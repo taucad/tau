@@ -179,14 +179,29 @@ export const createChatRunRegistry = (options: ChatRunRegistryOptions): ChatRunR
     return actor;
   };
 
-  /** Wait until the incarnation first serves: it has read, reconciled and abandoned what it had to (D10). */
+  /* The incarnations that have served once: only the first serve waits for what opening owed. */
+  const serving = new WeakSet<ChatRunActor>();
+  /**
+   * Wait until the incarnation first serves: it has read, reconciled, abandoned what it had to (D10), and settled the
+   * attempts its chat still held (TS-S7 step 2), unless a refused cut left it backing off (TS-Q9), where commands are
+   * answered `CHAT_RUN_LIVE` as in any settling.
+   */
   const served = async (actor: ChatRunActor): Promise<void> => {
+    if (serving.has(actor)) {
+      return;
+    }
     await waitFor(
       actor,
       (snapshot) =>
         snapshot.status !== 'active' ||
-        !(snapshot.matches('opening') || snapshot.matches('reconciling') || snapshot.matches({ idle: 'orphaned' })),
+        !(
+          snapshot.matches('opening') ||
+          snapshot.matches('reconciling') ||
+          snapshot.matches({ idle: 'orphaned' }) ||
+          (snapshot.matches('settling') && !snapshot.matches({ settling: 'backingOff' }))
+        ),
     ).catch(() => undefined);
+    serving.add(actor);
   };
 
   const claim = async (chatId: string): Promise<ChatRunClaim> => {

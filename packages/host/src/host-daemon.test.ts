@@ -491,17 +491,11 @@ describe('startHostDaemon', () => {
       const tree = realCreateProjectRevisions(options);
       return {
         ...tree,
-        record: (launcher) => {
-          const recorded = tree.record(launcher);
-          return {
-            ...recorded,
-            close: async (): Promise<void> => {
-              revisionCloseEntered.resolve();
-              await allowRevisionClose.promise;
-              await recorded.close();
-              throw new Error('revision close failed after drain');
-            },
-          };
+        release: async (): Promise<void> => {
+          revisionCloseEntered.resolve();
+          await allowRevisionClose.promise;
+          await tree.release();
+          throw new Error('revision close failed after drain');
         },
       };
     });

@@ -3,6 +3,7 @@
  * default. Tests only; hosts compose `createAgentLauncher` with `createNodeChatStore` themselves.
  */
 
+import { fakePlacement } from '#host/tau-agent-host.fixture.js';
 import { createAgentLauncher } from '#launchers/agent-launcher.js';
 import type { AgentLauncher, AgentLauncherOptions, CredentialState } from '#launchers/agent-launcher.js';
 import { createNodeChatStore } from '#node.js';
@@ -40,5 +41,7 @@ export const createNodeLauncher = (options: NodeLauncherFixtureOptions): AgentLa
         ...(fetch ? { fetch } : {}),
       }),
     credential: credential ?? (() => ({ mode: 'session' })),
+    /* Every CAD run is placed (D13): a test that names no placement gets the fake. */
+    turnPlacement: rest.turnPlacement ?? fakePlacement({ registry: rest.toolRegistry }).port,
   });
 };

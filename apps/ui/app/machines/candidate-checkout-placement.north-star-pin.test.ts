@@ -60,7 +60,6 @@ const harness = (): { project: RootedFileSystem; revisions: ReturnType<typeof cr
     projectId: 'pin-4',
     port: createIsomorphicGitRevisionPort({ filesystem: project }),
     filesystem: (root) => service.createRootedFileSystem(root),
-    authorityEpoch: 'epoch-pin-4',
   });
   disposers.push(() => {
     void revisions.release();
@@ -89,7 +88,9 @@ describe('candidate checkouts and the project tree (north star W0 pin 4)', () =>
     const { project, revisions } = harness();
     await project.writeFile('main.scad', 'cube(10);');
 
-    await revisions.admitTurn({ turnId: 'turn-pin-4', chatId: 'chat-pin-4', runId: 'run-pin-4' });
+    const session = await revisions.placementSession();
+    const key = { turnId: 'turn-pin-4', chatId: 'chat-pin-4', runId: 'run-pin-4', attempt: 1 };
+    await expect(session.admit({ requestId: 'admit:run-pin-4:1', key })).resolves.toMatchObject({ status: 'applied' });
     await settle();
 
     const files = await listProjectFiles(project);

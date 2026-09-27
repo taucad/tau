@@ -21,7 +21,8 @@ const retry = vi.hoisted(() => ({ retryAttempt: 0, retryMaxAttempts: 5 }));
 const continueChat = vi.hoisted(() => vi.fn());
 const openPanel = vi.hoisted(() => vi.fn());
 const restore = vi.hoisted(() => vi.fn());
-const host = vi.hoisted(() => ({ settlement: undefined as unknown, workspace: undefined as unknown }));
+/* `run` is the host's live run for the chat, with the placement its `running` row stated (W8 TS-S5). */
+const host = vi.hoisted(() => ({ settlement: undefined as unknown, run: undefined as unknown }));
 
 vi.mock('#hooks/use-chat.js', () => ({
   useChatContext: () => ({ activeChatId: 'chat-1' }),
@@ -49,13 +50,8 @@ vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
 vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', () => ({
   getHostTurnSettlement: () => host.settlement,
   subscribeHostTurnSettlements: () => () => undefined,
-}));
-vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
-  useOptionalChatWorkspaceAuthority: () => ({
-    ready: true,
-    get: () => host.workspace,
-    subscribe: () => () => undefined,
-  }),
+  getBrowserAgentHostRun: () => host.run,
+  subscribeBrowserAgentHostRuns: () => () => undefined,
 }));
 vi.mock('#components/files/file-link.js', () => ({
   FileLink: ({ children }: { readonly children: React.ReactNode }) => <span>{children}</span>,
@@ -98,7 +94,7 @@ beforeEach(() => {
   chatState.persistedError = undefined;
   retry.retryAttempt = 0;
   host.settlement = undefined;
-  host.workspace = undefined;
+  host.run = undefined;
   setRun(undefined);
   setRevisions({});
   vi.mocked(useRevisionChanges).mockReturnValue([
@@ -123,7 +119,7 @@ describe('ChatRevisionMarker', () => {
 
   it('should render nothing when the host confirms the request changed no files', () => {
     host.settlement = { type: 'turn.finalized', turnId: 'u1', chatId: 'chat-1', changedPaths: [] };
-    host.workspace = { execution: { baseRevisionId: 'rev-4' } };
+    host.run = { placement: { baseRevisionId: 'rev-4' } };
     setRun('done');
     const { container } = render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
     expect(container.firstChild).toBeNull();
@@ -170,7 +166,7 @@ describe('ChatRevisionMarker', () => {
   });
 
   it('should show the confirmed starting revision while work runs', () => {
-    host.workspace = { execution: { baseRevisionId: 'rev-4' } };
+    host.run = { placement: { baseRevisionId: 'rev-4' } };
     setRevisions({ revisions: [revision({ revisionId: 'rev-4', n: 4, turnId: undefined })] });
     setRun('working');
     chatState.status = 'streaming';
@@ -184,7 +180,7 @@ describe('ChatRevisionMarker', () => {
     /* A turn that starts dirty mints its base under its own turn id (D17), so
        the graph attaches a card to a turn that has saved nothing yet — on a new
        project that card is the scaffold, minted as Rev 1. */
-    host.workspace = { execution: { baseRevisionId: 'rev-1' } };
+    host.run = { placement: { baseRevisionId: 'rev-1' } };
     setRevisions({
       revisions: [revision({ revisionId: 'rev-1', n: 1, turnId: 'u1' })],
       byTurnId: new Map([['u1', revision({ revisionId: 'rev-1', n: 1 })]]),
@@ -196,7 +192,7 @@ describe('ChatRevisionMarker', () => {
   });
 
   it('should hold the last known label while the stream reconnects', () => {
-    host.workspace = { execution: { baseRevisionId: 'rev-4' } };
+    host.run = { placement: { baseRevisionId: 'rev-4' } };
     setRevisions({ revisions: [revision({ revisionId: 'rev-4', n: 4, turnId: undefined })] });
     setRun('finishing');
     const { rerender } = render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
@@ -210,7 +206,7 @@ describe('ChatRevisionMarker', () => {
   });
 
   it('should offer Retry when a placed request errors without a settlement', () => {
-    host.workspace = { execution: { baseRevisionId: 'rev-4' } };
+    host.run = { placement: { baseRevisionId: 'rev-4' } };
     setRevisions({ revisions: [revision({ revisionId: 'rev-4', n: 4, turnId: undefined })] });
     chatState.persistedError = { category: 'generic', title: 'Error', message: 'Network error', code: 'ERR' };
     render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);

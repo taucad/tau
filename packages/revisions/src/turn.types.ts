@@ -39,8 +39,11 @@ export type TurnLease = Readonly<{
   attempt: number;
   /** The checkout's head when the record was written, which bounds find-or-cut; absent on an unborn branch. */
   headRevisionId?: string;
-  /** The host authority that wrote it; the epoch sweep reads it until W8's TS-S7 deletes both. */
-  authorityEpoch: string;
   /** Milliseconds since the Unix epoch. */
   startedAt: number;
+  /**
+   * The root instance that holds the attempt (RM-R8 narrowed): another root adopts or retires the record only while
+   * this root's liveness mark is free. Absent on a record written before W8, which any root may adopt (TS-Q5).
+   */
+  holder?: string;
 }>;

@@ -653,13 +653,20 @@
       "kind": "witness",
       "ref": "SC T13 (Keyed = FALSE): after a false suspicion a re-send to the same generation appends k1 twice, so keys land before replay (SC-S5 before SC-S6); 6-state trace"
     },
-    "TurnSettlement.lease-first-AtMostOneRevisionPerTurn.cfg": {
+    "TurnSettlement.daemon.cfg": {
       "tier": "pr",
-      "expect": {
-        "violated": "AtMostOneRevisionPerTurn"
-      },
-      "kind": "witness",
-      "ref": "S4 3.3 (IntentFirst=FALSE)"
+      "expect": "pass",
+      "ref": "W8 TS-S1: the daemon leg (SplitAnchor=FALSE), eight invariants, IndInv and four liveness properties"
+    },
+    "TurnSettlement.drop-on-fence-two-turns.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "W8 TS-S1: the drop-on-fence alternative, two turns, eight invariants"
+    },
+    "TurnSettlement.drop-on-fence.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "W8 TS-S1: the drop-on-fence alternative (DropOnFence=TRUE), one turn, twelve properties"
     },
     "TurnSettlement.lease-first-EveryMintedTurnHasSettlementRow.cfg": {
       "tier": "pr",
@@ -667,27 +674,72 @@
         "violated": "EveryMintedTurnHasSettlementRow"
       },
       "kind": "witness",
-      "ref": "S4 3.3 (IntentFirst=FALSE)"
+      "ref": "S4 3.3 (IntentFirst=FALSE), kept in W8's model"
     },
-    "TurnSettlement.lease-first.cfg": {
-      "tier": "nightly",
-      "expect": "pass",
-      "ref": "S4 3.3 (IntentFirst=FALSE: only these fail)"
+    "TurnSettlement.lease-first-NoLeaseLeak.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoLeaseLeak"
+      },
+      "kind": "witness",
+      "ref": "S4 3.3 (IntentFirst=FALSE): a lease with no intent row is never reconciled (S4 IndInv conjunct 36); AtMostOneRevisionPerTurn no longer fails in W8's model"
     },
     "TurnSettlement.liveness-CompletedRunEventuallySettled.cfg": {
       "tier": "pr",
       "expect": "pass",
-      "ref": "S4 3.3 (one turn)"
+      "ref": "W8 TS-S1 (one turn, MaxEdits = 1 for the pull-request budget), I21"
     },
     "TurnSettlement.liveness-EveryMintedTurnHasSettlementRow.cfg": {
       "tier": "pr",
       "expect": "pass",
-      "ref": "S4 3.3 (one turn)"
+      "ref": "W8 TS-S1 (one turn, MaxEdits = 1 for the pull-request budget), I21"
+    },
+    "TurnSettlement.liveness-ExecutedRunEventuallySettled.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W8 TS-S1 (one turn, MaxEdits = 1 for the pull-request budget), I21"
     },
     "TurnSettlement.liveness-LeasesEventuallyRetired.cfg": {
       "tier": "pr",
       "expect": "pass",
-      "ref": "S4 3.3 (one turn)"
+      "ref": "W8 TS-S1 (one turn, MaxEdits = 1 for the pull-request budget), I22, I30"
+    },
+    "TurnSettlement.liveness.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "W8 TS-S1 (one turn, MaxEdits = 2): four liveness properties"
+    },
+    "TurnSettlement.no-cut-AgentBytesAttributedToTurn.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AgentBytesAttributedToTurn"
+      },
+      "kind": "witness",
+      "ref": "W8 TS-S1: the browser's discard (CutEveryTerminal=FALSE)"
+    },
+    "TurnSettlement.no-cut-ExecutedAttemptIsCut.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "ExecutedAttemptIsCut"
+      },
+      "kind": "witness",
+      "ref": "W8 TS-S1: the browser's discard (CutEveryTerminal=FALSE)"
+    },
+    "TurnSettlement.no-fence-LeasesEventuallyRetired.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "LeasesEventuallyRetired"
+      },
+      "kind": "witness",
+      "ref": "W8 TS-S1: no session fence (FenceOldSession=FALSE)"
+    },
+    "TurnSettlement.no-rebroker-LeasesEventuallyRetired.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "LeasesEventuallyRetired"
+      },
+      "kind": "witness",
+      "ref": "RV1-F1: a root that dies alone is never re-brokered (Rebroker=FALSE)"
     },
     "TurnSettlement.on-view-CompletedRunEventuallySettled.cfg": {
       "tier": "pr",
@@ -695,7 +747,7 @@
         "violated": "CompletedRunEventuallySettled"
       },
       "kind": "witness",
-      "ref": "S4 3.3 (ReconcileOnView=TRUE)"
+      "ref": "S4 3.3 (ReconcileOnView=TRUE), kept in W8's model"
     },
     "TurnSettlement.on-view-EveryMintedTurnHasSettlementRow.cfg": {
       "tier": "pr",
@@ -703,7 +755,7 @@
         "violated": "EveryMintedTurnHasSettlementRow"
       },
       "kind": "witness",
-      "ref": "S4 3.3 (ReconcileOnView=TRUE)"
+      "ref": "S4 3.3 (ReconcileOnView=TRUE), kept in W8's model"
     },
     "TurnSettlement.on-view-LeasesEventuallyRetired.cfg": {
       "tier": "pr",
@@ -711,240 +763,145 @@
         "violated": "LeasesEventuallyRetired"
       },
       "kind": "witness",
-      "ref": "S4 3.3 (ReconcileOnView=TRUE)"
+      "ref": "S4 3.3 (ReconcileOnView=TRUE), kept in W8's model"
     },
-    "TurnSettlement.on-view.cfg": {
+    "TurnSettlement.premint-first-EveryMintedTurnHasSettlementRow.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "EveryMintedTurnHasSettlementRow"
+      },
+      "kind": "witness",
+      "ref": "W8 TS-S1: the pre-mint before the lease (LeaseBeforeMint=FALSE)"
+    },
+    "TurnSettlement.premint-first-LeaseOutlivesRowlessAttempt.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "LeaseOutlivesRowlessAttempt"
+      },
+      "kind": "witness",
+      "ref": "W8 TS-S1: the pre-mint before the lease (LeaseBeforeMint=FALSE)"
+    },
+    "TurnSettlement.retire-at-cut-CompletedRunEventuallySettled.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "CompletedRunEventuallySettled"
+      },
+      "kind": "witness",
+      "ref": "W8 TS-S1: retire at the cut (AckBeforeRetire=FALSE; S4's LeaseUntilRow=FALSE re-pointed)"
+    },
+    "TurnSettlement.retire-at-cut-LeaseOutlivesRowlessAttempt.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "LeaseOutlivesRowlessAttempt"
+      },
+      "kind": "witness",
+      "ref": "W8 TS-S1: retire at the cut (AckBeforeRetire=FALSE; S4's LeaseUntilRow=FALSE re-pointed)"
+    },
+    "TurnSettlement.s4-order.cfg": {
       "tier": "nightly",
       "expect": "pass",
-      "ref": "S4 3.3 (ReconcileOnView=TRUE: only these fail)"
+      "ref": "W8 TS-S1: S4's order (pre-mint first) with every chat's log reconciled, eleven properties"
     },
-    "TurnSettlement.retire-first-AgentBytesAttributedToTurn.cfg": {
+    "TurnSettlement.safety.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "W8 TS-S1 (one turn): eight invariants and IndInv (RV1-F1 root death included)"
+    },
+    "TurnSettlement.two-turns-liveness.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "W8 TS-S1 (two turns, MaxCrashes = 1, MaxEdits = 1: at MaxCrashes = 2, MaxEdits = 2 TLC does not finish within the 900 s watchdog)"
+    },
+    "TurnSettlement.two-turns.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "W8 TS-S1 (two turns): eight invariants and IndInv"
+    },
+    "TurnSettlementSteal.hostdeath-asis-LiveHolderNotRetired.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "LiveHolderNotRetired"
+      },
+      "kind": "witness",
+      "ref": "RV2-F1: without HolderMark (the code before W8.a2 round 2 H1), a lone agent-host worker death lets another root retire a live holder's lease"
+    },
+    "TurnSettlementSteal.hostdeath-asis-NoMintAfterRow.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoMintAfterRow"
+      },
+      "kind": "witness",
+      "ref": "RV2-F1: without HolderMark (the code before W8.a2 round 2 H1), the new leader fails the intent and the holder root mints after the row"
+    },
+    "TurnSettlementSteal.hostdeath-mark-liveness.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "RV2-F1: with HolderMark, lone host death, three liveness properties"
+    },
+    "TurnSettlementSteal.mark-safety.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "RV2-F1: with HolderMark, steal, freeze, tab and host death, seven invariants"
+    },
+    "TurnSettlementSteal.steal-asis-AgentBytesAttributedToTurn.cfg": {
       "tier": "pr",
       "expect": {
         "violated": "AgentBytesAttributedToTurn"
       },
       "kind": "witness",
-      "ref": "S4 3.3 (LeaseUntilRow=FALSE)"
+      "ref": "RV2-F1: without HolderMark (the code before W8.a2 round 2 H1), a stealing tab adopts and settles while the thawed holder's driver writes"
     },
-    "TurnSettlement.retire-first.cfg": {
+    "TurnSettlementSteal.steal-mark-liveness.cfg": {
       "tier": "nightly",
       "expect": "pass",
-      "ref": "S4 3.3 (LeaseUntilRow=FALSE: only these fail)"
+      "ref": "RV2-F1: with HolderMark, steal and freeze, three liveness properties"
     },
-    "TurnSettlement.safety.cfg": {
+    "TurnSettlementTabs.attach-only-SaveEventuallyUnfenced.cfg": {
       "tier": "pr",
-      "expect": "pass",
-      "ref": "S4 3.3 (one turn)"
+      "expect": {
+        "violated": "SaveEventuallyUnfenced"
+      },
+      "kind": "witness",
+      "ref": "W8 I25: queue at attach only (QueueOnFence=FALSE)"
     },
-    "TurnSettlement.two-turns-liveness.cfg": {
-      "tier": "nightly",
-      "expect": "pass",
-      "ref": "S4 3.3 (two turns, 209 s)"
-    },
-    "TurnSettlement.two-turns.cfg": {
-      "tier": "nightly",
-      "expect": "pass",
-      "ref": "S4 3.3 (two turns, 29 s)"
-    },
-    "TurnSettlementToday.base-AgentBytesAttributedToTurn.cfg": {
+    "TurnSettlementTabs.cached-fence-AgentBytesAttributedToTurn.cfg": {
       "tier": "pr",
       "expect": {
         "violated": "AgentBytesAttributedToTurn"
       },
-      "kind": "defect",
-      "ref": "S4 3.1 (base)",
-      "fixedBy": "W8"
+      "kind": "witness",
+      "ref": "W8 I25: the cached fence before W8 TS-S7 (FreshFence=FALSE); the fresh fence is load-bearing"
     },
-    "TurnSettlementToday.base-AtMostOneRevisionPerTurn.cfg": {
+    "TurnSettlementTabs.no-queue-SaveEventuallyUnfenced.cfg": {
       "tier": "pr",
       "expect": {
-        "violated": "AtMostOneRevisionPerTurn"
+        "violated": "SaveEventuallyUnfenced"
       },
-      "kind": "defect",
-      "ref": "S4 3.1 (base)",
-      "fixedBy": "W8"
+      "kind": "witness",
+      "ref": "W8 I25: no queue (QueueOnAttach=FALSE, QueueOnFence=FALSE)"
     },
-    "TurnSettlementToday.base-CompletedRunEventuallySettled.cfg": {
-      "tier": "pr",
-      "expect": {
-        "violated": "CompletedRunEventuallySettled"
-      },
-      "kind": "defect",
-      "ref": "S4 3.1 (base)",
-      "fixedBy": "W8"
-    },
-    "TurnSettlementToday.base-EveryMintedTurnHasSettlementRow.cfg": {
-      "tier": "pr",
-      "expect": {
-        "violated": "EveryMintedTurnHasSettlementRow"
-      },
-      "kind": "defect",
-      "ref": "S4 3.1 (base)",
-      "fixedBy": "W8"
-    },
-    "TurnSettlementToday.base-SettlementRowNamesNewestRevision.cfg": {
-      "tier": "pr",
-      "expect": {
-        "violated": "SettlementRowNamesNewestRevision"
-      },
-      "kind": "defect",
-      "ref": "S4 3.1 (base)",
-      "fixedBy": "W8"
-    },
-    "TurnSettlementToday.base.cfg": {
+    "TurnSettlementTabs.queue-on-fence.cfg": {
       "tier": "pr",
       "expect": "pass",
-      "ref": "S4 3.1 (base)"
+      "ref": "W8 I25: queue on leaseHeld only (QueueOnAttach=FALSE)"
     },
-    "TurnSettlementToday.idle-edits-AtMostOneRevisionPerTurn.cfg": {
+    "TurnSettlementTabs.target-LeaseRetiredWhileATabIsOpen.cfg": {
       "tier": "pr",
       "expect": {
-        "violated": "AtMostOneRevisionPerTurn"
+        "violated": "LeaseRetiredWhileATabIsOpen"
       },
-      "kind": "defect",
-      "ref": "S4 3.2 (lease retired before the row)",
-      "fixedBy": "W8"
+      "kind": "limit",
+      "ref": "W8 I25: a lease no open tab observes waits for the next attach"
     },
-    "TurnSettlementToday.o2-AtMostOneRevisionPerTurn.cfg": {
-      "tier": "pr",
-      "expect": {
-        "violated": "AtMostOneRevisionPerTurn"
-      },
-      "kind": "defect",
-      "ref": "S4 3.2 O2 (browser-agent-host-transport.ts:207-212)",
-      "fixedBy": "W8"
-    },
-    "TurnSettlementToday.w1-AgentBytesAttributedToTurn.cfg": {
-      "tier": "pr",
-      "expect": {
-        "violated": "AgentBytesAttributedToTurn"
-      },
-      "kind": "defect",
-      "ref": "S4 3.1 (w1)",
-      "fixedBy": "W8"
-    },
-    "TurnSettlementToday.w1-AtMostOneRevisionPerTurn.cfg": {
-      "tier": "pr",
-      "expect": {
-        "violated": "AtMostOneRevisionPerTurn"
-      },
-      "kind": "defect",
-      "ref": "S4 3.1 (w1)",
-      "fixedBy": "W8"
-    },
-    "TurnSettlementToday.w1-CompletedRunEventuallySettled.cfg": {
-      "tier": "pr",
-      "expect": {
-        "violated": "CompletedRunEventuallySettled"
-      },
-      "kind": "defect",
-      "ref": "S4 3.1 (w1)",
-      "fixedBy": "W8"
-    },
-    "TurnSettlementToday.w1-EveryMintedTurnHasSettlementRow.cfg": {
-      "tier": "pr",
-      "expect": {
-        "violated": "EveryMintedTurnHasSettlementRow"
-      },
-      "kind": "defect",
-      "ref": "S4 3.1 (w1)",
-      "fixedBy": "W8"
-    },
-    "TurnSettlementToday.w1-SettlementRowNamesNewestRevision.cfg": {
-      "tier": "pr",
-      "expect": {
-        "violated": "SettlementRowNamesNewestRevision"
-      },
-      "kind": "defect",
-      "ref": "S4 3.1 (w1)",
-      "fixedBy": "W8"
-    },
-    "TurnSettlementToday.w1.cfg": {
+    "TurnSettlementTabs.target-reopen.cfg": {
       "tier": "pr",
       "expect": "pass",
-      "ref": "S4 3.1 (w1)"
+      "ref": "W8 I25: the target under SpecReopen"
     },
-    "TurnSettlementToday.w1s2-AgentBytesAttributedToTurn.cfg": {
-      "tier": "pr",
-      "expect": {
-        "violated": "AgentBytesAttributedToTurn"
-      },
-      "kind": "defect",
-      "ref": "S4 3.1 (w1s2)",
-      "fixedBy": "W8"
-    },
-    "TurnSettlementToday.w1s2-AtMostOneRevisionPerTurn.cfg": {
-      "tier": "pr",
-      "expect": {
-        "violated": "AtMostOneRevisionPerTurn"
-      },
-      "kind": "defect",
-      "ref": "S4 3.1 (w1s2)",
-      "fixedBy": "W8"
-    },
-    "TurnSettlementToday.w1s2-EveryMintedTurnHasSettlementRow.cfg": {
-      "tier": "pr",
-      "expect": {
-        "violated": "EveryMintedTurnHasSettlementRow"
-      },
-      "kind": "defect",
-      "ref": "S4 3.1 (w1s2)",
-      "fixedBy": "W8"
-    },
-    "TurnSettlementToday.w1s2-SettlementRowNamesNewestRevision.cfg": {
-      "tier": "pr",
-      "expect": {
-        "violated": "SettlementRowNamesNewestRevision"
-      },
-      "kind": "defect",
-      "ref": "S4 3.1 (w1s2)",
-      "fixedBy": "W8"
-    },
-    "TurnSettlementToday.w1s2.cfg": {
+    "TurnSettlementTabs.target.cfg": {
       "tier": "pr",
       "expect": "pass",
-      "ref": "S4 3.1 (w1s2)"
-    },
-    "TurnSettlementToday.w1s2s3-AgentBytesAttributedToTurn.cfg": {
-      "tier": "pr",
-      "expect": {
-        "violated": "AgentBytesAttributedToTurn"
-      },
-      "kind": "defect",
-      "ref": "S4 3.1 (w1s2s3)",
-      "fixedBy": "W8"
-    },
-    "TurnSettlementToday.w1s2s3-AtMostOneRevisionPerTurn.cfg": {
-      "tier": "pr",
-      "expect": {
-        "violated": "AtMostOneRevisionPerTurn"
-      },
-      "kind": "defect",
-      "ref": "S4 3.1 (w1s2s3)",
-      "fixedBy": "W8"
-    },
-    "TurnSettlementToday.w1s2s3-EveryMintedTurnHasSettlementRow.cfg": {
-      "tier": "pr",
-      "expect": {
-        "violated": "EveryMintedTurnHasSettlementRow"
-      },
-      "kind": "defect",
-      "ref": "S4 3.1 (w1s2s3)",
-      "fixedBy": "W8"
-    },
-    "TurnSettlementToday.w1s2s3-NoSettlementOverUncommittedWork.cfg": {
-      "tier": "pr",
-      "expect": {
-        "violated": "NoSettlementOverUncommittedWork"
-      },
-      "kind": "defect",
-      "ref": "S4 3.1 (w1s2s3)",
-      "fixedBy": "W8"
-    },
-    "TurnSettlementToday.w1s2s3.cfg": {
-      "tier": "pr",
-      "expect": "pass",
-      "ref": "S4 3.1 (w1s2s3)"
+      "ref": "W8 I25: queue at attach and on leaseHeld; fresh fence"
     },
     "ChatRunSlotGraph.export.cfg": {
       "tier": "pr",
@@ -961,20 +918,20 @@
     {
       "tier": "nightly",
       "expect": "NoError",
-      "ref": "S4 3.4 (IndInv holds initially)",
+      "ref": "S4 3.4, W8 TS-S1 (IndInv holds initially)",
       "args": ["check", "--cinit=ConstInit", "--init=Init", "--inv=IndInv", "--length=0", "MC_TurnSettlement.tla"]
     },
     {
       "tier": "nightly",
       "expect": "NoError",
-      "ref": "S4 3.4 (IndInv is inductive)",
+      "ref": "S4 3.4, W8 TS-S1 (IndInv is inductive: two chats with turns, root death alone)",
       "args": ["check", "--cinit=ConstInit", "--init=IndInv", "--inv=IndInv", "--length=1", "MC_TurnSettlement.tla"]
     },
     {
       "tier": "nightly",
       "expect": "Error",
       "kind": "witness",
-      "ref": "S4 3.4 (IntentFirst=FALSE breaks conjunct 36)",
+      "ref": "S4 3.4, W8 TS-S1 (IntentFirst=FALSE breaks IndInv)",
       "args": [
         "check",
         "--cinit=ConstInitLeaseFirst",
@@ -988,10 +945,38 @@
       "tier": "nightly",
       "expect": "Error",
       "kind": "witness",
-      "ref": "S4 3.4 (LeaseUntilRow=FALSE breaks conjunct 50)",
+      "ref": "S4 3.4, W8 TS-S1 (retire at the cut: AckBeforeRetire=FALSE breaks IndInv)",
       "args": [
         "check",
         "--cinit=ConstInitRetireFirst",
+        "--init=IndInv",
+        "--inv=IndInv",
+        "--length=1",
+        "MC_TurnSettlement.tla"
+      ]
+    },
+    {
+      "tier": "nightly",
+      "expect": "Error",
+      "kind": "witness",
+      "ref": "W8 TS-S1 (LeaseBeforeMint=FALSE breaks IndInv)",
+      "args": [
+        "check",
+        "--cinit=ConstInitPremintFirst",
+        "--init=IndInv",
+        "--inv=IndInv",
+        "--length=1",
+        "MC_TurnSettlement.tla"
+      ]
+    },
+    {
+      "tier": "nightly",
+      "expect": "Error",
+      "kind": "witness",
+      "ref": "W8 TS-S1 (CutEveryTerminal=FALSE breaks IndInv)",
+      "args": [
+        "check",
+        "--cinit=ConstInitNoCut",
         "--init=IndInv",
         "--inv=IndInv",
         "--length=1",
@@ -1171,6 +1156,22 @@
         },
         "kind": "witness",
         "ref": "W3 CL-S9 ReopenOnlyByRunning (CL-R9, run-lifecycle.legality.json): a settled attempt that failed with a code outside the resume class is not reopenable"
+      },
+      "ChatLog/seeded/cancel-after-settled-pause.jsonl": {
+        "tier": "pr",
+        "expect": "pass",
+        "ref": "W8.a2 round 3 (coordinator ruling, V8): a native pause settled with its request pending, then denied: [resolved, cancelled] ends the paused attempt (paused-reopenable admits cancelled)"
+      },
+      "ChatLog/seeded/cancelled-after-settled-failure.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 5,
+            "rules": ["ReopenOnlyByRunning"]
+          }
+        },
+        "kind": "witness",
+        "ref": "W8.a2 round 3: a settled resumable failure stays ended; reopenable admits only running, so cancelled is RUN_ID_TAKEN"
       },
       "ChatLog/seeded/reopen-while-another-runs.jsonl": {
         "tier": "pr",

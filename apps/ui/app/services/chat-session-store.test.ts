@@ -19,11 +19,10 @@ import { projectSessionMachine } from '#machines/project-session.machine.js';
 import { spyOnSend } from '#lib/xstate-test.utils.js';
 import {
   chatTurnAdmission,
-  chatTurnSettlement,
   publishChatTurnAdmission,
-  publishChatTurnSettlement,
   resetChatTurnServices,
 } from '#chat-clients/_internal/chat-host-binding.js';
+import { fromSafeAsync } from '#lib/xstate.lib.js';
 
 // ---------------------------------------------------------------------------
 // Hoisted test harness
@@ -301,6 +300,12 @@ function createStore(): StoreType {
 /** Project sessions a row started, stopped after it. */
 const turnOwners: Array<{ stop: () => void }> = [];
 
+/* The host settles every turn (W8 TS-S6); these rows assert which run the chat's session actor ends, and how. */
+const recordedSettlements = new Map<string, ChatTurnSettlementInput[]>();
+const recordingSettlement = fromSafeAsync<void, ChatTurnSettlementInput>(async ({ input }) => {
+  recordedSettlements.get(input.chatId)?.push(input);
+});
+
 /**
  * Register the project session that owns a chat's turns (C3).
  *
@@ -316,7 +321,7 @@ function startTurnOwner(store: StoreType, projectId: string): void {
     projectSessionMachine.provide({
       actors: {
         chatSession: chatSessionMachine.provide({
-          actors: { admitTurn: chatTurnAdmission, settleTurn: chatTurnSettlement },
+          actors: { admitTurn: chatTurnAdmission, settleTurn: recordingSettlement },
         }),
       },
     }),
@@ -329,16 +334,14 @@ function startTurnOwner(store: StoreType, projectId: string): void {
 }
 
 /**
- * Publish one chat's settlement and record every turn it ends.
+ * Record every turn one chat's session actor ends.
  *
- * @param chatId - The chat this settlement belongs to.
+ * @param chatId - The chat whose settlements to record.
  * @returns The settlements the chat's session actor asked for, in order.
  */
 function publishSettlementRecorder(chatId: string): ChatTurnSettlementInput[] {
   const settlements: ChatTurnSettlementInput[] = [];
-  publishChatTurnSettlement(chatId, async (input) => {
-    settlements.push(input);
-  });
+  recordedSettlements.set(chatId, settlements);
   return settlements;
 }
 
@@ -358,7 +361,6 @@ function publishAdmission(chatId: string, request: () => Promise<ChatRequest> | 
     leaseTurnId: undefined,
     request: await request(),
   }));
-  publishChatTurnSettlement(chatId, async () => undefined);
 }
 
 /** A host whose run ended on the one failure a resume is allowed to continue. */
@@ -1390,7 +1392,6 @@ describe('ChatSessionStore', () => {
             /* Never answers: the admission is in flight for the whole row. */
           }),
       );
-      publishChatTurnSettlement('chat_dispose_admitting', async () => undefined);
 
       void store.requestTurn('chat_dispose_admitting', { kind: 'regenerate' });
       await vi.waitFor(() => {
@@ -1425,7 +1426,6 @@ describe('ChatSessionStore', () => {
             /* Never answers: the admission is in flight for the whole row. */
           }),
       );
-      publishChatTurnSettlement('chat_stopped_admitting', async () => undefined);
 
       const requested = store.requestTurn('chat_stopped_admitting', { kind: 'regenerate' });
       await vi.waitFor(() => {
@@ -1464,7 +1464,6 @@ describe('ChatSessionStore', () => {
             /* Never answers: the admission is in flight for the whole row. */
           }),
       );
-      publishChatTurnSettlement('chat_stopped_before', async () => undefined);
 
       void store.requestTurn('chat_stopped_before', { kind: 'regenerate' });
       await vi.waitFor(() => {
@@ -2066,7 +2065,6 @@ describe('ChatSessionStore', () => {
           throw new Error('A daemon-placed turn reads its workspace from the daemon.');
         },
         createClient: async () => hostClient,
-        markRunId: async () => undefined,
       });
 
       const stream = await sharedChatTransport.reconnectToStream({ chatId, metadata: undefined });
@@ -2137,7 +2135,6 @@ describe('ChatSessionStore', () => {
           throw new Error('Unused by this reattach.');
         },
         createClient: async () => hostClient,
-        markRunId: async () => undefined,
       });
       const reattached = await sharedChatTransport.reconnectToStream({ chatId, metadata: undefined });
       await reattached?.getReader().cancel();
@@ -2191,7 +2188,6 @@ describe('ChatSessionStore', () => {
           throw new Error('Unused by this reattach.');
         },
         createClient: async () => hostClient,
-        markRunId: async () => undefined,
       });
       const reattached = await sharedChatTransport.reconnectToStream({ chatId, metadata: undefined });
 
@@ -3315,7 +3311,6 @@ describe('ChatSessionStore', () => {
               : { kind: 'edit', messageId: 'msg_edit', content: 'edited' },
         };
       });
-      publishChatTurnSettlement('chat_two_sends', async () => undefined);
 
       const first = store.requestTurn('chat_two_sends', {
         kind: 'send',
@@ -3352,7 +3347,6 @@ describe('ChatSessionStore', () => {
               : { kind: 'edit', messageId: 'msg_edit', content: 'edited' },
         };
       });
-      publishChatTurnSettlement('chat_send_then_edit', async () => undefined);
 
       const sent = store.requestTurn('chat_send_then_edit', {
         kind: 'send',

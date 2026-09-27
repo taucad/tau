@@ -1,6 +1,5 @@
 import type { AgentLiveEvent } from '@taucad/agent-host';
 import type { CommandAnswer, HostCommand, ReadAnswer, ReadInput } from '@taucad/agent-host/wire';
-import type { AgentHostWorkerSettlementRecord } from '#workers/agent-host.contract.js';
 
 /**
  * The wire the agent-host client is driven over: the keyed seam vocabulary (`@taucad/agent-host/wire`).
@@ -21,12 +20,11 @@ export type AgentHostTransport = {
   readonly ready: Promise<void>;
   /**
    * The worker-only calls, in today's shape. Absent on a daemon, whose teardown
-   * is local and whose log records its own settlements.
-   * ponytail: W6 makes `close` the channel's own, and W8 deletes `record-settlement` (drift 7).
+   * is local. Every host appends its own settlement rows (W8 TS-S6).
+   * ponytail: W6 makes `close` the channel's own.
    */
   readonly worker?: {
     close(signal: AbortSignal): Promise<void>;
-    recordSettlement(record: AgentHostWorkerSettlementRecord): Promise<void>;
   };
   /**
    * Send one keyed command and await its answer. A transport that heals re-sends

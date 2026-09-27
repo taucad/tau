@@ -21,13 +21,12 @@ import { useRevisionCommands } from '#hooks/use-revision-status.js';
 import { useChatActions, useChatContext, useChatRetrySnapshot, useChatSelector } from '#hooks/use-chat.js';
 import { useChatSidebarStatus } from '#hooks/use-sidebar-status.js';
 import { useProject } from '#hooks/use-project.js';
-import { useOptionalChatWorkspaceAuthority } from '#providers/chat-workspace-authority-provider.js';
 import {
+  getBrowserAgentHostRun,
   getHostTurnSettlement,
+  subscribeBrowserAgentHostRuns,
   subscribeHostTurnSettlements,
 } from '#chat-clients/_internal/browser-agent-host-transport.js';
-
-const noSubscription = (): (() => void) => () => undefined;
 
 /** Tucked under the user bubble, like a status strip attached to a composer (R11, R12). */
 const cardClassName = 'mx-2 -mt-3 rounded-b-lg border border-t-0 bg-muted/40 pt-3';
@@ -75,15 +74,15 @@ function useTurnRevisionState(userMessageId: string, isLatestTurn: boolean): Tur
   const { retryAttempt } = useChatRetrySnapshot();
   const isRequestActive = useChatSelector((state) => state.status === 'submitted' || state.status === 'streaming');
   const hasError = useChatSelector((state) => state.error !== undefined || state.persistedError !== undefined);
-  const authority = useOptionalChatWorkspaceAuthority();
-  const readWorkspace = useCallback(() => authority?.get(activeChatId), [authority, activeChatId]);
-  const workspace = useSyncExternalStore(authority?.subscribe ?? noSubscription, readWorkspace, () => undefined);
+  /* The base the host placed the chat's live run on, from its `running` row (W8 TS-S5). */
+  const readPlacement = useCallback(() => getBrowserAgentHostRun(activeChatId)?.placement, [activeChatId]);
+  const placement = useSyncExternalStore(subscribeBrowserAgentHostRuns, readPlacement, () => undefined);
   /* The last visible state, so a reconnect holds what the summary said. */
   const [held, setHeld] = useState<TurnRevisionState>();
 
-  const baseRevisionId = workspace?.execution.baseRevisionId;
+  const baseRevisionId = placement?.baseRevisionId;
   const base: TurnRevisionBase | undefined =
-    workspace === undefined
+    placement === undefined
       ? undefined
       : baseRevisionId === undefined
         ? { kind: 'first' }

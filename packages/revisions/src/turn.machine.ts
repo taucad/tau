@@ -171,6 +171,28 @@ export type TurnMachineEmitted =
   | (Readonly<{ type: 'turnFinalized' }> & TurnSettlement)
   | (Readonly<{ type: 'turnConflicted' }> & TurnSettlement);
 
+/**
+ * The one announcement of an attempt's outcome: a card for a finalized or conflicted attempt, a release otherwise.
+ *
+ * @public
+ */
+export type TurnAnnouncement =
+  | TurnMachineEmitted
+  | Readonly<{
+      type: 'turnReleased';
+      key: TurnAttemptKey;
+      turnId: string;
+      chatId: string;
+      runId: string;
+      attempt: number;
+      checkoutId: string | undefined;
+      outcome: TurnOutcome;
+      reason: string | undefined;
+      code: TurnFailureCode | undefined;
+      /** A base the attempt minted before it was released. */
+      revisionId?: string;
+    }>;
+
 /** Input of the injected `prepare` actor: resolve placement without branching. @public */
 export type TurnPrepareActorInput = Readonly<{
   key: TurnAttemptKey;
@@ -180,10 +202,6 @@ export type TurnPrepareActorInput = Readonly<{
 /**
  * Output of the injected `prepare` actor.
  *
- * `staleRunIds` are leases from a superseded authority epoch (N3); the machine
- * reports each to the parent as `leaseStale` so `checkouts` retires it (F13,
- * deleted with the sweep in W8's TS-S7).
- *
  * @public
  */
 export type TurnPrepareActorOutput = Readonly<{
@@ -192,7 +210,6 @@ export type TurnPrepareActorOutput = Readonly<{
   baseRevisionId: string | undefined;
   /** True when the checkout's tree differs from its head, so the base must be minted after the lease (D17, RM-R12). */
   dirty: boolean;
-  staleRunIds: readonly string[];
 }>;
 
 /** Input of the injected `writeLease` actor. @public */
@@ -311,30 +328,30 @@ const askCut = (context: TurnMachineContext, enq: TurnEnqueue, turnCut: TurnCut)
  * as sent; a release or a failure only reaches the root, which the host phrases
  * from the code rather than the diagnostic (E5).
  */
+const announcementOf = (context: TurnMachineContext): TurnAnnouncement =>
+  context.outcome === 'finalized' || context.outcome === 'conflicted'
+    ? { type: context.outcome === 'finalized' ? 'turnFinalized' : 'turnConflicted', ...settlement(context) }
+    : {
+        type: 'turnReleased',
+        key: context.key,
+        turnId: context.key.turnId,
+        chatId: context.key.chatId,
+        runId: context.key.runId,
+        attempt: context.key.attempt,
+        checkoutId: context.checkoutId,
+        outcome: context.outcome ?? 'failed',
+        reason: context.reason,
+        code: context.code,
+        /* A base this attempt minted, so a release still names what it recorded. */
+        ...(context.mintedBaseRevisionId === undefined ? {} : { revisionId: context.mintedBaseRevisionId }),
+      };
+
 const announce = (context: TurnMachineContext, enq: TurnEnqueue): void => {
-  if (context.outcome === 'finalized' || context.outcome === 'conflicted') {
-    const fact: TurnMachineEmitted = {
-      type: context.outcome === 'finalized' ? 'turnFinalized' : 'turnConflicted',
-      ...settlement(context),
-    };
+  const fact = announcementOf(context);
+  if (fact.type !== 'turnReleased') {
     enq.emit(fact);
-    tell(context, enq, fact);
-    return;
   }
-  tell(context, enq, {
-    type: 'turnReleased',
-    key: context.key,
-    turnId: context.key.turnId,
-    chatId: context.key.chatId,
-    runId: context.key.runId,
-    attempt: context.key.attempt,
-    checkoutId: context.checkoutId,
-    outcome: context.outcome ?? 'failed',
-    reason: context.reason,
-    code: context.code,
-    /* A base this attempt minted, so a release still names what it recorded. */
-    ...(context.mintedBaseRevisionId === undefined ? {} : { revisionId: context.mintedBaseRevisionId }),
-  });
+  tell(context, enq, fact);
 };
 
 type SettleFields = Readonly<{
@@ -615,10 +632,6 @@ const turnMachineDefinition = setup({
             checkoutId: event.output.checkoutId,
             branch: event.output.branch,
           });
-          /* F13: a lease from a superseded epoch is retired on the next prepare, and `checkouts` owns that. */
-          for (const runId of event.output.staleRunIds) {
-            tell(context, enq, { type: 'leaseStale', runId });
-          }
           return {
             target: 'writingLease',
             context: {
@@ -1058,3 +1071,16 @@ export const selectTurnHoldsLease = (snapshot: SnapshotFrom<typeof turnMachine>)
  * @public
  */
 export type TurnActors = MachineActors<typeof turnMachine>;
+
+/**
+ * Selects the outcome a settled attempt announced and still holds until `acknowledge` (RM-R10).
+ *
+ * The turn actor, not its host, keeps the settlement that awaits acknowledgement (D1), so a host that subscribes late
+ * replays it from here.
+ *
+ * @param snapshot - Current machine snapshot.
+ * @returns The announcement while the attempt is settled or retiring, else `undefined`.
+ * @public
+ */
+export const selectTurnAnnouncement = (snapshot: SnapshotFrom<typeof turnMachine>): TurnAnnouncement | undefined =>
+  snapshot.matches('settled') || snapshot.matches('retiring') ? announcementOf(snapshot.context) : undefined;

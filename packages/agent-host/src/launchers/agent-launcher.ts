@@ -19,13 +19,7 @@ import { createEventLogAppender } from '#log/event-log-appender.js';
 import type { EventLogAppender } from '#log/event-log-appender.js';
 import { emptyChatLedger, foldChatLedger } from '#log/chat-ledger.js';
 import type { ChatLedger } from '#log/chat-ledger.js';
-import type {
-  AgentLogEvent,
-  JsonValue,
-  TurnConflictedLogEvent,
-  TurnFailedLogEvent,
-  TurnFinalizedLogEvent,
-} from '#log/event-types.js';
+import type { AgentLogEvent, JsonValue } from '#log/event-types.js';
 import type {
   AgentLiveEvent,
   DurableEventLog,
@@ -100,15 +94,6 @@ export type AgentLauncherOptions = Readonly<{
   admitting?: ((run: Readonly<{ chatId: string; runId: string }>) => boolean) | undefined;
 }>;
 
-type WithoutLogPosition<Event> = Event extends unknown
-  ? Omit<Event, 'version' | 'leaderEpoch' | 'sequence' | 'recordedAt'>
-  : never;
-
-/** One host-attested turn record, before the log stamps its position. Deleted with W8's settlement. @public */
-export type HostAuthoredLogEvent = WithoutLogPosition<
-  TurnConflictedLogEvent | TurnFailedLogEvent | TurnFinalizedLogEvent
->;
-
 /** A running launcher: one per project, in any process. @public */
 export type AgentLauncher = {
   /** The assembled host, for callers that need the lifecycle surface directly. */
@@ -121,14 +106,6 @@ export type AgentLauncher = {
   liveEvents(input: Readonly<{ chatId: string; signal: AbortSignal }>): AsyncIterable<AgentLiveEvent>;
   /** Unresolved approval requests for one run. */
   pendingInterrupts(runId: string): Promise<readonly InterruptRequest[]>;
-  /**
-   * Append one host-authored settlement to a chat's log through the host's own writer. Deleted with W8's
-   * host-appended settlement.
-   *
-   * @param chatId - Chat whose log takes the record.
-   * @param event - The record, without its log position.
-   */
-  append(chatId: string, event: HostAuthoredLogEvent): Promise<void>;
   /**
    * The runs this launcher admitted, by chat: every `start` and `resume` it ran, whether a client or another tab sent
    * it. It resolves once each one under way has its answer, so a run that was refused, or whose admission threw, is not
@@ -143,9 +120,6 @@ export type AgentLauncher = {
  * reading; it re-reads from its cursor, which is what the durable log is for.
  */
 const fanOutQueueLimit = 1024;
-
-/** The keyed pseudo-command that carries a settlement record to the chat's writer (W8 deletes it). */
-const settlementCommand = 'record-settlement';
 
 /**
  * Read a stream as an async iterable through its reader: WebKit's `ReadableStream` has no `Symbol.asyncIterator`, and
@@ -488,22 +462,7 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
         answering.delete(answered);
       }
     }
-    if ((command.type as string) !== settlementCommand) {
-      return host.command(command);
-    }
-    const { chatId, event } = command.payload as unknown as Readonly<{ chatId: string; event: HostAuthoredLogEvent }>;
-    const { runId, ...body } = event;
-    try {
-      await host.recordSettlement({ chatId, runId, event: body });
-    } catch (error) {
-      const { code } = error as { readonly code?: unknown };
-      return refused(
-        command.commandId,
-        typeof code === 'string' ? code : 'HOST_FAULT',
-        error instanceof Error ? error.message : String(error),
-      );
-    }
-    return { commandId: command.commandId, generation: 0, status: 'applied', effect: 'not-applied', details: {} };
+    return host.command(command);
   };
 
   const port: LeadershipPort = binding.leadership({
@@ -752,24 +711,6 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
       }
       requireChatPathSegment(input.chatId);
       return port.read(input, async () => readLocal(input));
-    },
-    append: async (chatId, event) => {
-      const command = {
-        type: settlementCommand,
-        commandId: createId(),
-        payload: { chatId, event },
-      } as unknown as HostCommand;
-      const answer = closed
-        ? refused(command.commandId, 'HOST_CLOSED', 'The Tau agent launcher is closed.')
-        : await port.execute(chatId, command, async (epoch) => {
-            if (typeof epoch === 'number') {
-              host.assumeLeadership(chatId, epoch);
-            }
-            return runHere(command);
-          });
-      if (answer.status === 'refused') {
-        throw Object.assign(new Error(answer.message), { code: answer.code });
-      }
     },
     liveEvents: ({ chatId, signal }) => live.subscribe(signal, chatId),
     admittedRuns: async () => {

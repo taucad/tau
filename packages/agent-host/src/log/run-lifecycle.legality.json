@@ -1,6 +1,6 @@
 {
   "domain": {
-    "state": ["unadmitted", "open", "ended", "settled-open", "settled", "reopenable"],
+    "state": ["unadmitted", "open", "ended", "settled-open", "settled", "reopenable", "paused-reopenable"],
     "op": ["admitted", "running", "paused", "completed", "failed", "cancelled"]
   },
   "table": {
@@ -51,6 +51,14 @@
       "completed": "RUN_ID_TAKEN",
       "failed": "RUN_ID_TAKEN",
       "cancelled": "RUN_ID_TAKEN"
+    },
+    "paused-reopenable": {
+      "admitted": "RUN_ID_TAKEN",
+      "running": "ok",
+      "paused": "RUN_ID_TAKEN",
+      "completed": "RUN_ID_TAKEN",
+      "failed": "RUN_ID_TAKEN",
+      "cancelled": "ok"
     }
   }
 }

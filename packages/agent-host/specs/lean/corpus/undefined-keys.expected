@@ -51,6 +51,12 @@ TL reopenable paused RUN_ID_TAKEN
 TL reopenable completed RUN_ID_TAKEN
 TL reopenable failed RUN_ID_TAKEN
 TL reopenable cancelled RUN_ID_TAKEN
+TL paused-reopenable admitted RUN_ID_TAKEN
+TL paused-reopenable running ok
+TL paused-reopenable paused RUN_ID_TAKEN
+TL paused-reopenable completed RUN_ID_TAKEN
+TL paused-reopenable failed RUN_ID_TAKEN
+TL paused-reopenable cancelled ok
 X
 T log-0
 A 0 appended
@@ -11804,7 +11810,7 @@ QS SETTLEMENT_WITHOUT_RUN
 QS SETTLEMENT_CONFLICT
 QS SETTLEMENT_CONFLICT
 QL CHAT_RUN_LIVE
-QL RUN_ID_TAKEN
+QL ok
 QB batch 14 17 18 3:7,3:8,5:0
 QB batch 18 18 18 -
 QB batch 16 18 18 5:0,5:1

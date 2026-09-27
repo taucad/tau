@@ -11,15 +11,15 @@ import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { attachmentSendBlockReason, buildUserMessage } from '#utils/chat.utils.js';
 import type { AttachmentReference } from '#utils/attachment.utils.js';
 import { useProject } from '#hooks/use-project.js';
-import { useOptionalChatWorkspaceAuthority } from '#providers/chat-workspace-authority-provider.js';
 import {
   getBrowserAgentHostRun,
   resolveBrowserAgentHostInterrupt,
+  resumableBrowserAgentHostRunId,
 } from '#chat-clients/_internal/browser-agent-host-transport.js';
 import { daemonPlacementOf } from '#lib/agent-host-placement.js';
 import { useModels } from '#hooks/use-models.js';
 import { createRunBody } from '#chat-clients/_internal/turn-body.js';
-import { useTurnAdmission } from '#chat-clients/_internal/use-turn-admission.js';
+import { browserHostId, useTurnAdmission } from '#chat-clients/_internal/use-turn-admission.js';
 
 /**
  * Input payload for {@link CadChatClient.submit}. Mirrors the surface the
@@ -136,7 +136,6 @@ export const useCadChatClient = (): CadChatClient => {
   const store = useChatSessionStore();
   const { projectId } = useProject();
   const { resolveModel } = useModels();
-  const workspaceAuthority = useOptionalChatWorkspaceAuthority();
   /* This hook is a *view*: it composes gestures and reads the live chat. The
    * chat's agent-host binding and its admission belong to `ChatTurnHost`, which
    * is mounted once — owning either here made every transcript message a writer
@@ -211,19 +210,8 @@ export const useCadChatClient = (): CadChatClient => {
   );
 
   const stop = useCallback(() => {
-    if (workspaceAuthority) {
-      const markCancelled = async (): Promise<void> => {
-        try {
-          await workspaceAuthority.markCancelled(activeChatId);
-        } catch (error) {
-          console.error('[useCadChatClient] durable workspace cancellation mark failed', error);
-        }
-      };
-      // async-iife: bootstrap
-      void markCancelled();
-    }
     actions.stop();
-  }, [actions, activeChatId, workspaceAuthority]);
+  }, [actions]);
 
   const respondToToolApproval = useCallback(
     async (
@@ -258,27 +246,18 @@ export const useCadChatClient = (): CadChatClient => {
         );
         return;
       }
-      /* The branch below is the browser placement's: it claims this chat's
-         workspace and re-admits the run over the API transport. A daemon-placed
-         chat has neither — the daemon owns the files and records the turn — so
-         reaching it for one would admit a claim nothing writes to, and a claim
-         admitted here is exactly what lets this tab finalize a revision for a
-         turn the host already finalized (5-review N5). With no live host run to
-         answer, the stale affordance is dropped instead. */
-      if (requestInFlight || !workspaceAuthority || daemonPlacementOf(agent.execution) !== undefined) {
+      /* The branch below is the browser placement's: it answers the paused run
+         over a new request that continues it. A daemon-placed chat has none —
+         the daemon owns the run and records the turn — so with no live host run
+         to answer, the stale affordance is dropped instead (5-review N5). The
+         host places the continuation as its own attempt (W8 TS-S5). */
+      const runId = resumableBrowserAgentHostRunId(activeChatId);
+      if (requestInFlight || runId === undefined || daemonPlacementOf(agent.execution) !== undefined) {
         return;
       }
-      // Re-admits this chat's own in-flight run rather than starting a new
-      // turn, so it never waits on the admission its own claim already holds.
-      const approvalTurnId = messages.findLast((message) => message.role === 'user')?.id;
-      const prepared = await workspaceAuthority.prepare(
-        activeChatId,
-        approvalTurnId === undefined ? undefined : { turnId: approvalTurnId },
-      );
-      await workspaceAuthority.markAdmitted(activeChatId, approvalTurnId);
       const runBody = store.startRun(
         activeChatId,
-        createRunBody({ agent, projectId, execution: prepared.execution, runId: prepared.runId }),
+        createRunBody({ agent, projectId, execution: { hostId: browserHostId }, runId }),
       );
       try {
         await chat.addToolApprovalResponse({
@@ -291,7 +270,7 @@ export const useCadChatClient = (): CadChatClient => {
         store.endRun(activeChatId);
       }
     },
-    [actions, activeChatId, agent, chat, messages, projectId, requestInFlight, store, workspaceAuthority],
+    [actions, activeChatId, agent, chat, messages, projectId, requestInFlight, store],
   );
 
   return {

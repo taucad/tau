@@ -1,6 +1,7 @@
 import { createOpfsEventLog } from '#browser.js';
 import { createTauAgentHost } from '@taucad/agent-host';
 import { ScriptedParityModelTransport, scriptedParityResponses } from '#host/scripted-model.fixture.js';
+import { fakePlacement } from '#host/tau-agent-host.fixture.js';
 import type { ToolRegistry } from '#waist/ports.js';
 
 type TestSyncAccessHandle = {
@@ -53,6 +54,7 @@ globalThis.addEventListener('message', async () => {
       createId: () => `worker-message-${id++}`,
       createLeaderEpoch: () => `worker-epoch-${epoch++}`,
       now: () => new Date('2026-09-01T00:00:00.000Z'),
+      placement: fakePlacement({ registry: readTool }).port,
     });
     const messages = await host.admit({
       chatId,

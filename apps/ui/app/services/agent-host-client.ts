@@ -30,7 +30,6 @@ import type {
   AgentHostExternalContext,
   AgentHostModel,
   AgentHostWorkerProtocol,
-  AgentHostWorkerSettlementRecord,
 } from '#workers/agent-host.contract.js';
 import {
   agentHostWorkerProtocolSchemas,
@@ -126,6 +125,58 @@ export class AgentHostWorkerError extends Error {
   }
 }
 
+/** A refusal of retry class `wait`: the chat's previous attempt has ended and is being settled (W8 TS-S6). */
+const isSettlingRefusal = (error: unknown): error is AgentHostWorkerError =>
+  error instanceof AgentHostWorkerError &&
+  error.code === 'CHAT_RUN_LIVE' &&
+  (error.details?.['state'] === 'settling' || error.details?.['state'] === 'terminal');
+
+/**
+ * Send a command again while the host refuses it because the chat's previous attempt is settling (W8.r1 item 6).
+ *
+ * `CHAT_RUN_LIVE` naming a `settling` or already `terminal` run is retry class `wait`: the attempt's settlement row
+ * is durable and its acknowledge follows it, so the command is admitted once that lands. The re-send backs off from
+ * 20 ms to 250 ms; any other refusal, an abort, or the settlement bound passing ends it with the last refusal.
+ *
+ * @param send - One send of the command; a refusal rejects with its {@link AgentHostWorkerError}.
+ * @param signal - Stops re-sending once aborted.
+ * @param bound - The settlement bound, in milliseconds.
+ * @returns What the admitted send resolved with.
+ * @internal
+ */
+export const resendWhileSettling = async <Result>(
+  send: () => Promise<Result>,
+  signal?: AbortSignal,
+  bound = 30_000,
+): Promise<Result> => {
+  const deadline = Date.now() + bound;
+  /* Read afresh after each wait: a stop can land during it. */
+  const aborted = (): boolean => signal?.aborted === true;
+  const attempt = async (backoffMilliseconds: number): Promise<Result> => {
+    let refusal: AgentHostWorkerError;
+    try {
+      return await send();
+    } catch (error) {
+      if (!isSettlingRefusal(error) || aborted() || Date.now() + backoffMilliseconds > deadline) {
+        throw error;
+      }
+      refusal = error;
+    }
+    await new Promise<void>((resolve) => {
+      globalThis.setTimeout(resolve, backoffMilliseconds);
+    });
+    /* A stop during the back-off sends nothing more: the last refusal is the answer (W8.r1 round 5). */
+    if (aborted()) {
+      throw refusal;
+    }
+    return attempt(Math.min(backoffMilliseconds * 2, 250));
+  };
+  return attempt(20);
+};
+
+/** The commands the page re-sends while the previous attempt settles; `start` recovers in the transport. */
+const waitingCommands: ReadonlySet<HostCommand['type']> = new Set(['resolve-interrupt', 'resume', 'cancel']);
+
 export type AgentHostClientOptions = {
   readonly openFileSystemBridge: () => FileSystemBridgeConnection;
   readonly openProjectRootBridge: () => FileSystemBridgeConnection;
@@ -138,9 +189,10 @@ export type AgentHostClientOptions = {
   readonly openRevisionsPort?: (() => MessagePort | undefined) | undefined;
   /**
    * This end of a placement session brokered into the file-manager worker's revision root (`connectPlacement`, W8
-   * TS-S5), asked for at every provide, so a replaced host gets a new session. Without it turns run unplaced.
+   * TS-S5), asked for at every provide, so a replaced host gets a new session. A provide it answers `undefined` for is
+   * refused `REVISIONS_UNAVAILABLE`: no turn runs unplaced (D13).
    */
-  readonly openPlacementPort?: (() => MessagePort | undefined) | undefined;
+  readonly openPlacementPort: () => MessagePort | undefined;
   readonly projectStorage: ProjectFileSystemConfig;
   readonly durability: StorageDurabilityClass;
   readonly authority: { readonly projectId: string; readonly workspaceId: string };
@@ -223,14 +275,16 @@ export type AgentHostClient = {
   >;
   /** One read of the chat's durable rows; a refusal means the reader resets to cursor 0, never a clamp. */
   read(input: AgentHostReadInput): Promise<ReadAnswer>;
-  recordSettlement?(event: AgentHostWorkerSettlementRecord['event']): Promise<void>;
   /**
    * Follow one chat's durable rows from `cursor`: one outstanding long-poll read at a time (SC-R14).
    * ponytail: rows are handed over one by one, in the push shape the page projection folds; W9 replaces it.
+   *
+   * `onEnded` hears the follow stop for any reason but its own unsubscribe: no later row reaches `listener`.
    */
   subscribe(
     input: { readonly chatId: string; readonly cursor: number },
     listener: (chatId: string, event: AgentLogEvent) => void,
+    onEnded?: () => void,
   ): () => void;
   /** One chat's live deltas. */
   subscribeLive?(chatId: string, listener: (chatId: string, event: AgentLiveEvent) => void): () => void;
@@ -310,8 +364,6 @@ const externalAdmissionConfig = (
 /** Deadlines the transport-agnostic core enforces on every wire. */
 export type AgentHostClientCoreOptions = {
   readonly runIdleTimeout?: number | undefined;
-  /** Browser revision roots append their settlement through this client's log writer. */
-  readonly recordSettlements?: boolean | undefined;
 };
 
 /** What an `attach` answer names: the chat's run, whether it asked for the run's claim, and the log's end then. */
@@ -368,11 +420,14 @@ export const createAgentHostClient = (
 
   /** Send one keyed command; a refusal is thrown with its code and details. */
   const execute = async (command: HostCommand): Promise<Exclude<CommandAnswer, { readonly status: 'refused' }>> => {
-    const answer = await guarded(async () => transport.execute(command), 'WORKER_PROTOCOL_FAILED');
-    if (answer.status === 'refused') {
-      throw new AgentHostWorkerError(answer.code, answer.message, answer.details);
-    }
-    return answer;
+    const send = async (): Promise<Exclude<CommandAnswer, { readonly status: 'refused' }>> => {
+      const answer = await guarded(async () => transport.execute(command), 'WORKER_PROTOCOL_FAILED');
+      if (answer.status === 'refused') {
+        throw new AgentHostWorkerError(answer.code, answer.message, answer.details);
+      }
+      return answer;
+    };
+    return waitingCommands.has(command.type) ? resendWhileSettling(send) : send();
   };
 
   const attachCommand = async (chatId: string): Promise<Attached> => {
@@ -423,7 +478,7 @@ export const createAgentHostClient = (
   };
 
   /** Run one consumer for as long as its subscription lives; a failure other than the unsubscribe is the client's. */
-  const consume = (run: (signal: AbortSignal) => Promise<void>): (() => void) => {
+  const consume = (run: (signal: AbortSignal) => Promise<void>, onEnded?: () => void): (() => void) => {
     const operation = new AbortController();
     streamSubscriptions.add(operation);
     const drive = async (): Promise<void> => {
@@ -436,6 +491,9 @@ export const createAgentHostClient = (
         }
       } finally {
         streamSubscriptions.delete(operation);
+        if (!operation.signal.aborted) {
+          onEnded?.();
+        }
       }
     };
     void drive();
@@ -444,7 +502,7 @@ export const createAgentHostClient = (
     };
   };
 
-  const follow: AgentHostClient['subscribe'] = ({ chatId, cursor: from }, listener) =>
+  const follow: AgentHostClient['subscribe'] = ({ chatId, cursor: from }, listener, onEnded) =>
     consume(async (signal) => {
       let cursor = from;
       while (!signal.aborted) {
@@ -474,7 +532,7 @@ export const createAgentHostClient = (
         }
         cursor = answer.nextCursor;
       }
-    });
+    }, onEnded);
 
   const subscribeLive = (chatId: string, listener: (chatId: string, event: AgentLiveEvent) => void): (() => void) =>
     consume(async (signal) => {
@@ -572,8 +630,6 @@ export const createAgentHostClient = (
     offTransportClose?.();
   };
 
-  const { worker } = transport;
-
   return {
     async start(input) {
       chatsByRun.set(input.runId, input.chatId);
@@ -649,16 +705,6 @@ export const createAgentHostClient = (
       };
     },
     read: async (input) => read(input),
-    ...(options.recordSettlements && worker
-      ? {
-          recordSettlement: async (event: AgentHostWorkerSettlementRecord['event']) => {
-            await guarded(
-              async () => worker.recordSettlement({ chatId: event.chatId, event }),
-              'WORKER_PROTOCOL_FAILED',
-            );
-          },
-        }
-      : {}),
     subscribe: follow,
     subscribeLive,
     async close() {
@@ -701,7 +747,6 @@ export type ResidentAgentWorker = Readonly<{
    */
   connect: (projectId: string, closed?: () => boolean) => Promise<MessagePort>;
   capabilities: (durability: StorageDurabilityClass) => Promise<BrowserAgentHostCapability>;
-  recordSettlement: (projectId: string, record: AgentHostWorkerSettlementRecord) => Promise<void>;
   /**
    * Count one client of a project and remember its latest bridges and defaults. The returned release, called once,
    * sends `release` for the project's host when it was the last client (T3, RH-R4).
@@ -850,10 +895,18 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
   const provideTo = async (live: Incarnation, projectId: string): Promise<string> => {
     const options = registrationOf(projectId);
     const principal = await (options.principal ?? sessionPrincipal)();
+    const placementPort = options.openPlacementPort();
+    if (placementPort === undefined) {
+      throw Object.assign(
+        new Error(
+          "This project's revision root is not open, so the agent host cannot place turns. Reopen the project.",
+        ),
+        { code: 'REVISIONS_UNAVAILABLE' },
+      );
+    }
     const { computeMode, fileSystemPort, projectRootPort, computeStorePort, transferables, dispose } =
       openBridges(options);
     const revisionsPort = options.openRevisionsPort?.();
-    const placementPort = options.openPlacementPort?.();
     const hostId = randomUuid();
     live.bridges.set(hostId, dispose);
     try {
@@ -877,11 +930,7 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
           testingEnabled: options.testingEnabled,
           ...(principal === undefined ? {} : { principal }),
         },
-        transferables: [
-          ...transferables,
-          ...(revisionsPort ? [revisionsPort] : []),
-          ...(placementPort ? [placementPort] : []),
-        ],
+        transferables: [...transferables, ...(revisionsPort ? [revisionsPort] : []), placementPort],
       });
       /* The replaced incarnation drains its runs on its own bridges (T3); only its bridges go, once it has closed, so a
        * late close never takes the new host's (I31, RH-A26). */
@@ -893,7 +942,7 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
       live.bridges.delete(hostId);
       dispose();
       revisionsPort?.close();
-      placementPort?.close();
+      placementPort.close();
       throw toWorkerError(error, 'WORKER_PROTOCOL_FAILED');
     }
   };
@@ -918,7 +967,6 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
     })();
     return opening;
   };
-  const hostIn = async (live: Incarnation, projectId: string): Promise<string> => openingIn(live, projectId);
 
   /**
    * Release one host incarnation in the live worker, which answers once the host drained its runs and closed (T3);
@@ -1052,11 +1100,6 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
       const live = await incarnation();
       return live.channel.call('capabilities', { durability });
     },
-    recordSettlement: async (projectId, record) => {
-      const live = await incarnation();
-      await hostIn(live, projectId);
-      await live.channel.call('record-settlement', { ...record, projectId });
-    },
     reprovide: async () => {
       const live = current;
       if (live === undefined || live.dead) {
@@ -1148,7 +1191,6 @@ const createAgentHostWorkerTransport = (options: AgentHostClientOptions): AgentH
     worker: {
       /* A stream's close is the channel's own (D17); nothing to ask the worker. */
       close: async () => undefined,
-      recordSettlement: async (record) => resident.recordSettlement(projectId, record),
     },
   };
 };
@@ -1161,4 +1203,4 @@ const createAgentHostWorkerTransport = (options: AgentHostClientOptions): AgentH
  * @public
  */
 export const createBrowserAgentHostClient = (options: AgentHostClientOptions): AgentHostClient =>
-  createAgentHostClient(createAgentHostWorkerTransport(options), { ...options, recordSettlements: true });
+  createAgentHostClient(createAgentHostWorkerTransport(options), options);

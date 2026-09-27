@@ -139,7 +139,6 @@ const device = async (
   const actors = createRevisionActors({
     port,
     projectId: 'project-1',
-    authorityEpoch: `epoch-${label}`,
     filesystem: () => input.wrapFilesystem?.(filesystem) ?? filesystem,
     deviceId: () => `device-${label}`,
     ...(input.onChatsProjected === undefined ? {} : { onChatsProjected: input.onChatsProjected }),

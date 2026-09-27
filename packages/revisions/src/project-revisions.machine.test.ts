@@ -39,7 +39,7 @@ import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths'
  *  5  `cut` from a turn reaches that turn's checkout and no other
  *  6  `revisionMinted` reaches the requesting turn, which settles
  *  7  `turnFinalized` reaches `checkouts`, stops the turn child and is re-emitted
- *  8  `leaseStale` reaches `checkouts`
+ *  8  (deleted with the epoch sweep, W8 TS-S7)
  *  9  root `exit` stops every spawned child
  * 10  selection: `pinTo`, `followChat`, and D10's `switch` (re-root, apply to
  *     live, refused while a lease holds live)
@@ -133,7 +133,6 @@ const start = (): Harness => {
             listCheckouts: promises.actor('listCheckouts'),
             addCheckout: promises.actor('addCheckout'),
             removeCheckout: promises.actor('removeCheckout'),
-            sweepLeases: promises.actor('sweepLeases'),
             retireLease: promises.actor('retireRegistryLease'),
           },
         }),
@@ -222,7 +221,6 @@ const readyRegistry = async (
   harness: Harness,
   checkouts: readonly CheckoutRecord[] = [live, linked],
 ): Promise<void> => {
-  harness.promises.settle('sweepLeases', { output: { retiredRunIds: [] } });
   await flush();
   harness.promises.settle('listCheckouts', { output: { checkouts } });
   await flush();
@@ -236,22 +234,22 @@ const attemptKey = (runId = 'run-1', turnId = 'turn-1', attempt = 0): TurnAttemp
 });
 const key1 = attemptKey();
 
-/** Today's page and daemon admit legacy attempts (RM-S10's interim). */
+/** The host admits an attempt through its placement port (TS-S3). */
 const admit = (harness: Harness, key: TurnAttemptKey = key1): void => {
-  harness.actor.send({ type: 'admitTurn', key, legacy: true });
+  harness.actor.send({ type: 'admitTurn', key });
 };
 
 /** The `writeLease` effect's answer: the record, and the checkout's lease set with this run first. */
 const leaseWritten = (checkoutId: string, key: TurnAttemptKey = key1) => ({
   output: {
-    lease: { ...key, checkoutId, authorityEpoch: 'epoch-1', startedAt: 1 },
+    lease: { ...key, checkoutId, startedAt: 1 },
     leaseIds: [key.runId],
     held: [],
   },
 });
 
 const prepared = (checkoutId: string, branch: string) => ({
-  output: { checkoutId, branch, baseRevisionId: 'rev-1', dirty: false, staleRunIds: [] },
+  output: { checkoutId, branch, baseRevisionId: 'rev-1', dirty: false },
 });
 
 /** The attempt actor for a key: the root keys them by run and attempt (RM-S4). */
@@ -287,8 +285,8 @@ describe('projectRevisionsMachine', () => {
   it('invokes the always-on children and opens the registry', async () => {
     const harness = start();
 
-    /* `open` reached `checkouts`, which swept its leases with the project id. */
-    expect(harness.promises.inputsFor('sweepLeases')).toEqual([{ projectId: 'project-1' }]);
+    /* `open` reached `checkouts`, which lists the records with the project id and sweeps nothing (W8 TS-S7). */
+    expect(harness.promises.inputsFor('listCheckouts')).toEqual([{ projectId: 'project-1' }]);
 
     await readyRegistry(harness);
     expect(harness.actor.getSnapshot().context.checkouts).toEqual([live, linked]);
@@ -386,8 +384,8 @@ describe('projectRevisionsMachine', () => {
     const second = attemptKey('run-2');
     const events: ProjectRevisionsMachineEvent[] = [
       { type: 'checkoutsChanged', checkouts: [live] },
-      { type: 'admitTurn', key: key1, legacy: true },
-      { type: 'admitTurn', key: second, legacy: true },
+      { type: 'admitTurn', key: key1 },
+      { type: 'admitTurn', key: second },
     ];
     let admitted = initial;
     for (const event of events) {
@@ -468,7 +466,7 @@ describe('projectRevisionsMachine', () => {
     const harness = start();
 
     admit(harness);
-    expect(harness.actor.getSnapshot().context.pendingAdmissions).toEqual([{ key: key1, legacy: true }]);
+    expect(harness.actor.getSnapshot().context.pendingAdmissions).toEqual([{ key: key1 }]);
 
     /* The caller's wait expired; it names the attempt it gave up on. */
     harness.actor.send({ type: 'turnAbandoned', key: key1 });
@@ -546,7 +544,9 @@ describe('projectRevisionsMachine', () => {
       branch: 'agent/b',
     });
 
-    /* A legacy attempt is acknowledged by the root once it settles (RM-S10's interim). */
+    /* The attempt waits in `settled` for the host's acknowledgement, then retires its record (RM-R10). */
+    expect(turnRefOf(harness)?.getSnapshot().matches('settled')).toBe(true);
+    harness.actor.send({ type: 'acknowledge', key: key1 });
     expect(turnRefOf(harness)?.getSnapshot().matches('retiring')).toBe(true);
     expect(harness.emitted.map((event) => event.type)).toContain('revisionMinted');
     expect(harness.emitted.map((event) => event.type)).toContain('turnFinalized');
@@ -558,7 +558,7 @@ describe('projectRevisionsMachine', () => {
     const harness = start();
 
     /* The registry has to hold the lease for its retirement to mean anything:
-     * a run id no record holds is left to `sweepLeases` (R23/R30); `leaseWritten` puts it there. */
+     * a run id no record holds retires nothing (R23/R30); `leaseWritten` puts it there. */
     await readyRegistry(harness);
     await turnToRequesting(harness);
     const turnRef = turnRefOf(harness);
@@ -576,6 +576,7 @@ describe('projectRevisionsMachine', () => {
     /* RM-R10: the lease outlives the settlement until the retirement lands. */
     expect(harness.promises.inputsFor('retireRegistryLease')).toEqual([]);
 
+    harness.actor.send({ type: 'acknowledge', key: key1 });
     harness.promises.settle('retireTurnLease', { output: undefined });
     await flush();
 
@@ -586,17 +587,6 @@ describe('projectRevisionsMachine', () => {
     /* The attempt reached its final state, and the root dropped it. */
     expect(turnRef?.getSnapshot().status).toBe('done');
     expect(harness.emitted.map((event) => event.type)).toContain('turnRetired');
-
-    harness.actor.stop();
-  });
-
-  it('forwards a stale lease to checkouts', async () => {
-    const harness = start();
-
-    await readyRegistry(harness, [{ ...live, leaseRunIds: ['run-9'] }, linked]);
-    harness.actor.send({ type: 'leaseStale', runId: 'run-9' });
-
-    expect(harness.promises.inputsFor('retireRegistryLease')).toEqual([{ projectId: 'project-1', runId: 'run-9' }]);
 
     harness.actor.stop();
   });
@@ -847,8 +837,9 @@ describe('projectRevisionsMachine', () => {
 
     await turnToHeld(harness);
     harness.actor.send({ type: 'turnAbandoned', key: key1 });
+    harness.actor.send({ type: 'acknowledge', key: key1 });
 
-    /* Released, then acknowledged by the root for today's commands, so its record retires (RM-R10). */
+    /* Released, then acknowledged by the host, so its record retires (RM-R10). */
     expect(turnRefOf(harness)?.getSnapshot().matches('retiring')).toBe(true);
 
     harness.actor.stop();
@@ -931,12 +922,11 @@ describe('projectRevisionsMachine', () => {
     harness.promises.settle('find', { output: {} });
     await flush();
 
-    /* A legacy attempt gives up on a refused cut, so it settles failed as before W5. */
-    expect(turnRef?.getSnapshot().matches('retiring')).toBe(true);
-    expect(turnRef?.getSnapshot().context).toMatchObject({ outcome: 'failed', code: 'CAS_LOST' });
-    expect(harness.emitted.map((event) => event.type)).toEqual(
-      expect.arrayContaining(['casLost', 'turnCutRefused', 'turnReleased']),
-    );
+    /* The attempt keeps its lease for the host's next `complete` (RM-R13, TS-Q9). */
+    expect(turnRef?.getSnapshot().matches('held')).toBe(true);
+    expect(turnRef?.getSnapshot().context).toMatchObject({ code: 'CAS_LOST' });
+    expect(harness.emitted.map((event) => event.type)).toEqual(expect.arrayContaining(['casLost', 'turnCutRefused']));
+    expect(harness.emitted.map((event) => event.type)).not.toContain('turnReleased');
 
     harness.actor.stop();
   });
@@ -1035,7 +1025,7 @@ describe('projectRevisionsMachine', () => {
 
     const turnRef = turnRefOf(harness);
     expect(harness.emitted.find((event) => event.type === 'turnCutRefused')).toMatchObject({ key: key1 });
-    expect(turnRef?.getSnapshot().matches('retiring')).toBe(true);
+    expect(turnRef?.getSnapshot().matches('held')).toBe(true);
     expect(turnRef?.getSnapshot().context.reason).toContain('checkout-ghost');
 
     harness.actor.stop();
@@ -1044,7 +1034,6 @@ describe('projectRevisionsMachine', () => {
   it('tells restore which checkout the registry resolved, and its head', async () => {
     const harness = start();
 
-    harness.promises.settle('sweepLeases', { output: { retiredRunIds: [] } });
     await flush();
     harness.promises.settle('listCheckouts', {
       output: { checkouts: [{ ...live, headRevisionId: 'rev-9' }, linked] },
@@ -1075,6 +1064,7 @@ describe('projectRevisionsMachine', () => {
     const turnRef = turnRefOf(harness);
 
     harness.actor.send({ type: 'turnAbandoned', key: key1 });
+    harness.actor.send({ type: 'acknowledge', key: key1 });
     harness.promises.settle('retireTurnLease', { output: undefined });
     await flush();
 
@@ -1097,14 +1087,11 @@ describe('projectRevisionsMachine', () => {
   it('re-emits the registry facts a host has to show', async () => {
     const harness = start();
 
-    harness.promises.settle('sweepLeases', { output: { retiredRunIds: ['run-0'] } });
-    await flush();
     harness.promises.settle('listCheckouts', {
       output: { checkouts: [live, { ...linked, removable: true }] },
     });
     await flush();
 
-    expect(harness.emitted.map((event) => event.type)).toContain('leaseRetired');
     expect(harness.emitted.map((event) => event.type)).toContain('removalOffered');
 
     harness.actor.stop();
@@ -1120,7 +1107,7 @@ describe('projectRevisionsMachine', () => {
      * represents, and the turn's cut would be answered `cutFailed`. */
     expect(harness.actor.getSnapshot().context.turnRefs).toEqual({});
     expect(harness.promises.inputsFor('prepare')).toEqual([]);
-    expect(harness.actor.getSnapshot().context.pendingAdmissions).toEqual([{ key: key1, legacy: true }]);
+    expect(harness.actor.getSnapshot().context.pendingAdmissions).toEqual([{ key: key1 }]);
 
     await readyRegistry(harness);
 
@@ -1240,8 +1227,8 @@ describe('projectRevisionsMachine', () => {
     harness.actor.stop();
   });
 
-  /* RM-S10's interim: today's host gives up on a refused cut, so a legacy attempt settles failed and retires its record. */
-  it('should settle a legacy admission failed and retire its lease when its cut is refused', async () => {
+  /* RM-R13, TS-Q9: a refused cut keeps the lease and holds the attempt for the host's next `complete`. */
+  it('should keep the lease and hold the attempt when its cut is refused', async () => {
     const harness = start();
 
     await readyRegistry(harness);
@@ -1260,17 +1247,9 @@ describe('projectRevisionsMachine', () => {
       key: key1,
       cutFailures: 1,
     });
-    expect(harness.emitted.find((event) => event.type === 'turnReleased')).toMatchObject({
-      key: key1,
-      outcome: 'failed',
-    });
-    harness.promises.settle('retireTurnLease', { output: undefined });
-    await flush();
-
-    expect(harness.promises.inputsFor('retireRegistryLease')).toEqual([
-      { projectId: 'project-1', runId: 'run-1', key: key1 },
-    ]);
-    expect(harness.actor.getSnapshot().context.turnRefs).toEqual({});
+    expect(harness.emitted.map((event) => event.type)).not.toContain('turnReleased');
+    expect(turnRefOf(harness)?.getSnapshot().matches('held')).toBe(true);
+    expect(harness.promises.inputsFor('retireTurnLease')).toEqual([]);
 
     harness.actor.stop();
   });
@@ -1280,15 +1259,9 @@ describe('projectRevisionsMachine', () => {
     const harness = start();
 
     await readyRegistry(harness);
-    await turnToRequesting(harness);
-    harness.actor.send({
-      type: 'cutFailed',
-      checkoutId: 'checkout-b',
-      trigger: 'turn',
-      requestId: resultCutId(),
-      turn: { key: key1, turnCut: 'result' },
-      reason: 'disk full',
-    });
+    await turnToHeld(harness);
+    harness.actor.send({ type: 'turnAbandoned', key: key1 });
+    harness.actor.send({ type: 'acknowledge', key: key1 });
     await flush();
     harness.promises.settle('retireTurnLease', { output: undefined });
     await flush();
@@ -1311,15 +1284,9 @@ describe('projectRevisionsMachine', () => {
     const harness = start();
 
     await readyRegistry(harness);
-    await turnToRequesting(harness);
-    harness.actor.send({
-      type: 'cutFailed',
-      checkoutId: 'checkout-b',
-      trigger: 'turn',
-      requestId: resultCutId(),
-      turn: { key: key1, turnCut: 'result' },
-      reason: 'disk full',
-    });
+    await turnToHeld(harness);
+    harness.actor.send({ type: 'turnAbandoned', key: key1 });
+    harness.actor.send({ type: 'acknowledge', key: key1 });
     await flush();
     harness.promises.settle('retireTurnLease', { output: undefined });
     await flush();
@@ -1328,23 +1295,6 @@ describe('projectRevisionsMachine', () => {
     registerCheckouts(harness, [live, linked]);
 
     expect(harness.actor.getSnapshot().context.retiredAttempts).toEqual([]);
-
-    harness.actor.stop();
-  });
-
-  /* RM-S9's interim: a restarted root adopting on today's command acknowledges the attempt itself. */
-  it('should adopt a lease record as legacy when a legacy verb names it', async () => {
-    const harness = start();
-
-    await readyRegistry(harness, [{ ...live, headRevisionId: 'rev-1', leaseRunIds: ['run-1'] }, linked]);
-    harness.actor.send({ type: 'turnCompleted', key: key1, legacy: true });
-    harness.promises.settle('find', { output: { result: 'rev-7' } });
-    await flush();
-
-    expect(harness.emitted.find((event) => event.type === 'turnFinalized')).toMatchObject({ revisionId: 'rev-7' });
-    expect(harness.promises.inputsFor('retireTurnLease')).toEqual([
-      { key: key1, checkoutId: 'checkout-live', outcome: 'finalized' },
-    ]);
 
     harness.actor.stop();
   });
@@ -1805,6 +1755,8 @@ describe('projectRevisionsMachine', () => {
     });
     await flush();
     await readyRegistry(harness, [conflictedLive]);
+    /* The merge changed the records while the registry was loading, so it lists them again. */
+    await readyRegistry(harness, [conflictedLive]);
     expect(selectRevisionStatus(harness.actor.getSnapshot()).sync.state).toBe('conflicted');
 
     /* W10's resolution settles on the branch the scheduler tracks. */
@@ -1895,7 +1847,7 @@ describe('projectRevisionsMachine', () => {
         branch: 'main',
         headRevisionId: 'rev-1',
       },
-      { type: 'admitTurn', key: key1, legacy: true },
+      { type: 'admitTurn', key: key1 },
       { type: 'turnPrepared', key: key1, checkoutId: 'checkout-b', branch: 'agent/b' },
       { type: 'cut', requestId: 'save-1', trigger: 'save', checkoutId: 'checkout-live', leaseIds: [] },
       { type: 'cancelCut', requestId: 'save-1', checkoutId: 'checkout-live' },
@@ -1913,7 +1865,6 @@ describe('projectRevisionsMachine', () => {
       { type: 'cutCancelled', checkoutId: 'checkout-live', requestId: 'save-1' },
       { type: 'turnFinalized', ...settlement },
       { type: 'turnConflicted', ...settlement },
-      { type: 'leaseStale', runId: 'run-9' },
       { type: 'checkoutChanged', checkoutId: 'checkout-b', revisionId: 'rev-4', treeId: 'tree-4', branch: undefined },
       { type: 'changed', checkoutId: 'checkout-b', paths: ['a.ts'], generation: 1 },
       { type: 'turnCompleted', key: key1 },

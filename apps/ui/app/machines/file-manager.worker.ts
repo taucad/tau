@@ -21,7 +21,7 @@ import {
   sendKeepalivePush,
 } from '@taucad/revisions';
 import type { PushRecorder } from '@taucad/revisions';
-import { randomUuid } from '@taucad/utils/id';
+import { serveTurnPlacementChannel } from '@taucad/agent-host/channel-client';
 import { createIndexedDbComputeEngine, exposeComputeStoreChannel } from '@taucad/runtime/host';
 
 import type { WorkspaceScope } from '@taucad/filesystem';
@@ -323,19 +323,10 @@ exposeFileSystem(workspaceBridgeService(fileService), {
  * mount table can give each checkout route its own rooted provider and where
  * every content change is already observed.
  *
- * The authority epoch is the **project session's** identity (W19, W3c review
- * R4): a lease written under any other epoch belongs to a session that no
- * longer owns the project — another document, or an earlier session of this
- * one — and `sweepLeases` retires it on open (N3). Only the session that owns
- * a project's revisions actor system may sweep its leases, which is what makes
- * the rule hold across processes and not merely across documents.
- *
- * The page sends its session's epoch with `revisionsConnect`; a connection
- * that names none falls back to this document's, so a host that has no session
- * layer still gets the old per-document guarantee.
+ * No lease is swept by epoch (W8 TS-S7): the resident agent host reconciles
+ * the leases it finds through its placement session, which this registry
+ * serves on the port the page brokers (`placementConnect`, TS-S5).
  */
-const documentAuthorityEpoch = randomUuid();
-const projectAuthorityEpochs = new Map<string, string>();
 /* One place a linked checkout's files live, for the port that creates them
  * (W7 review R2/P24). Without it `capabilities.checkouts` is false and no
  * browser project can hold a second branch at all. */
@@ -395,7 +386,8 @@ const revisionRegistry = createWorkerRevisionRegistry({
         onChanged(paths);
       }
     }),
-  authorityEpoch: (projectId) => projectAuthorityEpochs.get(projectId) ?? documentAuthorityEpoch,
+  /* W8 TS-S5: the agent channel's own transport, injected so the registry holds no rpc (R3). */
+  servePlacement: ({ port, projectId, session }) => serveTurnPlacementChannel({ port, projectId, session }),
 });
 
 let languageFsSyncDispose: { dispose(): void } | undefined;
@@ -518,7 +510,6 @@ self.addEventListener(
       rootDirectory?: string;
       projectId?: unknown;
       hostServesRevisions?: unknown;
-      sessionEpoch?: unknown;
       action?: unknown;
       budget?: unknown;
       cursor?: unknown;
@@ -551,12 +542,24 @@ self.addEventListener(
         } else {
           hostServedProjects.delete(data.projectId);
         }
-        if (typeof data.sessionEpoch === 'string' && data.sessionEpoch.length > 0) {
-          projectAuthorityEpochs.set(data.projectId, data.sessionEpoch);
-        }
         revisionRegistry.connect(data.port, data.projectId);
       } else {
         data.port.close();
+      }
+      return;
+    }
+
+    /* W8 TS-S5: the resident agent host's placement session and its `revisions` tool reader, brokered by the page. */
+    if (
+      (data.type === 'placementConnect' || data.type === 'revisionsReaderConnect') &&
+      data.port instanceof MessagePort
+    ) {
+      if (typeof data.projectId !== 'string' || data.projectId.length === 0) {
+        data.port.close();
+      } else if (data.type === 'placementConnect') {
+        revisionRegistry.connectPlacement(data.port, data.projectId);
+      } else {
+        revisionRegistry.connectReader(data.port, data.projectId);
       }
       return;
     }

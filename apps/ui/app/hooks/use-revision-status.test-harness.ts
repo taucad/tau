@@ -190,7 +190,6 @@ export const revisionStatusMock = (): Record<string, unknown> => {
       revisionStatusHarness.toasts.add(listener);
       return () => revisionStatusHarness.toasts.delete(listener);
     },
-    admitTurn: async () => ({ checkoutId: 'live', root: '/projects/p', baseRevisionId: '' }),
     log: async (request?: { readonly branch?: string }) => {
       revisionStatusHarness.logRequests.push(request?.branch ?? '');
       return (

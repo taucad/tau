@@ -3,8 +3,9 @@
  * S6 by W1; W5 owns it). One table serves both bridges: forward replay maps each protocol action to
  * one harness operation, and the backward walk labels each machine event with the action it stands for.
  *
- * The code's knobs are the interim (`TurnProtocol.pr.cfg`): the target machine driven by today's
- * page and daemon commands, so a release is `turnAbandoned` and a completion is `turnCompleted`.
+ * The graph is `TurnProtocol.pr.cfg`: the target machine under every host verb it accepts, so a
+ * release is `turnAbandoned` and a completion is `turnCompleted`. W8's M1 completes only a placed
+ * attempt and never releases after a cut (`TurnProtocol.target.cfg`); that is the host's discipline.
  */
 
 import { createActor } from 'xstate';
@@ -38,12 +39,11 @@ export const adoptedTurnInput: TurnMachineInput = {
   adopt: { checkoutId: 'checkout-1', headRevisionId: 'rev-1' },
 };
 
-export const preparedOutput = (dirty: boolean, stale: boolean): Record<string, unknown> => ({
+export const preparedOutput = (dirty: boolean): Record<string, unknown> => ({
   checkoutId: 'checkout-1',
   branch: 'main',
   baseRevisionId: 'rev-1',
   dirty,
-  staleRunIds: stale ? ['run-old'] : [],
 });
 
 const lease = { key, checkoutId: 'checkout-1', headRevisionId: 'rev-1' };
@@ -67,12 +67,7 @@ export const answer = (kind: string, requestId: string, revisionId: string): Any
 
 /** What each invoked effect resolves with when it succeeds, per protocol label. */
 const doneOutputs: Readonly<Record<string, ReadonlyArray<readonly [ActionLabel, unknown]>>> = {
-  prepare: [false, true].flatMap((dirty) =>
-    [false, true].map((stale): readonly [ActionLabel, unknown] => [
-      ['PrepareOk', dirty, stale],
-      preparedOutput(dirty, stale),
-    ]),
-  ),
+  prepare: [false, true].map((dirty): readonly [ActionLabel, unknown] => [['PrepareOk', dirty], preparedOutput(dirty)]),
   writeLease: [[['WriteLeaseOk'], writtenOutput]],
   capture: [[['CaptureOk'], { captureId: 'capture-1' }]],
   merge: [
@@ -239,7 +234,7 @@ export const messageOf = (event: AnyEventObject): string => {
 };
 
 const orphanOutputs: Readonly<Record<string, unknown>> = {
-  prepare: preparedOutput(false, false),
+  prepare: preparedOutput(false),
   writeLease: writtenOutput,
   capture: { captureId: 'capture-1' },
   merge: { status: 'recorded' },
@@ -307,7 +302,7 @@ const perform = (harness: TurnHarness, action: readonly unknown[]): void => {
   const { actor, promises, callbacks } = harness;
   switch (name) {
     case 'PrepareOk': {
-      promises.settle('prepare', { output: preparedOutput(first === true, second === true) });
+      promises.settle('prepare', { output: preparedOutput(first === true) });
       return;
     }
     case 'PrepareErr':

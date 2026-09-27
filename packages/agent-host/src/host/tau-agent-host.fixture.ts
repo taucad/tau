@@ -6,7 +6,13 @@ import { createEventLogAppender } from '#log/event-log-appender.js';
 import type { EventLogAppender, EventLogStorage } from '#log/event-log-appender.js';
 import type { AgentLogEvent, JsonObject, ProviderMessage } from '#log/event-types.js';
 import type { CreateTauAgentHostOptions } from '#host/tau-agent-host.js';
-import type { ModelTransport, ToolRegistry } from '#waist/ports.js';
+import type {
+  ModelTransport,
+  ToolRegistry,
+  TurnAttemptKey,
+  TurnPlacementFact,
+  TurnPlacementPort,
+} from '#waist/ports.js';
 
 export const tauInternal = (message: ProviderMessage | undefined): JsonObject | undefined =>
   message?.metadata?.tauInternal;
@@ -119,6 +125,105 @@ export const tools = (invoke: ToolRegistry['invoke']): ToolRegistry => ({
   invoke,
 });
 
+/** One call the fake placement port answered, with the log's length when it was made (0 without a `rows` read). */
+export type PlacementCall = Readonly<{
+  verb: string;
+  key: TurnAttemptKey;
+  checkoutId?: string | undefined;
+  /** What `complete` asked of the cut (W8.r1 M-A). */
+  cut?: boolean | undefined;
+  rows: number;
+}>;
+
+/**
+ * W8's placement port as a fake: `admit` places on `checkout-live` with the given registry as the attempt's tools,
+ * `complete` publishes a `turn.finalized` settlement for the key, and every call is recorded. Every CAD run needs a
+ * placement (D13), so {@link hostOptions} gives each host one.
+ *
+ * @param input - The attempt's tools, and a read of the log's length to record at each call.
+ * @returns The port, its calls, and a gate that holds `acknowledge` until released.
+ */
+export const fakePlacement = (
+  input: Readonly<{ registry: ToolRegistry; rows?: () => Promise<number> }>,
+): Readonly<{ port: TurnPlacementPort; calls: PlacementCall[]; holdAcknowledge: () => () => void }> => {
+  const calls: PlacementCall[] = [];
+  const facts: TurnPlacementFact[] = [];
+  let wake: () => void = () => undefined;
+  let acknowledgeGate: Promise<void> = Promise.resolve();
+  const rows = async (): Promise<number> => (input.rows === undefined ? 0 : input.rows());
+  const port: TurnPlacementPort = {
+    admit: async ({ requestId, key, checkoutId }) => {
+      calls.push({ verb: 'admit', key, checkoutId, rows: await rows() });
+      return {
+        requestId,
+        status: 'applied',
+        placement: { checkoutId: checkoutId ?? 'checkout-live', mode: 'direct', root: '/work', tools: input.registry },
+      };
+    },
+    complete: async ({ requestId, key, cut }) => {
+      calls.push({ verb: 'complete', key, cut, rows: await rows() });
+      facts.push({
+        kind: 'settled',
+        key,
+        row: {
+          type: 'turn.finalized',
+          runId: key.runId,
+          attempt: key.attempt,
+          turnId: key.turnId,
+          chatId: key.chatId,
+          projectId: 'project-1',
+          changedPaths: [],
+          trigger: 'turn',
+          runIds: [key.runId],
+        },
+      });
+      wake();
+      return { requestId, status: 'applied' };
+    },
+    abandon: async ({ requestId, key }) => {
+      calls.push({ verb: 'abandon', key, rows: await rows() });
+      return { requestId, status: 'applied' };
+    },
+    reconcile: async ({ requestId }) => ({ requestId, status: 'applied', held: [] }),
+    async *settlements({ signal }) {
+      let next = 0;
+      const nextFact = async (): Promise<void> =>
+        new Promise<void>((resolve) => {
+          wake = resolve;
+          signal.addEventListener('abort', () => {
+            resolve();
+          });
+        });
+      while (!signal.aborted) {
+        while (next < facts.length) {
+          const fact = facts[next++];
+          if (fact !== undefined) {
+            yield fact;
+          }
+        }
+        // oxlint-disable-next-line no-await-in-loop -- a listen waits for the next fact.
+        await nextFact();
+      }
+    },
+    acknowledge: async ({ requestId, key }) => {
+      await acknowledgeGate;
+      calls.push({ verb: 'acknowledge', key, rows: await rows() });
+      return { requestId, status: 'applied' };
+    },
+  };
+  return {
+    port,
+    calls,
+    holdAcknowledge: () => {
+      let release: () => void = () => undefined;
+      acknowledgeGate = new Promise((resolve) => {
+        release = resolve;
+      });
+      return release;
+    },
+  };
+};
+
 export const hostOptions = (input: {
   readonly openEventLog: MemoryLogFile['open'];
   readonly transport: ModelTransport;
@@ -137,5 +242,6 @@ export const hostOptions = (input: {
     createId: ids,
     createLeaderEpoch: epochs,
     now: () => new Date(Date.UTC(2026, 8, 1, 0, 0, tick++)),
+    placement: fakePlacement({ registry: input.toolRegistry }).port,
   };
 };

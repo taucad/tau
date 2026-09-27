@@ -38,16 +38,6 @@ import type { RevisionPortErrorCode } from '#revision-port.js';
 import type { BranchOperation } from '#branch.types.js';
 
 /**
- * How long a delegated registry verb used to wait for the registry's answer.
- *
- * No machine reads it since the registry answers by request id (RM-S8); it
- * stays exported while outside waiters import it, and goes with them (W8 TS-S5).
- *
- * @public
- */
-export const branchRegistryMilliseconds = 30_000;
-
-/**
  * What refused a branch verb.
  *
  * A port code where the port refused, plus the two refusals a *New branch* can

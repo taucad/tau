@@ -9,12 +9,7 @@
  */
 
 export { createAgentLauncher, credentialPrincipal } from '#launchers/agent-launcher.js';
-export type {
-  AgentLauncher,
-  AgentLauncherOptions,
-  CredentialState,
-  HostAuthoredLogEvent,
-} from '#launchers/agent-launcher.js';
+export type { AgentLauncher, AgentLauncherOptions, CredentialState } from '#launchers/agent-launcher.js';
 export type { ChatStore } from '#launchers/chat-store.js';
 export { serveAgentChannel } from '#launchers/agent-channel.js';
 export type { ServeAgentChannelOptions } from '#launchers/agent-channel.js';

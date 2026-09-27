@@ -11,7 +11,7 @@ A row is `<term> <seq> <run> <kind> <arg> <ms> <epoch> <attempt>` (`epoch`/`atte
   W <row> / WJ / TEAR          another writer's row, a junk line, a torn fragment (no output)
   RELOAD                       reopen the appender                        → `O <quarantined> <order> <conflict> <history>`
   LEDGER                       fold the appender's view                   → `R … / I … / C … / P … / N … / U …`
-  SETTLE <run> <content>       `recordSettlement` on a copy of the file   → `QS <outcome>`
+  SETTLE <run> <content>       the host's settlement append on a copy     → `QS <outcome>`
   LIFE <run> <state>           gate one stamped lifecycle body            → `QL <code>`
   PREP <run> <arg>             gate one stamped prepared body             → `QP <code>`
   BATCH <c> <limit> <maxBytes|-> <last|-> <sizes|->   the appender's `readBatch` → `QB …`
@@ -108,7 +108,7 @@ def tables : List String :=
   let ts := [(AState.unadmitted, "unadmitted"), (.open_, "open"), (.terminal, "terminal"), (.settled, "settled")].map
     fun (a, n) => s!"TS {n} settle {codeName (settlementTable a)}"
   let conds := [(Cond.unadmitted, "unadmitted"), (.open_, "open"), (.ended, "ended"), (.settledOpen, "settled-open"),
-    (.settled, "settled"), (.reopenable, "reopenable")]
+    (.settled, "settled"), (.reopenable, "reopenable"), (.pausedReopenable, "paused-reopenable")]
   let ops := [(LOp.admitted, "admitted"), (.running, "running"), (.paused, "paused"), (.completed, "completed"),
     (.failed, "failed"), (.cancelled, "cancelled")]
   let tl := conds.flatMap fun (c, n) => ops.map fun (o, on) => s!"TL {n} {on} {codeName (lifecycleTable c o)}"

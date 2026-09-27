@@ -51,6 +51,12 @@ TL reopenable paused RUN_ID_TAKEN
 TL reopenable completed RUN_ID_TAKEN
 TL reopenable failed RUN_ID_TAKEN
 TL reopenable cancelled RUN_ID_TAKEN
+TL paused-reopenable admitted RUN_ID_TAKEN
+TL paused-reopenable running ok
+TL paused-reopenable paused RUN_ID_TAKEN
+TL paused-reopenable completed RUN_ID_TAKEN
+TL paused-reopenable failed RUN_ID_TAKEN
+TL paused-reopenable cancelled ok
 X
 T merge-0
 M 5:0:1:O1:17,5:1:1:O1:18,0:0:1:O2:19,0:1:1:O2:21,6:0:1:O1:28,6:1:1:O0:31,6:2:1:O2:33,3:0:1:O1:35,3:1:1:O2:36,3:2:1:O0:38,4:0:1:O0:14,1:0:1:O2:39,1:1:1:O2:39,2:0:1:O2:20,2:1:1:O2:23

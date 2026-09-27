@@ -15,7 +15,6 @@ import {
   chatTurnAdmission,
   chatTurnSettlement,
   publishChatTurnAdmission,
-  publishChatTurnSettlement,
   resetChatTurnServices,
 } from '#chat-clients/_internal/chat-host-binding.js';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
@@ -391,14 +390,10 @@ function startTurnOwner(store: ChatSessionStore, chatId: string, admit = testAdm
   );
   session.start();
   const unpublish = publishChatTurnAdmission(chatId, admit);
-  /* The route publishes both; a turn that cannot be settled never releases the
-   * chat, so a harness that omits this is asserting the absence of the owner. */
-  const unpublishSettlement = publishChatTurnSettlement(chatId, async () => undefined);
   store.setFocusedProject(testProjectId);
   store.setProjectSession(testProjectId, session);
   return () => {
     unpublish();
-    unpublishSettlement();
     store.setProjectSession(testProjectId, undefined);
     session.stop();
   };

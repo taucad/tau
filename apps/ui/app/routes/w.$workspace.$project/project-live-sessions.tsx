@@ -12,7 +12,6 @@ import { waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import { ChatInterface } from '#routes/w.$workspace.$project/chat-interface.js';
 import { ProjectProvider, useProject } from '#hooks/use-project.js';
-import { ProjectChatRunSettlement } from '#routes/w.$workspace.$project/project-chat-run-settlement.js';
 import { ProjectWorkspaceProvider } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { ProjectShareRouteIntent } from '#routes/w.$workspace.$project/project-share-action.js';
 import { ViewSettingsSyncHost } from '#routes/w.$workspace.$project/view-settings-sync-host.js';
@@ -412,10 +411,8 @@ export function LiveProjectSessions({
   );
 }
 
-// Chat component - handles keyboard shortcuts. Terminal-run settlement is
-// wired up by `<ProjectChatRunSettlement>` once per chatId from the app-shell
-// `ChatSessionStore` (settlement is per-session, not per-route — see
-// `apps/ui/app/routes/w.$workspace.$project/project-chat-run-settlement.tsx`).
+// Chat component - handles keyboard shortcuts. A turn is settled by the host
+// that ran it, which appends the settlement row to the chat's log (W8 TS-S6).
 function Chat(): React.JSX.Element {
   return <ChatInterface />;
 }
@@ -428,10 +425,6 @@ function Chat(): React.JSX.Element {
  *   `<ActiveChatProvider>` boundary so both the chat history and its
  *   composer share the focused chat. `<ChatHistoryGate>` remains the
  *   focused-chat skeleton/error boundary inside that session.
- * - `<ProjectChatRunSettlement>` reads chat ids from the app-shell
- *   `ChatSessionStore` directly (no `<ActiveChatProvider>` dependency),
- *   so settlement persists across `focusedChatId` changes and across
- *   `ensureFocusedChatActor` retries.
  *
  * Persistence + draft `flushNow` is dispatched centrally by
  * `<GlobalChatFlushGuard>` (mounted in `apps/ui/app/root.tsx`) — every
@@ -449,7 +442,6 @@ function ChatWithProvider(): React.JSX.Element {
     <>
       {name ? <title>{name}</title> : null}
       {description ? <meta name='description' content={description} /> : null}
-      <ProjectChatRunSettlement />
       <Chat />
     </>
   );

@@ -91,7 +91,6 @@ const startTree = (options: Readonly<{ scheduler?: boolean }> = {}): Tree => {
             listCheckouts: promises.actor('listCheckouts'),
             addCheckout: promises.actor('addCheckout'),
             removeCheckout: promises.actor('removeCheckout'),
-            sweepLeases: promises.actor('sweepLeases'),
             retireLease: promises.actor('retireRegistryLease'),
           },
         }),
@@ -172,7 +171,6 @@ const startTree = (options: Readonly<{ scheduler?: boolean }> = {}): Tree => {
 
 /** Bring the registry to `ready` over one live checkout. */
 const openRegistry = async (tree: Tree, checkouts: readonly CheckoutRecord[] = [live]): Promise<void> => {
-  tree.promises.settle('sweepLeases', { output: { retiredRunIds: [] } });
   await flush();
   tree.promises.settle('listCheckouts', { output: { checkouts } });
   await flush();
@@ -193,14 +191,14 @@ const leaseTurn = async (
 ): Promise<void> => {
   const { turnId, chatId, runId, leaseIds } = turn;
   const key = keyOf(turnId, chatId, runId);
-  tree.actor.send({ type: 'admitTurn', key, legacy: true });
+  tree.actor.send({ type: 'admitTurn', key });
   tree.promises.settle('prepare', {
-    output: { checkoutId: 'checkout-live', branch: 'main', baseRevisionId: 'rev-1', dirty: false, staleRunIds: [] },
+    output: { checkoutId: 'checkout-live', branch: 'main', baseRevisionId: 'rev-1', dirty: false },
   });
   await flush();
   tree.promises.settle('writeLease', {
     output: {
-      lease: { ...key, checkoutId: 'checkout-live', authorityEpoch: 'epoch-1', startedAt: 1 },
+      lease: { ...key, checkoutId: 'checkout-live', startedAt: 1 },
       leaseIds,
       held: [],
     },
@@ -227,8 +225,14 @@ const mint = async (tree: Tree, revisionId: string): Promise<void> => {
   await flush();
   tree.promises.settle('casHead', { output: { status: 'updated', head: revisionId } });
   await flush();
-  /* RM-R10: the settlement is announced first; the root acknowledges a legacy
-   * attempt, and only then does the turn retire its lease. */
+  /* RM-R10: the settlement is announced first; the host acknowledges it, and
+   * only then does the turn retire its lease. */
+  for (const fact of Object.values(tree.actor.getSnapshot().context.turnFacts)) {
+    if (fact.settled) {
+      tree.actor.send({ type: 'acknowledge', key: fact.key });
+    }
+  }
+  await flush();
   if (tree.promises.running('retireTurnLease') > 0) {
     tree.promises.settle('retireTurnLease', { output: undefined });
     await flush();
@@ -269,10 +273,9 @@ describe('revision machine composition (S48 Node set)', () => {
       /* XState v6 starts invoked children after the root's entry effects, so
        * the registry's `open` reaches it before `remote` and `sync` start; v5
        * started every child first. The three startup reads are independent. */
-      'sweepLeases',
+      'listCheckouts',
       'readRemote',
       'readPending',
-      'listCheckouts',
       'syncReadRemote',
       'syncFetch',
       'prepare',
@@ -678,7 +681,6 @@ const runScriptedTurn = async (set: ActorSet): Promise<Dump> => {
     createProjectRevisionsActor({
       port,
       projectId: 'project-1',
-      authorityEpoch: 'epoch-1',
       filesystem: () => filesystem,
       clock: stoppedClock(),
       actorId: 'actor-1',
@@ -698,7 +700,7 @@ const runScriptedTurn = async (set: ActorSet): Promise<Dump> => {
 
   await until(() => actor.getSnapshot().context.registrySettled, `${set}: the registry to settle`);
   const key = keyOf('turn-1');
-  const admit = { type: 'admitTurn', key, legacy: true } as const;
+  const admit = { type: 'admitTurn', key } as const;
   facts.push({ sent: admit });
   actor.send(admit);
   await until(() => placements.some((placement) => placement.status === 'leased'), `${set}: the turn to be placed`);
@@ -709,6 +711,11 @@ const runScriptedTurn = async (set: ActorSet): Promise<Dump> => {
   const completed = { type: 'turnCompleted', key } as const;
   facts.push({ sent: completed });
   actor.send(completed);
+  /* RM-R10: the host acknowledges the announced settlement; only then does the turn retire its lease. */
+  await until(() => emitted.some((event) => event.type === 'turnFinalized'), `${set}: the turn to settle`);
+  const acknowledged = { type: 'acknowledge', key } as const;
+  facts.push({ sent: acknowledged });
+  actor.send(acknowledged);
   /* `leaseRetired`, not `turnFinalized`: a trigger-only cut that lands while the
    * turn still holds the checkout is answered `nothingToSave` by design
    * (`project-revisions.machine.ts:747`, a2 R1), so the close below has to wait
@@ -814,7 +821,6 @@ describe('composition root options (MC-R4)', () => {
     const { actor, settled } = createProjectRevisionsActor({
       port,
       projectId: 'project-1',
-      authorityEpoch: 'epoch-1',
       filesystem: () => filesystem,
       clock,
       inspect: (event) => {
@@ -857,7 +863,6 @@ describe('placement over a real port (RM-R12)', () => {
     const { actor, settled } = createProjectRevisionsActor({
       port,
       projectId: 'project-1',
-      authorityEpoch: 'epoch-1',
       filesystem: () => filesystem,
       onPlacement: (placement) => {
         order.push(placement.status);
@@ -869,7 +874,7 @@ describe('placement over a real port (RM-R12)', () => {
     actor.start();
     await until(() => actor.getSnapshot().context.registrySettled, 'the registry to settle');
 
-    actor.send({ type: 'admitTurn', key: keyOf('turn-1'), legacy: true });
+    actor.send({ type: 'admitTurn', key: keyOf('turn-1') });
     await until(() => order.includes('leased'), 'the turn to be placed');
 
     expect(order).toEqual(['placed', 'minted', 'leased']);

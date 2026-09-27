@@ -13,6 +13,7 @@ import { createTauAgentHost } from '#host/tau-agent-host.js';
 import {
   completedFirstTurn,
   createMemoryLogFile,
+  fakePlacement,
   hostOptions,
   readLog,
   seedLog,
@@ -25,7 +26,6 @@ import type {
   ModelTransport,
   ToolRegistry,
   TurnAttemptKey,
-  TurnPlacementFact,
   TurnPlacementPort,
 } from '#waist/ports.js';
 import type { ExternalAgentPort, ExternalAgentTurn, TauAgentHost } from '#host/tau-agent-host.js';
@@ -708,90 +708,15 @@ describe('tool results per call (RA-S9, EQ6)', () => {
 });
 
 describe('placement and settlement per attempt (RA-S13)', () => {
-  type Call = Readonly<{ verb: string; key: TurnAttemptKey; checkoutId?: string | undefined; rows: number }>;
-
   /** W8's port as a fake: every call records the log's length when it was made; settlements publish on complete. */
-  const fakePort = (file: ReturnType<typeof createMemoryLogFile>, registry: ToolRegistry) => {
-    const calls: Call[] = [];
-    const facts: TurnPlacementFact[] = [];
-    let wake: () => void = () => undefined;
-    let acknowledgeGate: Promise<void> = Promise.resolve();
-    const rows = async (): Promise<number> => {
-      const log = await readLog(file);
-      return log.length;
-    };
-    const port: TurnPlacementPort = {
-      admit: async ({ requestId, key, checkoutId }) => {
-        calls.push({ verb: 'admit', key, checkoutId, rows: await rows() });
-        return {
-          requestId,
-          status: 'applied',
-          placement: { checkoutId: checkoutId ?? 'checkout-live', mode: 'direct', root: '/work', tools: registry },
-        };
+  const fakePort = (file: ReturnType<typeof createMemoryLogFile>, registry: ToolRegistry) =>
+    fakePlacement({
+      registry,
+      rows: async () => {
+        const rows = await readLog(file);
+        return rows.length;
       },
-      complete: async ({ requestId, key }) => {
-        calls.push({ verb: 'complete', key, rows: await rows() });
-        facts.push({
-          kind: 'settled',
-          key,
-          row: {
-            type: 'turn.finalized',
-            runId: key.runId,
-            attempt: key.attempt,
-            turnId: key.turnId,
-            chatId: key.chatId,
-            projectId: 'project-1',
-            changedPaths: [],
-            trigger: 'turn',
-            runIds: [key.runId],
-          },
-        });
-        wake();
-        return { requestId, status: 'applied' };
-      },
-      abandon: async ({ requestId, key }) => {
-        calls.push({ verb: 'abandon', key, rows: await rows() });
-        return { requestId, status: 'applied' };
-      },
-      reconcile: async ({ requestId }) => ({ requestId, status: 'applied', held: [] }),
-      async *settlements({ signal }) {
-        let next = 0;
-        const nextFact = async (): Promise<void> =>
-          new Promise<void>((resolve) => {
-            wake = resolve;
-            signal.addEventListener('abort', () => {
-              resolve();
-            });
-          });
-        while (!signal.aborted) {
-          while (next < facts.length) {
-            const fact = facts[next++];
-            if (fact !== undefined) {
-              yield fact;
-            }
-          }
-          // oxlint-disable-next-line no-await-in-loop -- a listen waits for the next fact.
-          await nextFact();
-        }
-      },
-      acknowledge: async ({ requestId, key }) => {
-        await acknowledgeGate;
-        calls.push({ verb: 'acknowledge', key, rows: await rows() });
-        return { requestId, status: 'applied' };
-      },
-    };
-    return {
-      port,
-      calls,
-      holdAcknowledge: () => {
-        let release: () => void = () => undefined;
-        acknowledgeGate = new Promise((resolve) => {
-          release = resolve;
-        });
-        return release;
-      },
-    };
-  };
+    });
 
   const placedHost = (
     file: ReturnType<typeof createMemoryLogFile>,
@@ -818,6 +743,38 @@ describe('placement and settlement per attempt (RA-S13)', () => {
       payload: { chatId, runId, trigger: 'submit', message: { id: `turn-${runId}`, role: 'user', content: 'Go.' } },
     });
 
+  /* D13 (W8.r1 M1, probe P5): a host with no placement runs no CAD turn; it refuses before any row. */
+  it('should refuse a start and a resume REVISIONS_UNAVAILABLE on a host with no placement, writing no row', async () => {
+    const file = createMemoryLogFile();
+    await seedLog(file, [
+      ...completedFirstTurn.slice(0, 3),
+      { type: 'run.lifecycle', runId: 'run-1', state: 'failed', detail: { code: 'RATE_LIMITED', message: 'Busy.' } },
+    ]);
+    const host = createTauAgentHost({
+      ...hostOptions({ openEventLog: file.open, transport: done, toolRegistry: idle, idPrefix: 'unplaced' }),
+      placement: undefined,
+    });
+    const before = await readLog(file);
+
+    const resumed = await host.command({
+      type: 'resume',
+      commandId: key(),
+      payload: { chatId: 'chat-unplaced', runId: 'run-1' },
+    });
+    const started = await start(host, 'chat-unplaced', 'run-2');
+
+    expect(resumed).toMatchObject({ status: 'refused', code: 'REVISIONS_UNAVAILABLE', effect: 'not-applied' });
+    expect(started).toMatchObject({ status: 'refused', code: 'REVISIONS_UNAVAILABLE', effect: 'not-applied' });
+    const after = await readLog(file);
+    expect(
+      after.slice(before.length).filter((row) => row.type === 'turn.finalized' || row.type === 'turn.failed'),
+    ).toEqual([]);
+    expect(
+      after.slice(before.length).filter((row) => row.type === 'run.lifecycle' && row.state === 'admitted'),
+    ).toEqual([]);
+    await host.close();
+  });
+
   it('should never enqueue admitPlacement before the intent row is durable', async () => {
     const file = createMemoryLogFile();
     const fake = fakePort(file, idle);
@@ -843,6 +800,40 @@ describe('placement and settlement per attempt (RA-S13)', () => {
     const settled = events.findIndex((event) => event.type === 'turn.finalized');
     expect(settled).toBeGreaterThan(0);
     expect(fake.calls[2]?.rows).toBeGreaterThan(settled);
+    await host.close();
+  });
+
+  /* HD-3 (W8.a2): a refused placement's rows are written in the one settlement shape, attempt included (TS-S9). */
+  it('should append a refused placement with its attempt, so the run ends with the refusal code', async () => {
+    const file = createMemoryLogFile();
+    const fake = fakePort(file, idle);
+    const port: TurnPlacementPort = {
+      ...fake.port,
+      admit: async ({ requestId }) => ({
+        requestId,
+        status: 'refused',
+        code: 'BASE_CUT_FAILED',
+        message: 'The files already in checkout live could not be saved before the agent started.',
+      }),
+    };
+    const host = placedHost(file, port, 'place-refused');
+
+    await start(host, 'chat-refused', 'run-1');
+
+    await vi.waitFor(async () => {
+      const log = await readLog(file);
+      expect(log).toContainEqual(
+        expect.objectContaining({ type: 'turn.failed', runId: 'run-1', attempt: 1, code: 'BASE_CUT_FAILED' }),
+      );
+    });
+    expect(await readLog(file)).toContainEqual(
+      expect.objectContaining({
+        type: 'run.lifecycle',
+        runId: 'run-1',
+        state: 'failed',
+        detail: expect.objectContaining({ code: 'BASE_CUT_FAILED' }) as unknown,
+      }),
+    );
     await host.close();
   });
 
@@ -951,6 +942,280 @@ describe('placement and settlement per attempt (RA-S13)', () => {
 
     expect(granted).toHaveBeenCalledOnce();
     await host.close();
+  });
+
+  it('should root an external attempt at the root its placement granted', async () => {
+    const file = createMemoryLogFile();
+    const fake = fakePort(file, idle);
+    const rooted: Array<string | undefined> = [];
+    const external: ExternalAgentPort = {
+      list: () => ['stub-agent'],
+      run: async (turn) => {
+        rooted.push(turn.root);
+        return undefined;
+      },
+    };
+    const host = createTauAgentHost({
+      ...hostOptions({ openEventLog: file.open, transport: done, toolRegistry: idle, idPrefix: 'rooted' }),
+      placement: fake.port,
+      externalRunners: { acp: external },
+    });
+
+    await host.command({
+      type: 'start',
+      commandId: key(),
+      payload: {
+        chatId: 'chat-rooted',
+        runId: 'run-1',
+        trigger: 'submit',
+        message: { id: 'turn-run-1', role: 'user', content: 'Run this elsewhere.' },
+        config: { systemPrompt: 'unused', toolChoice: 'none', agent: { kind: 'acp', id: 'stub-agent' } },
+      },
+    });
+    await vi.waitFor(() => {
+      expect(fake.calls.map((call) => call.verb)).toContain('acknowledge');
+    });
+
+    expect(rooted).toEqual(['/work']);
+    await host.close();
+  });
+
+  // TS-S9: M1 writes a published settlement only in the one shape (`turnSettlementSchema`), attempt and code included.
+  it('should not append a published settlement the write gate refuses', async () => {
+    const file = createMemoryLogFile();
+    const fake = fakePort(file, idle);
+    let listenEnded = false;
+    const port: TurnPlacementPort = {
+      ...fake.port,
+      async *settlements(input) {
+        input.signal.addEventListener('abort', () => {
+          listenEnded = true;
+        });
+        for await (const fact of fake.port.settlements(input)) {
+          yield fact.kind === 'settled'
+            ? {
+                ...fact,
+                row: {
+                  type: 'turn.failed',
+                  runId: fact.key.runId,
+                  attempt: fact.key.attempt,
+                  turnId: fact.key.turnId,
+                  chatId: fact.key.chatId,
+                  reason: 'A row with no code.',
+                },
+              }
+            : fact;
+        }
+      },
+    };
+    const host = placedHost(file, port, 'gated');
+
+    await start(host, 'chat-gated', 'run-1');
+    await vi.waitFor(() => {
+      expect(listenEnded).toBe(true);
+    });
+
+    const log = await readLog(file);
+    expect(log.filter((event) => event.type === 'turn.failed')).toEqual([]);
+    expect(fake.calls.map((call) => call.verb)).not.toContain('acknowledge');
+    await host.close();
+  });
+
+  // TS-S7 step 4, first row (RA-S13's deferred half): a lease whose attempt the log already settled is acknowledged at
+  // opening, before any command is served; the host died between the row and its acknowledge.
+  it('should acknowledge at opening a held lease whose attempt the log already settled', async () => {
+    const file = createMemoryLogFile();
+    const settledKey: TurnAttemptKey = { chatId: 'chat-reopen', turnId: 'turn-1', runId: 'run-1', attempt: 1 };
+    await seedLog(file, [
+      ...completedFirstTurn,
+      {
+        type: 'turn.finalized',
+        runId: 'run-1',
+        attempt: 1,
+        turnId: 'turn-1',
+        chatId: 'chat-reopen',
+        projectId: 'project-1',
+        changedPaths: [],
+        trigger: 'turn',
+        runIds: ['run-1'],
+      },
+    ]);
+    const fake = fakePort(file, idle);
+    const host = placedHost(
+      file,
+      {
+        ...fake.port,
+        reconcile: async ({ requestId }) => ({
+          requestId,
+          status: 'applied',
+          held: [{ key: settledKey, checkoutId: 'checkout-live' }],
+        }),
+      },
+      'reopen-ack',
+    );
+
+    await start(host, 'chat-reopen', 'run-2');
+    await vi.waitFor(() => {
+      expect(fake.calls.filter((call) => call.verb === 'acknowledge').map((call) => call.key.runId)).toEqual([
+        'run-1',
+        'run-2',
+      ]);
+    });
+
+    expect(fake.calls[0]).toMatchObject({ verb: 'acknowledge', key: settledKey });
+    await host.close();
+  });
+
+  /* A held lease at opening, with the reconcile answer and seed each row names. */
+  const openWith = async (
+    held: readonly TurnAttemptKey[],
+    seed: readonly SeededLogEvent[],
+    prefix: string,
+  ): Promise<Readonly<{ fake: ReturnType<typeof fakePort>; file: ReturnType<typeof createMemoryLogFile> }>> => {
+    const file = createMemoryLogFile();
+    await seedLog(file, seed);
+    const fake = fakePort(file, idle);
+    const host = placedHost(
+      file,
+      {
+        ...fake.port,
+        reconcile: async ({ requestId }) => ({
+          requestId,
+          status: 'applied',
+          held: held.map((key) => ({ key, checkoutId: 'checkout-live' })),
+        }),
+      },
+      prefix,
+    );
+    const claimed = await host.claim(held[0]?.chatId ?? 'chat-held');
+    expect(claimed).not.toHaveProperty('refused');
+    await host.close();
+    return { fake, file };
+  };
+
+  // TS-Q5 (W8.r1 H2, probe P4): a record written before W5 is attempt 0, which the run's row of any attempt settles.
+  it('should acknowledge at opening a lease written before W5 whose run the log already settled', async () => {
+    const legacy: TurnAttemptKey = { chatId: 'chat-legacy', turnId: 'turn-1', runId: 'run-1', attempt: 0 };
+    const { fake } = await openWith(
+      [legacy],
+      [
+        ...completedFirstTurn,
+        {
+          type: 'turn.finalized',
+          runId: 'run-1',
+          turnId: 'turn-1',
+          chatId: 'chat-legacy',
+          projectId: 'project-1',
+          changedPaths: [],
+          trigger: 'turn',
+          runIds: ['run-1'],
+        },
+      ],
+      'legacy-ack',
+    );
+
+    expect(fake.calls).toEqual([expect.objectContaining({ verb: 'acknowledge', key: legacy })]);
+  });
+
+  // TS-Q5, W8.r1 MU1: a held lease whose attempt has no row is settled first: complete, the row, then acknowledge.
+  it('should settle a held lease of an ended run the log has no row for, before acknowledging it', async () => {
+    const heldKey: TurnAttemptKey = { chatId: 'chat-unsettled', turnId: 'turn-1', runId: 'run-1', attempt: 1 };
+    const { fake, file } = await openWith([heldKey], completedFirstTurn, 'unsettled-ack');
+
+    const log = await readLog(file);
+    const row = log.findIndex((event) => event.type === 'turn.finalized' && event.runId === 'run-1');
+    expect(row).toBeGreaterThanOrEqual(completedFirstTurn.length);
+    expect(fake.calls.map((call) => call.verb)).toEqual(['complete', 'acknowledge']);
+    /* W8.r1 M-A: the held attempt's tools may have written, so its settlement cuts. */
+    expect(fake.calls[0]).toMatchObject({ verb: 'complete', key: heldKey, cut: true });
+    expect(fake.calls[1]?.rows).toBeGreaterThan(row);
+  });
+
+  // TS-Q5: a lease of a run that is not the chat's current one, and a pre-W5 one, settle as that run's current attempt.
+  it('should settle the lease of a run that is not current, and a pre-W5 lease, as their runs current attempts', async () => {
+    const older: TurnAttemptKey = { chatId: 'chat-older', turnId: 'turn-1', runId: 'run-1', attempt: 0 };
+    const { fake, file } = await openWith(
+      [older],
+      [
+        ...completedFirstTurn,
+        { type: 'message.appended', runId: 'run-2', message: { id: 'turn-2', role: 'user', content: 'Second.' } },
+        { type: 'run.lifecycle', runId: 'run-2', state: 'admitted' },
+        { type: 'run.lifecycle', runId: 'run-2', state: 'running' },
+        { type: 'run.lifecycle', runId: 'run-2', state: 'completed' },
+        {
+          type: 'turn.finalized',
+          runId: 'run-2',
+          turnId: 'turn-2',
+          chatId: 'chat-older',
+          projectId: 'project-1',
+          changedPaths: [],
+          trigger: 'turn',
+          runIds: ['run-2'],
+        },
+      ],
+      'older-run',
+    );
+
+    const settled = { ...older, attempt: 1 };
+    expect(fake.calls).toEqual([
+      expect.objectContaining({ verb: 'complete', key: settled, cut: true }),
+      expect.objectContaining({ verb: 'acknowledge', key: settled }),
+    ]);
+    expect(await readLog(file)).toContainEqual(
+      expect.objectContaining({ type: 'turn.finalized', runId: 'run-1', attempt: 1 }),
+    );
+  });
+
+  // I25, TS-A14 (W8.r1 H1): another live root holds the attempt, so M1 appends at most RUN_ABANDONED and leaves it.
+  it('should append at most RUN_ABANDONED and leave the attempt when another root holds its lease', async () => {
+    const heldKey: TurnAttemptKey = { chatId: 'chat-elsewhere', turnId: 'turn-1', runId: 'run-1', attempt: 1 };
+    const file = createMemoryLogFile();
+    await seedLog(file, [
+      { ...completedFirstTurn[0]!, commandId: 'start-1' } satisfies SeededLogEvent,
+      ...completedFirstTurn.slice(1, 3),
+    ]);
+    const fake = fakePort(file, idle);
+    const host = placedHost(
+      file,
+      {
+        ...fake.port,
+        reconcile: async ({ requestId }) => ({
+          requestId,
+          status: 'applied',
+          held: [{ key: heldKey, checkoutId: 'checkout-live' }],
+        }),
+        complete: async ({ requestId, key: completed }) => {
+          fake.calls.push({ verb: 'complete', key: completed, rows: 0 });
+          return { requestId, status: 'refused', code: 'LEASE_HELD_ELSEWHERE', message: 'Another tab holds it.' };
+        },
+      },
+      'elsewhere',
+    );
+
+    await host.claim('chat-elsewhere');
+    await vi.waitFor(() => {
+      expect(fake.calls.map((call) => call.verb)).toEqual(['complete']);
+    });
+    await host.close();
+
+    const rows = await readLog(file);
+    const appended = rows.slice(3);
+    expect(appended).toHaveLength(1);
+    expect(appended[0]).toMatchObject({ type: 'run.lifecycle', state: 'failed', detail: { code: 'RUN_ABANDONED' } });
+  });
+
+  // TS-Q5: a lease naming a run this chat's log does not hold (another device's, or a deleted chat's) is left and reported.
+  it('should leave and report a held lease whose run the log does not hold', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const foreign: TurnAttemptKey = { chatId: 'chat-foreign', turnId: 'turn-9', runId: 'run-9', attempt: 1 };
+    const { fake, file } = await openWith([foreign], completedFirstTurn, 'foreign');
+
+    expect(fake.calls).toEqual([]);
+    expect(await readLog(file)).toHaveLength(completedFirstTurn.length);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('Lease run-9 on checkout checkout-live names chat chat-foreign'),
+    );
+    warn.mockRestore();
   });
 });
 

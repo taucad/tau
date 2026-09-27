@@ -2,9 +2,9 @@
  * `checkouts.machine` — one actor per project, owning the checkout registry.
  *
  * It replaces the provider's `reclaim`/`reclaimAll` and the workspace sweep a
- * Node host used to run at start. Records are the truth (I3): `open` sweeps stale leases
- * against the authority epoch and then rehydrates from `listCheckouts`, never
- * from a persisted snapshot. It enforces one checkout per branch, retires
+ * Node host used to run at start. Records are the truth (I3): `open` rehydrates
+ * from `listCheckouts`, never from a persisted snapshot, and retires no lease
+ * (W8 TS-S7: reconciliation settles a dead holder's lease through the host). It enforces one checkout per branch, retires
  * leases without removing their checkouts (D17), and never removes a checkout a
  * lease still holds (A25, I9).
  *
@@ -58,7 +58,6 @@ export type CheckoutsMachineEvent =
   /* `requestId` is the asker's; every answer to the request echoes it (RM-R1). */
   | Readonly<{ type: 'addCheckout'; requestId: string; branch: string; from: string }>
   | Readonly<{ type: 'removeCheckout'; requestId: string; id: string }>
-  | Readonly<{ type: 'leaseStale'; runId: string }>
   | Readonly<{ type: 'leaseWritten'; checkoutId: string | undefined; runId: string }>
   /* An attempt retired, or was refused after writing its record: whatever its outcome, its lease leaves (RM-R10, L7 P-1). */
   | Readonly<{ type: 'turnEnded'; key: TurnAttemptKey; checkoutId: string | undefined }>;
@@ -79,9 +78,6 @@ export type CheckoutsMachineEmitted =
     }>
   | Readonly<{ type: 'checkoutAdded'; requestId: string; checkout: CheckoutRecord }>
   | Readonly<{ type: 'checkoutRemoved'; requestId: string; checkoutId: string }>;
-
-/** Output of the injected `sweepLeases` actor: the epoch comparison (F13). @public */
-export type SweepLeasesActorOutput = Readonly<{ retiredRunIds: readonly string[] }>;
 
 /** Output of the injected `listCheckouts` actor. @public */
 export type ListCheckoutsActorOutput = Readonly<{ checkouts: readonly CheckoutRecord[] }>;
@@ -209,9 +205,8 @@ const queueRetirements = (
   /* R2: `runIds` is the provenance set — every lease the writer saw on
    * the checkout. Retiring all of them takes the other chat's lease
    * (AC9), so a settlement retires only its own `runId`. */
-  const runIds = event.type === 'leaseStale' ? [event.runId] : event.type === 'turnEnded' ? [event.key.runId] : [];
+  const runIds = event.type === 'turnEnded' ? [event.key.runId] : [];
   const added = runIds.filter((runId) => !context.pendingRetirements.includes(runId));
-  /* A stale sweep names only the run, so no earlier attempt's key may narrow it. */
   const { [runIds[0] ?? '']: _replaced, ...keys } = context.retirementKeys;
   return {
     pendingRetirements: [...context.pendingRetirements, ...added],
@@ -300,11 +295,6 @@ const checkoutsMachineDefinition = setup({
         throw new Error('checkoutsMachine: the removeCheckout actor was not provided.');
       },
     }),
-    sweepLeases: createAsyncLogic<SweepLeasesActorOutput, Readonly<{ projectId: string }>>({
-      run: async () => {
-        throw new Error('checkoutsMachine: the sweepLeases actor was not provided.');
-      },
-    }),
     retireLease: createAsyncLogic<void, Readonly<{ projectId: string; runId: string; key?: TurnAttemptKey }>>({
       run: async () => {
         throw new Error('checkoutsMachine: the retireLease actor was not provided.');
@@ -373,33 +363,15 @@ const checkoutsMachineDefinition = setup({
         pendingLeases: [...context.pendingLeases, { checkoutId: event.checkoutId, runId: event.runId }],
       }),
     },
-    leaseStale: { context: ({ context, event }) => queueRetirements(context, event) },
     turnEnded: { context: ({ context, event }) => queueRetirements(context, event) },
     /* Queued in every state and served from `ready.idle`, answered by id either way (RM-R11). */
     addCheckout: { context: ({ context, event }) => queueOperation(context, event) },
     removeCheckout: { context: ({ context, event }) => queueOperation(context, event) },
   },
   states: {
+    /* No epoch sweep on open (W8 TS-S7): a lease retires only on `acknowledge`, after its settlement row (I25). */
     idle: {
-      on: { open: { target: 'recovering' } },
-    },
-    recovering: {
-      /* The load that follows the sweep reads the records fresh, so a reopen here is already served. */
-      on: { open: () => ({}) },
-      invoke: {
-        src: 'sweepLeases',
-        input: ({ context }) => ({ projectId: context.projectId }),
-        onDone: ({ context, event }, enq) => {
-          for (const runId of event.output.retiredRunIds) {
-            publish(context, enq, { type: 'leaseRetired', runId });
-          }
-          return { target: 'loading' };
-        },
-        onError: ({ context, event }, enq) => ({
-          target: 'failed',
-          context: failOperation(context, enq, { error: event.error, operation: 'open' }),
-        }),
-      },
+      on: { open: { target: 'loading' } },
     },
     loading: {
       /* A reopen asks for records written after this read began: read again. */
@@ -428,7 +400,7 @@ const checkoutsMachineDefinition = setup({
         return { context: { pendingOperations: [] } };
       },
       on: {
-        open: { target: 'recovering' },
+        open: { target: 'loading' },
         addCheckout: ({ context, event }, enq) => {
           refuseOperations(context, enq, [operationOf(event)]);
           return {};

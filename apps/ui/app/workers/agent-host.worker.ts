@@ -168,17 +168,6 @@ workerScope.addEventListener('message', (event) => {
           visibilityTopic.emit(visible);
           return undefined;
         }
-        case 'record-settlement': {
-          const { projectId, ...record } = args as Calls['record-settlement']['args'];
-          const host = hosts.hostOf(projectId);
-          if (host === undefined) {
-            throw Object.assign(new Error(`No project host serves ${projectId}.`), {
-              code: 'PROJECT_HOST_UNAVAILABLE',
-            });
-          }
-          await host.recordSettlement(record);
-          return undefined;
-        }
         default: {
           throw Object.assign(new Error(`Unknown agent host worker call: ${String(name)}.`), {
             code: 'COMMAND_UNREADABLE',

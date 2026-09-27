@@ -45,16 +45,6 @@ import type {
   PublishFacet,
 } from '#publish.types.js';
 
-/**
- * How long `pushing` used to wait for the settlement that names its push.
- *
- * No machine reads it since sync answers every push (RM-S8); it stays exported
- * while outside waiters import it, and goes with them (W8 TS-S5).
- *
- * @public
- */
-export const publishPushMilliseconds = 60_000;
-
 /** Input accepted when creating the publishMachine actor. @public */
 export type PublishMachineInput = Readonly<{
   projectId: string;

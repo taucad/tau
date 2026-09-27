@@ -9,9 +9,7 @@
  * production constructors, so it moves with the composition it pins):
  *
  * ```text
- * agent tool fs ── prepared bridge port ── bindInPlace wrapper ──
- *   createRootedBridgeFileSystem ── the agent's own rooted port ──
- *                                                    WorkspaceFileService
+ * agent tool fs ── the placement's tool port (W8 TS-S5) ── WorkspaceFileService
  *                                                                 │
  *   FileContentService ── WorkerChangeChannel ── the UI's own rooted port
  * ```
@@ -20,9 +18,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
-import type { FileSystemClientFacade } from '#hooks/use-file-manager.js';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import {
+  createFileSystemBridgePort,
   createFileSystemBridgeProxy,
   exposeFileSystem,
   openFileSystemBridge,
@@ -37,10 +35,6 @@ import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
 import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
 import { joinPath } from '@taucad/utils/path';
-import {
-  createPreparedWorkspaceFileSystems,
-  createRootedBridgeFileSystem,
-} from '#providers/chat-workspace-authority-provider.js';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -57,7 +51,7 @@ afterEach(() => {
 /** The file-manager worker, its single UI port, and the services that port feeds. */
 const createBrowserHarness = async (): Promise<{
   readonly content: FileContentService;
-  readonly worker: { postMessage: (data: unknown) => void };
+  readonly fileService: WorkspaceFileService;
 }> => {
   const provider = new MemoryProvider();
   const mountTable = new MountTable();
@@ -141,37 +135,15 @@ const createBrowserHarness = async (): Promise<{
   await fileService.mkdir(projectRoot, { recursive: true });
   await fileService.writeFile(joinPath(projectRoot, 'main.scad'), 'cube(1);');
 
-  return { content, worker };
+  return { content, fileService };
 };
 
-/** The filesystem the agent host receives for a direct-mode (`local`) turn. */
-const createAgentFileSystem = async (worker: {
-  postMessage: (data: unknown) => void;
-}): Promise<FileSystemBridgeProxy> => {
-  /* The production constructor over the production binding: the project's own
-   * rooted bridge connection, which is what carries the agent's writes. */
-  const rooted = createRootedBridgeFileSystem({
-    client: mock<FileSystemClientFacade>(),
-    rootDirectory: projectRoot,
-    backend: 'memory',
-    openConnection: async () => {
-      const proxy = createFileSystemBridgeProxy(
-        openFileSystemBridge(worker, { root: projectRoot, consumer: 'working-copy' }),
-      );
-      await proxy.ready;
-      disposers.push(() => {
-        proxy.dispose();
-      });
-      return proxy;
-    },
-  });
-  /* W3d: there is no materialized workspace to bind. A turn writes the project's
-   * live checkout, so the agent's filesystem *is* the project's rooted one — which
-   * is exactly what this pin is about. One read opens the lazy connection, so the
-   * bridge port below has the provider's capabilities to announce. */
-  await rooted.exists('');
-  const prepared = await createPreparedWorkspaceFileSystems(rooted);
-  const connection = prepared.openFileSystemBridge();
+/**
+ * The filesystem the agent host receives for a direct-mode turn: the placement's
+ * tool port over the live checkout, as `file-manager.worker.revisions.ts` opens it.
+ */
+const createAgentFileSystem = async (fileService: WorkspaceFileService): Promise<FileSystemBridgeProxy> => {
+  const connection = createFileSystemBridgePort(fileService.createRootedFileSystem(projectRoot));
   const agentClient = createFileSystemBridgeProxy(connection);
   await agentClient.ready;
   disposers.push(() => {
@@ -185,8 +157,8 @@ describe('agent direct-mode writes and the UI content authority (north star W0)'
   // oxlint-disable-next-line eslint/capitalized-comments -- the pin header is the exact wording the W0 brief specifies
   // north-star W0 pin 1: an agent direct-mode write is invisible to `FileContentService` because the agent's composed view relays through the UI's own bridge port, whose change events the bridge suppresses as self-originated; turns green in W2 (harness re-pointed at the landed composition, W0 review F1).
   it('should show an agent direct-mode write to the UI content authority without a reload', async () => {
-    const { content, worker } = await createBrowserHarness();
-    const agent = await createAgentFileSystem(worker);
+    const { content, fileService } = await createBrowserHarness();
+    const agent = await createAgentFileSystem(fileService);
 
     expect(decoder.decode(await content.resolveBytes('main.scad'))).toBe('cube(1);');
 

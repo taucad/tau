@@ -3,7 +3,7 @@ import type { AnyMachineSnapshot } from 'xstate';
 import { describe, expect, it } from 'vitest';
 
 import * as machineModule from '#branch.machine.js';
-import { branchMachine, branchRegistryMilliseconds, selectBranchFacet } from '#branch.machine.js';
+import { branchMachine, selectBranchFacet } from '#branch.machine.js';
 import type { BranchMachineEvent } from '#branch.machine.js';
 import { RevisionPortError } from '#revision-port.js';
 import { StepClock } from '@taucad/xstate-testing/clock';
@@ -542,7 +542,8 @@ describe('branchMachine', () => {
 
     actor.send({ type: 'create', requestId: 'req-1', name: 'enclosure-v2', from: 'rev-12' });
     await flush();
-    clock.advance(branchRegistryMilliseconds * 2);
+    /* Twice the deleted 30 s registry bound. */
+    clock.advance(60_000);
     expect(emitted).toEqual([]);
     expect(actor.getSnapshot().matches({ applying: { creating: 'adding' } })).toBe(true);
 

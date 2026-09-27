@@ -51,6 +51,12 @@ TL reopenable paused RUN_ID_TAKEN
 TL reopenable completed RUN_ID_TAKEN
 TL reopenable failed RUN_ID_TAKEN
 TL reopenable cancelled RUN_ID_TAKEN
+TL paused-reopenable admitted RUN_ID_TAKEN
+TL paused-reopenable running ok
+TL paused-reopenable paused RUN_ID_TAKEN
+TL paused-reopenable completed RUN_ID_TAKEN
+TL paused-reopenable failed RUN_ID_TAKEN
+TL paused-reopenable cancelled ok
 X
 T log-0
 O 0 0 0 0
@@ -4074,7 +4080,7 @@ U -
 QS SETTLEMENT_CONFLICT
 QS SETTLEMENT_CONFLICT
 QS skipped
-QL RUN_ID_TAKEN
+QL ok
 QL NO_RUN_ADMITTED
 QB batch 10 11 11 0:10
 QB batch 4 8 11 0:4,0:5,0:6,0:7
@@ -4258,7 +4264,7 @@ QS SETTLEMENT_CONFLICT
 QS SETTLEMENT_WITHOUT_RUN
 QS SETTLEMENT_CONFLICT
 QL ok
-QL RUN_ID_TAKEN
+QL ok
 QB batch 10 14 14 0:11,2:0,3:0,3:1
 QB batch 8 13 14 0:9,0:10,0:11,2:0,3:0
 QB batch 10 11 14 0:11

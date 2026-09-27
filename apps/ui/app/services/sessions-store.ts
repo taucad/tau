@@ -154,13 +154,8 @@ const relayRegion = (region: ProjectSessionRegion) =>
 // ---------------------------------------------------------------------------
 
 /**
- * This document's session epoch (W3c-R4, P31).
- *
- * One id per client session, carried on every `revisionsConnect` so the worker
- * can tell whose revisions actor system owns a project's leases. A second
- * window of the same workspace gets a different epoch, which is the whole
- * point: only the session that owns a project's revisions actor system may
- * sweep its leases.
+ * This document's session epoch (W3c-R4): one id per client session, which
+ * names this document's registration with the resident agent host.
  *
  * @public
  */

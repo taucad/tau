@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { InvocationFunding, ModelStreamEvent, ModelStreamRequest, ModelTransport } from '#waist/ports.js';
-import { createTauAgentHost } from '#host/tau-agent-host.js';
+import { appendChatRows, createTauAgentHost } from '#host/tau-agent-host.js';
 import { chatRunState, emptyChatLedger, foldChatLedger } from '#log/chat-ledger.js';
+import type { LogRowBody } from '#log/chat-ledger.js';
 import { isResumableRunFailure } from '#log/resumable.js';
 import lifecycleTable from '#log/run-lifecycle.legality.json' with { type: 'json' };
 import type { ExternalAgentPort, TauAgentHost } from '#host/tau-agent-host.js';
@@ -21,8 +22,37 @@ import {
   settlementOnlySecondRun,
   tools,
   hostOptions,
+  fakePlacement,
 } from '#host/tau-agent-host.fixture.js';
 import type { SeededLogEvent } from '#host/tau-agent-host.fixture.js';
+
+/**
+ * M1's append of one settlement row (`appendChatRows`, the host's only writer of `turn.*` rows; W8 M2) under a new
+ * term, over a log no host holds open.
+ */
+const appendSettlement = async (
+  file: ReturnType<typeof createMemoryLogFile>,
+  runId: string,
+  body: LogRowBody & { readonly attempt?: number },
+): Promise<void> => {
+  const log = await file.open();
+  try {
+    await appendChatRows({
+      chatId: 'chat',
+      log,
+      ledger: foldChatLedger(emptyChatLedger, await log.read()),
+      leaderEpoch: 'epoch-settle',
+      recordedAt: new Date(Date.UTC(2026, 8, 2)).toISOString(),
+      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a stated attempt rides the body (N4), as M1 writes it.
+      rows: [{ runId, body: body as LogRowBody }],
+    });
+  } finally {
+    await log.close();
+  }
+};
+
+/** An orphaned first turn: admitted and running, with no driver, which opening abandons (RA-R9). */
+const orphanedFirstTurn: readonly SeededLogEvent[] = completedFirstTurn.slice(0, 3);
 
 describe('createTauAgentHost', () => {
   it('publishes live deltas before their durable assistant completion', async () => {
@@ -143,55 +173,6 @@ describe('createTauAgentHost', () => {
       },
     });
     expect(invoke).not.toHaveBeenCalled();
-    await host.close();
-  });
-
-  it('records a revision settlement through the chat log writer', async () => {
-    const file = createMemoryLogFile();
-    const host = createTauAgentHost(
-      hostOptions({
-        openEventLog: file.open,
-        transport: {
-          funding: { type: 'unfunded' },
-          async *stream(): AsyncGenerator<ModelStreamEvent> {
-            yield { type: 'completed', stopReason: 'stop' };
-          },
-        },
-        toolRegistry: tools(async () => ({ content: null, isError: false })),
-        idPrefix: 'settlement',
-      }),
-    );
-    await host.admit({
-      chatId: 'chat-settlement',
-      runId: 'run-settlement',
-      trigger: 'submit',
-      message: { id: 'turn-settlement', role: 'user', content: 'Settle.' },
-    });
-
-    await host.recordSettlement({
-      chatId: 'chat-settlement',
-      runId: 'run-settlement',
-      event: {
-        type: 'turn.finalized',
-        turnId: 'turn-settlement',
-        chatId: 'chat-settlement',
-        projectId: 'project-settlement',
-        checkoutId: 'live',
-        revisionId: 'revision-settlement',
-        branch: 'main',
-        changedPaths: ['main.ts'],
-        treeId: 'tree-settlement',
-        trigger: 'turn',
-        runIds: ['run-settlement'],
-      },
-    });
-
-    const recorded = await readLog(file);
-    expect(recorded.at(-1)).toMatchObject({
-      type: 'turn.finalized',
-      runId: 'run-settlement',
-      revisionId: 'revision-settlement',
-    });
     await host.close();
   });
 
@@ -1412,6 +1393,7 @@ the cancelled tools left the system unchanged.
     const seen: Array<{ readonly agentId: string; readonly state: JsonObject | undefined }> = [];
     const closedChats: string[] = [];
     let nextSession = 0;
+    const placement = fakePlacement({ registry: tools(async () => ({ content: null, isError: false })) });
     const externalPort: ExternalAgentPort = {
       list: () => ['stub-agent', 'other-agent'],
       run: async (turn) => {
@@ -1437,6 +1419,7 @@ the cancelled tools left the system unchanged.
         toolRegistry: tools(async () => ({ content: null, isError: false })),
         idPrefix: 'external-session',
       }),
+      placement: placement.port,
       externalRunners: { acp: externalPort },
     });
 
@@ -1457,6 +1440,11 @@ the cancelled tools left the system unchanged.
         },
       });
       await host.cancel({ runId: input.runId });
+      /* The cancelled attempt settles (RA-R12) before the chat takes the next start. */
+      await vi.waitFor(() => {
+        const acknowledged = placement.calls.filter((call) => call.verb === 'acknowledge');
+        expect(acknowledged.map((call) => call.key.runId)).toContain(input.runId);
+      });
     };
 
     await start({ runId: 'run-1', messageId: 'turn-1', agentId: 'stub-agent' });
@@ -1809,35 +1797,17 @@ the cancelled tools left the system unchanged.
   it('refuses a settlement for a run that was never admitted', async () => {
     const file = createMemoryLogFile();
     await seedLog(file, completedFirstTurn);
-    const host = createTauAgentHost(
-      hostOptions({
-        openEventLog: file.open,
-        transport: {
-          funding: { type: 'unfunded' },
-          async *stream(): AsyncGenerator<ModelStreamEvent> {
-            yield { type: 'completed', stopReason: 'stop' };
-          },
-        },
-        toolRegistry: tools(async () => ({ content: null, isError: false })),
-        idPrefix: 'unadmitted-settlement',
-      }),
-    );
 
     await expect(
-      host.recordSettlement({
+      appendSettlement(file, 'run-unknown', {
+        type: 'turn.failed',
+        turnId: 'turn-1',
         chatId: 'chat-unadmitted',
-        runId: 'run-unknown',
-        event: {
-          type: 'turn.failed',
-          turnId: 'turn-1',
-          chatId: 'chat-unadmitted',
-          reason: 'The turn ended before it recorded a revision.',
-        },
+        reason: 'The turn ended before it recorded a revision.',
       }),
     ).rejects.toMatchObject({ code: 'SETTLEMENT_WITHOUT_RUN' });
     const remaining = await readLog(file);
     expect(remaining).toHaveLength(completedFirstTurn.length);
-    await host.close();
   });
 });
 
@@ -1918,8 +1888,13 @@ describe('the host run ledger', () => {
   // CL-A15 (L2a D18): the host folds a log once and then folds its own appends; it never re-reads per append.
   it('should append without re-reading the log', async () => {
     const file = createMemoryLogFile();
-    await seedLog(file, completedFirstTurn);
+    /* Keyed, so opening abandons it and then settles it: two appends of the host's own. */
+    await seedLog(file, [
+      { ...orphanedFirstTurn[0]!, commandId: 'start-1' } satisfies SeededLogEvent,
+      ...orphanedFirstTurn.slice(1),
+    ]);
     let reads = 0;
+    const readsAtAppend: number[] = [];
     const host = createTauAgentHost(
       hostOptions({
         openEventLog: async () => {
@@ -1929,6 +1904,10 @@ describe('the host run ledger', () => {
             read: async () => {
               reads++;
               return log.read();
+            },
+            append: async (row) => {
+              readsAtAppend.push(reads);
+              return log.append(row);
             },
           };
         },
@@ -1943,24 +1922,20 @@ describe('the host run ledger', () => {
       }),
     );
 
-    await host.recordSettlement({ chatId: 'chat-ledger', runId: 'run-1', event: settlement });
-    const afterFirst = reads;
-    for (const reason of ['a', 'b', 'c']) {
-      // oxlint-disable-next-line no-await-in-loop -- appends are serial per chat.
-      await host
-        .recordSettlement({ chatId: 'chat-ledger', runId: 'run-1', event: { ...settlement, reason } })
-        .catch(() => undefined);
-    }
+    /* Opening folds the log; the abandonment and the settlement are folded from the host's own appends. */
+    await host.markAbandoned('chat-ledger');
 
-    expect(afterFirst).toBe(1);
-    expect(reads).toBe(afterFirst);
+    const log = await readLog(file);
+    expect(log.map((row) => row.type).slice(orphanedFirstTurn.length)).toEqual(['run.lifecycle', 'turn.finalized']);
+    expect(readsAtAppend).toHaveLength(2);
+    expect(readsAtAppend[1]).toBe(readsAtAppend[0]);
     await host.close();
   });
 
   // SC-R14 (W4.r1): a row appended while an empty read is in flight wakes that read; it must not park past it.
   it('should answer a read with a row appended while its empty read was in flight', async () => {
     const file = createMemoryLogFile();
-    await seedLog(file, completedFirstTurn);
+    await seedLog(file, orphanedFirstTurn);
     let raced = false;
     const host: TauAgentHost = createTauAgentHost(
       hostOptions({
@@ -1972,7 +1947,7 @@ describe('the host run ledger', () => {
               const answer = await log.readBatch(request);
               if (!raced && answer.status === 'batch' && answer.events.length === 0) {
                 raced = true;
-                await host.recordSettlement({ chatId: 'chat-ledger', runId: 'run-1', event: settlement });
+                await host.markAbandoned('chat-ledger');
               }
               return answer;
             },
@@ -1995,7 +1970,7 @@ describe('the host run ledger', () => {
 
     const answer = await host.read({
       chatId: 'chat-ledger',
-      cursor: completedFirstTurn.length,
+      cursor: orphanedFirstTurn.length,
       limit: 16,
       maxBytes: 1_048_576,
       signal: parked.signal,
@@ -2005,7 +1980,7 @@ describe('the host run ledger', () => {
     // Answered by the row's wake, not by the reader giving up and re-reading.
     expect({ gaveUp: parked.signal.aborted, answer }).toMatchObject({
       gaveUp: false,
-      answer: { status: 'batch', events: [{ type: 'turn.failed' }] },
+      answer: { status: 'batch', events: [{ type: 'run.lifecycle', state: 'failed' }] },
     });
     await host.close();
   });
@@ -2013,7 +1988,7 @@ describe('the host run ledger', () => {
   // CL-S10 (L2a D18): eviction closes the chat's log and drops its ledger; the next use reopens and refolds.
   it('should reopen an evicted chat with an equal ledger', async () => {
     const file = createMemoryLogFile();
-    await seedLog(file, completedFirstTurn);
+    await seedLog(file, orphanedFirstTurn);
     let opens = 0;
     const host = createTauAgentHost(
       hostOptions({
@@ -2031,56 +2006,73 @@ describe('the host run ledger', () => {
         idPrefix: 'evict',
       }),
     );
-    await host.recordSettlement({ chatId: 'chat-ledger', runId: 'run-1', event: settlement });
+    await host.markAbandoned('chat-ledger');
     const before = await host.describeRun('chat-ledger');
 
     await host.evictChat('chat-ledger');
 
     expect(await host.describeRun('chat-ledger')).toEqual(before);
-    // The repeat settlement is still recognised: the refolded ledger holds the first.
-    await host.recordSettlement({ chatId: 'chat-ledger', runId: 'run-1', event: settlement });
+    // The abandonment is still recognised: the refolded ledger holds it, so nothing is abandoned twice.
+    await host.markAbandoned('chat-ledger');
     expect(opens).toBe(2);
+    const rows = await readLog(file);
+    expect(rows.length).toBe(orphanedFirstTurn.length + 1);
     await host.close();
   });
 
   it('should treat an identical repeat of a settlement as a no-op', async () => {
     const file = createMemoryLogFile();
     await seedLog(file, completedFirstTurn);
-    const host = ledgerHost(file, 'settle-twice');
 
-    await host.recordSettlement({ chatId: 'chat-ledger', runId: 'run-1', event: settlement });
+    await appendSettlement(file, 'run-1', settlement);
     const once = await readLog(file);
-    await host.recordSettlement({ chatId: 'chat-ledger', runId: 'run-1', event: settlement });
+    await appendSettlement(file, 'run-1', settlement);
 
     /* At-least-once delivery is what makes "exactly one settlement" reachable
      * at all, so the repeat has to add nothing rather than refuse (V10). */
     expect(await readLog(file)).toHaveLength(once.length);
-    await host.close();
   });
 
   it('should refuse a second settlement that says something else', async () => {
     const file = createMemoryLogFile();
     await seedLog(file, completedFirstTurn);
-    const host = ledgerHost(file, 'settle-conflict');
 
-    await host.recordSettlement({ chatId: 'chat-ledger', runId: 'run-1', event: settlement });
+    await appendSettlement(file, 'run-1', settlement);
 
     await expect(
-      host.recordSettlement({
+      appendSettlement(file, 'run-1', {
+        type: 'turn.finalized',
+        turnId: 'turn-1',
         chatId: 'chat-ledger',
-        runId: 'run-1',
-        event: {
-          type: 'turn.finalized',
-          turnId: 'turn-1',
-          chatId: 'chat-ledger',
-          projectId: 'project-1',
-          changedPaths: [],
-          trigger: 'turn',
-          runIds: ['run-1'],
-        },
+        projectId: 'project-1',
+        changedPaths: [],
+        trigger: 'turn',
+        runIds: ['run-1'],
       }),
     ).rejects.toMatchObject({ code: 'SETTLEMENT_CONFLICT' });
-    await host.close();
+  });
+
+  // N4 (W8): M1's append keeps the attempt a settlement states; a late one never settles the attempt a Resume opened.
+  it('should not settle a resumed attempt with a late settlement of the attempt before it', async () => {
+    const file = createMemoryLogFile();
+    await seedLog(file, [
+      ...completedFirstTurn.slice(0, 3),
+      { type: 'run.lifecycle', runId: 'run-1', state: 'failed', detail: { code: 'RATE_LIMITED', message: 'Busy.' } },
+      /* The quick Resume: attempt 2 opens before attempt 1's settlement is appended. */
+      { type: 'run.lifecycle', runId: 'run-1', state: 'running' },
+    ]);
+
+    await appendSettlement(file, 'run-1', { ...settlement, attempt: 1 }).catch(() => undefined);
+
+    const log = await readLog(file);
+    const settlements = log.filter((row) => row.type === 'turn.failed');
+    expect(settlements.every((row) => row.attempt === 1)).toBe(true);
+    /* Attempt 2 is still unsettled, so its own settlement is taken. */
+    await appendSettlement(file, 'run-1', { ...settlement, attempt: 2 });
+    const logged = await readLog(file);
+    expect(logged.filter((row) => row.type === 'turn.failed').map((row) => row.attempt)).toEqual(
+      expect.arrayContaining([2]),
+    );
   });
 
   it('should refuse to describe a chat whose log admitted no run', async () => {
@@ -2305,115 +2297,22 @@ describe('the attempt ledger and its refusal taxonomy', () => {
     await host.close();
   });
 
-  it('records a settlement for one run while another run of the chat is streaming', async () => {
-    const file = createMemoryLogFile();
-    await seedLog(file, completedFirstTurn);
-    const settled: unknown[] = [];
-    const host: TauAgentHost = silentHost(file, 'concurrent', {
-      funding: { type: 'unfunded' },
-      async *stream(): AsyncGenerator<ModelStreamEvent> {
-        yield { type: 'text-delta', text: 'still going' };
-        /* The collision the two writers made: this lands at the sequence the
-         * streaming run's own private counter is about to reuse. */
-        await host
-          .recordSettlement({
-            chatId: 'chat-concurrent',
-            runId: 'run-1',
-            event: settlementOf({ runId: 'run-1', chatId: 'chat-concurrent', revisionId: 'rev-1' }),
-          })
-          .then(
-            () => settled.push('ok'),
-            (error: unknown) => settled.push(error),
-          );
-        yield { type: 'completed', stopReason: 'stop' };
-      },
-    });
-
-    await host.admit({
-      chatId: 'chat-concurrent',
-      runId: 'run-2',
-      trigger: 'submit',
-      message: { id: 'turn-2', role: 'user', content: 'Second.' },
-    });
-
-    expect(settled).toEqual(['ok']);
-    const events = await readLog(file);
-    expect(
-      events.flatMap((event) => (event.type === 'run.lifecycle' && event.runId === 'run-2' ? [event.state] : [])),
-    ).toEqual(['admitted', 'running', 'completed']);
-    expect(events.filter((event) => event.type === 'turn.finalized')).toHaveLength(1);
-    await host.close();
-  });
-
   it('refuses a settlement that drops what the stored one named', async () => {
     const file = createMemoryLogFile();
     await seedLog(file, completedFirstTurn);
-    const host = silentHost(file, 'settlement-union');
     const stored = settlementOf({ runId: 'run-1', chatId: 'chat-union', revisionId: 'rev-1' });
-    await host.recordSettlement({ chatId: 'chat-union', runId: 'run-1', event: stored });
+    await appendSettlement(file, 'run-1', stored);
 
     /* Comparing only the *new* body's keys made a settlement that named no
      * revision dedupe against one that named a revision: the key was absent,
      * so it was never compared. */
     const { revisionId: _dropped, ...poorer } = stored;
-    await expect(host.recordSettlement({ chatId: 'chat-union', runId: 'run-1', event: poorer })).rejects.toMatchObject({
-      code: 'SETTLEMENT_CONFLICT',
-    });
+    await expect(appendSettlement(file, 'run-1', poorer)).rejects.toMatchObject({ code: 'SETTLEMENT_CONFLICT' });
 
     // An identical repeat is still the delivery guarantee doing its job.
-    await host.recordSettlement({ chatId: 'chat-union', runId: 'run-1', event: { ...stored } });
+    await appendSettlement(file, 'run-1', { ...stored });
     const recorded = await readLog(file);
     expect(recorded.filter((event) => event.type === 'turn.finalized')).toHaveLength(1);
-    await host.close();
-  });
-
-  it('refuses a settlement written while its run is only reserved', async () => {
-    const file = createMemoryLogFile();
-    const refusals: unknown[] = [];
-    const host: TauAgentHost = createTauAgentHost({
-      ...hostOptions({
-        openEventLog: file.open,
-        transport: {
-          funding: { type: 'unfunded' },
-          async *stream(): AsyncGenerator<ModelStreamEvent> {
-            yield { type: 'completed', stopReason: 'stop' };
-          },
-        },
-        toolRegistry: tools(async () => ({ content: null, isError: false })),
-        idPrefix: 'reserved',
-      }),
-      /* Awaited inside `sessionFor`: the reservation exists, the session does
-       * not, and the run has no lifecycle record — the window an abandoned
-       * lease's `turn.failed` used to land in. */
-      clientContext: async () => {
-        await host
-          .recordSettlement({
-            chatId: 'chat-reserved',
-            runId: 'run-reserved',
-            event: {
-              type: 'turn.failed',
-              chatId: 'chat-reserved',
-              turnId: 'turn-reserved',
-              reason: 'The turn ended before it recorded a revision.',
-            },
-          })
-          .catch((error: unknown) => {
-            refusals.push(error);
-          });
-        return undefined;
-      },
-    });
-
-    await host.admit({
-      chatId: 'chat-reserved',
-      runId: 'run-reserved',
-      trigger: 'submit',
-      message: { id: 'turn-reserved', role: 'user', content: 'First.' },
-    });
-
-    expect(refusals).toHaveLength(1);
-    expect(refusals[0]).toMatchObject({ code: 'SETTLEMENT_WITHOUT_RUN' });
-    await host.close();
   });
 
   it("refuses a live chat with one code, and abandons a dead host's run at opening instead", async () => {
@@ -2754,12 +2653,12 @@ describe('the attempt ledger and its refusal taxonomy', () => {
     await host.resume('chat-reopen');
 
     /* The second attempt settles on its own terms: the reopening row clears the
-     * first attempt's settlement slot, so this is no longer the
+     * first attempt's settlement slot, so M1's row for attempt 2 is no longer the
      * `SETTLEMENT_CONFLICT` that left the turn with no revision. */
-    await host.recordSettlement({
-      chatId: 'chat-reopen',
-      runId: 'run-1',
-      event: settlementOf({ runId: 'run-1', chatId: 'chat-reopen', revisionId: 'rev-1' }),
+    await vi.waitFor(async () => {
+      expect(await readLog(reopenFile)).toContainEqual(
+        expect.objectContaining({ type: 'turn.finalized', runId: 'run-1', attempt: 2 }),
+      );
     });
     expect(await host.snapshot('chat-reopen')).toMatchObject({ runId: 'run-1', state: 'completed' });
     await host.close();

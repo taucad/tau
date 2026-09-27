@@ -183,12 +183,27 @@ const startHarness = async (
    * read by the port when it opens the session (V19). */
   const checkouts = new Map<string, TurnCheckout>();
   const settlements: TurnFinalizedEvent[] = [];
-  const plain = createNodeLauncher({
+  const revisions = options.revisions
+    ? createProjectRevisions({
+        workspaceRoot,
+        checkouts,
+        /* The test construction (W3a R7): `isomorphic-git` over the same root,
+         * so this suite needs no `git` on PATH. A daemon takes the native port. */
+        port: createIsomorphicGitRevisionPort({ filesystem: new NodeFsProvider(workspaceRoot) }),
+        events: (event) => {
+          if (event.type === 'turn.finalized') {
+            settlements.push(event);
+          }
+        },
+      })
+    : undefined;
+  const launcher = createNodeLauncher({
     workspaceRoot,
     gatewayBaseUrl: `http://127.0.0.1:${String(api.port)}/`,
     model: { id: 'unused-by-external-runs', contextWindow: 1000 },
     systemPrompt: 'unused by external runs',
     toolRegistry: registry,
+    ...(revisions === undefined ? {} : { turnPlacement: revisions.placement(() => registry) }),
     externalAgents: createAcpExternalAgentPort({
       agents: options.agents ?? [fakeAgent, otherFakeAgent],
       workspaceRoot,
@@ -206,22 +221,11 @@ const startHarness = async (
       ...(options.systemSkillBundles === undefined ? {} : { systemSkillBundles: options.systemSkillBundles }),
     }),
   });
-  const launcher = options.revisions
-    ? createProjectRevisions({
-        workspaceRoot,
-        checkouts,
-        /* The test construction (W3a R7): `isomorphic-git` over the same root,
-         * so this suite needs no `git` on PATH. A daemon takes the native port. */
-        port: createIsomorphicGitRevisionPort({ filesystem: new NodeFsProvider(workspaceRoot) }),
-        events: (event) => {
-          if (event.type === 'turn.finalized') {
-            settlements.push(event);
-          }
-        },
-      }).record(plain)
-    : plain;
   launcherRef.current = launcher;
-  closers.push(async () => launcher.close());
+  closers.push(async () => {
+    await launcher.close();
+    await revisions?.release();
+  });
   return { launcher, workspaceRoot, api, frames, settlements };
 };
 
@@ -877,11 +881,16 @@ describe('the external agent run kind', () => {
     await until(async () => sent(frames, 'session/prompt') === 1, 'the first prompt');
     await launcher.execute({ type: 'cancel', commandId: 'cmd-2', payload: { chatId, runId } });
 
+    /* The cancelled attempt settles before the chat takes the next start (W8 RA-R12). */
     await until(
-      async () => lifecycleOf(await readLog(workspaceRoot, chatId)).includes('cancelled'),
-      'the cancelled lifecycle marker',
+      async () => {
+        const events = await readLog(workspaceRoot, chatId);
+        return events.some((event) => event.type === 'turn.finalized' && event.runId === runId);
+      },
+      'the cancelled attempt settled',
       { dump: async () => readLog(workspaceRoot, chatId) },
     );
+    expect(lifecycleOf(await readLog(workspaceRoot, chatId))).toContain('cancelled');
 
     /* D12: cancellation stops the prompt. The connection, the child and the
      * vendor session all stay up, so the next turn continues the same thread —
@@ -982,7 +991,8 @@ describe('the external agent run kind', () => {
     expect(sent(frames, 'session/new')).toBe(0);
     const resumedEvents = await readLog(workspaceRoot, chatId);
     expect(lifecycleOf(resumedEvents).at(-1)).toBe('failed');
-    expect(resumedEvents.at(-1)).toMatchObject({
+    /* The attempt's settlement row follows its terminal row (W8 TS-S6). */
+    expect(resumedEvents.findLast((event) => event.type === 'run.lifecycle')).toMatchObject({
       type: 'run.lifecycle',
       detail: { code: 'EXTERNAL_AGENT_RECOVERY_UNKNOWN' },
     });
@@ -1275,7 +1285,8 @@ describe('the external agent run kind', () => {
     expect(sent(frames, 'session/new')).toBe(0);
     expect(sent(frames, 'session/prompt')).toBe(0);
     const settled = await readLog(workspaceRoot, chatId);
-    expect(settled.at(-1)).toMatchObject({
+    /* The attempt's settlement row follows its terminal row (W8 TS-S6). */
+    expect(settled.findLast((event) => event.type === 'run.lifecycle')).toMatchObject({
       type: 'run.lifecycle',
       state: 'failed',
       detail: { code: 'EXTERNAL_AGENT_RECOVERY_UNKNOWN' },
@@ -2808,8 +2819,16 @@ describe('external turns through the revision port', () => {
           checkoutId: 'missing-checkout',
         }),
       );
-      await expect(runTurn(harness, { chatId, runId: 'run-selected', text: 'noask selected branch' })).rejects.toThrow(
-        'That chat is working in files this project does not have open.',
+      /* The start is answered at its intent row; the placement's refusal ends the run with its code (HD-3, TS-R12). */
+      await runTurn(harness, { chatId, runId: 'run-selected', text: 'noask selected branch' });
+      const events = await readLog(harness.workspaceRoot, chatId);
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: 'run.lifecycle',
+          runId: 'run-selected',
+          state: 'failed',
+          detail: expect.objectContaining({ code: 'CHECKOUT_UNKNOWN' }) as unknown,
+        }),
       );
       expect(sent(harness.frames, 'session/new')).toBe(previousTurn ? 1 : 0);
     },

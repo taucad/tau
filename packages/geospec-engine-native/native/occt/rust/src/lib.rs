@@ -2210,11 +2210,13 @@ unsafe fn occurrence_overlap_with_control(
         (0, 0) if value.work <= max_work => {
             let bounds =
                 (value.has_residual_bounds != 0).then(|| Bounds::from(value.residual_bounds));
-            let empty = value.residual_solid_count == 0;
-            if empty != bounds.is_none()
-                || (empty && value.residual_volume != 0.0)
-                || (!empty && !(value.residual_volume.is_finite() && value.residual_volume > 0.0))
-            {
+            let volume = value.residual_volume;
+            let consistent = if value.residual_solid_count == 0 {
+                bounds.is_none() && volume == 0.0
+            } else {
+                bounds.is_some() && volume.is_finite() && volume > 0.0
+            };
+            if !consistent {
                 return Err(backend_error(
                     "OCCT returned inconsistent exact overlap residual facts.",
                 ));

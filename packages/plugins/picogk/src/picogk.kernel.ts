@@ -80,7 +80,7 @@ export const picogkKernel = defineKernel({
 
   async getDependencies({ entryPath }, runtime, context) {
     try {
-      const paths = await context.mirror.sync(runtime.filesystem, runtime.fileContentCache);
+      const paths = await context.mirror.sync(runtime.filesystem, runtime.fileContentCache, runtime.operationId);
       /* The worker's Roslyn parse picks the C# this entry compiles with: its program and every
        * helper. Another program in the project is an independent model, so its edits never
        * re-render this one. Other files stay dependencies: a model may read any project asset. */
@@ -112,7 +112,7 @@ export const picogkKernel = defineKernel({
   },
 
   async getParameters({ entryPath }, runtime, context) {
-    await context.mirror.sync(runtime.filesystem, runtime.fileContentCache);
+    await context.mirror.sync(runtime.filesystem, runtime.fileContentCache, runtime.operationId);
     /* D8: the worker's own stage timings are attributes on the span that measured the request. The
      * span's duration is the total, so nothing here times the call a second time. */
     const span = runtime.tracer.startSpan('picogk.analyze', { entryPath });
@@ -140,7 +140,7 @@ export const picogkKernel = defineKernel({
   },
 
   async createGeometry({ entryPath, parameters }, runtime, context) {
-    await context.mirror.sync(runtime.filesystem, runtime.fileContentCache);
+    await context.mirror.sync(runtime.filesystem, runtime.fileContentCache, runtime.operationId);
     const span = runtime.tracer.startSpan('picogk.build', { entryPath });
     try {
       const result = await context.session.request({

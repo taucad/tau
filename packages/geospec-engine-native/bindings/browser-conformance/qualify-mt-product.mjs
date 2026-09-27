@@ -39,9 +39,9 @@ const ids = ['a2/raw/asymmetric-all-fields', 'a2/invalid-claim/null-expected'];
 // reached its route; `serial` names why a row stays serial under a grant today.
 const authorityPath = join(
   packageRoot,
-  '../geospec/host-tests/fixtures/data/fb0920d448648cf1ea82c1305f8701c7992156a72f5a592cc569b3b3bec0bd51',
+  '../geospec/host-tests/fixtures/data/ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86',
 );
-const authorityLogicalPath = join(packageRoot, '../geospec/host-tests/m3-corpus/current-authority-v3.json');
+const authorityLogicalPath = join(packageRoot, '../geospec/host-tests/m3-corpus/current-authority-v5.json');
 const stepRows = [
   { id: 'ancillary/analyzeMeshOverlap/positive', route: 'dedicated-tessellate', witness: { counter: 'tessellations' } },
   {

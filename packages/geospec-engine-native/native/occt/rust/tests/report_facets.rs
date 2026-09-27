@@ -45,6 +45,25 @@ fn facts_build_no_generation_and_each_report_mesh_builds_its_own() {
     }
 }
 
+#[test]
+fn validity_closure_and_exact_bounds_read_the_source_without_a_generation() {
+    // F1 x V1/V2 (W2-INT): the validity proof, the shell-closure facet, the
+    // exact whole-shape and occurrence bounds and the face boxes all read the
+    // admitted source shape; none builds or reads a copy+mesh generation.
+    for name in FIXTURES {
+        let document = Document::from_step(&fixture(name)).unwrap();
+        let validity = document.validity().unwrap();
+        let closure = document.closure().unwrap();
+        assert_eq!(validity.free_bounds, Some(closure.open_edges), "{name}");
+        document.reported_shape_parts(ShapeParts::BOUNDS).unwrap();
+        document.source_occurrences().unwrap();
+        for face in 0..document.faces().unwrap().len() as u32 {
+            document.face_optimal_bounds(face).unwrap();
+        }
+        assert_eq!(document.report_generation_builds(), 0, "{name}");
+    }
+}
+
 /// `shape` with only `parts` measured: the others NaN, counts zero.
 fn only(shape: &ShapeFacts, parts: ShapeParts) -> String {
     let nan = f64::NAN;

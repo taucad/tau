@@ -198,7 +198,7 @@ export type RpcImageClient = {
  * @public
  */
 export type RpcGeoSpecClient = {
-  runTests(args: RunGeoSpecTestsRpcInput): Promise<RunGeoSpecTestsRpcResult>;
+  runTests(args: RunGeoSpecTestsRpcInput, context?: RpcInvocationContext): Promise<RunGeoSpecTestsRpcResult>;
 };
 
 /**

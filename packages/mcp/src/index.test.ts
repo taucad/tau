@@ -130,13 +130,22 @@ describe('@taucad/mcp', () => {
     ).resolves.toEqual({
       isError: true,
       content: [{ type: 'text', text: 'RENDER_TIMEOUT: Renderer did not settle.' }],
+      structuredContent: { errorCode: 'RENDER_TIMEOUT', message: 'Renderer did not settle.' },
     });
   });
 
-  it('returns screenshot bytes as MCP images without a JSON data-url copy', async () => {
-    const dataUrl = 'data:image/webp;base64,AQID';
+  it('returns screenshot artifact links without inline image bytes', async () => {
+    const sha256 = 'a'.repeat(64);
+    const image = {
+      view: 'isometric',
+      path: `attachments/${sha256}.webp`,
+      absolutePath: `/tmp/tau-capture/${sha256}.webp`,
+      mimeType: 'image/webp',
+      byteLength: 3,
+      sha256,
+    };
     const adapter = createTauMcpAdapter({
-      dispatch: async () => ({ success: true, images: [{ view: 'isometric', dataUrl }] }),
+      dispatch: async () => ({ success: true, images: [image] }),
     });
 
     const result = await adapter.call({
@@ -146,10 +155,18 @@ describe('@taucad/mcp', () => {
     });
 
     expect(result.content).toEqual([
-      { type: 'text', text: 'Captured 1 CAD view: isometric.' },
-      { type: 'image', mimeType: 'image/webp', data: 'AQID' },
+      {
+        type: 'text',
+        text: `Captured 1 CAD view. Open each local image with your image-viewing tool:\nisometric: /tmp/tau-capture/${sha256}.webp`,
+      },
+      {
+        type: 'resource_link',
+        uri: `file:///tmp/tau-capture/${sha256}.webp`,
+        name: 'isometric screenshot',
+        mimeType: 'image/webp',
+      },
     ]);
-    expect(result.structuredContent).toEqual({ images: [{ view: 'isometric', dataUrl }] });
-    expect(JSON.stringify(result.content)).not.toContain(dataUrl);
+    expect(result.structuredContent).toEqual({ images: [image] });
+    expect(JSON.stringify(result)).not.toContain('AQID');
   });
 });

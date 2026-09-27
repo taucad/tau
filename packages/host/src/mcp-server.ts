@@ -29,8 +29,11 @@ import { z } from 'zod';
 import { createTauMcpHttpHandler } from '@taucad/mcp';
 import type { TauMcpDispatch, TauMcpHostTool, TauMcpRpcFailure, TauMcpRpcName, TauMcpRpcSuccess } from '@taucad/mcp';
 import { rpcName, toolName } from '@taucad/chat/constants';
+import { screenshotImageSchema, screenshotOutputSchema } from '@taucad/chat/schemas/tools/screenshot';
+import { testModelOutputSchema } from '@taucad/chat/schemas/tools/test-model';
 
 import type { JsonObject, JsonValue, ToolRegistry } from '@taucad/agent-host';
+import { saveChatAttachment } from '#acp/media.js';
 
 /**
  * Milliseconds a host-minted capability may live.
@@ -97,6 +100,9 @@ const readOnlyRegistryTools: ReadonlySet<string> = new Set<string>([
 
 const isJsonObject = (value: JsonValue): value is JsonObject =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/** Keep a diagnostic summary bounded while the full report remains readable by path. */
+const shortDiagnostic = (value: string): string => (value.length > 300 ? `${value.slice(0, 300)}…` : value);
 
 /**
  * How one registry tool presents over MCP.
@@ -169,6 +175,8 @@ export type HostMcpEndpointOptions = {
    * token: this one is handed to a vendor adapter's process.
    */
   readonly secret: string;
+  /** Workspace root owning the durable chat attachments returned to the agent. */
+  readonly workspaceRoot: string;
   /** The daemon's tool registry; the same one every agent run dispatches through. */
   readonly registry: ToolRegistry;
   /** Clock seam, for tests. */
@@ -231,7 +239,7 @@ const bearerOf = (authorization: string | undefined): string =>
 /**
  * Mount the host-local Tau MCP endpoint over one tool registry.
  *
- * @param options - Signing secret, tool registry, and clock seam.
+ * @param options - Signing secret, workspace root, tool registry, and clock seam.
  * @returns The endpoint: minting, verification, and the HTTP handler.
  * @public
  *
@@ -242,7 +250,8 @@ const bearerOf = (authorization: string | undefined): string =>
  * import type { ToolRegistry } from '@taucad/agent-host';
  *
  * declare const registry: ToolRegistry;
- * const mcp = createHostMcpEndpoint({ secret: randomBytes(32).toString('base64url'), registry });
+ * declare const workspaceRoot: string;
+ * const mcp = createHostMcpEndpoint({ secret: randomBytes(32).toString('base64url'), workspaceRoot, registry });
  * const capability = mcp.mint({ runId: 'run-1', chatId: 'chat-1' });
  * ```
  */
@@ -364,6 +373,62 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
       try {
         const result = await pending;
         if (!hostMcpRegistryTools.has(tool)) {
+          if (tool === toolName.screenshot && !result.isError && isJsonObject(result.content)) {
+            const { success: _success, ...payload } = result.content;
+            const capture = screenshotOutputSchema.parse(payload);
+            const images = await Promise.all(
+              capture.images.map(async (image) => {
+                const inline = screenshotImageSchema.parse(image);
+                const match = /^data:(image\/(?:png|webp));base64,([A-Za-z0-9+/]+=*)$/u.exec(inline.dataUrl);
+                if (!match?.[1] || !match[2]) {
+                  throw new Error('Tau screenshot returned an invalid image data URL.');
+                }
+                const saved = await saveChatAttachment({
+                  workspaceRoot: options.workspaceRoot,
+                  chatId: claims.chatId,
+                  data: match[2],
+                  mimeType: match[1],
+                });
+                return { view: inline.view, ...saved, mimeType: match[1] };
+              }),
+            );
+            return {
+              success: true,
+              images,
+              ...(capture.sourceRevision ? { sourceRevision: capture.sourceRevision } : {}),
+            };
+          }
+          if (tool === toolName.testModel && !result.isError && isJsonObject(result.content)) {
+            const { success: _success, ...payload } = result.content;
+            const verdict = testModelOutputSchema.parse(payload);
+            const full = JSON.stringify(verdict);
+            if (Buffer.byteLength(full, 'utf8') > 128 * 1024) {
+              const saved = await saveChatAttachment({
+                workspaceRoot: options.workspaceRoot,
+                chatId: claims.chatId,
+                data: Buffer.from(full, 'utf8').toString('base64'),
+                mimeType: 'application/json',
+              });
+              const failures = verdict.failures.slice(0, 20).map((failure) => ({
+                id: shortDiagnostic(failure.id),
+                requirement: shortDiagnostic(failure.requirement),
+                reason: shortDiagnostic(failure.reason),
+                suggestion: shortDiagnostic(failure.suggestion),
+                targetFile: failure.targetFile,
+              }));
+              return {
+                success: true,
+                passed: verdict.passed,
+                total: verdict.total,
+                failures,
+                passes: [],
+                omittedFailures: verdict.failures.length - failures.length,
+                omittedPasses: verdict.passes.length,
+                omittedSourceRevisions: verdict.sourceRevisions?.length ?? 0,
+                fullResult: { ...saved, mimeType: 'application/json' },
+              };
+            }
+          }
           // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the registry returns the canonical RPC result verbatim.
           return result.content as TauMcpRpcSuccess | TauMcpRpcFailure;
         }

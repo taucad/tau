@@ -51,7 +51,8 @@ describe('handleRunGeoSpecTests', () => {
       testTimeout: 15_000,
     };
 
-    const result = await handleRunGeoSpecTests(input, geospec);
+    const context = { signal: new AbortController().signal };
+    const result = await handleRunGeoSpecTests(input, geospec, context);
 
     expect(result).toEqual(
       expect.objectContaining({
@@ -60,7 +61,7 @@ describe('handleRunGeoSpecTests', () => {
         total: 1,
       }),
     );
-    expect(geospec.runTests).toHaveBeenCalledWith(input);
+    expect(geospec.runTests).toHaveBeenCalledWith(input, context);
   });
 
   it('returns a client error when no GeoSpec client is available', async () => {

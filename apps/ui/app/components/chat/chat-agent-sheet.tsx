@@ -978,7 +978,7 @@ function Sheet({
   /* The agent whose models the list shows: the chat's own, or one browsed from the agents. */
   const [browseKey, setBrowseKey] = useState(current.key);
   const [isFromAgents, setIsFromAgents] = useState(false);
-  const hasNavigated = useRef(false);
+  const [hasNavigated, setHasNavigated] = useState(false);
   /* Back returns focus to the row the person left from; a choice, to the chosen level. */
   const returnTo = useRef<'agent' | 'model' | 'level'>('level');
   const surfaceRef = useRef<HTMLDivElement>(null);
@@ -987,7 +987,7 @@ function Sheet({
   const hasChoice = agents.length > 1;
   const browsed = agents.find((agent) => agent.key === browseKey) ?? current;
   useEffect(() => {
-    if (!hasNavigated.current || view !== 'settings') {
+    if (!hasNavigated || view !== 'settings') {
       return;
     }
     if (returnTo.current === 'level') {
@@ -995,9 +995,9 @@ function Sheet({
     } else {
       (returnTo.current === 'agent' ? agentRowRef : modelRowRef).current?.focus();
     }
-  }, [view]);
+  }, [hasNavigated, view]);
   const go = (next: SheetView): void => {
-    hasNavigated.current = true;
+    setHasNavigated(true);
     setView(next);
   };
   const back = (): void => {
@@ -1051,7 +1051,7 @@ function Sheet({
           /* Opening is instant; only a return from a sub-view slides. */
           className={cn(
             'flex flex-col',
-            hasNavigated.current && 'motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-left-2',
+            hasNavigated && 'motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-left-2',
           )}
         >
           {hasChoice ? (

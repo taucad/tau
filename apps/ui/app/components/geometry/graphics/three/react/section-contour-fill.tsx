@@ -1330,7 +1330,8 @@ export function SectionContourFills({
             });
           }
         }
-        const requestKey = `${faceKey}:${basis.planeKey}|${buildSectionCapTopologySourceSetKey(workerSources)}`;
+        // The trim by value: the source summary does not tell two trims of one slice apart.
+        const requestKey = `${faceKey}:${basis.planeKey}:${trim.key}|${buildSectionCapTopologySourceSetKey(workerSources)}`;
         if (workerSources.length > 0) {
           workerFaces.push({ faceKey, basis: plainBasisFromSectionCutPlaneBasis(basis), sources: workerSources });
           requestKeys.push(requestKey);

@@ -50,6 +50,7 @@ const declaration = {
 
 const createCommitWorker = async () => {
   const counts = { dependencies: 0, parameters: 0 };
+  const operationIds: Array<[string, number | undefined]> = [];
   const geometryParameters: Array<Record<string, unknown>> = [];
   const kernel = defineKernel({
     id: 'commit-kernel',
@@ -61,15 +62,18 @@ const createCommitWorker = async () => {
     async initialize() {
       return {};
     },
-    async getDependencies(input) {
+    async getDependencies(input, runtime) {
+      operationIds.push(['dependencies', runtime.operationId]);
       counts.dependencies++;
       return { resolved: [input.entryPath], unresolved: [] };
     },
-    async getParameters() {
+    async getParameters(_input, runtime) {
+      operationIds.push(['parameters', runtime.operationId]);
       counts.parameters++;
       return { success: true, data: declaration, issues: [] };
     },
-    async createGeometry(input) {
+    async createGeometry(input, runtime) {
+      operationIds.push(['geometry', runtime.operationId]);
       geometryParameters.push(input.parameters);
       return { geometry: { format: 'gltf', content: new Uint8Array([1]) }, nativeHandle: {} };
     },
@@ -115,7 +119,7 @@ const createCommitWorker = async () => {
     });
   };
 
-  return { worker, counts, geometryParameters, selectionReads, stageAndRender };
+  return { worker, counts, operationIds, geometryParameters, selectionReads, stageAndRender };
 };
 
 describe('KernelWorker committed parameter edits', () => {
@@ -148,6 +152,24 @@ describe('KernelWorker committed parameter edits', () => {
       expect(counts.dependencies - baseline.dependencies).toBe(1);
       expect(counts.parameters - baseline.parameters).toBe(1);
       expect(selectionReads() - baseline.selections).toBe(1);
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
+  it('should give every kernel call in one render the same operation identity and the next render another', async () => {
+    const { worker, operationIds, stageAndRender } = await createCommitWorker();
+    try {
+      await stageAndRender({});
+      const first = operationIds.splice(0);
+      await stageAndRender({ [record]: JSON.stringify({ width: 3 }) });
+      const second = operationIds.splice(0);
+
+      expect(first.map(([call]) => call)).toEqual(['dependencies', 'parameters', 'geometry']);
+      expect(new Set(first.map(([, id]) => id)).size).toBe(1);
+      expect(first[0]?.[1]).toEqual(expect.any(Number));
+      expect(second).toEqual([['geometry', expect.any(Number)]]);
+      expect(second[0]?.[1]).not.toBe(first[0]?.[1]);
     } finally {
       await worker.cleanup();
     }

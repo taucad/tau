@@ -745,6 +745,12 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   /** Current render generation for abort detection. */
   private renderGeneration = 0;
 
+  /** Last issued `KernelRuntime.operationId`. */
+  private operationSequence = 0;
+
+  /** `KernelRuntime.operationId` shared by every kernel call inside the running operation. */
+  private currentOperationId: number | undefined;
+
   /** Current file for autonomous render loop. */
   private currentFile: RuntimeFileLocator | undefined;
 
@@ -1245,6 +1251,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     await previous;
     try {
       this.operationSignal = signal;
+      this.currentOperationId = ++this.operationSequence;
       // One probe per path per operation (W22/D15): an operation is the coherence window the
       // rest of the render already assumes, so a file appearing mid-operation is unobserved
       // either way.
@@ -1253,6 +1260,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       return await operation();
     } finally {
       this.operationSignal = undefined;
+      this.currentOperationId = undefined;
       this.pendingNativeHandle = undefined;
       // Operations are serialized, so an operation boundary is the one point
       // where every surviving reference to a native handle lives in a worker
@@ -6569,6 +6577,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private createRuntime(signal = this.operationSignal ?? neverAbortedSignal): KernelRuntime {
     return {
       signal,
+      // A call outside any operation shares its identity with nothing.
+      operationId: this.currentOperationId ?? ++this.operationSequence,
       filesystem: this.filesystem,
       logger: this.logger,
       fileContentCache: this.fileContentCache,

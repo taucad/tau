@@ -248,6 +248,7 @@ vi.mock('#main/navigation-policy.js', () => ({
 }));
 vi.mock('#main/services-broker.js', () => ({
   rendererServicesConcerns: ['nodeFs', 'agentHost', 'machines'],
+  ServicesQuiescingError: class ServicesQuiescingError extends Error {},
   createServicesBroker: vi.fn((options: { utilityEntry: string }) => {
     state.servicesUtilityEntry = options.utilityEntry;
     return {
@@ -505,6 +506,35 @@ describe('desktop main compute owner', () => {
         error: 'services.untrusted-root',
       });
       expect(state.servicesConnect).not.toHaveBeenCalledWith('agentHost', expect.anything());
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should answer a concern refused while quitting as quiescing rather than a connection failure',
+    async () => {
+      await bootstrap();
+      const { ServicesQuiescingError } = await import('#main/services-broker.js');
+      state.servicesConnect.mockImplementationOnce(() => {
+        throw new ServicesQuiescingError();
+      });
+      const postMessage = vi.fn();
+
+      for (const listener of state.ipcListeners.get(servicesPortRelayTag) ?? []) {
+        listener(
+          { senderFrame: { url: 'app://tau/index.html', postMessage } },
+          { requestId: 'req-quit', concern: 'nodeFs' },
+        );
+      }
+
+      /* Every `services.connect-failed` in the desktop log so far was this
+       * shutdown refusal; the requester and the audit must be able to tell. */
+      expect(postMessage).toHaveBeenCalledExactlyOnceWith(servicesPortRelayTag, {
+        requestId: 'req-quit',
+        error: 'services.quiescing',
+      });
+      expect(state.log).toHaveBeenCalledWith('info', 'services.connect-refused-quiescing', { concern: 'nodeFs' });
+      expect(state.log).not.toHaveBeenCalledWith('error', 'services.connect-failed', expect.anything());
     },
     bootMilliseconds,
   );

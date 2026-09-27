@@ -41,6 +41,19 @@ export const rendererServicesConcerns: readonly ServicesConcern[] = ['nodeFs', '
  */
 export type MachineBindingCompletion = Readonly<{ ceremonyId: string; address?: string; accessCode?: string }>;
 
+/**
+ * The broker's shutdown admission refusing a new concern.
+ *
+ * Typed so main can answer it as the intended lifecycle refusal it is, apart
+ * from a concern that failed to connect.
+ */
+export class ServicesQuiescingError extends Error {
+  public constructor() {
+    super('The services broker is quiescing and accepts no new concerns.');
+    this.name = 'ServicesQuiescingError';
+  }
+}
+
 /** Observable result of the bounded services-host drain. */
 export type ServicesQuiesceOutcome =
   | Readonly<{ status: 'quiesced' }>
@@ -417,7 +430,7 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
   return {
     connect(concern, context) {
       if (!acceptingConnections) {
-        throw new Error('The services broker is quiescing and accepts no new concerns.');
+        throw new ServicesQuiescingError();
       }
       let concernContext = context;
       if (concern === 'agentHost' && context?.['workspaceRoot']) {

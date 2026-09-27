@@ -302,6 +302,20 @@ typedef struct geospec_occt_regular_solid_containment_result {
   double residual_center_of_mass[3];
 } geospec_occt_regular_solid_containment_result;
 
+// S10 (INTERFERENCE-EXACT-01): one candidate pair of leaf occurrences. `work`
+// is always set; `work_exceeded` means no operand was qualified and no
+// Boolean ran. `unqualified` names the operand (1 left, 2 right) that is not
+// one regular solid, with its reason; otherwise the residual is exact.
+typedef struct geospec_occt_occurrence_overlap_result {
+  uint64_t work;
+  int32_t work_exceeded;
+  int32_t unqualified;
+  uint32_t residual_solid_count;
+  int32_t has_residual_bounds;
+  double residual_volume;
+  geospec_occt_bounds residual_bounds;
+} geospec_occt_occurrence_overlap_result;
+
 typedef struct geospec_occt_cylinder_axial_extent_result {
   double origin[3];
   double axis[3];
@@ -773,6 +787,16 @@ int geospec_occt_regular_solid_containment_dedicated(
     geospec_occt_entity target, geospec_occt_operand_memo* memo,
     int grant_width, int* out_used_parallel,
     geospec_occt_regular_solid_containment_result* out_result,
+    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+// S10: the work is 1 plus the face pairs whose exact memo boxes, each enlarged
+// by `tolerance`, intersect; above `max_work` nothing else runs. The Common is
+// non-destructive, on the memo's regular-solid operands.
+int geospec_occt_occurrence_overlap_dedicated(
+    const geospec_occt_document* document, uint32_t left, uint32_t right,
+    double tolerance, uint64_t max_work, geospec_occt_operand_memo* memo,
+    int grant_width, int* out_used_parallel,
+    geospec_occt_occurrence_overlap_result* out_result,
+    geospec_occt_string* reason,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 int geospec_occt_cylinder_axial_extent(
     const geospec_occt_document* document, geospec_occt_entity face,

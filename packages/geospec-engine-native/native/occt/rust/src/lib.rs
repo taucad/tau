@@ -19,9 +19,9 @@ pub use geospec_engine_native_core::backend::brep::{
     EdgeTreatmentLabel, EdgeTreatmentMaterialSide, EdgeTreatmentReason, EdgeTreatmentResidual,
     EdgeTreatmentResidualKind, EdgeTreatmentRow, EdgeTreatmentSupport, FaceFacts,
     FiniteContactCircle, FiniteContactFace, LocatedFace, NominalCylindricalBand, OccurrenceFacts,
-    OperandMemo, PointState, RegularSolidContainment, ReportedFaces, ResolvedSourceFace,
-    SelectedBoreVoid, SelectedContinuousDomain, SemanticDatumFacts, ShapeFacts, ShapeParts,
-    SourceFaceKey, StepSubjectMetadata, SubshapeFacts, SubshapeType, SurfaceFacts,
+    OccurrenceOverlap, OperandMemo, PointState, RegularSolidContainment, ReportedFaces,
+    ResolvedSourceFace, SelectedBoreVoid, SelectedContinuousDomain, SemanticDatumFacts, ShapeFacts,
+    ShapeParts, SourceFaceKey, StepSubjectMetadata, SubshapeFacts, SubshapeType, SurfaceFacts,
     TessellationProfile, TopologyCounts, ValidityFacts, MAX_CIRCULAR_BORE_CANDIDATES,
     MAX_CIRCULAR_BORE_OWNED_BYTES, MAX_EDGE_TREATMENT_BOUNDARY_USES,
     MAX_EDGE_TREATMENT_OWNED_BYTES, MAX_EDGE_TREATMENT_RESIDUALS, MAX_EDGE_TREATMENT_ROWS,
@@ -786,6 +786,35 @@ impl BrepSubject for Document {
             regular_solid_containment_with_control(raw, subject, target, memo_raw(memo), 0)?
         }
         .0)
+    }
+
+    fn occurrence_overlap_memoized(
+        &self,
+        left: u32,
+        right: u32,
+        tolerance: f64,
+        max_work: u64,
+        memo: &mut OperandMemo,
+    ) -> Result<OccurrenceOverlap, BackendError> {
+        self.require_occurrence(left)?;
+        self.require_occurrence(right)?;
+        let width = self.parallel_grant_width.map(dedicated_width).transpose()?;
+        // SAFETY: see the connector's lifetime permit contract.
+        let (value, used_parallel) = unsafe {
+            occurrence_overlap_with_control(
+                self.raw.as_ptr(),
+                left,
+                right,
+                tolerance,
+                max_work,
+                memo_raw(memo),
+                width.unwrap_or(0),
+            )?
+        };
+        if let Some(width) = self.parallel_grant_width {
+            require_grant_mode(width, used_parallel)?;
+        }
+        Ok(value)
     }
 
     fn source_occurrences(&self) -> Result<Rc<[OccurrenceFacts]>, BackendError> {
@@ -1803,6 +1832,10 @@ unsafe fn transfer_occurrences(
                 (!value.is_empty()).then_some(value)
             },
             ordinal_path,
+            face_count: u32::try_from(ffi::geospec_occt_occurrence_face_count(raw, index as u32))
+                .map_err(|_| {
+                backend_error("OCCT occurrence face count exceeds indexed range.")
+            })?,
         });
     }
     if ffi::geospec_occt_occurrence_count(raw) != occurrence_count
@@ -2204,6 +2237,70 @@ unsafe fn regular_solid_containment_with_control(
         },
         used_parallel != 0,
     ))
+}
+
+/// S10: a Boolean that never ran reports only its work; a residual must be
+/// consistent (solids iff positive volume and bounds).
+unsafe fn occurrence_overlap_with_control(
+    raw: *const ffi::Document,
+    left: u32,
+    right: u32,
+    tolerance: f64,
+    max_work: u64,
+    memo: *mut ffi::OperandMemo,
+    grant_width: i32,
+) -> Result<(OccurrenceOverlap, bool), BackendError> {
+    let mut value = ffi::OccurrenceOverlap::default();
+    let mut used_parallel = 0;
+    let reason = copied_string_small(|reason, error| {
+        ffi::geospec_occt_occurrence_overlap_dedicated(
+            raw,
+            left,
+            right,
+            tolerance,
+            max_work,
+            memo,
+            grant_width,
+            &mut used_parallel,
+            &mut value,
+            reason,
+            error,
+        )
+    })?;
+    let overlap = match (value.work_exceeded, value.unqualified) {
+        (1, 0) if value.work > max_work => OccurrenceOverlap::WorkExceeded { work: value.work },
+        (0, 1 | 2) if !reason.is_empty() => OccurrenceOverlap::Unqualified {
+            left: value.unqualified == 1,
+            reason,
+        },
+        (0, 0) if value.work <= max_work => {
+            let bounds =
+                (value.has_residual_bounds != 0).then(|| Bounds::from(value.residual_bounds));
+            let volume = value.residual_volume;
+            let consistent = if value.residual_solid_count == 0 {
+                bounds.is_none() && volume == 0.0
+            } else {
+                bounds.is_some() && volume.is_finite() && volume > 0.0
+            };
+            if !consistent {
+                return Err(backend_error(
+                    "OCCT returned inconsistent exact overlap residual facts.",
+                ));
+            }
+            OccurrenceOverlap::Residual {
+                work: value.work,
+                solids: value.residual_solid_count,
+                volume: value.residual_volume,
+                bounds,
+            }
+        }
+        _ => {
+            return Err(backend_error(
+                "OCCT returned an invalid exact overlap result.",
+            ))
+        }
+    };
+    Ok((overlap, used_parallel != 0))
 }
 
 unsafe fn cylinder_axial_extent(
@@ -3676,6 +3773,18 @@ mod ffi {
 
     #[derive(Clone, Copy, Default)]
     #[repr(C)]
+    pub struct OccurrenceOverlap {
+        pub work: u64,
+        pub work_exceeded: i32,
+        pub unqualified: i32,
+        pub residual_solid_count: u32,
+        pub has_residual_bounds: i32,
+        pub residual_volume: f64,
+        pub residual_bounds: Bounds,
+    }
+
+    #[derive(Clone, Copy, Default)]
+    #[repr(C)]
     pub struct CylinderAxialExtent {
         pub origin: [f64; 3],
         pub axis: [f64; 3],
@@ -4283,6 +4392,19 @@ mod ffi {
             grant_width: i32,
             used_parallel: *mut i32,
             result: *mut RegularSolidContainment,
+            error: *mut StringBuffer,
+        ) -> i32;
+        pub fn geospec_occt_occurrence_overlap_dedicated(
+            document: *const Document,
+            left: u32,
+            right: u32,
+            tolerance: f64,
+            max_work: u64,
+            memo: *mut OperandMemo,
+            grant_width: i32,
+            used_parallel: *mut i32,
+            result: *mut OccurrenceOverlap,
+            reason: *mut StringBuffer,
             error: *mut StringBuffer,
         ) -> i32;
         pub fn geospec_occt_tessellate_dedicated(

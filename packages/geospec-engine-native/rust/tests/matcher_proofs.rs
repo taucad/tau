@@ -100,6 +100,7 @@ fn occurrence() -> OccurrenceFacts {
         product_name: "wall".into(),
         instance_name: Some("wall".into()),
         ordinal_path: vec![1],
+        face_count: 1,
     }
 }
 

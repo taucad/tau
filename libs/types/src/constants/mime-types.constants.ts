@@ -69,6 +69,11 @@ export const mimeTypes = {
   smd: 'application/x-smd',
   wrl: 'model/vrml',
   xgl: 'application/x-xgl',
+
+  // Text / data (EDA kernel exports: bill of materials, readable netlist, circuit JSON)
+  csv: 'text/csv',
+  txt: 'text/plain',
+  json: 'application/json',
 } as const satisfies Record<string, string>;
 
 /**

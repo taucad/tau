@@ -126,6 +126,16 @@ describe('transformMechanism', () => {
     expect(metres.animations).toEqual(mechanism.animations);
   });
 
+  it('should keep a joint name through the transform', () => {
+    const mechanism = everyJoint();
+    const named: Mechanism = {
+      ...mechanism,
+      joints: { ...mechanism.joints, arm: { ...mechanism.joints['arm']!, name: 'Arm' } },
+    };
+
+    expect(transformed({ mechanism: named, units: { length: 'm', angle: 'deg' } }).joints['arm']?.name).toBe('Arm');
+  });
+
   it('should reproduce the same motion in metres', () => {
     const mechanism = everyJoint();
     const metres = transformed({ mechanism, units: { length: 'm', angle: 'deg' } });

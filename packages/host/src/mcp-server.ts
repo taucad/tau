@@ -329,6 +329,94 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
     signal: AbortSignal,
   ): TauMcpDispatch => {
     /**
+     * One registry result as the MCP adapter returns it.
+     *
+     * Screenshots and oversized GeoSpec reports leave the result as chat
+     * attachment files; everything else passes through.
+     *
+     * @param tool - The registry tool that answered.
+     * @param result - Its result.
+     * @returns The RPC-shaped result the adapter reads.
+     */
+    const present = async (
+      tool: HostMcpAllowedTool,
+      result: Awaited<ReturnType<ToolRegistry['invoke']>>,
+    ): Promise<TauMcpRpcSuccess | TauMcpRpcFailure> => {
+      if (!hostMcpRegistryTools.has(tool)) {
+        if (tool === toolName.screenshot && !result.isError && isJsonObject(result.content)) {
+          const { success: _success, ...payload } = result.content;
+          const capture = screenshotOutputSchema.parse(payload);
+          const images = await Promise.all(
+            capture.images.map(async (image) => {
+              const inline = screenshotImageSchema.parse(image);
+              const match = /^data:(image\/(?:png|webp));base64,([A-Za-z0-9+/]+=*)$/u.exec(inline.dataUrl);
+              if (!match?.[1] || !match[2]) {
+                throw new Error('Tau screenshot returned an invalid image data URL.');
+              }
+              const saved = await saveChatAttachment({
+                workspaceRoot: options.workspaceRoot,
+                chatId: claims.chatId,
+                data: match[2],
+                mimeType: match[1],
+              });
+              return { view: inline.view, ...saved, mimeType: match[1] };
+            }),
+          );
+          return {
+            success: true,
+            images,
+            ...(capture.sourceRevision ? { sourceRevision: capture.sourceRevision } : {}),
+            ...(capture.message === undefined ? {} : { message: capture.message }),
+          };
+        }
+        if (tool === toolName.testModel && !result.isError && isJsonObject(result.content)) {
+          const { success: _success, ...payload } = result.content;
+          const verdict = testModelOutputSchema.parse(payload);
+          const full = JSON.stringify(verdict);
+          if (Buffer.byteLength(full, 'utf8') > 128 * 1024) {
+            const saved = await saveChatAttachment({
+              workspaceRoot: options.workspaceRoot,
+              chatId: claims.chatId,
+              data: Buffer.from(full, 'utf8').toString('base64'),
+              mimeType: 'application/json',
+            });
+            const failures = verdict.failures.slice(0, 20).map((failure) => ({
+              id: shortDiagnostic(failure.id),
+              requirement: shortDiagnostic(failure.requirement),
+              reason: shortDiagnostic(failure.reason),
+              suggestion: shortDiagnostic(failure.suggestion),
+              targetFile: failure.targetFile,
+            }));
+            return {
+              success: true,
+              passed: verdict.passed,
+              total: verdict.total,
+              failures,
+              passes: [],
+              omittedFailures: verdict.failures.length - failures.length,
+              omittedPasses: verdict.passes.length,
+              omittedSourceRevisions: verdict.sourceRevisions?.length ?? 0,
+              fullResult: { ...saved, mimeType: 'application/json' },
+            };
+          }
+        }
+        // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the registry returns the canonical RPC result verbatim.
+        return result.content as TauMcpRpcSuccess | TauMcpRpcFailure;
+      }
+      /* A registry tool answers plain content with the error bit beside it;
+       * the adapter reads `success` and `errorCode` the way it does for an
+       * RPC result, so the bit becomes the field here. */
+      const content = isJsonObject(result.content) ? result.content : { value: result.content };
+      if (!result.isError) {
+        return { success: true, ...content };
+      }
+      return {
+        errorCode: typeof content['errorCode'] === 'string' ? content['errorCode'] : 'TOOL_ERROR',
+        message: typeof content['message'] === 'string' ? content['message'] : `${tool} failed.`,
+      };
+    };
+
+    /**
      * One allowed tool, by name, into the daemon's registry.
      *
      * Keyed by tool name rather than RPC name because the print request tools
@@ -372,78 +460,15 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
       binding.pending.add(pending);
       try {
         const result = await pending;
-        if (!hostMcpRegistryTools.has(tool)) {
-          if (tool === toolName.screenshot && !result.isError && isJsonObject(result.content)) {
-            const { success: _success, ...payload } = result.content;
-            const capture = screenshotOutputSchema.parse(payload);
-            const images = await Promise.all(
-              capture.images.map(async (image) => {
-                const inline = screenshotImageSchema.parse(image);
-                const match = /^data:(image\/(?:png|webp));base64,([A-Za-z0-9+/]+=*)$/u.exec(inline.dataUrl);
-                if (!match?.[1] || !match[2]) {
-                  throw new Error('Tau screenshot returned an invalid image data URL.');
-                }
-                const saved = await saveChatAttachment({
-                  workspaceRoot: options.workspaceRoot,
-                  chatId: claims.chatId,
-                  data: match[2],
-                  mimeType: match[1],
-                });
-                return { view: inline.view, ...saved, mimeType: match[1] };
-              }),
-            );
-            return {
-              success: true,
-              images,
-              ...(capture.sourceRevision ? { sourceRevision: capture.sourceRevision } : {}),
-              ...(capture.message === undefined ? {} : { message: capture.message }),
-            };
-          }
-          if (tool === toolName.testModel && !result.isError && isJsonObject(result.content)) {
-            const { success: _success, ...payload } = result.content;
-            const verdict = testModelOutputSchema.parse(payload);
-            const full = JSON.stringify(verdict);
-            if (Buffer.byteLength(full, 'utf8') > 128 * 1024) {
-              const saved = await saveChatAttachment({
-                workspaceRoot: options.workspaceRoot,
-                chatId: claims.chatId,
-                data: Buffer.from(full, 'utf8').toString('base64'),
-                mimeType: 'application/json',
-              });
-              const failures = verdict.failures.slice(0, 20).map((failure) => ({
-                id: shortDiagnostic(failure.id),
-                requirement: shortDiagnostic(failure.requirement),
-                reason: shortDiagnostic(failure.reason),
-                suggestion: shortDiagnostic(failure.suggestion),
-                targetFile: failure.targetFile,
-              }));
-              return {
-                success: true,
-                passed: verdict.passed,
-                total: verdict.total,
-                failures,
-                passes: [],
-                omittedFailures: verdict.failures.length - failures.length,
-                omittedPasses: verdict.passes.length,
-                omittedSourceRevisions: verdict.sourceRevisions?.length ?? 0,
-                fullResult: { ...saved, mimeType: 'application/json' },
-              };
-            }
-          }
-          // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the registry returns the canonical RPC result verbatim.
-          return result.content as TauMcpRpcSuccess | TauMcpRpcFailure;
-        }
-        /* A registry tool answers plain content with the error bit beside it;
-         * the adapter reads `success` and `errorCode` the way it does for an
-         * RPC result, so the bit becomes the field here. */
-        const content = isJsonObject(result.content) ? result.content : { value: result.content };
-        if (!result.isError) {
-          return { success: true, ...content };
-        }
-        return {
-          errorCode: typeof content['errorCode'] === 'string' ? content['errorCode'] : 'TOOL_ERROR',
-          message: typeof content['message'] === 'string' ? content['message'] : `${tool} failed.`,
-        };
+        /* A throw here is Tau's own fault after the tool answered — the agent's
+         * call was fine and a retry repeats it — so it is coded as such rather
+         * than reaching the agent as a bare runtime message it reads as its own. */
+        return await present(tool, result).catch(
+          (error: unknown): TauMcpRpcFailure => ({
+            errorCode: 'MCP_HOST_FAULT',
+            message: `Tau could not return this ${tool} result (${error instanceof Error ? error.message : String(error)}). This is a Tau fault, not a problem with the call; retrying will not help.`,
+          }),
+        );
       } finally {
         binding.pending.delete(pending);
       }

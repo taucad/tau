@@ -514,6 +514,44 @@ describe('the mounted /mcp route', () => {
     }
   }, 30_000);
 
+  it('codes a fault Tau hits after the tool answered, so the agent does not retry its own call', async () => {
+    endpoint = createHostMcpEndpoint({
+      secret,
+      workspaceRoot,
+      registry: {
+        list: () => [],
+        invoke: async (): ReturnType<ToolRegistry['invoke']> => ({
+          isError: false,
+          // A capture Tau cannot save: the renderer answered, the host post-processing throws.
+          content: { success: true, images: [{ view: 'isometric', dataUrl: 'data:image/gif;base64,R0lG' }] },
+        }),
+      },
+    });
+    server = startAgentServer({ launcher: stubLauncher(), token, workspaceRoot, mcp: endpoint });
+    await server.ready;
+    const capability = endpoint.mint({ runId: 'run-fault', chatId: 'chat-fault' });
+    const release = endpoint.activate({
+      token: capability.token,
+      runId: 'run-fault',
+      chatId: 'chat-fault',
+      signal: new AbortController().signal,
+    });
+    const client = await connectMcpOverFetch({
+      url: new URL('mcp', server.url()).href,
+      headers: { authorization: `Bearer ${capability.token}` },
+    });
+    try {
+      const capture = await client.callTool('screenshot', { targetFile: 'main.cs', mode: 'single' });
+      expect(capture.isError).toBe(true);
+      expect(capture.structuredContent).toMatchObject({
+        errorCode: 'MCP_HOST_FAULT',
+        message: expect.stringContaining('retrying will not help') as string,
+      });
+    } finally {
+      await release();
+    }
+  }, 30_000);
+
   /* The real machine registry's definitions and handler, never a hand-written
    * schema: a hand-written one is how a draft-07 `definitions` reference the
    * SDK could not read reached every external agent's `initialize` as HTTP 500. */

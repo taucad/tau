@@ -183,7 +183,7 @@ export class ToolpathParseError extends Error {
   }
 }
 
-const parserIdentity = Object.freeze({ id: 'tau.slicer.toolpath', version: '2' });
+const parserIdentity = Object.freeze({ id: 'tau.slicer.toolpath', version: '3' });
 const defaultAcceleration = Object.freeze({ print: 10_000, travel: 20_000, extruder: 5000 });
 const defaultMaximumFeedrate = 500;
 const defaultMaximumBytes = 64 * 1024 * 1024;
@@ -230,7 +230,8 @@ const typeKind = (label: string): ToolpathSegmentKind => {
   if (value === 'outer wall') {
     return 'outer-wall';
   }
-  if (value === 'inner wall' || value === 'overhang wall') {
+  // Bambu Studio lays its floating vertical shell behind the inner wall, never on the part's surface.
+  if (value === 'inner wall' || value === 'overhang wall' || value === 'floating vertical shell') {
     return 'inner-wall';
   }
   if (value.includes('infill') || value.includes('surface') || value === 'bridge' || value === 'ironing') {

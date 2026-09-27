@@ -2885,6 +2885,124 @@ describe('BrowserPlacementChatTransport', () => {
     unregister();
   });
 
+  /* GM.r2 R2-M1 and L-b: the continuation's settlement gate. */
+  const pausedApprovalStream = async (
+    name: string,
+    resume: (row: (sequence: number, body: Record<string, unknown>) => void) => ReturnType<AgentHostClient['resume']>,
+  ) => {
+    installBrowserGlobals();
+    const chatId = `chat-${name}`;
+    const runId = `run-${name}`;
+    let listener: Parameters<AgentHostClient['subscribe']>[1] | undefined;
+    const row = (sequence: number, body: Record<string, unknown>) =>
+      listener?.(chatId, {
+        version: 1,
+        leaderEpoch: `leader-${name}`,
+        sequence,
+        recordedAt: '2026-09-01T00:00:01.000Z',
+        runId,
+        ...body,
+      } as unknown as AgentLogEvent);
+    const settled = (sequence: number, attempt: number) => {
+      row(sequence, {
+        type: 'turn.finalized',
+        turnId: `message-${chatId}`,
+        attempt,
+        chatId,
+        projectId: `project-${chatId}`,
+        changedPaths: [],
+        trigger: 'turn',
+        runIds: [runId],
+      });
+    };
+    const client = clientFor(chatId, runId, {
+      start: vi.fn(async () => {
+        row(1, { type: 'run.lifecycle', state: 'running', attempt: 1 });
+        row(2, { type: 'run.lifecycle', state: 'paused', attempt: 1 });
+        return snapshot(chatId, runId, 'paused');
+      }),
+      resolveInterrupt: vi.fn(async () => snapshot(chatId, runId, 'paused')),
+      resume: vi.fn(async () => resume(row)),
+      subscribe: vi.fn((_input: Follow[0], next: Follow[1]) => {
+        listener = next;
+        return () => {
+          listener = undefined;
+        };
+      }),
+    });
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({ projectId: `project-${name}`, backend: 'opfs', providerBasePath: name }),
+      createClient: async () => client,
+    });
+    const stream = await new BrowserPlacementChatTransport().sendMessages({
+      chatId,
+      trigger: 'submit-message',
+      messageId: `message-${name}`,
+      messages: [{ id: `message-${name}`, role: 'user', parts: [{ type: 'text', text: 'Print it.' }] }],
+      abortSignal: undefined,
+      body: browserBody({ runId, trigger: 'submit' }),
+    });
+    const drained = drain(stream.getReader());
+    await vi.waitFor(() => {
+      expect(client.start).toHaveBeenCalledOnce();
+    });
+    return { chatId, runId, client, row, settled, drained, unregister };
+  };
+
+  it.each(['INTERRUPT_PENDING', 'RESUME_UNAVAILABLE', 'CHAT_RUN_LIVE'] as const)(
+    'releases the stream when the host refuses to continue the approved run (%s)',
+    async (code) => {
+      const { chatId, runId, client, row, settled, drained, unregister } = await pausedApprovalStream(
+        `refused-${code}`,
+        async () => {
+          throw new AgentHostWorkerError(code, `The host refused to continue (${code}).`);
+        },
+      );
+      settled(3, 1);
+
+      const answered = resolveBrowserAgentHostInterrupt({
+        chatId,
+        runId,
+        interruptId: 'interrupt-print',
+        approved: true,
+      });
+      await (code === 'INTERRUPT_PENDING' ? answered : expect(answered).rejects.toMatchObject({ code }));
+      /* The run ends cancelled (the other request denied, or another tab's Stop): a paused run's cancel settles no turn. */
+      row(4, { type: 'run.lifecycle', state: 'cancelled', attempt: 1 });
+      await drained;
+
+      await vi.waitFor(() => {
+        expect(client.close).toHaveBeenCalledOnce();
+      });
+      unregister();
+    },
+  );
+
+  it("holds the continued attempt's stream past the paused attempt's late settlement", async () => {
+    const { chatId, runId, client, row, settled, drained, unregister } = await pausedApprovalStream(
+      'late-settlement',
+      async (write) => {
+        write(3, { type: 'run.lifecycle', state: 'running', attempt: 2 });
+        return snapshot('chat-late-settlement', 'run-late-settlement', 'running');
+      },
+    );
+
+    await resolveBrowserAgentHostInterrupt({ chatId, runId, interruptId: 'interrupt-print', approved: true });
+    settled(4, 1);
+    row(5, { type: 'run.lifecycle', state: 'completed', attempt: 2 });
+    await drained;
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+
+    expect(client.close).not.toHaveBeenCalled();
+    settled(6, 2);
+    await vi.waitFor(() => {
+      expect(client.close).toHaveBeenCalledOnce();
+    });
+    unregister();
+  });
+
   it.each([
     [true, 'paused', 1],
     [false, 'cancelled', 0],

@@ -20,6 +20,7 @@ import {
   digestResponse,
   ffmpegCandidates,
   findFfmpeg,
+  listenRtspProxy,
   parseChallenges,
 } from '#rtsps-still.js';
 import type { RtspSession } from '#rtsps-still.js';
@@ -350,6 +351,52 @@ describe('captureRtspsStill', () => {
         'MACHINE_STILL_TIMEOUT',
       );
     } finally {
+      tcpCamera.close();
+    }
+  });
+});
+
+describe('listenRtspProxy', () => {
+  /** Whether a loopback connection to `port` is accepted, or the code refusing it. */
+  const connectionOutcome = async (port: number): Promise<string> => {
+    const socket = connect(port, '127.0.0.1');
+    try {
+      await once(socket, 'connect');
+      return 'accepted';
+    } catch (error) {
+      return error instanceof Error && 'code' in error ? String(error.code) : 'failed';
+    } finally {
+      socket.destroy();
+    }
+  };
+
+  it('should refuse any connection after the first, while it is live and after it closes', async () => {
+    const cameraConnections: Socket[] = [];
+    const cameraReached = Promise.withResolvers<void>();
+    const tcpCamera = await listenTcpCamera((socket) => {
+      cameraConnections.push(socket);
+      cameraReached.resolve();
+    });
+    const proxy = await listenRtspProxy({
+      openUpstream: async () => connectTcp(tcpCamera.port),
+      remote: { address: '192.0.2.10', port: 322 },
+      authenticator: createRtspAuthenticator({ username: 'bblp', password: accessCode }),
+      onFailure: () => undefined,
+    });
+    try {
+      const first = connect(proxy.port, '127.0.0.1');
+      await once(first, 'connect');
+      /* The proxy has taken the first connection once it reaches the camera for it. */
+      await cameraReached.promise;
+
+      expect(await connectionOutcome(proxy.port)).toBe('ECONNREFUSED');
+      first.destroy();
+      await once(first, 'close');
+      expect(await connectionOutcome(proxy.port)).toBe('ECONNREFUSED');
+      expect(cameraConnections).toHaveLength(1);
+      await expect(proxy.close()).resolves.toBeUndefined();
+    } finally {
+      await proxy.close();
       tcpCamera.close();
     }
   });

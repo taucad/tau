@@ -503,6 +503,7 @@ Runtime package exports must not include legacy preset or concrete-capability ba
 @taucad/middleware    → named plugin export plus individual middleware factories
 @taucad/opencascade   → browser/WASM-safe OpenCascade plugin toolkit
 @taucad/build123d     → Node-hosted Build123d kernel; private supervised Python process
+@taucad/tscircuit     → browser/Node tscircuit EDA kernel; `output` render option selects GLB or SVG
 @taucad/occt-core     → shared OCCT helper package, no plugin export
 @taucad/geometry-core → shared geometry helper package, no plugin export
 ```

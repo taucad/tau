@@ -15,6 +15,7 @@ const progressiveDisclosureSkillNames = [
   'cad-zoo',
   'cad-jscad',
   'cad-opencascadejs',
+  'cad-tscircuit',
   'geospec-authoring',
 ] as const;
 
@@ -88,7 +89,7 @@ describe('systemSkillsCatalog', () => {
 
     expect(catalog).toEqual(configured);
     expect(createModelRows).toEqual(configured);
-    expect(progressiveDisclosureSkillNames).toHaveLength(10);
+    expect(progressiveDisclosureSkillNames).toHaveLength(11);
   });
 
   it('preserves JSCAD multi-shape output as one flat array of named geometries', () => {

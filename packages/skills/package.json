@@ -74,6 +74,7 @@
     "@taucad/openrscad": "workspace:*",
     "@taucad/picogk": "workspace:*",
     "@taucad/replicad": "workspace:*",
+    "@taucad/tscircuit": "workspace:*",
     "@taucad/zoo": "workspace:*",
     "geospec": "workspace:*"
   }

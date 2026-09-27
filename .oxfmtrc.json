@@ -29,6 +29,7 @@
     "/packages/geospec-engine-native/native/manifold-rust/source/**",
     "/packages/geospec-engine-native/conformance/early-corpus.json",
     "/packages/geospec-engine-native/conformance/continuous-wall-box-a2.json",
+    "/packages/geospec-engine-native/conformance/continuous-wall-box-a3.json",
     "/packages/geospec-engine-native/conformance/required-pair-controls.json",
     "/packages/geospec-engine-native/bench/fixtures/legacy-installed-v1/**",
     "/packages/geospec-engine-native/bench/fixtures/performance-lab/**",

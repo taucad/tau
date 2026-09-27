@@ -74,8 +74,10 @@ impl BatchAnalysis {
             self.observe(WorkCounter::ComponentBuilds);
             self.gaps(analysis.component_clusters(tolerance))?
         };
-        self.keep(cell, &value)?;
-        analysis.retain_components(bits, &value);
+        // The analysis holds only what the batch accounts.
+        if self.keep(cell, &value)? {
+            analysis.retain_components(bits, &value);
+        }
         Ok(value)
     }
 
@@ -157,26 +159,33 @@ impl BatchAnalysis {
 
     /// The floor implies the refusal in `keep`, before C(C-1)/2 gaps exist.
     fn gaps(&self, clusters: Vec<ClusterReport>) -> Result<Rc<ConnectedComponents>, BackendError> {
-        let floor = retained_component_bytes_floor(&clusters);
-        if self.retained_bytes.get().saturating_add(floor) > self.byte_limit {
+        if retained_component_bytes_floor(&clusters) > self.byte_limit {
             return Err(retention_refusal());
         }
         Ok(Rc::new(ConnectedComponents::from_clusters(clusters)))
     }
 
+    /// C8 (ruling 12): a result refuses only when it alone exceeds the limit,
+    /// whatever other claims of the plan retained. It is retained, and
+    /// `keep` answers `true`, only while the batch stays within the limit; a
+    /// later demand of an unretained cell rebuilds it, having paid for it as
+    /// a cold claim does.
     fn keep(
         &self,
         cell: &OnceCell<Rc<ConnectedComponents>>,
         value: &Rc<ConnectedComponents>,
-    ) -> Result<(), BackendError> {
+    ) -> Result<bool, BackendError> {
         let bytes = retained_component_bytes(&value.clusters, &value.gaps);
+        if bytes > self.byte_limit {
+            return Err(retention_refusal());
+        }
         let total = self.retained_bytes.get().saturating_add(bytes);
         if total > self.byte_limit {
-            return Err(retention_refusal());
+            return Ok(false);
         }
         let _ = cell.set(Rc::clone(value));
         self.retained_bytes.set(total);
-        Ok(())
+        Ok(true)
     }
 }
 
@@ -436,17 +445,52 @@ mod tests {
         assert!(largest * 16 < gap_bytes);
         assert_eq!(pre_check.retained_bytes.get(), 0);
 
-        // An exact fit is kept, and retained bytes count toward the next floor.
-        let cumulative = batch(exact);
-        let value = cumulative
+        // An exact fit is kept. Ruling 12: another claim's cell of the same
+        // size answers too, as it does alone, but is not retained, by the
+        // batch or by its analysis, so neither holds more than the limit.
+        let two_claims = batch(exact);
+        let value = two_claims
             .connected_components("a", 0.0, &analysis)
             .unwrap();
         assert_eq!(*value, expected);
-        assert_eq!(cumulative.retained_bytes.get(), exact);
-        let (result, largest) =
-            largest_request(|| cumulative.connected_components("b", 0.0, &analysis));
-        assert_eq!(result.err(), refusal);
-        assert!(largest * 16 < gap_bytes);
-        assert_eq!(cumulative.retained_bytes.get(), exact);
+        assert_eq!(two_claims.retained_bytes.get(), exact);
+        let value = two_claims
+            .connected_components("b", 0.0, &analysis)
+            .unwrap();
+        assert_eq!(*value, expected);
+        assert_eq!(two_claims.retained_bytes.get(), exact);
+        assert!(two_claims.cell("b", 0).unwrap().get().is_none());
+        let fresh = scattered_clusters(400);
+        let value = two_claims.connected_components("b", 0.0, &fresh).unwrap();
+        assert_eq!(*value, expected);
+        assert!(fresh.retained_components(0).is_none());
+    }
+
+    #[test]
+    fn a_step_claim_answers_as_alone_beside_a_retained_one() {
+        // Ruling 12: two complete-profile STEP claims on different
+        // cells, each B bytes with B <= limit < 2B, both answer in one plan
+        // as each does alone; only the first is retained.
+        let clusters = scattered_clusters(40).component_clusters(0.0);
+        let expected = ConnectedComponents::from_clusters(clusters.clone());
+        let bytes = retained_component_bytes(&expected.clusters, &expected.gaps);
+        let exact = ExactClusters { clusters, units: 0 };
+        let plan = batch(2 * bytes - 1);
+        let alone = batch(2 * bytes - 1);
+        assert_eq!(*plan.step_components("a", 0.0, &exact).unwrap(), expected);
+        let second = plan.step_components("b", 0.0, &exact).unwrap();
+        assert_eq!(second, alone.step_components("b", 0.0, &exact).unwrap());
+        assert_eq!(*second, expected);
+        assert_eq!(plan.retained_bytes.get(), bytes);
+        assert!(plan.cell("b", 0).unwrap().get().is_none());
+        // A result above the limit alone still refuses.
+        let small = batch(bytes - 1);
+        assert_eq!(
+            small
+                .step_components("a", 0.0, &exact)
+                .err()
+                .map(|error| error.message),
+            Some(retention_refusal().message)
+        );
     }
 }

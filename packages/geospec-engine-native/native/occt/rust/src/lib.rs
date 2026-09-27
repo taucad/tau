@@ -799,28 +799,49 @@ impl BrepSubject for Document {
         left: u32,
         right: u32,
         tolerance: f64,
-        max_work: u64,
         memo: &mut OperandMemo,
-    ) -> Result<OccurrenceOverlap, BackendError> {
+        charge: &mut Charge<'_>,
+    ) -> Result<Option<OccurrenceOverlap>, BackendError> {
         self.require_occurrence(left)?;
         self.require_occurrence(right)?;
         let width = self.parallel_grant_width.map(dedicated_width).transpose()?;
         // SAFETY: see the connector's lifetime permit contract.
-        let (value, used_parallel) = unsafe {
+        let Some((value, used_parallel)) = (unsafe {
             occurrence_overlap_with_control(
                 self.raw.as_ptr(),
                 left,
                 right,
                 tolerance,
-                max_work,
                 memo_raw(memo),
                 width.unwrap_or(0),
+                charge,
             )?
+        }) else {
+            return Ok(None);
         };
         if let Some(width) = self.parallel_grant_width {
             require_grant_mode(width, used_parallel)?;
         }
-        Ok(value)
+        Ok(Some(value))
+    }
+
+    fn occurrence_box_units(&self, occurrence: u32) -> Result<u64, BackendError> {
+        self.require_occurrence(occurrence)?;
+        let mut units = 0;
+        let mut error = ErrorBuffer::new();
+        // SAFETY: the document lives for &self and the index is in range.
+        check(
+            unsafe {
+                ffi::geospec_occt_occurrence_box_units(
+                    self.raw.as_ptr(),
+                    occurrence,
+                    &mut units,
+                    error.raw(),
+                )
+            },
+            &error,
+        )?;
+        Ok(units)
     }
 
     fn source_occurrences(&self) -> Result<Rc<[OccurrenceFacts]>, BackendError> {
@@ -833,6 +854,39 @@ impl BrepSubject for Document {
         let raw = self.raw.as_ptr();
         let product_count = unsafe { ffi::geospec_occt_product_count(raw) };
         Ok(unsafe { transfer_occurrences(raw, product_count, false)? }.into())
+    }
+
+    fn occurrence_bounds(&self, occurrence: u32) -> Result<Bounds, BackendError> {
+        self.require_occurrence(occurrence)?;
+        let mut output = ffi::OccurrenceFacts::default();
+        let mut error = ErrorBuffer::new();
+        // SAFETY: the document lives for &self, the index is in range, and
+        // the bridge skips null string outputs.
+        check(
+            unsafe {
+                ffi::geospec_occt_occurrence(
+                    self.raw.as_ptr(),
+                    occurrence as usize,
+                    &mut output,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    error.raw(),
+                )
+            },
+            &error,
+        )?;
+        let bounds = output.bounds;
+        if (0..3).any(|axis| {
+            !bounds.min[axis].is_finite()
+                || !bounds.max[axis].is_finite()
+                || bounds.min[axis] > bounds.max[axis]
+        }) {
+            return Err(backend_error(
+                "OCCT source occurrence placement/bounds are not finite and ordered.",
+            ));
+        }
+        Ok(bounds.into())
     }
 
     fn faces(&self) -> Result<Rc<[LocatedFace]>, BackendError> {
@@ -861,13 +915,18 @@ impl BrepSubject for Document {
         Ok(validity)
     }
 
-    fn closure(&self) -> Result<Rc<ClosureFacts>, BackendError> {
+    fn closure(&self, charge: &mut Charge<'_>) -> Result<Option<Rc<ClosureFacts>>, BackendError> {
         if let Some(closure) = self.closure.get() {
-            return Ok(Rc::clone(closure));
+            let occurrences = unsafe { ffi::geospec_occt_occurrence_count(self.raw.as_ptr()) };
+            let units = closure_units(closure.failing.len(), occurrences);
+            return Ok(charge(units).then(|| Rc::clone(closure)));
         }
-        let closure = Rc::new(unsafe { closure(self.raw.as_ptr())? });
+        let Some(closure) = (unsafe { closure(self.raw.as_ptr(), charge)? }) else {
+            return Ok(None);
+        };
+        let closure = Rc::new(closure);
         let _ = self.closure.set(Rc::clone(&closure));
-        Ok(closure)
+        Ok(Some(closure))
     }
 
     fn component_bodies(
@@ -1617,11 +1676,13 @@ fn edge_treatment_vec<T>(count: usize, owned: &mut u64) -> Result<Vec<T>, Backen
 unsafe fn admission_facts(raw: *const ffi::Document) -> Result<BrepAdmissionFacts, BackendError> {
     let mut source_unit_to_millimeters = 0.0;
     let mut occurrence_count = 0;
+    let mut surfaceless_faces = 0;
     let source_length_unit = copied_string(|unit, error| {
         ffi::geospec_occt_admission_facts(
             raw,
             &mut source_unit_to_millimeters,
             &mut occurrence_count,
+            &mut surfaceless_faces,
             unit,
             error,
         )
@@ -1630,6 +1691,7 @@ unsafe fn admission_facts(raw: *const ffi::Document) -> Result<BrepAdmissionFact
         source_length_unit,
         source_unit_to_millimeters,
         occurrence_count,
+        surfaceless_faces,
     })
 }
 
@@ -2324,7 +2386,21 @@ unsafe fn validity_with_control(
     ))
 }
 
-unsafe fn closure(raw: *const ffi::Document) -> Result<ClosureFacts, BackendError> {
+/// Rulings 23 and 28: naming the failing groups' leaves is one pass over the
+/// occurrences that yields each group, so it costs a unit per occurrence and
+/// per group; a closed subject names nothing.
+fn closure_units(groups: usize, occurrences: usize) -> u64 {
+    if groups == 0 {
+        0
+    } else {
+        groups.saturating_add(occurrences) as u64
+    }
+}
+
+unsafe fn closure(
+    raw: *const ffi::Document,
+    charge: &mut Charge<'_>,
+) -> Result<Option<ClosureFacts>, BackendError> {
     let mut value = ffi::ClosureFacts::default();
     let mut error = ErrorBuffer::new();
     check(
@@ -2332,16 +2408,20 @@ unsafe fn closure(raw: *const ffi::Document) -> Result<ClosureFacts, BackendErro
         &error,
     )?;
     let capacity = ffi::geospec_occt_occurrence_count(raw);
+    if !charge(closure_units(value.failing_group_count, capacity)) {
+        return Ok(None);
+    }
+    // One scratch buffer; each group keeps only its own ordinals.
+    let mut scratch = vec![0_u32; capacity];
     let mut failing = Vec::with_capacity(value.failing_group_count);
     for index in 0..value.failing_group_count {
         let mut group = ffi::ClosureGroup::default();
-        let mut occurrences = vec![0_u32; capacity];
         check(
             ffi::geospec_occt_validity_closure_group(
                 raw,
                 index,
                 &mut group,
-                occurrences.as_mut_ptr(),
+                scratch.as_mut_ptr(),
                 capacity,
                 error.raw(),
             ),
@@ -2350,12 +2430,11 @@ unsafe fn closure(raw: *const ffi::Document) -> Result<ClosureFacts, BackendErro
         if group.sample_count > 4 || group.occurrence_count > capacity {
             return Err(backend_error("Invalid OCCT closure group transfer."));
         }
-        occurrences.truncate(group.occurrence_count);
         failing.push(ClosureGroup {
             free_faces: group.free_faces != 0,
             open_edges: group.open_edge_count,
             nonmanifold_edges: group.nonmanifold_edge_count,
-            occurrences,
+            occurrences: scratch[..group.occurrence_count].to_vec(),
             samples: group.samples[..group.sample_count as usize]
                 .iter()
                 .map(|sample| ClosureEdgeSample {
@@ -2367,13 +2446,13 @@ unsafe fn closure(raw: *const ffi::Document) -> Result<ClosureFacts, BackendErro
                 .collect(),
         });
     }
-    Ok(ClosureFacts {
+    Ok(Some(ClosureFacts {
         shells: value.shell_count,
         free_faces: value.free_face_count,
         open_edges: value.open_edge_count,
         nonmanifold_edges: value.nonmanifold_edge_count,
         failing,
-    })
+    }))
 }
 
 unsafe fn classify_face_points(
@@ -2437,41 +2516,55 @@ unsafe fn regular_solid_containment_with_control(
     ))
 }
 
-/// S10: a Boolean that never ran reports only its work; a residual must be
-/// consistent (solids iff positive volume and bounds).
+/// S10: `None` when a charge stopped the pair; a residual must be consistent
+/// (solids iff positive volume and bounds).
 unsafe fn occurrence_overlap_with_control(
     raw: *const ffi::Document,
     left: u32,
     right: u32,
     tolerance: f64,
-    max_work: u64,
     memo: *mut ffi::OperandMemo,
     grant_width: i32,
-) -> Result<(OccurrenceOverlap, bool), BackendError> {
+    charge: &mut Charge<'_>,
+) -> Result<Option<(OccurrenceOverlap, bool)>, BackendError> {
     let mut value = ffi::OccurrenceOverlap::default();
     let mut used_parallel = 0;
-    let reason = copied_string_small(|reason, error| {
-        ffi::geospec_occt_occurrence_overlap_dedicated(
-            raw,
-            left,
-            right,
-            tolerance,
-            max_work,
-            memo,
-            grant_width,
-            &mut used_parallel,
-            &mut value,
-            reason,
-            error,
-        )
-    })?;
-    let overlap = match (value.work_exceeded, value.unqualified) {
-        (1, 0) if value.work > max_work => OccurrenceOverlap::WorkExceeded { work: value.work },
-        (0, 1 | 2) if !reason.is_empty() => OccurrenceOverlap::Unqualified {
+    let mut charge = charge;
+    // One call, never the sized retry: a second call would charge the pair's
+    // steps again. Reasons are the bridge's short constant texts.
+    let mut bytes = [0u8; 256];
+    let mut reason = ffi::StringBuffer {
+        data: bytes.as_mut_ptr().cast(),
+        capacity: bytes.len(),
+        length: 0,
+    };
+    let mut error = ErrorBuffer::new();
+    let status = ffi::geospec_occt_occurrence_overlap_dedicated(
+        raw,
+        left,
+        right,
+        tolerance,
+        memo,
+        grant_width,
+        charge_units,
+        charge_context(&mut charge),
+        &mut used_parallel,
+        &mut value,
+        &mut reason,
+        error.raw(),
+    );
+    if status == ffi::STOPPED {
+        return Ok(None);
+    }
+    check(status, &error)?;
+    let reason = String::from_utf8(bytes[..reason.length.min(bytes.len())].to_vec())
+        .map_err(|_| backend_error("OCCT returned non-UTF-8 text."))?;
+    let overlap = match value.unqualified {
+        1 | 2 if !reason.is_empty() => OccurrenceOverlap::Unqualified {
             left: value.unqualified == 1,
             reason,
         },
-        (0, 0) if value.work <= max_work => {
+        0 => {
             let bounds =
                 (value.has_residual_bounds != 0).then(|| Bounds::from(value.residual_bounds));
             let volume = value.residual_volume;
@@ -2486,7 +2579,6 @@ unsafe fn occurrence_overlap_with_control(
                 ));
             }
             OccurrenceOverlap::Residual {
-                work: value.work,
                 solids: value.residual_solid_count,
                 volume: value.residual_volume,
                 bounds,
@@ -2498,7 +2590,7 @@ unsafe fn occurrence_overlap_with_control(
             ))
         }
     };
-    Ok((overlap, used_parallel != 0))
+    Ok(Some((overlap, used_parallel != 0)))
 }
 
 unsafe fn cylinder_axial_extent(
@@ -3990,8 +4082,6 @@ mod ffi {
     #[derive(Clone, Copy, Default)]
     #[repr(C)]
     pub struct OccurrenceOverlap {
-        pub work: u64,
-        pub work_exceeded: i32,
         pub unqualified: i32,
         pub residual_solid_count: u32,
         pub has_residual_bounds: i32,
@@ -4345,6 +4435,7 @@ mod ffi {
             document: *const Document,
             unit_scale: *mut f64,
             occurrence_count: *mut usize,
+            surfaceless_face_count: *mut usize,
             unit: *mut StringBuffer,
             error: *mut StringBuffer,
         ) -> i32;
@@ -4663,14 +4754,21 @@ mod ffi {
             result: *mut RegularSolidContainment,
             error: *mut StringBuffer,
         ) -> i32;
+        pub fn geospec_occt_occurrence_box_units(
+            document: *const Document,
+            occurrence: u32,
+            units: *mut u64,
+            error: *mut StringBuffer,
+        ) -> i32;
         pub fn geospec_occt_occurrence_overlap_dedicated(
             document: *const Document,
             left: u32,
             right: u32,
             tolerance: f64,
-            max_work: u64,
             memo: *mut OperandMemo,
             grant_width: i32,
+            charge: Charge,
+            context: *mut c_void,
             used_parallel: *mut i32,
             result: *mut OccurrenceOverlap,
             reason: *mut StringBuffer,

@@ -274,7 +274,8 @@ typedef struct geospec_occt_validity_facts {
 
 // V1 shell closure: per unique shell definition, face uses per edge, skipping
 // degenerated and INTERNAL/EXTERNAL uses; odd is open, three or more is
-// non-manifold. Faces outside any shell form one group.
+// non-manifold. Faces outside any shell form one group. A group with no
+// counted use fails with no open or non-manifold edge.
 typedef struct geospec_occt_closure_facts {
   uint32_t shell_count;
   uint32_t free_face_count;
@@ -319,13 +320,10 @@ typedef struct geospec_occt_regular_solid_containment_result {
   double residual_center_of_mass[3];
 } geospec_occt_regular_solid_containment_result;
 
-// S10 (INTERFERENCE-EXACT-01): one candidate pair of leaf occurrences. `work`
-// is always set; `work_exceeded` means no operand was qualified and no
-// Boolean ran. `unqualified` names the operand (1 left, 2 right) that is not
-// one regular solid, with its reason; otherwise the residual is exact.
+// S10 (INTERFERENCE-EXACT-01): one candidate pair of leaf occurrences.
+// `unqualified` names the operand (1 left, 2 right) that is not one regular
+// solid, with its reason; otherwise the residual is exact.
 typedef struct geospec_occt_occurrence_overlap_result {
-  uint64_t work;
-  int32_t work_exceeded;
   int32_t unqualified;
   uint32_t residual_solid_count;
   int32_t has_residual_bounds;
@@ -604,11 +602,12 @@ size_t geospec_occt_triangulated_face_count(
 
 // Admission keeps source identity and addresses only. Occurrence bounds, edge
 // addresses and whole-face numerics are computed on first demand by their
-// getters, which may then return GEOSPEC_OCCT_NATIVE_ERROR.
+// getters, which may then return GEOSPEC_OCCT_NATIVE_ERROR. The surfaceless
+// face count (tessellated-only products, ruling 32) is taken at admission.
 int geospec_occt_admission_facts(
     const geospec_occt_document* document,
     double* out_source_unit_to_millimeters, size_t* out_occurrence_count,
-    geospec_occt_string* source_unit,
+    size_t* out_surfaceless_face_count, geospec_occt_string* source_unit,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 int geospec_occt_step_subject_metadata(
     const geospec_occt_document* document, size_t* out_source_byte_length,
@@ -777,15 +776,17 @@ int geospec_occt_validity_closure(const geospec_occt_document* document,
                                   geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 // Failing group `index` (shells in explorer order, then the free faces): its
 // samples placed at the group's first located instance, and the ordinals of
-// the leaf occurrences containing it (capacity: the occurrence count).
+// the leaf occurrences containing it (capacity: the occurrence count). The
+// first call attributes every failing group in one pass over the leaves.
 int geospec_occt_validity_closure_group(
     const geospec_occt_document* document, size_t index,
     geospec_occt_closure_group* out_group, uint32_t* out_occurrences,
     size_t occurrence_capacity, geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 // M2 narrow phase. The bodies of the listed occurrences (the whole shape when
 // the count is zero) are their top-level solids, then free shells, then free
-// faces, each with its faces' boxes from the per-located-face memo; bodies
-// without a finite face box are omitted. The boxes are charged before any is
+// faces, each with its faces' boxes from the per-located-face memo, grown by
+// each face's largest face, edge or vertex tolerance (the body bounds fold
+// them ungrown); bodies without a finite face box are omitted. The boxes are charged before any is
 // measured. The caller releases the set before the document. `facts` writes
 // every body, then every face box in body order.
 int geospec_occt_component_bodies_new(
@@ -850,13 +851,19 @@ int geospec_occt_regular_solid_containment_dedicated(
     int grant_width, int* out_used_parallel,
     geospec_occt_regular_solid_containment_result* out_result,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
-// S10: the work is 1 plus the face pairs whose exact memo boxes, each enlarged
-// by `tolerance`, intersect; above `max_work` nothing else runs. The Common is
-// non-destructive, on the memo's regular-solid operands.
+// S10: one occurrence's exact-box price, M2's face-box units of its faces.
+int geospec_occt_occurrence_box_units(
+    const geospec_occt_document* document, uint32_t occurrence,
+    uint64_t* out_units, geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+// S10: each step of the pair is charged before it runs (ruling 28): the
+// face-box pre-count, each operand's first qualification in the memo, then
+// the Common, priced from the face pairs whose exact memo boxes, each
+// enlarged by `tolerance`, intersect. The Common is non-destructive, on the
+// memo's regular-solid operands.
 int geospec_occt_occurrence_overlap_dedicated(
     const geospec_occt_document* document, uint32_t left, uint32_t right,
-    double tolerance, uint64_t max_work, geospec_occt_operand_memo* memo,
-    int grant_width, int* out_used_parallel,
+    double tolerance, geospec_occt_operand_memo* memo, int grant_width,
+    geospec_occt_charge charge, void* context, int* out_used_parallel,
     geospec_occt_occurrence_overlap_result* out_result,
     geospec_occt_string* reason,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;

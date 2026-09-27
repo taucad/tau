@@ -7,6 +7,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=GEOSPEC_OCCT_PREFIX");
     println!("cargo:rerun-if-changed=../bridge/geospec_occt_bridge.cpp");
     println!("cargo:rerun-if-changed=../bridge/geospec_occt_bridge.h");
+    println!("cargo:rerun-if-changed=../tests/qualification.cpp");
 
     let manifest = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
     let repository = manifest
@@ -37,6 +38,13 @@ fn main() {
         );
     }
 
+    // The `qualification` feature compiles the bridge through the synthetic
+    // controls' translation unit, which includes the bridge source.
+    let source = if env::var_os("CARGO_FEATURE_QUALIFICATION").is_some() {
+        "../tests/qualification.cpp"
+    } else {
+        "../bridge/geospec_occt_bridge.cpp"
+    };
     cc::Build::new()
         .cpp(true)
         .std("c++17")
@@ -46,7 +54,7 @@ fn main() {
         .flag(format!("-ffile-prefix-map={}=occt", prefix.display()))
         .include(&include)
         .include("../bridge")
-        .file("../bridge/geospec_occt_bridge.cpp")
+        .file(source)
         .compile("geospec_occt_bridge");
 
     // em++ links the prefix archives itself, so the Emscripten staticlib must not re-bundle their members.

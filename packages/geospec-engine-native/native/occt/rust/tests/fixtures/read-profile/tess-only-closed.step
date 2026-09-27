@@ -1,0 +1,89 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('Open CASCADE Model'),'2;1');
+FILE_NAME('Open CASCADE Shape Model','2026-09-26T21:00:14',('Author'),(
+    'Open CASCADE'),'Open CASCADE STEP processor 8.1','Open CASCADE 8.1'
+  ,'Unknown');
+FILE_SCHEMA((
+'AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF {1 0 10303 442 1 1 4 }'
+    ));
+ENDSEC;
+DATA;
+#1 = APPLICATION_PROTOCOL_DEFINITION('international standard',
+  'ap242_managed_model_based_3d_engineering',2013,#2);
+#2 = APPLICATION_CONTEXT('Managed model based 3d engineering');
+#3 = SHAPE_DEFINITION_REPRESENTATION(#4,#364);
+#4 = PRODUCT_DEFINITION_SHAPE('','',#5);
+#5 = PRODUCT_DEFINITION('design','',#6,#9);
+#6 = PRODUCT_DEFINITION_FORMATION('','',#7);
+#7 = PRODUCT('Product 1','Product 1','',(#8));
+#8 = PRODUCT_CONTEXT('',#2,'mechanical');
+#9 = PRODUCT_DEFINITION_CONTEXT('part definition',#2,'design');
+#345 = TESSELLATED_SOLID('',(#346,#348,#350,#352,#354,#356),$);
+#346 = TRIANGULATED_FACE('',#347,4,(
+    (1.,0.,0.)
+    ,(1.,0.,0.)
+    ,(1.,0.,0.)
+    ,(1.,0.,0.)),$,(1,2,3,4),(
+    (2,1,3)
+    ,(2,3,4)));
+#347 = COORDINATES_LIST('',4,((0.,0.,0.),(0.,0.,30.),(0.,20.,0.),(0.,20.
+      ,30.)));
+#348 = TRIANGULATED_FACE('',#349,4,(
+    (1.,0.,0.)
+    ,(1.,0.,0.)
+    ,(1.,0.,0.)
+    ,(1.,0.,0.)),$,(1,2,3,4),(
+    (2,1,3)
+    ,(2,3,4)));
+#349 = COORDINATES_LIST('',4,((10.,0.,0.),(10.,0.,30.),(10.,20.,0.),(10.
+      ,20.,30.)));
+#350 = TRIANGULATED_FACE('',#351,4,(
+    (0.,1.,0.)
+    ,(0.,1.,0.)
+    ,(0.,1.,0.)
+    ,(0.,1.,0.)),$,(1,2,3,4),(
+    (4,2,1)
+    ,(4,1,3)));
+#351 = COORDINATES_LIST('',4,((0.,0.,0.),(10.,0.,0.),(0.,0.,30.),(10.,0.
+      ,30.)));
+#352 = TRIANGULATED_FACE('',#353,4,(
+    (0.,1.,0.)
+    ,(0.,1.,0.)
+    ,(0.,1.,0.)
+    ,(0.,1.,0.)),$,(1,2,3,4),(
+    (4,2,1)
+    ,(4,1,3)));
+#353 = COORDINATES_LIST('',4,((0.,20.,0.),(10.,20.,0.),(0.,20.,30.),(10.
+      ,20.,30.)));
+#354 = TRIANGULATED_FACE('',#355,4,(
+    (0.,0.,1.)
+    ,(0.,0.,1.)
+    ,(0.,0.,1.)
+    ,(0.,0.,1.)),$,(1,2,3,4),(
+    (4,2,1)
+    ,(4,1,3)));
+#355 = COORDINATES_LIST('',4,((0.,0.,0.),(0.,20.,0.),(10.,0.,0.),(10.,
+      20.,0.)));
+#356 = TRIANGULATED_FACE('',#357,4,(
+    (0.,0.,1.)
+    ,(0.,0.,1.)
+    ,(0.,0.,1.)
+    ,(0.,0.,1.)),$,(1,2,3,4),(
+    (4,2,1)
+    ,(4,1,3)));
+#357 = COORDINATES_LIST('',4,((0.,0.,30.),(0.,20.,30.),(10.,0.,30.),(10.
+      ,20.,30.)));
+#363 = PRODUCT_RELATED_PRODUCT_CATEGORY('part',$,(#7));
+#364 = TESSELLATED_SHAPE_REPRESENTATION('',(#345),#365);
+#365 = ( GEOMETRIC_REPRESENTATION_CONTEXT(3) 
+GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((#369)) GLOBAL_UNIT_ASSIGNED_CONTEXT
+((#366,#367,#368)) REPRESENTATION_CONTEXT('Context #1',
+  '3D Context with UNIT and UNCERTAINTY') );
+#366 = ( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.) );
+#367 = ( NAMED_UNIT(*) PLANE_ANGLE_UNIT() SI_UNIT($,.RADIAN.) );
+#368 = ( NAMED_UNIT(*) SI_UNIT($,.STERADIAN.) SOLID_ANGLE_UNIT() );
+#369 = UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.E-07),#366,
+  'distance_accuracy_value','confusion accuracy');
+ENDSEC;
+END-ISO-10303-21;

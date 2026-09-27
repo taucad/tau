@@ -1038,6 +1038,37 @@ impl ComponentBodies for OcctComponentBodies<'_> {
         Ok(Some(within != 0))
     }
 
+    fn body_inside(
+        &self,
+        outer: usize,
+        inner: usize,
+        charge: &mut Charge<'_>,
+    ) -> Result<Option<PointState>, BackendError> {
+        let mut state = 0;
+        let mut error = ErrorBuffer::new();
+        let mut charge = charge;
+        let status = unsafe {
+            ffi::geospec_occt_component_body_inside(
+                self.raw.as_ptr(),
+                outer,
+                inner,
+                charge_units,
+                charge_context(&mut charge),
+                &mut state,
+                error.raw(),
+            )
+        };
+        if status == ffi::STOPPED {
+            return Ok(None);
+        }
+        check(status, &error)?;
+        Ok(Some(match state {
+            0 => PointState::Out,
+            1 => PointState::In,
+            _ => PointState::On,
+        }))
+    }
+
     fn bodies_within(
         &self,
         left: usize,
@@ -4298,6 +4329,15 @@ mod ffi {
             charge: Charge,
             context: *mut c_void,
             within: *mut i32,
+            error: *mut StringBuffer,
+        ) -> i32;
+        pub fn geospec_occt_component_body_inside(
+            bodies: *const ComponentBodies,
+            outer: usize,
+            inner: usize,
+            charge: Charge,
+            context: *mut c_void,
+            state: *mut i32,
             error: *mut StringBuffer,
         ) -> i32;
         pub fn geospec_occt_component_bodies_within_dedicated(

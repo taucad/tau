@@ -472,6 +472,17 @@ pub trait ComponentBodies {
         tolerance: f64,
         charge: &mut Charge<'_>,
     ) -> Result<Option<bool>, BackendError>;
+    /// Where `inner` lies in the solid `outer`, for bodies whose boundaries
+    /// lie farther apart than the tolerance: one vertex per vertex-connected
+    /// face set of `inner`, classified as the whole-body distance classifies
+    /// every vertex; `In` when one is inside, `Out` when all are outside, and
+    /// `On` otherwise.
+    fn body_inside(
+        &self,
+        outer: usize,
+        inner: usize,
+        charge: &mut Charge<'_>,
+    ) -> Result<Option<PointState>, BackendError>;
     /// Whether two whole bodies lie within `tolerance`, a solid's interior
     /// included; parallel under a grant, which leaves the distance exact.
     fn bodies_within(

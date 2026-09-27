@@ -77,6 +77,11 @@ fn admission_joins_products_and_owners_in_order() {
 }
 
 #[test]
+fn m2_face_boxes_grow_by_their_tolerances_and_the_body_bounds_do_not() {
+    qualify("component-face-boxes-grow-by-their-tolerances");
+}
+
+#[test]
 fn the_report_prototype_copy_admits_only_disjoint_unshared_leaves() {
     qualify("prototype-copy-eligibility");
 }

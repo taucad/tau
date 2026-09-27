@@ -384,6 +384,45 @@ void product_owner_joins() {
         "owners join in occurrence order, and an outside product owns nothing");
 }
 
+// M2: the filter boxes of a body's faces grow by each face's largest
+// tolerance, so a vertex that lies off its faces' surfaces stays inside them;
+// the body bounds fold the boxes ungrown, as bounds() does.
+void component_face_boxes_grow_by_their_tolerances() {
+  const TopoDS_Shape box = BRepPrimAPI_MakeBox(10, 10, 10).Solid();
+  TopoDS_Vertex corner;
+  for (TopExp_Explorer vertex(box, TopAbs_VERTEX); vertex.More() && corner.IsNull();
+       vertex.Next()) {
+    const TopoDS_Vertex& current = TopoDS::Vertex(vertex.Current());
+    if (BRep_Tool::Pnt(current).Distance(gp_Pnt(10, 10, 10)) < 1e-9) corner = current;
+  }
+  check(!corner.IsNull(), "the control needs the box's far corner");
+  // The corner 0.05 mm above its edges' ends, with a tolerance that still
+  // joins them.
+  BRep_Builder().UpdateVertex(corner, gp_Pnt(10, 10, 10.05), 0.06);
+  const geospec_occt_document document = document_for(box);
+  geospec_occt_component_bodies* bodies = nullptr;
+  size_t body_count = 0, face_count = 0;
+  const geospec_occt_charge approve = [](void*, uint64_t) { return 0; };
+  check(geospec_occt_component_bodies_new(&document, nullptr, 0, approve, nullptr,
+                                          &bodies, &body_count, &face_count,
+                                          nullptr) == GEOSPEC_OCCT_OK &&
+            body_count == 1 && face_count == 6,
+        "the box is one solid body of six faces");
+  geospec_occt_component_body body{};
+  std::vector<geospec_occt_bounds> faces(face_count);
+  const int status = geospec_occt_component_bodies_facts(bodies, &body, 1, faces.data(),
+                                                         faces.size(), nullptr);
+  geospec_occt_component_bodies_release(bodies);
+  check(status == GEOSPEC_OCCT_OK, "the body facts are read");
+  const geospec_occt_bounds exact = memo_bounds(document, box);
+  check(std::memcmp(&body.bounds, &exact, sizeof exact) == 0,
+        "the body bounds stay the ungrown fold");
+  check(exact.max[2] < 10.05, "the memo boxes miss the raised corner");
+  size_t reaching = 0;
+  for (const geospec_occt_bounds& face : faces) reaching += face.max[2] >= 10.05 ? 1 : 0;
+  check(reaching == 3, "the three faces at the corner reach it");
+}
+
 // The report prototype copy: only a compound of located-disjoint leaves
 // whose definitions share no descendant is eligible.
 void prototype_copy_eligibility() {
@@ -430,6 +469,8 @@ constexpr Control kControls[] = {
     {"wall-closure-ignores-the-stored-flag", wall_closure_ignores_the_stored_flag},
     {"product-owner-joins", product_owner_joins},
     {"prototype-copy-eligibility", prototype_copy_eligibility},
+    {"component-face-boxes-grow-by-their-tolerances",
+     component_face_boxes_grow_by_their_tolerances},
 };
 
 }  // namespace

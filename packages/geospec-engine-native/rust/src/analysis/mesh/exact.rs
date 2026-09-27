@@ -253,8 +253,22 @@ fn box_distance(left: Bounds, right: Bounds) -> f64 {
     squares.sqrt()
 }
 
-/// The face pairs whose memo boxes lie within `tolerance`. The boxes enclose
-/// their faces, so any other face pair is proven apart.
+/// The fold of a body's grown face boxes: as far as its faces' tolerances
+/// let the exact distances reach, where `bounds` is the exact fold.
+fn reach(body: &ComponentBody) -> Bounds {
+    let mut reach = empty_aabb();
+    for face in &body.faces {
+        expand(&mut reach, face.min);
+        expand(&mut reach, face.max);
+    }
+    Bounds {
+        min: reach.min,
+        max: reach.max,
+    }
+}
+
+/// The face pairs whose grown boxes lie within `tolerance`. The boxes enclose
+/// what the exact distances measure, so any other face pair is proven apart.
 fn face_pairs(
     left: &ComponentBody,
     right: &ComponentBody,
@@ -270,8 +284,8 @@ fn face_pairs(
     let mut left_used = vec![false; left.faces.len()];
     let mut right_used = vec![false; right.faces.len()];
     let mut count = 0;
-    let right_near = near(&right.faces, left.bounds);
-    for left_face in near(&left.faces, right.bounds) {
+    let right_near = near(&right.faces, reach(left));
+    for left_face in near(&left.faces, reach(right)) {
         for &right_face in &right_near {
             if box_distance(left.faces[left_face], right.faces[right_face]) <= tolerance {
                 count += 1;
@@ -294,13 +308,16 @@ fn face_pairs(
     }
 }
 
-/// Whether `inner` can lie inside the solid `outer`'s material.
+/// Whether `inner` can lie inside the solid `outer`'s material, which
+/// reaches as far as its grown face boxes.
 fn holds(outer: &ComponentBody, inner: &ComponentBody, tolerance: f64) -> bool {
-    outer.solid
-        && (0..3).all(|axis| {
-            outer.bounds.min[axis] - tolerance <= inner.bounds.min[axis]
-                && inner.bounds.max[axis] <= outer.bounds.max[axis] + tolerance
+    outer.solid && {
+        let reach = reach(outer);
+        (0..3).all(|axis| {
+            reach.min[axis] - tolerance <= inner.bounds.min[axis]
+                && inner.bounds.max[axis] <= reach.max[axis] + tolerance
         })
+    }
 }
 
 /// Clusters in body order, labelled by their body with the most vertices
@@ -593,6 +610,35 @@ mod tests {
             assert_eq!(*fake.calls.borrow(), calls);
             assert_eq!(budget.used(), units);
         }
+    }
+
+    #[test]
+    fn the_filters_reach_as_far_as_the_grown_face_boxes() {
+        // Face boxes grow by their faces' tolerances; `bounds` folds them
+        // ungrown. Body 0's second face (x 0.3-0.95) lies beyond the tolerance
+        // of body 1's exact bounds (x from 1.0005) but meets its grown face
+        // (x from 0.9005), so it joins the pair's faces.
+        let span = |min: f64, max: f64| slab([min, 0.0, 0.0], [max, 1.0, 1.0]);
+        let left = body(vec![span(0.0, 1.0), span(0.3, 0.95)], true, 8);
+        let right = ComponentBody {
+            bounds: span(1.0005, 2.0),
+            ..body(vec![span(0.9005, 2.1)], true, 8)
+        };
+        let pair = face_pairs(&left, &right, 0, 1, 0.001);
+        assert_eq!(
+            (pair.count, pair.left_faces, pair.right_faces),
+            (2, vec![0, 1], vec![0])
+        );
+        // A solid's material reaches its grown faces: a body there, beyond
+        // the exact bounds, may lie inside it; one beyond the reach may not.
+        let outer = ComponentBody {
+            bounds: slab([0.0; 3], [10.0; 3]),
+            ..body(vec![slab([-0.5; 3], [10.5; 3])], true, 8)
+        };
+        let within = body(vec![slab([9.0; 3], [10.4; 3])], true, 8);
+        let beyond = body(vec![slab([9.0; 3], [10.6; 3])], true, 8);
+        assert!(holds(&outer, &within, 0.001));
+        assert!(!holds(&outer, &beyond, 0.001));
     }
 
     #[test]

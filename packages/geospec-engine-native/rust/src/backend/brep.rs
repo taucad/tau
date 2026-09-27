@@ -487,9 +487,12 @@ pub struct ComponentBody {
     /// A solid, so a body inside its material is at distance zero.
     pub solid: bool,
     pub vertices: u32,
-    /// The fold of `faces`, bit-equal to the shape's exact bounds.
+    /// The fold of the faces' memo boxes before they grow, bit-equal to the
+    /// shape's exact bounds.
     pub bounds: Bounds,
-    /// Each face's box from the per-located-face memo, in explorer order.
+    /// Each face's box from the per-located-face memo, grown by the largest
+    /// tolerance of the face, its edges and its vertices so it encloses what
+    /// the exact distances measure, in explorer order.
     pub faces: Vec<Bounds>,
 }
 

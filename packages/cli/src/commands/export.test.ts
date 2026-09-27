@@ -204,6 +204,7 @@ describe('exportCommand', () => {
     const target = `${process.platform}-${process.arch}`;
     const targetRoot = join(workspace, target);
     const digest = 'a'.repeat(64);
+    const { picogkRuntimeManifestSchema } = await import('@taucad/picogk');
     await mkdir(targetRoot);
     await writeFile(
       join(targetRoot, 'tau-runtime-manifest.json'),
@@ -218,7 +219,7 @@ describe('exportCommand', () => {
         picoGkArchiveSha256: digest,
         picoGkHostedPatchSha256: digest,
         hostApiVersion: 1,
-        protocolVersion: 3,
+        protocolVersion: picogkRuntimeManifestSchema.shape.protocolVersion.value,
         sceneArtifactVersion: 3,
         topologySchemaVersion: 1,
         sourceFilesSha256: digest,

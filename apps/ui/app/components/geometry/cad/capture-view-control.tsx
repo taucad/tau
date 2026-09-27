@@ -2,7 +2,6 @@ import { useCallback } from 'react';
 import { Camera, Check } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
-import { DropdownMenuItem } from '@taucad/ui/components/dropdown-menu';
 import { useGraphics } from '#hooks/use-graphics.js';
 import { useCad } from '#hooks/use-cad.js';
 import { useChatActions } from '#hooks/use-chat.js';
@@ -68,26 +67,11 @@ export function CaptureViewControl(): React.JSX.Element {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button variant='overlay' size='icon' aria-label='Capture view to chat' onClick={handleCapture}>
+        <Button variant='ghost' size='icon-sm' aria-label='Capture view to chat' onClick={handleCapture}>
           {ticked ? <Check className='size-4 text-success' /> : <Camera className='size-4' />}
         </Button>
       </TooltipTrigger>
       <TooltipContent>{ticked ? 'Added to chat' : 'Capture view to chat'}</TooltipContent>
     </Tooltip>
-  );
-}
-
-/**
- * Overflow (dropdown) variant of {@link CaptureViewControl}.
- * Rendered inside the ViewerSettings dropdown when the toolbar is too narrow.
- */
-export function CaptureViewOverflowControl(): React.JSX.Element {
-  const handleCapture = useCaptureCurrentViewToChat(() => toast.success('Added screenshot to chat'));
-
-  return (
-    <DropdownMenuItem onSelect={handleCapture}>
-      <Camera />
-      Capture view to chat
-    </DropdownMenuItem>
   );
 }

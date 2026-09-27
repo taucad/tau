@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
@@ -30,6 +30,15 @@ vi.mock('#hooks/use-graphics.js', () => ({
       },
     }),
 }));
+
+/** Waits one task: a menu starts listening for presses outside, and returns focus, a task after it opens or closes. */
+const nextTask = async (): Promise<void> => {
+  await act(async () => {
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0);
+    });
+  });
+};
 
 const renderGridSizeIndicator = (): void => {
   render(
@@ -78,6 +87,35 @@ describe('GridSizeIndicator', () => {
 
     expect(mocks.graphicsSend).toHaveBeenLastCalledWith({ type: 'setGridUnit', payload: { unit: 'cm' } });
     expect(screen.getByRole('menu')).toBeVisible();
+  });
+
+  it('should return focus to the readout when Escape closes its menu', async () => {
+    const user = userEvent.setup();
+    renderGridSizeIndicator();
+    const trigger = screen.getByRole('button', { name: 'Grid 50 mm, units and grid' });
+    act(() => {
+      trigger.focus();
+    });
+
+    await user.keyboard('{Enter}');
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
+  it('should leave focus with the pointer when a press outside closes its menu', async () => {
+    const user = userEvent.setup();
+    renderGridSizeIndicator();
+    await user.click(screen.getByRole('button', { name: 'Grid 50 mm, units and grid' }));
+    await nextTask();
+
+    fireEvent.pointerDown(document.body);
+    await nextTask();
+
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Grid 50 mm, units and grid' })).not.toHaveFocus();
   });
 
   it('should render nothing before the grid has a size', () => {

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
@@ -71,12 +71,25 @@ vi.mock('#hooks/use-cad.js', () => ({
 
 const fieldOfViewName = 'Field of view, 0° is orthographic';
 
-const openViewerSettings = async (user: ReturnType<typeof userEvent.setup>): Promise<void> => {
+/** Waits one task: a menu starts listening for presses outside, and returns focus, a task after it opens or closes. */
+const nextTask = async (): Promise<void> => {
+  await act(async () => {
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0);
+    });
+  });
+};
+
+const renderViewerSettings = (): void => {
   render(
     <TooltipProvider>
       <ViewerSettings />
     </TooltipProvider>,
   );
+};
+
+const openViewerSettings = async (user: ReturnType<typeof userEvent.setup>): Promise<void> => {
+  renderViewerSettings();
   await user.click(screen.getByRole('button', { name: 'Viewer settings' }));
 };
 
@@ -104,6 +117,36 @@ describe('ViewerSettings', () => {
     expect(screen.queryByText('Backend')).not.toBeInTheDocument();
     expect(screen.queryByText('Graphics backend')).not.toBeInTheDocument();
     expect(screen.queryByText('WebGPU')).not.toBeInTheDocument();
+  });
+
+  describe('closing', () => {
+    it('should return focus to the trigger when Escape closes the menu', async () => {
+      const user = userEvent.setup();
+      renderViewerSettings();
+      const trigger = screen.getByRole('button', { name: 'Viewer settings' });
+      act(() => {
+        trigger.focus();
+      });
+
+      await user.keyboard('{Enter}');
+      expect(screen.getByRole('menu')).toBeInTheDocument();
+      await user.keyboard('{Escape}');
+
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+      expect(trigger).toHaveFocus();
+    });
+
+    it('should leave focus with the pointer when a press outside closes the menu', async () => {
+      const user = userEvent.setup();
+      await openViewerSettings(user);
+      await nextTask();
+
+      fireEvent.pointerDown(document.body);
+      await nextTask();
+
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Viewer settings' })).not.toHaveFocus();
+    });
   });
 
   describe('field of view', () => {
@@ -192,7 +235,7 @@ describe('ViewerSettings', () => {
       });
 
       await user.keyboard('{ArrowDown}');
-      expect(screen.getByRole('menuitem', { name: fieldOfViewName })).toHaveFocus();
+      expect(screen.getByRole('menuitem', { name: `${fieldOfViewName}, 42°` })).toHaveFocus();
       expect(await screen.findByRole('tooltip', { name: /Drag for field of view/ })).toBeInTheDocument();
 
       await user.keyboard('{ArrowRight}');

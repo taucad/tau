@@ -1368,7 +1368,12 @@ fn evaluate_center(
     let (hash, mut diagnostics) = subject_meta(context);
     let (measured, source) = match context.brep_shape() {
         Err(result) => return result,
-        Ok(Some(shape)) => (Some(shape.center_of_mass), "brep"),
+        // As a zero signed mesh volume has none: the bridge measures no centre
+        // of mass for a massless shape (|volume| <= epsilon).
+        Ok(Some(shape)) => (
+            (shape.volume.abs() > f64::EPSILON).then_some(shape.center_of_mass),
+            "brep",
+        ),
         Ok(None) => {
             let analysis = match context.mesh_analysis() {
                 Ok(value) => value,

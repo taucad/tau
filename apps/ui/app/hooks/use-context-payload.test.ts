@@ -12,6 +12,7 @@ const mockGetEntry = vi.fn<(path: string) => Promise<FileEntry | undefined>>();
 const mockSubscribeTree = vi.fn<(callback: () => void) => () => void>();
 
 const mockTreeService = {
+  getTreeSnapshot: () => new Map<string, FileEntry>(),
   listDirectory: mockListDirectory,
   getEntry: mockGetEntry,
   subscribeTree: mockSubscribeTree,

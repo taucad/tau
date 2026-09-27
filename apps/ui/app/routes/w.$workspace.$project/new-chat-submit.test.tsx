@@ -203,10 +203,10 @@ describe('new chat submit regression', () => {
 
     // Pre-acquire the "previous focused chat" — this mirrors the route having
     // chat_old loaded before the user creates chat_new.
-    store.acquire('chat_old');
+    store.acquire('chat_old', 'project_test');
 
     // User clicks "new chat" → focusedChatId flips → store acquires chat_new.
-    const newSession = store.acquire('chat_new');
+    const newSession = store.acquire('chat_new', 'project_test');
 
     expect(newSession.chatId).toBe('chat_new');
     expect(newSession.chat.id).toBe('chat_new');
@@ -266,8 +266,8 @@ describe('new chat submit regression', () => {
       client: emptyClient(),
     });
 
-    store.acquire('chat_old');
-    const newSession = store.acquire('chat_new');
+    store.acquire('chat_old', 'project_test');
+    const newSession = store.acquire('chat_new', 'project_test');
 
     const userMessage: MyUIMessage = {
       id: 'msg_user_1',

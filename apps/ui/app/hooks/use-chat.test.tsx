@@ -314,7 +314,9 @@ function createWrapper(chatId: string = defaultTestChatId) {
   return function Wrapper({ children }: { readonly children: ReactNode }) {
     return (
       <ChatSessionStoreProvider>
-        <ActiveChatProvider chatId={chatId}>{children}</ActiveChatProvider>
+        <ActiveChatProvider chatId={chatId} projectId={testProjectId}>
+          {children}
+        </ActiveChatProvider>
       </ChatSessionStoreProvider>
     );
   };
@@ -1147,9 +1149,11 @@ describe('hooks resolution rules', () => {
       return (
         <ChatSessionStoreProvider>
           {/* Background session: ActiveChatProvider acquires chat_background from the store. */}
-          <ActiveChatProvider chatId='chat_background'>
+          <ActiveChatProvider chatId='chat_background' projectId={testProjectId}>
             {/* Inner foreground binding: ActiveChatProvider acquires chat_foreground. */}
-            <ActiveChatProvider chatId='chat_foreground'>{children}</ActiveChatProvider>
+            <ActiveChatProvider chatId='chat_foreground' projectId={testProjectId}>
+              {children}
+            </ActiveChatProvider>
           </ActiveChatProvider>
         </ChatSessionStoreProvider>
       );

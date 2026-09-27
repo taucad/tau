@@ -448,7 +448,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
 
     store.setProjectSession('proj_a', projectA.ref);
     store.setFocusedProject('proj_a');
-    store.acquire('chat-a');
+    store.acquire('chat-a', 'proj_a');
     const fake = harness.created.find((entry) => entry.id === 'chat-a')!;
     fake.status = 'streaming';
     fake.emitStatusChange();
@@ -477,6 +477,9 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     store.setFocusedProject('proj_b');
 
     store.acquire('chat-a', 'proj_a');
+    // @ts-expect-error -- focus never names a chat's project: its caller does (PV-A10).
+    store.acquire('chat-a');
+    store.release('chat-a');
 
     expect(projectA.heard).toContainEqual({ type: 'openChat', chatId: 'chat-a' });
     expect(projectB.heard).not.toContainEqual({ type: 'openChat', chatId: 'chat-a' });
@@ -485,7 +488,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     store.setProjectSession('proj_b', undefined);
   });
 
-  it('rebinds a chat acquired during a focus switch to its durable project before the run starts', async () => {
+  it('binds a chat acquired during a focus switch to its caller’s project before its row loads', async () => {
     const store = new ChatSessionStore();
     const deps = createStubDeps();
     let resolveLoadedChat!: (chat: ChatEntity) => void;
@@ -519,10 +522,9 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     store.setFocusedProject('proj_b');
 
     /* React renders A's new chat before ProjectSessionBinding's focus effect
-     * runs, so acquisition still sees B. The durable chat row is the first
-     * authoritative ownership fact available to the store. */
-    const session = store.acquire('chat_a');
-    expect(session.stateActorRef).toBe(projectB.chatRef);
+     * runs, so focus still says B. The caller names A (PV-S4). */
+    const session = store.acquire('chat_a', 'proj_a');
+    expect(session.stateActorRef).toBe(projectA.chatRef);
     expect(session.persistenceActorRef.getSnapshot().value).toMatchObject({ chatLoading: 'loading' });
     await vi.waitFor(() => {
       expect(deps.getChat).toHaveBeenCalledWith('chat_a');
@@ -538,13 +540,13 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     });
 
     await vi.waitFor(() => {
-      expect(session.stateActorRef).toBe(projectA.chatRef);
+      expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
     });
     const fake = harness.created.find((entry) => entry.id === 'chat_a')!;
     fake.status = 'streaming';
     fake.emitStatusChange();
 
-    expect(projectB.heard).toContainEqual({ type: 'chatClosed', chatId: 'chat_a' });
+    expect(projectB.heard).toEqual([]);
     expect(projectA.heard).toContainEqual({ type: 'openChat', chatId: 'chat_a' });
     expect(projectA.heard).toContainEqual({ type: 'runStarted', chatId: 'chat_a' });
     expect(projectB.heard).not.toContainEqual({ type: 'runStarted', chatId: 'chat_a' });
@@ -569,14 +571,14 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     store.setFocusedProject('proj_b');
 
     try {
-      store.acquire('chat_delayed_release');
+      store.acquire('chat_delayed_release', 'proj_b');
       await vi.waitFor(() => {
         expect(deps.getChat).toHaveBeenCalledWith('chat_delayed_release');
       });
       store.release('chat_delayed_release');
       resolveLoadedChat({
         id: 'chat_delayed_release',
-        resourceId: 'proj_a',
+        resourceId: 'proj_b',
         name: 'Released chat',
         messages: [],
         createdAt: 0,
@@ -618,12 +620,12 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     store.setFocusedProject('proj_b');
 
     try {
-      const released = store.acquire('chat_reacquired');
+      const released = store.acquire('chat_reacquired', 'proj_b');
       await vi.waitFor(() => {
         expect(deps.getChat).toHaveBeenCalledTimes(1);
       });
       store.release('chat_reacquired');
-      const replacement = store.acquire('chat_reacquired');
+      const replacement = store.acquire('chat_reacquired', 'proj_b');
       await vi.waitFor(() => {
         expect(deps.getChat).toHaveBeenCalledTimes(2);
       });
@@ -631,7 +633,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
 
       resolveFirstLoad({
         id: 'chat_reacquired',
-        resourceId: 'proj_a',
+        resourceId: 'proj_b',
         name: 'Reacquired chat',
         messages: [],
         createdAt: 0,
@@ -703,7 +705,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     store.setFocusedProject('proj_b');
 
     try {
-      const session = store.acquire('chat_early_settlement');
+      const session = store.acquire('chat_early_settlement', 'proj_a');
       await vi.waitFor(() => {
         expect(deps.getChat).toHaveBeenCalledWith('chat_early_settlement');
       });
@@ -786,7 +788,7 @@ describe('ChatSessionStore — host-attested settlement (P71)', () => {
     try {
       store.setFocusedProject('project-settlement');
       store.setProjectSession('project-settlement', sessionProjectRef(chatId, actor));
-      store.acquire(chatId);
+      store.acquire(chatId, 'project-settlement');
       store.startRun(chatId, testRunBody);
       const fake = harness.created.find((entry) => entry.id === chatId);
       expect(fake).toBeDefined();
@@ -830,7 +832,7 @@ describe('ChatSessionStore — host-attested settlement (P71)', () => {
     try {
       store.setFocusedProject('project-settlement');
       store.setProjectSession('project-settlement', sessionProjectRef(chatId, actor));
-      store.acquire(chatId);
+      store.acquire(chatId, 'project-settlement');
       store.startRun(chatId, {
         ...testRunBody,
         admission: { version: 1, idempotencyKey: currentRunId },
@@ -894,8 +896,8 @@ describe('ChatSessionStore — host-attested settlement (P71)', () => {
     try {
       store.setFocusedProject('project-settlement');
       store.setProjectSession('project-settlement', projectRef);
-      store.acquire('chat-a');
-      store.acquire('chat-b');
+      store.acquire('chat-a', 'project-settlement');
+      store.acquire('chat-b', 'project-settlement');
       chatA.send({ type: 'runLifecycle', phase: 'running', runId: 'run-a' });
       chatA.send({ type: 'runLifecycle', phase: 'completed', runId: 'run-a' });
 
@@ -952,8 +954,8 @@ describe('ChatSessionStore — host-attested settlement (P71)', () => {
 
     store.setFocusedProject('project-settlement');
     store.setProjectSession('project-settlement', projectRef);
-    store.acquire('chat-failed');
-    store.acquire('chat-conflicted');
+    store.acquire('chat-failed', 'project-settlement');
+    store.acquire('chat-conflicted', 'project-settlement');
     try {
       recordHostTurnSettlement({
         type: 'turn.failed',
@@ -1024,7 +1026,7 @@ describe('ChatSessionStore — host-attested settlement (P71)', () => {
     });
 
     store.setFocusedProject('project-persisted-settlement');
-    store.acquire(chatId);
+    store.acquire(chatId, 'project-persisted-settlement');
     store.setProjectSession('project-persisted-settlement', projectRef);
 
     expect(chat.getSnapshot().matches({ run: 'done' })).toBe(true);
@@ -1108,7 +1110,7 @@ describe('ChatSessionStore — persisted failure replay (P59)', () => {
     } as unknown as Parameters<StoreType['setProjectSession']>[1];
 
     store.setFocusedProject('proj_reload');
-    store.acquire('chat-reloaded');
+    store.acquire('chat-reloaded', 'proj_reload');
     const fake = harness.created.find((entry) => entry.id === 'chat-reloaded')!;
     fake.status = 'error';
     fake.error = new Error('the model refused');
@@ -1141,7 +1143,7 @@ describe('ChatSessionStore — persisted failure replay (P59)', () => {
     } as unknown as Parameters<StoreType['setProjectSession']>[1];
 
     store.setFocusedProject('proj_live');
-    store.acquire('chat-streaming');
+    store.acquire('chat-streaming', 'proj_live');
     const fake = harness.created.find((entry) => entry.id === 'chat-streaming')!;
     fake.status = 'streaming';
     fake.emitStatusChange();
@@ -1182,7 +1184,7 @@ describe('ChatSessionStore', () => {
 
   it('updates the active dynamic tool name when counts stay unchanged', () => {
     const store = createStore();
-    const session = store.acquire('chat_tool_name');
+    const session = store.acquire('chat_tool_name', 'project_1');
     const fake = harness.created.find((entry) => entry.id === 'chat_tool_name')!;
     const actor = createActor(chatSessionMachine, {
       input: { chatId: 'chat_tool_name', projectId: 'project_1' },
@@ -1224,14 +1226,14 @@ describe('ChatSessionStore', () => {
     it('marks unattended terminal success and error, but not abort or disconnect', async () => {
       const { store, deps } = storeInProject();
 
-      store.retainDurableRun({ chatId: 'chat_success', runId: 'run_chat_success' });
+      store.retainDurableRun({ projectId, chatId: 'chat_success', runId: 'run_chat_success' });
       finishRun(harness.created.at(-1)!);
       for (const [chatId, options] of [
         ['chat_error', { isError: true }],
         ['chat_abort', { isAbort: true }],
         ['chat_disconnect', { isDisconnect: true }],
       ] as const) {
-        store.retainDurableRun({ chatId, runId: `run_${chatId}` });
+        store.retainDurableRun({ projectId, chatId, runId: `run_${chatId}` });
         harness.created.at(-1)!.finish(options);
       }
 
@@ -1248,7 +1250,7 @@ describe('ChatSessionStore', () => {
     it('marks a new unattended approval once while it remains pending', async () => {
       const { store, deps } = storeInProject();
       vi.spyOn(deps.client, 'writeFile');
-      store.retainDurableRun({ chatId: 'chat_approval', runId: 'run_approval' });
+      store.retainDurableRun({ projectId, chatId: 'chat_approval', runId: 'run_approval' });
       const chat = harness.created[0]!;
       const approval = {
         type: 'tool-delete_file',
@@ -1271,7 +1273,7 @@ describe('ChatSessionStore', () => {
 
     it('does not mark terminal or approval events viewed in an active document', async () => {
       const { store, deps } = storeInProject();
-      store.acquire('chat_active');
+      store.acquire('chat_active', projectId);
       store.focusChat('chat_active');
       const chat = harness.created[0]!;
       chat.messages = [
@@ -1305,7 +1307,7 @@ describe('ChatSessionStore', () => {
      * `onFinish` lands after focus has moved on, and marking it left a chat nothing ran in unread. */
     it('should not mark a chat unread when its resume ends without output after focus moved away', async () => {
       const { store, deps } = storeInProject();
-      store.acquire('chat_opened');
+      store.acquire('chat_opened', projectId);
       store.focusChat('chat_opened');
       store.focusChat('chat_next');
       store.blurChat('chat_opened');
@@ -1328,8 +1330,8 @@ describe('ChatSessionStore', () => {
     /* R3: every sidebar row holds a view of its chat, so a view alone is not the person reading it. */
     it('should mark a chat that finishes while another chat is focused in an active document', async () => {
       const { store, deps } = storeInProject();
-      store.acquire('chat_listed');
-      store.acquire('chat_focused');
+      store.acquire('chat_listed', projectId);
+      store.acquire('chat_focused', projectId);
       store.focusChat('chat_focused');
 
       finishRun(harness.created[0]!);
@@ -1342,7 +1344,7 @@ describe('ChatSessionStore', () => {
 
     it('should mark the focused chat once focus has moved away from it', async () => {
       const { store, deps } = storeInProject();
-      store.acquire('chat_left');
+      store.acquire('chat_left', projectId);
       store.focusChat('chat_left');
       store.focusChat('chat_next');
       store.blurChat('chat_left');
@@ -1357,7 +1359,7 @@ describe('ChatSessionStore', () => {
     it('marks a terminal event when its mounted view is hidden', async () => {
       vi.stubGlobal('document', { visibilityState: 'hidden', hasFocus: () => false });
       const { store, deps } = storeInProject();
-      store.acquire('chat_hidden');
+      store.acquire('chat_hidden', projectId);
 
       finishRun(harness.created[0]!);
 
@@ -1383,7 +1385,7 @@ describe('ChatSessionStore', () => {
      */
     it('should not dispose a chat whose turn owner is still admitting', async () => {
       const store = createStore();
-      store.acquire('chat_dispose_admitting');
+      store.acquire('chat_dispose_admitting', 'resource_dispose_admitting');
       startTurnOwner(store, 'resource_dispose_admitting');
       publishChatTurnAdmission(
         'chat_dispose_admitting',
@@ -1416,7 +1418,7 @@ describe('ChatSessionStore', () => {
      */
     it('should release the composer when the turn owner is stopped mid-admission', async () => {
       const store = createStore();
-      store.acquire('chat_stopped_admitting');
+      store.acquire('chat_stopped_admitting', 'resource_stopped_admitting');
       startTurnOwner(store, 'resource_stopped_admitting');
       const owner = turnOwners.at(-1)!;
       publishChatTurnAdmission(
@@ -1454,7 +1456,7 @@ describe('ChatSessionStore', () => {
      */
     it('should release the composer for a gesture made after its turn owner was stopped', async () => {
       const store = createStore();
-      store.acquire('chat_stopped_before');
+      store.acquire('chat_stopped_before', 'resource_stopped_before');
       startTurnOwner(store, 'resource_stopped_before');
       const owner = turnOwners.at(-1)!;
       publishChatTurnAdmission(
@@ -1482,7 +1484,11 @@ describe('ChatSessionStore', () => {
     it('retains and resumes an API-discovered run without a focused view', async () => {
       const store = createStore();
 
-      const session = store.retainDurableRun({ chatId: 'chat_background', runId: 'run_background' });
+      const session = store.retainDurableRun({
+        projectId: 'project_test',
+        chatId: 'chat_background',
+        runId: 'run_background',
+      });
 
       expect(store.list()).toContain('chat_background');
       expect(session).toBe(store.get('chat_background'));
@@ -1494,6 +1500,7 @@ describe('ChatSessionStore', () => {
     it('restores one canonical user row before its durable assistant idempotently', () => {
       const store = createStore();
       const session = store.retainDurableRun({
+        projectId: 'project_test',
         chatId: 'chat_durable_user',
         runId: 'run_durable_user',
         state: 'terminal',
@@ -1536,12 +1543,17 @@ describe('ChatSessionStore', () => {
         recencyAt: 1,
       });
       store.setDependencies(deps);
-      const session = store.acquire('chat_recovery');
+      const session = store.acquire('chat_recovery', 'project_test');
 
       await vi.waitFor(() => {
         expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
       });
-      store.retainDurableRun({ chatId: 'chat_recovery', runId: 'run_recovery', state: 'active' });
+      store.retainDurableRun({
+        projectId: 'project_test',
+        chatId: 'chat_recovery',
+        runId: 'run_recovery',
+        state: 'active',
+      });
 
       await vi.waitFor(() => {
         expect(harness.created[0]?.resumeStream).toHaveBeenCalledOnce();
@@ -1550,8 +1562,18 @@ describe('ChatSessionStore', () => {
 
     it('fences release of a waiting run after an approval admission replaces its runId', () => {
       const store = createStore();
-      store.retainDurableRun({ chatId: 'chat_approval', runId: 'run_waiting', state: 'active' });
-      store.retainDurableRun({ chatId: 'chat_approval', runId: 'run_approval', state: 'active' });
+      store.retainDurableRun({
+        projectId: 'project_test',
+        chatId: 'chat_approval',
+        runId: 'run_waiting',
+        state: 'active',
+      });
+      store.retainDurableRun({
+        projectId: 'project_test',
+        chatId: 'chat_approval',
+        runId: 'run_approval',
+        state: 'active',
+      });
 
       store.releaseDurableRun({ chatId: 'chat_approval', runId: 'run_waiting' });
 
@@ -1569,8 +1591,13 @@ describe('ChatSessionStore', () => {
       const store = createStore();
       startTurnOwner(store, 'project_reconcile');
       const settlements = publishSettlementRecorder('chat_reconcile');
-      store.acquire('chat_reconcile');
-      store.retainDurableRun({ chatId: 'chat_reconcile', runId: 'run_reconcile', state: 'active' });
+      store.acquire('chat_reconcile', 'project_reconcile');
+      store.retainDurableRun({
+        projectId: 'project_reconcile',
+        chatId: 'chat_reconcile',
+        runId: 'run_reconcile',
+        state: 'active',
+      });
 
       harness.created.find((entry) => entry.id === 'chat_reconcile')!.finish();
 
@@ -1592,10 +1619,15 @@ describe('ChatSessionStore', () => {
       const store = createStore();
       startTurnOwner(store, 'project_host_named');
       const settlements = publishSettlementRecorder('chat_host_named');
-      store.acquire('chat_host_named');
+      store.acquire('chat_host_named', 'project_host_named');
       // Reload discovery retained a *stale* claim's run; the reattach then
       // resolved the run the chat's log actually ends on.
-      store.retainDurableRun({ chatId: 'chat_host_named', runId: 'run_stale_claim', state: 'active' });
+      store.retainDurableRun({
+        projectId: 'project_host_named',
+        chatId: 'chat_host_named',
+        runId: 'run_stale_claim',
+        state: 'active',
+      });
       bindDurableChatRun('chat_host_named', 'run_from_host_log');
 
       harness.created.find((entry) => entry.id === 'chat_host_named')!.finish();
@@ -1626,7 +1658,7 @@ describe('ChatSessionStore', () => {
       });
 
       try {
-        store.acquire('chat_abandoned');
+        store.acquire('chat_abandoned', 'project_abandoned');
         bindDurableChatRun('chat_abandoned', 'run_abandoned');
 
         harness.created.find((entry) => entry.id === 'chat_abandoned')!.finish();
@@ -1658,7 +1690,7 @@ describe('ChatSessionStore', () => {
       });
 
       try {
-        const session = store.acquire('chat_adopt');
+        const session = store.acquire('chat_adopt', 'project_adopt');
 
         const snapshot = session.stateActorRef!.getSnapshot();
         expect(snapshot.matches({ run: 'running' })).toBe(true);
@@ -1670,8 +1702,13 @@ describe('ChatSessionStore', () => {
 
     it('should notify status subscribers when a durable run is released', () => {
       const store = createStore();
-      store.acquire('chat_release');
-      store.retainDurableRun({ chatId: 'chat_release', runId: 'run_release', state: 'terminal' });
+      store.acquire('chat_release', 'project_test');
+      store.retainDurableRun({
+        projectId: 'project_test',
+        chatId: 'chat_release',
+        runId: 'run_release',
+        state: 'terminal',
+      });
       const status = vi.fn();
       store.subscribeStatus('chat_release', status);
 
@@ -1683,7 +1720,7 @@ describe('ChatSessionStore', () => {
 
     it('adopts a freshly admitted transport run before settling a waiting response', () => {
       const store = createStore();
-      store.acquire('chat_fresh_waiting');
+      store.acquire('chat_fresh_waiting', 'project_test');
       bindDurableChatRun('chat_fresh_waiting', 'run_fresh_waiting');
 
       harness.created[0]?.finish();
@@ -1694,7 +1731,7 @@ describe('ChatSessionStore', () => {
 
     it('creates a session lazily on first acquire', () => {
       const store = createStore();
-      const session = store.acquire('chat_a');
+      const session = store.acquire('chat_a', 'project_test');
 
       expect(session.chatId).toBe('chat_a');
       expect(session.chat.id).toBe('chat_a');
@@ -1717,7 +1754,7 @@ describe('ChatSessionStore', () => {
       });
       store.setDependencies(deps);
 
-      store.acquire('chat_idle');
+      store.acquire('chat_idle', 'project_test');
 
       await vi.waitFor(() => {
         expect(deps.getChat).toHaveBeenCalledWith('chat_idle');
@@ -1738,7 +1775,7 @@ describe('ChatSessionStore', () => {
         recencyAt: 1,
       });
       store.setDependencies(deps);
-      const session = store.acquire('chat_daemon');
+      const session = store.acquire('chat_daemon', 'project_test');
       await vi.waitFor(() => {
         expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
       });
@@ -1768,7 +1805,7 @@ describe('ChatSessionStore', () => {
       const loading = Promise.withResolvers<ChatEntity>();
       deps.getChat.mockReturnValue(loading.promise);
       store.setDependencies(deps);
-      const session = store.acquire(chatId);
+      const session = store.acquire(chatId, 'project_test');
       await vi.waitFor(() => {
         expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(true);
       });
@@ -1819,7 +1856,7 @@ describe('ChatSessionStore', () => {
       deps.getChat.mockResolvedValue(seededChat);
       deps.consumeChatStartupRequest.mockResolvedValue({ ...seededChat, startupRequest: undefined });
       store.setDependencies(deps);
-      store.acquire('chat_seeded_daemon');
+      store.acquire('chat_seeded_daemon', 'project_test');
       await vi.waitFor(() => {
         expect(deps.consumeChatStartupRequest).toHaveBeenCalledWith('chat_seeded_daemon', 'req_seeded');
       });
@@ -1844,7 +1881,7 @@ describe('ChatSessionStore', () => {
         recencyAt: 1,
       });
       store.setDependencies(deps);
-      const session = store.acquire('chat_daemon_busy');
+      const session = store.acquire('chat_daemon_busy', 'project_test');
       await vi.waitFor(() => {
         expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
       });
@@ -1885,7 +1922,7 @@ describe('ChatSessionStore', () => {
       try {
         store.setFocusedProject('project_reattach');
         store.setProjectSession('project_reattach', projectRef);
-        const session = store.acquire(chatId);
+        const session = store.acquire(chatId, 'project_reattach');
         await vi.waitFor(() => {
           expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
         });
@@ -1936,7 +1973,7 @@ describe('ChatSessionStore', () => {
       try {
         store.setFocusedProject('project_reattach');
         store.setProjectSession('project_reattach', projectRef);
-        const session = store.acquire(chatId);
+        const session = store.acquire(chatId, 'project_reattach');
         await vi.waitFor(() => {
           expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
         });
@@ -1990,7 +2027,7 @@ describe('ChatSessionStore', () => {
       try {
         store.setFocusedProject('project_reattach');
         store.setProjectSession('project_reattach', projectRef);
-        const session = store.acquire(chatId);
+        const session = store.acquire(chatId, 'project_reattach');
         await vi.waitFor(() => {
           expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
         });
@@ -2035,7 +2072,7 @@ describe('ChatSessionStore', () => {
         role: 'user',
         parts: [{ type: 'text', text: 'Build it.' }],
       };
-      const session = store.acquire(chatId);
+      const session = store.acquire(chatId, 'project_test');
       session.chat.messages = [userMessage, { id: runId, role: 'assistant', parts: [{ type: 'text', text: 'Done.' }] }];
       const hostClient: AgentHostClient = {
         start: vi.fn(),
@@ -2106,7 +2143,7 @@ describe('ChatSessionStore', () => {
     it('dispatches a bodyless continuation, because a resume carries no run body', async () => {
       const chatId = 'chat_resume_bodyless';
       const store = createStore();
-      const session = store.acquire(chatId);
+      const session = store.acquire(chatId, 'project_test');
       const fake = harness.created.at(-1)!;
 
       session.persistenceActorRef.send({ type: 'startRequest', request: { kind: 'continue' } });
@@ -2119,7 +2156,7 @@ describe('ChatSessionStore', () => {
     it('does not arm the host resume from a continue no browser host can consume', async () => {
       const chatId = 'chat_resume_request_unplaced';
       const store = createStore();
-      const session = store.acquire(chatId);
+      const session = store.acquire(chatId, 'project_test');
       const fake = harness.created.at(-1)!;
 
       session.persistenceActorRef.send({
@@ -2158,7 +2195,7 @@ describe('ChatSessionStore', () => {
       const chatId = 'chat_stop_reattached';
       const runId = 'run_stop_reattached';
       const store = createStore();
-      store.acquire(chatId);
+      store.acquire(chatId, 'project_test');
       const running = { chatId, runId, turnId: 'turn_stop_reattached', state: 'running', messages: [] } as const;
       const hostClient: AgentHostClient = {
         start: vi.fn(),
@@ -2206,8 +2243,8 @@ describe('ChatSessionStore', () => {
 
     it('returns the same session on subsequent acquires for the same chatId', () => {
       const store = createStore();
-      const first = store.acquire('chat_a');
-      const second = store.acquire('chat_a');
+      const first = store.acquire('chat_a', 'project_test');
+      const second = store.acquire('chat_a', 'project_test');
 
       expect(second).toBe(first);
       expect(second.chat).toBe(first.chat);
@@ -2218,8 +2255,8 @@ describe('ChatSessionStore', () => {
 
     it('keeps the session live until the final release', () => {
       const store = createStore();
-      store.acquire('chat_a');
-      store.acquire('chat_a');
+      store.acquire('chat_a', 'project_test');
+      store.acquire('chat_a', 'project_test');
 
       store.release('chat_a');
       expect(store.get('chat_a')).toBeDefined();
@@ -2230,7 +2267,7 @@ describe('ChatSessionStore', () => {
 
     it('disposes the persistence and draft actors on the final release', () => {
       const store = createStore();
-      const session = store.acquire('chat_a');
+      const session = store.acquire('chat_a', 'project_test');
       const persistenceSnapshotBefore = session.persistenceActorRef.getSnapshot();
       const draftSnapshotBefore = session.draftActorRef.getSnapshot();
 
@@ -2252,7 +2289,7 @@ describe('ChatSessionStore', () => {
 
     it('does not throw when releasing more times than acquired', () => {
       const store = createStore();
-      store.acquire('chat_a');
+      store.acquire('chat_a', 'project_test');
       store.release('chat_a');
 
       expect(() => {
@@ -2263,10 +2300,10 @@ describe('ChatSessionStore', () => {
 
     it('creates a fresh session after a previous release (no zombie state)', () => {
       const store = createStore();
-      const first = store.acquire('chat_a');
+      const first = store.acquire('chat_a', 'project_test');
       store.release('chat_a');
 
-      const second = store.acquire('chat_a');
+      const second = store.acquire('chat_a', 'project_test');
       expect(second).not.toBe(first);
       expect(second.chat).not.toBe(first.chat);
       expect(harness.created).toHaveLength(2);
@@ -2274,14 +2311,14 @@ describe('ChatSessionStore', () => {
 
     it('keeps a streaming chat alive across focused navigation and releases only its view reference', async () => {
       const store = createStore();
-      const chatA = store.acquire('chat_a');
+      const chatA = store.acquire('chat_a', 'project_test');
       chatA.persistenceActorRef.send({
         type: 'startRequest',
         request: { kind: 'continue', body: testRunBody },
       });
 
       store.release('chat_a');
-      const chatB = store.acquire('chat_b');
+      const chatB = store.acquire('chat_b', 'project_test');
 
       expect(store.get('chat_a')).toBe(chatA);
       expect(store.get('chat_b')).toBe(chatB);
@@ -2302,7 +2339,7 @@ describe('ChatSessionStore', () => {
 
     it('releases the non-view run hold after cancellation reaches terminal state', async () => {
       const store = createStore();
-      const session = store.acquire('chat_cancelled');
+      const session = store.acquire('chat_cancelled', 'project_test');
       session.persistenceActorRef.send({
         type: 'startRequest',
         request: { kind: 'continue', body: testRunBody },
@@ -2339,8 +2376,8 @@ describe('ChatSessionStore', () => {
   describe('per-chatId isolation', () => {
     it('creates an independent session for each chatId', () => {
       const store = createStore();
-      const a = store.acquire('chat_a');
-      const b = store.acquire('chat_b');
+      const a = store.acquire('chat_a', 'project_test');
+      const b = store.acquire('chat_b', 'project_test');
 
       expect(a.chat).not.toBe(b.chat);
       expect(a.persistenceActorRef).not.toBe(b.persistenceActorRef);
@@ -2350,8 +2387,8 @@ describe('ChatSessionStore', () => {
 
     it('releasing one session does not affect the other', () => {
       const store = createStore();
-      const a = store.acquire('chat_a');
-      const b = store.acquire('chat_b');
+      const a = store.acquire('chat_a', 'project_test');
+      const b = store.acquire('chat_b', 'project_test');
 
       store.release('chat_a');
 
@@ -2372,21 +2409,21 @@ describe('ChatSessionStore', () => {
       const listener = vi.fn();
       store.subscribeMembership(listener);
 
-      store.acquire('chat_a');
+      store.acquire('chat_a', 'project_test');
       // Membership notifications fan out on a microtask so an in-render
       // acquire never triggers a re-entrant React update.
       await Promise.resolve();
       expect(listener).toHaveBeenCalledTimes(1);
 
-      store.acquire('chat_a');
+      store.acquire('chat_a', 'project_test');
       await Promise.resolve();
       expect(listener).toHaveBeenCalledTimes(1);
     });
 
     it('notifies membership subscribers on final release only', async () => {
       const store = createStore();
-      store.acquire('chat_a');
-      store.acquire('chat_a');
+      store.acquire('chat_a', 'project_test');
+      store.acquire('chat_a', 'project_test');
       await Promise.resolve();
 
       const listener = vi.fn();
@@ -2406,9 +2443,9 @@ describe('ChatSessionStore', () => {
       const listener = vi.fn();
       store.subscribeMembership(listener);
 
-      store.acquire('chat_a');
-      store.acquire('chat_b');
-      store.acquire('chat_c');
+      store.acquire('chat_a', 'project_test');
+      store.acquire('chat_b', 'project_test');
+      store.acquire('chat_c', 'project_test');
       expect(listener).not.toHaveBeenCalled();
 
       await Promise.resolve();
@@ -2417,12 +2454,12 @@ describe('ChatSessionStore', () => {
 
     it('exposes a stable list reference until membership changes', () => {
       const store = createStore();
-      store.acquire('chat_a');
+      store.acquire('chat_a', 'project_test');
       const first = store.list();
       const second = store.list();
       expect(second).toBe(first);
 
-      store.acquire('chat_b');
+      store.acquire('chat_b', 'project_test');
       expect(store.list()).not.toBe(first);
       expect([...store.list()].sort()).toEqual(['chat_a', 'chat_b']);
     });
@@ -2433,7 +2470,7 @@ describe('ChatSessionStore', () => {
       const unsubscribe = store.subscribeMembership(listener);
       unsubscribe();
 
-      store.acquire('chat_a');
+      store.acquire('chat_a', 'project_test');
       await Promise.resolve();
       expect(listener).not.toHaveBeenCalled();
     });
@@ -2446,7 +2483,7 @@ describe('ChatSessionStore', () => {
   describe('subscribeChat', () => {
     it('fires when the underlying chat messages change', () => {
       const store = createStore();
-      store.acquire('chat_a');
+      store.acquire('chat_a', 'project_test');
       const fake = harness.created[0]!;
       const listener = vi.fn();
       store.subscribeChat('chat_a', listener);
@@ -2457,7 +2494,7 @@ describe('ChatSessionStore', () => {
 
     it('fires when the underlying chat status changes', () => {
       const store = createStore();
-      store.acquire('chat_a');
+      store.acquire('chat_a', 'project_test');
       const fake = harness.created[0]!;
       const listener = vi.fn();
       store.subscribeChat('chat_a', listener);
@@ -2468,8 +2505,8 @@ describe('ChatSessionStore', () => {
 
     it('does not wake subscribers from a different chatId', () => {
       const store = createStore();
-      store.acquire('chat_a');
-      store.acquire('chat_b');
+      store.acquire('chat_a', 'project_test');
+      store.acquire('chat_b', 'project_test');
       const fakeA = harness.created[0]!;
 
       const listenerA = vi.fn();
@@ -2487,7 +2524,7 @@ describe('ChatSessionStore', () => {
       const listener = vi.fn();
       store.subscribeChat('chat_a', listener);
 
-      store.acquire('chat_a');
+      store.acquire('chat_a', 'project_test');
       const fake = harness.created[0]!;
       fake.emitMessagesChange();
 
@@ -2496,7 +2533,7 @@ describe('ChatSessionStore', () => {
 
     it('stops invoking listeners after unsubscribe', () => {
       const store = createStore();
-      store.acquire('chat_a');
+      store.acquire('chat_a', 'project_test');
       const fake = harness.created[0]!;
       const listener = vi.fn();
       const unsubscribe = store.subscribeChat('chat_a', listener);
@@ -2515,7 +2552,7 @@ describe('ChatSessionStore', () => {
     it('keeps every distinct session live and active under simultaneous acquires', () => {
       const store = createStore();
       const ids = ['chat_a', 'chat_b', 'chat_c', 'chat_d'];
-      const sessions = ids.map((id) => store.acquire(id));
+      const sessions = ids.map((id) => store.acquire(id, 'project_test'));
 
       for (const session of sessions) {
         expect(session.persistenceActorRef.getSnapshot().status).toBe('active');
@@ -2527,8 +2564,8 @@ describe('ChatSessionStore', () => {
 
     it("releasing one chat does not stop another chat's actors or unsubscribe its listeners", () => {
       const store = createStore();
-      const a = store.acquire('chat_a');
-      const b = store.acquire('chat_b');
+      const a = store.acquire('chat_a', 'project_test');
+      const b = store.acquire('chat_b', 'project_test');
 
       const listenerA = vi.fn();
       const listenerB = vi.fn();
@@ -2552,7 +2589,7 @@ describe('ChatSessionStore', () => {
 
     it('fans out a single chat event to every subscriber bound to that chatId', () => {
       const store = createStore();
-      store.acquire('chat_a');
+      store.acquire('chat_a', 'project_test');
       const fake = harness.created[0]!;
 
       const listeners = [vi.fn(), vi.fn(), vi.fn()];
@@ -2569,14 +2606,14 @@ describe('ChatSessionStore', () => {
     it('per-chat listener buckets are isolated across re-acquire cycles', () => {
       const store = createStore();
       // First lifecycle: subscribe + drop the subscription via release.
-      store.acquire('chat_a');
+      store.acquire('chat_a', 'project_test');
       const stale = vi.fn();
       const unsubscribeStale = store.subscribeChat('chat_a', stale);
       store.release('chat_a');
       unsubscribeStale();
 
       // Second lifecycle: a brand-new Chat instance + a new subscriber.
-      store.acquire('chat_a');
+      store.acquire('chat_a', 'project_test');
       const fake = harness.created.at(-1)!;
       const fresh = vi.fn();
       store.subscribeChat('chat_a', fresh);
@@ -2589,8 +2626,8 @@ describe('ChatSessionStore', () => {
 
     it('subscribeStatus notifies only its own chatId', () => {
       const store = createStore();
-      store.acquire('chat_a');
-      store.acquire('chat_b');
+      store.acquire('chat_a', 'project_test');
+      store.acquire('chat_b', 'project_test');
 
       const fakeA = harness.created.find((chat) => chat.id === 'chat_a')!;
       const fakeB = harness.created.find((chat) => chat.id === 'chat_b')!;
@@ -2622,7 +2659,7 @@ describe('ChatSessionStore', () => {
       const deps = createStubDeps();
       store.setDependencies(deps);
 
-      store.acquire(chatIdForMilestonePersistence);
+      store.acquire(chatIdForMilestonePersistence, 'project_test');
       await vi.runOnlyPendingTimersAsync();
       deps.patchChat.mockClear();
 
@@ -2683,7 +2720,7 @@ describe('ChatSessionStore', () => {
         const deps = createStubDeps();
         store.setDependencies(deps);
 
-        const session = store.acquire(chatLedgerStopIntegration);
+        const session = store.acquire(chatLedgerStopIntegration, 'project_test');
         await Promise.resolve();
 
         deps.patchChat.mockClear();
@@ -2773,7 +2810,7 @@ describe('ChatSessionStore', () => {
         deps.client.files.set(`${chatAttachmentsDirectory(projectId, chatId)}/${pngHash}.png`, pngBytes);
         store.setDependencies(deps);
 
-        const session = store.acquire(chatId);
+        const session = store.acquire(chatId, projectId);
         await vi.runOnlyPendingTimersAsync();
         deps.patchChat.mockClear();
 
@@ -2862,7 +2899,7 @@ describe('ChatSessionStore', () => {
         const deps = createStubDeps();
         store.setDependencies(deps);
 
-        const session = store.acquire(chatId);
+        const session = store.acquire(chatId, 'project_test');
         await vi.runOnlyPendingTimersAsync();
         deps.patchChat.mockClear();
 
@@ -2969,7 +3006,7 @@ describe('ChatSessionStore', () => {
         kind: 'regenerate',
         body: { agent: { profile: 'cad', execution: { kind: 'tau', model: 'cad-default' }, kernel: 'replicad' } },
       }));
-      const firstSession = store.acquire(chatId);
+      const firstSession = store.acquire(chatId, 'resource_release_reacquire');
 
       const firstFake = harness.created.find((entry) => entry.id === chatId)!;
       await vi.waitFor(() => {
@@ -2991,7 +3028,7 @@ describe('ChatSessionStore', () => {
       await vi.waitFor(() => {
         expect(storedChat.messages).toEqual([]);
       });
-      const secondSession = store.acquire(chatId);
+      const secondSession = store.acquire(chatId, 'resource_release_reacquire');
 
       await vi.waitFor(() => {
         expect(secondSession.draftActorRef.getSnapshot().context.draftText).toBe('make a planetary gear');
@@ -3025,7 +3062,7 @@ describe('ChatSessionStore', () => {
       };
       deps.getChat.mockResolvedValue(sampleChat);
 
-      store.acquire('chat_a');
+      store.acquire('chat_a', 'resource_1');
 
       // Microtask flush so the persistence actor's loadChatActor invokes deps.getChat.
       await Promise.resolve();
@@ -3093,7 +3130,7 @@ describe('ChatSessionStore', () => {
         },
       };
       startTurnOwner(store, 'resource_startup');
-      store.acquire('chat_startup_hydration');
+      store.acquire('chat_startup_hydration', 'resource_startup');
 
       // Reproduce the real mount order: IndexedDB hydration can consume the
       // startup marker before the route publishes the chat's admission. The
@@ -3172,7 +3209,7 @@ describe('ChatSessionStore', () => {
       deps.consumeChatStartupRequest.mockResolvedValue({ ...seededChat, startupRequest: undefined });
 
       // No turn owner yet: the route's registration effect has not run.
-      store.acquire('chat_seed_late_owner');
+      store.acquire('chat_seed_late_owner', 'resource_seed_late');
       await vi.waitFor(() => {
         expect(deps.consumeChatStartupRequest).toHaveBeenCalledWith('chat_seed_late_owner', 'req_seed_late');
       });
@@ -3204,7 +3241,7 @@ describe('ChatSessionStore', () => {
      */
     it('holds a gesture made before the project session binds and admits it on bind', async () => {
       const store = createStore();
-      store.acquire('chat_unbound_gesture');
+      store.acquire('chat_unbound_gesture', 'resource_unbound_gesture');
       const fake = harness.created.find((entry) => entry.id === 'chat_unbound_gesture')!;
 
       // No project session: the chat has no owner to ask.
@@ -3233,7 +3270,7 @@ describe('ChatSessionStore', () => {
      */
     it('keeps a send parked on an unbound owner in the composer until its flush admits it', async () => {
       const store = createStore();
-      const session = store.acquire('chat_parked_draft');
+      const session = store.acquire('chat_parked_draft', 'resource_parked_draft');
       const fake = harness.created.find((entry) => entry.id === 'chat_parked_draft')!;
       const message = buildUserMessage({ text: 'parked message' });
       session.draftActorRef.send({ type: 'setDraftText', text: 'parked message' });
@@ -3267,7 +3304,7 @@ describe('ChatSessionStore', () => {
      */
     it('does not clear a composer the person has typed into since the parked send was made', async () => {
       const store = createStore();
-      const session = store.acquire('chat_parked_retyped');
+      const session = store.acquire('chat_parked_retyped', 'resource_parked_retyped');
       const fake = harness.created.find((entry) => entry.id === 'chat_parked_retyped')!;
       const message = buildUserMessage({ text: 'parked message' });
       session.draftActorRef.send({ type: 'setDraftText', text: 'parked message' });
@@ -3299,7 +3336,7 @@ describe('ChatSessionStore', () => {
      */
     it('returns a displaced send to the composer whichever requestTurn call observes it', async () => {
       const store = createStore();
-      const session = store.acquire('chat_two_sends');
+      const session = store.acquire('chat_two_sends', 'resource_two_sends');
       startTurnOwner(store, 'resource_two_sends');
       const admitted = Promise.withResolvers<void>();
       const second = buildUserMessage({ text: 'second message' });
@@ -3336,7 +3373,7 @@ describe('ChatSessionStore', () => {
      * send's — and its own `requestTurn` resolves last, holding the clear. */
     it('returns a send displaced by an edit to the composer', async () => {
       const store = createStore();
-      const session = store.acquire('chat_send_then_edit');
+      const session = store.acquire('chat_send_then_edit', 'resource_send_then_edit');
       startTurnOwner(store, 'resource_send_then_edit');
       const admitted = Promise.withResolvers<void>();
       publishChatTurnAdmission('chat_send_then_edit', async (gesture) => {
@@ -3380,7 +3417,7 @@ describe('ChatSessionStore', () => {
      */
     it('admits a gesture parked on an unbound owner while a run of that chat is still live', async () => {
       const store = createStore();
-      store.acquire('chat_parked_live_run');
+      store.acquire('chat_parked_live_run', 'resource_parked_live_run');
       const fake = harness.created.find((entry) => entry.id === 'chat_parked_live_run')!;
       const live = vi.spyOn(transportModule, 'getBrowserAgentHostRun').mockReturnValue({
         runId: 'run_live_elsewhere',
@@ -3430,7 +3467,7 @@ describe('ChatSessionStore', () => {
       deps.getChat.mockResolvedValue(orphanChat);
       deps.commitCancelledDraftRestore.mockResolvedValue(restoredChat);
 
-      const session = store.acquire('chat_orphan_pending');
+      const session = store.acquire('chat_orphan_pending', 'resource_orphan');
 
       // The restored draft reaches its record before the transcript is truncated (W7), which takes more than two ticks.
       await vi.waitFor(() => {
@@ -3485,7 +3522,7 @@ describe('ChatSessionStore', () => {
       };
       deps.getChat.mockResolvedValue(orphanChat);
 
-      const session = store.acquire('chat_orphan_placeholder');
+      const session = store.acquire('chat_orphan_placeholder', 'resource_orphan');
 
       // The restored draft reaches its record before the transcript is truncated (W7), which takes more than two ticks.
       await vi.waitFor(() => {
@@ -3560,13 +3597,13 @@ describe('ChatSessionStore', () => {
       const { deps, startupRequest, store } = seededRow(chatId);
 
       startTurnOwner(store, 'project_seed');
-      const first = store.acquire(chatId);
+      const first = store.acquire(chatId, 'project_seed');
       await vi.waitFor(() => {
         expect(deps.consumeChatStartupRequest).toHaveBeenCalledWith(chatId, startupRequest.id);
       });
 
       store.release(chatId);
-      const second = store.acquire(chatId);
+      const second = store.acquire(chatId, 'project_seed');
       expect(second).toBe(first);
 
       publishAdmission(chatId, () => ({ kind: 'regenerate', body: testRunBody }));
@@ -3589,7 +3626,7 @@ describe('ChatSessionStore', () => {
       const { deps, startupRequest, store } = seededRow(chatId);
       deps.consumeChatStartupRequest.mockResolvedValue(undefined);
 
-      store.acquire(chatId);
+      store.acquire(chatId, 'project_test');
       await vi.waitFor(() => {
         expect(deps.consumeChatStartupRequest).toHaveBeenCalledWith(chatId, startupRequest.id);
       });
@@ -3610,7 +3647,7 @@ describe('ChatSessionStore', () => {
       const { deps, store } = seededRow(chatId);
       deps.consumeChatStartupRequest.mockRejectedValue(new Error('workspace patch failed'));
 
-      const session = store.acquire(chatId);
+      const session = store.acquire(chatId, 'project_test');
       await vi.waitFor(() => {
         expect(session.persistenceActorRef.getSnapshot().context.loadError?.message).toContain(
           'workspace patch failed',
@@ -3629,7 +3666,7 @@ describe('ChatSessionStore', () => {
       const chatId = 'chat_seed_compose_failure';
       const { deps, startupRequest, store } = seededRow(chatId);
       startTurnOwner(store, 'project_seed');
-      const session = store.acquire(chatId);
+      const session = store.acquire(chatId, 'project_seed');
       await vi.waitFor(() => {
         expect(deps.consumeChatStartupRequest).toHaveBeenCalledWith(chatId, startupRequest.id);
       });
@@ -3657,7 +3694,7 @@ describe('ChatSessionStore', () => {
       const chatId = 'chat_seed_unloaded';
       const { deps, store } = seededRow(chatId, { messages: [] });
 
-      store.acquire(chatId);
+      store.acquire(chatId, 'project_test');
       await vi.waitFor(() => {
         expect(deps.getChat).toHaveBeenCalledWith(chatId);
       });
@@ -3686,7 +3723,7 @@ describe('ChatSessionStore', () => {
       const { deps, seedMessage, startupRequest, store } = seededRow(chatId);
 
       startTurnOwner(store, 'project_seed');
-      store.acquire(chatId);
+      store.acquire(chatId, 'project_seed');
       await vi.waitFor(() => {
         expect(deps.consumeChatStartupRequest).toHaveBeenCalledWith(chatId, startupRequest.id);
       });
@@ -3713,7 +3750,7 @@ describe('ChatSessionStore', () => {
 
       const loaded = Promise.withResolvers<ChatEntity>();
       deps.getChat.mockImplementation(async () => loaded.promise);
-      const replacement = store.acquire(chatId);
+      const replacement = store.acquire(chatId, 'project_seed');
       const secondChat = harness.created.findLast((entry) => entry.id === chatId)!;
       expect(secondChat).not.toBe(seededChat);
 
@@ -3756,7 +3793,7 @@ describe('ChatSessionStore', () => {
   describe('resumable streams (R4 plumbing + R1 continue dispatch)', () => {
     it('dispatchRequest { kind: "continue" } calls chat.resumeStream() and does NOT mutate chat.messages', async () => {
       const store = createStore();
-      const session = store.acquire('chat_resume');
+      const session = store.acquire('chat_resume', 'project_test');
       const fake = harness.created.find((entry) => entry.id === 'chat_resume')!;
       const before: MyUIMessage[] = [
         // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- minimal MyUIMessage shape for test
@@ -3804,7 +3841,7 @@ describe('ChatSessionStore', () => {
      */
     it('reuses the running turn\u2019s body on a bodyless `continue` so the resumed POST carries the agent block', async () => {
       const store = createStore();
-      const session = store.acquire('chat_resume_agent');
+      const session = store.acquire('chat_resume_agent', 'project_test');
       const fake = harness.created.find((entry) => entry.id === 'chat_resume_agent')!;
 
       const admitted = store.startRun('chat_resume_agent', {
@@ -3837,7 +3874,7 @@ describe('ChatSessionStore', () => {
   describe('edit-resubmit dispatch', () => {
     it('rebuilds the edited message with refreshed createdAt/status and forwards `request.body` to chat.regenerate', async () => {
       const store = createStore();
-      const session = store.acquire('chat_edit_kernel');
+      const session = store.acquire('chat_edit_kernel', 'project_test');
       const fake = harness.created.find((entry) => entry.id === 'chat_edit_kernel')!;
 
       const originalMessage: MyUIMessage = {
@@ -3886,7 +3923,7 @@ describe('ChatSessionStore', () => {
      * until reload. Every dispatch that cannot run ends its request. */
     it('ends the request when the edited message vanished before the dispatch ran', async () => {
       const store = createStore();
-      const session = store.acquire('chat_edit_vanished');
+      const session = store.acquire('chat_edit_vanished', 'project_test');
       const fake = harness.created.find((entry) => entry.id === 'chat_edit_vanished')!;
       fake.messages = [];
 
@@ -3919,7 +3956,7 @@ describe('ChatSessionStore', () => {
   describe('request body fallback (R10/t17)', () => {
     it('reuses the running turn\u2019s admitted body when a dispatch supplies none', async () => {
       const store = createStore();
-      const session = store.acquire('chat_hydration_regen');
+      const session = store.acquire('chat_hydration_regen', 'project_test');
       const fake = harness.created.find((entry) => entry.id === 'chat_hydration_regen')!;
 
       const admitted = store.startRun('chat_hydration_regen', {
@@ -3959,7 +3996,7 @@ describe('ChatSessionStore', () => {
   describe('preempt-clobber defense', () => {
     it('does NOT call chat.sendMessage synchronously inside startRequest dispatch (deferred onto a microtask)', async () => {
       const store = createStore();
-      const session = store.acquire('chat_clobber_send');
+      const session = store.acquire('chat_clobber_send', 'project_test');
       const fake = harness.created.find((entry) => entry.id === 'chat_clobber_send')!;
 
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- minimal MyUIMessage shape for test
@@ -3989,7 +4026,7 @@ describe('ChatSessionStore', () => {
 
     it('does NOT call chat.regenerate synchronously inside startRequest dispatch', async () => {
       const store = createStore();
-      const session = store.acquire('chat_clobber_regen');
+      const session = store.acquire('chat_clobber_regen', 'project_test');
       const fake = harness.created.find((entry) => entry.id === 'chat_clobber_regen')!;
 
       session.persistenceActorRef.send({
@@ -4006,7 +4043,7 @@ describe('ChatSessionStore', () => {
 
     it('does NOT call chat.resumeStream synchronously inside continue dispatch', async () => {
       const store = createStore();
-      const session = store.acquire('chat_clobber_continue');
+      const session = store.acquire('chat_clobber_continue', 'project_test');
       const fake = harness.created.find((entry) => entry.id === 'chat_clobber_continue')!;
 
       session.persistenceActorRef.send({
@@ -4030,7 +4067,7 @@ describe('ChatSessionStore', () => {
       // sanitized message tail (with the partial assistant turn finalised)
       // rather than the in-flight pre-preempt array.
       const store = createStore();
-      const session = store.acquire('chat_preempt_ordering');
+      const session = store.acquire('chat_preempt_ordering', 'project_test');
       const fake = harness.created.find((entry) => entry.id === 'chat_preempt_ordering')!;
 
       const initialMessages: MyUIMessage[] = [
@@ -4097,7 +4134,7 @@ describe('ChatSessionStore', () => {
 
     it('should finalize static and dynamic in-progress tool parts before dispatching a preempting follow-up', async () => {
       const store = createStore();
-      const session = store.acquire('chat_preempt_tools');
+      const session = store.acquire('chat_preempt_tools', 'project_test');
       const fake = harness.created.find((entry) => entry.id === 'chat_preempt_tools')!;
 
       const interruptedMessages: MyUIMessage[] = [
@@ -4207,7 +4244,7 @@ describe('ChatSessionStore', () => {
         const deps = createStubDeps();
         store.setDependencies(deps);
 
-        const session = store.acquire(chatId);
+        const session = store.acquire(chatId, 'project_test');
         await Promise.resolve();
         deps.patchChat.mockClear();
 
@@ -4292,7 +4329,7 @@ describe('ChatSessionStore', () => {
   describe('streamResumed (R6)', () => {
     it('T21: sends streamResumed to the persistence actor only on transition into streaming', () => {
       const store = createStore();
-      const session = store.acquire('chat_r6');
+      const session = store.acquire('chat_r6', 'project_test');
       const fake = harness.created.find((entry) => entry.id === 'chat_r6')!;
       const sendSpy = spyOnSend(session.persistenceActorRef);
 
@@ -4373,7 +4410,7 @@ describe('ChatSessionStore — composer records (W7)', () => {
   it('restores the draft, both attachments, tool choice and mode through a fresh store', async () => {
     const client = createMemoryClient();
     const first = openStore(client);
-    const session = first.store.acquire(chatId);
+    const session = first.store.acquire(chatId, projectId);
     await attachBoth(session);
     session.draftActorRef.send({ type: 'setDraftText', text: 'model the bracket per the spec' });
     session.draftActorRef.send({ type: 'setDraftToolChoice', toolChoice: 'none' });
@@ -4393,7 +4430,7 @@ describe('ChatSessionStore — composer records (W7)', () => {
     );
 
     const second = openStore(client);
-    const restored = second.store.acquire(chatId);
+    const restored = second.store.acquire(chatId, projectId);
     await vi.waitFor(() => {
       expect(restored.draftActorRef.getSnapshot().context).toMatchObject({
         draftText: 'model the bracket per the spec',
@@ -4412,7 +4449,7 @@ describe('ChatSessionStore — composer records (W7)', () => {
     vi.stubGlobal('document', { visibilityState: 'hidden', hasFocus: () => false });
     const client = createMemoryClient();
     const first = openStore(client);
-    first.store.acquire(chatId);
+    first.store.acquire(chatId, projectId);
     finishRun(harness.created.at(-1)!);
     await vi.waitFor(() => {
       expect(client.json(unreadPath)).toEqual({ version: 1, unread: { [chatId]: true } });
@@ -4420,7 +4457,7 @@ describe('ChatSessionStore — composer records (W7)', () => {
     first.store.release(chatId);
 
     const second = openStore(client);
-    second.store.acquire(chatId);
+    second.store.acquire(chatId, projectId);
     await vi.waitFor(() => {
       expect(second.store.isUnread(chatId)).toBe(true);
     });
@@ -4445,7 +4482,7 @@ describe('ChatSessionStore — composer records (W7)', () => {
   it('should hand a displaced send back to the composer with its attachment still usable', async () => {
     const client = createMemoryClient();
     const { store } = openStore(client);
-    const session = store.acquire(chatId);
+    const session = store.acquire(chatId, projectId);
     startTurnOwner(store, projectId);
     publishAdmission(chatId, () => ({ kind: 'regenerate', body: testRunBody }));
     await attachBoth(session);
@@ -4479,7 +4516,7 @@ describe('ChatSessionStore — composer records (W7)', () => {
   it('promotes both blobs into the chat directory on send and clears the draft-stage copies', async () => {
     const client = createMemoryClient();
     const { store } = openStore(client);
-    const session = store.acquire(chatId);
+    const session = store.acquire(chatId, projectId);
     const fake = harness.created.at(-1)!;
     await attachBoth(session);
     const { draftAttachments } = session.draftActorRef.getSnapshot().context;
@@ -4527,7 +4564,7 @@ describe('ChatSessionStore — composer records (W7)', () => {
   it('leaves the draft intact and copies nothing it cannot finish when promotion fails', async () => {
     const client = createMemoryClient();
     const { store } = openStore(client);
-    const session = store.acquire(chatId);
+    const session = store.acquire(chatId, projectId);
     await attachBoth(session);
     const before = session.draftActorRef.getSnapshot().context.draftAttachments;
     client.files.delete(`${draftAttachmentsDirectory(projectId, chatId)}/${pdfHash}.pdf`);
@@ -4581,7 +4618,7 @@ describe('ChatSessionStore — composer records (W7)', () => {
   it('should keep a blob an earlier message holds when a later promotion fails (G10)', async () => {
     const client = createMemoryClient();
     const { store } = openStore(client);
-    const session = store.acquire(chatId);
+    const session = store.acquire(chatId, projectId);
     await attachBoth(session);
     const before = session.draftActorRef.getSnapshot().context.draftAttachments;
     await store.promoteDraftAttachments(chatId, before.slice(0, 1));
@@ -4705,7 +4742,7 @@ describe('ChatSessionStore — composer records (W7)', () => {
     client.failingReads.add(composerPath(projectId, chatId));
     const transcript: MyUIMessage[] = [{ id: 'msg_1', role: 'user', parts: [{ type: 'text', text: 'earlier' }] }];
     const { store } = openStore(client, chatRow(chatId, projectId, { messages: transcript }));
-    const session = store.acquire(chatId);
+    const session = store.acquire(chatId, projectId);
     const unreadable = vi.fn();
     session.composerRecordRef.on('recordUnreadable', unreadable);
 
@@ -4730,7 +4767,7 @@ describe('ChatSessionStore — composer records (W7)', () => {
   it('disables send with the reason when the selected model cannot read a PDF in the draft', async () => {
     const client = createMemoryClient();
     const { store } = openStore(client);
-    const session = store.acquire(chatId);
+    const session = store.acquire(chatId, projectId);
     await attachBoth(session);
     const gate = (model: SelectedModel): string | undefined =>
       attachmentSendBlockReason(session.draftActorRef.getSnapshot().context.draftAttachments, model);

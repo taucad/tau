@@ -243,7 +243,7 @@ const dispatchSeededTurn = async (activeExecution: CadAgentExecution): Promise<R
   }
 
   render(
-    <ActiveChatProvider chatId={chatId}>
+    <ActiveChatProvider chatId={chatId} projectId={row.resourceId}>
       {/* The chat's one turn host publishes the bodyless body factory the
           seeded dispatch composes through; the view beside it only reads. */}
       <ChatTurnHost />

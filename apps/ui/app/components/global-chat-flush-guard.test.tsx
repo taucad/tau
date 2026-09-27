@@ -141,7 +141,7 @@ describe('GlobalChatFlushGuard', () => {
 
   it('flushes a single live chat session on visibility hidden', () => {
     const { store } = renderWithStore();
-    const session = store.acquire('chat_alpha');
+    const session = store.acquire('chat_alpha', 'project_test');
     const { persistenceSend, draftSend } = spyOnActorSends(session);
 
     dispatchVisibilityHidden();
@@ -153,7 +153,7 @@ describe('GlobalChatFlushGuard', () => {
   it('fans out flushNow to every live chat session', () => {
     const { store } = renderWithStore();
     const sessions = ['chat_a', 'chat_b', 'chat_c'].map((id) => {
-      const session = store.acquire(id);
+      const session = store.acquire(id, 'project_test');
       return spyOnActorSends(session);
     });
 
@@ -167,8 +167,8 @@ describe('GlobalChatFlushGuard', () => {
 
   it('does not flush sessions that have been released before the close event', () => {
     const { store } = renderWithStore();
-    const a = spyOnActorSends(store.acquire('chat_a'));
-    const b = spyOnActorSends(store.acquire('chat_b'));
+    const a = spyOnActorSends(store.acquire('chat_a', 'project_test'));
+    const b = spyOnActorSends(store.acquire('chat_b', 'project_test'));
 
     store.release('chat_b');
     // Release flushes its own draft so the last keystroke is kept; only the close event's fan-out is under test.
@@ -186,7 +186,7 @@ describe('GlobalChatFlushGuard', () => {
    * producer guard must not begin another chat upload on pagehide. */
   it('does not start a fresh chat flush on pagehide', () => {
     const { store } = renderWithStore();
-    const session = store.acquire('chat_alpha');
+    const session = store.acquire('chat_alpha', 'project_test');
     const { persistenceSend, draftSend } = spyOnActorSends(session);
 
     globalThis.dispatchEvent(new Event('pagehide'));

@@ -26,7 +26,7 @@ import { pathToFileURL } from 'node:url';
 
 import type { ContentBlock, McpServer, Usage as AcpUsage } from '@agentclientprotocol/sdk';
 
-import { materializeAttachments, reduceEventLog } from '@taucad/agent-host';
+import { externalAgentStopCodes, materializeAttachments, reduceEventLog } from '@taucad/agent-host';
 import type {
   DocumentBlockBuilder,
   ExternalAgentPort,
@@ -39,6 +39,7 @@ import { createSkillBundleRegistry } from '@taucad/agent-tools/registry';
 import { tauMcpInstructions } from '@taucad/mcp';
 import { isRecord } from '@taucad/utils/schema';
 
+import { createAcpMediaStore } from '#acp/media.js';
 import { openAcpSession } from '#acp/session.js';
 import type { AcpSession } from '#acp/session.js';
 import type { AcpWireFrame } from '#acp/spawn.js';
@@ -403,7 +404,9 @@ const promptBlocksOf = (turn: ExternalAgentTurn, first: boolean): readonly Conte
   if (blocks.length === 0) {
     return undefined;
   }
-  return [...cadContextBlocks(turn.config, first), ...blocks];
+  /* The user's own blocks lead: a vendor names its mirrored thread after the
+   * prompt's first text (Codex titled every Tau thread "tau://agent-guidance…"). */
+  return [...blocks, ...cadContextBlocks(turn.config, first)];
 };
 
 /**
@@ -470,22 +473,27 @@ const continuationPrompt = 'Continue from where you stopped.';
  * turn; or a restart found the turn still `running`, and ACP can report
  * nothing about whether it finished. Only the first can be continued.
  *
- * Read from the row before this attempt's own `admitted`, not from the run's
- * whole history: a resume reuses the run id and appends `admitted`/`running`
- * again, so a run that stopped, resumed and was *then* cut short by a restart
- * still carries the first stop's `failed` row. Answering on that row would
- * continue exactly the turn the ambiguity guard exists for.
+ * Read from the row before this attempt's own `running`, not from the run's
+ * whole history: a resume reuses the run id and appends only `running` (the
+ * host writes one `admitted` per run), so a run that stopped, resumed and was
+ * *then* cut short by a restart still carries the first stop's `failed` row.
+ * The restart's own record is a `failed` too — `RUN_ABANDONED`, written by the
+ * host rather than the agent — so the row must carry an agent stop code.
+ * Answering on either would continue exactly the turn the ambiguity guard
+ * exists for.
  *
  * @param turn - The turn being run.
- * @returns Whether the state this attempt resumes from is a recorded failure.
+ * @returns Whether the state this attempt resumes from is the agent's own stop.
  */
 const stopRecorded = (turn: ExternalAgentTurn): boolean => {
-  const states = turn.history.flatMap((event) =>
-    event.runId === turn.runId && event.type === 'run.lifecycle' ? [event.state] : [],
+  /* The host reads the history after appending this attempt's `running`, so
+   * that row is the last one and the state it resumes from precedes it. */
+  const previous = turn.history.filter((event) => event.runId === turn.runId && event.type === 'run.lifecycle').at(-2);
+  return (
+    previous?.type === 'run.lifecycle' &&
+    previous.state === 'failed' &&
+    externalAgentStopCodes.some((code) => code === previous.detail?.code)
   );
-  /* Every attempt opens with exactly one `admitted`, so the last one is this
-   * attempt's and everything after it is what admitting it just wrote. */
-  return states[states.lastIndexOf('admitted') - 1] === 'failed';
 };
 
 const usageNumber = (value: unknown): number | undefined =>
@@ -886,7 +894,14 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
               ),
             )
           : undefined;
-        const outcome = await entry.session.prompt(prompt, turn, model, configuration);
+        /* Every durable row of the turn names agent media by attachment rather
+         * than carrying it inline (see `createAcpMediaStore`). */
+        const moveMedia = createAcpMediaStore(options.workspaceRoot, turn.chatId);
+        const recordedTurn = {
+          ...turn,
+          append: async (events) => turn.append(await moveMedia(events)),
+        } satisfies ExternalAgentTurn;
+        const outcome = await entry.session.prompt(prompt, recordedTurn, model, configuration);
         /* What the agent changed about its own session, written back to the
          * chat's record so the next turn — and the selector above it — start
          * from what actually ran rather than from what was last asked for

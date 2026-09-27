@@ -471,7 +471,8 @@ const requestPrint = async (
   if (prior !== undefined && typeof priorRequestId === 'string') {
     const request = await findRequest(client, priorRequestId, signal);
     if (request.state !== 'awaiting-approval') {
-      return asJson({ request, machineName, ...nextStepOf(request) });
+      /* The hand-over already settled it; the call still reports the answer it recalled. */
+      return asJson({ request, machineName, approval: prior.resolution.outcome, ...nextStepOf(request) });
     }
     const settled = await settleApproval(client, { requestId: priorRequestId, resolution: prior.resolution, signal });
     return asJson({ request: settled, machineName, approval: prior.resolution.outcome, ...nextStepOf(settled) });

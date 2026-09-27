@@ -1,9 +1,11 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import {
+  addSectionCapFaceTiming,
   addSectionCapTiming,
   appendSectionCapPerformanceFrame,
   createSectionCapFramePerformance,
+  getSectionCapFacePerformance,
   recordSectionCapBooleanOperation,
   recordSectionCapPackedGeometry,
   sectionCapPerformanceHistoryLimit,
@@ -102,6 +104,30 @@ describe('section cap performance debug helpers', () => {
         topologyWorkerRequestCount: 0,
       },
     });
+  });
+
+  it('should split a face phase by face while the frame keeps its total', () => {
+    const frame = createSectionCapFramePerformance(1, 0);
+
+    addSectionCapFaceTiming(frame, { faceKey: 'cut-a:0', phase: 'topologySlice', elapsed: 2 });
+    addSectionCapFaceTiming(frame, { faceKey: 'cut-b:0', phase: 'topologySlice', elapsed: 3 });
+    addSectionCapFaceTiming(frame, { faceKey: 'cut-a:0', phase: 'topologySlice', elapsed: 4 });
+    addSectionCapTiming(frame, 'frameTotal', 10);
+    getSectionCapFacePerformance(frame, 'cut-b:0').slicedSourceCount++;
+
+    expect(frame.timings.topologySlice).toBe(9);
+    expect(frame.timings.frameTotal).toBe(10);
+    expect(
+      frame.faces.map((face) => [
+        face.faceKey,
+        face.timings.topologySlice,
+        face.timings.frameTotal,
+        face.slicedSourceCount,
+      ]),
+    ).toEqual([
+      ['cut-a:0', 6, 0, 0],
+      ['cut-b:0', 3, 0, 1],
+    ]);
   });
 
   it('should keep the frame that built the drawn caps as the latest frame while later frames skip', () => {

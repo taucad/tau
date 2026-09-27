@@ -13,9 +13,11 @@ import type { SectionPiece } from '#components/geometry/graphics/section-cuts.js
 import {
   resolveSectionViewRaycastClip,
   resolveSectionViewRenderPlane,
+  useLiveSectionCutSet,
   useSectionPieces,
   useSectionViewFlags,
 } from '#components/geometry/graphics/three/use-section-view.js';
+import type { SectionCutSet } from '#components/geometry/graphics/three/utils/section-view-safe-snapshot.js';
 
 const renderFrame: RenderFrame = { anchorFrameId: 'tau:root', originMeters: [0, 0, 0], metersPerRenderUnit: 1 };
 
@@ -58,14 +60,14 @@ describe('useSectionViewFlags', () => {
     actor = undefined;
   });
 
-  it('should re-render its caller when the cut turns on or off, not when the cut moves', async () => {
+  it('should re-render its caller when Section turns on or off, not when a cut moves', async () => {
     actor = createActor(
       graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
       { input: {} },
     ).start();
     actor.send({ type: 'sceneRadiusUpdated', radius: 0.1, centerMeters: [0, 0, 0] });
-    actor.send({ type: 'setSectionViewActive', payload: true });
-    actor.send({ type: 'selectSectionView', payload: 'xy' });
+    actor.send({ type: 'addSectionCut', payload: { kind: 'plane' } });
+    const [cut] = actor.getSnapshot().context.sectionCuts;
 
     const seen: Array<{ isActive: boolean; enableMesh: boolean }> = [];
     let commits = 0;
@@ -87,21 +89,21 @@ describe('useSectionViewFlags', () => {
     );
     await act(async () => undefined);
     const settled = commits;
+    expect(seen.at(-1)).toEqual({ isActive: true, enableMesh: true });
 
     act(() => {
-      for (const step of [0.01, 0.02, 0.03]) {
-        actor!.send({ type: 'setSectionViewTranslation', payload: step });
+      for (const offset of [0.01, 0.02, 0.03]) {
+        actor!.send({ type: 'updateSectionCut', payload: { id: cut!.id, patch: { offset } } });
       }
-      actor!.send({ type: 'setSectionViewRotation', payload: [0.1, 0, 0] });
     });
-    expect(actor.getSnapshot().context.sectionViewTranslation).toBeCloseTo(0.03);
+    expect(actor.getSnapshot().context.sectionCuts[0]).toMatchObject({ offset: 0.03 });
     expect(commits).toBe(settled);
 
     act(() => {
       actor!.send({ type: 'setSectionViewActive', payload: false });
     });
     expect(commits).toBe(settled + 1);
-    expect(seen.at(-1)).toEqual({ isActive: false, enableMesh: true });
+    expect(seen.at(-1)).toEqual({ isActive: false, enableMesh: false });
   });
 });
 
@@ -113,7 +115,7 @@ describe('useSectionPieces', () => {
     actor = undefined;
   });
 
-  it('should give the cut list in the render frame while Section is on, and keep one list until a cut changes', async () => {
+  it('should give the committed cut list in the render frame, and keep one list until the caps commit another', async () => {
     actor = createActor(
       graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
       { input: {} },
@@ -121,11 +123,13 @@ describe('useSectionPieces', () => {
     actor.send({ type: 'sceneRadiusUpdated', radius: 0.1, centerMeters: [0, 0, 0] });
 
     const seen: Array<readonly SectionPiece[]> = [];
+    const seenLive: SectionCutSet[] = [];
     let setRenderFrame: ((next: RenderFrame) => void) | undefined;
     const Probe = (): ReactNode => {
       // Re-renders on hover too, which the pieces do not depend on.
       useGraphicsSelector((state) => state.context.hoveredSectionCutId);
       seen.push(useSectionPieces());
+      seenLive.push(useLiveSectionCutSet());
       setRenderFrame = useSetRenderFrame();
       return undefined;
     };
@@ -136,7 +140,9 @@ describe('useSectionPieces', () => {
     );
     await act(async () => undefined);
     const off = seen.at(-1);
+    const liveOff = seenLive.at(-1);
     expect(off).toEqual([]);
+    expect(liveOff).toEqual({ cuts: [], pieces: [] });
 
     const scaledFrame: RenderFrame = {
       anchorFrameId: 'tau:root',
@@ -149,20 +155,44 @@ describe('useSectionPieces', () => {
       actor!.send({ type: 'addSectionCut', payload: { kind: 'revolution' } });
     });
     const { sectionCuts } = actor.getSnapshot().context;
-    const on = seen.at(-1);
+    const pieces = toRenderSectionPieces(resolveSectionPieces(sectionCuts), scaledFrame);
     expect(sectionCuts).toHaveLength(2);
-    expect(on).toEqual(toRenderSectionPieces(resolveSectionPieces(sectionCuts), scaledFrame));
+    // The caps certify the live list; nothing is clipped until they commit it.
+    expect(seenLive.at(-1)).toEqual({ cuts: sectionCuts, pieces });
+    expect(seen.at(-1)).toBe(off);
+
+    act(() => {
+      actor!.send({ type: 'setSectionCertification', payload: { status: 'exact', cuts: sectionCuts } });
+    });
+    const on = seen.at(-1);
+    expect(on).toEqual(pieces);
     expect(on).not.toEqual(resolveSectionPieces(sectionCuts));
 
     const renders = seen.length;
+    const live = seenLive.at(-1);
+    const certified = actor.getSnapshot();
     act(() => {
+      actor!.send({ type: 'setSectionCertification', payload: { status: 'exact', cuts: sectionCuts } });
       actor!.send({ type: 'hoverSectionCut', payload: sectionCuts[0]!.id });
     });
     expect(seen.length).toBeGreaterThan(renders);
     expect(seen.at(-1)).toBe(on);
+    expect(seenLive.at(-1)).toBe(live);
+    expect(actor.getSnapshot().context.committedSectionCuts).toBe(certified.context.committedSectionCuts);
 
+    // A refused list leaves the committed one clipped.
     act(() => {
       actor!.send({ type: 'removeSectionCut', payload: sectionCuts[1]!.id });
+      actor!.send({ type: 'setSectionCertification', payload: { status: 'rejected', cuts: sectionCuts } });
+    });
+    expect(actor.getSnapshot().context.sectionCertification).toBe('rejected');
+    expect(seen.at(-1)).toBe(on);
+
+    act(() => {
+      actor!.send({
+        type: 'setSectionCertification',
+        payload: { status: 'exact', cuts: actor!.getSnapshot().context.sectionCuts },
+      });
     });
     expect(seen.at(-1)).toEqual(toRenderSectionPieces(resolveSectionPieces([sectionCuts[0]!]), scaledFrame));
 
@@ -170,5 +200,23 @@ describe('useSectionPieces', () => {
       actor!.send({ type: 'setSectionViewActive', payload: false });
     });
     expect(seen.at(-1)).toBe(off);
+    expect(seenLive.at(-1)).toBe(liveOff);
+  });
+
+  it('should keep the snapshot when the caps report the certification it holds', () => {
+    actor = createActor(
+      graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
+      { input: {} },
+    ).start();
+    actor.send({ type: 'sceneRadiusUpdated', radius: 0.1, centerMeters: [0, 0, 0] });
+    actor.send({ type: 'addSectionCut', payload: { kind: 'plane' } });
+    const { sectionCuts } = actor.getSnapshot().context;
+    actor.send({ type: 'setSectionCertification', payload: { status: 'exact', cuts: sectionCuts } });
+    const certified = actor.getSnapshot();
+
+    actor.send({ type: 'setSectionCertification', payload: { status: 'exact', cuts: sectionCuts } });
+
+    expect(actor.getSnapshot()).toBe(certified);
+    expect(certified.context).toMatchObject({ committedSectionCuts: sectionCuts, sectionCertification: 'exact' });
   });
 });

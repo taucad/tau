@@ -606,6 +606,22 @@ test('GLTF toolbar and @ actions use one annotated headless camera path', async 
 
   await clearAttachments();
   await target.setViewport({ width: 320, height: 844 });
+  // The phone layout remounts the viewer and opens a drawer under it; capture once the camera has the settled canvas.
+  await target.expectGeometryFramed();
+  await expect
+    .poll(async () =>
+      target.evaluate(() => {
+        const canvas = document.querySelector('[data-testid="cad-viewer-canvas-region"] canvas');
+        const bridge = (globalThis as { __TAU_SECTION_VIEW_TEST__?: { getCamera(): { aspect: number } } })
+          .__TAU_SECTION_VIEW_TEST__;
+        if (!canvas || !bridge) {
+          return false;
+        }
+        const { width, height } = canvas.getBoundingClientRect();
+        return height > 0 && Math.abs(bridge.getCamera().aspect - width / height) < 0.01;
+      }),
+    )
+    .toBe(true);
   // The phone layout's open drawer hides the workbench from the accessibility tree, so find the button by its label.
   await target.click(selectors.getByCss('[data-slot="viewer-controls"] button[aria-label="Capture view to chat"]'));
   await waitForCaptureAttachments(1);

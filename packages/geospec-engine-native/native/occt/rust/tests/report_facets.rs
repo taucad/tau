@@ -53,7 +53,7 @@ fn validity_closure_and_exact_bounds_read_the_source_without_a_generation() {
     for name in FIXTURES {
         let document = Document::from_step(&fixture(name)).unwrap();
         let validity = document.validity().unwrap();
-        let closure = document.closure().unwrap();
+        let closure = document.closure(&mut |_| true).unwrap().unwrap();
         assert_eq!(validity.free_bounds, Some(closure.open_edges), "{name}");
         document.reported_shape_parts(ShapeParts::BOUNDS).unwrap();
         document.source_occurrences().unwrap();

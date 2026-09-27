@@ -861,13 +861,18 @@ impl BrepSubject for Document {
         Ok(validity)
     }
 
-    fn closure(&self) -> Result<Rc<ClosureFacts>, BackendError> {
+    fn closure(&self, charge: &mut Charge<'_>) -> Result<Option<Rc<ClosureFacts>>, BackendError> {
         if let Some(closure) = self.closure.get() {
-            return Ok(Rc::clone(closure));
+            let occurrences = unsafe { ffi::geospec_occt_occurrence_count(self.raw.as_ptr()) };
+            let units = closure_units(closure.failing.len(), occurrences);
+            return Ok(charge(units).then(|| Rc::clone(closure)));
         }
-        let closure = Rc::new(unsafe { closure(self.raw.as_ptr())? });
+        let Some(closure) = (unsafe { closure(self.raw.as_ptr(), charge)? }) else {
+            return Ok(None);
+        };
+        let closure = Rc::new(closure);
         let _ = self.closure.set(Rc::clone(&closure));
-        Ok(closure)
+        Ok(Some(closure))
     }
 
     fn component_bodies(
@@ -2327,7 +2332,21 @@ unsafe fn validity_with_control(
     ))
 }
 
-unsafe fn closure(raw: *const ffi::Document) -> Result<ClosureFacts, BackendError> {
+/// Rulings 23 and 28: naming the failing groups' leaves is one pass over the
+/// occurrences that yields each group, so it costs a unit per occurrence and
+/// per group; a closed subject names nothing.
+fn closure_units(groups: usize, occurrences: usize) -> u64 {
+    if groups == 0 {
+        0
+    } else {
+        groups.saturating_add(occurrences) as u64
+    }
+}
+
+unsafe fn closure(
+    raw: *const ffi::Document,
+    charge: &mut Charge<'_>,
+) -> Result<Option<ClosureFacts>, BackendError> {
     let mut value = ffi::ClosureFacts::default();
     let mut error = ErrorBuffer::new();
     check(
@@ -2335,16 +2354,20 @@ unsafe fn closure(raw: *const ffi::Document) -> Result<ClosureFacts, BackendErro
         &error,
     )?;
     let capacity = ffi::geospec_occt_occurrence_count(raw);
+    if !charge(closure_units(value.failing_group_count, capacity)) {
+        return Ok(None);
+    }
+    // One scratch buffer; each group keeps only its own ordinals.
+    let mut scratch = vec![0_u32; capacity];
     let mut failing = Vec::with_capacity(value.failing_group_count);
     for index in 0..value.failing_group_count {
         let mut group = ffi::ClosureGroup::default();
-        let mut occurrences = vec![0_u32; capacity];
         check(
             ffi::geospec_occt_validity_closure_group(
                 raw,
                 index,
                 &mut group,
-                occurrences.as_mut_ptr(),
+                scratch.as_mut_ptr(),
                 capacity,
                 error.raw(),
             ),
@@ -2353,12 +2376,11 @@ unsafe fn closure(raw: *const ffi::Document) -> Result<ClosureFacts, BackendErro
         if group.sample_count > 4 || group.occurrence_count > capacity {
             return Err(backend_error("Invalid OCCT closure group transfer."));
         }
-        occurrences.truncate(group.occurrence_count);
         failing.push(ClosureGroup {
             free_faces: group.free_faces != 0,
             open_edges: group.open_edge_count,
             nonmanifold_edges: group.nonmanifold_edge_count,
-            occurrences,
+            occurrences: scratch[..group.occurrence_count].to_vec(),
             samples: group.samples[..group.sample_count as usize]
                 .iter()
                 .map(|sample| ClosureEdgeSample {
@@ -2370,13 +2392,13 @@ unsafe fn closure(raw: *const ffi::Document) -> Result<ClosureFacts, BackendErro
                 .collect(),
         });
     }
-    Ok(ClosureFacts {
+    Ok(Some(ClosureFacts {
         shells: value.shell_count,
         free_faces: value.free_face_count,
         open_edges: value.open_edge_count,
         nonmanifold_edges: value.nonmanifold_edge_count,
         failing,
-    })
+    }))
 }
 
 unsafe fn classify_face_points(

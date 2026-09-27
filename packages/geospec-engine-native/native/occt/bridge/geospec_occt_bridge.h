@@ -779,7 +779,8 @@ int geospec_occt_validity_closure(const geospec_occt_document* document,
                                   geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 // Failing group `index` (shells in explorer order, then the free faces): its
 // samples placed at the group's first located instance, and the ordinals of
-// the leaf occurrences containing it (capacity: the occurrence count).
+// the leaf occurrences containing it (capacity: the occurrence count). The
+// first call attributes every failing group in one pass over the leaves.
 int geospec_occt_validity_closure_group(
     const geospec_occt_document* document, size_t index,
     geospec_occt_closure_group* out_group, uint32_t* out_occurrences,

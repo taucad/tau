@@ -1,6 +1,7 @@
 //! V1/M1 end to end: STEP `toBeWatertight` and `toHaveMeshIntegrity` answer
-//! from the exact shell-closure facet (one BRep unit, no tessellation), and
-//! STEP integrity refuses the mesh-only options. Expected counts are O2's
+//! from the exact shell-closure facet (one BRep unit, no tessellation; naming
+//! failing groups costs a unit per group and per occurrence, R4-2), and STEP
+//! integrity refuses the mesh-only options. Expected counts are O2's
 //! independent v1 probe rows (2026-09-26 OCCT substrate run). Ruling 32:
 //! tessellated-only products (faces with no surface) refuse every exact
 //! claim, and the facet never proves a faceless or edgeless subject closed.
@@ -100,7 +101,7 @@ fn admitted(name: &str) -> (Engine, String) {
 
 /// One positive claim, cold and warm; the result and the observations after it.
 fn claim(engine: &Engine, hash: &str, capability: &str, payload: Value) -> (Value, Value) {
-    claim_with(engine, hash, capability, payload, "positive")
+    claim_with(engine, hash, capability, payload, "positive", 8_000_000)
 }
 
 fn claim_with(
@@ -109,13 +110,14 @@ fn claim_with(
     capability: &str,
     payload: Value,
     polarity: &str,
+    budget: u64,
 ) -> (Value, Value) {
     let request = serde_json::to_vec(&json!({
         "method": "submitClaims", "requestId": "closure-query", "protocolVersion": 3,
         "registryVersion": 5, "canonicalProfile": "geospec-jcs-v1",
         "plan": {"subjects": [{"slot": "subject", "subjectHash": hash}], "claims": [{
             "claimId": "c", "capability": capability, "subjectSlots": ["subject"],
-            "payload": payload, "polarity": polarity, "workUnitBudget": 8000000
+            "payload": payload, "polarity": polarity, "workUnitBudget": budget
         }]}
     }))
     .unwrap();
@@ -131,7 +133,7 @@ fn claim_with(
 }
 
 /// The exact route never builds a report mesh or tessellates, and charges the
-/// single BRep unit (or nothing when it refuses first).
+/// BRep unit plus the failing groups' naming (or nothing when it refuses first).
 fn assert_exact_work(name: &str, observations: &Value, charged: &str) {
     for counter in ["meshRecords", "reportBuilds", "tessellations"] {
         assert_eq!(
@@ -204,8 +206,55 @@ fn step_watertight_answers_from_the_exact_closure_facet() {
                 "{name}"
             );
         }
-        assert_exact_work(name, &observations, "1");
+        assert_exact_work(name, &observations, &closure_charge(name, failing));
     }
+}
+
+/// The BRep unit, plus a unit per failing group and per occurrence when a
+/// group fails and its leaf occurrences are named (R4-2).
+fn closure_charge(name: &str, failing: usize) -> String {
+    let occurrences = Document::from_step(&fixture(name))
+        .unwrap()
+        .source_occurrence_structure()
+        .unwrap()
+        .len();
+    (1 + if failing == 0 {
+        0
+    } else {
+        failing + occurrences
+    })
+    .to_string()
+}
+
+#[test]
+fn naming_failing_groups_is_charged_before_it_runs_warm_or_cold() {
+    // R4-2 (rulings 23 and 28): one pass over the occurrences names every
+    // failing group's leaves. It is charged before it runs, so a budget one
+    // short refuses cold and warm alike, and the exact budget answers.
+    let name = "regular-solid-controls.step";
+    let payload = json!({"kind": "watertight", "expected": true});
+    let units: u64 = closure_charge(name, 1).parse().unwrap();
+    let (engine, hash) = admitted(name);
+    let (result, observations) = claim_with(
+        &engine,
+        &hash,
+        "toBeWatertight",
+        payload.clone(),
+        "positive",
+        units - 1,
+    );
+    assert_eq!(result["status"], "refused", "{result}");
+    let diagnostic = &result["diagnostics"][0];
+    assert_eq!(diagnostic["code"], "MATCHER_TIMEOUT", "{result}");
+    assert_eq!(diagnostic["details"]["unitsUsed"], units, "{result}");
+    assert_exact_work(name, &observations, "1");
+    let (result, _) = claim_with(&engine, &hash, "toBeWatertight", payload, "positive", units);
+    assert_eq!(result["status"], "failed", "{result}");
+    let rows = result["evidence"]["witnesses"]["failingShells"]
+        .as_array()
+        .unwrap();
+    assert_eq!(rows.len(), 1, "{result}");
+    assert!(!rows[0]["occurrences"].as_array().unwrap().is_empty());
 }
 
 #[test]
@@ -286,7 +335,11 @@ fn step_integrity_watertight_routes_to_the_exact_closure_facet() {
                 json!(["watertight is false, not the declared true"])
             );
         }
-        assert_exact_work(name, &observations, "1");
+        assert_exact_work(
+            name,
+            &observations,
+            &closure_charge(name, usize::from(open)),
+        );
     }
     // Nothing declared: vacuous, and no work at all.
     let (engine, hash) = admitted("ap242-box.step");
@@ -482,7 +535,9 @@ fn tessellated_only_products_refuse_every_exact_claim_before_any_work() {
 fn the_facet_never_proves_a_faceless_or_edgeless_group_closed() {
     // A shell whose faces have no counted edge use proves nothing closed.
     let document = Document::from_step(&fixture("read-profile/tess-only-closed.step")).unwrap();
-    let closure = BrepSubject::closure(&document).unwrap();
+    let closure = BrepSubject::closure(&document, &mut |_| true)
+        .unwrap()
+        .unwrap();
     assert_eq!(
         (
             closure.shells,
@@ -506,7 +561,9 @@ fn the_facet_never_proves_a_faceless_or_edgeless_group_closed() {
     let name = "read-profile/wireframe-only.step";
     let document = Document::from_step(&fixture(name)).unwrap();
     assert_eq!(document.admission_facts().unwrap().surfaceless_faces, 0);
-    let closure = BrepSubject::closure(&document).unwrap();
+    let closure = BrepSubject::closure(&document, &mut |_| true)
+        .unwrap()
+        .unwrap();
     assert_eq!((closure.shells, closure.free_faces), (0, 0));
     assert!(closure.failing.is_empty());
     let (engine, hash) = admitted(name);
@@ -535,6 +592,7 @@ fn the_facet_never_proves_a_faceless_or_edgeless_group_closed() {
         "toBeWatertight",
         json!({"kind": "watertight", "expected": true}),
         "negative",
+        8_000_000,
     );
     assert_eq!(result["status"], "passed", "{result}");
     let (result, _) = claim(

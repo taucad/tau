@@ -592,6 +592,12 @@ fn geometric(satisfied: bool, diagnostics: Vec<Diagnostic>, evidence: Json) -> E
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Entries into `mismatch`, the failure-diagnostic builder (H9 test hook).
+    static MISMATCH_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 fn mismatch(
     diagnostics: &mut Vec<Diagnostic>,
     code: &str,
@@ -600,6 +606,8 @@ fn mismatch(
     details: Json,
     spatial: Option<Json>,
 ) {
+    #[cfg(test)]
+    MISMATCH_BUILDS.with(|builds| builds.set(builds.get() + 1));
     let mut diagnostic = Diagnostic::error(code, message);
     diagnostic.suggestion = Some(suggestion.into());
     diagnostic.details = Some(details);
@@ -712,7 +720,7 @@ fn evaluate_bounds(
         }
     }
     let measured = bounds_json(bounds);
-    if !failures.is_empty() {
+    if !failures.is_empty() && context.wants_failure_detail() {
         mismatch(
             &mut diagnostics,
             "GEOSPEC_BOUNDING_BOX_MISMATCH",
@@ -847,7 +855,7 @@ fn evaluate_watertight(context: &mut EvaluationContext<'_>) -> Evaluation {
         Err(result) => return result,
     };
     let measured = analysis.watertight();
-    if !measured.watertight {
+    if !measured.watertight && context.wants_failure_detail() {
         mismatch(
             &mut diagnostics,
             "GEOSPEC_WATERTIGHT_MISMATCH",
@@ -1101,7 +1109,7 @@ fn evaluate_exact_watertight(context: &mut EvaluationContext<'_>) -> Evaluation 
         Ok(value) => value,
         Err(result) => return result,
     };
-    if !closure.watertight {
+    if !closure.watertight && context.wants_failure_detail() {
         let Json::Object(mut details) = closure.measured.clone() else {
             unreachable!("owned closure evidence")
         };
@@ -1197,7 +1205,7 @@ fn evaluate_exact_integrity(
         witnesses.push(("failingShells".into(), Json::Array(closure.failing_shells)));
     }
     let failure_list = Json::Array(failures.iter().map(|value| Json::string(value)).collect());
-    if !failures.is_empty() {
+    if !failures.is_empty() && context.wants_failure_detail() {
         let mut details = witnesses.clone();
         details.push(("failures".into(), failure_list.clone()));
         details.push(("matcher".into(), Json::string("toHaveMeshIntegrity")));
@@ -1294,7 +1302,7 @@ fn evaluate_scalar(
         return Evaluation::Refused { diagnostics };
     };
     let satisfied = expected.value.holds(measured, expected.tolerance);
-    if !satisfied {
+    if !satisfied && context.wants_failure_detail() {
         mismatch(
             &mut diagnostics,
             "GEOSPEC_MEASUREMENT_MISMATCH",
@@ -1395,7 +1403,7 @@ fn evaluate_center(
         return Evaluation::Refused { diagnostics };
     };
     let failures = point_failures(measured, expected, tolerance);
-    if !failures.is_empty() {
+    if !failures.is_empty() && context.wants_failure_detail() {
         mismatch(
             &mut diagnostics,
             "GEOSPEC_MEASUREMENT_MISMATCH",

@@ -34,7 +34,7 @@ use crate::{
     codec::Json,
     identity::SubjectIdentity,
     registry::Capability,
-    result::{Diagnostic, Evaluation},
+    result::{Diagnostic, Evaluation, Polarity},
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1451,6 +1451,7 @@ pub(crate) struct EvaluationContext<'a> {
     batch: Option<&'a BatchAnalysis>,
     /// The primary BRep's claim-local operand memo (C7), made on first use.
     operand_memo: Option<OperandMemo>,
+    polarity: Polarity,
 }
 
 impl<'a> EvaluationContext<'a> {
@@ -1477,6 +1478,7 @@ impl<'a> EvaluationContext<'a> {
             cylindrical_band_output_bytes: 0,
             batch: None,
             operand_memo: None,
+            polarity: Polarity::Positive,
         }
     }
 
@@ -1492,6 +1494,17 @@ impl<'a> EvaluationContext<'a> {
     pub(crate) fn with_batch(mut self, batch: &'a BatchAnalysis) -> Self {
         self.batch = Some(batch);
         self
+    }
+
+    pub(crate) fn with_polarity(mut self, polarity: Polarity) -> Self {
+        self.polarity = polarity;
+        self
+    }
+
+    /// H9: `result::finish` drops every error diagnostic of a negated
+    /// geometric result, so families build failure detail only when positive.
+    pub(crate) fn wants_failure_detail(&self) -> bool {
+        self.polarity == Polarity::Positive
     }
 
     pub(crate) fn connected_components(

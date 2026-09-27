@@ -1,0 +1,20 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_4w9wTW4GJbpzweI6qnOwK",
+  "name": "V8 Engine",
+  "description": "A complete 90° pushrod V8 with a cross-plane crank and the 1-8-4-3-6-5-7-2 firing order: block, crank, pistons and rods, a valley camshaft driving flat-tappet lifters, pushrods, stud rockers and valves, heads, manifolds, timing drive and dress. Every repeated part is modelled once and instanced. Its mechanism drives all 64 moving parts from the crank through sampled curve couplings, so the engine can be turned, played through a full four-stroke cycle or dragged by any piston.",
+  "tags": [
+    "assembly",
+    "kinematics",
+    "automotive",
+    "engine",
+    "parametric",
+    "replicad"
+  ],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

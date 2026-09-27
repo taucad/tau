@@ -268,7 +268,56 @@ export type HostToolInvocation = {
    * adapter, which is served at the workspace root.
    */
   readonly runId?: string | undefined;
+  /**
+   * Ask the person for a durable approval, or read the one they already gave (D5).
+   *
+   * Optional, unlike the rest of the invocation: one registry serves runs under
+   * hosts that cannot pause a run — an API-coordinated run, an MCP call from an
+   * external adapter — and a tool that needs consent under such a host hands
+   * its record back `awaiting-approval` for the person to answer in Tau's own
+   * surface, rather than failing or, worse, proceeding.
+   */
+  readonly approve?: HostToolApproval | undefined;
 };
+
+/**
+ * One durable approval a tool asks of the person before an effect it must not
+ * take alone — a physical print, a paid job (D5).
+ *
+ * Under a Tau host the request is the run's native durable interrupt: asking
+ * records `interrupt.recorded` and pauses the run, which ends this attempt (D10,
+ * TS-R10), so the call never returns an answer; it rejects as the attempt is
+ * aborted. The person's decision resolves the interrupt, and the run continues
+ * as its next attempt, where the tool asks again and `recall` finds the answer.
+ * A denial ends the paused run (`resolved`, `cancelled`), so no tool reads it.
+ *
+ * The whole resolution, not just its outcome: a request that offered options is
+ * answered by one of them, and re-deriving the choice from `approved` would
+ * substitute the host's guess for the human's decision.
+ *
+ * @public
+ */
+export type HostToolApproval = ((request: {
+  /** Names what is being approved across attempts: the next attempt recalls it by this key. */
+  readonly key?: string | undefined;
+  readonly prompt: string;
+  readonly payload?: JsonObject | undefined;
+}) => Promise<InterruptResolution>) & {
+  /**
+   * The person's answer to this run's request under `key`, until this tool records a result after it.
+   *
+   * @param key - The key the request was asked under.
+   * @returns The payload that was asked and its resolution, or `undefined` when none is waiting to be used.
+   */
+  readonly recall?: ((key: string) => Promise<HostToolApprovalRecord | undefined>) | undefined;
+};
+
+/** A resolved approval a tool asked for, as its next attempt recalls it. @public */
+export type HostToolApprovalRecord = Readonly<{
+  /** The payload the request carried. */
+  payload: JsonObject;
+  resolution: InterruptResolution;
+}>;
 
 /** Normalized result of one tool dispatch. @public */
 export type HostToolResult = {

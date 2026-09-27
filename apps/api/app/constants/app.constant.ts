@@ -27,6 +27,9 @@ export const loggingRedactPaths = [
   'req.headers["x-tau-lfs-key"]',
   'req.headers.cookie',
   'req.headers["set-cookie"]',
+  // A sign-in's response carries the new session token twice; both are live credentials.
+  'res.headers["set-cookie"]',
+  'res.headers["set-auth-token"]',
   'req.body.token',
   'req.body.refreshToken',
   'req.body.email',

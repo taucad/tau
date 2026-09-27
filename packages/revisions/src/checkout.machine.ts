@@ -72,6 +72,8 @@ export type CheckoutCutRequest = Readonly<{
   turn?: TurnCutOf;
   /** Run ids of the leases on this checkout when the request was made. */
   leaseIds: readonly string[];
+  /** The revision whose tree a restore applied, when this cut records that restore (D1). */
+  restoredFrom?: string;
 }>;
 
 /** Settled condition of one checkout, as its parent reads it. @public */
@@ -80,7 +82,7 @@ export type CheckoutStatus = 'clean' | 'dirty' | 'minting' | 'stale' | 'failed';
 /** Input accepted when creating the checkoutMachine actor. @public */
 export type CheckoutMachineInput = Readonly<{
   checkoutId: string;
-  /** The branch this checkout tracks; `undefined` when it is detached. */
+  /** The branch this checkout tracks; `undefined` only when the store names none for it. */
   branch?: string;
   /** Head revision recorded for the branch, rehydrated from records (I3). */
   headRevisionId?: string;
@@ -97,8 +99,8 @@ export type CheckoutMachineInput = Readonly<{
   parentRef?: AnyActorRef;
 }>;
 
-/** Serializable state owned by checkoutMachine. @public */
-export type CheckoutMachineContext = Readonly<{
+/* The fields of {@link CheckoutMachineContext}, named by the interface below. */
+type CheckoutMachineContextFields = Readonly<{
   checkoutId: string;
   branch: string | undefined;
   headRevisionId: string | undefined;
@@ -112,6 +114,16 @@ export type CheckoutMachineContext = Readonly<{
   cutGeneration: number;
   /** The write generation the checkout was last clean at; a re-read returns there only if nothing was written since. */
   cleanGeneration: number;
+  /**
+   * The paths written since the last cut took them (NS15, E1).
+   *
+   * `undefined` is "unknown": the next capture reads every file. A checkout
+   * spawns there and returns there whenever its head moves, so the first capture
+   * against any head is a whole one (D4, I6).
+   */
+  changedPaths: readonly string[] | undefined;
+  /** The paths the running mint took; a mint that fails gives them back. */
+  cutPaths: readonly string[] | undefined;
   /** Requests that arrived while a mint was running, served in order. */
   queued: readonly CheckoutCutRequest[];
   /** Counts `headMoved` facts (RM-R6). */
@@ -119,7 +131,27 @@ export type CheckoutMachineContext = Readonly<{
   /** The move generation the running mint or read started at; a newer one re-reads after it. */
   seenMoveGeneration: number;
   reason: string | undefined;
+  /**
+   * Whether the spawn-time comparison of the live tree with the head's has run (D4).
+   *
+   * Once per actor: a checkout rehydrated from records trusts nothing about the
+   * bytes under it until that one capture answers, and every later `clean` is a
+   * state this actor reached itself. A head re-read that moves it asks again
+   * against the new head (M5, I6).
+   */
+  treeCompared: boolean;
+  /**
+   * The D4/I6 comparison `dirty` runs on entry: `pending` asks for it, `matched`
+   * says the files turned out to be the head's, so `dirty` settles `clean`.
+   * A nested state reaches another top-level state only through its parent's
+   * `onDone` in alpha.59's strict targets, which is why this is context.
+   */
+  comparison: 'pending' | 'matched' | undefined;
 }>;
+
+/** Serializable state owned by checkoutMachine. @public */
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type, typescript/consistent-type-definitions -- an interface, not a type alias: declarations reference it by name, where an alias is expanded into every transition of this machine and of any machine that holds it (K-17, TS7056)
+export interface CheckoutMachineContext extends CheckoutMachineContextFields {}
 
 /** Events accepted by checkoutMachine. @public */
 export type CheckoutMachineEvent =
@@ -133,6 +165,8 @@ export type CheckoutMachineEvent =
       /** Present when a turn asks: the attempt and which of its revisions this is. */
       turn?: TurnCutOf;
       leaseIds: readonly string[];
+      /** The revision a restore applied, on the cut that records that restore (D1). */
+      restoredFrom?: string;
     }>
   /** Withdraw a queued request; a running mint answers for itself (RM-R4). */
   | Readonly<{ type: 'cancelCut'; requestId: string }>
@@ -168,8 +202,35 @@ export type CheckoutMachineEmitted =
       headTreeId?: string;
     }>;
 
-/** Input of the injected `cut` actor: hash the checkout's versioned tree. @public */
-export type CheckoutCutActorInput = Readonly<{ checkoutId: string; trigger: CheckoutCutTrigger }>;
+/**
+ * Input of the injected `cut` actor: hash the checkout's versioned tree.
+ *
+ * `changedPaths` names every path written since the previous cut, or is absent
+ * when that is unknown; a host whose change feed is complete re-reads only those (E1).
+ *
+ * @public
+ */
+export type CheckoutCutActorInput = Readonly<{
+  checkoutId: string;
+  trigger: CheckoutCutTrigger;
+  changedPaths?: readonly string[] | undefined;
+  /** The write generation the cut takes: every change event up to it is in the cut. */
+  generation?: number;
+}>;
+
+/** Input of the injected `captureTree` actor: hash the live tree without holding it (D4). @public */
+export type CheckoutCaptureTreeActorInput = Readonly<{
+  checkoutId: string;
+  changedPaths?: readonly string[] | undefined;
+  /**
+   * The write generation the comparison covers. A cut over the same one may
+   * take the comparison's capture rather than read the same files again (E1).
+   */
+  generation?: number;
+}>;
+
+/** Output of the injected `captureTree` actor. @public */
+export type CheckoutCaptureTreeActorOutput = Readonly<{ treeId: string }>;
 
 /**
  * Output of the injected `cut` actor.
@@ -179,7 +240,17 @@ export type CheckoutCutActorInput = Readonly<{ checkoutId: string; trigger: Chec
  *
  * @public
  */
-export type CheckoutCutActorOutput = Readonly<{ treeId: string; cutId: string }>;
+export type CheckoutCutActorOutput = Readonly<{
+  treeId: string;
+  cutId: string;
+  /**
+   * The host found nothing of this checkout's own to record: an unborn line
+   * whose files are only generated setup or the bytes its open is about to
+   * bring (E2E-D defect A). Minted, they would be a root the pull then merges
+   * as unrelated history.
+   */
+  nothingToSave?: boolean;
+}>;
 
 /** Input of the injected `writeRevision` actor. @public */
 export type CheckoutWriteRevisionActorInput = Readonly<{
@@ -191,6 +262,8 @@ export type CheckoutWriteRevisionActorInput = Readonly<{
   /** The attempt a turn's cut is for; its provenance names it (RM-R9). */
   turn?: TurnCutOf;
   leaseIds: readonly string[];
+  /** The revision a restore applied; only a `restore` cut that records one carries it (D1). */
+  restoredFrom?: string;
 }>;
 
 /** Input of the injected `casHead` actor: publish the branch head expected-old (I7). @public */
@@ -226,8 +299,16 @@ export type CheckoutHead = Readonly<{
 export const checkoutIgnoredEvents: ReadonlyArray<readonly [state: string, eventType: string]> = [
   ['clean', 'fenceGranted'],
   ['clean', 'fenceRefused'],
+  ['clean.routing', 'fenceGranted'],
+  ['clean.routing', 'fenceRefused'],
+  ['clean.comparing', 'fenceGranted'],
+  ['clean.comparing', 'fenceRefused'],
+  ['clean.rested', 'fenceGranted'],
+  ['clean.rested', 'fenceRefused'],
   ['dirty', 'fenceGranted'],
   ['dirty', 'fenceRefused'],
+  ['dirty.comparing', 'fenceGranted'],
+  ['dirty.comparing', 'fenceRefused'],
   ['minting.cutting', 'fenceGranted'],
   ['minting.cutting', 'fenceRefused'],
   ['minting.writing', 'fenceGranted'],
@@ -298,11 +379,27 @@ const announce = (
   }
 };
 
+/* ponytail: past this many distinct paths a whole capture is as cheap as the list; the next one reads everything. */
+const changedPathLimit = 1024;
+
+/* Two changed-path sets as one; unknown absorbs everything (E1). */
+const unionPaths = (
+  left: readonly string[] | undefined,
+  right: readonly string[] | undefined,
+): readonly string[] | undefined => {
+  if (left === undefined || right === undefined) {
+    return undefined;
+  }
+  const union = [...new Set([...left, ...right])];
+  return union.length > changedPathLimit ? undefined : union;
+};
+
 const recordWrite = (
   context: CheckoutMachineContext,
   event: Extract<CheckoutMachineEvent, { type: 'changed' }>,
 ): Partial<CheckoutMachineContext> => ({
   writeGeneration: Math.max(context.writeGeneration, event.generation),
+  changedPaths: unionPaths(context.changedPaths, event.paths),
 });
 
 const requestOf = (event: Extract<CheckoutMachineEvent, { type: 'cut' }>): CheckoutCutRequest => ({
@@ -310,17 +407,68 @@ const requestOf = (event: Extract<CheckoutMachineEvent, { type: 'cut' }>): Check
   requesters: [{ requestId: event.requestId, trigger: event.trigger }],
   leaseIds: event.leaseIds,
   ...(event.turn === undefined ? {} : { turn: event.turn }),
+  ...(event.restoredFrom === undefined ? {} : { restoredFrom: event.restoredFrom }),
 });
+
+/* The wishes that only ever mean "record what is on disk". An operation's own
+ * cut (`restore`, `switch`, `merge`) is a step its machine is waiting on by
+ * trigger, so it never joins one of these (D1). */
+const ambientTriggers: ReadonlySet<CheckoutCutTrigger> = new Set(['save', 'idle', 'hidden', 'close']);
+
+/* The ambient triggers by strength: a stronger one records everything a weaker one asked for (RV-W2b #4). */
+const ambientStrength = new Map<CheckoutCutTrigger, number>([
+  ['idle', 0],
+  ['save', 1],
+  ['hidden', 2],
+  ['close', 3],
+]);
+
+/**
+ * Whether an answer to a cut with trigger `answered` also answers a waiter for `awaited`.
+ *
+ * Queued ambient requests join into one mint that records the strongest of
+ * them (R13); each requester is still answered under its own id and trigger
+ * (RM-R2), so this is for a waiter that listens by trigger rather than by id.
+ * An operation's or a turn's trigger is answered only by itself.
+ *
+ * @param answered - The trigger the answer carries.
+ * @param awaited - The trigger the waiter asked with.
+ * @returns Whether the waiter may settle on this answer.
+ * @public
+ */
+export const satisfiesCut = (answered: CheckoutCutTrigger, awaited: CheckoutCutTrigger): boolean => {
+  const answeredStrength = ambientStrength.get(answered);
+  const awaitedStrength = ambientStrength.get(awaited);
+  return answeredStrength === undefined || awaitedStrength === undefined
+    ? answered === awaited
+    : answeredStrength >= awaitedStrength;
+};
+
+/**
+ * Whether a cut request, or the answer to one, is ambient: `save`, `idle`, `hidden` or `close` with no turn.
+ *
+ * The line every host draws for its *save* channel: a turn's cut is answered
+ * in its chat and an operation's own cut (`restore`, `switch`, `merge`) by the
+ * child that asked, so neither may also read as a failed save (M3).
+ *
+ * @param request - A request, or an answer addressed with one's trigger and turn.
+ * @returns Whether no turn and no operation is waiting on it.
+ * @public
+ */
+export const isAmbientCut = (request: Readonly<{ trigger: CheckoutCutTrigger; turn?: TurnCutOf }>): boolean =>
+  request.turn === undefined && ambientTriggers.has(request.trigger);
 
 /*
  * R13, RM-R2: a burst of trigger-only requests is one mint, and every requester is answered.
  *
  * `Mod+S` held down, an idle window that fires while the tab is being hidden,
  * and `hidden` followed by `pagehide` all describe the same wish — "record what
- * is on disk" — and the checkout can only honour it once. A request no turn is
- * waiting on joins the last queued entry when that entry is trigger-only too;
- * the later trigger is what the mint records, and each requester still hears
- * its own answer. A turn's request never joins: its provenance names its attempt.
+ * is on disk" — and the checkout can only honour it once. An ambient request
+ * joins the last queued entry when that entry is ambient too; the stronger
+ * trigger is what the mint records (`close` after `idle` is a close; a `save`
+ * after a `close` is still a close), and each requester still hears its own
+ * answer. A turn's request never joins: its provenance names its attempt; nor
+ * does an operation's own cut, which records that operation (D1).
  */
 const queueRequest = (
   context: CheckoutMachineContext,
@@ -329,12 +477,12 @@ const queueRequest = (
 ): Partial<CheckoutMachineContext> => {
   const request = requestOf(event);
   const last = context.queued.at(-1);
-  if (request.turn === undefined && last !== undefined && last.turn === undefined) {
+  if (last !== undefined && isAmbientCut(request) && isAmbientCut(last)) {
     return {
       queued: [
         ...context.queued.slice(0, -1),
         {
-          trigger: request.trigger,
+          trigger: satisfiesCut(request.trigger, last.trigger) ? request.trigger : last.trigger,
           requesters: [...last.requesters, ...request.requesters],
           leaseIds: request.leaseIds,
         },
@@ -415,6 +563,13 @@ const afterMint = (context: CheckoutMachineContext, wrote: boolean): MintExit =>
 
 const moved = (context: CheckoutMachineContext) => ({ moveGeneration: context.moveGeneration + 1 });
 
+/* The comparison's capture (D4, I6): only the paths written since the last cut, or all of them when unknown. */
+const captureInput = ({ context }: Readonly<{ context: CheckoutMachineContext }>): CheckoutCaptureTreeActorInput => ({
+  checkoutId: context.checkoutId,
+  changedPaths: context.changedPaths,
+  generation: context.writeGeneration,
+});
+
 type MintPatch = Partial<Omit<CheckoutMachineContext, 'reason'>> & Readonly<{ reason?: string }>;
 
 /* Settle the mint into `minting.done`, carrying where `minting.onDone` routes it (see `MintExit`). */
@@ -435,8 +590,8 @@ const checkoutMachineDefinition = setup({
     tags: types<'dirty'>(),
   },
   states: {
-    clean: {},
-    dirty: { states: { quiet: {}, elapsed: {} } },
+    clean: { states: { routing: {}, comparing: {}, rested: {}, differs: {} } },
+    dirty: { states: { routing: {}, comparing: {}, quiet: {}, elapsed: {}, matched: {} } },
     minting: {
       schemas: { context: types<MintingContext>() },
       /* Each child restates the schema: alpha.59 checks a nested state's patches against its own schema only. */
@@ -485,6 +640,12 @@ const checkoutMachineDefinition = setup({
       sendBack({ type: 'fenceRefused', reason: 'checkoutMachine: the fence actor was not provided.' });
       return () => undefined;
     }),
+    /* A host that cannot compare trusts its records, which is what it did before D4. */
+    captureTree: createAsyncLogic<CheckoutCaptureTreeActorOutput, CheckoutCaptureTreeActorInput>({
+      run: async () => {
+        throw new Error('checkoutMachine: the captureTree actor was not provided.');
+      },
+    }),
   },
   delays: {
     idleWindow: ({ context }) => context.idleWindow,
@@ -510,6 +671,11 @@ const checkoutMachineDefinition = setup({
     moveGeneration: 0,
     seenMoveGeneration: 0,
     reason: undefined,
+    changedPaths: undefined,
+    cutPaths: undefined,
+    /* Nothing to compare against on an unborn branch: every tree is new there. */
+    treeCompared: input.headTreeId === undefined,
+    comparison: undefined,
   }),
   initial: 'clean',
   on: {
@@ -537,9 +703,50 @@ const checkoutMachineDefinition = setup({
             }
           : undefined,
       on: {
-        changed: { target: 'dirty', context: ({ context, event }) => recordWrite(context, event) },
+        /*
+         * A write to a clean checkout is compared before it is called an edit
+         * (FX1 M). A host reports its own applies to the feed (E1), so a pull's
+         * burst lands here after the head re-read with the head's own bytes;
+         * only the comparison, not the idle window, can say so. One capture per
+         * clean-to-dirty edge, reading only the named paths.
+         */
+        changed: {
+          target: 'dirty',
+          context: ({ context, event }) => ({ ...recordWrite(context, event), comparison: 'pending' }),
+        },
         cut: ({ event }) => ({ target: 'minting', context: { pending: requestOf(event) } }),
+        /* During the spawn comparison too: `treeCompared` is set only when it answers, so the re-read compares again (M5). */
         headMoved: ({ context }) => ({ target: 'rereading', context: moved(context) }),
+      },
+      onDone: { target: 'dirty' },
+      initial: 'routing',
+      states: {
+        routing: {
+          always: ({ context }) => (context.treeCompared ? { target: 'rested' } : { target: 'comparing' }),
+        },
+        /*
+         * D4: records say where the head is, not what the files are.
+         *
+         * A tree restored, edited or rewound while no actor watched it would
+         * read `clean` over bytes its head does not carry. The checkout spawns
+         * `clean` so the first render waits for nothing, and moves to `dirty`
+         * when this capture answers. A head that moves meanwhile is a
+         * `headMoved`, whose re-read compares again against the new head.
+         */
+        comparing: {
+          invoke: {
+            src: 'captureTree',
+            input: captureInput,
+            onDone: ({ context, event }) =>
+              event.output.treeId === context.headTreeId
+                ? { target: 'rested', context: { treeCompared: true } }
+                : { target: 'differs', context: { treeCompared: true } },
+            onError: { target: 'rested', context: { treeCompared: true } },
+          },
+        },
+        rested: {},
+        /* The files are not the head's: `clean.onDone` reports `dirty`. */
+        differs: { type: 'final' },
       },
     },
     dirty: {
@@ -558,8 +765,41 @@ const checkoutMachineDefinition = setup({
         cut: ({ event }) => ({ target: 'minting', context: { pending: requestOf(event) } }),
         headMoved: ({ context }) => ({ target: 'rereading', context: moved(context) }),
       },
-      initial: 'quiet',
+      initial: 'routing',
       states: {
+        routing: {
+          always: ({ context }) => (context.comparison === 'pending' ? { target: 'comparing' } : { target: 'quiet' }),
+        },
+        /*
+         * I6: the D4 comparison, for bytes that were unrecorded when the head
+         * moved or written while the checkout read clean. `dirty` until the
+         * capture shows the files are the head's; a failed capture proves
+         * nothing, so it stays `dirty`.
+         *
+         * The answered capture is the host's new starting tree, as a cut's is,
+         * so it takes the paths it read: the cut after it re-reads only what
+         * was written since (E1). A cut asked meanwhile starts at once.
+         */
+        comparing: {
+          entry: () => ({ context: { treeCompared: true, comparison: undefined } }),
+          invoke: {
+            src: 'captureTree',
+            input: captureInput,
+            onDone: ({ context, event }) =>
+              event.output.treeId === context.headTreeId
+                ? { target: 'matched', context: { changedPaths: [], comparison: 'matched' } }
+                : { target: 'quiet', context: { changedPaths: [] } },
+            onError: { target: 'quiet' },
+          },
+          on: {
+            /* The answer in flight predates this write, so it cannot clear it: compare again. */
+            changed: {
+              target: 'comparing',
+              reenter: true,
+              context: ({ context, event }) => recordWrite(context, event),
+            },
+          },
+        },
         /*
          * S30's idle window, and the only timer in this machine.
          *
@@ -586,14 +826,28 @@ const checkoutMachineDefinition = setup({
           },
         },
         elapsed: { type: 'final' },
+        /* The comparison found the head's own bytes: `dirty.onDone` settles `clean`. */
+        matched: { type: 'final' },
       },
-      onDone: { target: 'minting', context: { pending: idleRequest } },
+      onDone: ({ context }) =>
+        context.comparison === 'matched'
+          ? { target: 'clean', context: { comparison: undefined } }
+          : { target: 'minting', context: { pending: idleRequest } },
     },
     minting: {
       tags: ['dirty'],
       entry: ({ context }, enq) => {
         reportStatus(context, enq, 'minting');
-        return { context: { cutGeneration: context.writeGeneration, seenMoveGeneration: context.moveGeneration } };
+        /* The paths are taken with the generation (F4): a write after this
+         * point is the next cut's, and leaves this checkout dirty. */
+        return {
+          context: {
+            cutGeneration: context.writeGeneration,
+            seenMoveGeneration: context.moveGeneration,
+            cutPaths: context.changedPaths,
+            changedPaths: [],
+          },
+        };
       },
       invoke: {
         id: 'fence',
@@ -614,9 +868,14 @@ const checkoutMachineDefinition = setup({
         cutting: {
           invoke: {
             src: 'cut',
-            input: ({ context }) => ({ checkoutId: context.checkoutId, trigger: context.pending.trigger }),
+            input: ({ context }) => ({
+              checkoutId: context.checkoutId,
+              trigger: context.pending.trigger,
+              changedPaths: context.cutPaths,
+              generation: context.cutGeneration,
+            }),
             onDone: ({ context, event, guards }, enq) => {
-              if (guards.treeUnchanged(context, event.output.treeId)) {
+              if (event.output.nothingToSave === true || guards.treeUnchanged(context, event.output.treeId)) {
                 announce(context, enq, { request: context.pending, answer: { type: 'nothingToSave' } });
                 return leave(afterMint(context, true));
               }
@@ -643,6 +902,7 @@ const checkoutMachineDefinition = setup({
               trigger: context.pending.trigger,
               ...(context.pending.turn === undefined ? {} : { turn: context.pending.turn }),
               leaseIds: context.pending.leaseIds,
+              ...(context.pending.restoredFrom === undefined ? {} : { restoredFrom: context.pending.restoredFrom }),
             }),
             onDone: ({ context, event }, enq) => {
               if (event.output.status === 'held') {
@@ -719,18 +979,23 @@ const checkoutMachineDefinition = setup({
         src: 'readHead',
         input: ({ context }) => ({ checkoutId: context.checkoutId }),
         onDone: ({ context, event }) => {
+          /* A head that moved forgets the changed paths, so the capture that
+           * compares the files with it reads all of them (belt and braces for a
+           * host whose applies bypass its feed; once per move, not per save). */
           const head = {
             branch: event.output.branch,
             headRevisionId: event.output.revisionId,
             headTreeId: event.output.treeId,
+            ...(event.output.revisionId === context.headRevisionId ? {} : { changedPaths: undefined }),
           };
           if (context.moveGeneration > context.seenMoveGeneration) {
             return { target: 'rereading', reenter: true, context: head };
           }
-          /* A move that wrote nothing here (a switch, a fast-forward, a restore) leaves the tree at the new head. */
+          /* A move that wrote nothing here (a switch, a fast-forward, a restore) leaves the tree at the new head;
+           * bytes written since the last clean say nothing about the new head, so they are compared with it (I6). */
           return context.writeGeneration === context.cleanGeneration
             ? { target: 'clean', context: head }
-            : { target: 'dirty', context: head };
+            : { target: 'dirty', context: { ...head, comparison: 'pending' } };
         },
         onError: {
           target: 'failed',
@@ -744,7 +1009,10 @@ const checkoutMachineDefinition = setup({
       entry: ({ context }, enq) => {
         const drained = failQueuedRequests(context, enq);
         reportStatus(context, enq, 'failed');
-        return { context: drained };
+        /* The failed mint's paths are still unrecorded: the next cut reads them again. */
+        return {
+          context: { ...drained, changedPaths: unionPaths(context.cutPaths, context.changedPaths), cutPaths: [] },
+        };
       },
       /* A head fact deferred by the failed mint is still news (W0.9, RM-R6). */
       always: ({ context }) =>

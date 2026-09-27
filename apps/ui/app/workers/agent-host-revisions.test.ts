@@ -46,7 +46,7 @@ describe('createPortRevisionsClient', () => {
     port2.postMessage({
       type: 'status',
       status: {
-        branch: 'main',
+        line: { kind: 'branch', name: 'main' },
         headRevisionId: 'rev-m',
         branches: [
           { name: 'main', head: 'rev-m' },

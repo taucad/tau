@@ -17,6 +17,7 @@ import {
 import { opencascade } from '@taucad/opencascade';
 import { replicad } from '@taucad/replicad';
 import { rhino } from '@taucad/rhino';
+import { slicer } from '@taucad/slicer';
 import { zoo } from '@taucad/zoo';
 import { zooCloseErrors } from '#cloud/zoo-close-errors.js';
 import { observabilityMiddleware } from '#runtime/observability/observability.middleware.js';
@@ -38,6 +39,7 @@ const createUiRuntimeOptions = (config: UiRuntimeConfig, options: UiRuntimeOptio
     brep(),
     rhino(),
     image(),
+    slicer(),
     assimp({ preset: 'all' }),
     replicad({
       kernels: {

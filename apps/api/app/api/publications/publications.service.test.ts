@@ -18,6 +18,10 @@ import { publicationRowSchema } from '#api/publications/publications.dto.js';
 import { PublicationsService } from '#api/publications/publications.service.js';
 import { createMemoryRepositoryStore, seedLease } from '#testing/publication-lease.fixture.js';
 import type { RepositoryStore } from '#api/git/store/port.js';
+import { hydrateLease } from '#api/git/store/lease.js';
+import { decodeManifest, encodeManifest } from '#api/git/store/manifest.js';
+import type { RepositoryLease } from '#api/git/store/lease.js';
+import { repositoryLocator } from '#api/git/store/locator.js';
 import {
   isPublishableTreePath,
   parseLfsPointer,
@@ -114,6 +118,33 @@ function createStoreStub(repositoryPath: string): PublicationsServiceDeps[8] {
     deleteObjects: async (_locator, keys) => store.deleteObjects(only, keys),
   };
   return seeded as unknown as PublicationsServiceDeps[8];
+}
+
+/**
+ * The repository store and the lease runner over it, as the service's last two
+ * dependencies. The runner hydrates straight from the store: admission (disk,
+ * owner fairness, hydrate budgets) is `GitRepositoryService`'s and is proved in
+ * `git.service.test.ts`.
+ *
+ * @param repositoryPath - The repository to seed, or `''` for none.
+ * @returns The store and the runner, in constructor order.
+ */
+function leaseDependencies(repositoryPath: string): readonly [PublicationsServiceDeps[8], PublicationsServiceDeps[9]] {
+  const store = createStoreStub(repositoryPath);
+  const repositories = {
+    withLease: async <T>(
+      access: { ownerId: string; projectId: string },
+      work: (lease: RepositoryLease) => Promise<T>,
+    ): Promise<T> => {
+      const lease = await hydrateLease({ store, locator: repositoryLocator(access) });
+      try {
+        return await work(lease);
+      } finally {
+        await lease.dispose();
+      }
+    },
+  } as unknown as PublicationsServiceDeps[9];
+  return [store, repositories] as const;
 }
 
 /**
@@ -319,7 +350,7 @@ function createProjectShareService(args: { readonly selectRows: unknown[][] }): 
     createMetricsStub(),
     createEmailStub(),
     createBillingStub(),
-    createStoreStub(''),
+    ...leaseDependencies(''),
   );
 }
 
@@ -600,7 +631,7 @@ describe('PublicationsService.publishFromRevision', () => {
       createMetricsStub(),
       createEmailStub(),
       createBillingStub(),
-      createStoreStub(repositoryPath),
+      ...leaseDependencies(repositoryPath),
     );
 
     await service.publishFromRevision({ ownerId: 'user_1', request: publishRequest(repositoryPath) });
@@ -625,7 +656,7 @@ describe('PublicationsService.publishFromRevision', () => {
       createMetricsStub(),
       email,
       createBillingStub(),
-      createStoreStub(repositoryPath),
+      ...leaseDependencies(repositoryPath),
     );
 
     const result = await service.publishFromRevision({
@@ -659,7 +690,7 @@ describe('PublicationsService.publishFromRevision', () => {
       createMetricsStub(),
       email,
       createBillingStub(),
-      createStoreStub(repositoryPath),
+      ...leaseDependencies(repositoryPath),
     );
 
     const result = await service.publishFromRevision({
@@ -691,7 +722,7 @@ describe('PublicationsService.publishFromRevision', () => {
       createMetricsStub(),
       createEmailStub(),
       createBillingStub(),
-      createStoreStub(repositoryPath),
+      ...leaseDependencies(repositoryPath),
     );
 
     await expect(
@@ -927,7 +958,7 @@ describe('PublicationsService.getPublicationForViewer', () => {
       createMetricsStub(),
       createEmailStub(),
       createBillingStub(),
-      createStoreStub(''),
+      ...leaseDependencies(''),
     );
 
     const result = await service.getPublicationForViewer({ publicationId: 'pub_test' });
@@ -949,7 +980,7 @@ describe('PublicationsService.getPublicationForViewer', () => {
       createMetricsStub(),
       createEmailStub(),
       createBillingStub(),
-      createStoreStub(''),
+      ...leaseDependencies(''),
     );
 
     await service.getPublicationForViewer({ publicationId: 'pub_test' });
@@ -973,7 +1004,7 @@ describe('PublicationsService.getPublicationForViewer', () => {
       createMetricsStub(),
       createEmailStub(),
       createBillingStub(),
-      createStoreStub(''),
+      ...leaseDependencies(''),
     );
 
     await service.getPublicationForViewer({ publicationId: 'pub_test' });
@@ -1012,7 +1043,7 @@ describe('PublicationsService.getPublicationForViewer', () => {
       createMetricsStub(),
       createEmailStub(),
       createBillingStub(),
-      createStoreStub(''),
+      ...leaseDependencies(''),
     );
 
     const result = await service.getPublicationForViewer({
@@ -1035,7 +1066,7 @@ describe('PublicationsService.getPublicationForViewer', () => {
       createMetricsStub(),
       createEmailStub(),
       createBillingStub(),
-      createStoreStub(''),
+      ...leaseDependencies(''),
     );
 
     await expect(service.getPublicationForViewer({ publicationId: 'pub_test' })).rejects.toBeInstanceOf(
@@ -1085,7 +1116,7 @@ describe('PublicationsService.getPublicationForViewer', () => {
       createMetricsStub(),
       createEmailStub(),
       createBillingStub(),
-      createStoreStub(''),
+      ...leaseDependencies(''),
     );
 
     const result = await service.getPublicationForViewer({ publicationId: 'pub_test', viewerUserId: 'user_friend' });
@@ -1135,7 +1166,7 @@ describe('PublicationsService.getPublicationForViewer', () => {
       createMetricsStub(),
       createEmailStub(),
       createBillingStub(),
-      createStoreStub(''),
+      ...leaseDependencies(''),
     );
 
     await expect(
@@ -1199,7 +1230,7 @@ describe('PublicationsService.updateVisibility', () => {
       createMetricsStub(),
       createEmailStub(),
       createBillingStub(),
-      createStoreStub(''),
+      ...leaseDependencies(''),
     );
 
     return { service, update, set, storage };
@@ -1418,7 +1449,7 @@ describe('PublicationsService access grants', () => {
       createMetricsStub(),
       createEmailStub(),
       createBillingStub(),
-      createStoreStub(''),
+      ...leaseDependencies(''),
     );
 
     const result = await service.listAccessGrants({ publicationId: 'pub_access', ownerId: 'user_owner' });
@@ -1453,7 +1484,7 @@ describe('PublicationsService access grants', () => {
       createMetricsStub(),
       email,
       createBillingStub(),
-      createStoreStub(''),
+      ...leaseDependencies(''),
     );
 
     const result = await service.inviteAccess({
@@ -1492,7 +1523,7 @@ describe('PublicationsService access grants', () => {
       createMetricsStub(),
       email,
       createBillingStub(),
-      createStoreStub(''),
+      ...leaseDependencies(''),
     );
 
     const result = await service.inviteAccess({
@@ -1537,7 +1568,7 @@ describe('PublicationsService access grants', () => {
       metrics,
       email,
       createBillingStub(),
-      createStoreStub(''),
+      ...leaseDependencies(''),
     );
 
     const result = await service.inviteAccess({
@@ -1582,7 +1613,7 @@ describe('PublicationsService access grants', () => {
       metrics,
       email,
       createBillingStub(),
-      createStoreStub(''),
+      ...leaseDependencies(''),
     );
 
     const result = await service.inviteAccess({
@@ -1640,7 +1671,7 @@ describe('PublicationsService.recordView', () => {
       args.metrics ?? createMetricsStub(),
       createEmailStub(),
       createBillingStub(),
-      createStoreStub(''),
+      ...leaseDependencies(''),
     );
   }
 
@@ -1794,7 +1825,7 @@ describe('PublicationsService.publishFromRevision storage tiers (R2/R8)', () => 
       createMetricsStub(),
       createEmailStub(),
       createBillingStub(),
-      createStoreStub(repositoryPath),
+      ...leaseDependencies(repositoryPath),
     );
 
     return { storage, txInserts, outerInsert, service, repositoryPath };
@@ -1819,6 +1850,44 @@ describe('PublicationsService.publishFromRevision storage tiers (R2/R8)', () => 
         ownerId: 'user_1',
         request: publishRequest(repositoryPath, { revisionId: 'c'.repeat(40) }),
       }),
+    ).rejects.toMatchObject({ response: { code: publicationApiCode.REVISION_MOVED } });
+  });
+
+  /* D24 / RV-W9 M5: a lease hydrated before the ref-removal verb committed
+     still holds the removed name. Under the publication lock the name is read
+     from the store again, so the publish is refused rather than bringing back a
+     name the owner just removed. */
+  it('refuses a publish whose name the store no longer holds once it has the lock', async () => {
+    const { databaseService } = createPublishDatabase();
+    const repositoryPath = seedRepository(new Map([['main.ts', encodeUtf8('code')]]));
+    const [store, repositories] = leaseDependencies(repositoryPath);
+    const removed = {
+      ...store,
+      readManifest: async (locator: Parameters<RepositoryStore['readManifest']>[0]) => {
+        const read = await store.readManifest(locator);
+        if (read === undefined) {
+          return read;
+        }
+        const manifest = decodeManifest(read.manifest);
+        const references = Object.fromEntries(Object.entries(manifest.refs).filter(([ref]) => ref !== 'refs/tags/v1'));
+        return { ...read, manifest: encodeManifest({ ...manifest, refs: references }) };
+      },
+    } as unknown as PublicationsServiceDeps[8];
+    const service = new PublicationsService(
+      databaseService,
+      createStorageStub(),
+      createConfigStub(),
+      createRedisStub(),
+      createRateLimiterStub(),
+      createMetricsStub(),
+      createEmailStub(),
+      createBillingStub(),
+      removed,
+      repositories,
+    );
+
+    await expect(
+      service.publishFromRevision({ ownerId: 'user_1', request: publishRequest(repositoryPath) }),
     ).rejects.toMatchObject({ response: { code: publicationApiCode.REVISION_MOVED } });
   });
 
@@ -1977,7 +2046,7 @@ describe('PublicationsService.publishFromRevision storage tiers (R2/R8)', () => 
       createMetricsStub(),
       createEmailStub(),
       createBillingStub(),
-      createStoreStub(repositoryPath),
+      ...leaseDependencies(repositoryPath),
     );
 
     const result = await service.publishFromRevision({
@@ -2107,7 +2176,7 @@ describe('PublicationsService derived-state repair', () => {
       createMetricsStub(),
       createEmailStub(),
       createBillingStub(),
-      createStoreStub(repositoryPath),
+      ...leaseDependencies(repositoryPath),
     );
 
     const result = await service.getPublicationForViewer({ publicationId: 'pub_derived' });
@@ -2159,7 +2228,7 @@ describe('PublicationsService derived-state repair', () => {
       createMetricsStub(),
       createEmailStub(),
       createBillingStub(),
-      createStoreStub(repositoryPath),
+      ...leaseDependencies(repositoryPath),
     );
 
     const result = await service.getPublicationForViewer({ publicationId: 'pub_current_tag' });
@@ -2203,7 +2272,7 @@ describe('PublicationsService derived-state repair', () => {
       createEmailStub(),
       createBillingStub(),
       /* No repository at all: a current publication must never hydrate one. */
-      createStoreStub(''),
+      ...leaseDependencies(''),
     );
 
     const result = await service.getPublicationForViewer({ publicationId: 'pub_current' });
@@ -2254,7 +2323,7 @@ describe('PublicationsService.resolvePublicationFile (R3)', () => {
       createMetricsStub(),
       createEmailStub(),
       createBillingStub(),
-      createStoreStub(''),
+      ...leaseDependencies(''),
     );
     return { service, storage };
   }
@@ -2399,7 +2468,7 @@ describe('PublicationsService.openPublicationFile (R3)', () => {
       createMetricsStub(),
       createEmailStub(),
       createBillingStub(),
-      createStoreStub(''),
+      ...leaseDependencies(''),
     );
 
     const sha = 'f'.repeat(64);
@@ -2430,7 +2499,7 @@ describe('PublicationsService.openPublicationFile (R3)', () => {
       createMetricsStub(),
       createEmailStub(),
       createBillingStub(),
-      createStoreStub(''),
+      ...leaseDependencies(''),
     );
 
     await expect(service.openPublicationFile('f'.repeat(64), 'main.ts')).rejects.toThrow('denied');
@@ -2455,7 +2524,7 @@ describe('PublicationsService.openPublicationFile (R3)', () => {
       createMetricsStub(),
       createEmailStub(),
       createBillingStub(),
-      createStoreStub(''),
+      ...leaseDependencies(''),
     );
 
     const opened = await service.openPublicationFile('f'.repeat(64), 'thumbnail.webp');
@@ -2515,7 +2584,7 @@ describe('PublicationsService.getPublicationForViewer tiered file URLs (R4/R6)',
       createMetricsStub(),
       createEmailStub(),
       createBillingStub(),
-      createStoreStub(''),
+      ...leaseDependencies(''),
     );
 
     return { service, storage };
@@ -2604,7 +2673,7 @@ describe('PublicationsService private-visibility entitlement gate (T4/T16)', () 
       createMetricsStub(),
       createEmailStub(),
       createBillingStub({ canCreatePrivateShares: args.entitled }),
-      createStoreStub(seedRepository(new Map([['main.ts', new Uint8Array([1])]]))),
+      ...leaseDependencies(seedRepository(new Map([['main.ts', new Uint8Array([1])]]))),
     );
   }
 
@@ -2640,7 +2709,7 @@ describe('PublicationsService private-visibility entitlement gate (T4/T16)', () 
       createMetricsStub(),
       createEmailStub(),
       createBillingStub({ canCreatePrivateShares: true }),
-      createStoreStub(seedRepository(new Map([['main.ts', new Uint8Array([1])]]))),
+      ...leaseDependencies(seedRepository(new Map([['main.ts', new Uint8Array([1])]]))),
     );
 
     await expect(

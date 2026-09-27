@@ -40,6 +40,20 @@ internal sealed record CompiledModel(
     IReadOnlyDictionary<string, object?> JsonSchema,
     CompilationTimings Timings);
 
+/// <summary>
+/// One parsed project C# file and whether it is a program: top-level statements or a static
+/// <c>Main</c> method. Every other file is a helper that any program may use.
+/// </summary>
+internal sealed record ProjectSource(
+    string Path,
+    byte[] Content,
+    SyntaxTree Tree,
+    bool HasTopLevelStatements,
+    IReadOnlyList<MethodDeclarationSyntax> MainMethods)
+{
+    internal bool IsProgram => HasTopLevelStatements || MainMethods.Count > 0;
+}
+
 internal sealed record CompilationTimings(
     bool CacheHit,
     double SourceRead,
@@ -49,7 +63,7 @@ internal sealed record CompilationTimings(
 
 internal static class CompilationService
 {
-    private const string CompilerContractVersion = "3";
+    private const string CompilerContractVersion = "4";
     private const int MaximumSourceFiles = 256;
     private const int MaximumSourceBytes = 8 * 1024 * 1024;
     private const int MaximumSingleSourceBytes = 1024 * 1024;
@@ -59,56 +73,56 @@ internal static class CompilationService
     private static readonly ImmutableArray<MetadataReference> References = CreateReferences(
         AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") as string);
     private static readonly byte[] PicoGkAssemblyHash = SHA256.HashData(File.ReadAllBytes(typeof(global::PicoGK.Library).Assembly.Location));
+    // ponytail: one slot each. Alternating entries in one worker re-select from the cached parse but
+    // recompile; keep a slot per entry if that switch cost shows up in the build timings.
     private static (string Key, CompiledModel Model)? cachedCompilation;
+    private static (string Key, IReadOnlyList<ProjectSource> Sources)? cachedProject;
 
-    internal static CompiledModel Compile(string workspace)
+    /// <summary>
+    /// The project C# files an entry compiles with: its program and every helper. Other programs are
+    /// independent models, so their top-level statements, <c>Params</c> and types never collide with it.
+    /// </summary>
+    internal static IReadOnlyList<string> SelectSources(string workspace, string entryPath) =>
+        Select(ReadProject(workspace, Stopwatch.StartNew(), new Stopwatch()), entryPath)
+            .Select(source => source.Path)
+            .ToArray();
+
+    internal static CompiledModel Compile(string workspace, string entryPath)
     {
         var sourceRead = Stopwatch.StartNew();
-        var paths = Directory.GetFiles(workspace, "*.cs", SearchOption.AllDirectories)
-            .Order(StringComparer.Ordinal)
-            .ToArray();
-        if (paths.Length == 0)
-        {
-            throw CompilationError("The PicoGK project contains no C# source files.");
-        }
-        if (paths.Length > MaximumSourceFiles)
-        {
-            throw CompilationError($"The PicoGK project exceeds {MaximumSourceFiles} C# source files.");
-        }
-
-        var totalBytes = 0L;
+        var parse = new Stopwatch();
+        var selected = Select(ReadProject(workspace, sourceRead, parse), entryPath);
         using var digest = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         digest.AppendData(Encoding.UTF8.GetBytes(CompilerContractVersion));
         digest.AppendData(PicoGkAssemblyHash);
-        var sources = paths.Select(path =>
+        foreach (var source in selected)
         {
-            var fileBytes = new FileInfo(path).Length;
-            totalBytes = checked(totalBytes + fileBytes);
-            if (fileBytes > MaximumSingleSourceBytes || totalBytes > MaximumSourceBytes)
-            {
-                throw CompilationError("The PicoGK project exceeds its C# source byte limit.");
-            }
-            var relativePath = Path.GetRelativePath(workspace, path).Replace('\\', '/');
-            var content = File.ReadAllBytes(path);
-            AppendDigest(digest, Encoding.UTF8.GetBytes(relativePath));
-            AppendDigest(digest, content);
-            return (relativePath, content);
-        }).ToArray();
+            AppendDigest(digest, Encoding.UTF8.GetBytes(source.Path));
+            AppendDigest(digest, source.Content);
+        }
         var cacheKey = Convert.ToHexString(digest.GetHashAndReset());
-        sourceRead.Stop();
         lock (CacheLock)
         {
             if (cachedCompilation is { } cached && cached.Key == cacheKey)
             {
                 return cached.Model with
                 {
-                    Timings = new CompilationTimings(true, sourceRead.Elapsed.TotalMilliseconds, 0, 0, 0),
+                    Timings = new CompilationTimings(
+                        true,
+                        sourceRead.Elapsed.TotalMilliseconds,
+                        parse.Elapsed.TotalMilliseconds,
+                        0,
+                        0),
                 };
             }
         }
 
-        var parse = Stopwatch.StartNew();
-        var trees = sources.Select(source => ParseSource(source.relativePath, source.content)).Prepend(ParseImplicitUsings()).ToArray();
+        parse.Start();
+        foreach (var source in selected)
+        {
+            AssertSyntaxDepth(source.Tree);
+        }
+        var trees = selected.Select(source => source.Tree).Prepend(ParseImplicitUsings()).ToArray();
         parse.Stop();
 
         var analyze = Stopwatch.StartNew();
@@ -166,6 +180,101 @@ internal static class CompilationService
             cachedCompilation = (cacheKey, model);
         }
         return model;
+    }
+
+    private static IReadOnlyList<ProjectSource> ReadProject(string workspace, Stopwatch sourceRead, Stopwatch parse)
+    {
+        var paths = Directory.GetFiles(workspace, "*.cs", SearchOption.AllDirectories)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        if (paths.Length == 0)
+        {
+            throw CompilationError("The PicoGK project contains no C# source files.");
+        }
+        if (paths.Length > MaximumSourceFiles)
+        {
+            throw CompilationError($"The PicoGK project exceeds {MaximumSourceFiles} C# source files.");
+        }
+
+        var totalBytes = 0L;
+        using var digest = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var files = paths.Select(path =>
+        {
+            var fileBytes = new FileInfo(path).Length;
+            totalBytes = checked(totalBytes + fileBytes);
+            if (fileBytes > MaximumSingleSourceBytes || totalBytes > MaximumSourceBytes)
+            {
+                throw CompilationError("The PicoGK project exceeds its C# source byte limit.");
+            }
+            var relativePath = Path.GetRelativePath(workspace, path).Replace('\\', '/');
+            var content = File.ReadAllBytes(path);
+            AppendDigest(digest, Encoding.UTF8.GetBytes(relativePath));
+            AppendDigest(digest, content);
+            return (relativePath, content);
+        }).ToArray();
+        var projectKey = Convert.ToHexString(digest.GetHashAndReset());
+        sourceRead.Stop();
+        lock (CacheLock)
+        {
+            if (cachedProject is { } cached && cached.Key == projectKey)
+            {
+                return cached.Sources;
+            }
+        }
+
+        // Every file is parsed to be classified, so a syntax error in another entry still leaves that
+        // file a program and keeps it out of this compilation. Only compiled trees face the depth limit.
+        parse.Start();
+        var sources = files.Select(file => Classify(file.relativePath, file.content)).ToArray();
+        parse.Stop();
+        lock (CacheLock)
+        {
+            cachedProject = (projectKey, sources);
+        }
+        return sources;
+    }
+
+    private static ProjectSource Classify(string path, byte[] content)
+    {
+        var tree = CSharpSyntaxTree.ParseText(
+            Encoding.UTF8.GetString(content),
+            new CSharpParseOptions(LanguageVersion.Latest),
+            path,
+            Encoding.UTF8);
+        var root = tree.GetCompilationUnitRoot();
+        // The C# entry-point candidates: static methods named Main. Roslyn itself diagnoses a
+        // candidate whose signature cannot start a program.
+        var mainMethods = root.DescendantNodes()
+            .OfType<MethodDeclarationSyntax>()
+            .Where(method => method.Identifier.ValueText == "Main" && method.Modifiers.Any(SyntaxKind.StaticKeyword))
+            .ToArray();
+        return new ProjectSource(path, content, tree, root.Members.OfType<GlobalStatementSyntax>().Any(), mainMethods);
+    }
+
+    private static IReadOnlyList<ProjectSource> Select(IReadOnlyList<ProjectSource> sources, string entryPath)
+    {
+        var entry = sources.FirstOrDefault(source => source.Path == entryPath)
+            ?? throw new WorkerException(new Issue(
+                "PicoGK entryPath must name a C# file inside the workspace.", "CS_TAU_PATH", "validation", "error"));
+        var programs = sources.Where(source => source.IsProgram).ToArray();
+        // A helper opened on its own still runs the project's one program, as a console project would.
+        // With no program at all every file is a helper, and Roslyn names the syntax error or the
+        // missing entry point (CS5001) itself.
+        var program = entry.IsProgram ? entry : programs.Length == 1 ? programs[0] : null;
+        if (program is null && programs.Length > 1)
+        {
+            throw EntryError(
+                $"{entryPath} is a helper, and this project has several programs: {string.Join(", ", programs.Select(source => source.Path))}. Open the one to run.",
+                new Location(entryPath, 1, 1));
+        }
+        if (program is { HasTopLevelStatements: false, MainMethods.Count: > 1 })
+        {
+            var lines = program.MainMethods.Select(method => method.GetLocation().GetLineSpan().StartLinePosition.Line + 1);
+            throw EntryError(
+                $"{program.Path} declares {program.MainMethods.Count} static Main methods (lines {string.Join(", ", lines)}). A program file needs exactly one entry point.",
+                LocationOf(program.MainMethods[1]));
+        }
+        return sources.Where(source => ReferenceEquals(source, program) || !source.IsProgram).ToArray();
     }
 
     internal static IReadOnlyDictionary<string, object?> BindParameters(CompiledModel compiled, JsonElement supplied)
@@ -393,13 +502,8 @@ internal static class CompilationService
         digest.AppendData(value);
     }
 
-    private static SyntaxTree ParseSource(string path, byte[] content)
+    private static void AssertSyntaxDepth(SyntaxTree tree)
     {
-        var tree = CSharpSyntaxTree.ParseText(
-            Encoding.UTF8.GetString(content),
-            new CSharpParseOptions(LanguageVersion.Latest),
-            path,
-            Encoding.UTF8);
         var maximumDepth = tree.GetRoot().DescendantNodes(descendIntoTrivia: true)
             .Select(node => node.Ancestors().Count())
             .DefaultIfEmpty(0)
@@ -408,7 +512,6 @@ internal static class CompilationService
         {
             throw CompilationError($"C# syntax exceeds the maximum depth of {MaximumSyntaxDepth}.", tree.GetRoot());
         }
-        return tree;
     }
 
     private static SyntaxTree ParseImplicitUsings() => CSharpSyntaxTree.ParseText(
@@ -449,25 +552,18 @@ internal static class CompilationService
         return new Issue(diagnostic.GetMessage(), diagnostic.Id, "syntax", "error", location);
     }
 
-    private static WorkerException CompilationError(string message, SyntaxNode? node = null)
+    private static WorkerException CompilationError(string message, SyntaxNode? node = null) =>
+        new(new Issue(message, "CS_TAU_COMPILATION", "validation", "error", node is null ? null : LocationOf(node)));
+
+    private static WorkerException EntryError(string message, Location location) =>
+        new(new Issue(message, "CS_TAU_ENTRY", "validation", "error", location));
+
+    private static Location LocationOf(SyntaxNode node)
     {
-        Location? location = null;
-        if (node is not null)
-        {
-            var span = node.GetLocation().GetLineSpan();
-            location = new Location(span.Path, span.StartLinePosition.Line + 1, span.StartLinePosition.Character + 1);
-        }
-        return new WorkerException(new Issue(message, "CS_TAU_COMPILATION", "validation", "error", location));
+        var span = node.GetLocation().GetLineSpan();
+        return new Location(span.Path, span.StartLinePosition.Line + 1, span.StartLinePosition.Character + 1);
     }
 
-    private static WorkerException ParameterError(string message, SyntaxNode? node = null)
-    {
-        Location? location = null;
-        if (node is not null)
-        {
-            var span = node.GetLocation().GetLineSpan();
-            location = new Location(span.Path, span.StartLinePosition.Line + 1, span.StartLinePosition.Character + 1);
-        }
-        return new WorkerException(new Issue(message, "CS_TAU_PARAMETERS", "validation", "error", location));
-    }
+    private static WorkerException ParameterError(string message, SyntaxNode? node = null) =>
+        new(new Issue(message, "CS_TAU_PARAMETERS", "validation", "error", node is null ? null : LocationOf(node)));
 }

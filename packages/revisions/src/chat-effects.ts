@@ -9,6 +9,7 @@
 import { revisionId } from '#algorithms/index.js';
 import { chatRefName, projectChats, replayChatSegment, writeChatRef } from '#chat-ref.js';
 import { LfsQuotaError } from '#lfs-client.js';
+import type { OpsLog } from '#ops-ref.js';
 import type { LfsQuotaRefusal } from '#lfs-client.js';
 import { remoteTrackingRef } from '#remotes.js';
 import { RevisionPortError } from '#revision-port.js';
@@ -46,6 +47,8 @@ export const createChatEffects = (
     port: RevisionPort;
     recordsFileSystem: () => Promise<RevisionFileSystem>;
     deviceId: RevisionActorsOptions['deviceId'];
+    /** Names this host's segments by actor form (EQ10(a)); the host id only gates. */
+    recordDevices: Pick<OpsLog, 'deviceFor' | 'ownDevices'>;
     actor: RevisionActorsOptions['actor'];
     onChatsProjected: RevisionActorsOptions['onChatsProjected'];
     actorId: string;
@@ -53,7 +56,13 @@ export const createChatEffects = (
   }>,
 ): Readonly<{
   chatContext: () => Promise<
-    Readonly<{ port: RevisionPort; filesystem: RevisionFileSystem; deviceId: string }> | undefined
+    | Readonly<{
+        port: RevisionPort;
+        filesystem: RevisionFileSystem;
+        deviceId: string;
+        ownDevices: ReadonlySet<string>;
+      }>
+    | undefined
   >;
   offerOf: (name: string, leases: Readonly<Record<string, string>>) => RevisionPushRef;
   outcomeOf: (entry: RevisionPushRefResult, offered?: ReadonlyMap<string, string>) => SyncRefOutcome;
@@ -72,7 +81,15 @@ export const createChatEffects = (
       quotaStorage?: RemoteStorageRefusal;
     }>
   >;
-  recordChats: (syncChats: boolean) => Promise<readonly SyncRefOutcome[]>;
+  pushRecordSet: (
+    input: Readonly<{
+      names: readonly string[];
+      remote: string;
+      leases: Readonly<Record<string, string>>;
+      offered: ReadonlyMap<string, string>;
+    }>,
+  ) => Promise<ReadonlyMap<string, SyncRefOutcome> | undefined>;
+  recordChats: (syncChats: boolean, remote: string) => Promise<readonly SyncRefOutcome[]>;
   refusedAll: (
     names: readonly string[],
     why: string,
@@ -89,17 +106,45 @@ export const createChatEffects = (
   ) => Promise<SyncRefOutcome>;
   staysPerRef: (error: unknown) => boolean;
 }> => {
-  const { port, recordsFileSystem, deviceId, actor, onChatsProjected, actorId, now } = dependencies;
+  const { port, recordsFileSystem, deviceId, recordDevices, actor, onChatsProjected, actorId, now } = dependencies;
 
-  /** What every chat-ref effect needs, or `undefined` on a host with no device id. */
+  /**
+   * What every chat-ref effect needs, or `undefined` on a host with no device id.
+   *
+   * The segment is named by the record device of the actor form that writes it,
+   * so no pushed path carries the host's own id and no one name joins a
+   * pseudonym to an account (EQ10(a)).
+   */
   const chatContext = async (): Promise<
-    Readonly<{ port: RevisionPort; filesystem: RevisionFileSystem; deviceId: string }> | undefined
+    | Readonly<{
+        port: RevisionPort;
+        filesystem: RevisionFileSystem;
+        deviceId: string;
+        ownDevices: ReadonlySet<string>;
+      }>
+    | undefined
   > => {
     const identity = deviceId?.();
     if (identity === undefined || identity === '') {
       return undefined;
     }
-    return { port, filesystem: await recordsFileSystem(), deviceId: identity };
+    try {
+      const segment = await recordDevices.deviceFor(actor?.({ runId: undefined, trigger: 'save' }));
+      return {
+        port,
+        filesystem: await recordsFileSystem(),
+        deviceId: segment,
+        /* The host id named this host's segments before record devices did, so
+         * a segment it wrote then is still its own, never projected back as
+         * another device's (EQ10 ruling, RV-W7 #8). */
+        ownDevices: new Set([...(await recordDevices.ownDevices()), identity]),
+      };
+    } catch (error) {
+      /* A device file this host cannot read names no segment: no chat is
+       * recorded under a guess, and history still pushes (I8). */
+      console.error('[revisions] record devices', error);
+      return undefined;
+    }
   };
 
   /**
@@ -110,8 +155,9 @@ export const createChatEffects = (
    * needs a second one.
    *
    * @param syncChats - The project's own answer; `false` writes nothing at all.
+   * @param remote - The remote this push goes to, whose fetched chat heads a write builds on.
    */
-  const recordChats = async (syncChats: boolean): Promise<readonly SyncRefOutcome[]> => {
+  const recordChats = async (syncChats: boolean, remote: string): Promise<readonly SyncRefOutcome[]> => {
     const context = await chatContext();
     if (context === undefined || !syncChats) {
       return [];
@@ -135,6 +181,7 @@ export const createChatEffects = (
             actorId,
             ...(person === undefined ? {} : { actor: person }),
             now: now(),
+            remote,
           });
           return {
             name,
@@ -182,6 +229,11 @@ export const createChatEffects = (
   const staysPerRef = (error: unknown): boolean =>
     error instanceof LfsQuotaError ||
     (error instanceof RevisionPortError && (error.code === 'REMOTE_REJECTED' || error.code === 'REMOTE_REF_CONFLICT'));
+
+  /* A 429 is the whole push's, and the scheduler's to wait out (W13d): offering
+   * each record alone would spend N more requests on the same limit. */
+  const rateLimited = (error: unknown): boolean =>
+    error instanceof RevisionPortError && error.retryAfterMilliseconds !== undefined;
 
   /** Every ref of one push, refused with one reason — a quota, or a throw. */
   const refusedAll = (
@@ -231,6 +283,9 @@ export const createChatEffects = (
             : outcomeOf(entry, input.offered),
       };
     } catch (error) {
+      if (rateLimited(error)) {
+        throw error;
+      }
       const message = error instanceof Error ? error.message : 'This record could not be backed up.';
       return {
         outcome: {
@@ -249,6 +304,41 @@ export const createChatEffects = (
             }
           : {}),
       };
+    }
+  };
+
+  /**
+   * Offer the whole record set in one push, non-atomic, so each ref keeps its
+   * own verdict: N chats were N pushes, each its own advertisement (W13c).
+   *
+   * A server that refuses a push whole — the Tau Hosted Remote's `pre-receive`
+   * — answers every ref `rejected` for one ref's sake, so that answer, and a
+   * throw, are no verdict at all: `undefined`, and each ref is offered alone.
+   *
+   * @param input - The record refs, the remote and the leases this host holds.
+   * @returns Each ref's outcome by name, or `undefined` to offer them one by one.
+   */
+  const pushRecordSet = async (
+    input: Readonly<{
+      names: readonly string[];
+      remote: string;
+      leases: Readonly<Record<string, string>>;
+      offered: ReadonlyMap<string, string>;
+    }>,
+  ): Promise<ReadonlyMap<string, SyncRefOutcome> | undefined> => {
+    try {
+      const pushed = await port.push({
+        remote: input.remote,
+        refs: input.names.map((name) => offerOf(name, input.leases)),
+      });
+      return pushed.refs.every((entry) => entry.status === 'rejected')
+        ? undefined
+        : new Map(pushed.refs.map((entry) => [entry.name, outcomeOf(entry, input.offered)]));
+    } catch (error) {
+      if (rateLimited(error)) {
+        throw error;
+      }
+      return undefined;
     }
   };
 
@@ -302,9 +392,14 @@ export const createChatEffects = (
       };
     }
     const fetched = await port.fetch({ remote: input.remote, refs: [input.name] });
-    const projected = await projectChats({ ...context, refs: fetched.refs });
-    if (projected.length > 0) {
-      onChatsProjected?.(projected);
+    const written: string[] = [];
+    try {
+      await projectChats({ ...context, refs: fetched.refs, onWritten: (id) => written.push(id) });
+    } finally {
+      /* A conflicted record still wrote its segments (RV-W7 #5). */
+      if (written.length > 0) {
+        onChatsProjected?.(written);
+      }
     }
     const remoteHead = await port.readRef(remoteTrackingRef(input.remote, input.name));
     const person = actor?.({ runId: undefined, trigger: 'save' });
@@ -319,6 +414,11 @@ export const createChatEffects = (
     });
     if (replayed.head === undefined) {
       return { name: input.name, status: 'rejected', head: undefined, reason: 'This chat could not be replayed.' };
+    }
+    /* The remote already holds every byte this device has, and the local ref
+     * now names its head: offering the old chain again is refused forever (W13c). */
+    if (replayed.status === 'upToDate') {
+      return { name: input.name, status: 'upToDate', head: replayed.head };
     }
     /* The lease is the head that was just *fetched*, never the local chain's
      * own value: `refs/tau/chats/*` is an orphan chain per host (W17 a2.9/5). */
@@ -337,6 +437,7 @@ export const createChatEffects = (
     offerOf,
     outcomeOf,
     pushRecordRef,
+    pushRecordSet,
     recordChats,
     refusedAll,
     replayRejectedChat,

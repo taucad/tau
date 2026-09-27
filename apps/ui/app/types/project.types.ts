@@ -1,4 +1,4 @@
-import type { ProjectManifest } from '@taucad/types';
+import type { ProjectManifest, ProjectManifestParseIssue } from '@taucad/types';
 import type { ProjectLocator } from '@taucad/filesystem';
 import type { ProjectSlugs } from '#utils/project-url.utils.js';
 
@@ -20,6 +20,8 @@ export type ProjectLibraryEntry = {
   readonly locator: ProjectLocator;
   readonly slugs?: ProjectSlugs;
   readonly workspaceName?: string;
+  /** Why `tau.json` is degraded: the project opens from `manifest`, its normalized view, until Repair. */
+  readonly issue?: ProjectManifestParseIssue;
 };
 
 /** Flat presentation projection used by local library and recents components. */
@@ -29,6 +31,8 @@ export type ProjectListItem = ProjectManifest & {
   readonly locator: ProjectLocator;
   readonly slugs?: ProjectSlugs;
   readonly workspaceName?: string;
+  /** Why `tau.json` is degraded, when it is. */
+  readonly manifestIssue?: ProjectManifestParseIssue;
 };
 
 export const projectLibraryEntryToListItem = (entry: ProjectLibraryEntry): ProjectListItem => ({
@@ -38,4 +42,5 @@ export const projectLibraryEntryToListItem = (entry: ProjectLibraryEntry): Proje
   locator: entry.locator,
   ...(entry.slugs === undefined ? {} : { slugs: entry.slugs }),
   ...(entry.workspaceName === undefined ? {} : { workspaceName: entry.workspaceName }),
+  ...(entry.issue === undefined ? {} : { manifestIssue: entry.issue }),
 });

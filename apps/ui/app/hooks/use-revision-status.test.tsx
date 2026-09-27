@@ -477,6 +477,26 @@ describe('the page client of the worker revision root', () => {
     revisionClient.close();
   });
 
+  it('should say which project is focused on every port it opens, so a reopened root streams again (RV-W5b2 N4)', () => {
+    const { worker, messages } = controlledWorker();
+    const revisionClient = getRevisionClient({ projectId, worker });
+    const focusFrames = (): unknown[] =>
+      messages.filter((message) => (message as { command?: string }).command === 'focus');
+    revisionClient.focus?.(true);
+    expect(focusFrames()).toEqual([]);
+
+    revisionClient.open();
+    expect(focusFrames()).toEqual([{ command: 'focus', focused: true }]);
+
+    revisionClient.close();
+    revisionClient.open();
+    expect(focusFrames()).toEqual([
+      { command: 'focus', focused: true },
+      { command: 'focus', focused: true },
+    ]);
+    revisionClient.close();
+  });
+
   it('should replay a completed chat projection to a later route subscriber', () => {
     const { worker, ports } = controlledWorker();
     const revisionClient = getRevisionClient({ projectId, worker });
@@ -606,7 +626,13 @@ describe('the page client of the worker revision root', () => {
     await settle();
 
     expect(root.inspect()).toMatchObject({ status: 'stopped', children: [] });
-    expect(registry.openProjectIds()).toEqual([]);
+    // Closing waits for the operation log's last append, so the registry lets go after the root stops.
+    await vi.waitFor(
+      () => {
+        expect(registry.openProjectIds()).toEqual([]);
+      },
+      { timeout: 10_000 },
+    );
   });
 
   it('should keep one lifecycle owner when one of multiple passive consumers unmounts', async () => {
@@ -749,7 +775,7 @@ describe('the page client of the worker revision root', () => {
       /* One hop from a surface, so the words are the table's rather than the
          registry's — "the registry made x without a checkout to run on" is
          banned vocabulary and unactionable besides (Rule 1). */
-      message: describeRevisionFailure('branch', 'BRANCH_UNPLACED', 'isolated-run').description,
+      message: describeRevisionFailure('branch', 'BRANCH_UNPLACED', { branch: 'isolated-run' }).description,
     });
     client.close();
   });
@@ -842,7 +868,13 @@ describe('the page client of the worker revision root', () => {
       expect(secondRoot.inspect().status).toBe('active');
     });
     expect(firstRoot.inspect().status).toBe('stopped');
-    expect(first.registry.openProjectIds()).toEqual([]);
+    // Closing waits for the operation log's last append, so the registry lets go after the root stops.
+    await vi.waitFor(
+      () => {
+        expect(first.registry.openProjectIds()).toEqual([]);
+      },
+      { timeout: 10_000 },
+    );
   });
 
   /**

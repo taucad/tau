@@ -493,6 +493,10 @@ function validateWorkspaceRanges(): CheckResult {
  * the canonical two entries, and a reason that outlives its key is an issue.
  */
 const internalImportsExceptions: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  '@taucad/slicer': {
+    '#bambu-studio/engine.js':
+      'node/default platform swap for the Bambu Studio engine, pinned by src/slicer.plugin.test.ts',
+  },
   '@taucad/geospec-engine': {
     '#cache/node-evidence-store.js':
       'browser/default platform swap for the evidence store, pinned by src/browser-import-graph.test.ts',

@@ -22,7 +22,9 @@ import { toPiToolContent } from '@taucad/agent-host';
 import type { JsonValue } from '@taucad/agent-host';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import type { GeoSpecRunner } from 'geospec/runner/worker';
+import type { MachineClient, MachineDirectoryEntry, MachineProvider } from '@taucad/runtime/machine';
 import type { HashedGeometryResult } from '@taucad/runtime/types';
+import { sha256Bytes } from '@taucad/utils/hash';
 import { createActor, createAsyncLogic } from 'xstate';
 import { parameterSetMachine } from '@taucad/parameters/set-machine';
 
@@ -30,7 +32,7 @@ import * as agentToolsRegistry from '@taucad/agent-tools/registry';
 import type { SystemSkillBundle } from '@taucad/agent-tools/registry';
 
 import { createHostToolRegistry } from '#agent-tools.js';
-import type { HostExportFile, HostRuntimeClient } from '#agent-tools.js';
+import type { HostExportFile, HostRuntimeClient, HostToolRegistryOptions } from '#agent-tools.js';
 
 const roots: string[] = [];
 
@@ -384,6 +386,142 @@ describe('createHostToolRegistry', () => {
     expect(names).toContain('get_kernel_result');
     expect(names).toContain('screenshot');
     expect(names).toContain('export_geometry');
+  });
+
+  it('offers request_print only with a runtime, a project id and a machine, and slices at the requested quality through its own export route', async () => {
+    const workspaceRoot = await makeWorkspace();
+    const timestamp = '2026-09-24T00:00:00.000Z';
+    /* Not a real container: the planner's summary is advisory and covered in its own tests. */
+    const sliced = Uint8Array.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00]);
+    const slice = vi.fn<HostRuntimeClient['export']>(async () => ({
+      success: true,
+      data: [{ name: 'main.gcode.3mf', mimeType: 'application/vnd.bambulab.gcode-3mf', bytes: sliced }],
+      issues: [],
+    }));
+    const runtimeClient = async () => fakeRuntime({ export: slice });
+    const projectId = 'proj_000000000000000000001';
+    const entry = {
+      machineId: 'machine-1',
+      providerId: 'bambu',
+      descriptor: {
+        id: 'physical-1',
+        name: 'Workshop X1C',
+        model: 'X1C',
+        accepts: [
+          {
+            contract: { id: 'manufacturing.toolpath.bambu-gcode-3mf', version: 1 },
+            mediaType: 'application/vnd.bambulab.gcode-3mf',
+            requiredMembers: ['Metadata/plate_1.gcode'],
+            payloadSelection: 'plate',
+            technology: 'additive.fff',
+          },
+        ],
+      },
+      snapshot: {
+        connection: 'connected',
+        readiness: 'idle',
+        observedAt: timestamp,
+        setup: { bedType: 'textured-pei', materials: [{ slot: 0, state: 'loaded', materialId: 'PLA' }] },
+      },
+      freshness: 'current',
+    } as unknown as MachineDirectoryEntry;
+    const provider = {
+      id: 'bambu',
+      name: 'Bambu Lab',
+      manifest: {
+        toolhead: {
+          filamentDiameter: { value: 1.75, unit: 'mm' },
+          nozzles: [{ diameter: { value: 0.4, unit: 'mm' } }],
+        },
+        bed: { plates: [{ id: 'cool-plate', label: 'Cool Plate' }] },
+        slicing: {
+          recommended: { nozzleTemperature: { value: 220, unit: 'Cel' }, bedTemperature: { value: 55, unit: 'Cel' } },
+        },
+      },
+    } as unknown as MachineProvider;
+    const requestPrint = vi.fn<MachineClient['requestPrint']>(async (input) => ({
+      requestId: input.requestId,
+      machineId: input.machineId,
+      artifact: input.artifact,
+      configuration: input.configuration,
+      requestedBy: input.requestedBy,
+      summary: input.summary ?? { fileName: 'main.gcode.3mf' },
+      state: 'awaiting-approval',
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    }));
+    const machines = {
+      available: true,
+      list: async () => ({
+        cursor: { hostId: 'host-1', authorityId: 'authority-1', generation: 'generation-1', position: 1, revision: 1 },
+        entries: [entry],
+      }),
+      listProviders: async () => [provider],
+      requestPrint,
+    } as unknown as NonNullable<HostToolRegistryOptions['machines']>;
+
+    const names = (options: Partial<HostToolRegistryOptions>) =>
+      createHostToolRegistry({ workspaceRoot, ...options })
+        .list()
+        .map((tool) => tool.name);
+    expect(names({ runtimeClient, projectId })).not.toContain('request_print');
+    expect(names({ runtimeClient, machines })).not.toContain('request_print');
+    expect(names({ projectId, machines })).not.toContain('request_print');
+    /* No revision history: a print names its project, not a revision. */
+    const registry = createHostToolRegistry({ workspaceRoot, runtimeClient, projectId, machines });
+    expect(registry.list().map((tool) => tool.name)).toContain('request_print');
+
+    const result = await invoke(registry, 'request_print', {
+      targetFile: 'main.ts',
+      preset: 'fine',
+      options: { walls: 3 },
+    });
+    expect(result).toMatchObject({
+      isError: false,
+      content: { request: { requestId: 'call-1', machineId: 'machine-1', state: 'awaiting-approval' } },
+    });
+    /* The quality the agent asked for is what the slicer receives, over the machine's own options. */
+    expect(slice).toHaveBeenCalledExactlyOnceWith('gcode.3mf', {
+      source: { path: 'main.ts' },
+      signal: expect.any(AbortSignal) as AbortSignal,
+      exportOptions: {
+        plate: 'textured-pei',
+        nozzleDiameter: 0.4,
+        filamentDiameter: 1.75,
+        nozzleTemperature: 220,
+        bedTemperature: 55,
+        walls: 3,
+        preset: 'fine',
+      },
+    });
+    const request = requestPrint.mock.calls[0]![0];
+    expect(request.artifact).not.toHaveProperty('revision');
+    expect(request.artifact).toMatchObject({
+      projectId,
+      path: '.tau/artifacts/call-1__main.ts-gcode.3mf/main.gcode.3mf',
+      digest: `sha256:${await sha256Bytes(sliced)}`,
+      length: sliced.byteLength,
+      mediaType: 'application/vnd.bambulab.gcode-3mf',
+      selectedMember: 'Metadata/plate_1.gcode',
+    });
+    expect(request.configuration).toMatchObject({
+      expectedModel: 'X1C',
+      expectedBedType: 'textured-pei',
+      expectedMaterials: [{ slot: 0, materialId: 'PLA' }],
+      amsMapping: [0],
+    });
+    expect(request.summary).toEqual({ fileName: 'main.gcode.3mf' });
+    /* The slice the machine host will read is the one the runtime produced, recorded in the project. */
+    expect(new Uint8Array(await readFile(join(workspaceRoot, request.artifact.path)))).toEqual(sliced);
+
+    /* The same registry serves MCP: a slicer key the agent may not choose refuses before slicing. */
+    const refused = await invoke(registry, 'request_print', { targetFile: 'main.ts', options: { engine: 'service' } });
+    expect(refused).toMatchObject({
+      isError: true,
+      content: { errorCode: 'TOOL_INPUT_VALIDATION_FAILED', message: expect.stringContaining('"engine"') as string },
+    });
+    expect(slice).toHaveBeenCalledOnce();
+    expect(requestPrint).toHaveBeenCalledOnce();
   });
 
   it('offers both parameter tools only with a native parameter actor and preserves its outcome', async () => {

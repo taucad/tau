@@ -852,6 +852,7 @@ describe('rpc-handlers', () => {
         expect(result).toEqual({
           success: true,
           files: [{ bytes: stepBytes, name: 'mesh.step', mimeType: 'application/step' }],
+          issues: [],
         });
       });
 

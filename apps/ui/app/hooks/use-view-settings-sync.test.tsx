@@ -367,6 +367,94 @@ describe('useViewSettingsSync', () => {
     graphicsRef.stop();
   });
 
+  /* A drag moves the cut on every pointer move. Each editor event rebuilds the whole view-settings map and
+   * re-renders every editor subscriber, so the pose is written once it settles, like the camera's. */
+  it('persists the section pose once it settles instead of once per drag step', async () => {
+    const graphicsRef = createGraphicsActor();
+    const editorSend = vi.fn<(event: EditorSendEvent) => void>();
+    const editorRef = mock<ActorRefFrom<typeof editorMachine>>({ send: editorSend });
+
+    render(<PaneLessHarness graphicsRef={graphicsRef} editorRef={editorRef} />);
+
+    act(() => {
+      graphicsRef.send({ type: 'setSectionViewActive', payload: true });
+      graphicsRef.send({ type: 'selectSectionView', payload: 'xz' });
+    });
+    // Choosing the plane is a click, not a drag, so it is written at once.
+    await waitFor(() => {
+      expect(editorSend.mock.calls.at(-1)?.[0]).toMatchObject({
+        type: 'updateViewSettings',
+        settings: { sectionView: { active: true, plane: 'xz' } },
+      });
+    });
+
+    editorSend.mockClear();
+    // Each pointer move is its own task, so each step commits on its own.
+    for (let step = 1; step <= 5; step++) {
+      act(() => {
+        graphicsRef.send({ type: 'setSectionViewTranslation', payload: step / 1000 });
+      });
+      act(() => {
+        graphicsRef.send({ type: 'setSectionViewRotation', payload: [(step * Math.PI) / 180, 0, 0] });
+      });
+    }
+
+    expect(editorSend).not.toHaveBeenCalled();
+
+    await waitFor(() => {
+      expect(editorSend).toHaveBeenCalledTimes(1);
+    });
+    // The one write is exactly the cut the drag settled on.
+    const settled = graphicsRef.getSnapshot().context;
+    expect(settled.sectionViewRotation).toEqual([(5 * Math.PI) / 180, 0, 0]);
+    expect(editorSend.mock.calls[0]?.[0]).toMatchObject({
+      type: 'updateViewSettings',
+      settings: {
+        sectionView: {
+          active: true,
+          plane: 'xz',
+          pivot: settled.sectionViewPivot,
+          rotation: settled.sectionViewRotation,
+          direction: settled.sectionViewDirection,
+        },
+      },
+    });
+    graphicsRef.stop();
+  });
+
+  it('writes the last section pose when the view goes away inside the settle window', async () => {
+    const graphicsRef = createGraphicsActor();
+    const editorSend = vi.fn<(event: EditorSendEvent) => void>();
+    const editorRef = mock<ActorRefFrom<typeof editorMachine>>({ send: editorSend });
+
+    const view = render(<PaneLessHarness graphicsRef={graphicsRef} editorRef={editorRef} />);
+
+    act(() => {
+      graphicsRef.send({ type: 'setSectionViewActive', payload: true });
+      graphicsRef.send({ type: 'selectSectionView', payload: 'xz' });
+    });
+    await waitFor(() => {
+      expect(editorSend.mock.calls.at(-1)?.[0]).toMatchObject({ settings: { sectionView: { plane: 'xz' } } });
+    });
+
+    editorSend.mockClear();
+    act(() => {
+      graphicsRef.send({ type: 'setSectionViewTranslation', payload: 0.004 });
+    });
+    expect(editorSend).not.toHaveBeenCalled();
+    // Closing the view, or the project, inside the settle window must not lose the cut just made.
+    act(() => {
+      view.unmount();
+    });
+
+    expect(editorSend).toHaveBeenCalledTimes(1);
+    expect(editorSend.mock.calls[0]?.[0]).toMatchObject({
+      type: 'updateViewSettings',
+      settings: { sectionView: { plane: 'xz', pivot: [0, 0.004, 0] } },
+    });
+    graphicsRef.stop();
+  });
+
   /* E1: the render timeout is owned per file, so it is written to the entry's record and never into
    * the per-view one. The value observed at mount is the seed the spawn applied, not a person's edit. */
   it('writes a render timeout change to the per-entry record and never to the view record', async () => {

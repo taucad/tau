@@ -795,7 +795,11 @@ export const materializePublishedTags = async (
     .select()
     .from(schema.publication)
     .where(eq(schema.publication.projectId, input.projectId));
-  const published = rows.filter((row) => oidByTag.has(row.tag));
+  /* A retired publication is not derived state any more: the ref-removal verb
+     retires the one a removed name backed (D24), and a later push that
+     re-creates the name must not bring it back. Publishing it again is the
+     owner's explicit act, which re-points the row. */
+  const published = rows.filter((row) => oidByTag.has(row.tag) && row.unpublishedAt === null);
   if (published.length === 0) {
     return [];
   }

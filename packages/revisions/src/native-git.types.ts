@@ -1,4 +1,4 @@
-import type { RevisionId, RevisionTreeConflict } from '#algorithms/index.js';
+import type { ParameterRecordCodec, RevisionId, RevisionTreeConflict } from '#algorithms/index.js';
 import type { Checkout } from '#revision-port.js';
 import type {
   BranchHeadUpdateResult,
@@ -146,6 +146,8 @@ export type NativeGitAdapterOptions = Readonly<{
   repositoryPath: string;
   worktreeRoot: string;
   gitExecutable?: string;
+  /** The host's `.tau/parameters/**` codec, so a merge here settles as every other merge does (D12). */
+  parameters?: ParameterRecordCodec;
 }>;
 
 /** Native Git operations consumed by Tau host processes. @public */

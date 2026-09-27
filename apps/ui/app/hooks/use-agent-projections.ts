@@ -37,7 +37,8 @@ export type AgentProjection = {
     readonly provider: string;
   };
   readonly workspace: string;
-  readonly branch: string;
+  /** The checkout's line; `undefined` until a turn has landed on one, never a guessed `main` (I6). */
+  readonly branch: string | undefined;
   readonly pendingApprovalCount: number;
   /**
    * Funded Tau operations this chat's turns were charged through.
@@ -159,7 +160,7 @@ export const buildAgentProjection = (input: AgentProjectionInput): AgentProjecti
     /* No chat has a branch of its own: turns attach to the chat's checkout and
      * never create one (A29, S11). The row shows the checkout's branch, which
      * the machine carries once a turn has landed on one. */
-    branch: metadata?.branch ?? status?.branch ?? 'main',
+    branch: metadata?.branch ?? status?.branch,
     pendingApprovalCount: status?.pendingApprovalCount ?? 0,
     operationIds: usageOperationIds(messages),
     /* The machine's `read` region, which the store restores from the

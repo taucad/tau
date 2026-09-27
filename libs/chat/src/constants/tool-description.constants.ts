@@ -1,4 +1,5 @@
 import { toolName } from '#constants/tool.constants.js';
+import { requestPrintOptionKeys } from '#schemas/tools/print.tool.schema.js';
 
 const parameterUnitRule =
   'When current.entry.groups[g].units[pointer] exists, it is the unit of the stored number and of native-value writes; use unit-value with inputUnit to be explicit.';
@@ -39,7 +40,7 @@ Give explicit \`targetFile\` and \`format\` (extension only, matching the Tau MI
 
 Examples: \`format: "stl"\`, \`format: "step"\`, \`format: "glb"\`, \`format: "3mf"\`. The runtime must expose an export route for that extension on the user's active kernel — when it does not, the tool surfaces an RPC error explaining the rejection.
 
-Returns an ordered \`files\` array with each producer name, persisted \`artifactPath\`, \`mimeType\`, and \`byteLength\`. The first entry is the primary artifact and later entries are required companions.
+Returns an ordered \`files\` array with each producer name, persisted \`artifactPath\`, \`mimeType\`, and \`byteLength\`. The first entry is the primary artifact and later entries are required companions. Any \`warnings\` name what the export could not honour, such as colours; tell the person.
 
 For deterministic measurement runs, create or edit \`*.geospec.ts\` tests and use \`${toolName.testModel}\` instead.`,
   [toolName.getParameters]: `Read the admitted parameter manifest and current checked parameter record for one geometry source file.
@@ -136,6 +137,22 @@ Common glob patterns:
 - "**/prefix_*" - Files starting with a prefix in any directory
 
 For searching file contents, use \`grep\`.`,
+  [toolName.updateTodos]: `Replace this chat's task list, the one the person watches above the composer while you work.
+
+Send the whole list every time: an item you leave out is removed. Keep one item \`in_progress\` at a time and mark items \`done\` as they finish. Titles are short and outcome-shaped ("Slice the pyramid"), not step narration.
+
+Returns the written path (\`.tau/chats/<chatId>/todo.yaml\`) and a count per status.`,
+  [toolName.getMachine]:
+    'Read one bound machine: its readiness, loaded setup and printable envelope. Omit machineId when exactly one machine is bound; otherwise the error names every bound machine.',
+  [toolName.requestPrint]: `The only way to print. Slices one CAD source file to a .gcode.3mf in the project and opens a print request on a bound machine; nothing is uploaded or started until a person accepts, which starts the print. A Tau-hosted turn waits for the answer and the start; elsewhere it returns the request awaiting-approval for the Print pane. Report the outcome as nextStep states it; an unconfirmed start is unknown, never "submitted" or "started". Never retry or work around a request with other machine tools. First run test_model, check the part fits get_machine's printable envelope, and call get_print_profiles. When get_machine shows no bedType, ask which plate is installed and pass it as plate. Under engine "bambu-studio" presets follow what the printer reports; change them with profiles and settings as get_print_profiles names them. Under the reference engine, options accept only ${requestPrintOptionKeys.join(', ')}.`,
+  [toolName.getPrintProfiles]: `List the slicing presets and settings request_print can use for a bound machine. Read-only.
+
+For a Bambu printer with Bambu Studio available it returns engine "bambu-studio": defaults (the presets chosen from the printer's model, nozzle, loaded filament and reported plate), the compatible printers, processes and filaments (source "user" marks the person's own), plates, and every setting's current value by group with enum choices. Pass profiles to read another selection, and keys for full descriptors (units, ranges, descriptions). Otherwise it returns engine "reference" and why. When the project's .tau/machines/printer.json names this printer's model, its presets and settings are the defaults and request_print's arguments override them; printIntent lists the values it supplied. Edit that file to change the project's defaults.`,
+  [toolName.getPrintRequest]:
+    'Read one print request by its exact request ID: state, summary, receipts, any failure, and a nextStep saying what to tell the person and do next.',
+  [toolName.listPrintRequests]: 'List print requests, newest first, optionally for one machine.',
+  [toolName.cancelPrint]:
+    'Stop a print. Withdraws a request that has not started, or cancels the exact observed provider run of a started one, which stops the printer. Give requestId alone, or machineId with expectedProviderRunId.',
   [toolName.revisions]: `Read this project's saved revisions. Read-only.
 
 Actions:

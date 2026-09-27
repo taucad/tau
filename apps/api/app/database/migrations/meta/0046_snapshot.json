@@ -1,6 +1,6 @@
 {
-  "id": "4ee144b8-4015-4fbd-97f5-e206530e5858",
-  "prevId": "ea49cd25-d73b-4e96-a4f5-87fdc043aaa2",
+  "id": "a3aed096-47f3-4d91-af2e-248e8b3e2aaf",
+  "prevId": "d847fdde-8168-4df1-bd88-3dd76833db50",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -5260,66 +5260,6 @@
       },
       "isRLSEnabled": false
     },
-    "billing.credit_attempt_void": {
-      "name": "credit_attempt_void",
-      "schema": "billing",
-      "columns": {
-        "account_id": {
-          "name": "account_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "environment": {
-          "name": "environment",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "surface": {
-          "name": "surface",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "attempt_key": {
-          "name": "attempt_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "voided_at": {
-          "name": "voided_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "credit_attempt_void_environment_account_id_credit_account_environment_id_fk": {
-          "name": "credit_attempt_void_environment_account_id_credit_account_environment_id_fk",
-          "tableFrom": "credit_attempt_void",
-          "tableTo": "credit_account",
-          "schemaTo": "billing",
-          "columnsFrom": ["environment", "account_id"],
-          "columnsTo": ["environment", "id"],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "credit_attempt_void_account_id_surface_attempt_key_pk": {
-          "name": "credit_attempt_void_account_id_surface_attempt_key_pk",
-          "columns": ["account_id", "surface", "attempt_key"]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "billing.credit_operation": {
       "name": "credit_operation",
       "schema": "billing",
@@ -5838,10 +5778,6 @@
         "credit_operation_states": {
           "name": "credit_operation_states",
           "value": "\"billing\".\"credit_operation\".\"category\" IN ('llm','zoo_engine') AND \"billing\".\"credit_operation\".\"dispatch_state\" IN ('admitted','intent_recorded','accepted','recovery_required') AND \"billing\".\"credit_operation\".\"customer_state\" IN ('pending','settled','released','absorbed') AND \"billing\".\"credit_operation\".\"supplier_state\" IN ('reserved','preliminary','unresolved','final','funded_exception') AND \"billing\".\"credit_operation\".\"generation\" > 0"
-        },
-        "credit_operation_dispatch": {
-          "name": "credit_operation_dispatch",
-          "value": "\"billing\".\"credit_operation\".\"history_version\" IS NULL OR \"billing\".\"credit_operation\".\"customer_state\" <> 'settled' OR \"billing\".\"credit_operation\".\"dispatch_intent_at\" IS NOT NULL"
         },
         "credit_operation_terminal": {
           "name": "credit_operation_terminal",
@@ -6684,6 +6620,12 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "git_credential_hash": {
+          "name": "git_credential_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -6692,6 +6634,21 @@
           "columns": [
             {
               "expression": "credential_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "agent_device_git_credential_hash_idx": {
+          "name": "agent_device_git_credential_hash_idx",
+          "columns": [
+            {
+              "expression": "git_credential_hash",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -8062,6 +8019,13 @@
         },
         "lfs_bytes": {
           "name": "lfs_bytes",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "retained_bytes": {
+          "name": "retained_bytes",
           "type": "bigint",
           "primaryKey": false,
           "notNull": true,

@@ -457,6 +457,28 @@ describe('branchMachine', () => {
     parent.stop();
   });
 
+  /* The trigger alone cannot tell this verb's cut from an earlier one's late
+   * answer: a *New branch* that timed out leaves its `switch` cut running. */
+  it('settles only on the answer to its own cut, by the id the checkout echoes (N2)', async () => {
+    const { actor, promises, parent } = start();
+    promises.script('checkBranch', cleanCheck);
+
+    actor.send({ type: 'create', requestId: 'req-2', name: 'isolated-run', checkoutId: 'checkout-live' });
+    await flush();
+    actor.send({
+      type: 'revisionMinted',
+      requestId: 'req-1/cut',
+      checkoutId: 'checkout-live',
+      trigger: 'switch',
+      revisionId: 'rev-late',
+    });
+
+    expect(actor.getSnapshot().matches({ applying: { creating: 'recording' } })).toBe(true);
+    expect(types(parent.events)).not.toContain('addCheckout');
+    actor.stop();
+    parent.stop();
+  });
+
   it('carries the check refusal code out, the way an applied verb does', async () => {
     const { actor, promises, emitted } = start();
     promises.script('checkBranch', {
@@ -531,6 +553,8 @@ describe('branchMachine', () => {
         checkoutRoot: '/checkouts/checkout-c',
       },
     ]);
+    /* D59: a branch mints nothing, so the scheduler hears that the refs changed. */
+    expect(parent.events).toContainEqual({ type: 'sync', event: { type: 'recordsChanged' } });
     actor.stop();
     parent.stop();
   });

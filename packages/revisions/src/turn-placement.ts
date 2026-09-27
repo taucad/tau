@@ -120,6 +120,12 @@ export type TurnPlacementPortOptions<Tools> = Readonly<{
    * cwd). Default: the checkout's own `root`; a disk host maps the live checkout's route to its workspace directory.
    */
   root?: ((checkout: Checkout) => string) | undefined;
+  /**
+   * Wait until this host's change feed has reported every write so far (E1), so a cut re-reads only the paths it was
+   * told of: before an admission (the dirty base holds the person's last writes, not the agent's) and before a
+   * completion cut (the agent's last writes). A host whose feed is not complete omits it.
+   */
+  settle?: (() => Promise<void>) | undefined;
 }>;
 
 /** A root answer the adapter waits on, per attempt. */
@@ -594,6 +600,7 @@ export const createTurnPlacementPort = <Tools>(
       }
       /* TS-R12: the person's choice, else the chat record's checkout; the root falls back to the live one. */
       const intent = checkoutId ?? (await recordedCheckout(key.chatId));
+      await options.settle?.();
       const heard = listen(key, (event) => (event.type === 'placed' || event.type === 'refused' ? event : undefined));
       actor.send({ type: 'admitTurn', key, ...(intent === undefined ? {} : { checkoutId: intent }) });
       const event = await heard.answer;
@@ -631,6 +638,7 @@ export const createTurnPlacementPort = <Tools>(
       }
       /* The tools go first, after the writes they accepted: a cut then sees every byte the attempt wrote (TS-R15). */
       await tools.get(attemptIdOf(key))?.revocable.revoke();
+      await options.settle?.();
       await registryAnswered();
       if (announcementFor(key) !== undefined) {
         return { requestId, status: 'replayed' };

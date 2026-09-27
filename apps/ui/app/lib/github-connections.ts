@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ENV } from '#environment.config.js';
+import { isDesktopTarget } from '#filesystem/desktop-bridge.js';
 
 const githubId = z.number().int().positive();
 const connectionSchema = z.object({
@@ -304,3 +305,21 @@ export const githubSetupReturn = Object.freeze({
     }
   },
 });
+
+/**
+ * Sends the page to GitHub to change which repositories the Tau app reaches.
+ *
+ * The answer when an account works but a repository is not shared with the app
+ * (moved to another owner, or removed from the installation): signing in again
+ * cannot share it (D67).
+ *
+ * @param installUrl - The App's installation page, from `githubConnections.configuration()`.
+ * @param returnTo - Where `/github/complete` returns once GitHub is done.
+ */
+export const configureGithubAccess = (installUrl: string, returnTo: string): void => {
+  if (!isDesktopTarget) {
+    /* D16d: GitHub returns to the App's Setup URL (/github/complete) with no Tau state. */
+    githubSetupReturn.remember(returnTo);
+  }
+  globalThis.location.assign(installUrl);
+};

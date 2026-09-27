@@ -22,6 +22,7 @@ from unittest.mock import MagicMock, PropertyMock, patch
 PYTHON_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PYTHON_ROOT))
 
+import glb
 import worker
 
 
@@ -297,8 +298,11 @@ class WorkerTest(unittest.TestCase):
             self.assertEqual(shapes[0].label, "Shape 1")
             self.assertIn("main.py", observed)
 
+            for empty in ("return None", "return []"):
+                entry.write_text(MODEL.replace("return Box(params.width, 3, 4)", empty), encoding="utf-8")
+                self.assertEqual(worker._load_model(root, "main.py", {})[0], ())
+
             cases = (
-                (MODEL.replace("return Box(params.width, 3, 4)", "return []"), "non-empty"),
                 (MODEL.replace("return Box(params.width, 3, 4)", "return 1"), "Shape"),
                 (MODEL.replace("def main", "async def main"), "Async"),
                 (MODEL.replace("def main(params: Params):", "not_main = 1\ndef other(params: Params):"), "callable main"),
@@ -475,6 +479,11 @@ class WorkerTest(unittest.TestCase):
 
             with patch.object(build123d, "export_step", return_value=False), self.assertRaisesRegex(RuntimeError, "failed"):
                 runtime.dispatch("export", {"handleId": handle, "format": "step"})
+            runtime.handles["empty"] = ()
+            empty_mesh = runtime.dispatch("mesh", {"handleId": "empty", "linearTolerance": 0.05, "angularTolerance": 0.1})
+            glb.validate_glb(Path(empty_mesh["artifactPath"]).read_bytes())
+            with self.assertRaisesRegex(ValueError, "no shapes"):
+                runtime.dispatch("export", {"handleId": "empty", "format": "step"})
             self.assertEqual(runtime.dispatch("release", {"handleId": handle}), {})
             self.assertEqual(runtime.dispatch("shutdown", {}), {"shutdown": True})
             with self.assertRaisesRegex(ValueError, "Unknown"):

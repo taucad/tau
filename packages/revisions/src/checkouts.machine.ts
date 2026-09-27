@@ -19,7 +19,7 @@ import type { AnyActorRef, EnqueueObject, SnapshotFrom } from 'xstate';
 
 import { eventSchemas } from '#machine-schemas.js';
 import type { MachineActors } from '#machine-schemas.js';
-import type { CheckoutRecord, RevisionPortErrorCode } from '#revision-port.js';
+import type { CheckoutRecord, ConflictRecord, RevisionPortErrorCode } from '#revision-port.js';
 import type { TurnAttemptKey } from '#turn.types.js';
 
 /** What a registry operation was doing when it failed or was refused. @public */
@@ -31,10 +31,12 @@ export type CheckoutsMachineInput = Readonly<{
   parentRef?: AnyActorRef;
 }>;
 
-/** Serializable state owned by checkoutsMachine. @public */
-export type CheckoutsMachineContext = Readonly<{
+/* The fields of {@link CheckoutsMachineContext}, named by the interface below. */
+type CheckoutsMachineContextFields = Readonly<{
   projectId: string;
   checkouts: readonly CheckoutRecord[];
+  /** Every conflicted revision no decision has landed yet, as the last listing read them (D14). */
+  conflicts: readonly ConflictRecord[];
   /** Run ids awaiting retirement, served one at a time in arrival order. */
   pendingRetirements: readonly string[];
   /** The attempt a turn's retirement names, by run id; the effect retires only that attempt's record (TS-R5). */
@@ -52,6 +54,10 @@ export type CheckoutsMachineContext = Readonly<{
   parentRef: AnyActorRef | undefined;
 }>;
 
+/** Serializable state owned by checkoutsMachine. @public */
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type, typescript/consistent-type-definitions -- an interface, not a type alias: declarations reference it by name, where an alias is expanded into every transition of this machine and of any machine that holds it (K-17, TS7056)
+export interface CheckoutsMachineContext extends CheckoutsMachineContextFields {}
+
 /** Events accepted by checkoutsMachine. @public */
 export type CheckoutsMachineEvent =
   | Readonly<{ type: 'open' }>
@@ -65,7 +71,7 @@ export type CheckoutsMachineEvent =
 /** Facts checkoutsMachine emits, and sends to its parent when they change the registry. @public */
 export type CheckoutsMachineEmitted =
   /* A record's branch, head and head tree are the registry's read at `loading`; the root takes those from each checkout actor (RM-R5). */
-  | Readonly<{ type: 'checkoutsChanged'; checkouts: readonly CheckoutRecord[] }>
+  | Readonly<{ type: 'checkoutsChanged'; checkouts: readonly CheckoutRecord[]; conflicts: readonly ConflictRecord[] }>
   | Readonly<{ type: 'leaseRetired'; runId: string }>
   | Readonly<{ type: 'removalOffered'; checkoutId: string }>
   /* P4: a refusal crosses as a code; the page that shows it owns the words. `requestId` names the add or remove it answers. */
@@ -80,7 +86,11 @@ export type CheckoutsMachineEmitted =
   | Readonly<{ type: 'checkoutRemoved'; requestId: string; checkoutId: string }>;
 
 /** Output of the injected `listCheckouts` actor. @public */
-export type ListCheckoutsActorOutput = Readonly<{ checkouts: readonly CheckoutRecord[] }>;
+export type ListCheckoutsActorOutput = Readonly<{
+  checkouts: readonly CheckoutRecord[];
+  /** Read from the conflict lines by ancestry (D14). */
+  conflicts: readonly ConflictRecord[];
+}>;
 
 /** Output of the injected `addCheckout` actor. @public */
 export type AddCheckoutActorOutput = Readonly<{ checkout: CheckoutRecord }>;
@@ -117,7 +127,7 @@ const publish = (context: CheckoutsMachineContext, enq: CheckoutsEnqueue, fact: 
 
 /* Records are read only at `loading`; their heads are spawn input only, so republishing them is harmless (RM-R5). */
 const announceRegistry = (context: CheckoutsMachineContext, enq: CheckoutsEnqueue): void => {
-  publish(context, enq, { type: 'checkoutsChanged', checkouts: context.checkouts });
+  publish(context, enq, { type: 'checkoutsChanged', checkouts: context.checkouts, conflicts: context.conflicts });
   for (const checkout of context.checkouts) {
     if (checkout.removable === true) {
       publish(context, enq, { type: 'removalOffered', checkoutId: checkout.id });
@@ -269,6 +279,18 @@ const completeRetirement = (
   return { pendingRetirements: context.pendingRetirements.slice(1), retirementKeys: withoutKey(context, runId) };
 };
 
+/* Drop the head retirement's lease from the record, say so, and re-announce the registry. */
+const retire = (context: CheckoutsMachineContext, enq: CheckoutsEnqueue): Partial<CheckoutsMachineContext> => {
+  const dropped = { ...context, ...dropRetiredLease(context) };
+  const completed = { ...dropped, ...completeRetirement(dropped, enq) };
+  announceRegistry(completed, enq);
+  return {
+    checkouts: completed.checkouts,
+    pendingRetirements: completed.pendingRetirements,
+    retirementKeys: completed.retirementKeys,
+  };
+};
+
 const checkoutsMachineDefinition = setup({
   schemas: {
     context: types<CheckoutsMachineContext>(),
@@ -305,6 +327,14 @@ const checkoutsMachineDefinition = setup({
     /* One checkout per branch (I18): a branch that has one cannot get another. */
     branchIsFree: (context: CheckoutsMachineContext, branch: string) =>
       !context.checkouts.some((checkout) => checkout.branch === branch),
+    /* The checkout this add asks for is already on disk: an `open` cancelled
+     * the add after it landed. A checkout's id is its branch's, so the same
+     * branch at the same base is that very checkout; the live one never is. */
+    alreadyAdded: (checkout: CheckoutRecord, verb: Readonly<{ branch: string; from: string }>) =>
+      verb.from !== '' &&
+      checkout.kind === 'linked' &&
+      checkout.branch === verb.branch &&
+      checkout.headRevisionId === verb.from,
     /* A25/I9: a checkout a lease holds is never removed. */
     checkoutIsFree: (context: CheckoutsMachineContext, id: string) =>
       context.checkouts.some((checkout) => checkout.id === id && checkout.leaseRunIds.length === 0),
@@ -337,6 +367,7 @@ const checkoutsMachineDefinition = setup({
   context: ({ input }) => ({
     projectId: input.projectId,
     checkouts: [],
+    conflicts: [],
     pendingRetirements: [],
     retirementKeys: {},
     pendingLeases: [],
@@ -380,7 +411,7 @@ const checkoutsMachineDefinition = setup({
         src: 'listCheckouts',
         input: ({ context }) => ({ projectId: context.projectId }),
         onDone: ({ context, event }, enq) => {
-          const patch = { checkouts: event.output.checkouts };
+          const patch = { checkouts: event.output.checkouts, conflicts: event.output.conflicts };
           announceRegistry({ ...context, ...patch }, enq);
           return { target: 'ready', context: patch };
         },
@@ -447,6 +478,12 @@ const checkoutsMachineDefinition = setup({
             }
             const [operation, ...rest] = context.pendingOperations;
             if (operation?.kind === 'add') {
+              /* Done, not refused: an `open` cancelled the add after it landed, and the record is the answer. */
+              const added = context.checkouts.find((checkout) => guards.alreadyAdded(checkout, operation));
+              if (added !== undefined) {
+                publish(context, enq, { type: 'checkoutAdded', requestId: operation.requestId, checkout: added });
+                return { context: { pendingOperations: rest } };
+              }
               if (guards.branchIsFree(context, operation.branch)) {
                 return { target: 'adding' };
               }
@@ -555,28 +592,17 @@ const checkoutsMachineDefinition = setup({
               const key = context.retirementKeys[runId];
               return { projectId: context.projectId, runId, ...(key === undefined ? {} : { key }) };
             },
-            onDone: ({ context }, enq) => {
-              const dropped = { ...context, ...dropRetiredLease(context) };
-              const completed = { ...dropped, ...completeRetirement(dropped, enq) };
-              announceRegistry(completed, enq);
-              return {
-                target: 'idle',
-                context: {
-                  checkouts: completed.checkouts,
-                  pendingRetirements: completed.pendingRetirements,
-                  retirementKeys: completed.retirementKeys,
-                },
-              };
-            },
+            onDone: ({ context }, enq) => ({ target: 'idle', context: retire(context, enq) }),
+            /* A lease whose file this host could not delete is still not a lease
+             * this host holds: keeping the run id on the record pinned the
+             * checkout as leased — Discard and the switch guard refusing it —
+             * until the project was reopened (L2-F11). The failure is still
+             * said; the file is the fresh fence's to find at the next mint
+             * (`nothingToSave{heldBy}`, RM-R16) and reconciliation's to retire. */
             onError: ({ context, event }, enq) => {
-              const patch = {
-                reason: describeFailure(event.error),
-                reasonCode: describeFailureCode(event.error),
-                pendingRetirements: context.pendingRetirements.slice(1),
-                retirementKeys: withoutKey(context, context.pendingRetirements[0]),
-              };
-              announceFailure({ ...context, ...patch }, enq, { operation: 'retire' });
-              return { target: 'idle', context: patch };
+              const failure = { reason: describeFailure(event.error), reasonCode: describeFailureCode(event.error) };
+              announceFailure({ ...context, ...failure }, enq, { operation: 'retire' });
+              return { target: 'idle', context: { ...failure, ...retire(context, enq) } };
             },
           },
         },

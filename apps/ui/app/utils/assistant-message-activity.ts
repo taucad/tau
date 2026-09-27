@@ -9,6 +9,7 @@
 import type { MyMessagePart } from '@taucad/chat';
 import { isRecord } from '@taucad/utils/schema';
 import { agentApprovalToolName } from '#services/agent-host-event-projection.js';
+import { summarizeExternalCall } from '#utils/shell-command-summary.js';
 
 export type ActivityCategory = 'text' | 'reasoning' | 'research' | 'write' | 'data' | 'skip';
 
@@ -184,6 +185,19 @@ export const externalToolKind = (part: MyMessagePart): string | undefined => {
   return typeof kind === 'string' ? kind : undefined;
 };
 
+/** The title and located paths an external call reported. */
+const externalCallFacts = (part: MyMessagePart): { title: string | undefined; locations: string[] } => {
+  const facts = tauFacts(part);
+  const title = facts?.['title'];
+  const locations = Array.isArray(facts?.['locations']) ? facts['locations'] : [];
+  return {
+    title: typeof title === 'string' ? title : undefined,
+    locations: locations.flatMap((location: unknown) =>
+      isRecord(location) && typeof location['path'] === 'string' ? [location['path']] : [],
+    ),
+  };
+};
+
 const tauMcpToolName = (part: MyMessagePart): string | undefined => {
   const tau = tauFacts(part);
   const nativeName = tau?.['nativeName'];
@@ -200,7 +214,12 @@ export const activityFamily = (part: MyMessagePart): ActivityFamily => {
   if (nativeName) {
     return nativeFamilies.get(nativeName) ?? 'other';
   }
-  return externalFamilies.get(externalToolKind(part) ?? '') ?? 'other';
+  const kind = externalToolKind(part);
+  const summary =
+    part.type === 'dynamic-tool'
+      ? summarizeExternalCall({ ...externalCallFacts(part), kind, input: part.input })
+      : undefined;
+  return summary?.family ?? externalFamilies.get(kind ?? '') ?? 'other';
 };
 
 /** Classify one message part without reordering it. */

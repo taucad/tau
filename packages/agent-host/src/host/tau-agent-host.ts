@@ -31,6 +31,7 @@ import {
   externalTurnOf,
   failureMarkerClearance,
   isInterruptPayload,
+  isJsonObject,
   latestTurnId,
   pendingToolCalls,
 } from '#host/run-history.js';
@@ -65,6 +66,8 @@ import type {
   DurableEventLog,
   HostRunSnapshot,
   InterruptRequest,
+  HostToolApproval,
+  HostToolApprovalRecord,
   InterruptResolution,
   ModelTransport,
   ToolRegistry,
@@ -735,6 +738,147 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     return log.read();
   };
 
+  /** Settle a promise nobody reads, so its rejection is not reported as unhandled. */
+  const settleQuietly = async (pending: Promise<unknown>): Promise<void> => {
+    try {
+      await pending;
+    } catch {
+      /* Answered elsewhere: the race already took the outcome. */
+    }
+  };
+
+  /**
+   * A tool's resolved approval under `key` in this run, until the tool records a result after it (D5).
+   *
+   * The request row names the key and the tool; the answer is the `resolved` row of the same interrupt. A result the
+   * tool records after that row used the answer, so a later call asks again rather than reusing one decision twice.
+   */
+  const recallApproval = async (
+    { chatId, runId, toolName }: Readonly<{ chatId: string; runId: string; toolName: string }>,
+    key: string,
+  ): Promise<HostToolApprovalRecord | undefined> => {
+    const rows = await readRows(chatId);
+    let found: (HostToolApprovalRecord & { readonly at: number }) | undefined;
+    const asked = new Map<string, JsonObject>();
+    for (const [at, row] of rows.entries()) {
+      if (row.runId !== runId) {
+        continue;
+      }
+      if (row.type === 'interrupt.recorded' && isJsonObject(row.payload)) {
+        const { context } = row.payload;
+        if (row.phase === 'requested' && isJsonObject(context) && context['approvalKey'] === key) {
+          const { approvalKey: _key, approvalTool: _tool, ...payload } = context;
+          asked.set(row.interruptId, payload);
+        } else if (row.phase === 'resolved' && asked.has(row.interruptId)) {
+          const { outcome, optionId, response } = row.payload;
+          if (outcome === 'approved' || outcome === 'denied' || outcome === 'cancelled') {
+            found = {
+              at,
+              payload: asked.get(row.interruptId)!,
+              resolution: {
+                interruptId: row.interruptId,
+                outcome,
+                ...(typeof optionId === 'string' ? { optionId } : {}),
+                ...(response === undefined ? {} : { payload: response }),
+              },
+            };
+          }
+        }
+      }
+    }
+    const used =
+      found !== undefined &&
+      rows
+        .slice(found.at + 1)
+        .some(
+          (row) =>
+            row.runId === runId &&
+            row.type === 'message.appended' &&
+            row.message.role === 'tool-output' &&
+            row.message.toolName === toolName,
+        );
+    return found === undefined || used ? undefined : { payload: found.payload, resolution: found.resolution };
+  };
+
+  /**
+   * The approval a Tau attempt's tool asks through (D5): the run's native durable interrupt.
+   *
+   * Asking sends the chat's own `interrupt` command, keyed by the tool call, as a person's operator interrupt would:
+   * M1 aborts this attempt's driver and records `interrupt.recorded` and `paused` as its ending (running.tau, D10,
+   * TS-R10). The call therefore never answers; it rejects when the abort reaches it, or with the command's refusal.
+   * The decision resolves the interrupt, and the run's next attempt asks again and `recall` answers.
+   *
+   * @param key - The attempt the tool runs in.
+   * @param invocation - The tool call asking.
+   * @returns The approval for that call.
+   */
+  const approvalFor = (
+    key: TurnAttemptKey,
+    invocation: Readonly<{ toolCallId: string; toolName: string; signal: AbortSignal }>,
+  ): HostToolApproval => {
+    const scope = { chatId: key.chatId, runId: key.runId, toolName: invocation.toolName };
+    const recall = async (approvalKey: string): Promise<HostToolApprovalRecord | undefined> =>
+      recallApproval(scope, approvalKey);
+    const approve = async (request: Parameters<HostToolApproval>[0]): Promise<InterruptResolution> => {
+      if (request.key !== undefined) {
+        const prior = await recall(request.key);
+        if (prior !== undefined) {
+          return prior.resolution;
+        }
+      }
+      const { signal } = invocation;
+      const aborted = Promise.withResolvers<never>();
+      const onAbort = (): void => {
+        aborted.reject(signal.reason ?? new Error('The run paused for the approval.'));
+      };
+      if (signal.aborted) {
+        onAbort();
+      } else {
+        signal.addEventListener('abort', onAbort, { once: true });
+      }
+      const ask = async (): Promise<never> => {
+        const answer = await execute({
+          type: 'interrupt',
+          commandId: `approval:${key.runId}/${String(key.attempt)}/${invocation.toolCallId}`,
+          payload: {
+            chatId: key.chatId,
+            runId: key.runId,
+            interruptId: createId(),
+            kind: 'approval',
+            prompt: request.prompt,
+            payload: {
+              ...request.payload,
+              ...(request.key === undefined ? {} : { approvalKey: request.key }),
+              approvalTool: invocation.toolName,
+            },
+          },
+        });
+        const refused = refusal(answer);
+        if (refused) {
+          throw refused;
+        }
+        /* Applied: M1 is ending this attempt, and the abort answers the call. */
+        return aborted.promise;
+      };
+      const answered = ask();
+      try {
+        return await Promise.race([aborted.promise, answered]);
+      } finally {
+        signal.removeEventListener('abort', onAbort);
+        /* The loser of the race settles later with nobody listening. */
+        void settleQuietly(answered);
+        void settleQuietly(aborted.promise);
+      }
+    };
+    return Object.assign(approve, { recall });
+  };
+
+  /** A Tau attempt's tools, each call carrying its approval (D5). */
+  const approvingTools = (key: TurnAttemptKey, tools: ToolRegistry): ToolRegistry => ({
+    list: () => tools.list(),
+    invoke: async (invocation) => tools.invoke({ ...invocation, approve: approvalFor(key, invocation) }),
+  });
+
   const messagesOf = async (chatId: string): ReturnType<DurableEventLog['messages']> => {
     const log = await logOf(chatId);
     return log.messages();
@@ -1307,7 +1451,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
               model,
               modelTransport: options.modelTransport,
               /* The attempt's tools, as W8 granted them over its checkout (RA-R12); the host's without placement. */
-              toolRegistry: grant?.tools ?? options.toolRegistry,
+              toolRegistry: approvingTools(key, grant?.tools ?? options.toolRegistry),
               eventLog: log,
               /* I2: the session's rows go through the chat's one chain, gated by its attempt (RA-R6). */
               appendEvent: async (event) => append([event as LogRowBody]),

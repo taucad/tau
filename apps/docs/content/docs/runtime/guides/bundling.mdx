@@ -78,26 +78,29 @@ export default withTauRuntime({
 
 ## Electron
 
-Wrap the ordinary electron-vite process config once. The adapter installs `tauRuntime()` in main and renderer, preserves preload isolation, and configures the native dependency externalizer:
+Wrap the ordinary electron-vite process config once. The adapter installs `tauRuntime()` in main and renderer, preserves preload isolation, and configures the native dependency externalizer. Make each utility a main input:
 
 ```typescript
+import { resolve } from 'node:path';
 import { electronRuntimeConfig } from '@taucad/runtime/electron/vite';
 
 export default electronRuntimeConfig({
-  main: {},
+  main: {
+    build: {
+      rolldownOptions: {
+        input: {
+          index: resolve(import.meta.dirname, 'src/main/index.ts'),
+          'kernel-host': resolve(import.meta.dirname, 'src/tau/kernel-host.ts'),
+        },
+      },
+    },
+  },
   preload: {},
   renderer: {},
 });
 ```
 
-Import the utility entry through electron-vite, not by naming an output file:
-
-```typescript @ts-nocheck
-// @ts-nocheck: the docs resolver cannot resolve electron-vite's `?modulePath` virtual specifier.
-import utilityEntry from '../tau/kernel-host?modulePath';
-```
-
-Add `electron-vite/node` to the app's TypeScript `types` for the `?modulePath` declaration. Unlike `?url`, which returns a static asset URL, `?modulePath` builds the imported graph as an executable Node entry and returns its filesystem path — the contract Electron utility and worker APIs require.
+On Vite 7, use `rollupOptions`. Each input becomes `<name>.js` beside `index.js`, where main resolves `join(import.meta.dirname, 'kernel-host.js'){:ts}`; shared modules are emitted once. `?modulePath` would build the utility separately, bundling them again. It fits only a lone utility sharing nothing with main; a runtime host always shares runtime code.
 
 ## Qualified framework versions
 

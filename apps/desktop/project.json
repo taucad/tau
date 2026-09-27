@@ -4,6 +4,7 @@
   "sourceRoot": "apps/desktop/src",
   "projectType": "application",
   "tags": ["scope:ui", "type:app"],
+  "implicitDependencies": ["desktop-quick-look"],
   "targets": {
     "prepare-build123d-python": {
       "executor": "nx:run-commands",
@@ -15,7 +16,6 @@
     },
     "prepare-build123d-python-macos": {
       "executor": "nx:run-commands",
-      "dependsOn": ["prepare-build123d-python"],
       "outputs": ["{projectRoot}/resources/python/darwin-arm64"],
       "options": {
         "cwd": ".",
@@ -32,7 +32,6 @@
     },
     "prepare-picogk-dotnet-macos": {
       "executor": "nx:run-commands",
-      "dependsOn": ["prepare-picogk-dotnet"],
       "outputs": ["{projectRoot}/resources/picogk/darwin-arm64"],
       "options": {
         "cwd": ".",
@@ -44,11 +43,7 @@
       "executor": "nx:run-commands",
       "outputs": ["{projectRoot}/dist"],
       "inputs": ["production", "^production", { "env": "TAU_CLOUD_ENABLED" }],
-      "dependsOn": [
-        "prepare-build123d-python",
-        "prepare-picogk-dotnet",
-        { "projects": ["ui"], "target": "build:desktop" }
-      ],
+      "dependsOn": [{ "projects": ["ui"], "target": "build:desktop" }],
       "options": {
         "cwd": "{projectRoot}",
         "command": "electron-vite build"
@@ -74,7 +69,12 @@
     "serve": {
       "executor": "nx:run-commands",
       "continuous": true,
-      "dependsOn": ["build", { "projects": ["scripts"], "target": "populate-ui-env" }],
+      "dependsOn": [
+        "build",
+        "prepare-build123d-python",
+        "prepare-picogk-dotnet",
+        { "projects": ["scripts"], "target": "populate-ui-env" }
+      ],
       "options": {
         "cwd": "{projectRoot}",
         "command": "node --env-file=../ui/.env scripts/run-electron-vite.mts preview --skipBuild",
@@ -83,50 +83,38 @@
         }
       }
     },
-    "generate-quick-look": {
+    "prepare-git": {
       "executor": "nx:run-commands",
-      "outputs": ["{projectRoot}/macos/generated"],
+      "outputs": ["{projectRoot}/resources/git"],
       "options": {
         "cwd": ".",
-        "command": "node --import @oxc-node/core/register apps/desktop/scripts/generate-quick-look-metadata.mts --write"
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/prepare-git.mts"
       }
     },
-    "check-quick-look": {
+    "prepare-git-macos": {
       "executor": "nx:run-commands",
+      "outputs": ["{projectRoot}/resources/git/darwin-arm64", "{projectRoot}/resources/git/SOURCES"],
       "options": {
         "cwd": ".",
-        "command": "node --import @oxc-node/core/register apps/desktop/scripts/generate-quick-look-metadata.mts --check"
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/prepare-git.mts --target darwin-arm64"
       }
     },
-    "build-quick-look-runtime": {
+    "test-git-payload": {
       "executor": "nx:run-commands",
-      "dependsOn": ["check-quick-look"],
-      "outputs": ["{projectRoot}/macos/generated/runtime"],
       "options": {
         "cwd": ".",
-        "commands": [
-          "tsgo -p apps/desktop/macos/runtime/tsconfig.json --noEmit",
-          "vite build --config apps/desktop/macos/runtime/vite.config.ts"
-        ],
-        "parallel": false
-      }
-    },
-    "build-quick-look-extensions": {
-      "executor": "nx:run-commands",
-      "dependsOn": ["build-quick-look-runtime"],
-      "outputs": ["{projectRoot}/macos/dist/extensions"],
-      "options": {
-        "cwd": ".",
-        "command": "node --import @oxc-node/core/register apps/desktop/scripts/build-quick-look-extensions.mts"
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/git-payload.test.mts"
       }
     },
     "package-macos": {
       "executor": "nx:run-commands",
       "dependsOn": [
         "build",
-        "build-quick-look-extensions",
+        "check-renderer-payload",
+        { "projects": ["desktop-quick-look"], "target": "build-extensions" },
         "prepare-build123d-python-macos",
-        "prepare-picogk-dotnet-macos"
+        "prepare-picogk-dotnet-macos",
+        "prepare-git-macos"
       ],
       "outputs": ["{projectRoot}/package-out"],
       "options": {
@@ -138,9 +126,11 @@
       "executor": "nx:run-commands",
       "dependsOn": [
         "build",
-        "build-quick-look-extensions",
+        "check-renderer-payload",
+        { "projects": ["desktop-quick-look"], "target": "build-extensions" },
         "prepare-build123d-python-macos",
-        "prepare-picogk-dotnet-macos"
+        "prepare-picogk-dotnet-macos",
+        "prepare-git-macos"
       ],
       "outputs": ["{projectRoot}/package-out"],
       "options": {
@@ -152,9 +142,11 @@
       "executor": "nx:run-commands",
       "dependsOn": [
         "build",
-        "build-quick-look-extensions",
+        "check-renderer-payload",
+        { "projects": ["desktop-quick-look"], "target": "build-extensions" },
         "prepare-build123d-python-macos",
-        "prepare-picogk-dotnet-macos"
+        "prepare-picogk-dotnet-macos",
+        "prepare-git-macos"
       ],
       "outputs": ["{projectRoot}/package-out"],
       "options": {
@@ -192,7 +184,19 @@
     },
     "check-renderer-payload": {
       "executor": "nx:run-commands",
-      "cache": false,
+      "cache": true,
+      "metadata": {
+        "description": "Renderer ownership gate: fails when the renderer bundle carries kernel, converter or host payloads (only KCL and Clipper WASM are allowed). Every package target depends on it. Cached on the bytes it checks, the renderer build and the main and preload bundles; `dist/dev-electron`, the branded Electron that `dev` and `serve` create, is left out of the key."
+      },
+      "dependsOn": ["build"],
+      "inputs": [
+        "{projectRoot}/scripts/check-renderer-payload.mts",
+        {
+          "dependentTasksOutputFiles": "{apps/ui/desktop/build,apps/desktop/dist/main,apps/desktop/dist/preload}/**",
+          "transitive": true
+        }
+      ],
+      "outputs": [],
       "options": {
         "cwd": ".",
         "command": "node --import @oxc-node/core/register apps/desktop/scripts/check-renderer-payload.mts"

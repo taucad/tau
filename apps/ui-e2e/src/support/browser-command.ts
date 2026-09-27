@@ -282,7 +282,12 @@ export const uiAuthenticateTauTestUser: BrowserCommand<[account: TargetTauTestAc
     headers,
   });
   if (!signUp.ok()) {
-    throw new Error(`Tau test-account sign-up failed with HTTP ${signUp.status()}.`);
+    /* `INVALID_ORIGIN` is the usual one: the API at TAU_E2E_API_URL trusts only
+     * its own TAU_FRONTEND_URL, which must be this run's origin. */
+    const body = await signUp.text();
+    throw new Error(
+      `Tau test-account sign-up failed with HTTP ${signUp.status()} from ${tauApiUrl} for origin ${testBaseURL}: ${body.slice(0, 200)}`,
+    );
   }
 
   await executeTauDatabase(`UPDATE "user" SET email_verified = true WHERE email = '${account.email}';`);

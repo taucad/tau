@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 import { ChatRevisionMarker } from '#routes/w.$workspace.$project/chat-revision-marker.js';
-import { useRevisionChanges, useRevisions } from '#hooks/use-revisions.js';
+import { useRevisionCards, useRevisionChanges, useRevisions, useTurnRevision } from '#hooks/use-revisions.js';
 import type { RevisionCard, RevisionsView } from '#hooks/use-revisions.js';
 import { useRestoreToPoint } from '#hooks/use-restore-to-point.js';
 import { useChatSidebarStatus } from '#hooks/use-sidebar-status.js';
@@ -33,6 +35,8 @@ vi.mock('#hooks/use-chat.js', () => ({
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'p' }) }));
 vi.mock('#hooks/use-revisions.js', () => ({
   useRevisions: vi.fn(),
+  useRevisionCards: vi.fn(),
+  useTurnRevision: vi.fn(),
   useRevisionChanges: vi.fn(),
   useRevisionFileComparison: vi.fn(),
 }));
@@ -70,15 +74,19 @@ const revision = (over: Partial<RevisionCard> = {}): RevisionCard => ({
 });
 
 const setRevisions = (view: Partial<RevisionsView>): void => {
+  const byTurnId = view.byTurnId ?? new Map<string, RevisionCard>();
   vi.mocked(useRevisions).mockReturnValue({
     revisions: view.revisions ?? [],
-    byTurnId: view.byTurnId ?? new Map<string, RevisionCard>(),
+    hasOlder: false,
+    loadOlder: async () => undefined,
+    byTurnId,
     headRevisionId: view.headRevisionId,
-    branch: view.branch ?? 'main',
+    line: view.line ?? { kind: 'branch', name: 'main' },
     isDirty: false,
-    canReturnToLatest: false,
     isLoading: false,
   });
+  /* The turn's own lookup, which the real hook answers from the page or by the settled id (B2). */
+  vi.mocked(useTurnRevision).mockImplementation((turnId) => byTurnId.get(turnId));
 };
 
 const setRun = (state: ChatSidebarStatus['state'] | undefined): void => {
@@ -89,6 +97,7 @@ const setRun = (state: ChatSidebarStatus['state'] | undefined): void => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  revisionStatusHarness.reset();
   chatState.status = 'ready';
   chatState.error = undefined;
   chatState.persistedError = undefined;
@@ -97,13 +106,13 @@ beforeEach(() => {
   host.run = undefined;
   setRun(undefined);
   setRevisions({});
+  vi.mocked(useRevisionCards).mockReturnValue(new Map());
   vi.mocked(useRevisionChanges).mockReturnValue([
     { path: 'bracket.scad', kind: 'modified' },
     { path: '.tau/parameters/bracket.scad.json', kind: 'modified' },
   ]);
   vi.mocked(useRestoreToPoint).mockReturnValue({
     restore,
-    returnToLatest: vi.fn(),
     undo: vi.fn(),
     isDirty: false,
     isBusy: false,
@@ -141,19 +150,58 @@ describe('ChatRevisionMarker', () => {
 
     fireEvent.click(toggle);
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
-    expect(screen.getByRole('button', { name: 'Name version' })).not.toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Files · 2' }));
-    expect(screen.getByText('bracket.scad')).not.toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Restore to Revision 5' }));
-    expect(restore).toHaveBeenCalledWith('rev-5');
+    /* Rounds 14 and 18: History's actions row — View revision, then More and Details. */
+    const actions = document.querySelector<HTMLElement>('[data-slot="marker-actions"]')!;
+    fireEvent.click(within(actions).getByRole('button', { name: 'View revision' }));
+    expect(requestRevisionReveal).toHaveBeenCalledWith('p', 'rev-5');
+    expect(openPanel).toHaveBeenCalledWith('revisions');
+    expect(within(actions).getByRole('button', { name: 'More actions for Rev 5' })).not.toBeNull();
+    fireEvent.click(within(actions).getByRole('button', { name: 'Details' }));
+    const details = document.querySelector('dl[aria-label="Details for Rev 5"]');
+    expect(details?.textContent).toContain('rev-5');
+    expect(details?.textContent).toContain('main');
+    /* Restore is History's; the chat reaches it by View revision. */
+    expect(screen.queryByRole('button', { name: /Restore/u })).toBeNull();
   });
 
-  it('should read Current as neutral text on the head revision', () => {
+  it('should reach History’s More from the chat: naming and a new branch (round 14)', async () => {
+    const user = userEvent.setup();
+    setRevisions({ byTurnId: new Map([['u1', revision()]]), headRevisionId: 'rev-9' });
+    render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
+    await user.click(screen.getByRole('button', { name: /revision details$/u }));
+    await user.click(screen.getByRole('button', { name: 'More actions for Rev 5' }));
+
+    expect(screen.getByRole('menuitem', { name: 'Name version…' })).not.toBeNull();
+    expect(screen.getByRole('menuitem', { name: 'New branch from Rev 5…' })).not.toBeNull();
+    expect(screen.getByRole('menuitem', { name: 'Copy revision id' })).not.toBeNull();
+  });
+
+  it('should draw the trigger’s glyph family, purple only for an interrupted turn (HQ5)', () => {
+    setRevisions({ byTurnId: new Map([['u1', revision()]]) });
+    const { unmount } = render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
+    expect(document.querySelector('[data-slot="marker-glyph"]')?.getAttribute('class')).toContain('lucide-history');
+    unmount();
+
+    host.run = { placement: { baseRevisionId: 'rev-4' } };
+    setRevisions({ revisions: [revision({ revisionId: 'rev-4', n: 4, turnId: undefined })] });
+    chatState.persistedError = { category: 'generic', title: 'Error', message: 'Network error', code: 'ERR' };
+    render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
+    const glyph = document.querySelector('[data-slot="marker-glyph"]')?.getAttribute('class') ?? '';
+    expect(glyph).toContain('lucide-circle-alert');
+    expect(glyph).toContain('text-destructive');
+    expect(glyph).not.toContain('text-feature');
+  });
+
+  it('should say the saved revision is still on its way to Tau Cloud (round 21)', () => {
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      remote: { ...revisionStatusHarness.status.remote, kind: 'tau', phase: 'connected' },
+      sync: { ...revisionStatusHarness.status.sync, state: 'pending', pendingCount: 1 },
+    };
     setRevisions({ byTurnId: new Map([['u1', revision()]]), headRevisionId: 'rev-5' });
     render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
-    fireEvent.click(screen.getByRole('button', { name: /revision details$/ }));
-    expect(screen.getByText('Current')).not.toBeNull();
-    expect(screen.queryByRole('button', { name: /Restore/ })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /revision details$/u }));
+    expect(screen.getByText('Backing up to Tau Cloud…')).not.toBeNull();
   });
 
   it('should link an earlier saved request to its revision in Revisions', () => {
@@ -174,6 +222,22 @@ describe('ChatRevisionMarker', () => {
     const status = screen.getByRole('status');
     expect(status.textContent).toBe('Starting from Rev 4');
     expect(status.getAttribute('aria-busy')).toBe('true');
+  });
+
+  /* B2: the base a turn started from can sit below History's loaded page; it is read on its own. */
+  it('should name a starting revision older than the loaded page, read by its id', () => {
+    host.run = { placement: { baseRevisionId: 'rev-4' } };
+    setRevisions({ revisions: [revision({ revisionId: 'rev-60', n: 60, turnId: undefined })] });
+    vi.mocked(useRevisionCards).mockImplementation((ids) =>
+      ids.includes('rev-4')
+        ? new Map([['rev-4', revision({ revisionId: 'rev-4', n: 4, turnId: undefined })]])
+        : new Map(),
+    );
+    setRun('working');
+    chatState.status = 'streaming';
+    render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
+    expect(screen.getByRole('status').textContent).toBe('Starting from Rev 4');
+    expect(vi.mocked(useRevisionCards)).toHaveBeenCalledWith(['rev-4']);
   });
 
   it('should not read the turn base as a save while work runs', () => {

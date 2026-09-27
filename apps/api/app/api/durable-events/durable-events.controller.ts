@@ -16,11 +16,11 @@ export class DurableEventsController {
   public async readEvents(
     @Param('streamId') streamId: string,
     @Query() query: ReadDurableEventsDto,
-    @User('id') ownerId: string,
+    @User('id') userId: string,
   ): Promise<Exclude<DurableStreamReadOutcome, { readonly found: false }>> {
-    const outcome = await this.durableEvents.waitForEvents({
+    const outcome = await this.durableEvents.waitForCallerEvents({
       streamId,
-      ownerId,
+      userId,
       afterSequence: query.afterSequence,
       limit: query.limit,
       longPollDuration: query.longPollDuration,

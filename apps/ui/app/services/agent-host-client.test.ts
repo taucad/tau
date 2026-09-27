@@ -588,6 +588,19 @@ describe('createBrowserAgentHostClient', () => {
     await client.close();
   });
 
+  /* Offline the catalog names no model; opening a chat still attaches and replays its log. */
+  it('should provide the project host without a default model row while the catalog is unavailable', async () => {
+    const worker = new FakeResidentWorker();
+    const client = createTestClient(workerOf(worker), { model: undefined });
+
+    await client.attach({ chatId: 'chat-offline', cursor: 0 });
+
+    const provide = requestsNamed(worker, 'provide')[0];
+    expect(provide?.args).toMatchObject({ authority: { projectId: 'project-one', workspaceId: 'workspace-one' } });
+    expect(provide?.args).not.toHaveProperty('model', expect.anything());
+    await client.close();
+  });
+
   /* W8 TS-S6: the transport's wait for a settlement row ends on this fact, never on a clock. */
   it('should tell a follower its follow ended when a read fails, and not when it unsubscribes', async () => {
     const worker = new FakeResidentWorker();

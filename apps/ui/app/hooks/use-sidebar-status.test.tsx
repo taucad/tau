@@ -143,7 +143,7 @@ const sidebarChats: readonly Chat[] = [sidebarChat];
 const { ProjectChatList } = await import('#components/nav/project-chat-list.js');
 const { ProjectNavigation } = await import('#components/nav/project-navigation.js');
 
-type RevisionOverrides = Partial<Pick<RevisionStatusProjection, 'branch' | 'dirty'>> & {
+type RevisionOverrides = Readonly<{ branch?: string; dirty?: boolean }> & {
   readonly sync?: Partial<RevisionStatusProjection['sync']>;
 };
 
@@ -245,7 +245,7 @@ const closeProject = (projectId: string, reason: ProjectSessionCloseReason): voi
 const revisions = (projectId: string, overrides: RevisionOverrides = {}): void => {
   const projection = {
     projectId,
-    branch: overrides.branch ?? 'main',
+    line: { kind: 'branch', name: overrides.branch ?? 'main' },
     dirty: overrides.dirty ?? false,
     sync: {
       state: 'noRemote',
@@ -489,7 +489,7 @@ const agentStateRows: ReadonlyArray<{
     events: [],
     label: undefined,
     mark: 'attention',
-    sentence: 'Live · 1 needs you · needs resolution',
+    sentence: 'Live · 1 needs you · Needs your decision',
     revision: { sync: { state: 'conflicted', pendingCount: 0 } },
     conflictedChats: 3,
     attention: 1,
@@ -899,7 +899,7 @@ describe('use-sidebar-status — pin (R3/R4): the bind key carries what the row 
       revisions('enclosure', { sync: { state: 'conflicted', pendingCount: 0 } });
       notifyRegistry();
     });
-    expect(screen.getByText('Live · 1 needs you · needs resolution')).toBeTruthy();
+    expect(screen.getByText('Live · 1 needs you · Needs your decision')).toBeTruthy();
   });
 
   it('leaves `opening` when the registry says the project is live, with no chat spawned (W19-b)', () => {

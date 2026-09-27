@@ -81,9 +81,11 @@ const glbJson = (bytes: Uint8Array<ArrayBuffer>) => {
       readonly primitives: ReadonlyArray<{
         readonly mode?: number;
         readonly indices?: number;
+        readonly material?: number;
         readonly attributes: Record<string, number>;
       }>;
     }>;
+    readonly materials: ReadonlyArray<{ readonly pbrMetallicRoughness: Readonly<Record<string, unknown>> }>;
     readonly accessors: ReadonlyArray<{ readonly count: number; readonly bufferView: number }>;
     readonly extensions: { readonly TAU_cad_topology: { readonly topologyBufferView: number } };
     readonly bufferViews: ReadonlyArray<{ readonly byteOffset?: number; readonly byteLength: number }>;
@@ -159,6 +161,19 @@ describe('PicoGK mesh artifact adapter', () => {
     });
     expect(new TextDecoder().decode(glb)).toContain('component:picogk-1');
     expect(new TextDecoder().decode(glb)).not.toContain('"alphaMode":"BLEND"');
+  });
+
+  it('should write roughnessFactor only when it differs from the glTF default of 1', () => {
+    const { bytes, result } = artifact();
+    const material = (roughness: number) => {
+      const json = glbJson(
+        picogkArtifactToGlb(bytes, { ...result, components: [{ ...result.components[0]!, roughness }] }),
+      );
+      return json.materials[json.meshes[0]!.primitives[0]!.material!]!.pbrMetallicRoughness;
+    };
+    expect(material(0.75)).toMatchObject({ metallicFactor: 0.25, roughnessFactor: 0.75 });
+    expect(material(1)).toHaveProperty('metallicFactor', 0.25);
+    expect(material(1)).not.toHaveProperty('roughnessFactor');
   });
 
   it('preserves captured polylines as GLB line primitives and edge topology', () => {

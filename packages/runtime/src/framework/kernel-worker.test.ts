@@ -39,6 +39,8 @@ import {
 } from '../../test/support/kernel-worker.fixture.js';
 /* oxlint-enable no-restricted-imports, import/extensions */
 import { defineMiddleware } from '#middleware/runtime-middleware.js';
+import { createKernelSuccess } from '#kernels/kernel-helpers.js';
+import { createKernelParameterDeclaration } from '#kernels/kernel-module-helpers.js';
 import { attachRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
 import { checkAbort } from '#framework/cooperative-abort.js';
 import type { RuntimeStateChangedArgs } from '#types/runtime-protocol.types.js';
@@ -447,44 +449,59 @@ describe('KernelWorker lifecycle', () => {
     );
   });
 
-  it('drops stale values that a changed closed parameter schema no longer declares', async () => {
-    const capturedParameters: Array<Record<string, unknown>> = [];
-    class ClosedParameterWorker extends MockKernelWorker {
-      protected override async onGetParameters(): Promise<GetParameterDeclarationsResult> {
-        return createParameterDeclaration(
-          {},
-          {
-            properties: { accepted: { type: 'string' } },
-            additionalProperties: false,
-          },
-        );
+  // The producer projection drops an empty `properties` map, as PicoGK emits for a source without `Params`.
+  it.each([
+    {
+      declares: 'other parameters',
+      declaration: () =>
+        createParameterDeclaration({}, { properties: { accepted: { type: 'string' } }, additionalProperties: false }),
+    },
+    {
+      declares: 'no parameters',
+      declaration: () =>
+        createKernelSuccess(
+          createKernelParameterDeclaration(
+            {},
+            { type: 'object', properties: {}, additionalProperties: false },
+            { id: 'urn:taucad:test:closed', name: 'Closed' },
+          ),
+        ),
+    },
+  ])(
+    'drops stale values that a changed closed schema declaring $declares no longer declares',
+    async ({ declaration }) => {
+      const capturedParameters: Array<Record<string, unknown>> = [];
+      class ClosedParameterWorker extends MockKernelWorker {
+        protected override async onGetParameters(): Promise<GetParameterDeclarationsResult> {
+          return declaration();
+        }
+
+        protected override async onCreateGeometry(
+          input: CreateGeometryInput,
+          runtime: KernelRuntime,
+        ): Promise<CreateGeometryResult> {
+          capturedParameters.push(input.parameters);
+          return super.onCreateGeometry(input, runtime);
+        }
       }
 
-      protected override async onCreateGeometry(
-        input: CreateGeometryInput,
-        runtime: KernelRuntime,
-      ): Promise<CreateGeometryResult> {
-        capturedParameters.push(input.parameters);
-        return super.onCreateGeometry(input, runtime);
-      }
-    }
+      const restorePersistedParameters = defineMiddleware({
+        id: 'restorePersistedParameters',
+        name: 'RestorePersistedParameters',
+        async wrapCreateGeometry(input, handler) {
+          return handler({ ...input, parameters: { ...input.parameters, RadiusMm: 16 } });
+        },
+      });
+      const worker = new ClosedParameterWorker({ middleware: [restorePersistedParameters()], onLog: noopLog });
+      const file = createGeometryFile('main.cs');
+      const parameters = { RadiusMm: 16 };
+      await worker.render({ file, parameters });
+      await openAndWaitForRender(worker, file, parameters);
+      await worker.exportModel({ file, parameters, format: 'gltf' });
 
-    const restorePersistedParameters = defineMiddleware({
-      id: 'restorePersistedParameters',
-      name: 'RestorePersistedParameters',
-      async wrapCreateGeometry(input, handler) {
-        return handler({ ...input, parameters: { ...input.parameters, RadiusMm: 16 } });
-      },
-    });
-    const worker = new ClosedParameterWorker({ middleware: [restorePersistedParameters()], onLog: noopLog });
-    const file = createGeometryFile('main.cs');
-    const parameters = { RadiusMm: 16 };
-    await worker.render({ file, parameters });
-    await openAndWaitForRender(worker, file, parameters);
-    await worker.exportModel({ file, parameters, format: 'gltf' });
-
-    expect(capturedParameters).toEqual([{}, {}, {}]);
-  });
+      expect(capturedParameters).toEqual([{}, {}, {}]);
+    },
+  );
 
   afterEach(() => {
     vi.useRealTimers();

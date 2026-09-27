@@ -53,7 +53,7 @@ export function usePanzoomReset(parameters: PanzoomResetParameters): () => void 
   }, [panzoomRef, containerRef]);
 
   useEffect(() => {
-    const subscription = graphicsActor.on('viewResetRequested', resetSvg);
+    const subscription = graphicsActor.on('viewFitRequested', resetSvg);
     return () => {
       subscription.unsubscribe();
     };

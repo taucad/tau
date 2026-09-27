@@ -3,6 +3,7 @@ import type { ComposedView } from '@taucad/filesystem/composed-view';
 import { composeView } from '@taucad/filesystem/composed-view';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { MemoryProvider } from '@taucad/filesystem/backend';
+import { projectToManifest, serializeProjectManifest } from '@taucad/types';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { createProviderRpcFileSystem } from '#registry/provider-file-system.js';
@@ -223,5 +224,53 @@ describe('createProviderRpcFileSystem', () => {
 
     await fileSystem.editFile('main.ts', 'main = 1', 'main = 2');
     expect(decoder.decode(await unchecked.readFile('main.ts'))).toBe('export const main = 2;\n');
+  });
+
+  /* The incident this guards: asked for a second model, an agent added
+   * `assets.<name>` to the manifest and the project became unreachable. The
+   * model now reads the defect as a tool error and can correct itself. */
+  describe('tau.json', () => {
+    const manifest = projectToManifest({
+      id: 'proj_0123456789ABCDEFGHIJK',
+      name: 'Relief',
+      description: '',
+      tags: [],
+      assets: { main: { entryPath: 'main.ts' } },
+    });
+    const text = (value: unknown): string => `${JSON.stringify(value, undefined, 2)}\n`;
+
+    beforeEach(async () => {
+      await provider.writeFile('tau.json', serializeProjectManifest(manifest));
+    });
+
+    it('accepts a valid edit that keeps the project identity', async () => {
+      const fileSystem = fileSystemFor();
+
+      await fileSystem.writeFile('tau.json', text({ ...manifest, name: 'Renamed' }));
+      await fileSystem.editFile('tau.json', '"Renamed"', '"Renamed again"');
+
+      expect(JSON.parse(await fileSystem.readFile('tau.json'))).toMatchObject({ name: 'Renamed again' });
+    });
+
+    it('refuses writes and edits that would break the manifest, naming the defect', async () => {
+      const fileSystem = fileSystemFor();
+      const before = decoder.decode(await provider.readFile('tau.json'));
+      const secondAsset = text({ ...manifest, assets: { ...manifest.assets, second: { entryPath: 'second.cs' } } });
+
+      await expect(fileSystem.writeFile('tau.json', secondAsset)).rejects.toMatchObject({
+        code: 'VALIDATION_ERROR',
+        /* oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- vitest types asymmetric matchers as `any`. */
+        message: expect.stringContaining('assets: Unrecognized key: "second"'),
+      });
+      await expect(fileSystem.editFile('tau.json', '"main.ts"\n', '"main.ts", "extra": 1\n')).rejects.toMatchObject({
+        code: 'VALIDATION_ERROR',
+      });
+      await expect(
+        fileSystem.writeFile('tau.json', text({ ...manifest, id: 'proj_zzzzzzzzzzzzzzzzzzzzz' })),
+      ).rejects.toThrow(`tau.json must keep the project id ${manifest.id}.`);
+      await expect(fileSystem.deleteFile('tau.json')).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+
+      expect(decoder.decode(await provider.readFile('tau.json'))).toBe(before);
+    });
   });
 });

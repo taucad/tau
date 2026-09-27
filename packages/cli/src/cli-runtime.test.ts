@@ -80,6 +80,8 @@ describe('createCliRuntime', () => {
         name.startsWith('@taucad/') &&
         ![
           '@taucad/agent-host',
+          // Machine providers, loaded by `tau serve --machines`, not runtime plugins.
+          '@taucad/bambu',
           '@taucad/host',
           '@taucad/jobs-solvers',
           '@taucad/parameters',
@@ -98,7 +100,7 @@ describe('createCliRuntime', () => {
     expect(runtime.kernels.map(({ id }) => id)).toEqual(builtInKernelIds);
     expect(runtime.bundlers.map(({ id }) => id)).toEqual(['esbuild']);
     expect(runtime.middleware.length).toBeGreaterThan(0);
-    expect(runtime.transcoders.map(({ id }) => id)).toEqual(['gltf', 'assimp', 'image', 'svg-image']);
+    expect(runtime.transcoders.map(({ id }) => id)).toEqual(['gltf', 'slicer', 'assimp', 'image', 'svg-image']);
   });
 
   it('registers the assimp import kernel through the pinned "all" preset', async () => {

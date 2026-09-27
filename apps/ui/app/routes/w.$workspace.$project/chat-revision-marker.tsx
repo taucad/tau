@@ -1,10 +1,11 @@
 import { memo, useCallback, useState, useSyncExternalStore } from 'react';
-import { AlertCircle, Check, ChevronDown, ChevronRight, CircleDashed, RotateCcw } from 'lucide-react';
+import { ChevronDown, RotateCw } from 'lucide-react';
 import { messageRole } from '@taucad/chat/constants';
-import { Button } from '@taucad/ui/components/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { cn } from '@taucad/ui/utils/cn';
-import { FileRow, RevisionNameAction } from '#routes/w.$workspace.$project/revision-marker.js';
+import { ActionButton, ActionsRow, disclosureMotion } from '#components/revisions/revision-actions.js';
+import { RevisionDetails, RevisionMenu } from '#routes/w.$workspace.$project/revision-marker.js';
+import { turnRevisionGlyph } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 import {
   deriveTurnRevisionState,
   turnRevisionDetail,
@@ -14,10 +15,9 @@ import type { TurnRevisionBase, TurnRevisionState } from '#routes/w.$workspace.$
 import { useTurnOutcomes } from '#routes/w.$workspace.$project/revision-outcomes.js';
 import { requestRevisionReveal } from '#routes/w.$workspace.$project/revision-reveal.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
-import { useRevisionChanges, useRevisions } from '#hooks/use-revisions.js';
+import { useRevisionCards, useRevisionChanges, useRevisions, useTurnRevision } from '#hooks/use-revisions.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
-import { useRestoreToPoint } from '#hooks/use-restore-to-point.js';
-import { useRevisionCommands } from '#hooks/use-revision-status.js';
+import { useRevisionStatus } from '#hooks/use-revision-status.js';
 import { useChatActions, useChatContext, useChatRetrySnapshot, useChatSelector } from '#hooks/use-chat.js';
 import { useChatSidebarStatus } from '#hooks/use-sidebar-status.js';
 import { useProject } from '#hooks/use-project.js';
@@ -61,7 +61,9 @@ const turnSave = (card: RevisionCard | undefined, baseRevisionId: string | undef
 function useTurnRevisionState(userMessageId: string, isLatestTurn: boolean): TurnRevisionState {
   const { projectId } = useProject();
   const { activeChatId } = useChatContext();
-  const { byTurnId, revisions } = useRevisions();
+  /* B4: the turn's own revision, looked up by the id its settlement names — not found by scanning a page. */
+  const turnRevision = useTurnRevision(userMessageId);
+  const { revisions } = useRevisions();
   const outcome = useTurnOutcomes(projectId).find((notice) => notice.turnId === userMessageId)?.kind;
   /* Stable closures: a fresh `subscribe` every render makes React unsubscribe
      and resubscribe both stores on every render of every turn marker (C47). */
@@ -81,15 +83,20 @@ function useTurnRevisionState(userMessageId: string, isLatestTurn: boolean): Tur
   const [held, setHeld] = useState<TurnRevisionState>();
 
   const baseRevisionId = placement?.baseRevisionId;
+  const loadedBase = revisions.find((revision) => revision.revisionId === baseRevisionId);
+  const baseCard =
+    useRevisionCards(
+      isLatestTurn && loadedBase === undefined && baseRevisionId !== undefined ? [baseRevisionId] : [],
+    ).get(baseRevisionId ?? '') ?? loadedBase;
   const base: TurnRevisionBase | undefined =
     placement === undefined
       ? undefined
       : baseRevisionId === undefined
         ? { kind: 'first' }
-        : { kind: 'revision', n: revisions.find((revision) => revision.revisionId === baseRevisionId)?.n };
+        : { kind: 'revision', n: baseCard?.n };
 
   const state = deriveTurnRevisionState({
-    revision: turnSave(byTurnId.get(userMessageId), baseRevisionId),
+    revision: turnSave(turnRevision, baseRevisionId),
     outcome,
     isSettledWithoutChange:
       settlement?.type === 'turn.finalized' &&
@@ -111,97 +118,74 @@ function useTurnRevisionState(userMessageId: string, isLatestTurn: boolean): Tur
 }
 
 function StatusIcon({ state }: { readonly state: TurnRevisionState }): React.JSX.Element {
-  if (state.kind === 'working' || state.kind === 'saving') {
-    return <CircleDashed aria-hidden className='size-4 shrink-0 text-muted-foreground' />;
-  }
-  if (state.kind === 'saved' && !state.isInterrupted) {
-    return <Check aria-hidden className='size-4 shrink-0' />;
-  }
-  return <AlertCircle aria-hidden className='size-4 shrink-0 text-feature' />;
+  const glyph = turnRevisionGlyph(state);
+  return <glyph.icon aria-hidden data-slot='marker-glyph' className={cn('size-4 shrink-0', glyph.tone)} />;
 }
 
-function ExpandableSection({
-  label,
-  children,
+/**
+ * The saved body's one status sentence, only for an exception (round 4): a
+ * revision still on its way to its backup, or not there yet. Never the
+ * redundant *Saved · Backed up*; round 21: it names where the copy is going, so
+ * it reads as the step after saving on this device.
+ *
+ * @returns The sentence, or `undefined` when there is nothing to add.
+ */
+function useBackupException(): string | undefined {
+  const status = useRevisionStatus();
+  if (status === undefined || status.remote.kind === 'none') {
+    return undefined;
+  }
+  const to = status.remote.kind === 'tau' ? 'Tau Cloud' : 'your repository';
+  switch (status.sync.state) {
+    case 'pending': {
+      return `Backing up to ${to}…`;
+    }
+    case 'queued':
+    case 'failed': {
+      return `Not backed up to ${to} yet`;
+    }
+    default: {
+      return undefined;
+    }
+  }
+}
+
+/**
+ * A saved turn's body: its name, the backup exception, History's actions row —
+ * View revision, then the revision's More and Details — so the chat reaches the
+ * verbs History does (rounds 14, 18).
+ *
+ * @param props - The revision and how to open it in Revisions.
+ * @returns The body.
+ */
+function SavedRevisionDetails({
+  revision,
+  onView,
 }: {
-  readonly label: string;
-  readonly children: React.ReactNode;
+  readonly revision: RevisionCard;
+  readonly onView: () => void;
 }): React.JSX.Element {
-  const [isOpen, setIsOpen] = useState(false);
+  const { headRevisionId, line } = useRevisions();
+  const exception = useBackupException();
+  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+  const branch = line.kind === 'unknown' ? undefined : line.name;
+  const named = revision.tags?.[0];
   return (
-    <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-      <CollapsibleTrigger asChild>
-        <Button variant='ghost' size='xs' className='-ml-2 justify-start'>
-          <ChevronRight aria-hidden className={cn('size-3 transition-transform', isOpen && 'rotate-90')} />
-          {label}
-        </Button>
-      </CollapsibleTrigger>
-      <CollapsibleContent className='pt-1'>{children}</CollapsibleContent>
+    <Collapsible open={isDetailsOpen} className='flex flex-col gap-2 px-3 pt-1 pb-2' onOpenChange={setIsDetailsOpen}>
+      {named === undefined ? null : <p className='text-sm font-medium wrap-break-word'>{named}</p>}
+      {exception === undefined ? null : (
+        <p data-slot='marker-exception' className='text-xs text-muted-foreground'>
+          {exception}
+        </p>
+      )}
+      <ActionsRow
+        slot='marker-actions'
+        end={<RevisionMenu revision={revision} isCurrent={revision.revisionId === headRevisionId} branch={branch} />}
+      >
+        <ActionButton verb='View revision' short='View' onClick={onView} />
+      </ActionsRow>
+      <RevisionDetails revision={revision} branch={branch} />
     </Collapsible>
-  );
-}
-
-function SavedRevisionDetails({ revision }: { readonly revision: RevisionCard }): React.JSX.Element {
-  const { headRevisionId } = useRevisions();
-  const { restore, isBusy } = useRestoreToPoint();
-  const commands = useRevisionCommands();
-  const changes = useRevisionChanges(revision);
-  const name = revision.n === undefined ? 'Revision' : `Revision ${String(revision.n)}`;
-  const title = revision.tags?.[0] ?? (revision.summary === '' ? undefined : revision.summary);
-
-  return (
-    <div className='flex flex-col gap-3'>
-      {title === undefined ? null : <p className='text-sm font-medium wrap-break-word'>{title}</p>}
-      <div className='flex flex-wrap items-center gap-2'>
-        {headRevisionId === revision.revisionId ? (
-          <span className='flex items-center gap-1 text-xs'>
-            <Check aria-hidden className='size-3' />
-            Current
-          </span>
-        ) : (
-          <Button
-            size='xs'
-            variant='outline'
-            disabled={isBusy}
-            aria-label={`Restore to ${name}`}
-            onClick={() => {
-              restore(revision.revisionId);
-            }}
-          >
-            <RotateCcw aria-hidden className='size-3' />
-            Restore
-          </Button>
-        )}
-        <RevisionNameAction
-          revisionName={name}
-          onTag={async (tag) => {
-            await commands.tag({ name: tag, revisionId: revision.revisionId });
-          }}
-        />
-      </div>
-      <ExpandableSection label={`Files · ${String(changes.length)}`}>
-        <div aria-label='Changed files' className='-mx-2 flex flex-col'>
-          {changes.map((file) => (
-            <FileRow key={file.path} file={file} revisionId={revision.revisionId} compareAgainst='parent' />
-          ))}
-        </div>
-      </ExpandableSection>
-      <ExpandableSection label='Engineering details'>
-        <dl className='grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-xs'>
-          <dt className='text-muted-foreground'>Revision</dt>
-          <dd className='font-mono break-all'>{revision.revisionId}</dd>
-          {revision.createdAt > 0 ? (
-            <>
-              <dt className='text-muted-foreground'>Saved</dt>
-              <dd className='tabular-nums'>
-                {new Date(revision.createdAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })} ·
-                On this device
-              </dd>
-            </>
-          ) : null}
-        </dl>
-      </ExpandableSection>
-    </div>
   );
 }
 
@@ -274,15 +258,13 @@ export const ChatRevisionMarker = memo(function ({
     return (
       <div aria-label='Turn revision' className={cn(cardClassName, 'flex items-center gap-2 pr-1 pl-2')}>
         <span className='flex min-w-0 flex-1 items-start gap-2 py-1.5 text-xs text-muted-foreground'>{status}</span>
-        <Button
-          size='xs'
+        <ActionButton
+          verb='View revision'
           variant='ghost'
           onClick={() => {
             openRevisions(savedRevision.revisionId);
           }}
-        >
-          View revision
-        </Button>
+        />
       </div>
     );
   }
@@ -301,35 +283,35 @@ export const ChatRevisionMarker = memo(function ({
             {status}
             <ChevronDown
               aria-hidden
-              className='mt-px size-3.5 shrink-0 transition-transform group-data-[state=open]/revision:rotate-180'
+              className='mt-px size-3.5 shrink-0 transition-transform group-data-[state=open]/revision:rotate-180 motion-reduce:transition-none'
             />
           </button>
         </CollapsibleTrigger>
         {state.kind === 'unconfirmed' ? (
-          <Button size='xs' variant='ghost' className='mt-0.5 mr-1' onClick={continueChat}>
-            <RotateCcw aria-hidden className='size-3' />
-            Retry
-          </Button>
+          <ActionButton verb='Retry' icon={RotateCw} className='mt-0.5 mr-1' onClick={continueChat} />
         ) : null}
       </div>
-      <CollapsibleContent className='px-4 pb-3'>
+      {/* Padding sits on an inner element, so the height motion starts from zero. */}
+      <CollapsibleContent className={disclosureMotion}>
         {savedRevision === undefined ? (
-          <div className='flex flex-col items-start gap-2'>
+          <div className='flex flex-col items-start gap-2 px-3 pt-1 pb-2'>
             <p className='text-xs leading-relaxed text-muted-foreground'>{turnRevisionDetail(state)}</p>
             {state.kind === 'conflicted' ? (
-              <Button
-                size='xs'
-                variant='outline'
+              <ActionButton
+                verb='Open Revisions'
                 onClick={() => {
                   openRevisions();
                 }}
-              >
-                Open Revisions
-              </Button>
+              />
             ) : null}
           </div>
         ) : (
-          <SavedRevisionDetails revision={savedRevision} />
+          <SavedRevisionDetails
+            revision={savedRevision}
+            onView={() => {
+              openRevisions(savedRevision.revisionId);
+            }}
+          />
         )}
       </CollapsibleContent>
     </Collapsible>

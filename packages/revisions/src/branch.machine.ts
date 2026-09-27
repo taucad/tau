@@ -58,8 +58,8 @@ export type BranchMachineInput = Readonly<{
   parentRef?: AnyActorRef;
 }>;
 
-/** Serializable state owned by branchMachine. @public */
-export type BranchMachineContext = Readonly<{
+/* The fields of {@link BranchMachineContext}, named by the interface below. */
+type BranchMachineContextFields = Readonly<{
   projectId: string;
   currentBranch: string | undefined;
   /** The verb in flight, or `undefined` while idle. */
@@ -97,6 +97,10 @@ export type BranchMachineContext = Readonly<{
   conflicts: readonly string[];
   parentRef: AnyActorRef | undefined;
 }>;
+
+/** Serializable state owned by branchMachine. @public */
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type, typescript/consistent-type-definitions -- an interface, not a type alias: declarations reference it by name, where an alias is expanded into every transition of this machine and of any machine that holds it (K-17, TS7056)
+export interface BranchMachineContext extends BranchMachineContextFields {}
 
 /** Events accepted by branchMachine. @public */
 export type BranchMachineEvent =
@@ -754,13 +758,19 @@ const branchMachineDefinition = setup({
             ? {}
             : { checkoutId: context.checkoutId, checkoutRoot: context.checkoutRoot }),
         });
+        /* D59: a branch made or renamed here mints nothing, so the scheduler
+         * would read *Backed up* over a ref the remote has never seen. */
+        if (context.parentRef !== undefined) {
+          enq.sendTo(context.parentRef, { type: 'sync', event: { type: 'recordsChanged' } });
+        }
       },
       always: { target: 'idle', context: clearTransient },
     },
     conflicted: {
       /* The fact goes to the parent as well as out, exactly as `applySwitch`'s
-       * `checkoutChanged` does: a conflicted merge moved the source branch, so
-       * the registry is stale and nothing else would ever say so. Without this
+       * `checkoutChanged` does: a conflicted merge recorded a revision on the
+       * conflict line (D14), so the registry is stale and nothing else would
+       * ever say so. Without this
        * send the conflict is real in the graph and invisible on the screen
        * until the project is reopened (W10 review R1, P41). */
       entry: ({ context }, enq) => {

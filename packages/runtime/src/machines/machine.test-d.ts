@@ -3,7 +3,14 @@ import type { StandardJSONSchemaV1, StandardSchemaV1 } from '@standard-schema/sp
 
 import type { ConfigurationDefinition } from '#configuration/configuration.js';
 import { defineMachine, defineMachineQuery } from '#machines/machine.js';
-import type { MachineDiscoveryRuntime, MachineProviderDefinition, MachineTransportTrust } from '#machines/machine.js';
+import type {
+  MachineAlertSnapshot,
+  MachineDiscoveryRuntime,
+  MachineProviderDefinition,
+  MachineTransportTrust,
+} from '#machines/machine.js';
+import { machineManifestFixture } from '#machines/machine-manifest.fixture.js';
+import type { MachineManifest } from '#machines/machine-manifest.js';
 
 type Binding = Readonly<{ logicalId: string }>;
 type Submission = Readonly<{ copies: number }>;
@@ -30,6 +37,7 @@ const definition = {
       technology: 'fff',
     },
   ],
+  manifest: machineManifestFixture,
   bindingConfiguration,
   submissionConfiguration,
   queries: {
@@ -94,5 +102,29 @@ describe('machine authoring types', () => {
     expectTypeOf(registration.id).toEqualTypeOf<'typed-machine'>();
     expectTypeOf(registration.queries.materials).not.toBeNever();
     expectTypeOf(registration.queries.counts).not.toBeNever();
+  });
+});
+
+describe('machine observation and manifest types', () => {
+  it('should declare still capture as the only camera fact', () => {
+    expectTypeOf<MachineManifest['camera']>().toEqualTypeOf<{ stills: boolean }>();
+    // @ts-expect-error -- no live-stream contract exists, so a manifest cannot claim one.
+    const streamed: MachineManifest['camera'] = { stills: true, stream: true };
+    expectTypeOf(streamed).toEqualTypeOf<{ stills: boolean }>();
+  });
+
+  it('should carry a readable alert whose severity is a closed set', () => {
+    const alert: MachineAlertSnapshot = {
+      code: '0C00-0300-0003-000B',
+      severity: 'serious',
+      message: 'The first layer is not sticking to the plate.',
+      reference: 'https://support.example.com/codes/0C00-0300-0003-000B',
+    };
+    expectTypeOf(alert.severity).toEqualTypeOf<'fatal' | 'serious' | 'warning' | 'info' | undefined>();
+    expectTypeOf(alert.message).toEqualTypeOf<string | undefined>();
+    expectTypeOf(alert.reference).toEqualTypeOf<string | undefined>();
+    // @ts-expect-error -- a severity outside the four levels is refused.
+    const critical: MachineAlertSnapshot = { code: '0300-400C', severity: 'critical' };
+    expectTypeOf(critical).toEqualTypeOf<MachineAlertSnapshot>();
   });
 });

@@ -409,9 +409,11 @@ function createBrowserGraphicsClient(
     async exportGeometry({
       targetFile,
       format,
+      exportOptions,
     }: {
       targetFile: string;
       format: string;
+      exportOptions?: Record<string, unknown>;
     }): Promise<RpcGraphicsExportGeometryResult> {
       const resolved = await ensureGeometryUnit(projectRef, targetFile, editorRef);
       if (!resolved.ok) {
@@ -458,13 +460,13 @@ function createBrowserGraphicsClient(
           };
         }
 
-        const exportResult = await exportWithRuntimeValidatedInput(kernelClient, route);
+        const exportResult = await exportWithRuntimeValidatedInput(kernelClient, route, { exportOptions });
         if (!exportResult.success) {
           const message = exportResult.issues.map((issue) => issue.message).join('; ') || 'Geometry export failed';
           return { success: false, errorCode: rpcClientErrorCode.unknown, message };
         }
 
-        return { success: true, files: exportResult.data };
+        return { success: true, files: exportResult.data, issues: exportResult.issues };
       } catch (error) {
         return {
           success: false,

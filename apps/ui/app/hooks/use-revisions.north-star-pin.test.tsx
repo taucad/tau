@@ -56,7 +56,11 @@ const wrapper = ({ children }: { readonly children: ReactNode }): React.JSX.Elem
 beforeEach(() => {
   revisionStatusHarness.reset();
   revisionStatusHarness.rows = [row('u2', 'rev-u2', 2), row('u1', 'rev-u1', 1)];
-  revisionStatusHarness.status = { ...revisionStatusHarness.status, branch: 'main', headRevisionId: 'rev-u2' };
+  revisionStatusHarness.status = {
+    ...revisionStatusHarness.status,
+    line: { kind: 'branch', name: 'main' },
+    headRevisionId: 'rev-u2',
+  };
   chatsRef.current = [chat('chat_first'), chat('chat_second')];
 });
 

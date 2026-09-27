@@ -2,6 +2,7 @@ import * as React from 'react';
 import type { ParameterFieldProjection } from '@taucad/parameters';
 import { convert, createQuantity } from '@taucad/units/quantity';
 import { formatQuantity, parseInput } from '@taucad/units/input';
+import { createRafCoalescer } from '#components/geometry/graphics/three/utils/raf-coalescer.js';
 import { ParametersNumberField } from '#components/geometry/parameters/parameters-number-field.js';
 import { validateParameterInputValue } from '#components/geometry/parameters/parameter-field.js';
 import type { ParameterFieldBinding } from '#components/geometry/parameters/parameter-field.js';
@@ -97,7 +98,9 @@ const fieldBinding = (fieldProjection: ParameterFieldProjection): ParameterField
 /** The authority value this row last showed, which a commit proves it was still editing. */
 type EditBase = Readonly<{ value: number; binding: ParameterFieldBinding; authorityValue: number }>;
 
-export function ParametersNumber({
+/* Memoised: the section panel re-renders on every step of the field being dragged, and its other
+ * rows pass stable props, so only the dragged row re-renders. */
+export const ParametersNumber = React.memo(function ParametersNumber({
   value,
   defaultValue,
   fieldProjection,
@@ -130,6 +133,13 @@ export function ParametersNumber({
   const [localValue, setLocalValue] = React.useState<Readonly<{ value: number; authorityValue: number }>>();
   const [inputDiagnostic, setInputDiagnostic] = React.useState<string>();
   const [base, setBase] = React.useState<EditBase>(() => ({ value: authorityValue, binding, authorityValue }));
+  /* A local value answers the authority it was entered against; once the authority moves, a later
+   * return to that same value (a reset after a transient edit) must not bring the old entry back. */
+  const [enteredAgainst, setEnteredAgainst] = React.useState(authorityValue);
+  if (!Object.is(enteredAgainst, authorityValue)) {
+    setEnteredAgainst(authorityValue);
+    setLocalValue(undefined);
+  }
 
   const isDirty = draftText !== '';
   const currentBase: EditBase = { value: authorityValue, binding, authorityValue };
@@ -167,6 +177,22 @@ export function ParametersNumber({
         }
       }),
     [commit, instancePointer],
+  );
+
+  /* A continual row previews a drag through `onChange`, which can arrive faster than frames: at most one
+   * value per animation frame is sent, the latest. The row shows each value at once. Release sends a value
+   * still waiting before its own, which it skips when the drag ends where it started; cancel and unmount
+   * drop a waiting value, so nothing lands after the final one. */
+  const [continualChange] = React.useState(() =>
+    createRafCoalescer<() => void>((send) => {
+      send();
+    }),
+  );
+  React.useEffect(
+    () => () => {
+      continualChange.cancel();
+    },
+    [continualChange],
   );
 
   const toNative = (next: number): number => {
@@ -347,6 +373,9 @@ export function ParametersNumber({
       }
       rangeMin={rangeMin}
       rangeMax={rangeMax}
+      // Without a declared bound, that end of the range is only a scrub window.
+      hasMinimum={min !== undefined}
+      hasMaximum={max !== undefined}
       step={currentStep}
       id={id}
       shouldAutoFocus={autoFocus}
@@ -368,10 +397,13 @@ export function ParametersNumber({
             value: sourceUnit === undefined ? native : `${String(Number(next.toPrecision(12)))} ${sourceUnit}`,
           });
         } else if (commit === undefined && enableContinualOnChange) {
-          onChange(native);
+          continualChange.schedule(() => {
+            onChange(native);
+          });
         }
       }}
       onSliderRelease={(next) => {
+        continualChange.flush();
         const final = commitValue(next);
         if (final === undefined) {
           void commit?.endScrub?.();
@@ -380,6 +412,7 @@ export function ParametersNumber({
         }
       }}
       onSliderCancel={() => {
+        continualChange.cancel();
         void commit?.endScrub?.();
         revert();
       }}
@@ -418,4 +451,4 @@ export function ParametersNumber({
       }}
     />
   );
-}
+});

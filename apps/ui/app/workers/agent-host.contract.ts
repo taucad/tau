@@ -112,7 +112,12 @@ export type AgentHostProjectProvide = {
   readonly systemPromptBlocks:
     | readonly [ModelSystemPromptBlock, ModelSystemPromptBlock]
     | readonly [ModelSystemPromptBlock, ModelSystemPromptBlock, ModelSystemPromptBlock];
-  readonly model: AgentHostModel;
+  /**
+   * The host's default row, for a bodyless resume of a run whose log committed none. Absent while
+   * the model catalog cannot name a provider (offline): attach, replay and a resume on the log's
+   * committed row still work, and a turn names its own row in its admission.
+   */
+  readonly model?: AgentHostModel | undefined;
   readonly runtimeConfig: UiRuntimeConfigInput;
   readonly testingEnabled?: boolean | undefined;
   /** The signed-in account the session cookie funds, which the host checks an attempt against (W11 GI-Q6). */
@@ -362,7 +367,7 @@ const provideSchema = z.strictObject({
       agentChannelSystemPromptBlockSchema,
     ]),
   ]),
-  model: agentChannelModelSchema,
+  model: agentChannelModelSchema.optional(),
   runtimeConfig: z.strictObject({ tauApiUrl: z.url(), tauWebSocketUrl: z.url() }),
   testingEnabled: z.boolean().optional(),
   principal: nonEmptyString.optional(),

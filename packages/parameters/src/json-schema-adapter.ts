@@ -3,8 +3,8 @@ import { admitParameterDeclaration } from '#manifest.js';
 import type { ParameterDeclaration } from '#manifest.js';
 import type { JSONSchema7 } from '@taucad/json-schema';
 
-/** Input for projecting one admitted Draft-7 schema into a native parameter declaration. @public */
-export type Draft7ParameterDeclarationInput = Readonly<{
+/** Input for projecting one admitted Draft-07 or 2020-12 schema into a native parameter declaration. @public */
+export type JsonSchemaParameterDeclarationInput = Readonly<{
   schema: JSONSchema7 | Readonly<Record<string, unknown>>;
   defaults: Readonly<Record<string, unknown>>;
   schemaId: string;
@@ -16,7 +16,13 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const escapePointer = (value: string): string => value.replaceAll('~', '~0').replaceAll('/', '~1');
 
-const schemaMapKeywords = new Set(['definitions', 'properties']);
+// The carrier keeps one definitions keyword whichever dialect the author wrote.
+const carrierReference = (reference: string): string => reference.replace(/^#\/\$defs\//u, '#/definitions/');
+const schemaMapKeywords = new Set(['$defs', 'definitions', 'properties']);
+// In 2020-12 documents admission guarantees each numeric format sits on its own JSON type, and the carrier spells
+// the width as the type. Draft-07 keeps format an inert annotation.
+const draft202012 = 'https://json-schema.org/draft/2020-12/schema';
+const carrierWidths = new Set(['float', 'double', 'int32', 'uint32']);
 const schemaArrayKeywords = new Set(['allOf', 'anyOf', 'oneOf']);
 const schemaKeywords = new Set([
   'additionalItems',
@@ -30,25 +36,41 @@ const schemaKeywords = new Set([
   'then',
 ]);
 const semanticKeywords = new Set([
+  'x-ogc-definition',
   'x-ogc-unit',
   'x-tau-quantity-kind',
   'x-tau-reference',
   'x-tau-space',
   'x-tau-symbol',
+  'x-tau-symbols',
   'x-tau-unit',
 ]);
 
-const draftTypeToNative = (value: unknown): unknown => {
+const draftTypeToNative = (value: unknown, width: string | undefined): unknown => {
   if (Array.isArray(value)) {
-    return value.map((item) => draftTypeToNative(item));
+    return value.map((item) => draftTypeToNative(item, width));
   }
-  if (value === 'number') {
-    return 'double';
-  }
-  if (value === 'integer') {
-    return 'integer';
+  if (value === 'number' || value === 'integer') {
+    return width ?? (value === 'number' ? 'double' : 'integer');
   }
   return value;
+};
+
+// `pattern` is a keyword only on a schema object; in a name map or a data value it is an ordinary key.
+type PatternRole = 'schema' | 'schemas' | 'data';
+const patternChildRole = (role: PatternRole, key: string, value: unknown): PatternRole => {
+  if (role !== 'schema') {
+    return role === 'schemas' ? 'schema' : 'data';
+  }
+  if (
+    schemaMapKeywords.has(key) ||
+    schemaArrayKeywords.has(key) ||
+    key === 'dependencies' ||
+    (key === 'items' && Array.isArray(value))
+  ) {
+    return 'schemas';
+  }
+  return schemaKeywords.has(key) ? 'schema' : 'data';
 };
 
 const withoutStringPatterns = (root: Record<string, unknown>): Record<string, unknown> => {
@@ -57,16 +79,17 @@ const withoutStringPatterns = (root: Record<string, unknown>): Record<string, un
     source: Record<string, unknown> | unknown[];
     target: Record<string, unknown> | unknown[];
     depth: number;
-  }> = [{ source: root, target: projected, depth: 0 }];
+    role: PatternRole;
+  }> = [{ source: root, target: projected, depth: 0, role: 'schema' }];
   let nodes = 0;
   while (stack.length > 0) {
-    const { source, target, depth } = stack.pop()!;
+    const { source, target, depth, role } = stack.pop()!;
     nodes += 1;
     if (nodes > 2048 || depth > 20) {
       throw new TypeError('SCHEMA_LIMIT: depth or node budget exceeded');
     }
     for (const [key, value] of Object.entries(source)) {
-      if (key === 'pattern') {
+      if (role === 'schema' && key === 'pattern') {
         continue;
       }
       if (value !== null && typeof value === 'object') {
@@ -76,6 +99,7 @@ const withoutStringPatterns = (root: Record<string, unknown>): Record<string, un
           source: Array.isArray(value) ? value : (value as Record<string, unknown>),
           target: child,
           depth: depth + 1,
+          role: patternChildRole(role, key, value),
         });
       } else {
         Reflect.set(target, key, value);
@@ -85,14 +109,10 @@ const withoutStringPatterns = (root: Record<string, unknown>): Record<string, un
   return projected;
 };
 
-const declaredUnit = (schema: Record<string, unknown>): string | undefined => {
-  const tauUnit = schema['x-tau-unit'];
-  const ogcUnit = schema['x-ogc-unit'];
-  if (typeof tauUnit === 'string' && typeof ogcUnit === 'string' && tauUnit !== ogcUnit) {
-    throw new TypeError('NATIVE_PROJECTION_UNSUPPORTED: conflicting Tau and OGC unit annotations');
-  }
-  return typeof tauUnit === 'string' ? tauUnit : typeof ogcUnit === 'string' ? ogcUnit : undefined;
-};
+// Admission has refused disagreeing unit and quantity-kind spellings, so either spelling is the claim.
+const declaredUnit = (schema: Record<string, unknown>): unknown => schema['x-tau-unit'] ?? schema['x-ogc-unit'];
+const declaredKind = (schema: Record<string, unknown>): unknown =>
+  schema['x-ogc-definition'] ?? schema['x-tau-quantity-kind'];
 
 type BindingMode = 'definition' | 'exact' | 'unsupported';
 type VisitInput = Readonly<{
@@ -112,6 +132,7 @@ const createProjection = (
   const semanticDefinitions = new Set<Record<string, unknown>>();
   const referencedDefinitions = new Set<Record<string, unknown>>();
   const traversedReferences = new Set<string>();
+  const formatWidths = root['$schema'] === draft202012;
 
   const resolveReference = (reference: string): unknown => {
     let value: unknown = root;
@@ -131,7 +152,7 @@ const createProjection = (
     const schemaReference = value['$ref'];
     if (typeof schemaReference === 'string') {
       if (Object.keys(value).some((key) => key !== '$ref')) {
-        throw new TypeError('NATIVE_PROJECTION_UNSUPPORTED: Draft-7 reference siblings');
+        throw new TypeError('NATIVE_PROJECTION_UNSUPPORTED: reference siblings');
       }
       if (/%[0-9A-Fa-f]{2}/u.test(schemaReference)) {
         throw new TypeError('NATIVE_PROJECTION_UNSUPPORTED: percent-encoded bundled reference');
@@ -142,7 +163,7 @@ const createProjection = (
         traversedReferences.add(referenceKey);
         visit({ value: target, mode, instancePointer, emit: false });
       }
-      return emit ? { type: { $ref: schemaReference } } : undefined;
+      return emit ? { type: { $ref: carrierReference(schemaReference) } } : undefined;
     }
     const semantic = Object.keys(value).some((key) => semanticKeywords.has(key));
     if (semantic) {
@@ -153,7 +174,7 @@ const createProjection = (
         semanticDefinitions.add(value);
       } else {
         referencedDefinitions.add(value);
-        const quantityKind = value['x-tau-quantity-kind'];
+        const quantityKind = declaredKind(value);
         const space = value['x-tau-space'];
         const reference = value['x-tau-reference'];
         if (
@@ -170,8 +191,10 @@ const createProjection = (
     }
 
     const projected: Record<string, unknown> = {};
+    const { format } = value;
+    const width = formatWidths && typeof format === 'string' && carrierWidths.has(format) ? format : undefined;
     for (const [key, child] of Object.entries(value)) {
-      if (key === 'pattern') {
+      if (key === 'pattern' || (key === 'format' && width !== undefined)) {
         continue;
       }
       if (key === '$schema' || key.startsWith('x-tau-') || key.startsWith('x-ogc-')) {
@@ -185,7 +208,7 @@ const createProjection = (
         continue;
       }
       if (key === 'type') {
-        projected[key] = draftTypeToNative(child);
+        projected[key] = draftTypeToNative(child, width);
         continue;
       }
       if (schemaMapKeywords.has(key) && isRecord(child)) {
@@ -200,7 +223,7 @@ const createProjection = (
           }),
         ]);
         if (entries.length > 0) {
-          projected[key] = Object.fromEntries(entries);
+          projected[key === '$defs' ? 'definitions' : key] = Object.fromEntries(entries);
         }
         continue;
       }
@@ -249,12 +272,16 @@ const createProjection = (
       projected[key] = structuredClone(child);
     }
     const unit = declaredUnit(value);
-    if (unit !== undefined) {
+    if (typeof unit === 'string') {
       projected['ucumUnit'] = unit;
     }
     const symbol = value['x-tau-symbol'];
     if (typeof symbol === 'string') {
       projected['symbol'] = symbol;
+    }
+    const symbols = value['x-tau-symbols'];
+    if (isRecord(symbols)) {
+      projected['symbols'] = structuredClone(symbols);
     }
     return emit ? projected : undefined;
   };
@@ -281,13 +308,14 @@ const createProjection = (
 };
 
 /**
- * Project admitted Draft-7/OGC schema data and native defaults into a pinned parameter declaration.
+ * Project admitted Draft-07 or 2020-12 schema data, as its `$schema` declares, and native defaults into a pinned
+ * parameter declaration.
  * @param input - Schema data, defaults, and caller-owned stable schema identity.
  * @returns An admitted immutable native parameter declaration.
  * @public
  */
-export const projectDraft7SchemaToParameterDeclaration = (
-  input: Draft7ParameterDeclarationInput,
+export const projectJsonSchemaToParameterDeclaration = (
+  input: JsonSchemaParameterDeclarationInput,
 ): ParameterDeclaration => {
   const { defaults, schema, schemaId, schemaName } = input;
   const schemaRecord = Object.fromEntries(Object.entries(schema));

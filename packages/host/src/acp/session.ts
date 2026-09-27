@@ -98,6 +98,7 @@ import {
   testModelOutputSchema,
 } from '@taucad/chat';
 import { toolName } from '@taucad/chat/constants';
+import { checkProjectManifestReplacement } from '@taucad/types';
 
 const maskedPath = (message: string): Error => Object.assign(new Error(message), { code: maskedPathCode });
 
@@ -290,7 +291,24 @@ export const writeSessionTextFile = async (
   params: { readonly path: string; readonly content: string },
 ): Promise<void> => {
   const provider = new NodeFsProvider(cwd);
-  await provider.writeFile(await confine(cwd, params.path, 'write'), params.content);
+  const target = await confine(cwd, params.path, 'write');
+  /* The one content rule on this path, shared with Tau's own file tools: the
+   * manifest stays valid and keeps its identity (manifest recovery blueprint R8). */
+  if (target === 'tau.json') {
+    let current: Uint8Array<ArrayBuffer> | undefined;
+    try {
+      current = await provider.readFile(target);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw error;
+      }
+    }
+    const refusal = checkProjectManifestReplacement(new TextEncoder().encode(params.content), current);
+    if (refusal !== undefined) {
+      throw Object.assign(new Error(refusal), { code: 'VALIDATION_ERROR' });
+    }
+  }
+  await provider.writeFile(target, params.content);
 };
 
 // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- an ACP payload is JSON by construction of its transport.

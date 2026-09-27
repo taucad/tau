@@ -51,6 +51,8 @@ import { assertRootedPath } from '@taucad/utils/path';
  * as an external import. */
 import type { ExportFile, RuntimeFileSystemBase, SourceRevision } from '@taucad/runtime/types';
 import type { RuntimeClient } from '@taucad/runtime/client';
+import type { MachineClient } from '@taucad/runtime/machine';
+import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
 import type { ActorRefFrom } from 'xstate';
 import type { parameterSetMachine } from '@taucad/parameters/set-machine';
 
@@ -265,6 +267,23 @@ export type HostToolRegistryOptions = {
    * client here follows.
    */
   readonly revisions?: ProjectRevisions['history'] | undefined;
+  /**
+   * The machines facet this host serves its machine tools over, once the
+   * composition has negotiated and granted it — the daemon under
+   * `tau serve --machines`, the desktop services utility. Omit it and no
+   * machine tool is offered rather than offered-and-failing (the same rule
+   * every other client here follows); a facet that is present but not
+   * `available` offers none either.
+   */
+  readonly machines?: RuntimeTransportFacet<MachineClient> | undefined;
+  /**
+   * The `tau.json` id of the project `workspaceRoot` holds: the desktop's
+   * attached project, or the daemon's served root. Every artifact `request_print`
+   * slices names it, which is how a machine host finds the file again. Omit it
+   * and `request_print` is not offered: a host that cannot name its project
+   * never guesses one.
+   */
+  readonly projectId?: string | undefined;
 };
 
 /**
@@ -441,13 +460,33 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
       },
     };
 
+    /* `request_print` needs every leg of the print path: the project id here
+     * names the artifact's project, and the registry offers the tool only when
+     * a runtime to slice with and a machine to ask are attached too. A
+     * candidate turn's slice lands in its checkout, which the machine host
+     * finds through the same project id. */
+    const { revisions, machines, projectId } = options;
     return createChatToolRegistry({
       fileSystemFor: (signal) => createProviderRpcFileSystem({ provider: view, mutations, signal }),
       recordFileSystemFor: (signal) => createProviderRpcFileSystem({ provider: recordView, mutations, signal }),
       ...(runtimeClient === undefined ? {} : { kernelClient, graphics, images }),
       ...(parameters === undefined ? {} : { parameters }),
       ...(geospec === undefined ? {} : { geospec }),
-      ...(options.revisions === undefined ? {} : { revisions: options.revisions }),
+      ...(revisions === undefined ? {} : { revisions }),
+      ...(projectId === undefined
+        ? {}
+        : {
+            print: {
+              projectId,
+              readArtifact: async ({ path, signal }) => {
+                signal.throwIfAborted();
+                const bytes = await recordView.readFile(assertRootedPath(path));
+                signal.throwIfAborted();
+                return bytes;
+              },
+            },
+          }),
+      ...(machines === undefined ? {} : { machines }),
       skillResolver,
       testingEnabled: geospec !== undefined,
     });

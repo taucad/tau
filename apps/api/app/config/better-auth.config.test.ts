@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { betterAuth } from 'better-auth';
 import { memoryAdapter } from 'better-auth/adapters/memory';
+import { github as githubProvider } from 'better-auth/social-providers';
 import { getBetterAuthConfig } from '#config/better-auth.config.js';
 import type { Environment } from '#config/environment.config.js';
 import type { ConfigService } from '@nestjs/config';
@@ -50,14 +51,20 @@ const createConfig = (authUrl = 'http://localhost:4000') => {
       order.push('closure');
     }),
   };
+  const cloudHosts = {
+    retireCloudHosts: vi.fn().mockImplementation(async () => {
+      order.push('cloudHosts');
+    }),
+  };
   const config = getBetterAuthConfig({
     closure,
+    cloudHosts,
     databaseService,
     configService: configService as unknown as ConfigService<Environment, true>,
     emailService: emailService as unknown as EmailService,
   });
 
-  return { config, emailService, closure, writes, order };
+  return { config, emailService, closure, cloudHosts, writes, order };
 };
 
 type TestEmailCallbackArgs = {
@@ -115,7 +122,7 @@ describe('getBetterAuthConfig abuse gates', () => {
   });
 
   it('should write no tombstone when the financial closure refuses the deletion', async () => {
-    const { config, closure, writes } = createConfig();
+    const { config, closure, cloudHosts, writes } = createConfig();
     const beforeDelete = config.user?.deleteUser?.beforeDelete;
     if (!beforeDelete) {
       throw new Error('Deletion hook is missing');
@@ -136,6 +143,8 @@ describe('getBetterAuthConfig abuse gates', () => {
       ),
     ).rejects.toThrow('account still owes');
     expect(writes).toStrictEqual([]);
+    /* A refused deletion keeps its cloud hosts (W10 a4). */
+    expect(cloudHosts.retireCloudHosts).not.toHaveBeenCalled();
   });
 
   /**
@@ -145,7 +154,7 @@ describe('getBetterAuthConfig abuse gates', () => {
    * bytes nobody could still attribute.
    */
   it('should record a storage tombstone with a thirty-day purge date before the financial closure runs', async () => {
-    const { config, writes, order } = createConfig();
+    const { config, cloudHosts, writes, order } = createConfig();
     const beforeDelete = config.user?.deleteUser?.beforeDelete;
     if (!beforeDelete) {
       throw new Error('Deletion hook is missing');
@@ -167,7 +176,9 @@ describe('getBetterAuthConfig abuse gates', () => {
        `purge_after`, so the real deletion weeks later inherits a window that has
        already run down. The closure deletes no bytes, so writing first bought
        nothing. */
-    expect(order).toStrictEqual(['closure', 'tombstone']);
+    expect(order).toStrictEqual(['closure', 'cloudHosts', 'tombstone']);
+    /* W10 a4: the account's cloud hosts stop before the cascade takes their rows. */
+    expect(cloudHosts.retireCloudHosts).toHaveBeenCalledWith(user.id);
     expect(writes).toHaveLength(1);
     const values = writes[0]?.values;
     expect(values).toMatchObject({ ownerId: user.id });
@@ -248,6 +259,24 @@ describe('getBetterAuthConfig abuse gates', () => {
 
     expect(typeof github).not.toBe('function');
     expect(typeof github === 'function' ? undefined : github?.scope).toEqual(['read:user', 'user:email']);
+  });
+
+  /* D62: the provider's own defaults were added to the configured list. */
+  it('asks GitHub for each identity scope once', async () => {
+    const { config } = createConfig();
+    const options = config.socialProviders?.['github'];
+    if (options === undefined || typeof options === 'function') {
+      throw new TypeError('GitHub sign-in is configured statically.');
+    }
+
+    const url = await githubProvider(options).createAuthorizationURL({
+      state: 'state',
+      codeVerifier: 'v'.repeat(43),
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- better-auth's parameter name.
+      redirectURI: 'http://localhost:4000/v1/auth/callback/github',
+    });
+
+    expect(url.searchParams.get('scope')).toBe('read:user user:email');
   });
 
   it('keeps bearer last in both lockstep plugin lists', async () => {

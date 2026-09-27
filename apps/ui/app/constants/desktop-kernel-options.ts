@@ -36,11 +36,9 @@ export const desktopKernelOptions =
   (projectId: string, nativeKernelId: string | undefined, computeMode: ComputeReuseMode): LazyKernelOptionsFactory =>
   async () => {
     const projectRoot = await desktopProjectRoot(projectId);
-    if (nativeKernelId) {
-      const bridge = desktopBridge();
-      if (!bridge?.runtimeKernelIds.includes(nativeKernelId)) {
-        throw new Error(`${nativeKernelId} is not available in this desktop runtime.`);
-      }
+    const bridge = desktopBridge();
+    if (nativeKernelId && !bridge?.runtimeKernelIds.includes(nativeKernelId)) {
+      throw new Error(`${nativeKernelId} is not available in this desktop runtime.`);
     }
     // Dynamic so the electron renderer module never enters the web bundle's
     // eager graph, the way every other preset defers its heavy import.

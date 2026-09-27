@@ -194,24 +194,16 @@ export class KclUtilities {
 
           // Update the literal value while preserving the structure
           if (typeof parameterValue === 'number') {
-            // `value` is mistyped - it always has a nested `value` property
-            (declaration.init.value as unknown) = {
-              value: parameterValue,
-              suffix: 'None',
-            };
-            declaration.init.raw = String(parameterValue);
-          } else if (typeof parameterValue === 'string') {
-            (declaration.init.value as unknown) = {
-              value: parameterValue,
-              suffix: 'None',
-            };
-            declaration.init.raw = `"${parameterValue}"`;
-          } else if (typeof parameterValue === 'boolean') {
-            (declaration.init.value as unknown) = {
-              value: parameterValue,
-              suffix: 'None',
-            };
-            declaration.init.raw = String(parameterValue);
+            // Keep the author's unit suffix (`0.25in` stays inches); dropping it re-types the value as the file default.
+            const original = declaration.init.value;
+            const isNumberLiteral = typeof original === 'object';
+            declaration.init.value = { value: parameterValue, suffix: isNumberLiteral ? original.suffix : 'None' };
+            const suffixText = isNumberLiteral ? (/[A-Z_a-z]+$/.exec(declaration.init.raw)?.[0] ?? '') : '';
+            declaration.init.raw = `${parameterValue}${suffixText}`;
+          } else if (typeof parameterValue === 'string' || typeof parameterValue === 'boolean') {
+            // String and bool literals are plain values; only numbers carry `{ value, suffix }`.
+            declaration.init.value = parameterValue;
+            declaration.init.raw = JSON.stringify(parameterValue);
           }
         }
       }

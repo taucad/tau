@@ -106,6 +106,8 @@ export type {
   HostRun,
   HostRunFailure,
   HostRunSnapshot,
+  HostToolApproval,
+  HostToolApprovalRecord,
   HostToolDefinition,
   HostToolInvocation,
   HostToolResult,

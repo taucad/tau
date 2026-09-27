@@ -17,6 +17,7 @@ import { SearchInput } from '#components/search-input.js';
 import {
   PaneviewHeader,
   PaneviewHeaderControls,
+  paneviewAttachedBodyClassName,
   paneviewAttachedSurfaceStyleOverrides,
   paneviewHeaderSize,
 } from '#components/panes/paneview-header.js';
@@ -42,10 +43,7 @@ type KernelPanelParams = {
 
 function KernelPanelBody({ params }: { readonly params: KernelPanelParams }): React.JSX.Element {
   return (
-    <div
-      data-slot='telemetry-unit-surface'
-      className='h-full overflow-hidden rounded-b-xl border border-border bg-card'
-    >
+    <div data-slot='telemetry-unit-surface' className={cn('h-full', paneviewAttachedBodyClassName)}>
       <GeometryUnitTiming key={actorSessionIdOf(params.cadRef)} cadRef={params.cadRef} query={params.query} />
     </div>
   );

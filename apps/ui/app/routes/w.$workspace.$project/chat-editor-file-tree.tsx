@@ -86,7 +86,7 @@ import { getFileExtension, encodeTextFile } from '#utils/filesystem.utils.js';
 import { downloadBlob, asBuffer } from '@taucad/utils/file';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useRevisionStatus } from '#hooks/use-revision-status.js';
-import { useFileTreeMap } from '#hooks/use-file-tree.js';
+import { useFileTreeSelector } from '#hooks/use-file-tree.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
 import type { KeyCombination } from '#utils/keys.utils.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
@@ -163,6 +163,41 @@ const plainPresentation: RowPresentation = Object.freeze({
   provenance: undefined,
   isSubtreeRoot: true,
 });
+
+const selectTree = (tree: Map<string, FileEntry>): Map<string, FileEntry> => tree;
+
+/** Same provenance facts, whether or not the listing minted a new object for them. */
+const sameProvenance = (previous?: FileProvenance, next?: FileProvenance): boolean =>
+  previous === next ||
+  (previous?.source === next?.source &&
+    previous?.versioned === next?.versioned &&
+    previous?.agentAccess === next?.agentAccess &&
+    previous?.identity === next?.identity &&
+    previous?.overrides === next?.overrides);
+
+/**
+ * Whether two tree snapshots draw the same rows.
+ *
+ * A row shows its path, name, kind and provenance, never size or mtime, so a
+ * content write (a parameter commit, an agent edit) leaves the tree as it was.
+ */
+function sameTreeRows(previous: ReadonlyMap<string, FileEntry>, next: ReadonlyMap<string, FileEntry>): boolean {
+  if (previous.size !== next.size) {
+    return false;
+  }
+  for (const [path, entry] of next) {
+    const before = previous.get(path);
+    if (
+      before !== entry &&
+      (before?.name !== entry.name ||
+        before.type !== entry.type ||
+        !sameProvenance(before.provenance, entry.provenance))
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
 
 /** One pass over the tree snapshot: label every row, then find each non-project subtree's root. */
 function buildRowPresentation(fileTreeMap: ReadonlyMap<string, FileEntry>): Map<string, RowPresentation> {
@@ -365,10 +400,6 @@ export const ChatEditorFileTree = memo(function ({
     runtimeFileSystem,
   } = fileManager;
   const projectId = useSelector(projectRef, (state) => state.context.project?.id);
-  /* The open pull's first window, read where it lives (W13 P34): the tree says
-   * `Checking…` rather than `No files available` while a second device's pull
-   * is still inside its own bound. */
-  const checkingRemote = useRevisionStatus()?.sync.state === 'checking';
   const openFiles = useSelector(editorRef, (state) => state.context.openFiles);
   const activeFilePath = useSelector(editorRef, (state) => {
     const id = state.context.activePaneId;
@@ -419,7 +450,9 @@ export const ChatEditorFileTree = memo(function ({
 
   const { treeService } = fileManager;
 
-  const fileTreeMap = useFileTreeMap();
+  /* Every row re-renders with this component, so it holds the snapshot it last drew until a row
+   * would change: sizes and mtimes in it may be stale, and nothing below reads them. */
+  const fileTreeMap = useFileTreeSelector(selectTree, sameTreeRows);
 
   /**
    * One provenance answer per row, and the only input to every label and every
@@ -2023,21 +2056,7 @@ export const ChatEditorFileTree = memo(function ({
             </div>
           ) : (
             <div className='min-h-0 flex-1 p-2'>
-              {/*
-                The open pull's first window (D28, S41, W13 P34).
-                
-                A second device opens a project whose files are still on the
-                remote, and "No files available" would be wrong rather than
-                merely early. The scheduler's facet is the one signal: while it
-                reads `checking` the pull is inside its 3 s window, and the
-                moment it answers — or that window elapses — this says what the
-                device actually has. No second copy of the exits lives here.
-              */}
-              <PanelEmptyState
-                icon={FolderOpen}
-                title={checkingRemote ? 'Checking…' : 'No files available'}
-                className='rounded-xl border bg-card'
-              />
+              <FileTreeEmptyState />
             </div>
           )}
         </FloatingPanelContentBody>
@@ -2045,6 +2064,28 @@ export const ChatEditorFileTree = memo(function ({
     </>
   );
 });
+
+/**
+ * The open pull's first window (D28, S41, W13 P34).
+ *
+ * A second device opens a project whose files are still on the remote, and
+ * "No files available" would be wrong rather than merely early. The
+ * scheduler's facet is the one signal: while it reads `checking` the pull is
+ * inside its 3 s window, and the moment it answers — or that window elapses —
+ * this says what the device actually has. No second copy of the exits lives
+ * here. The revision status is read here rather than by the tree, whose rows
+ * would otherwise all re-render on every revision the project mints.
+ */
+function FileTreeEmptyState(): React.JSX.Element {
+  const checkingRemote = useRevisionStatus()?.sync.state === 'checking';
+  return (
+    <PanelEmptyState
+      icon={FolderOpen}
+      title={checkingRemote ? 'Checking…' : 'No files available'}
+      className='rounded-xl border bg-card'
+    />
+  );
+}
 
 type TreeItemProps = {
   readonly item: ItemInstance<TreeItemData>;

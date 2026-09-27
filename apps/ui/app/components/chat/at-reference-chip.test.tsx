@@ -159,15 +159,27 @@ describe('AtReferenceChip', () => {
     expect(screen.getByText('highlighted text')).toBeInTheDocument();
   });
 
-  it('should render skill chip when data-slash-command is set', () => {
+  it('should render a skill chip for a token the chat knows', () => {
     render(
-      <AtReferenceProvider treeService={createMockTreeService()} chats={[]}>
-        <AtReferenceChip data-slash-command='create-policy' />
+      <AtReferenceProvider treeService={createMockTreeService()} chats={[]} knownTokens={new Set(['$imagegen'])}>
+        <AtReferenceChip data-invocation='$imagegen' />
       </AtReferenceProvider>,
     );
 
-    expect(screen.getByText('/create-policy')).toBeInTheDocument();
+    /* A chip carries its type icon beside the label; plain text has none. */
+    expect(screen.getByText('$imagegen').parentElement?.querySelector('svg')).toBeInTheDocument();
     expect(screen.queryByTestId('file-link')).not.toBeInTheDocument();
+  });
+
+  it('should render an unknown token as plain text', () => {
+    const { container } = render(
+      <AtReferenceProvider treeService={createMockTreeService()} chats={[]} knownTokens={new Set(['/create-policy'])}>
+        <AtReferenceChip data-invocation='$5' />
+      </AtReferenceProvider>,
+    );
+
+    expect(container.querySelector('svg')).not.toBeInTheDocument();
+    expect(container).toHaveTextContent('$5');
   });
 
   it('should render fallback mark when neither data attribute is present', () => {

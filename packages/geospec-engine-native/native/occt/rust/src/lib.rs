@@ -26,6 +26,7 @@ pub use geospec_engine_native_core::backend::brep::{
     MAX_CIRCULAR_BORE_OWNED_BYTES, MAX_EDGE_TREATMENT_BOUNDARY_USES,
     MAX_EDGE_TREATMENT_OWNED_BYTES, MAX_EDGE_TREATMENT_RESIDUALS, MAX_EDGE_TREATMENT_ROWS,
 };
+use geospec_engine_native_core::backend::brep::{ClosureEdgeSample, ClosureFacts, ClosureGroup};
 use geospec_engine_native_core::backend::pmi::{PmiFaceAssociation, PmiField, PmiFieldStatus};
 use geospec_engine_native_core::backend::{BackendError, BackendErrorKind, TriangleMesh};
 use std::{cell::OnceCell, ffi::c_char, ptr::NonNull, rc::Rc};
@@ -99,6 +100,7 @@ pub struct Document {
     parallel_grant_width: Option<u32>,
     whole_faces: OnceCell<Rc<[LocatedFace]>>,
     validity: OnceCell<Rc<ValidityFacts>>,
+    closure: OnceCell<Rc<ClosureFacts>>,
     _single_threaded: std::marker::PhantomData<*mut ()>,
 }
 
@@ -119,6 +121,7 @@ impl Document {
             parallel_grant_width: None,
             whole_faces: OnceCell::new(),
             validity: OnceCell::new(),
+            closure: OnceCell::new(),
             _single_threaded: std::marker::PhantomData,
         })
     }
@@ -844,6 +847,15 @@ impl BrepSubject for Document {
         });
         let _ = self.validity.set(Rc::clone(&validity));
         Ok(validity)
+    }
+
+    fn closure(&self) -> Result<Rc<ClosureFacts>, BackendError> {
+        if let Some(closure) = self.closure.get() {
+            return Ok(Rc::clone(closure));
+        }
+        let closure = Rc::new(unsafe { closure(self.raw.as_ptr())? });
+        let _ = self.closure.set(Rc::clone(&closure));
+        Ok(closure)
     }
 
     fn classify_face_points(
@@ -2084,11 +2096,64 @@ unsafe fn validity_with_control(
             solid_count: Some(value.solid_count),
             invalid_solid_count: Some(value.invalid_solid_count),
             open_edge_count: Some(value.open_edge_count),
+            nonmanifold_edge_count: Some(value.nonmanifold_edge_count),
             closed_wires: Some(value.closed_wires != 0),
             reason: (!reason.is_empty()).then_some(reason),
         },
         used_parallel != 0,
     ))
+}
+
+unsafe fn closure(raw: *const ffi::Document) -> Result<ClosureFacts, BackendError> {
+    let mut value = ffi::ClosureFacts::default();
+    let mut error = ErrorBuffer::new();
+    check(
+        ffi::geospec_occt_validity_closure(raw, &mut value, error.raw()),
+        &error,
+    )?;
+    let capacity = ffi::geospec_occt_occurrence_count(raw);
+    let mut failing = Vec::with_capacity(value.failing_group_count);
+    for index in 0..value.failing_group_count {
+        let mut group = ffi::ClosureGroup::default();
+        let mut occurrences = vec![0_u32; capacity];
+        check(
+            ffi::geospec_occt_validity_closure_group(
+                raw,
+                index,
+                &mut group,
+                occurrences.as_mut_ptr(),
+                capacity,
+                error.raw(),
+            ),
+            &error,
+        )?;
+        if group.sample_count > 4 || group.occurrence_count > capacity {
+            return Err(backend_error("Invalid OCCT closure group transfer."));
+        }
+        occurrences.truncate(group.occurrence_count);
+        failing.push(ClosureGroup {
+            free_faces: group.free_faces != 0,
+            open_edges: group.open_edge_count,
+            nonmanifold_edges: group.nonmanifold_edge_count,
+            occurrences,
+            samples: group.samples[..group.sample_count as usize]
+                .iter()
+                .map(|sample| ClosureEdgeSample {
+                    face_uses: sample.face_uses,
+                    start: sample.start,
+                    end: sample.end,
+                    center: sample.center,
+                })
+                .collect(),
+        });
+    }
+    Ok(ClosureFacts {
+        shells: value.shell_count,
+        free_faces: value.free_face_count,
+        open_edges: value.open_edge_count,
+        nonmanifold_edges: value.nonmanifold_edge_count,
+        failing,
+    })
 }
 
 unsafe fn classify_face_points(
@@ -3573,6 +3638,37 @@ mod ffi {
         pub invalid_solid_count: u32,
         pub open_edge_count: u32,
         pub closed_wires: i32,
+        pub nonmanifold_edge_count: u32,
+    }
+
+    #[derive(Clone, Copy, Default)]
+    #[repr(C)]
+    pub struct ClosureFacts {
+        pub shell_count: u32,
+        pub free_face_count: u32,
+        pub open_edge_count: u32,
+        pub nonmanifold_edge_count: u32,
+        pub failing_group_count: usize,
+    }
+
+    #[derive(Clone, Copy, Default)]
+    #[repr(C)]
+    pub struct ClosureEdgeSample {
+        pub face_uses: u32,
+        pub start: [f64; 3],
+        pub end: [f64; 3],
+        pub center: [f64; 3],
+    }
+
+    #[derive(Clone, Copy, Default)]
+    #[repr(C)]
+    pub struct ClosureGroup {
+        pub free_faces: i32,
+        pub open_edge_count: u32,
+        pub nonmanifold_edge_count: u32,
+        pub sample_count: u32,
+        pub samples: [ClosureEdgeSample; 4],
+        pub occurrence_count: usize,
     }
 
     #[derive(Clone, Copy, Default)]
@@ -4091,6 +4187,19 @@ mod ffi {
             used_parallel: *mut i32,
             facts: *mut ValidityFacts,
             reason: *mut StringBuffer,
+            error: *mut StringBuffer,
+        ) -> i32;
+        pub fn geospec_occt_validity_closure(
+            document: *const Document,
+            closure: *mut ClosureFacts,
+            error: *mut StringBuffer,
+        ) -> i32;
+        pub fn geospec_occt_validity_closure_group(
+            document: *const Document,
+            index: usize,
+            group: *mut ClosureGroup,
+            occurrences: *mut u32,
+            occurrence_capacity: usize,
             error: *mut StringBuffer,
         ) -> i32;
         pub fn geospec_occt_cylinder_axial_extent(

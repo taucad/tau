@@ -13,8 +13,14 @@
  * filesystem at all, because an unfenced provider does not answer
  * `provenance`.
  *
- * The imports are type-only, so this module stays browser-safe and the registry
- * entry point does not drag a filesystem backend into a bundle.
+ * One content rule lives here because every agent write funnels through it:
+ * `tau.json` must stay a valid manifest with its identity. A broken manifest
+ * cost the project its reachability before any reader could object, so the
+ * model gets the defects as a tool error and retries instead (manifest
+ * recovery blueprint R8).
+ *
+ * The filesystem imports are type-only, so this module stays browser-safe and
+ * the registry entry point does not drag a filesystem backend into a bundle.
  *
  * @module
  */
@@ -23,11 +29,19 @@ import type { ResourceQueue } from '@taucad/filesystem';
 import type { ComposedView } from '@taucad/filesystem/composed-view';
 import { applyClientTextMutation, createExactReplacementPlan } from '@taucad/chat/rpc';
 import type { RpcDirectoryEntry, RpcFileStat, RpcFileSystem } from '@taucad/chat/rpc';
+import { rpcClientErrorCode } from '@taucad/chat/schemas/rpc';
+import { checkProjectManifestReplacement } from '@taucad/types';
 import { getErrno } from '@taucad/utils/error';
 import { assertRootedPath } from '@taucad/utils/path';
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder('utf-8', { fatal: true });
+
+/** The project manifest: the one path whose content an agent may edit but never break. */
+const manifestPath = 'tau.json';
+
+const manifestRefusal = (message: string): Error =>
+  Object.assign(new Error(message), { code: rpcClientErrorCode.validationError });
 
 const abortError = (signal: AbortSignal): Error =>
   signal.reason instanceof Error ? signal.reason : new DOMException('The operation was aborted.', 'AbortError');
@@ -74,6 +88,30 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
   const { mutations, provider, signal } = options;
   const bytes = async (path: string): Promise<Uint8Array<ArrayBuffer>> =>
     new Uint8Array(await provider.readFile(assertRootedPath(path)));
+  /** Refuse bytes that would leave `tau.json` invalid or re-identify the project. */
+  const assertManifestReplacement = async (
+    path: string,
+    next: Uint8Array<ArrayBuffer>,
+    current?: Uint8Array<ArrayBuffer>,
+  ): Promise<void> => {
+    if (assertRootedPath(path) !== manifestPath) {
+      return;
+    }
+    let existing = current;
+    if (existing === undefined) {
+      try {
+        existing = await bytes(path);
+      } catch (error) {
+        if (getErrno(error) !== 'ENOENT') {
+          throw error;
+        }
+      }
+    }
+    const refusal = checkProjectManifestReplacement(next, existing);
+    if (refusal !== undefined) {
+      throw manifestRefusal(refusal);
+    }
+  };
   const stat = async (path: string): Promise<RpcFileStat> => {
     const target = assertRootedPath(path);
     const value = await provider.stat(target);
@@ -114,6 +152,7 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
       if (!unchanged) {
         return { status: 'conflict', currentBytes } as const;
       }
+      await assertManifestReplacement(path, replacement, currentBytes);
       assertNotAborted(signal);
       await provider.writeFile(path, new Uint8Array(replacement));
       return { status: 'committed', committedBytes: await bytes(path) } as const;
@@ -150,19 +189,26 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
     },
     async writeFile(path, content) {
       await mutations.queueFor(path, async () => {
+        const next = textEncoder.encode(content);
+        await assertManifestReplacement(path, next);
         assertNotAborted(signal);
-        await provider.writeFile(assertRootedPath(path), textEncoder.encode(content));
+        await provider.writeFile(assertRootedPath(path), next);
       });
     },
     async writeBinaryFile(path, data) {
       await mutations.queueFor(path, async () => {
+        const next = new Uint8Array(data);
+        await assertManifestReplacement(path, next);
         assertNotAborted(signal);
-        await provider.writeFile(assertRootedPath(path), new Uint8Array(data));
+        await provider.writeFile(assertRootedPath(path), next);
       });
     },
     async deleteFile(path) {
       await mutations.queueFor(path, async () => {
         const target = assertRootedPath(path);
+        if (target === manifestPath) {
+          throw manifestRefusal('tau.json is the project manifest and cannot be deleted; edit it instead.');
+        }
         const value = await provider.stat(target);
         assertNotAborted(signal);
         // oxlint-disable-next-line capitalized-comments -- Ponytail debt markers intentionally use the lowercase `ponytail:` tag.
@@ -189,8 +235,10 @@ export const createProviderRpcFileSystem = (options: ProviderRpcFileSystemOption
             throw error;
           }
         }
+        const next = textEncoder.encode(existing + content);
+        await assertManifestReplacement(path, next);
         assertNotAborted(signal);
-        await provider.writeFile(assertRootedPath(path), textEncoder.encode(existing + content));
+        await provider.writeFile(assertRootedPath(path), next);
       });
     },
     // oxlint-disable-next-line max-params -- RpcFileSystem owns this four-argument compatibility signature.

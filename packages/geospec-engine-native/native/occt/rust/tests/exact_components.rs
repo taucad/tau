@@ -286,3 +286,62 @@ fn leaf_bodies_are_solids_with_their_exact_occurrence_boxes() {
         .component_bodies(&[u32::MAX], &mut |_| true)
         .is_err());
 }
+
+/// The two-cube assembly with cubeB's solid removed from its representation
+/// (W2-BOUNDS' all-empty edit, on cubeB only): leaf cubeB owns no face.
+fn one_faceless_leaf() -> Vec<u8> {
+    let source = String::from_utf8(
+        std::fs::read(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/two-cube-assembly.step"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let from = "#2010=ADVANCED_BREP_SHAPE_REPRESENTATION('cubeB',(#211,#2513),#400);";
+    assert_eq!(source.matches(from).count(), 1);
+    source
+        .replace(from, "#2010=SHAPE_REPRESENTATION('cubeB',(#2513),#400);")
+        .into_bytes()
+}
+
+#[test]
+fn the_leaf_partition_keeps_the_charged_narrow_phase() {
+    // C2 x M2: components run on the partition's leaves that own a face
+    // (ruling 32). A faceless leaf adds no body and no charge, so the setup
+    // and pair charges are those of every listed leaf before C2.
+    let source = one_faceless_leaf();
+    let document = Document::from_step(&source).unwrap();
+    // The engine's structure transfer: the faceless leaf has no finite bounds.
+    let occurrences = document.source_occurrence_structure().unwrap();
+    let leaves: Vec<u32> = (0..occurrences.len() as u32)
+        .filter(|index| occurrences.iter().all(|value| value.parent != Some(*index)))
+        .collect();
+    let faced: Vec<u32> = leaves
+        .iter()
+        .copied()
+        .filter(|&index| occurrences[index as usize].face_count > 0)
+        .collect();
+    assert_eq!((leaves.len(), faced.len()), (2, 1));
+    let measured = |list: &[u32]| {
+        let mut charges = Vec::new();
+        let bodies = document
+            .component_bodies(list, &mut |units| {
+                charges.push(units);
+                true
+            })
+            .unwrap()
+            .unwrap();
+        (bodies.bodies().to_vec(), charges)
+    };
+    assert_eq!(measured(&leaves), measured(&faced));
+    assert_eq!(measured(&faced).1, [6]);
+    // Through the engine: one component, charged the BRep gate and the six
+    // face boxes; one unit refuses at the face boxes, naming no pair.
+    let (result, charged) =
+        charged_components(Box::new(OcctConnector), &source, 1, 8_000_000, false);
+    assert_eq!(result["status"], "passed", "{result}");
+    assert_eq!(charged, 1 + 6);
+    let refused = components(Box::new(OcctConnector), &source, 1, 1, false);
+    assert_eq!(refused["diagnostics"][0]["code"], "MATCHER_TIMEOUT");
+    assert!(refused["diagnostics"][0]["details"].get("pair").is_none());
+}

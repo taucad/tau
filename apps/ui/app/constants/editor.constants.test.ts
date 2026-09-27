@@ -362,10 +362,21 @@ describe('section view settings', () => {
   });
 
   const cut = { kind: 'plane', plane: 'xy', offset: 0, isFlipped: false } as const;
+  const revolution = { kind: 'revolution', axis: 'z', origin: [0, 0, 0], start: 359.5, sweep: 355 } as const;
+
+  it('should keep a revolution at the edges of its ranges', () => {
+    const sectionView = { active: true, cuts: [revolution, { ...revolution, start: 0, sweep: 5 }] };
+
+    expect(parseGraphicsViewSettings({ ...defaultGraphicsSettings, sectionView }).sectionView).toEqual(sectionView);
+  });
 
   it.each([
     { invalid: 'more cuts than a section holds', cuts: [cut, cut, cut, cut, cut] },
     { invalid: 'a null cut', cuts: [cut, null] },
+    { invalid: 'a sweep above the editor range', cuts: [{ ...revolution, sweep: 400 }] },
+    { invalid: 'a sweep below the editor range', cuts: [{ ...revolution, sweep: 0 }] },
+    { invalid: 'a start past a full turn', cuts: [{ ...revolution, start: 720 }] },
+    { invalid: 'a negative start', cuts: [{ ...revolution, start: -1 }] },
   ])('should drop only the section view from a record with $invalid', ({ cuts }) => {
     const cameraView = { target: [1, 2, 3], direction: [1, 0, 0], up: [0, 0, 1], verticalSpan: 12, perspectiveZoom: 1 };
     const pinnedMeasurements = [

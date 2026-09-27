@@ -1,7 +1,13 @@
 import { z } from 'zod';
 import { createCameraView } from '@taucad/camera';
 import type { CameraView } from '@taucad/camera';
-import { maxSectionCuts, sectionAxisIndices, sectionPlaneAxes } from '#components/geometry/graphics/section-cuts.js';
+import {
+  maxSectionCuts,
+  maxSectionSweep,
+  minSectionSweep,
+  sectionAxisIndices,
+  sectionPlaneAxes,
+} from '#components/geometry/graphics/section-cuts.js';
 import type { SectionCutValues, SectionVector } from '#components/geometry/graphics/section-cuts.js';
 
 // ============================================================================
@@ -202,8 +208,10 @@ const sectionCutSchema = z.discriminatedUnion('kind', [
     kind: z.literal('revolution'),
     axis: z.enum(['x', 'y', 'z']),
     origin: vector3Schema,
-    start: z.number(),
-    sweep: z.number(),
+    // The ranges the machine keeps: a start wrapped into [0, 360), which may be fractional after a drag, and the
+    // editor's sweep. Anything else drops the section view, as any other bad cut does.
+    start: z.number().min(0).lt(360),
+    sweep: z.number().min(minSectionSweep).max(maxSectionSweep),
   }),
 ]);
 

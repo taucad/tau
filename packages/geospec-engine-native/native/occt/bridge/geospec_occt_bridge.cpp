@@ -1884,43 +1884,55 @@ bool edge_path_surface(const Adaptor3d_Surface& surface) {
 }
 
 // V2 under the grant (ruling 24): the AddOptimal box of every located face of
-// `shape` not yet in the memo, computed in OSD_Parallel::For when at least 16
-// of them are off the edge path (O3-02: planar documents are slower in
-// parallel). Each box is that face's own AddOptimal and memo_bounds keeps the
-// serial fold, so the bits equal the serial path. ponytail: a pure prefill; a
-// face whose box throws, or any failure here, is left to the serial fold,
-// which then fails exactly as it would have without a grant.
-void prefill_face_boxes(const geospec_occt_document& document,
-                        const TopoDS_Shape& shape) {
+// the document not yet in the memo, computed in OSD_Parallel::For when at least
+// 16 of them are off the edge path (O3-02: planar documents are slower in
+// parallel). `document.faces` holds the shape's located faces once each, in
+// explorer order. Each face TShape is classified once (its surface type does
+// not depend on the placement), and nothing is listed unless the pass can run,
+// so a granted call costs no more than the serial fold (O3-02 acceptance (3)).
+// Each box is that face's own AddOptimal and memo_bounds keeps the serial
+// fold, so the bits equal the serial path. ponytail: a pure prefill; a face
+// whose box throws, or any failure here, is left to the serial fold, which
+// then fails exactly as it would have without a grant.
+void prefill_face_boxes(const geospec_occt_document& document) {
   try {
-    std::vector<TopoDS_Shape> pending;
-    NCollection_Map<TopoDS_Shape, TopTools_ShapeMapHasher> listed;
-    size_t off_edge_path = 0;
-    for (TopExp_Explorer face(shape, TopAbs_FACE); face.More(); face.Next()) {
-      if (document.face_boxes.IsBound(face.Current()) || !listed.Add(face.Current()))
-        continue;
-      pending.push_back(face.Current());
-      TopLoc_Location location;
-      const TopoDS_Face& value = TopoDS::Face(face.Current());
-      if (!BRep_Tool::Surface(value, location).IsNull() &&
-          !edge_path_surface(BRepAdaptor_Surface(value, false))) {
-        ++off_edge_path;
+    std::map<const TopoDS_TShape*, bool> classified;
+    const auto off_edge_path = [&](const TopoDS_Face& face) {
+      const auto [slot, added] = classified.try_emplace(face.TShape().get(), false);
+      if (added) {
+        TopLoc_Location location;
+        slot->second = !BRep_Tool::Surface(face, location).IsNull() &&
+                       !edge_path_surface(BRepAdaptor_Surface(face, false));
       }
+      return slot->second;
+    };
+    // An upper bound first: every face off the edge path, memoized or not.
+    size_t off_path = 0;
+    for (const FaceFacts& face : document.faces) {
+      if (off_edge_path(face.shape) && ++off_path == 16) break;
     }
     // ponytail: O3-02's fixed gate; tune it if a corpus measures slower above it.
-    if (off_edge_path < 16) return;
+    if (off_path < 16) return;
+    std::vector<const TopoDS_Face*> pending;
+    off_path = 0;
+    for (const FaceFacts& face : document.faces) {
+      if (document.face_boxes.IsBound(face.shape)) continue;
+      pending.push_back(&face.shape);
+      if (off_edge_path(face.shape)) ++off_path;
+    }
+    if (off_path < 16) return;
     std::vector<Bnd_Box> boxes(pending.size());
     std::vector<char> measured(pending.size(), 0);
     OSD_Parallel::For(0, static_cast<int>(pending.size()), [&](int index) {
       const size_t face = static_cast<size_t>(index);
       try {
-        BRepBndLib::AddOptimal(pending[face], boxes[face], false, false);
+        BRepBndLib::AddOptimal(*pending[face], boxes[face], false, false);
         measured[face] = 1;
       } catch (...) {
       }
     });
     for (size_t face = 0; face < pending.size(); ++face) {
-      if (measured[face] != 0) document.face_boxes.Bind(pending[face], boxes[face]);
+      if (measured[face] != 0) document.face_boxes.Bind(*pending[face], boxes[face]);
     }
   } catch (...) {
   }
@@ -6416,7 +6428,7 @@ int geospec_occt_report_prepare_dedicated(
       }
       if ((facets & GEOSPEC_OCCT_REPORT_BOUNDS) != 0 && *used_parallel != 0 &&
           (document->source_shape_parts & GEOSPEC_OCCT_REPORT_BOUNDS) == 0) {
-        prefill_face_boxes(*document, document->shape);
+        prefill_face_boxes(*document);
       }
     }
     if ((facets & GEOSPEC_OCCT_REPORT_MESH) != 0) {

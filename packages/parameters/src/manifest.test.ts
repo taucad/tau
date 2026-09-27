@@ -1426,27 +1426,27 @@ describe('2020-12 parameter schema view', () => {
   });
 });
 
+const dataCarrier = (properties: Readonly<Record<string, unknown>>) => ({
+  $schema: 'https://json-structure.org/meta/extended/v0/#',
+  $id: 'urn:taucad:test:data-values',
+  $uses: ['JSONSchemaUnits'],
+  name: 'DataValues',
+  type: 'object',
+  properties,
+});
+
 describe('data-valued keywords in schema views', () => {
   // Every key here is also a carrier or view keyword; inside a data value each one is an ordinary property name.
   const token = { unit: 'mm', value: 3, ucumUnit: 'mm', symbol: 'd', symbols: { default: 'd' }, type: 'int64' };
   const other = { unit: 'in', value: 1, name: 'n', $uses: ['JSONSchemaUnits'], properties: { unit: 'in' } };
   const valueSchema = { type: 'object', properties: { unit: { type: 'string' }, value: { type: 'double' } } };
-  const carrier = (properties: Readonly<Record<string, unknown>>) => ({
-    $schema: 'https://json-structure.org/meta/extended/v0/#',
-    $id: 'urn:taucad:test:data-values',
-    $uses: ['JSONSchemaUnits'],
-    name: 'DataValues',
-    type: 'object',
-    properties,
-  });
 
   it.each(['draft-07', '2020-12'] as const)('should copy data-valued keywords verbatim into the %s view', (dialect) => {
     const size = { ...valueSchema, default: token, const: token, enum: [token, other], examples: [token] };
     const view = projectParameterSchema(
-      { schema: carrier({ size: structuredClone(size) }), bindings: {} },
+      { schema: dataCarrier({ size: structuredClone(size) }), bindings: {} },
       { dialect },
     );
-
     expect(view).toMatchObject({
       status: 'usable',
       diagnostics: [],
@@ -1456,7 +1456,7 @@ describe('data-valued keywords in schema views', () => {
 
   it('should embed an object-valued default unchanged in the manifest legacy projection', async () => {
     const length = { unit: 'mm', value: 3 };
-    const schema = carrier({ length: { ...valueSchema, default: structuredClone(length) } });
+    const schema = dataCarrier({ length: { ...valueSchema, default: structuredClone(length) } });
     const manifest = await compile({ schema, defaults: { length }, bindings: {} });
 
     expect(manifest.legacyProjection).toMatchObject({
@@ -1464,5 +1464,37 @@ describe('data-valued keywords in schema views', () => {
       diagnostics: [],
       schema: { properties: { length: { default: length } } },
     });
+  });
+});
+
+describe('data-valued keywords in value validation', () => {
+  // Each key is also a carrier keyword the validator schema rewrites; inside an enum member it is a property name.
+  const member = (tag: string) => ({ required: [tag], $uses: ['JSONSchemaUnits'], type: { $ref: 'urn:x:absent#/x' } });
+  const text = { type: 'string' };
+  const strings = { type: 'array', items: text };
+  const size = { type: 'object', properties: { width: { type: 'double' } }, required: ['width'] };
+
+  it('should admit object enum members as data and name-map entries as partial schemas', async () => {
+    const admitted = await compile({
+      schema: dataCarrier({
+        choice: {
+          type: 'object',
+          properties: { required: strings, $uses: strings, type: { type: 'object', properties: { $ref: text } } },
+          enum: [member('a')],
+        },
+        // Name-map entries named like data keywords are schemas, so partial values still apply inside them.
+        default: size,
+        required: size,
+      }),
+      defaults: { choice: member('a') },
+      bindings: {},
+    });
+
+    expect(() => {
+      admitParameterValues(admitted, { choice: member('a'), default: {}, required: {} });
+    }).not.toThrow();
+    expect(() => {
+      admitParameterValues(admitted, { choice: member('b') });
+    }).toThrow(ParameterAdmissionError);
   });
 });

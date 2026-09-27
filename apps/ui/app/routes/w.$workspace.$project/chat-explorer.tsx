@@ -23,6 +23,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/t
 import {
   ModelComponentActionContextContent,
   ModelComponentActionDropdown,
+  MaterialSwatch,
 } from '#components/geometry/cad/model-component-action-menu.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
 import { useProject } from '#hooks/use-project.js';
@@ -765,12 +766,16 @@ export function ComponentRow({
             aria-pressed={isSelected}
             onClick={toggleSelection}
           >
-            <Box
-              aria-hidden='true'
-              data-testid='component-color-icon'
-              className='size-3.5 shrink-0'
-              style={node.appearance?.color ? { fill: node.appearance.color } : undefined}
-            />
+            {node.appearance?.materials?.length ? (
+              <MaterialSwatch materials={node.appearance.materials} />
+            ) : (
+              <Box
+                aria-hidden='true'
+                data-testid='component-color-icon'
+                className='size-3.5 shrink-0'
+                style={node.appearance?.color ? { fill: node.appearance.color } : undefined}
+              />
+            )}
             <span className='truncate'>
               <HighlightText text={node.name} searchTerm={query} />
             </span>

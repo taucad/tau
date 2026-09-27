@@ -215,7 +215,6 @@ export class BillingAccountClosureService {
       );
     let pending = false;
     for (const obligation of obligations) {
-      if (obligation.customerBindingId === null) throw new Error('owned_subscription_missing_customer_binding');
       const creation = await this.databaseService.database.query.billingProviderLeg.findFirst({
         where: and(
           eq(billingProviderLeg.subscriptionId, obligation.subscriptionId),
@@ -333,7 +332,6 @@ export class BillingAccountClosureService {
         ),
       );
     for (const item of subscriptions) {
-      if (item.bindingId === null) throw new Error('owned_subscription_missing_customer_binding');
       const legId = randomUUID();
       const request = { version: 'subscription-cancel-v1', subscriptionId: item.id, closureId };
       await tx.insert(billingProviderLeg).values({

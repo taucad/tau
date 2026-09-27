@@ -264,6 +264,18 @@ describe('runner-independent GeoSpec assertion client', () => {
     expect(plan['subjects']).toStrictEqual([{ slot: 'subject', contentHash: hash }]);
   });
 
+  it('names the evidence profile on the plan only when a client selects one', async () => {
+    const engine = new RecordingEngine();
+
+    await createGeoSpecAssertionClient({ engine, workUnitLimit: 1 }).expectGeo({ subjectHash: hash }).toBeWatertight();
+    expect(record(record(engine.canonicalInput!)['plan']!)).not.toHaveProperty('evidenceProfile');
+
+    await createGeoSpecAssertionClient({ engine, evidenceProfile: 'bounded', workUnitLimit: 1 })
+      .expectGeo({ subjectHash: hash })
+      .toBeWatertight();
+    expect(record(record(engine.canonicalInput!)['plan']!)['evidenceProfile']).toBe('bounded');
+  });
+
   it('reuses the engine-owned default budget once per engine across clients', async () => {
     const engine = new RecordingEngine(8_000_000);
     const first = createGeoSpecAssertionClient({ engine });

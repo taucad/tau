@@ -1,6 +1,6 @@
 # geospec — Types
 
-274 top-level symbols. Signatures are verbatim typescript.
+275 top-level symbols. Signatures are verbatim typescript.
 
 // Stateful GeoSpec API created by {@link createGeoSpec}
 GeoSpec: {
@@ -2535,6 +2535,8 @@ GeoSpecAssertionClient: {
 GeoSpecAssertionClientOptions: {
     readonly claimId?: (matcher: GeoSpecNativeMatcherName, sequence: number) => string;
     readonly engine: GeoSpecNativeEngine;
+    /** Success-evidence profile of every claim and query; omitted means `complete`. */
+    readonly evidenceProfile?: GeoSpecNativeEvidenceProfile;
     readonly subjectSlot?: string;
     readonly workUnitLimit?: number;
 }
@@ -2702,6 +2704,9 @@ GeoSpecNativeEngine: {
     evaluateClaim(request: Uint8Array<ArrayBuffer>): GeoSpecNativeClaimEvaluation;
     processRequest(request: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer>;
 }
+
+// Success-evidence profile a product selects for its plans (PERF-OUTPUT-01)
+GeoSpecNativeEvidenceProfile: 'bounded' | 'complete'
 
 // Content-addressed subject accepted by a protocol-3 assertion plan
 GeoSpecNativeSubject: {

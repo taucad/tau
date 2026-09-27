@@ -1,13 +1,18 @@
 //! Source-backed scalar, bounds, topology and integrity mesh matchers.
 
 use crate::{
-    analysis::mesh::{
-        Aabb, BoundingBox, ClusterGap, ClusterReport, ConnectedComponents, DegenerateTriangle,
-        DuplicateFace, IrregularEdgeCluster, IrregularEdgeKind, IrregularEdgeSample, MeshAnalysis,
-        MeshQuality, NonFiniteVertex, PrimitiveRecord, Watertight, WatertightPrimitiveBreakdown,
+    analysis::{
+        interference::ComponentIdentity,
+        mesh::{
+            exact::{ask, exact_clusters, ExactError},
+            nearest_cluster_gaps, Aabb, BoundingBox, ClusterGap, ClusterReport,
+            ConnectedComponents, DegenerateTriangle, DuplicateFace, IrregularEdgeCluster,
+            IrregularEdgeKind, IrregularEdgeSample, MeshAnalysis, MeshQuality, NonFiniteVertex,
+            PrimitiveRecord, Watertight, WatertightPrimitiveBreakdown,
+        },
     },
     backend::{
-        brep::{DocumentRows, OccurrenceFacts, SubshapeType},
+        brep::{ComponentBody, DocumentRows, OccurrenceFacts, SubshapeType},
         BackendError, BackendErrorKind,
     },
     codec::Json,
@@ -18,6 +23,7 @@ use crate::{
     subject::{backend_refusal, EvaluationContext, Subject, SubjectFormat},
     ProtocolError,
 };
+use std::{collections::HashMap, rc::Rc};
 
 const AXES: [&str; 3] = ["x", "y", "z"];
 const BOUNDS_FIELDS: [&str; 4] = ["min", "max", "size", "center"];
@@ -411,6 +417,7 @@ pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>)
             _ => {}
         }
     }
+    let bounded = context.bounded_evidence();
     let evaluation = evaluate_family(prepared, context);
     if matches!(prepared, Prepared::BoundingBox { .. })
         && context.subject().format == crate::subject::SubjectFormat::MeshBufferV1
@@ -437,16 +444,25 @@ pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>)
                 &["source", "primitives", "axisFailures", "tolerance"],
             ),
         ),
-        Prepared::ConnectedComponents { .. } => (
-            selected_fields(&mut raw_measured, &["count"]),
-            Json::object([
-                ("toleranceMm", take_field(&mut evidence, "toleranceMm")),
-                ("clusters", take_field(&mut raw_measured, "clusters")),
-                ("gaps", take_field(&mut raw_measured, "gaps")),
-            ]),
-        ),
-        Prepared::Watertight => (
-            selected_fields(
+        Prepared::ConnectedComponents { .. } => {
+            let mut witnesses = vec![
+                (
+                    "toleranceMm".into(),
+                    take_field(&mut evidence, "toleranceMm"),
+                ),
+                ("clusters".into(), take_field(&mut raw_measured, "clusters")),
+            ];
+            // Absent only on a bounded-profile success.
+            if let Some(gaps) = take_optional(&mut raw_measured, "gaps") {
+                witnesses.push(("gaps".into(), gaps));
+            }
+            (
+                selected_fields(&mut raw_measured, &["count"]),
+                Json::Object(witnesses),
+            )
+        }
+        Prepared::Watertight => {
+            let measured = selected_fields(
                 &mut raw_measured,
                 &[
                     "watertight",
@@ -456,20 +472,26 @@ pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>)
                     "totalEdges",
                     "irregularEdgeFraction",
                 ],
-            ),
-            selected_fields(
+            );
+            let mut witnesses = selected_fields(
                 &mut raw_measured,
                 &[
                     "irregularEdgeKindCounts",
                     "irregularEdgeClusters",
                     "perPrimitive",
                 ],
-            ),
-        ),
+            );
+            // PERF-OUTPUT-01: a closed mesh's per-primitive rows are all zero.
+            if bounded && positive_satisfied {
+                take_optional(&mut witnesses, "perPrimitive");
+            }
+            (measured, witnesses)
+        }
         Prepared::MeshIntegrity(_) => {
             let nonfinite = take_field(&mut raw_measured, "nonFiniteVertices");
             let degenerate = take_field(&mut raw_measured, "degenerateTriangles");
-            let duplicate = take_field(&mut raw_measured, "duplicateFaces");
+            // Absent only under the bounded profile without a declared rule.
+            let duplicate = take_optional(&mut raw_measured, "duplicateFaces");
             let count = |value: &Json| match value {
                 Json::Array(values) => Json::Number(values.len() as f64),
                 _ => unreachable!("owned list"),
@@ -481,20 +503,20 @@ pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>)
                 ),
                 ("nonFiniteVertexCount".into(), count(&nonfinite)),
                 ("degenerateTriangleCount".into(), count(&degenerate)),
-                ("duplicateFaceCount".into(), count(&duplicate)),
             ];
+            let mut witnesses = vec![
+                ("failures".into(), take_field(&mut evidence, "failures")),
+                ("nonFiniteVertices".into(), nonfinite),
+                ("degenerateTriangles".into(), degenerate),
+            ];
+            if let Some(duplicate) = duplicate {
+                measured.push(("duplicateFaceCount".into(), count(&duplicate)));
+                witnesses.push(("duplicateFaces".into(), duplicate));
+            }
             if let Some(mut value) = take_optional(&mut evidence, "watertight") {
                 measured.push(("watertight".into(), take_field(&mut value, "watertight")));
             }
-            (
-                Json::Object(measured),
-                Json::object([
-                    ("failures", take_field(&mut evidence, "failures")),
-                    ("nonFiniteVertices", nonfinite),
-                    ("degenerateTriangles", degenerate),
-                    ("duplicateFaces", duplicate),
-                ]),
-            )
+            (Json::Object(measured), Json::Object(witnesses))
         }
         Prepared::SurfaceArea(_) | Prepared::Volume(_) | Prepared::Mass(_) => {
             let mut witnesses = match selected_fields(&mut evidence, &["source", "tolerance"]) {
@@ -807,9 +829,64 @@ fn evaluate_components(
     context: &mut EvaluationContext<'_>,
 ) -> Evaluation {
     let (hash, mut diagnostics) = subject_meta(context);
-    let analysis = match context.connected_components(tolerance_mm) {
-        Ok(value) => value,
-        Err(result) => return result,
+    let bounded = context.bounded_evidence();
+    let brep = context.subject().brep.is_some();
+    let analysis = if !brep && !bounded {
+        match context.connected_components(tolerance_mm) {
+            Ok(value) => value,
+            Err(result) => return result,
+        }
+    } else {
+        let clusters = if brep {
+            step_component_clusters(tolerance_mm, context)
+        } else {
+            context
+                .mesh_analysis()
+                .map(|analysis| analysis.component_clusters(tolerance_mm))
+        };
+        let clusters = match clusters {
+            Ok(value) => value,
+            Err(result) => return result,
+        };
+        if bounded {
+            // PERF-OUTPUT-01: no pairwise gaps on success, nearest ones on failure.
+            let count = clusters.len() as u32;
+            let gaps = if u64::from(count) == expected_count {
+                Vec::new()
+            } else {
+                match nearest_cluster_gaps(&clusters, context.budget()) {
+                    Ok(gaps) => gaps,
+                    Err(error) => {
+                        return Evaluation::budget_exceeded(
+                            Capability::ToHaveConnectedComponents,
+                            error,
+                        )
+                    }
+                }
+            };
+            Rc::new(ConnectedComponents {
+                count,
+                clusters,
+                gaps,
+            })
+        } else {
+            // The complete profile's C(C-1)/2 STEP gaps are refused past the
+            // declared retention bytes before any exists, as the batch floor
+            // refuses mesh gaps; that floor is never below this one.
+            let count = clusters.len() as u64;
+            let pairs = count.saturating_mul(count.saturating_sub(1)) / 2;
+            if pairs.saturating_mul(std::mem::size_of::<ClusterGap>() as u64)
+                > context.subject().retention_limits.max_mesh_bytes
+            {
+                return backend_refusal(BackendError {
+                    kind: BackendErrorKind::Unsupported,
+                    message:
+                        "Connected-component results exceed the declared analysis retention byte limit."
+                            .into(),
+                });
+            }
+            Rc::new(ConnectedComponents::from_clusters(clusters))
+        }
     };
     let satisfied = u64::from(analysis.count) == expected_count;
     if !satisfied {
@@ -839,13 +916,107 @@ fn evaluate_components(
         diagnostics,
         Json::object([
             ("profile", Json::string("mesh-components-v1")),
-            ("source", Json::string("mesh")),
+            ("source", Json::string(if brep { "brep" } else { "mesh" })),
             ("subjectContentHash", Json::string(&hash)),
             ("expected", Json::Number(expected_count as f64)),
             ("toleranceMm", Json::Number(tolerance_mm)),
-            ("measured", connected_json(&analysis)),
+            (
+                "measured",
+                connected_json(&analysis, !bounded || !satisfied),
+            ),
         ]),
     )
+}
+
+/// M2: STEP clusters from the retained BRep's bodies, never a tessellation.
+/// Bodies belong to leaf occurrences (none names another as parent, C2's
+/// rule), labelled through the component partition, or to the whole shape.
+fn step_component_clusters(
+    tolerance_mm: f64,
+    context: &mut EvaluationContext<'_>,
+) -> Result<Vec<ClusterReport>, Evaluation> {
+    let brep = context.brep_gate()?.ok_or_else(|| {
+        backend_refusal(BackendError {
+            kind: BackendErrorKind::Unsupported,
+            message: "Exact connected components require a retained BRep.".into(),
+        })
+    })?;
+    let occurrences = context.source_occurrence_structure()?.unwrap_or_default();
+    let mut parents = vec![false; occurrences.len()];
+    for occurrence in occurrences.iter() {
+        if let Some(parent) = occurrence
+            .parent
+            .and_then(|value| parents.get_mut(value as usize))
+        {
+            *parent = true;
+        }
+    }
+    let leaves: Vec<u32> = (0..occurrences.len() as u32)
+        .filter(|&index| !parents[index as usize])
+        .collect();
+    let identities = crate::analysis::interference::component_labels(context.subject())
+        .map_err(backend_refusal)?;
+    let refusal = |error: ExactError, labels: &[String]| match error {
+        ExactError::Backend(error) => backend_refusal(error),
+        ExactError::Budget { exceeded, pair } => {
+            let mut refusal =
+                Evaluation::budget_exceeded(Capability::ToHaveConnectedComponents, exceeded);
+            // Ruling 28: a narrow-phase refusal names the pair whose charge crossed.
+            if let (Some((left, right)), Evaluation::Refused { diagnostics }) = (pair, &mut refusal)
+            {
+                if let Some(Json::Object(fields)) = &mut diagnostics[0].details {
+                    fields.push((
+                        "pair".into(),
+                        Json::Array(vec![
+                            Json::string(&labels[left]),
+                            Json::string(&labels[right]),
+                        ]),
+                    ));
+                }
+            }
+            refusal
+        }
+    };
+    let bodies = ask(context.budget(), None, |charge| {
+        brep.component_bodies(&leaves, charge)
+    })
+    .map_err(|error| refusal(error, &[]))?;
+    let labels = body_labels(bodies.bodies(), &identities);
+    exact_clusters(bodies.as_ref(), &labels, tolerance_mm, context.budget())
+        .map_err(|error| refusal(error, &labels))
+}
+
+/// A body is named by its component label, or `step` for a whole-shape
+/// body; several bodies of one owner take `#<ordinal>` in body order.
+fn body_labels(bodies: &[ComponentBody], identities: &[ComponentIdentity]) -> Vec<String> {
+    let names: HashMap<u32, &str> = identities
+        .iter()
+        .map(|identity| (identity.id, identity.label.as_str()))
+        .collect();
+    let mut totals: HashMap<Option<u32>, u32> = HashMap::new();
+    for body in bodies {
+        *totals.entry(body.occurrence).or_insert(0) += 1;
+    }
+    let mut ordinals: HashMap<Option<u32>, u32> = HashMap::new();
+    bodies
+        .iter()
+        .map(|body| {
+            let base = match body.occurrence {
+                Some(index) => names.get(&index).map_or_else(
+                    || format!("step-occurrence-{index}"),
+                    |label| (*label).to_owned(),
+                ),
+                None => "step".to_owned(),
+            };
+            if totals[&body.occurrence] < 2 {
+                return base;
+            }
+            let ordinal = ordinals.entry(body.occurrence).or_insert(0);
+            let label = format!("{base}#{ordinal}");
+            *ordinal += 1;
+            label
+        })
+        .collect()
 }
 
 fn evaluate_watertight(context: &mut EvaluationContext<'_>) -> Evaluation {
@@ -888,6 +1059,8 @@ fn evaluate_integrity(
     context: &mut EvaluationContext<'_>,
 ) -> Evaluation {
     let mut diagnostics = context.subject().diagnostics.clone();
+    // PERF-OUTPUT-01: the bounded profile finds duplicate faces only when declared.
+    let duplicates = !context.bounded_evidence() || expected.duplicate_faces.is_some();
     let analysis = match context.mesh_analysis() {
         Ok(value) => value,
         Err(result) => return result,
@@ -948,25 +1121,25 @@ fn evaluate_integrity(
                 failures.join("; ")
             ),
             "Re-tessellate the model (or repair it) until the mesh evidence is clean.",
-            integrity_details(&quality, &failures),
+            integrity_details(&quality, &failures, duplicates),
             None,
         );
     }
     // Only the fields `evaluate` projects: no per-triangle rows, and the
     // watertight verdict without its edge detail.
-    let mut evidence = vec![
+    let mut measured = vec![
         (
-            "measured",
-            Json::object([
-                (
-                    "triangleCount",
-                    Json::Number(f64::from(quality.triangle_count)),
-                ),
-                ("nonFiniteVertices", nonfinite_list(&quality)),
-                ("degenerateTriangles", degenerate_list(&quality)),
-                ("duplicateFaces", duplicate_list(&quality)),
-            ]),
+            "triangleCount".into(),
+            Json::Number(f64::from(quality.triangle_count)),
         ),
+        ("nonFiniteVertices".into(), nonfinite_list(&quality)),
+        ("degenerateTriangles".into(), degenerate_list(&quality)),
+    ];
+    if duplicates {
+        measured.push(("duplicateFaces".into(), duplicate_list(&quality)));
+    }
+    let mut evidence = vec![
+        ("measured", Json::Object(measured)),
         (
             "failures",
             Json::Array(failures.iter().map(|value| Json::string(value)).collect()),
@@ -1885,12 +2058,15 @@ fn primitive_json(value: &PrimitiveRecord) -> Json {
     Json::Object(fields)
 }
 
-fn connected_json(value: &ConnectedComponents) -> Json {
-    Json::object([
-        ("count", Json::Number(f64::from(value.count))),
-        ("clusters", clusters_json(value)),
-        ("gaps", gaps_json(value)),
-    ])
+fn connected_json(value: &ConnectedComponents, gaps: bool) -> Json {
+    let mut fields = vec![
+        ("count".into(), Json::Number(f64::from(value.count))),
+        ("clusters".into(), clusters_json(value)),
+    ];
+    if gaps {
+        fields.push(("gaps".into(), gaps_json(value)));
+    }
+    Json::Object(fields)
 }
 
 fn clusters_json(value: &ConnectedComponents) -> Json {
@@ -2167,20 +2343,19 @@ fn duplicate_json(value: &DuplicateFace) -> Json {
     ])
 }
 
-fn integrity_details(quality: &MeshQuality, failures: &[String]) -> Json {
-    let duplicate_faces = quality.duplicate_faces();
-    Json::object([
-        ("matcher", Json::string("toHaveMeshIntegrity")),
+fn integrity_details(quality: &MeshQuality, failures: &[String], duplicates: bool) -> Json {
+    let mut details = vec![
+        ("matcher".into(), Json::string("toHaveMeshIntegrity")),
         (
-            "failures",
+            "failures".into(),
             Json::Array(failures.iter().map(|value| Json::string(value)).collect()),
         ),
         (
-            "triangleCount",
+            "triangleCount".into(),
             Json::Number(f64::from(quality.triangle_count)),
         ),
         (
-            "nonFiniteVertices",
+            "nonFiniteVertices".into(),
             Json::Array(
                 quality
                     .non_finite_vertices
@@ -2191,7 +2366,7 @@ fn integrity_details(quality: &MeshQuality, failures: &[String]) -> Json {
             ),
         ),
         (
-            "degenerateTriangles",
+            "degenerateTriangles".into(),
             Json::Array(
                 quality
                     .degenerate_triangles
@@ -2201,10 +2376,13 @@ fn integrity_details(quality: &MeshQuality, failures: &[String]) -> Json {
                     .collect(),
             ),
         ),
-        (
-            "duplicateFaces",
+    ];
+    if duplicates {
+        details.push((
+            "duplicateFaces".into(),
             Json::Array(
-                duplicate_faces
+                quality
+                    .duplicate_faces()
                     .iter()
                     .take(4)
                     .map(|face| {
@@ -2219,8 +2397,9 @@ fn integrity_details(quality: &MeshQuality, failures: &[String]) -> Json {
                     })
                     .collect(),
             ),
-        ),
-    ])
+        ));
+    }
+    Json::Object(details)
 }
 
 fn analysis_json(value: &MeshAnalysis) -> Json {
@@ -2360,6 +2539,10 @@ mod preparation_tests {
 #[cfg(test)]
 #[path = "../../tests/matcher_mesh.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "../../tests/matcher_components.rs"]
+mod components_tests;
 
 #[cfg(test)]
 #[path = "../../tests/current_bounds.rs"]

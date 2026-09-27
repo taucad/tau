@@ -7109,12 +7109,6 @@ struct geospec_occt_component_bodies {
     TopoDS_Shape shape;
     std::vector<TopoDS_Face> faces;
     std::vector<geospec_occt_bounds> boxes;
-    // One vertex per vertex-connected set of faces: a set whose faces all lie
-    // beyond the tolerance of another solid's boundary is wholly inside or
-    // wholly outside that solid, so one vertex classifies all of its vertices.
-    std::vector<gp_Pnt> points;
-    // A solid classifier's construction, in work units.
-    uint64_t classifier_units = 0;
     geospec_occt_component_body facts{};
   };
   const geospec_occt_document* document = nullptr;
@@ -7282,6 +7276,9 @@ uint64_t component_pair_units(const ComponentPiece& left,
          (left.edge_poles + right.edge_poles) / 4;
 }
 
+// One vertex per vertex-connected set of faces: a set whose faces all lie
+// beyond the tolerance of another solid's boundary is wholly inside or wholly
+// outside that solid, so one vertex classifies all of its vertices.
 std::vector<gp_Pnt> component_points(const TopoDS_Shape& shape) {
   NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faces;
   TopExp::MapShapes(shape, TopAbs_FACE, faces);
@@ -7390,12 +7387,10 @@ int geospec_occt_component_bodies_new(
                    bounds.max[1], bounds.max[2]);
         body.faces.push_back(TopoDS::Face(face.Current()));
         body.boxes.push_back(bounds);
-        body.classifier_units += component_classifier_units(TopoDS::Face(face.Current()));
       }
       if (body.faces.empty()) continue;
       NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> vertices;
       TopExp::MapShapes(candidate.shape, TopAbs_VERTEX, vertices);
-      body.points = component_points(candidate.shape);
       body.shape = candidate.shape;
       body.facts.occurrence = candidate.occurrence;
       body.facts.solid = candidate.solid ? 1 : 0;
@@ -7557,14 +7552,20 @@ int geospec_occt_component_body_inside(
   }
   return guarded(error, [&]() -> int {
     const auto& solid = bodies->bodies[outer];
-    const auto& points = bodies->bodies[inner].points;
+    // Priced here, not per body at setup, since only nested pairs classify;
+    // the pricing walks faces and vertices whose boxes setup already charged.
+    const std::vector<gp_Pnt> points = component_points(bodies->bodies[inner].shape);
+    uint64_t classifier_units = 0;
+    for (const TopoDS_Face& face : solid.faces) {
+      classifier_units += component_classifier_units(face);
+    }
     // Building the classifier prepares every face; each point's ray may
     // meet any of them.
-    if (charge(context, (1 + points.size()) * solid.classifier_units) != 0) {
+    if (charge(context, (1 + points.size()) * classifier_units) != 0) {
       return GEOSPEC_OCCT_STOPPED;
     }
-    // ponytail: one classifier per call; cache it per outer body if many
-    // nested pairs share one outer solid.
+    // ponytail: one classifier, points and price per call; cache them per
+    // body if many nested pairs share one outer solid.
     BRepClass3d_SolidClassifier classifier(solid.shape);
     *out_state = 0;
     for (const gp_Pnt& point : points) {

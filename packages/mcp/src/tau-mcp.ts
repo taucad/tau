@@ -228,7 +228,8 @@ const screenshotSuccess = (result: z.infer<typeof screenshotMcpOutputSchema>): C
   content: [
     {
       type: 'text',
-      text: `Captured ${String(result.images.length)} CAD ${result.images.length === 1 ? 'view' : 'views'}. Open each local image with your image-viewing tool:\n${result.images.map(({ view, absolutePath }) => `${view}: ${absolutePath}`).join('\n')}`,
+      // The message says what the images leave out of the viewer, so a client that reads only text still learns it.
+      text: `Captured ${String(result.images.length)} CAD ${result.images.length === 1 ? 'view' : 'views'}.${result.message === undefined ? '' : ` ${result.message}`} Open each local image with your image-viewing tool:\n${result.images.map(({ view, absolutePath }) => `${view}: ${absolutePath}`).join('\n')}`,
     },
     ...result.images.map(({ view, absolutePath, mimeType }): CallToolResult['content'][number] => ({
       type: 'resource_link',

@@ -169,4 +169,32 @@ describe('@taucad/mcp', () => {
     expect(result.structuredContent).toEqual({ images: [image] });
     expect(JSON.stringify(result)).not.toContain('AQID');
   });
+
+  it('should say in the text line what the images leave out of the viewer', async () => {
+    const message = 'Section cutaways narrower than 180° are not shown in captures.';
+    const sha256 = 'b'.repeat(64);
+    const image = {
+      view: 'isometric',
+      path: `attachments/${sha256}.webp`,
+      absolutePath: `/tmp/tau-capture/${sha256}.webp`,
+      mimeType: 'image/webp',
+      byteLength: 3,
+      sha256,
+    };
+    const adapter = createTauMcpAdapter({
+      dispatch: async () => ({ success: true, images: [image], message }),
+    });
+
+    const result = await adapter.call({
+      name: toolName.screenshot,
+      arguments: { mode: 'single', targetFile: 'main.ts' },
+      toolCallId: 'tool-omitted',
+    });
+
+    expect(result.content[0]).toEqual({
+      type: 'text',
+      text: `Captured 1 CAD view. ${message} Open each local image with your image-viewing tool:\nisometric: /tmp/tau-capture/${sha256}.webp`,
+    });
+    expect(result.structuredContent).toMatchObject({ message });
+  });
 });

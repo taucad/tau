@@ -1,8 +1,8 @@
 /**
  * Slicing through the person's Bambu Studio command line.
  *
- * Each slice gets a temporary directory holding the flattened presets, the
- * STL, an empty Bambu Studio data directory (so the person's own
+ * Each slice gets a temporary directory holding the flattened presets, one
+ * STL per part, an empty Bambu Studio data directory (so the person's own
  * configuration is never read or written) and the output. The directory is
  * removed afterwards whatever happens.
  *
@@ -24,6 +24,7 @@ import type { BambuStudioSelection, BambuStudioSliceInput, BambuStudioSliceResul
 const sliceTimeout = 5 * 60 * 1000;
 /** Characters of Bambu Studio's log kept for a failure message. */
 const logTail = 2000;
+const hexColor = /^#[\dA-F]{6}$/iu;
 
 type ResultReport = Readonly<{
   return_code?: number;
@@ -146,14 +147,28 @@ const run = async (
 
 let queue: Promise<void> = Promise.resolve();
 
-const sliceNow = async ({
-  install,
-  selection,
-  stl,
-  filamentColor,
-  signal,
-}: BambuStudioSliceInput): Promise<BambuStudioSliceResult> => {
-  signal.throwIfAborted();
+// A single part slices exactly as a one-material model always has. Several parts slice as one
+// assembled object, so they keep their placement: without `--assemble` each is arranged on its own,
+// and without arranging the assembly stays at its model coordinates, where Bambu Studio refuses the
+// X1C's front-left exclusion area. Each part names its filament, and the colour list always has one
+// entry per part: Bambu Studio 02.08.02.61 crashes on an assembly with fewer, and fills an empty entry
+// with its own default.
+const partArguments = (parts: BambuStudioSliceInput['parts']): string[] => {
+  const [first] = parts;
+  if (parts.length === 1) {
+    return first?.color === undefined ? [] : ['--filament-colour', first.color];
+  }
+  return [
+    '--load-filament-ids',
+    parts.map((_, index) => index + 1).join(','),
+    '--assemble',
+    '--filament-colour',
+    parts.map(({ color }) => color ?? '').join(';'),
+  ];
+};
+
+// The selection's plate, after refusing a slice Bambu Studio could not run.
+const checkedPlate = ({ selection, parts }: Pick<BambuStudioSliceInput, 'selection' | 'parts'>) => {
   const plate = bambuPlates.find(({ id }) => id === selection.plate);
   if (plate === undefined || selection.filaments.length === 0) {
     throw new BambuStudioError(
@@ -161,11 +176,39 @@ const sliceNow = async ({
       plate === undefined ? `Bambu Studio has no plate "${selection.plate}".` : 'A slice needs at least one filament.',
     );
   }
-  const resolved = await resolveBambuSelectionPresets(install, selection);
+  if (parts.length === 0) {
+    throw new BambuStudioError('BAMBU_STUDIO_SLICE_FAILED', 'A slice needs at least one part.');
+  }
+  const unreadable = parts.find(({ color }) => color !== undefined && !hexColor.test(color));
+  if (unreadable !== undefined) {
+    throw new BambuStudioError(
+      'BAMBU_STUDIO_SETTINGS_INVALID',
+      `The filament colour "${unreadable.color}" is not #RRGGBB.`,
+    );
+  }
+  return plate;
+};
+
+const sliceNow = async ({
+  install,
+  selection,
+  parts,
+  signal,
+}: BambuStudioSliceInput): Promise<BambuStudioSliceResult> => {
+  signal.throwIfAborted();
+  const plate = checkedPlate({ selection, parts });
+  // ponytail: the engine owns the one-preset-per-part default because only it sees both the parts and
+  // the presets; a caller that maps each part to a tray passes the presets in part order.
+  const filamentNames =
+    parts.length === 1
+      ? selection.filaments
+      : parts.map((_, index) => selection.filaments[index] ?? selection.filaments[0]!);
+  const resolved = await resolveBambuSelectionPresets(install, { ...selection, filaments: filamentNames });
   const { process, filaments } = applySettings(resolved.process, resolved.filaments, selection.settings);
   const directory = await mkdtemp(join(tmpdir(), 'tau-bambu-studio-'));
   try {
     const filamentFiles = filaments.map((_, index) => `filament-${index + 1}.json`);
+    const partFiles = parts.length === 1 ? ['model.stl'] : parts.map((_, index) => `part-${index + 1}.stl`);
     await Promise.all([
       writeFile(join(directory, 'machine.json'), JSON.stringify(forCommandLine(resolved.machine, selection.printer))),
       writeFile(
@@ -175,10 +218,10 @@ const sliceNow = async ({
       ...filaments.map(async (filament, index) =>
         writeFile(
           join(directory, filamentFiles[index]!),
-          JSON.stringify(forCommandLine(filament, selection.filaments[index]!, selection.printer)),
+          JSON.stringify(forCommandLine(filament, filamentNames[index]!, selection.printer)),
         ),
       ),
-      writeFile(join(directory, 'model.stl'), stl),
+      ...parts.map(async ({ stl }, index) => writeFile(join(directory, partFiles[index]!), stl)),
       mkdir(join(directory, 'datadir')),
       mkdir(join(directory, 'out')),
     ]);
@@ -200,12 +243,12 @@ const sliceNow = async ({
         '--load-filaments',
         filamentFiles.join(';'),
         // The project's filament colours come from the command line; filament presets carry none.
-        ...(filamentColor === undefined ? [] : ['--filament-colour', filamentColor]),
+        ...partArguments(parts),
         '--outputdir',
         join(directory, 'out'),
         '--export-3mf',
         'model.gcode.3mf',
-        join(directory, 'model.stl'),
+        ...partFiles.map((file) => join(directory, file)),
       ],
       { cwd: directory, signal },
     );
@@ -229,7 +272,7 @@ const sliceNow = async ({
     return {
       archive,
       version: install.version,
-      presets: { printer: selection.printer, process: selection.process, filaments: selection.filaments },
+      presets: { printer: selection.printer, process: selection.process, filaments: filamentNames },
       result: {
         returnCode: report.return_code,
         errorString: report.error_string ?? '',
@@ -243,17 +286,19 @@ const sliceNow = async ({
 };
 
 /**
- * Slice an STL with the person's Bambu Studio and return its archive untouched.
+ * Slice a model's parts with the person's Bambu Studio and return its archive untouched.
  *
- * Presets are resolved (`inherits`, then `include`, then own keys), setting
- * overrides applied last, and the command line runs in a temporary directory
- * with its own data directory. Slices run one at a time per process; the
- * signal stops Bambu Studio, and so does a five-minute ceiling.
+ * One part slices as one object. Several slice as one assembled object that keeps the parts where
+ * the model places them, part *i* printed with filament *i* and recorded in its colour. Presets are
+ * resolved (`inherits`, then `include`, then own keys), setting overrides applied last, and the
+ * command line runs in a temporary directory with its own data directory. Slices run one at a time
+ * per process; the signal stops Bambu Studio, and so does a five-minute ceiling.
  *
- * @param input - Install, selection, STL in millimetres and the caller's signal.
- * @returns Bambu Studio's `.gcode.3mf`, its version, the presets and its result report.
- * @throws BambuStudioError - `BAMBU_STUDIO_SLICE_FAILED` with Bambu Studio's message, `BAMBU_STUDIO_SETTINGS_INVALID`
- * for a setting the option catalog cannot encode, or `BAMBU_STUDIO_PRESET_NOT_FOUND`.
+ * @param input - Install, selection, the parts as STL in millimetres and the caller's signal.
+ * @returns Bambu Studio's `.gcode.3mf`, its version, the presets it loaded and its result report.
+ * @throws BambuStudioError - `BAMBU_STUDIO_SLICE_FAILED` with Bambu Studio's message or for no parts,
+ * `BAMBU_STUDIO_SETTINGS_INVALID` for a setting the option catalog cannot encode or a colour that is not
+ * `#RRGGBB`, or `BAMBU_STUDIO_PRESET_NOT_FOUND`.
  * @public
  * @example <caption>Slice with the default presets for an X1 Carbon</caption>
  * ```typescript
@@ -273,7 +318,33 @@ const sliceNow = async ({
  *   const { archive } = await sliceWithBambuStudio({
  *     install,
  *     selection,
- *     stl: Uint8Array.from(await readFile('part.stl')),
+ *     parts: [{ stl: Uint8Array.from(await readFile('part.stl')) }],
+ *     signal: AbortSignal.timeout(600_000),
+ *   });
+ * }
+ * ```
+ * @example <caption>Slice a red base with a blue logo standing on it, one filament each</caption>
+ * ```typescript
+ * import { readFile } from 'node:fs/promises';
+ *
+ * import {
+ *   findBambuStudio,
+ *   loadBambuStudioCatalog,
+ *   resolveBambuStudioSelection,
+ *   sliceWithBambuStudio,
+ * } from '@taucad/slicer/bambu-studio';
+ *
+ * const install = await findBambuStudio();
+ * if (install) {
+ *   const catalog = await loadBambuStudioCatalog(install, { model: 'X1C' });
+ *   const selection = resolveBambuStudioSelection(catalog, { model: 'X1C', materials: [] });
+ *   const { archive } = await sliceWithBambuStudio({
+ *     install,
+ *     selection,
+ *     parts: [
+ *       { stl: Uint8Array.from(await readFile('base.stl')), color: '#C12E1F' },
+ *       { stl: Uint8Array.from(await readFile('logo.stl')), color: '#0A2989' },
+ *     ],
  *     signal: AbortSignal.timeout(600_000),
  *   });
  * }

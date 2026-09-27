@@ -12,13 +12,19 @@ import {
 } from '#bambu-studio/engine.js';
 import type { BambuMachineHints } from '#bambu-studio/engine.js';
 import { writeBambuContainer } from '#container.js';
-import { readTriangleMesh, writeBinaryStl } from '#glb-mesh.js';
+import { isClosedMesh, readTriangleMesh, writeBinaryStl } from '#glb-mesh.js';
+import type { TriangleModel } from '#glb-mesh.js';
 import { ReferenceEngineError, sliceReference } from '#reference-engine.js';
 import { ServiceEngineError, sliceWithService } from '#service-engine.js';
 import { resolveSlicerOptions, slicerOptionsSchema } from '#slicer-options.js';
 import type { ResolvedSlicerOptions } from '#slicer-options.js';
 
 const edges = [{ from: 'glb', to: 'gcode.3mf', fidelity: 'mesh', optionsSchema: slicerOptionsSchema }] as const;
+
+// ponytail: an X1C with one AMS prints at most four filaments. Its external spool cannot join an AMS
+// print, and Tau's AMS mapping addresses trays only. Ceiling: more AMS units (up to 16 trays); pass the
+// bound printer's tray count through `bambuStudio.hints` when such a printer is qualified.
+const maximumFilaments = 4;
 
 const issue = (message: string, code: KernelIssue['code'], details?: KernelIssue['details']): KernelIssue => ({
   message,
@@ -27,6 +33,35 @@ const issue = (message: string, code: KernelIssue['code'], details?: KernelIssue
   severity: 'error',
   ...(details === undefined ? {} : { details }),
 });
+
+// A model whose colours print as one: the whole mesh is sliced and records its first colour.
+const mergedColors = (model: TriangleModel, reason: string, engine: ResolvedSlicerOptions['engine']): KernelIssue => {
+  const colors = model.parts.map(({ color }) => color ?? 'uncoloured').join(', ');
+  return {
+    ...issue(
+      `${reason}, so the model's ${model.parts.length} colours (${colors}) print as one${model.color === undefined ? '' : `, in ${model.color}`}.`,
+      'REPRESENTATION_UNSUPPORTED',
+      {
+        operation: 'transcode',
+        engine,
+        colors: model.parts.flatMap(({ color }) => (color === undefined ? [] : [color])),
+      },
+    ),
+    severity: 'warning',
+  };
+};
+
+// Why Bambu Studio cannot print each of the model's colours with its own filament; undefined when it can.
+const mergeReason = (model: TriangleModel): string | undefined => {
+  if (model.parts.length > maximumFilaments) {
+    return `The printer loads at most ${maximumFilaments} filaments`;
+  }
+  // A colour on some faces of a solid makes an open part, which Bambu Studio cannot slice on its own.
+  if (model.parts.length > 1 && !model.parts.every(isClosedMesh)) {
+    return 'Colours on faces of a solid cannot print as separate filaments';
+  }
+  return undefined;
+};
 
 const failure = (issues: KernelIssue[]): { success: false; issues: KernelIssue[] } => ({ success: false, issues });
 
@@ -38,12 +73,14 @@ const modelNameOf = (fileName: string): string => {
 
 // Slice through the person's Bambu Studio and return its archive untouched.
 // Presets not named in `bambuStudio` default from its `hints`, else from an
-// X1 Carbon with the generic options' quality preset and plate.
+// X1 Carbon with the generic options' quality preset and plate. A model with
+// several colours slices as one assembly with a filament per colour, unless
+// the printer cannot print them apart.
 const sliceThroughBambuStudio = async (
   glb: Uint8Array<ArrayBuffer>,
   options: ResolvedSlicerOptions,
   signal: AbortSignal,
-): Promise<Uint8Array<ArrayBuffer>> => {
+): Promise<{ archive: Uint8Array<ArrayBuffer>; issues: KernelIssue[] }> => {
   const install = await findBambuStudio();
   if (install === undefined) {
     throw new BambuStudioError(
@@ -67,15 +104,19 @@ const sliceThroughBambuStudio = async (
       : { printer: partial.printer },
   );
   const selection = resolveBambuStudioSelection(catalog, hints, partial);
-  const mesh = await readTriangleMesh(glb);
+  const model = await readTriangleMesh(glb);
+  const reason = mergeReason(model);
+  const parts = reason === undefined ? model.parts : [model];
   const { archive } = await sliceWithBambuStudio({
     install,
     selection,
-    stl: writeBinaryStl(mesh),
-    ...(mesh.color === undefined ? {} : { filamentColor: mesh.color }),
+    parts: parts.map((part) => ({
+      stl: writeBinaryStl(part),
+      ...(part.color === undefined ? {} : { color: part.color }),
+    })),
     signal,
   });
-  return archive;
+  return { archive, issues: reason === undefined ? [] : [mergedColors(model, reason, 'bambu-studio')] };
 };
 
 /**
@@ -83,9 +124,12 @@ const sliceThroughBambuStudio = async (
  *
  * The reference engine slices in-process on `manifold-3d`; the service engine
  * delegates to a configured `tau-slicer-service/1` companion; both wrap their
- * G-code in Tau's Bambu container. The `bambu-studio` engine (Node hosts
- * only) runs the person's installed Bambu Studio and returns its archive
- * byte for byte. Every engine outputs one `model.gcode.3mf`.
+ * G-code in Tau's Bambu container, recording the model's first colour. The
+ * `bambu-studio` engine (Node hosts only) runs the person's installed Bambu
+ * Studio and returns its archive byte for byte; a model with up to four
+ * colours prints with a filament per colour. Otherwise the colours print as
+ * one, with a warning issue naming them. Every engine outputs one
+ * `model.gcode.3mf`.
  *
  * @public
  * @example <caption>Register slicing in a runtime</caption>
@@ -128,17 +172,34 @@ export const slicerTranscoder = defineTranscoder({
     }
     try {
       if (options.engine === 'bambu-studio') {
-        const archive = await sliceThroughBambuStudio(file.bytes, options, runtime.signal);
-        return { success: true, data: [createExportFile('gcode.3mf', 'model.gcode.3mf', archive)], issues: [] };
+        const { archive, issues } = await sliceThroughBambuStudio(file.bytes, options, runtime.signal);
+        return { success: true, data: [createExportFile('gcode.3mf', 'model.gcode.3mf', archive)], issues };
       }
-      const mesh = await readTriangleMesh(file.bytes);
+      const model = await readTriangleMesh(file.bytes);
       const sliced =
         options.engine === 'service' && options.service !== undefined
-          ? await sliceWithService({ mesh, options: { ...options, service: options.service }, signal: runtime.signal })
-          : await sliceReference({ mesh, options, signal: runtime.signal });
-      const { gcode } = sliced;
-      const bytes = writeBambuContainer({ gcode, modelName: modelNameOf(file.name), plate: options.plate });
-      return { success: true, data: [createExportFile('gcode.3mf', 'model.gcode.3mf', bytes)], issues: [] };
+          ? await sliceWithService({
+              mesh: model,
+              options: { ...options, service: options.service },
+              signal: runtime.signal,
+            })
+          : await sliceReference({ mesh: model, options, signal: runtime.signal });
+      // Both engines print one material: the whole model, recorded in its first colour.
+      const bytes = writeBambuContainer({
+        gcode: sliced.gcode,
+        modelName: modelNameOf(file.name),
+        plate: options.plate,
+        ...(model.color === undefined ? {} : { filamentColors: [model.color] }),
+      });
+      const reason =
+        options.engine === 'service'
+          ? 'The slicing service prints one material'
+          : 'The reference engine prints one material';
+      return {
+        success: true,
+        data: [createExportFile('gcode.3mf', 'model.gcode.3mf', bytes)],
+        issues: model.parts.length > 1 ? [mergedColors(model, reason, options.engine)] : [],
+      };
     } catch (error) {
       runtime.signal.throwIfAborted();
       if (error instanceof ReferenceEngineError) {

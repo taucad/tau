@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
   "id": "n8-current-source-v5-a1",
-  "frozenManifestSha256": "8c3c1da56d9aa0818bc4aced3f6583750b7b47e10844cf89874fba6fe9273061",
+  "frozenManifestSha256": "bf1435f48ce7b574f8b89601859218bd9a1a39a26870b7138d7f8cbfcd14e7c5",
   "nativeContract": {
     "sourceId": "native-contract",
     "path": "packages/geospec-engine-native/rust/src/matchers/brep.rs",
     "frozenSha256": "aad545c2f0b37e0d2bacb2934dfdc95fba1da343c611881dd047950500b36bae",
-    "currentSha256": "dc7e96c953e65d57bc08d07c28b3b5f858589d9514b151d38493a9fa128fd61f"
+    "currentSha256": "9b717d78787b8ec14a2feda286425fc5b3f2010c15706c4d36e599b24b9b1b24"
   },
   "approvedNumericProfile": "geospec-demand-v5",
   "affectedCaseIds": [

@@ -21,13 +21,15 @@ enum Expected {
 }
 
 use CircularBoreNonMember::{ExteriorCylinder, ObstructedInterior};
-use CircularBoreUnqualified::{IncompleteBand, UnsupportedTermination};
+use CircularBoreUnqualified::{IncompleteBand, InvalidSolid, UnsupportedTermination};
 use Expected::{NonMember, Qualified, Unqualified};
 
 // Dispositions are the exact bridge Common's verdicts recorded by O4
 // (`adv_bores.jsonl`, bridge rows); the digest is FNV-1a 64 over `serialize`
 // on the M0 bridge (446ff8ba0, prefix delivery-n10-20260926). The tilted far
 // pin (review W1 R3) is pinned on the W2B authored-healing profile.
+// c-parallel-hole-wall-1e-7 is re-pinned on the authored-healing profile (A1, ruling 1):
+// without repair its 1e-7 mm wall leaves an invalid solid, so no bore reaches the Common.
 const CASES: [(&str, &[Expected], u64); 17] = [
     ("a0-clean-through.step", &[Qualified], 0x778a_5cdd_697a_605e),
     ("a1-blind.step", &[Qualified], 0xdc94_c957_5c4e_68c4),
@@ -75,11 +77,11 @@ const CASES: [(&str, &[Expected], u64); 17] = [
     (
         "c-parallel-hole-wall-1e-7.step",
         &[
-            Qualified,
-            Unqualified(IncompleteBand),
-            Unqualified(IncompleteBand),
+            Unqualified(InvalidSolid),
+            Unqualified(InvalidSolid),
+            Unqualified(InvalidSolid),
         ],
-        0xc7f2_04e6_39a5_c733,
+        0x9a7f_5c17_9e9a_ef20,
     ),
     (
         "d-counterbore.step",

@@ -317,7 +317,6 @@ const main = async (): Promise<void> => {
     'm3-corpus/vitest.config.mjs',
     'm3-corpus/corpus.mjs',
     'm3-corpus/profile-v3.mjs',
-    'm3-corpus/profile-v4.mjs',
     'f1-public-a1/authority.mjs',
     'f1-public-a1/f1-public.vitest.test.mjs',
     'f1-public-a1/vitest.config.mjs',

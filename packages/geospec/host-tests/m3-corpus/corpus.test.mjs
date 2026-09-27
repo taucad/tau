@@ -114,9 +114,9 @@ void test('should select only the four independently approved native/mixed statu
     ['family/toHaveCenterOfMass/negative', 'passed', 'failed'],
   ]);
   for (const campaign of [native, mixed]) {
-    assert.equal(campaign.rows.filter((row) => row.expected.status === 'passed').length, 214);
-    assert.equal(campaign.rows.filter((row) => row.expected.status === 'failed').length, 120);
-    assert.equal(campaign.rows.filter((row) => row.expected.status === 'refused').length, 14);
+    assert.equal(campaign.rows.filter((row) => row.expected.status === 'passed').length, 213);
+    assert.equal(campaign.rows.filter((row) => row.expected.status === 'failed').length, 119);
+    assert.equal(campaign.rows.filter((row) => row.expected.status === 'refused').length, 16);
     assert.equal(campaign.rows.filter((row) => row.expected.status === 'protocol-error').length, 4);
     assert.ok(campaign.rows.every((row) => row.expected.canonicalResultUtf8 === null));
   }
@@ -137,7 +137,7 @@ void test('should preserve approved request/plan bytes, identities and budgets w
       assert.equal(request.registryVersion, 5);
       assert.equal(request.canonicalProfile, 'geospec-jcs-v1');
     }
-    assert.equal(canonical.numericProfile, 'geospec-st-logical-requests-v3');
+    assert.equal(canonical.numericProfile, 'geospec-demand-v5');
     for (const request of [authored, canonical]) {
       const claim = request.plan.claims[0];
       assert.equal(claim.claimId, row.claimId);
@@ -155,7 +155,7 @@ void test('should preserve approved request/plan bytes, identities and budgets w
       assert.deepEqual(canonical.plan.claims[0].payload, { maxOutputBytes: 1_048_576, maxRecords: 1024 });
     }
   }
-  assert.equal(sha256(contracts.join('\n')), '7e99d2621b946976d2dd8896c03cdc159a4f72a36f680f7e41439e6127d88f6a');
+  assert.equal(sha256(contracts.join('\n')), '423b20f9c7aaed500b837554c73280472b0cf95ea49592f49f027ea6a47776ae');
   assert.deepEqual(pmi, [
     'queryPmi/parallel-plane-distance-source#710',
     'queryPmi/parallel-plane-distance-same-occurrence-source#710',
@@ -172,7 +172,7 @@ void test('should resolve all 70 exact assets through the existing fixture closu
   assert.deepEqual(campaign.definitions, {
     f1: {
       path: 'packages/geospec-engine-native/rust/src/certificates/definition.rs',
-      sha256: '38922652cc624d2a6c84377bddc20e76a0361dc95b87f9c3e94463ded6610df9',
+      sha256: '96b287ff9299888859c4338e9d7b05093dafed7fdfcade9811c7c1c4c9bcadd2',
     },
     f2: {
       path: 'packages/geospec-engine-native/rust/src/certificates/parallel_plane_definition.rs',

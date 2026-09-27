@@ -6,8 +6,8 @@ import { resolve } from 'node:path';
 // oxlint-disable-next-line no-restricted-imports -- The standalone data harness reads its local fixture closure without workspace aliases.
 import { fixturePath, fixtureWorkspaceRoot, readFixture } from '../fixtures/read-fixture.mjs';
 
-const CURRENT_AUTHORITY = 'packages/geospec/host-tests/m3-corpus/current-authority-v3.json';
-const CURRENT_AUTHORITY_SHA256 = 'fb0920d448648cf1ea82c1305f8701c7992156a72f5a592cc569b3b3bec0bd51';
+const CURRENT_AUTHORITY = 'packages/geospec/host-tests/m3-corpus/current-authority-v5.json';
+const CURRENT_AUTHORITY_SHA256 = 'ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86';
 
 /** Load current semantic expectations; binary provenance belongs to execution receipts. @internal */
 export function loadCurrentM3Campaign(backend, workspaceRoot = fixtureWorkspaceRoot) {
@@ -18,7 +18,7 @@ export function loadCurrentM3Campaign(backend, workspaceRoot = fixtureWorkspaceR
   assert.equal(campaign.protocolVersion, 3);
   assert.equal(campaign.registryVersion, 5);
   assert.equal(campaign.canonicalProfile, 'geospec-jcs-v1');
-  assert.equal(campaign.numericProfile, 'geospec-st-logical-requests-v3');
+  assert.equal(campaign.numericProfile, 'geospec-demand-v5');
   for (const definition of Object.values(campaign.definitions)) {
     const source = readFileSync(resolve(workspaceRoot, definition.path), 'utf8');
     assert.ok(source.includes(`"${definition.sha256}"`), `independent definition changed: ${definition.path}`);

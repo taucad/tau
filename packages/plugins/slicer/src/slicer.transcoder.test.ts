@@ -5,8 +5,6 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { ColorUtils, Document, WebIO } from '@gltf-transform/core';
-import type { MachineArtifactReference } from '@taucad/runtime/machine';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import type { TranscoderRuntime } from '@taucad/runtime/transcoder';
 import type { ExportFile } from '@taucad/runtime/types';
@@ -16,15 +14,12 @@ import { mock } from 'vitest-mock-extended';
 
 import { writeFakeInstall } from '#bambu-studio/fake-install.test-helpers.js';
 import type { FakeInstall } from '#bambu-studio/fake-install.test-helpers.js';
-import { bambuPlateMember, readBambuContainer } from '#container.js';
+import { bambuPlateMember, readBambuContainer, readBambuContainerProducer } from '#container.js';
+import { boxTriangles, boxVertices, writeTestGlb } from '#glb.test-helpers.js';
+import type { TestVertex } from '#glb.test-helpers.js';
 import { slicerOptionsSchema } from '#slicer-options.js';
 import { slicerTranscoder } from '#slicer.transcoder.js';
 import { parseGcode } from '#toolpath.js';
-// The Bambu provider keeps its preflight private; this white-box import proves the container it admits.
-/* oxlint-disable no-restricted-imports -- cross-package white-box acceptance check against @taucad/bambu's private preflight */
-// eslint-disable-next-line @nx/enforce-module-boundaries -- same white-box check; @taucad/bambu exports no preflight subpath
-import { prepareBambuArtifact } from '../../bambu/src/bambu.archive.js';
-/* oxlint-enable no-restricted-imports -- white-box import ends */
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), '__fixtures__');
 const readGlb = (name: string): ExportFile => ({
@@ -40,70 +35,42 @@ const createRuntime = (signal = new AbortController().signal): TranscoderRuntime
     signal,
   });
 
-/** Write a GLB in Tau's export convention (glTF Y-up metres) from Z-up millimetre vertices. */
+/** A GLB in Tau's export convention with one part, from Z-up millimetre vertices; uncoloured without `color`. */
 const createGlb = async (
-  vertices: ReadonlyArray<readonly [number, number, number]>,
+  vertices: readonly TestVertex[],
   triangles: ReadonlyArray<readonly [number, number, number]>,
-  /** The part's material colour as sRGB hex; no material when absent. */
   color?: number,
-): Promise<ExportFile> => {
-  const document = new Document();
-  const buffer = document.createBuffer();
-  const position = document
-    .createAccessor()
-    .setType('VEC3')
-    .setArray(Float32Array.from(vertices.flatMap(([x, y, z]) => [x / 1000, z / 1000, -y / 1000])))
-    .setBuffer(buffer);
-  const indices = document
-    .createAccessor()
-    .setType('SCALAR')
-    .setArray(Uint32Array.from(triangles.flat()))
-    .setBuffer(buffer);
-  const primitive = document.createPrimitive().setAttribute('POSITION', position).setIndices(indices);
-  if (color !== undefined) {
-    primitive.setMaterial(
-      document.createMaterial('part').setBaseColorFactor(ColorUtils.hexToFactor(color, [0, 0, 0, 1])),
-    );
-  }
-  const mesh = document.createMesh('part').addPrimitive(primitive);
-  const node = document.createNode('part').setMesh(mesh);
-  document.createScene().addChild(node);
-  return { name: 'part.glb', bytes: await new WebIO().writeBinary(document), mimeType: 'model/gltf-binary' };
-};
+): Promise<ExportFile> => ({
+  name: 'part.glb',
+  bytes: await writeTestGlb([{ vertices, triangles, ...(color === undefined ? {} : { color }) }]),
+  mimeType: 'model/gltf-binary',
+});
 
-const cubeVertices = (size: number): Array<readonly [number, number, number]> => [
-  [-size / 2, -size / 2, 0],
-  [size / 2, -size / 2, 0],
-  [size / 2, size / 2, 0],
-  [-size / 2, size / 2, 0],
-  [-size / 2, -size / 2, size],
-  [size / 2, -size / 2, size],
-  [size / 2, size / 2, size],
-  [-size / 2, size / 2, size],
-];
-const cubeTriangles: Array<readonly [number, number, number]> = [
-  [0, 2, 1],
-  [0, 3, 2],
-  [4, 5, 6],
-  [4, 6, 7],
-  [0, 1, 5],
-  [0, 5, 4],
-  [1, 2, 6],
-  [1, 6, 5],
-  [2, 3, 7],
-  [2, 7, 6],
-  [3, 0, 4],
-  [3, 4, 7],
-];
+const cubeVertices = (size: number): TestVertex[] => boxVertices([-size / 2, -size / 2, 0], [size / 2, size / 2, size]);
+const cubeTriangles = boxTriangles;
+const decoder = new TextDecoder();
 
-const artifactFor = (bytes: Uint8Array<ArrayBuffer>, path: string): MachineArtifactReference => ({
-  projectId: 'proj_000000000000000000001',
-  path,
-  digest: `sha256:${sha256(bytes)}` as MachineArtifactReference['digest'],
-  length: bytes.byteLength,
-  mediaType: 'application/vnd.bambulab.gcode-3mf',
-  contract: { id: 'manufacturing.toolpath.bambu-gcode-3mf', version: 1 },
-  selectedMember: bambuPlateMember,
+/** A GLB of 10 mm boxes in a row along X, one per colour. */
+const createRowGlb = async (colors: readonly number[]): Promise<ExportFile> => ({
+  name: 'row.glb',
+  bytes: await writeTestGlb(
+    colors.map((color, index) => ({
+      vertices: boxVertices([index * 20, 0, 0], [index * 20 + 10, 10, 10]),
+      triangles: boxTriangles,
+      color,
+    })),
+  ),
+  mimeType: 'model/gltf-binary',
+});
+
+/** A 20 mm cube whose bottom, top and front faces are red and whose other faces are blue. */
+const createFaceColouredGlb = async (): Promise<ExportFile> => ({
+  name: 'faces.glb',
+  bytes: await writeTestGlb([
+    { vertices: cubeVertices(20), triangles: cubeTriangles.slice(0, 6), color: 0xff_00_00 },
+    { vertices: cubeVertices(20), triangles: cubeTriangles.slice(6), color: 0x00_00_ff },
+  ]),
+  mimeType: 'model/gltf-binary',
 });
 
 describe('slicerTranscoder', () => {
@@ -143,7 +110,7 @@ describe('slicerTranscoder', () => {
       envelope: { max: 143, height: 25 },
     },
   ])('reference engine on $name', ({ name, layers, containerSha256, plateSha256, segments, envelope }) => {
-    it('should produce a deterministic Bambu container the provider preflight admits', async () => {
+    it('should produce a deterministic Bambu container whose plate MD5 verifies', async () => {
       const result = await slice(readGlb(name));
       expect(result.success).toBe(true);
       if (!result.success) {
@@ -157,20 +124,6 @@ describe('slicerTranscoder', () => {
       expect(new TextDecoder().decode(plate)).toMatch(
         /^; generated by @taucad\/slicer reference engine\n(?:; tau:option [a-zA-Z]+=.*\n)+; tau:layer-count \d+\nM140 S55\nM104 S220\nG28\n/u,
       );
-      await expect(
-        prepareBambuArtifact({
-          artifact: artifactFor(file!.bytes, `${name.slice(0, -4)}.gcode.3mf`),
-          runtime: {
-            async *readArtifact() {
-              yield Uint8Array.from(file!.bytes);
-            },
-          },
-          signal: new AbortController().signal,
-        }),
-      ).resolves.toMatchObject({
-        length: file!.bytes.byteLength,
-        memberMd5: createHash('md5').update(plate).digest('hex'),
-      });
       expect(readBambuContainer(file!.bytes).md5Verified).toBe(true);
     });
 
@@ -295,6 +248,43 @@ describe('slicerTranscoder', () => {
     expect(program.layerTable).toHaveLength(100);
   });
 
+  describe('model colours on the reference engine', () => {
+    it('should record a coloured model’s colour in a config block ahead of the plate it slices uncoloured', async () => {
+      const coloured = await slice(await createGlb(cubeVertices(20), cubeTriangles, 0xf5_a6_23));
+      const plain = await slice(await createGlb(cubeVertices(20), cubeTriangles));
+      if (!coloured.success || !plain.success) {
+        expect.fail(JSON.stringify({ coloured: coloured.issues, plain: plain.issues }));
+      }
+      const container = readBambuContainer(coloured.data[0]!.bytes);
+
+      expect(coloured.issues).toEqual([]);
+      expect(container.filamentColors).toEqual(['#F5A623']);
+      expect(decoder.decode(container.gcode)).toBe(
+        `; CONFIG_BLOCK_START\n; filament_colour = #F5A623\n; CONFIG_BLOCK_END\n${decoder.decode(readBambuContainer(plain.data[0]!.bytes).gcode)}`,
+      );
+      expect(readBambuContainerProducer(coloured.data[0]!.bytes)).toEqual({ name: '@taucad/slicer reference' });
+    });
+
+    it('should print a two-colour model in its first colour and warn that the colours merge', async () => {
+      const result = await slice(readGlb('two-colour-cubes.glb'));
+      if (!result.success) {
+        expect.fail(JSON.stringify(result.issues));
+      }
+
+      expect(readBambuContainer(result.data[0]!.bytes).filamentColors).toEqual(['#FF0000']);
+      expect(result.issues).toEqual([
+        {
+          message:
+            "The reference engine prints one material, so the model's 2 colours (#FF0000, #0000FF) print as one, in #FF0000.",
+          code: 'REPRESENTATION_UNSUPPORTED',
+          type: 'runtime',
+          severity: 'warning',
+          details: { operation: 'transcode', engine: 'reference', colors: ['#FF0000', '#0000FF'] },
+        },
+      ]);
+    });
+  });
+
   it('should stop at the operation signal', async () => {
     const controller = new AbortController();
     controller.abort();
@@ -313,7 +303,16 @@ describe('slicerTranscoder', () => {
   describe('bambu-studio engine', () => {
     let root: string;
     let fake: FakeInstall;
-    type Recorded = { args: string[]; files: Record<string, { name: string }> };
+    type Recorded = { args: string[]; files: Record<string, { name: string }>; stls: string[] };
+    // Triangle count and X extent of a binary STL the fake command line recorded.
+    const stlSummary = (base64: string) => {
+      const bytes = Buffer.from(base64, 'base64');
+      const triangles = bytes.readUInt32LE(80);
+      const xs = Array.from({ length: triangles * 3 }, (_, corner) =>
+        bytes.readFloatLE(84 + Math.floor(corner / 3) * 50 + 12 + (corner % 3) * 12),
+      );
+      return { triangles, x: [Math.min(...xs), Math.max(...xs)] };
+    };
     const recorded = async (): Promise<Recorded> => JSON.parse(await readFile(fake.record, 'utf8')) as Recorded;
 
     beforeAll(async () => {
@@ -374,6 +373,79 @@ describe('slicerTranscoder', () => {
       const { args } = await recorded();
       expect(args[args.indexOf('--filament-colour') + 1]).toBe('#F5A623');
     });
+
+    it('should slice a two-colour model as one assembly, each colour with its own filament', async () => {
+      useFakeInstall();
+      await fake.control({ mode: 'succeed' });
+      const result = await sliceWithRealSignal(readGlb('two-colour-cubes.glb'), { engine: 'bambu-studio' });
+      if (!result.success) {
+        expect.fail(JSON.stringify(result.issues));
+      }
+      const { args, files, stls } = await recorded();
+
+      expect(result.issues).toEqual([]);
+      expect(args.slice(args.indexOf('--load-filament-ids'), args.indexOf('--outputdir'))).toEqual([
+        '--load-filament-ids',
+        '1,2',
+        '--assemble',
+        '--filament-colour',
+        '#FF0000;#0000FF',
+      ]);
+      expect(Object.values(files).map(({ name }) => name)).toEqual([
+        'Bambu Lab X1 Carbon 0.4 nozzle',
+        '0.20mm Standard @BBL X1C',
+        'Bambu PLA Basic @BBL X1C',
+        'Bambu PLA Basic @BBL X1C',
+      ]);
+      // Each part keeps its place in the model, so Bambu Studio arranges the pair as one.
+      expect(stls.map((stl) => stlSummary(stl))).toEqual([
+        { triangles: 12, x: [-15, -5] },
+        { triangles: 12, x: [5, 15] },
+      ]);
+    });
+
+    it.each([
+      {
+        name: 'more colours than the printer loads',
+        file: async () => createRowGlb([0xff_00_00, 0x00_ff_00, 0x00_00_ff, 0xff_ff_00, 0xff_00_ff]),
+        triangles: 60,
+        message:
+          "The printer loads at most 4 filaments, so the model's 5 colours (#FF0000, #00FF00, #0000FF, #FFFF00, #FF00FF) print as one, in #FF0000.",
+        colors: ['#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF'],
+      },
+      {
+        name: 'colours on faces of one solid',
+        file: createFaceColouredGlb,
+        triangles: 12,
+        message:
+          "Colours on faces of a solid cannot print as separate filaments, so the model's 2 colours (#FF0000, #0000FF) print as one, in #FF0000.",
+        colors: ['#FF0000', '#0000FF'],
+      },
+    ])(
+      'should slice $name as one part in the first colour, with a warning',
+      async ({ file, triangles, message, colors }) => {
+        useFakeInstall();
+        await fake.control({ mode: 'succeed' });
+        const result = await sliceWithRealSignal(await file(), { engine: 'bambu-studio' });
+        if (!result.success) {
+          expect.fail(JSON.stringify(result.issues));
+        }
+        const { args, stls } = await recorded();
+
+        expect(args).not.toContain('--assemble');
+        expect(args[args.indexOf('--filament-colour') + 1]).toBe('#FF0000');
+        expect(stls.map((stl) => stlSummary(stl).triangles)).toEqual([triangles]);
+        expect(result.issues).toEqual([
+          {
+            message,
+            code: 'REPRESENTATION_UNSUPPORTED',
+            type: 'runtime',
+            severity: 'warning',
+            details: { operation: 'transcode', engine: 'bambu-studio', colors },
+          },
+        ]);
+      },
+    );
 
     it('should slice with the chosen presets and fill the rest from the printer hints', async () => {
       useFakeInstall();

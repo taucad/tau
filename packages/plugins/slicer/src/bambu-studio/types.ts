@@ -58,7 +58,13 @@ export type BambuSettingValue = string | number | boolean | null | ReadonlyArray
 export type BambuStudioSelection = Readonly<{
   printer: string;
   process: string;
-  /** One filament preset per used slot, in slot order. */
+  /**
+   * Filament presets, filament 1 first; the caller sets the order. A slice of one part loads them all
+   * and prints with the first; a slice of several parts prints part *i* with filament *i*, repeating
+   * the first preset for parts the list does not reach. `resolveBambuStudioSelection` fills its default
+   * in tray order, one preset per loaded slot, so a caller slicing several parts maps each part to a tray
+   * and passes the presets in part order.
+   */
   filaments: readonly string[];
   plate: BambuPlate['id'];
   /** Bambu Studio setting keys and values applied over the resolved presets. */
@@ -109,13 +115,20 @@ export type BambuStudioSettings = Readonly<{
 export type BambuStudioSliceInput = Readonly<{
   install: BambuStudioInstallation;
   selection: BambuStudioSelection;
-  /** Binary STL in millimetres. */
-  stl: Uint8Array<ArrayBuffer>;
   /**
-   * `#RRGGBB` the file records for the first filament, so previews draw the print in the model's
-   * colour; the preset's colour when absent.
+   * The model's parts, each a binary STL in millimetres, all in one coordinate space. Several parts
+   * slice as one assembled object that keeps their placement, part *i* printed with filament *i*.
    */
-  filamentColor?: string;
+  parts: ReadonlyArray<
+    Readonly<{
+      stl: Uint8Array<ArrayBuffer>;
+      /**
+       * `#RRGGBB` the file records for this part's filament, so previews draw the print in the model's
+       * colours; Bambu Studio's own default colour when absent.
+       */
+      color?: string;
+    }>
+  >;
   signal: AbortSignal;
 }>;
 
@@ -124,6 +137,7 @@ export type BambuStudioSliceResult = Readonly<{
   /** The `.gcode.3mf` exactly as Bambu Studio wrote it. */
   archive: Uint8Array<ArrayBuffer>;
   version: string;
+  /** The presets the slice loaded, `filaments` in filament order. */
   presets: Readonly<{ printer: string; process: string; filaments: readonly string[] }>;
   result: Readonly<{
     returnCode: number;
@@ -139,7 +153,8 @@ export type BambuStudioErrorCode =
   | 'BAMBU_STUDIO_UNAVAILABLE'
   | 'BAMBU_STUDIO_PRESET_NOT_FOUND'
   | 'BAMBU_STUDIO_SETTINGS_INVALID'
-  | 'BAMBU_STUDIO_SLICE_FAILED';
+  | 'BAMBU_STUDIO_SLICE_FAILED'
+  | 'BAMBU_STUDIO_TIMEOUT';
 
 /** Typed refusal raised by `@taucad/slicer/bambu-studio`. @public */
 export class BambuStudioError extends Error {

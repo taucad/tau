@@ -118,8 +118,8 @@ export const compatiblePresets = (
   );
 
 type Loaded = Readonly<{
-  /** The hints the selection was resolved from, so slicing never pairs new hints with an old selection. */
-  hints: BambuMachineHints;
+  /** The trays the selection was resolved for, ascending: `selection.filaments` holds one preset per tray. */
+  trays: readonly number[];
   /** The hints and picks this selection answers; slicing waits while a newer request resolves. */
   request: string;
   selection: BambuStudioSelection;
@@ -164,7 +164,7 @@ export type BambuStudioMode = Readonly<{
   /** Settings the print intent holds that these presets lack: kept in the file, left out of the slice. */
   dropped: number;
   error: string | undefined;
-  /** The used material slots, in the order `selection.filaments` follows. */
+  /** The loaded trays the filaments print from, ascending: the order `selection.filaments` follows. */
   slots: readonly number[];
   chosen: BambuStudioChosen;
   /** Another printer preset has its own processes and filaments, so choosing one clears those picks. */
@@ -181,6 +181,29 @@ export type BambuStudioMode = Readonly<{
 }>;
 
 const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
+/** The preset a selection resolved for one tray, when it resolved one. */
+const presetFor = (loaded: Loaded | undefined, slot: number): string | undefined =>
+  loaded?.selection.filaments[loaded.trays.indexOf(slot)];
+
+/**
+ * The filament preset each filament prints with, in filament order: its tray's. A filament without a tray yet
+ * takes the first one's, as Bambu Studio prints any filament past the list with the first preset; so filaments
+ * that share one preset send just that one, and a remap among trays of the same preset leaves the slice current.
+ *
+ * @param loaded - The resolved selection and the trays it is for.
+ * @param mapping - The slot each filament prints from, in filament order; `-1` for none.
+ * @returns The presets to slice with.
+ */
+const filamentOrder = (loaded: Loaded, mapping: readonly number[]): readonly string[] => {
+  const mapped = mapping.map((slot) => presetFor(loaded, slot));
+  const first = mapped.find((name) => name !== undefined);
+  if (first === undefined) {
+    return loaded.selection.filaments;
+  }
+  const presets = mapped.map((name) => name ?? first);
+  return presets.every((name) => name === first) ? [first] : presets;
+};
 
 const toBambuPlate = (plate: string | undefined): BambuPlate['id'] | undefined =>
   plate !== undefined && bambuPlateIds.has(plate) ? (plate as BambuPlate['id']) : undefined;
@@ -234,11 +257,11 @@ const partialSelection = ({
   slots: readonly number[];
   plate: BambuPlate['id'] | undefined;
   /** The filaments Bambu Studio resolved last, per used slot. */
-  resolved: readonly string[] | undefined;
+  resolved: ReadonlyArray<string | undefined>;
 }>): Partial<BambuStudioSelection> => {
   const picked = slots.map((slot) => chosen.filaments?.[slot]);
   // One pick among several slots keeps the others at what Bambu Studio resolved for them.
-  const filaments = picked.map((name, index) => name ?? resolved?.[index]);
+  const filaments = picked.map((name, index) => name ?? resolved[index]);
   return {
     ...(chosen.printer === undefined ? {} : { printer: chosen.printer }),
     ...(chosen.process === undefined ? {} : { process: chosen.process }),
@@ -269,8 +292,8 @@ const modeStatus = (
 /**
  * Own Bambu Studio's selection surface for the selected machine.
  *
- * @param input - The machine, its provider and manifest, the confirmed plate, the used slots, and the
- * project's print intent for this printer with its `update`.
+ * @param input - The machine, its provider and manifest, the confirmed plate, the slot each filament prints
+ * from, and the project's print intent for this printer with its `update`.
  * @returns The mode, its presets, settings, overrides and the export options they make.
  * @public
  */
@@ -279,7 +302,7 @@ export const useBambuStudio = ({
   entry,
   manifest,
   plate,
-  slots,
+  mapping,
   intent,
   update,
 }: {
@@ -287,7 +310,8 @@ export const useBambuStudio = ({
   readonly entry: MachineDirectoryEntry | undefined;
   readonly manifest: MachineManifest | undefined;
   readonly plate: string | undefined;
-  readonly slots: readonly number[];
+  /** The slot each filament prints from, in filament order; `-1` for a filament given none yet. */
+  readonly mapping: readonly number[];
   readonly intent: PrintIntent | undefined;
   readonly update: (edit: PrintIntentEdit) => void;
 }): BambuStudioMode => {
@@ -305,10 +329,20 @@ export const useBambuStudio = ({
   const model = entry?.descriptor.model;
   const nozzleDiameter = manifest?.toolhead.nozzles[0]?.diameter.value;
   const bambuPlate = toBambuPlate(plate);
+  /* Presets are Bambu Studio's per tray, ascending, as it resolves them; `mapping` orders them per filament. */
+  const slots = useMemo(
+    () => [...new Set(mapping.filter((slot) => slot >= 0))].toSorted((left, right) => left - right),
+    [mapping],
+  );
   // Keyed by content so a telemetry frame that changes nothing here reloads nothing.
   const hintsKey = JSON.stringify(machineHints({ entry, manifest, preset, plate: bambuPlate, slots }) ?? '');
   const partialKey = JSON.stringify(
-    partialSelection({ chosen, slots, plate: bambuPlate, resolved: loaded?.selection.filaments }),
+    partialSelection({
+      chosen,
+      slots,
+      plate: bambuPlate,
+      resolved: slots.map((slot) => presetFor(loaded, slot)),
+    }),
   );
 
   useEffect(() => {
@@ -385,10 +419,11 @@ export const useBambuStudio = ({
         }
         settingsCacheRef.current = { key, settings };
         setFailure(undefined);
+        const trays = hints.materials.map(({ slot }) => slot);
         setLoaded((previous) =>
           previous?.settings === settings
-            ? { ...previous, hints, request, selection }
-            : { hints, request, selection, settings, defaults: flattenSettings(settings.values) },
+            ? { ...previous, trays, request, selection }
+            : { trays, request, selection, settings, defaults: flattenSettings(settings.values) },
         );
       } catch (error) {
         if (!cancelled) {
@@ -479,13 +514,12 @@ export const useBambuStudio = ({
       bambuStudio: {
         printer: loaded.selection.printer,
         process: loaded.selection.process,
-        filaments: loaded.selection.filaments,
+        filaments: filamentOrder(loaded, mapping),
         plate: loaded.selection.plate,
         ...(Object.keys(reconciled.kept).length === 0 ? {} : { settings: reconciled.kept }),
-        hints: loaded.hints,
       },
     };
-  }, [isCurrent, loaded, reconciled]);
+  }, [isCurrent, loaded, mapping, reconciled]);
   const printer = selection?.printer;
   const processes = useMemo(() => compatiblePresets(catalog?.processes ?? [], printer), [catalog, printer]);
   const filaments = useMemo(() => compatiblePresets(catalog?.filaments ?? [], printer), [catalog, printer]);

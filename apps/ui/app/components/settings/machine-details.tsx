@@ -127,15 +127,7 @@ const materialSummary = ({ units, slotsPerUnit, externalSpool }: MachineManifest
   return externalSpool ? `${slots} · External spool` : slots;
 };
 
-const cameraSummary = ({ stills, stream }: MachineManifest['camera']): string => {
-  if (stills && stream) {
-    return 'Stills and stream';
-  }
-  if (stills) {
-    return 'Stills';
-  }
-  return stream ? 'Stream' : 'None';
-};
+const cameraSummary = ({ stills }: MachineManifest['camera']): string => (stills ? 'Stills' : 'None');
 
 /**
  * An observation budget in the unit people read it in: "15 s", "2 min".
@@ -547,7 +539,6 @@ export const MachineDetails = memo(function MachineDetails({
       <Part id='camera' title='Camera' summary={cameraSummary(camera)}>
         <dl>
           <Fact label='Still capture'>{yesNo(camera.stills)}</Fact>
-          <Fact label='Live stream'>{yesNo(camera.stream)}</Fact>
         </dl>
       </Part>
       <Part id='storage' title='Storage' summary={manifest.storage.removable ? 'Removable' : 'None'}>

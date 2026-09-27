@@ -19,7 +19,7 @@ import { z } from 'zod';
 
 import { bambuAcceptedContainers, bambuSubmissionConfiguration } from '#bambu.machine.js';
 import { bambuX1cManifest } from '#bambu.manifest.js';
-import { bambuQuantity, bambuRemoteName, parseBambuStill } from '#bambu.protocol.js';
+import { bambuQuantity, bambuRemoteName, bambuStage, parseBambuStill } from '#bambu.protocol.js';
 
 /** Deterministic fault switches accepted by the simulator. @internal */
 export type BambuSimulatorFault =
@@ -335,8 +335,9 @@ const describeRun = (run: SimulatedRun, at: number): MachineRunSnapshot => {
     progress: duration > 0 ? Math.round((done / duration) * 10_000) / 100 : 0,
     remainingSeconds: Math.ceil(Math.max(run.preheat - elapsed, 0) + duration - done),
     file: run.file,
+    // An X1C reports stage 2 (`stg_cur`) while its bed heats, and no stage once it prints.
     ...(isHeating
-      ? { stage: 'Heating the bed and nozzle' }
+      ? { stage: bambuStage(2) }
       : { currentLayer: layerStarts.findLastIndex((start) => start <= done) + 1, totalLayers: layerStarts.length }),
     speedProfile: 'standard',
     speedPercent: 100,

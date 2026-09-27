@@ -401,7 +401,7 @@ describe('Simulated X1C run progression', () => {
       readiness: 'busy',
       activeRunId: 'run-1',
       observedAt: '2026-09-14T00:00:00.000Z',
-      run: { state: 'preparing', progress: 0, remainingSeconds: 960, stage: 'Heating the bed and nozzle' },
+      run: { state: 'preparing', progress: 0, remainingSeconds: 960, stage: 'Heating the bed' },
       temperatures: {
         nozzle: { value: 24.9 },
         nozzleTarget: { value: 220 },

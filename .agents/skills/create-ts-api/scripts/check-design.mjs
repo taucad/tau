@@ -52,6 +52,8 @@ const options = {
   noPropertyAccessFromIndexSignature: true,
   exactOptionalPropertyTypes: false,
   verbatimModuleSyntax: true,
+  // `.tsx` sketches (a component's call site) resolve `react/jsx-runtime` from the --project.
+  jsx: ts.JsxEmit.ReactJSX,
   skipLibCheck: true,
   noEmit: true,
   lib: ['lib.esnext.d.ts', 'lib.dom.d.ts'],

@@ -291,6 +291,7 @@ export type MachineRunSnapshot = Readonly<{
   file?: string;
   currentLayer?: number;
   totalLayers?: number;
+  /** A readable phrase for what the machine is doing now, or absent; never a bare vendor stage number. */
   stage?: string;
   printType?: string;
   speedProfile?: 'silent' | 'standard' | 'sport' | 'ludicrous' | 'unknown';
@@ -335,8 +336,20 @@ export type MachineLightSnapshot = Readonly<{
   chamber?: 'off' | 'on' | 'unknown';
 }>;
 
-/** One normalized active diagnostic without provider payload detail. @public */
-export type MachineAlertSnapshot = Readonly<{ code: string }>;
+/**
+ * One active diagnostic, readable by a person and an agent without the vendor's payload.
+ * @public
+ */
+export type MachineAlertSnapshot = Readonly<{
+  /** The code in the vendor's canonical display form, as the vendor's own screens and help pages print it. */
+  code: string;
+  /** How urgently the person must act: `fatal` stops the machine, `serious` needs attention before it continues. */
+  severity?: 'fatal' | 'serious' | 'warning' | 'info';
+  /** One readable sentence the provider wrote for this code, saying what happened. */
+  message?: string;
+  /** The vendor's public help page for this code: an `https:` URL. */
+  reference?: string;
+}>;
 
 /** Current connection and readiness snapshot. @public */
 export type MachineSnapshot = Readonly<{

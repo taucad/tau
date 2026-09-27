@@ -45,7 +45,7 @@ describe('readPrinterFile and loadPrinterProgram', () => {
 
   it('should pass text G-code through untouched', () => {
     const bytes = new TextEncoder().encode(fixtureGcode({ layers: 2 }));
-    expect(readPrinterFile(bytes, 'gcode')).toEqual({ gcode: bytes, slicedPlate: undefined, filamentColor: undefined });
+    expect(readPrinterFile(bytes, 'gcode')).toEqual({ gcode: bytes, slicedPlate: undefined, filamentColors: [] });
     expect(loadPrinterProgram(bytes, 'gcode').program.layerTable).toHaveLength(2);
   });
 
@@ -87,13 +87,25 @@ describe('readGcodeSetting', () => {
   });
 });
 
-describe('sliced filament colour', () => {
-  it("should take the first colour of the config block's filament list", () => {
-    const gcode = `; CONFIG_BLOCK_START\n; filament_colour = #f5a623;#FFFFFF\n; CONFIG_BLOCK_END\n${fixtureGcode({ layers: 1 })}`;
-    expect(readPrinterFile(encode(gcode), 'gcode').filamentColor).toBe('#F5A623');
-    expect(readPrinterFile(writeBambuContainer({ gcode, modelName: 'fixture' }), 'container').filamentColor).toBe(
+describe('sliced filament colours', () => {
+  it("should read every colour of the config block's filament list in order, from a container or the G-code", () => {
+    const gcode = `; CONFIG_BLOCK_START\n; filament_colour = #f5a623;#FFFFFFFF\n; CONFIG_BLOCK_END\n${fixtureGcode({ layers: 1 })}`;
+    expect(readPrinterFile(encode(gcode), 'gcode').filamentColors).toEqual(['#F5A623', '#FFFFFF']);
+    expect(readPrinterFile(writeBambuContainer({ gcode, modelName: 'fixture' }), 'container').filamentColors).toEqual([
       '#F5A623',
-    );
-    expect(readPrinterFile(encode(fixtureGcode({ layers: 1 })), 'gcode').filamentColor).toBeUndefined();
+      '#FFFFFF',
+    ]);
+    const recorded = writeBambuContainer({
+      gcode: fixtureGcode({ layers: 1 }),
+      modelName: 'fixture',
+      filamentColors: ['#FF0000', '#0000FF'],
+    });
+    expect(readPrinterFile(recorded, 'container').filamentColors).toEqual(['#FF0000', '#0000FF']);
+  });
+
+  it('should record no colours when the file states none or one entry is not a colour', () => {
+    expect(readPrinterFile(encode(fixtureGcode({ layers: 1 })), 'gcode').filamentColors).toEqual([]);
+    const named = `; filament_colour = #FF0000;red\n${fixtureGcode({ layers: 1 })}`;
+    expect(readPrinterFile(encode(named), 'gcode').filamentColors).toEqual([]);
   });
 });

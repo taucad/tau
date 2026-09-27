@@ -94,7 +94,8 @@ const expectedMaterials = (configuration: unknown): readonly MaterialMapping[] =
  * The three confirmations every start asks for (coordinator ruling D12): the
  * plate is clear, the material is loaded, the nozzle matches. Read from the
  * request's submission configuration so an agent's request asks exactly what
- * it will send, falling back to what the machine reports.
+ * it will send, falling back to what the machine reports. Every mapped slot
+ * is named, by material: "PLA is loaded in A2 and A1".
  *
  * @param configuration - The submission configuration the request carries.
  * @param entry - The machine as observed.
@@ -114,12 +115,21 @@ export const describeStartConfirmations = (
     plateId === undefined
       ? undefined
       : (manifest?.bed.plates.find(({ id }) => id === plateId)?.label ?? `${plateId} plate`);
-  const material =
-    expectedMaterials(configuration)[0] ??
-    entry.snapshot.setup.materials.find(
-      (candidate): candidate is MaterialMapping & { state: 'loaded' } =>
-        candidate.state === 'loaded' && candidate.materialId !== undefined,
-    );
+  const listFormat = new Intl.ListFormat('en', { type: 'conjunction' });
+  const fallback = entry.snapshot.setup.materials.find(
+    (candidate): candidate is MaterialMapping & { state: 'loaded' } =>
+      candidate.state === 'loaded' && candidate.materialId !== undefined,
+  );
+  const expected = expectedMaterials(configuration);
+  const materials = expected.length > 0 ? expected : fallback === undefined ? [] : [fallback];
+  /* Slots by material, in the order the print names them. */
+  const slotsByMaterial = new Map<string, string[]>();
+  for (const { slot, materialId } of materials) {
+    slotsByMaterial.set(materialId, [...(slotsByMaterial.get(materialId) ?? []), materialSlotLabel(slot, manifest)]);
+  }
+  const loaded = [...slotsByMaterial].map(
+    ([materialId, slots], index) => `${materialId}${index === 0 ? ' is loaded' : ''} in ${listFormat.format(slots)}`,
+  );
   const nozzleRecord = record['expectedNozzleDiameter'];
   const nozzle =
     isRecord(nozzleRecord) && typeof nozzleRecord['value'] === 'number'
@@ -133,10 +143,7 @@ export const describeStartConfirmations = (
     },
     {
       id: 'material',
-      label:
-        material === undefined
-          ? 'The material this print expects is loaded'
-          : `${material.materialId} is loaded in ${materialSlotLabel(material.slot, manifest)}`,
+      label: loaded.length === 0 ? 'The material this print expects is loaded' : listFormat.format(loaded),
     },
     {
       id: 'nozzle',

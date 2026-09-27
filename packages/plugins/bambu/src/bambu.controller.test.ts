@@ -11,9 +11,11 @@ import { zipSync } from 'fflate';
 import { describe, expect, it, vi } from 'vitest';
 
 const report =
-  '{"print":{"sequence_id":"8","printer_type":"BL-P001","nozzle_diameter":"0.4","nozzle_temper":215,"nozzle_target_temper":220,"bed_temper":60,"bed_target_temper":65,"gcode_state":"RUNNING","mc_percent":42,"mc_remaining_time":3,"subtask_id":"run-1","subtask_name":"Cube","layer_num":12,"total_layer_num":120,"spd_lvl":2,"spd_mag":100,"cooling_fan_speed":"15","wifi_signal":"-47dBm","sdcard":true,"lights_report":[{"node":"chamber_light","mode":"on"}],"ams":{"tray_exist_bits":"1","tray_now":"0","tray_tar":"0","ams":[{"humidity":"3","temp":"22","tray":[{"tray_type":"PLA","tray_info_idx":"GFA00"},{},{},{}]}]}}}';
+  '{"print":{"sequence_id":"8","printer_type":"BL-P001","nozzle_diameter":"0.4","nozzle_temper":215,"nozzle_target_temper":220,"bed_temper":60,"bed_target_temper":65,"gcode_state":"RUNNING","mc_percent":42,"mc_remaining_time":3,"subtask_id":"run-1","subtask_name":"Cube","layer_num":12,"total_layer_num":120,"spd_lvl":2,"spd_mag":100,"stg_cur":1,"hms":[{"attr":201327360,"code":196619}],"cooling_fan_speed":"15","wifi_signal":"-47dBm","sdcard":true,"lights_report":[{"node":"chamber_light","mode":"on"}],"ams":{"tray_exist_bits":"1","tray_now":"0","tray_tar":"0","ams":[{"humidity":"3","temp":"22","tray":[{"tray_type":"PLA","tray_info_idx":"GFA00"},{},{},{}]}]}}}';
 const published = vi.hoisted((): string[] => []);
 const versionReply = vi.hoisted(() => ({ serial: '00M00A391800004' }));
+// The model the mocked printer's status reports; `BL-P001` is the X1C.
+const statusReply = vi.hoisted(() => ({ printerType: 'BL-P001' }));
 // How the mocked printer answers a start: an exact echo, or only its status naming the run by the id or name Tau sent.
 const startReply = vi.hoisted((): { mode: 'echo' | 'status-id' | 'status-name' } => ({ mode: 'echo' }));
 
@@ -106,7 +108,11 @@ vi.mock('mqtt', async () => {
           ),
         );
       } else {
-        this.#emit('message', topic.replace('/request', '/report'), Buffer.from(report));
+        this.#emit(
+          'message',
+          topic.replace('/request', '/report'),
+          Buffer.from(report.replace('BL-P001', statusReply.printerType)),
+        );
       }
       await Promise.resolve();
     }
@@ -281,9 +287,18 @@ describe('Bambu read-only controller', () => {
         name: 'Cube',
         currentLayer: 12,
         totalLayers: 120,
+        stage: 'Levelling the bed',
         speedProfile: 'standard',
         speedPercent: 100,
       },
+      alerts: [
+        {
+          code: '0C00-0300-0003-000B',
+          severity: 'warning',
+          message: "The printer's camera and AI inspection raised a warning.",
+          reference: 'https://wiki.bambulab.com/en/x1/troubleshooting/hmscode/0C00_0300_0003_000B',
+        },
+      ],
       setup: {
         materials: [
           { slot: 0, state: 'loaded', materialId: 'PLA', profileId: 'GFA00' },
@@ -414,6 +429,8 @@ describe('Bambu read-only controller', () => {
     });
     expect(completed).toMatchObject({ readiness: 'idle' });
     expect(completed).not.toHaveProperty('activeRunId');
+    // The printer may keep its last stage id after a run ends; a finished run shows no stage.
+    expect(completed.run).not.toHaveProperty('stage');
     expect(published).toEqual(
       expect.arrayContaining([
         expect.stringContaining(
@@ -594,5 +611,56 @@ describe('Bambu read-only controller', () => {
       ),
     ).rejects.toThrow('BAMBU_MQTT_CONNECT_FAILED');
     versionReply.serial = '00M00A391800004';
+  });
+
+  it('should offer stills only for an X1C whose host captures them over the pinned camera', async () => {
+    const captureNetworkStill: NonNullable<MachineConnectionRuntime['captureNetworkStill']> = vi.fn();
+    const connect = async (hostCaptures: boolean) =>
+      connectBambuMachine(
+        {
+          candidate,
+          configuration: { logicalId: 'workshop' },
+          connection: {
+            secretRef: 'vault:bambu-x1c',
+            serviceTrust: {
+              mqtt: { type: 'pinned', digest: pinnedDigest },
+              camera: { type: 'pinned', digest: pinnedDigest },
+            },
+          },
+          signal: new AbortController().signal,
+        },
+        {
+          clock: { now: () => '2026-09-14T00:00:00.000Z' },
+          log: vi.fn(async () => undefined),
+          connectStream: vi.fn(async () => ({
+            readable: (async function* () {
+              yield* [];
+            })(),
+            write: vi.fn(async () => undefined),
+            close: vi.fn(async () => undefined),
+          })),
+          async *readArtifact() {
+            yield* [];
+          },
+          resolveSecret: vi.fn(async () => 'access-code-must-not-escape'),
+          ...(hostCaptures ? { captureNetworkStill } : {}),
+        },
+      );
+    try {
+      // Another model's camera needs its own manifest and pin; the X1C's pinned camera service never reaches it.
+      statusReply.printerType = 'C12';
+      const other = await connect(true);
+      expect(other.stillCapture).toEqual({ type: 'unsupported' });
+      const descriptor = await other.getDescriptor({ signal: new AbortController().signal });
+      expect(descriptor.operations).not.toContain('still');
+      await other.close();
+      statusReply.printerType = 'BL-P001';
+      const withoutHostCapture = await connect(false);
+      expect(withoutHostCapture.stillCapture).toEqual({ type: 'unsupported' });
+      await withoutHostCapture.close();
+    } finally {
+      statusReply.printerType = 'BL-P001';
+    }
+    expect(captureNetworkStill).not.toHaveBeenCalled();
   });
 });

@@ -12,7 +12,6 @@ import {
   Vector2,
   Vector3,
   Raycaster,
-  Plane,
 } from 'three';
 import type { Material, Object3D } from 'three';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
@@ -34,6 +33,7 @@ import {
   shouldConsumeGuardedModelPointerClick,
 } from '#components/geometry/graphics/three/react/gltf-mesh.js';
 import { sceneTag } from '#components/geometry/graphics/three/utils/scene-tags.js';
+import { resolveSectionPieces } from '#components/geometry/graphics/section-cuts.js';
 import {
   getModelComponentOwner,
   setModelComponentOwner,
@@ -561,7 +561,7 @@ describe('model component BVH picking', () => {
         meshes: [frontMesh, rearMesh],
         clipping: {
           enabled: true,
-          planes: [new Plane(new Vector3(0, 0, -1), -1.5)],
+          pieces: resolveSectionPieces([{ id: 'cut', kind: 'plane', plane: 'xy', offset: -1.5, isFlipped: false }]),
         },
       }),
     ).toBe(firstComponentId);
@@ -577,7 +577,7 @@ describe('model component BVH picking', () => {
         meshes: [frontMesh, rearMesh],
         clipping: {
           enabled: true,
-          planes: [new Plane(new Vector3(0, 0, 1), 0.5)],
+          pieces: resolveSectionPieces([{ id: 'cut', kind: 'plane', plane: 'xy', offset: -0.5, isFlipped: true }]),
         },
       }),
     ).toBeUndefined();

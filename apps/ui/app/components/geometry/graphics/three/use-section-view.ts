@@ -1,61 +1,30 @@
 import { useMemo } from 'react';
-import type * as THREE from 'three';
 import type { RenderFrame } from '@taucad/spatial';
-import { toThreeRenderPlane } from '@taucad/three/spatial';
 import { useGraphicsSelector, useRenderFrame } from '#hooks/use-graphics.js';
 import type { GraphicsContext } from '#machines/graphics.machine.js';
 import type { RaycastClipState } from '#components/geometry/graphics/three/utils/bvh-raycast.js';
-import { resolveSectionViewPlane } from '#components/geometry/graphics/section-view-plane.js';
 import { resolveSectionPieces, toRenderSectionPieces } from '#components/geometry/graphics/section-cuts.js';
 import type { SectionPiece } from '#components/geometry/graphics/section-cuts.js';
 import type { SectionCutSet } from '#components/geometry/graphics/three/utils/section-view-safe-snapshot.js';
 
-/** The graphics context fields the section clipping plane is resolved from. */
-export type SectionViewPlaneContext = Pick<
-  GraphicsContext,
-  | 'selectedSectionViewId'
-  | 'availableSectionViews'
-  | 'sectionViewPivot'
-  | 'sectionViewRotation'
-  | 'sectionViewDirection'
->;
-
-const unselectedPlane = { pointMeters: [0, 0, 0], normal: [0, 0, 1] } as const;
-
-/** The render-space clipping plane of the selected section view, or the XY plane when none is selected. */
-export function resolveSectionViewRenderPlane(context: SectionViewPlaneContext, renderFrame: RenderFrame): THREE.Plane {
-  const selectedPlane = context.selectedSectionViewId
-    ? context.availableSectionViews.find((candidate) => candidate.id === context.selectedSectionViewId)
-    : undefined;
-  if (!selectedPlane) {
-    return toThreeRenderPlane({ renderFrame, plane: unselectedPlane });
-  }
-
-  const resolved = resolveSectionViewPlane({
-    baseNormal: selectedPlane.normal,
-    pivot: context.sectionViewPivot,
-    rotation: context.sectionViewRotation,
-    direction: context.sectionViewDirection,
-  });
-  return toThreeRenderPlane({
-    renderFrame,
-    plane: { pointMeters: resolved.point, normal: resolved.normal },
-  });
-}
-
 /**
- * The clipping a model raycast must respect, resolved from the graphics context when the raycast runs.
- * Callers read the context then instead of selecting the plane, so a section drag step re-renders none of them.
+ * The clipping a model raycast must respect: the committed cut list's pieces in the render frame while Section is on,
+ * the ones the clip draws, so a raycast agrees with the drawing while the caps certify a newer list. Callers resolve
+ * it from the graphics context when the raycast runs instead of selecting it, so a section drag step re-renders none
+ * of them.
  */
 export function resolveSectionViewRaycastClip(
-  context: SectionViewPlaneContext & Pick<GraphicsContext, 'isSectionViewActive' | 'enableClippingMesh'>,
+  context: Pick<GraphicsContext, 'isSectionViewActive' | 'committedSectionCuts'>,
   renderFrame: RenderFrame,
 ): RaycastClipState | undefined {
-  if (!context.isSectionViewActive || !context.selectedSectionViewId || !context.enableClippingMesh) {
+  if (!context.isSectionViewActive || context.committedSectionCuts.length === 0) {
     return undefined;
   }
 
-  return { enabled: true, planes: [resolveSectionViewRenderPlane(context, renderFrame)] };
+  return {
+    enabled: true,
+    pieces: toRenderSectionPieces(resolveSectionPieces(context.committedSectionCuts), renderFrame),
+  };
 }
 
 const noSectionPieces: readonly SectionPiece[] = [];

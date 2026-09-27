@@ -298,6 +298,20 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     match: 'root',
     directory: true,
   },
+  /* The per-device trash tombstone the project library mirrors to disk
+   * (`use-project-manager.tsx`). It answers exactly the reserved `.tau` default
+   * it fell to before; the row exists so the generated ignore file names it and
+   * stock Git stops listing it as untracked (R14 R7). */
+  {
+    prefix: '.tau/library.json',
+    class: 'records',
+    versioned: false,
+    agentAccess: 'hidden',
+    watch: 'ui',
+    anchored: true,
+    match: 'root',
+    directory: false,
+  },
   {
     prefix: 'exports',
     class: 'records',

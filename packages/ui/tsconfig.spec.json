@@ -9,6 +9,9 @@
     "lib": ["DOM", "DOM.Iterable", "ES2024"],
     "target": "ESNext",
     "paths": {
+      // Unlike package.json#imports (`#*.js` -> `./src/*.ts`), a path alias also finds the
+      // `.tsx` components behind `#components/*.js`. It applies to every file in this
+      // program, so a dependency compiled from source must not share a `#` subpath here.
       "#*": ["./src/*"]
     }
   },

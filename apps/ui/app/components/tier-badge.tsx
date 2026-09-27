@@ -5,16 +5,14 @@ import { Badge } from '@taucad/ui/components/badge';
 import { cn } from '@taucad/ui/utils/cn';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 
-const proBadgeClassName =
-  'h-4 border-blue/30 bg-blue/10 px-1 text-[10px] leading-none font-medium tracking-wide uppercase';
+const proBadgeClassName = 'h-4 px-1 text-[10px] leading-none font-medium tracking-wide uppercase';
 
 type ProBadgeProps = {
   readonly className?: string;
 };
 
 /**
- * Compact inline Pro marker using the blue ramp from `--color-blue`.
- * Intended for non-kernel surfaces (e.g. nav "Upgrade to Pro").
+ * Compact inline Pro marker. Every tier label shares this styling.
  */
 export function ProBadge({ className }: ProBadgeProps): React.JSX.Element {
   return <Badge className={cn(proBadgeClassName, className)}>Pro</Badge>;
@@ -49,12 +47,7 @@ export function TierBadge({ tier, className }: TierBadgeProps): React.JSX.Elemen
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Badge
-          className={cn(
-            'h-6 cursor-help border-blue/30 bg-blue/10 text-xs font-normal text-blue uppercase dark:text-blue/70',
-            className,
-          )}
-        >
+        <Badge className={cn(proBadgeClassName, 'cursor-help', className)}>
           {tier === 'pro' ? 'Pro' : 'Enterprise'}
         </Badge>
       </TooltipTrigger>

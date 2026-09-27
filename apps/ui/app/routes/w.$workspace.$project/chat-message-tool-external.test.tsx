@@ -541,6 +541,9 @@ describe('the external tool-call renderer', () => {
     expect(header).toHaveTextContent(/^Read skills cad-openscad, geospec-authoring$/u);
     await user.click(header);
     expect(screen.getByText(/\$ sed -n '1,240p'.*--- name: cad-openscad/u)).toBeVisible();
+    /* Each file read is linked, as an adapter-labelled read's locations are. */
+    expect(screen.getByText(/cad-openscad\/SKILL\.md$/u)).toBeVisible();
+    expect(screen.getByText(/geospec-authoring\/SKILL\.md$/u)).toBeVisible();
   });
 
   it('strips control and bidirectional-override characters from an agent-authored title', async () => {

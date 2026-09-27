@@ -23,7 +23,7 @@ import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths'
  *  1  starts in `resolving` and calls `prepare` with its attempt key
  *  2  a resolved placement writes the record first, naming the attempt and the
  *     head; `turnPrepared` and `leaseWritten` reach the parent (R1, RM-R12)
- *  3  a superseded epoch sends `leaseStale { runId }` to the parent (F13)
+ *  3  (deleted with the epoch sweep, W8 TS-S7)
  *  4  `prepare` failure → `refused` with the port's code and nothing to retire
  *  5  `writeLease` failure → `refused`
  *  6  the live-tree lease is held while acquiring and held, never after (F6)
@@ -114,7 +114,6 @@ const preparedOutput = {
   branch: 'main',
   baseRevisionId: 'rev-1',
   dirty: false,
-  staleRunIds: [],
 };
 
 const lease: TurnLease = {
@@ -124,7 +123,6 @@ const lease: TurnLease = {
   checkoutId: 'checkout-1',
   attempt: 0,
   headRevisionId: 'rev-1',
-  authorityEpoch: 'epoch-1',
   startedAt: 1,
 };
 
@@ -226,21 +224,6 @@ describe('turnMachine', () => {
       held: [other],
     });
     listing.actor.stop();
-  });
-
-  it('reports a superseded epoch as leaseStale to the parent', async () => {
-    const harness = start();
-    const { actor, promises, parent } = harness;
-
-    promises.settle('prepare', { output: { ...preparedOutput, staleRunIds: ['run-old', 'run-older'] } });
-    await flush();
-
-    expect(parent.events.filter((event) => event.type === 'leaseStale')).toEqual([
-      { type: 'leaseStale', runId: 'run-old' },
-      { type: 'leaseStale', runId: 'run-older' },
-    ]);
-
-    actor.stop();
   });
 
   it('refuses when prepare rejects, with no record to retire', async () => {

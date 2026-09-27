@@ -10,7 +10,7 @@ the code through the committed goldens `corpus/*.expected`:
   log/chat-ledger.ts         foldChatLedger, foldReadAnswer, reopens,
                              gateRows/gateCode, stampRows, the three tables → `Ledger.step`, `fold`, `foldRead`,
                                                                              `reopens`, `gateCode`, `stamp`, tables
-  host/tau-agent-host.ts     recordSettlement → appendRecords                → `hostSettle`
+  host/tau-agent-host.ts     appendChatRows (M1's append) of a settlement    → `hostSettle`
   log/segments.ts            mergeLogSegments (CL-R14)                        → `merge`
 
 Every list is in PHYSICAL (file) order. A row is the trace's `<term> <seq> <run> <kind> <arg> <ms> <epoch>
@@ -613,7 +613,7 @@ inductive Code where
   deriving DecidableEq, Repr
 
 inductive Cond where
-  | unadmitted | open_ | ended | settledOpen | settled | reopenable
+  | unadmitted | open_ | ended | settledOpen | settled | reopenable | pausedReopenable
   deriving DecidableEq, Repr
 
 inductive LOp where
@@ -639,6 +639,9 @@ def lifecycleTable : Cond → LOp → Code
   | .settled, _ => .runIdTaken
   | .reopenable, .running => .ok
   | .reopenable, _ => .runIdTaken
+  | .pausedReopenable, .running => .ok
+  | .pausedReopenable, .cancelled => .ok
+  | .pausedReopenable, _ => .runIdTaken
   | _, .admitted => .runIdTaken
   | _, _ => .ok
 
@@ -658,12 +661,18 @@ def settlementTable : AState → Code
   | .terminal => .ok
   | .settled => .settlementConflict
 
+/-- A settled reopenable run's state: a native pause with nothing pending may also be cancelled (V8). -/
+def reopenableCond (en : Entry) : Cond :=
+  match en.life with
+  | some .paused => .pausedReopenable
+  | _ => .reopenable
+
 /-- `lifecycleCondition`. -/
 def condition (en : Entry) : Cond :=
   if en.life.isNone then .unadmitted
   else if en.append ≠ .settled then (if attemptEnded en then .ended else .open_)
   else if !attemptEnded en then .settledOpen
-  else if reopenable en then .reopenable else .settled
+  else if reopenable en then reopenableCond en else .settled
 
 /-- `gateCode(ledger, row, invocations)`. -/
 def gateCode (L : Ledger) (e : Row) (invocations : Bool) : Code :=
@@ -721,8 +730,8 @@ inductive Settled where
   | skipped
   | refused (r : Refusal)
 
-/-- `recordSettlement` on a fresh host over the file: stamp (`e99`), gate `{invocations: false}`, drop an exact
-repeat, then append through the appender. -/
+/-- The host's `appendChatRows` (M1's append) of one settlement row under a new term: stamp (`e99`), gate
+`{invocations: false}`, drop an exact repeat, then append through the appender. -/
 def hostSettle (F : File) (run c : Nat) : Settled :=
   let A := openApp F
   let L := fold {} A.view

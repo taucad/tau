@@ -40,11 +40,7 @@ import { uiRuntimeConfigSchema } from '#runtime/ui-runtime.schema.js';
 import type { HeadlessImageService } from '#services/headless-image.service.js';
 import type { AppRuntimeClient } from '#types/runtime-client.alias.js';
 import { agentHostWorkerBuild } from '#workers/agent-host.contract.js';
-import type {
-  AgentHostProjectProvide,
-  AgentHostProjectRebridge,
-  AgentHostWorkerSettlementRecord,
-} from '#workers/agent-host.contract.js';
+import type { AgentHostProjectProvide, AgentHostProjectRebridge } from '#workers/agent-host.contract.js';
 import { closeProvidedPorts, createDisposers } from '#workers/agent-host-projects.js';
 import { createPortRevisionsClient } from '#workers/agent-host-revisions.js';
 import { createGeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js';
@@ -87,22 +83,23 @@ export type BrowserProjectHost = Readonly<{
   rebridge: (ports: AgentHostProjectRebridge) => Promise<void>;
   /** Serve no stream, and settle once every run this host admitted has ended, or `signal` ends (T3). */
   drain: (signal: AbortSignal) => Promise<void>;
-  /** Record one settlement through the chat's writer. ponytail: W8 deletes the verb (RH-S11). */
-  recordSettlement: (record: AgentHostWorkerSettlementRecord) => Promise<void>;
   /** Stop the launcher and every child, then dispose the bridges this host was given. */
   close: () => Promise<void>;
 }>;
 
 /**
- * T3: every run in `runIds` has ended; a paused run has too, since its pause survives a restart (RA-S7). Unlike the
- * desktop's drain it waits on no settlement: the page records that, and a released host has no page (W8 moves it).
+ * T3: every run in `runIds` has ended; a paused run has too, since its pause survives a restart (RA-S7). A placed run
+ * ends at its settlement row, which M1 appends after the terminal one (W8 TS-S6).
  */
 const runsEnded =
   (runIds: ReadonlySet<string>) =>
   (ledger: ChatLedger): boolean =>
     [...runIds].every((runId) => {
-      const lifecycle = ledger.runs[runId]?.lifecycle;
-      return lifecycle !== undefined && lifecycle !== 'admitted' && lifecycle !== 'running';
+      const entry = ledger.runs[runId];
+      if (entry === undefined || entry.lifecycle === 'admitted' || entry.lifecycle === 'running') {
+        return false;
+      }
+      return entry.lifecycle === 'paused' || entry.settlements.some((row) => row.attempt === entry.attempt);
     });
 
 /** How often the worker's agent channel sends `lk`, so the page's liveness bound can tell slow from dead (T9 E3). */
@@ -608,15 +605,14 @@ const composeProjectHost = async (
     };
   };
   /* W8 TS-S5: the placement session the page brokered into the file-manager worker for this project. */
-  const turnPlacement: TurnPlacementChannel | undefined =
-    provide.placementPort === undefined
-      ? undefined
-      : connectTurnPlacementChannel({
-          port: provide.placementPort,
-          projectId: provide.authority.projectId,
-          toolsFor: placedTools,
-        });
-  opened(() => turnPlacement?.close('project host failed to open'));
+  const turnPlacement: TurnPlacementChannel = connectTurnPlacementChannel({
+    port: provide.placementPort,
+    projectId: provide.authority.projectId,
+    toolsFor: placedTools,
+  });
+  opened(() => {
+    turnPlacement.close('project host failed to open');
+  });
   let cachedSkillFingerprint = '';
   let cachedSkills: Awaited<ReturnType<SkillResolver['getPromptSkillListing']>> = [];
   const opfs =
@@ -656,7 +652,7 @@ const composeProjectHost = async (
     model: provide.model,
     toolRegistry,
     ...(worker.delays === undefined ? {} : { delays: worker.delays }),
-    ...(turnPlacement === undefined ? {} : { turnPlacement }),
+    turnPlacement,
     clientContext: async () => {
       const discovered = await skillResolver.getPromptSkillListing();
       const fingerprint = JSON.stringify(
@@ -749,15 +745,15 @@ const composeProjectHost = async (
         await Promise.all(
           [...runs].map(async ([chatId, runIds]) => {
             // oxlint-disable-next-line no-empty-pattern -- only the follow's end matters.
-            for await (const {} of followChat(launcher.read, chatId, { signal, until: runsEnded(runIds) })) {
+            for await (const {} of followChat(launcher.read, chatId, {
+              signal,
+              until: runsEnded(runIds),
+            })) {
               /* Each batch moves the ledger; `until` ends the follow once the runs have ended. */
             }
           }),
         );
       }
-    },
-    recordSettlement: async ({ chatId, event }) => {
-      await launcher.append(chatId, event as Parameters<AgentLauncher['append']>[1]);
     },
     close: async () => {
       for (const channel of channels) {
@@ -774,7 +770,7 @@ const composeProjectHost = async (
       });
       imageService.dispose();
       revisions?.close();
-      turnPlacement?.close('project host closed');
+      turnPlacement.close('project host closed');
       runtimeClient.terminate();
       computeConnection?.dispose();
       fileSystem.dispose();

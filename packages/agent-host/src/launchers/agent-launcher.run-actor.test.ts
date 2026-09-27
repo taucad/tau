@@ -249,6 +249,8 @@ describe('the run actor on the daemon (W7)', () => {
     expect(answer).toMatchObject({ status: 'applied', effect: 'not-applied', details: { state: 'running' } });
   });
 
+  /* A native pause settles before the run rests (TS-R10), and its `cancelled` row is then legal: the settled pause is
+   * `paused-reopenable` (W8.a2 round 3, coordinator ruling). */
   it('should approve and cancel a durable pause after a restart', async () => {
     const root = await makeRoot();
     const first = makeLauncher(root, gateway(true).fetch);
@@ -291,9 +293,15 @@ describe('the run actor on the daemon (W7)', () => {
       type: 'interrupt',
       payload: { chatId: 'chat-held', runId: 'run-held', interruptId: 'int-1', kind: 'approval', prompt: 'Write?' },
     });
+    /* A native pause ends its attempt, which settles before the run rests (W8 TS-R10); a command in between waits. */
+    await until(root, 'chat-held', (rows) => rows.some((row) => row.type === 'turn.finalized'));
+    const resume = async (): Promise<Awaited<ReturnType<typeof execute>>> => {
+      const answer = await execute(launcher, { type: 'resume', payload: { chatId: 'chat-held', runId: 'run-held' } });
+      return answer.status === 'refused' && answer.code === 'CHAT_RUN_LIVE' ? resume() : answer;
+    };
 
     const resumed = await Promise.race([
-      execute(launcher, { type: 'resume', payload: { chatId: 'chat-held', runId: 'run-held' } }),
+      resume(),
       new Promise<'held'>((resolve) => {
         setTimeout(() => {
           resolve('held');

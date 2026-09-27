@@ -10,6 +10,7 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { fakePlacement } from '#host/tau-agent-host.fixture.js';
 import { createNodeLauncher } from '#launchers/node-launcher.fixture.js';
 import { createAgentLauncher, credentialPrincipal } from '#launchers/agent-launcher.js';
 import { chatStoreBinding, createChatStore } from '#launchers/chat-store.js';
@@ -486,6 +487,8 @@ describe('createAgentLauncher', () => {
     await other.close();
   });
 
+  /* The pause settled before the denial (TS-R10); the denial's `cancelled` row ends the settled pause, which is
+   * `paused-reopenable` (W8.a2 round 3, coordinator ruling). */
   it('records an approval as a durable interrupt and resolves it from a later caller', async () => {
     const host = await makeLauncher(stalledGateway({}));
     await start(host, { chatId: 'chat-2', runId: 'run-2' });
@@ -656,6 +659,7 @@ describe('createAgentLauncher', () => {
       systemPrompt: 'You are Tau.',
       model,
       toolRegistry: emptyTools,
+      turnPlacement: fakePlacement({ registry: emptyTools }).port,
     });
     const chatB = Promise.withResolvers<void>();
     const chatC = Promise.withResolvers<void>();
@@ -761,6 +765,7 @@ describe('createAgentLauncher', () => {
       systemPrompt: 'You are Tau.',
       model,
       toolRegistry: emptyTools,
+      turnPlacement: fakePlacement({ registry: emptyTools }).port,
     });
     const startOf = (runId: string, messageId: string) =>
       ({
@@ -829,6 +834,7 @@ describe('createAgentLauncher', () => {
       systemPrompt: 'You are Tau.',
       model,
       toolRegistry: emptyTools,
+      turnPlacement: fakePlacement({ registry: emptyTools }).port,
     });
 
     await expect(closing.close()).rejects.toThrow('The leadership port could not close.');
@@ -869,6 +875,7 @@ describe('createAgentLauncher', () => {
       systemPrompt: 'You are Tau.',
       model,
       toolRegistry: emptyTools,
+      turnPlacement: fakePlacement({ registry: emptyTools }).port,
     });
     const waiting = launcher.read({ chatId: 'chat-woken', cursor: 0, limit: 16, maxBytes: 1_048_576 });
     await reading.promise;
@@ -1034,13 +1041,33 @@ describe('createAgentLauncher', () => {
     const key = (chatId: string) => ({ chatId, turnId: 'user-1', runId: `run-${chatId}`, attempt: 1 });
     const turnPlacement: TurnPlacementPort = {
       admit: async ({ requestId }) => ({ requestId, status: 'refused', code: 'REVISIONS_UNAVAILABLE', message: 'No.' }),
-      complete: async ({ requestId }) => ({ requestId, status: 'applied' }),
+      complete: async ({ requestId, key: completed }) => {
+        for (const push of facts) {
+          push({
+            kind: 'settled',
+            key: completed,
+            row: {
+              type: 'turn.failed',
+              runId: completed.runId,
+              chatId: completed.chatId,
+              turnId: completed.turnId,
+              attempt: completed.attempt,
+              reason: 'The attempt was released.',
+              code: 'TURN_RELEASED',
+            },
+          });
+        }
+        return { requestId, status: 'applied' };
+      },
       abandon: async ({ requestId }) => ({ requestId, status: 'applied' }),
       acknowledge: async ({ requestId }) => ({ requestId, status: 'applied' }),
-      reconcile: async ({ requestId }) => ({
+      reconcile: async ({ requestId, chatId }) => ({
         requestId,
         status: 'applied',
-        held: [{ key: key('chat-held'), checkoutId: 'live' }],
+        held: [
+          { key: key('chat-held'), checkoutId: 'live' },
+          { key: key('chat-fact'), checkoutId: 'live' },
+        ].filter((held) => (chatId === undefined ? held.key.chatId === 'chat-held' : held.key.chatId === chatId)),
       }),
       settlements: ({ signal }) => ({
         [Symbol.asyncIterator]: async function* placementFacts(): AsyncGenerator<TurnPlacementFact> {
@@ -1080,9 +1107,10 @@ describe('createAgentLauncher', () => {
       fetch: scriptedGateway(),
       turnPlacement,
     });
+    /* Abandoned, then settled as the run's current attempt: its intent row names no command (TS-Q5). */
     const abandoned = async (logPath: string): Promise<boolean> => {
       const log = await readFile(logPath, 'utf8');
-      return log.includes('"state":"failed"');
+      return log.includes('"state":"failed"') && log.includes('"type":"turn.failed"');
     };
 
     await vi.waitFor(async () => {

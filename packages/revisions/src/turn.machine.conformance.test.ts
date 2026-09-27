@@ -105,7 +105,7 @@ describe('turn.machine conforms to TurnProtocol.tla', () => {
   it('should replay the covering suite without divergence', async () => {
     const behaviours = suiteBehaviours(graph, suite);
 
-    expect(behaviours).toHaveLength(77);
+    expect(behaviours).toHaveLength(75);
     expect(await replay(behaviours)).toEqual([]);
   });
 

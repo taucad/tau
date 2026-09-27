@@ -13,6 +13,7 @@ import { rootedProvider } from '#workers/test/rooted-provider.fixture.js';
 import {
   controlOf,
   disposeOpfsProject,
+  livePlacementPort,
   opfsProject,
   retireWorkers,
 } from '#workers/test/agent-host-resident.fixture.js';
@@ -145,6 +146,12 @@ it('runs a gateway turn in the dedicated launcher and commits its OPFS event log
   const clientOptions = {
     openFileSystemBridge: () => createFileSystemBridgePort(fileSystemProvider),
     openProjectRootBridge: () => createFileSystemBridgePort(rootedProvider(fileSystemProvider, providerBasePath)),
+    openPlacementPort: () =>
+      livePlacementPort(
+        rootedProvider(fileSystemProvider, providerBasePath),
+        providerBasePath,
+        createFileSystemBridgePort,
+      ),
     projectStorage: { projectId: providerBasePath, backend: 'opfs', providerBasePath },
     durability: 'exclusive-append',
     authority: { projectId: providerBasePath, workspaceId: providerBasePath },
@@ -245,6 +252,12 @@ it('refuses initialization when the persisted project root is missing', async ()
   const client = createBrowserAgentHostClient({
     openFileSystemBridge: () => createFileSystemBridgePort(fileSystemProvider),
     openProjectRootBridge: () => createFileSystemBridgePort(rootedProvider(fileSystemProvider, providerBasePath)),
+    openPlacementPort: () =>
+      livePlacementPort(
+        rootedProvider(fileSystemProvider, providerBasePath),
+        providerBasePath,
+        createFileSystemBridgePort,
+      ),
     projectStorage: { projectId: providerBasePath, backend: 'opfs', providerBasePath },
     durability: 'exclusive-append',
     authority: { projectId: providerBasePath, workspaceId: providerBasePath },
@@ -310,6 +323,12 @@ it('reclaims an abandoned transactional writer lock after winning attach takeove
   const client = createBrowserAgentHostClient({
     openFileSystemBridge: () => createFileSystemBridgePort(fileSystemProvider),
     openProjectRootBridge: () => createFileSystemBridgePort(rootedProvider(fileSystemProvider, providerBasePath)),
+    openPlacementPort: () =>
+      livePlacementPort(
+        rootedProvider(fileSystemProvider, providerBasePath),
+        providerBasePath,
+        createFileSystemBridgePort,
+      ),
     projectStorage: { projectId: providerBasePath, backend: 'indexeddb', providerBasePath },
     durability: 'transactional-rewrite',
     authority: { projectId: providerBasePath, workspaceId: providerBasePath },
@@ -345,6 +364,12 @@ it('records the run a dead leader left as abandoned, observed on the stream', as
   const clientOptions = {
     openFileSystemBridge: () => createFileSystemBridgePort(fileSystemProvider),
     openProjectRootBridge: () => createFileSystemBridgePort(rootedProvider(fileSystemProvider, providerBasePath)),
+    openPlacementPort: () =>
+      livePlacementPort(
+        rootedProvider(fileSystemProvider, providerBasePath),
+        providerBasePath,
+        createFileSystemBridgePort,
+      ),
     projectStorage: { projectId: providerBasePath, backend: 'indexeddb', providerBasePath },
     durability: 'transactional-rewrite',
     authority: { projectId: providerBasePath, workspaceId: providerBasePath },
@@ -473,6 +498,7 @@ it('runs the file tools over the one relayed workspace provider and refuses a no
     await initializeSession(sessionId, {
       fileSystemPort: createFileSystemBridgePort(workspace).port,
       projectRootPort: createFileSystemBridgePort(workspace).port,
+      placementPort: livePlacementPort(workspace, providerBasePath, createFileSystemBridgePort),
       projectStorage: { projectId: providerBasePath, backend: 'opfs', providerBasePath },
       authority: { projectId: providerBasePath, workspaceId: providerBasePath },
       gatewayBaseUrl: location.origin,
@@ -547,6 +573,7 @@ it('refuses a start that names an external agent instead of running it on Tau', 
     await initializeSession(sessionId, {
       fileSystemPort: createFileSystemBridgePort(workspace).port,
       projectRootPort: createFileSystemBridgePort(workspace).port,
+      placementPort: livePlacementPort(workspace, providerBasePath, createFileSystemBridgePort),
       projectStorage: { projectId: providerBasePath, backend: 'opfs', providerBasePath },
       authority: { projectId: providerBasePath, workspaceId: providerBasePath },
       gatewayBaseUrl: location.origin,
@@ -637,6 +664,7 @@ const initializeSeededSession = async (
     {
       fileSystemPort: createFileSystemBridgePort(workspace).port,
       projectRootPort: createFileSystemBridgePort(workspace).port,
+      placementPort: livePlacementPort(workspace, input.providerBasePath, createFileSystemBridgePort),
       projectStorage: {
         projectId: input.providerBasePath,
         backend: 'indexeddb',
@@ -1238,6 +1266,7 @@ it('should drop a queued reconcile request when the page is hidden and queue it 
       hostId: `host-${crypto.randomUUID()}`,
       fileSystemPort: createFileSystemBridgePort(workspace).port,
       projectRootPort: createFileSystemBridgePort(workspace).port,
+      placementPort: livePlacementPort(workspace, providerBasePath, createFileSystemBridgePort),
       projectStorage: { projectId: providerBasePath, backend: 'indexeddb', providerBasePath },
       authority: { projectId: providerBasePath, workspaceId: providerBasePath },
       gatewayBaseUrl: location.origin,
@@ -1384,6 +1413,7 @@ it('should offer the revisions tool on the browser host', async () => {
     await initializeSession(sessionId, {
       fileSystemPort: createFileSystemBridgePort(workspace).port,
       projectRootPort: createFileSystemBridgePort(workspace).port,
+      placementPort: livePlacementPort(workspace, providerBasePath, createFileSystemBridgePort),
       revisionsPort: revisions.port1,
       projectStorage: { projectId: providerBasePath, backend: 'indexeddb', providerBasePath },
       authority: { projectId: providerBasePath, workspaceId: providerBasePath },

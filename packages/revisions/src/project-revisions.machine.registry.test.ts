@@ -65,7 +65,6 @@ const start = () => {
             listCheckouts: stub('listCheckouts'),
             addCheckout: stub('addCheckout'),
             removeCheckout: stub('removeCheckout'),
-            sweepLeases: stub('sweepLeases'),
             retireLease: stub('retireRegistryLease'),
           },
         }),
@@ -137,7 +136,6 @@ type Harness = ReturnType<typeof start>;
 
 /** Bring the invoked `checkouts` child to `ready` through its own records. */
 const readyRegistry = async (harness: Harness, checkouts: readonly CheckoutRecord[]): Promise<void> => {
-  harness.promises.settle('sweepLeases', { output: { retiredRunIds: [] } });
   await flush();
   harness.promises.settle('listCheckouts', { output: { checkouts } });
   await flush();
@@ -193,7 +191,7 @@ describe('projectRevisionsMachine and its checkout registry', () => {
       checkoutId: 'checkout-live',
       leaseIds: ['run-9'],
     });
-    harness.actor.send({ type: 'leaseStale', runId: 'run-9' });
+    harness.actor.send({ type: 'acknowledge', key: { ...key, runId: 'run-9' } });
     await flush();
     harness.promises.settle('retireRegistryLease', { output: undefined });
     await flush();
@@ -226,14 +224,14 @@ describe('projectRevisionsMachine and its checkout registry', () => {
     const harness = start();
     await readyRegistry(harness, [live]);
 
-    harness.actor.send({ type: 'admitTurn', key, legacy: true });
+    harness.actor.send({ type: 'admitTurn', key });
     harness.promises.settle('prepare', {
-      output: { checkoutId: 'checkout-live', branch: 'main', baseRevisionId: undefined, dirty: false, staleRunIds: [] },
+      output: { checkoutId: 'checkout-live', branch: 'main', baseRevisionId: undefined, dirty: false },
     });
     await flush();
     harness.promises.settle('writeLease', {
       output: {
-        lease: { ...key, checkoutId: 'checkout-live', authorityEpoch: 'epoch-1', startedAt: 1 },
+        lease: { ...key, checkoutId: 'checkout-live', startedAt: 1 },
         leaseIds: ['run-1'],
         held: [],
       },
@@ -246,7 +244,9 @@ describe('projectRevisionsMachine and its checkout registry', () => {
     harness.promises.settle('merge', { output: { status: 'conflicted', conflictRevisionId: 'rev-conflict' } });
     await flush();
 
-    /* The legacy attempt is acknowledged by the root, so its record retires, then the registry drops it (RM-R10). */
+    /* The host acknowledges the settlement, so the record retires, then the registry drops it (RM-R10). */
+    harness.actor.send({ type: 'acknowledge', key });
+    await flush();
     harness.promises.settle('retireTurnLease', { output: undefined });
     await flush();
     expect(harness.emitted.map((event) => event.type)).toContain('turnConflicted');

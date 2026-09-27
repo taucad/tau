@@ -26,7 +26,8 @@
 (*                               find-or-cut, adoption (RM-R13, RM-R14)    *)
 (*   M1Host       FALSE | TRUE   the host is W8's M1: it completes only a  *)
 (*                               placed attempt, never releases after a    *)
-(*                               cut, and sends no epoch sweep (TS-R11).   *)
+(*                               cut (TS-R11). No host sweeps leases by   *)
+(*                               epoch (TS-S7), whatever this knob says.  *)
 (*                               FALSE with the other four TRUE is the     *)
 (*                               interim, while today's page and daemon    *)
 (*                               commands still drive the root.            *)
@@ -150,7 +151,7 @@ Init ==
 (* live-tree lease. LeaseFirst: prepare, lease record, live-tree lease,    *)
 (* base cut; every refusal then precedes the pre-mint or is its failure.   *)
 
-PrepareOk(dirty, stale) ==
+PrepareOk(dirty) ==
   /\ turn.phase = "resolving"
   /\ IF turn.releasing
        THEN /\ turn' = EndUnleased(turn, "released")
@@ -160,9 +161,8 @@ PrepareOk(dirty, stale) ==
             IN /\ turn' = [turn EXCEPT !.phase = IF base THEN "basing" ELSE "writingLease",
                                        !.base = "rev-1", !.dirty = dirty /\ LeaseFirst]
                /\ Strand({"prepare"}, [world EXCEPT !.cutOpen = base])
-               /\ Outputs(<<"turnPrepared">> \o (IF stale THEN <<"leaseStale">> ELSE <<>>)
-                                             \o (IF base THEN <<"cut">> ELSE <<>>))
-  /\ act' = <<"PrepareOk", dirty, stale>>
+               /\ Outputs(<<"turnPrepared">> \o (IF base THEN <<"cut">> ELSE <<>>))
+  /\ act' = <<"PrepareOk", dirty>>
 
 PrepareErr(c) ==
   /\ turn.phase = "resolving"
@@ -404,7 +404,7 @@ LateAnswer(k) ==
 -----------------------------------------------------------------------------
 
 Next ==
-  \/ \E dirty \in BOOLEAN, stale \in (IF M1Host THEN {FALSE} ELSE BOOLEAN) : PrepareOk(dirty, stale)
+  \/ \E dirty \in BOOLEAN : PrepareOk(dirty)
   \/ \E c \in PortCodes : PrepareErr(c) \/ WriteLeaseErr(c) \/ CaptureErr(c) \/ MergeErr(c)
   \/ \E k \in Answers : BaseAnswer(k) \/ CutAnswer(k) \/ LateAnswer(k)
   \/ BaseTimeout \/ CutTimeout \/ WriteLeaseOk \/ LeaseGranted \/ LeaseRefused
@@ -444,7 +444,7 @@ RetireOnlyWhatWasLeased ==
 NoOrphans == world.orphans = {}
 
 (* I22: once everything has settled, no lease file is left unless its     *)
-(* retirement failed (today R7 leaves it to `sweepLeases`, F13).          *)
+(* retirement failed (the next reconcile retires it, TS-S7).             *)
 NoUnretiredLease == Quiescent /\ world.leaseFile => world.retireFailed
 
 (* I22: no revision is minted for an attempt after it ended without one. *)

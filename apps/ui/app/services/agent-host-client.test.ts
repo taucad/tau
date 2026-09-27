@@ -13,17 +13,15 @@ import type { AgentLauncher } from '@taucad/agent-host/launcher';
 import { agentWireVersion } from '@taucad/agent-host/wire';
 import type { CommandAnswer, HostCommand, ReadAnswer, ReadInput } from '@taucad/agent-host/wire';
 import {
+  AgentHostWorkerError,
   createBrowserAgentHostClient,
   getBrowserAgentHostCapability,
   probeBrowserAgentHostCapability,
+  resendWhileSettling,
   residentAgentWorker,
 } from '#services/agent-host-client.js';
 import type { AgentHostWorkerProtocol } from '#workers/agent-host.contract.js';
-import {
-  agentHostSettlementRecordSchema,
-  agentHostWorkerProtocolSchemas,
-  parseAgentHostWorkerConnect,
-} from '#workers/agent-host.contract.js';
+import { agentHostWorkerProtocolSchemas, parseAgentHostWorkerConnect } from '#workers/agent-host.contract.js';
 
 type FakeRequest = { readonly name: string; readonly args: Record<string, unknown> };
 type ErrorListener = (event: ErrorEvent) => void;
@@ -310,6 +308,10 @@ class FakeResidentWorker {
   private async read(input: ReadInput): Promise<ReadAnswer> {
     const { signal, ...request } = input;
     this.requests.push({ name: 'read', args: request });
+    const failure = this.refusals.get('read');
+    if (failure) {
+      throw new Error(failure.message);
+    }
     const rowsOf = (): AgentLogEvent[] => this.rows.get(request.chatId) ?? [];
     const aborted = (): boolean => signal?.aborted === true;
     while (rowsOf().length <= request.cursor && !aborted()) {
@@ -407,6 +409,7 @@ const createTestClient = (
     systemPromptBlocks: promptBlocks(),
     openFileSystemBridge: openBridge,
     openProjectRootBridge: openBridge,
+    openPlacementPort: () => new MessageChannel().port1,
     createWorker,
     principal: async () => undefined,
     ...overrides,
@@ -482,6 +485,7 @@ describe('createBrowserAgentHostClient', () => {
           systemPromptBlocks: promptBlocks(),
           openFileSystemBridge,
           openProjectRootBridge,
+          openPlacementPort: () => undefined,
           model: { id: `${providerKind}-model`, providerKind, contextWindow: 200_000 },
           createWorker,
         }),
@@ -526,6 +530,7 @@ describe('createBrowserAgentHostClient', () => {
       },
     });
     expect(control[1]?.args['fileSystemPort']).toBeInstanceOf(MessagePort);
+    expect(control[1]?.args['placementPort']).toBeInstanceOf(MessagePort);
     expect(control[1]?.args['projectRootPort']).toBeInstanceOf(MessagePort);
     expect(openComputeStorePort).not.toHaveBeenCalled();
     const commands = worker.requests.filter(
@@ -580,6 +585,124 @@ describe('createBrowserAgentHostClient', () => {
     });
     const reads = worker.requests.filter((request) => request.name === 'read').map((request) => request.args);
     expect(reads.at(-1)).toEqual({ chatId: 'chat-bounds', cursor: 0, limit: 16, maxBytes: 1_048_576 });
+    await client.close();
+  });
+
+  /* W8 TS-S6: the transport's wait for a settlement row ends on this fact, never on a clock. */
+  it('should tell a follower its follow ended when a read fails, and not when it unsubscribes', async () => {
+    const worker = new FakeResidentWorker();
+    worker.refusals.set('read', { code: 'LEADERSHIP_LOST', message: 'Another tab leads this chat.' });
+    const client = createTestClient(workerOf(worker));
+    const ended = vi.fn();
+    client.subscribe({ chatId: 'chat-ended', cursor: 0 }, () => undefined, ended);
+
+    await vi.waitFor(() => {
+      expect(ended).toHaveBeenCalledOnce();
+    });
+
+    worker.refusals.delete('read');
+    const quiet = vi.fn();
+    const unsubscribe = client.subscribe({ chatId: 'chat-quiet', cursor: 0 }, () => undefined, quiet);
+    unsubscribe();
+    await client.close();
+    expect(quiet).not.toHaveBeenCalled();
+  });
+
+  /* W8.r1 item 6: a decision, a resume or a cancel refused while the previous attempt settles is retry class `wait`,
+   * re-sent until the host admits it; a live run's refusal is thrown at once. */
+  it.each([
+    ['resolve-interrupt', 'settling'],
+    ['resume', 'terminal'],
+    ['cancel', 'settling'],
+  ] as const)('should re-send a %s refused CHAT_RUN_LIVE{%s} until it is admitted', async (verb, state) => {
+    const worker = new FakeResidentWorker();
+    const client = createTestClient(workerOf(worker));
+    await client.start({ chatId: 'chat-1', runId: 'run-1', trigger: 'submit', message: 'Build.' });
+    worker.refusals.set(verb, {
+      code: 'CHAT_RUN_LIVE',
+      message: `Chat chat-1 has a ${state} run; send the command again after it ends.`,
+      details: { state, runId: 'run-1' },
+    });
+    const sent = (): number => worker.requests.filter((request) => request.name === verb).length;
+
+    const answered =
+      verb === 'resolve-interrupt'
+        ? client.resolveInterrupt('chat-1', 'run-1', { interruptId: 'interrupt-1', outcome: 'approved' })
+        : verb === 'resume'
+          ? client.resume('chat-1', 'run-1')
+          : client.cancel('run-1');
+    await vi.waitFor(() => {
+      expect(sent()).toBeGreaterThanOrEqual(3);
+    });
+    worker.refusals.delete(verb);
+
+    await expect(answered).resolves.toMatchObject({ chatId: 'chat-1' });
+    expect(sent()).toBeGreaterThanOrEqual(4);
+    await client.close();
+  });
+
+  /* W8.r1 round 5 (MU35): a stop during the back-off sends nothing more and rejects with the last refusal. */
+  it('should send nothing more once aborted during the settling back-off', async () => {
+    vi.useFakeTimers();
+    try {
+      const refusal = new AgentHostWorkerError('CHAT_RUN_LIVE', 'Chat chat-1 has a settling run.', {
+        state: 'settling',
+      });
+      const send = vi.fn(async (): Promise<string> => {
+        throw refusal;
+      });
+      const stop = new AbortController();
+
+      const answered = expect(resendWhileSettling(send, stop.signal)).rejects.toBe(refusal);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(send).toHaveBeenCalledOnce();
+      stop.abort();
+      await vi.advanceTimersByTimeAsync(1000);
+
+      await answered;
+      expect(send).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /* W8.r1 round 5 (MU36): the re-send stops at the 30 s settlement bound, with the last refusal. */
+  it('should give up re-sending at the 30 s settlement bound', async () => {
+    vi.useFakeTimers();
+    try {
+      const refusal = new AgentHostWorkerError('CHAT_RUN_LIVE', 'Chat chat-1 has a settling run.', {
+        state: 'settling',
+      });
+      const send = vi.fn(async (): Promise<string> => {
+        throw refusal;
+      });
+
+      const answered = expect(resendWhileSettling(send)).rejects.toBe(refusal);
+      await vi.advanceTimersByTimeAsync(29_000);
+      expect(send.mock.calls.length).toBeLessThan(124);
+      await vi.advanceTimersByTimeAsync(2000);
+
+      await answered;
+      /* 20, 40, 80 and 160 ms, then 250 ms until the next wait would pass 30 s. */
+      expect(send.mock.calls.length).toBeGreaterThanOrEqual(120);
+      expect(send.mock.calls.length).toBeLessThanOrEqual(125);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('should throw a CHAT_RUN_LIVE refusal naming a running run without re-sending it', async () => {
+    const worker = new FakeResidentWorker();
+    const client = createTestClient(workerOf(worker));
+    await client.start({ chatId: 'chat-1', runId: 'run-1', trigger: 'submit', message: 'Build.' });
+    worker.refusals.set('cancel', {
+      code: 'CHAT_RUN_LIVE',
+      message: 'Chat chat-1 has a running run; send the command again after it ends.',
+      details: { state: 'running', runId: 'run-1' },
+    });
+
+    await expect(client.cancel('run-1')).rejects.toMatchObject({ code: 'CHAT_RUN_LIVE' });
+    expect(worker.requests.filter((request) => request.name === 'cancel')).toHaveLength(1);
     await client.close();
   });
 
@@ -876,6 +999,20 @@ describe('releasing project hosts', () => {
   });
 });
 
+/* D13 (W8.r1 M1): a project host is provided only with its placement session, so no browser turn runs unplaced. */
+describe('the placement session', () => {
+  it('should refuse a start REVISIONS_UNAVAILABLE and provide nothing while the revision root has no placement port', async () => {
+    const worker = new FakeResidentWorker();
+    const client = createTestClient(workerOf(worker), { openPlacementPort: () => undefined });
+
+    await expect(
+      client.start({ chatId: 'chat-unplaced', runId: 'run-1', trigger: 'submit', message: 'Build.' }),
+    ).rejects.toMatchObject({ code: 'REVISIONS_UNAVAILABLE' });
+    expect(requestsNamed(worker, 'provide')).toEqual([]);
+    await client.close();
+  });
+});
+
 /* W11 GI-Q6 (W6.r1 finding 16): the browser host funds a turn for the signed-in account and knows which one. */
 describe('the funding principal', () => {
   it('should provide the signed-in account as the project host principal', async () => {
@@ -896,27 +1033,5 @@ describe('the funding principal', () => {
 
     expect(requestsNamed(worker, 'provide')[0]?.args).not.toHaveProperty('principal');
     await client.close();
-  });
-});
-
-describe('the browser worker settlement contract', () => {
-  /* A failed turn names why with a code as well as a sentence (blueprint P4);
-     the settlement schema is strict, so a field it does not know refuses the
-     whole durable write — and a refused settlement is a turn that never
-     settles. */
-  it('accepts a failed-turn settlement that carries its code', () => {
-    const settlement = {
-      chatId: 'chat-1',
-      event: {
-        type: 'turn.failed',
-        turnId: 'turn-1',
-        runId: 'run-1',
-        chatId: 'chat-1',
-        reason: 'The checkout did not settle the cut in time.',
-        code: 'CUT_TIMED_OUT',
-      },
-    };
-
-    expect(agentHostSettlementRecordSchema.safeParse(settlement)).toMatchObject({ success: true });
   });
 });

@@ -17,12 +17,14 @@
  * held (which is now the machines') and minus branch-per-chat placement, which
  * is gone (D7/I18: a turn attaches to a checkout, it never creates one).
  *
- * **A turn is never rehydrated from disk.** `.tau/runs/<runId>.json` is a lease
- * record, not a resumable turn: a host that died mid-turn leaves an orphan, and
- * {@link RevisionActors.checkouts}' `sweepLeases` retires it against the
- * authority epoch on the next open (F13, R15).
+ * **A lease record is the index of unsettled attempts.** `.tau/runs/<runId>.json`
+ * names one attempt; it retires only on `acknowledge`, after the host appended
+ * the attempt's settlement row. A host that died mid-turn leaves the record,
+ * and the next leader of its chat reconciles it: a root adopts it into a new
+ * turn actor (RM-R14), never an epoch sweep (W8 TS-S7, TS-R13).
  */
 
+import { ResourceQueue } from '@taucad/filesystem';
 import type { PathPolicy, RootedFileSystem } from '@taucad/filesystem';
 import { randomUuid } from '@taucad/utils/id';
 import { walk } from '@taucad/filesystem/content-ops';
@@ -79,12 +81,7 @@ import type {
   BranchMergeActorOutput,
   BranchRenameActorOutput,
 } from '#branch.machine.js';
-import type {
-  AddCheckoutActorOutput,
-  CheckoutsActors,
-  ListCheckoutsActorOutput,
-  SweepLeasesActorOutput,
-} from '#checkouts.machine.js';
+import type { AddCheckoutActorOutput, CheckoutsActors, ListCheckoutsActorOutput } from '#checkouts.machine.js';
 import { chatIdOfRef, chatRefName, chatRefPrefix, projectChats } from '#chat-ref.js';
 import { LfsQuotaError } from '#lfs-client.js';
 import { cleanLargeObjects } from '#lfs.js';
@@ -394,14 +391,6 @@ export type RevisionActorsOptions = Readonly<{
   useFileSystem?: UseCheckoutFileSystem;
   projectId: string;
   /**
-   * The authority this host holds the project under.
-   *
-   * A lease written under any other epoch belongs to a process that no longer
-   * owns this project, so it is stale and `sweepLeases` retires it. W19 moves
-   * the value under `project-session`; until then a host mints one per process.
-   */
-  authorityEpoch: string;
-  /**
    * Timers and time for the whole tree (MC-R4): the actors' timers run on it, and
    * its `now()` (milliseconds since the Unix epoch) stamps what this host mints,
    * falling back to `Date.now`. Each root takes its own clock.
@@ -571,6 +560,40 @@ export type RevisionActors = Readonly<{
    * has to wait for this first.
    */
   settled: () => Promise<void>;
+  /** The store reads the turn-placement adapter makes beside the root (W8 TS-S3). */
+  turns: TurnStore;
+  /** Free this root's liveness mark (RM-R8 narrowed); {@link createProjectRevisionsActor} calls it when the root stops. */
+  release: () => void;
+}>;
+
+/**
+ * What one project's turn-placement adapter reads from the store beside its root (W8 TS-S3).
+ *
+ * The root drives the attempts; these are the reads it does not expose: the lease directory, a checkout's files, and a
+ * finalized settlement's graph facts. It also holds the per-record section in which a root takes over another root's
+ * record (RM-R8 narrowed).
+ *
+ * @public
+ */
+export type TurnStore = Readonly<{
+  /** Every lease record in `.tau/runs`, read now, never from a cached list (TS-R17). */
+  leases: () => Promise<readonly TurnLease[]>;
+  /** One checkout and its files, or `undefined` when the project has no checkout with that id. */
+  open: (checkoutId: string) => Promise<Readonly<{ checkout: Checkout; filesystem: RevisionFileSystem }> | undefined>;
+  /** A finalized settlement shaped for the wire, as {@link describeTurnSettlement} does. */
+  describe: (settlement: TurnSettlement) => Promise<TurnFinalizedEvent>;
+  /**
+   * Make this root the holder of the run's record before it adopts it (RM-R14): `held` while another root's liveness
+   * mark is held, and nothing changes. A missing record, or one this root holds, is `free`.
+   */
+  claim: (runId: string) => Promise<'free' | 'held'>;
+  /**
+   * Delete the record naming this attempt, for an acknowledge with no actor (TS-R5): `held` while another root's mark
+   * is held, `absent` when no record names the attempt. A record written before W5 names every attempt of its run.
+   */
+  retire: (key: TurnAttemptKey) => Promise<'retired' | 'absent' | 'held'>;
+  /** Resolves once the root that holds the run's record has stopped; at once when none does. */
+  holderReleased: (runId: string, signal: AbortSignal) => Promise<void>;
 }>;
 
 /**
@@ -583,6 +606,21 @@ type ChosenSide = Readonly<{ side: ResolutionSide; content?: Uint8Array<ArrayBuf
 
 /** Where leases live, relative to the project. A `records` row in the registry. */
 const leaseDirectory = '.tau/runs';
+
+/*
+ * RM-R8 narrowed: the Web Lock manager that holds each root's liveness mark and each record's section. Node 24 has one
+ * per process, which is all a Node root needs: host and root share the process (TS-S4), and another process reaches a
+ * chat's attempts only through that chat's kernel writer lock (EQ2), which the holder's process keeps until they
+ * settle and the kernel frees only when that process, root included, dies.
+ */
+const lockManager = (): LockManager | undefined =>
+  (globalThis as { navigator?: { locks?: LockManager } }).navigator?.locks;
+/* ponytail: where the runtime has no lock manager (jsdom tests, or a browser page in an insecure context, where
+ * `navigator.locks` is undefined), the marks and sections are this module's own, which is exact only for roots in one
+ * realm: another tab's root then cannot see this mark (W8.r1 L-E). Managers are per runtime family, so a browser-realm
+ * host and a Node host serving the same store do not exclude each other either; one store has one host family (W6). */
+const heldMarks = new Map<string, Promise<void>>();
+const recordSections = new ResourceQueue();
 /** The trunk: a project's live tree starts on it and a turn records onto it. */
 const mainBranch = 'main';
 /** Identity every revision this host records is committed under. */
@@ -625,7 +663,6 @@ export { revisionTreeId } from '#git-tree-id.js';
  * const actors = createRevisionActors({
  *   port: createNativeGitRevisionPort({ repositoryPath: '/srv/project' }),
  *   projectId: 'project-1',
- *   authorityEpoch: 'epoch-1',
  *   filesystem: (checkout) => new NodeFsProvider(checkout.root),
  * });
  * const restore = createActor(restoreMachine.provide({ actors: actors.restore }), {
@@ -636,7 +673,7 @@ export { revisionTreeId } from '#git-tree-id.js';
  */
 // oxlint-disable-next-line eslint/max-lines-per-function -- one closure over one project's port; splitting it would thread the same six values through every half.
 export const createRevisionActors = (options: RevisionActorsOptions): RevisionActors => {
-  const { port, filesystem, projectId, authorityEpoch } = options;
+  const { port, filesystem, projectId } = options;
   const policy = options.policy ?? tauRevisionPolicy.policy;
   const useFileSystem: UseCheckoutFileSystem =
     options.useFileSystem ?? (async (checkout, operation) => operation(await filesystem(checkout)));
@@ -1238,19 +1275,19 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         try {
           const stored: unknown = JSON.parse(await records.readFile(`${leaseDirectory}/${name}`, 'utf8'));
           // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- validated field by field below.
-          const lease = stored as Partial<TurnLease> & Readonly<{ baseRevisionId?: string }>;
-          if (typeof lease.runId !== 'string' || typeof lease.authorityEpoch !== 'string') {
+          const lease = stored as Partial<TurnLease> & Readonly<{ baseRevisionId?: string; authorityEpoch?: unknown }>;
+          if (typeof lease.runId !== 'string') {
             return [];
           }
-          /* A record written before W5 names no attempt (read as 0) and calls its head `baseRevisionId` (W8 TS-Q5). */
-          const { baseRevisionId, ...rest } = lease;
+          /* A record written before W5 names no attempt (read as 0) and calls its head `baseRevisionId` (W8 TS-Q5); one
+           * written before W8 still carries the retired `authorityEpoch`, which nothing reads. */
+          const { baseRevisionId, authorityEpoch: _retired, ...rest } = lease;
           const headRevisionId = lease.headRevisionId ?? baseRevisionId;
           return [
             // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the two required fields are checked above; the rest are the record's own.
             Object.freeze({
               ...rest,
               runId: lease.runId,
-              authorityEpoch: lease.authorityEpoch,
               attempt: typeof lease.attempt === 'number' ? lease.attempt : 0,
               ...(headRevisionId === undefined ? {} : { headRevisionId }),
             } as TurnLease),
@@ -1269,16 +1306,21 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    * counts as retired.
    */
   const retireAttempt = async (key: TurnAttemptKey): Promise<void> => {
-    const leases = await readLeases();
-    const record = leases.find((lease) => lease.runId === key.runId);
-    if (
-      record !== undefined &&
-      (record.attempt !== key.attempt || record.turnId !== key.turnId || record.chatId !== key.chatId)
-    ) {
+    const record = await leaseOf(key.runId);
+    if (record !== undefined && !namesAttempt(record, key)) {
       return;
     }
     await dropLease(key.runId);
   };
+  const leaseOf = async (runId: string): Promise<TurnLease | undefined> => {
+    const leases = await readLeases();
+    return leases.find((lease) => lease.runId === runId);
+  };
+  /* A record written before W5 reads as attempt 0 and names every attempt of its run (TS-Q5). */
+  const namesAttempt = (record: TurnLease, key: TurnAttemptKey): boolean =>
+    (record.attempt === 0 || record.attempt === key.attempt) &&
+    record.turnId === key.turnId &&
+    record.chatId === key.chatId;
 
   /* Delete one lease. Retiring one that is already gone resolves (R17). */
   const dropLease = async (runId: string): Promise<void> => {
@@ -1289,6 +1331,70 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       /* A lease that was never written, or that another pass already retired,
        * is exactly the state the caller wanted. */
     }
+  };
+
+  /*
+   * RM-R8 narrowed (W8 H1): this root's liveness mark, taken before its first lease write and held until the root
+   * stops. A record names its holder; another root adopts or retires it only inside the record's section, and only
+   * while the holder's mark is free.
+   */
+  const rootInstanceId = `root_${randomUuid()}`;
+  const markOf = (holder: string): string => `tau:revisions-root:${projectId}:${holder}`;
+  const rootStopped = Promise.withResolvers<void>();
+  const takeMark = async (): Promise<void> => {
+    const name = markOf(rootInstanceId);
+    heldMarks.set(name, rootStopped.promise);
+    const locks = lockManager();
+    if (locks === undefined) {
+      return;
+    }
+    const taken = Promise.withResolvers<void>();
+    /* Never stolen; the browser frees it when the realm holding the root ends. A refused request leaves the in-process
+     * mark, which is all this realm can offer. */
+    const hold = async (): Promise<void> => {
+      try {
+        await locks.request(name, async () => {
+          taken.resolve();
+          await rootStopped.promise;
+        });
+      } catch {
+        /* See above. */
+      } finally {
+        taken.resolve();
+      }
+    };
+    void hold();
+    await taken.promise;
+  };
+  let marked: Promise<void> | undefined;
+  const holdMark = async (): Promise<void> => {
+    marked ??= takeMark();
+    await marked;
+  };
+  const markFree = async (holder: string | undefined): Promise<boolean> => {
+    if (holder === undefined || holder === rootInstanceId) {
+      return true;
+    }
+    const name = markOf(holder);
+    const locks = lockManager();
+    return locks === undefined
+      ? !heldMarks.has(name)
+      : locks.request(name, { ifAvailable: true }, (lock) => lock !== null);
+  };
+  const inRecordSection = async <T>(runId: string, operation: () => Promise<T>): Promise<T> => {
+    const name = `tau:revisions-lease:${projectId}:${runId}`;
+    return recordSections.queueFor(name, async () => {
+      const locks = lockManager();
+      return locks === undefined ? operation() : locks.request(name, async () => operation());
+    });
+  };
+  const writeLeaseRecord = async (lease: TurnLease): Promise<void> => {
+    const records = await recordsFileSystem();
+    await records.writeFile(leasePathOf(lease.runId), `${JSON.stringify(lease, undefined, 2)}\n`);
+  };
+  const releaseMark = (): void => {
+    heldMarks.delete(markOf(rootInstanceId));
+    rootStopped.resolve();
   };
 
   /**
@@ -1554,6 +1660,52 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
 
   return {
     settled,
+    turns: {
+      leases: readLeases,
+      open: async (checkoutId) => {
+        const places = await listPlaces();
+        const checkout = places.find((candidate) => candidate.id === checkoutId);
+        return checkout === undefined ? undefined : { checkout, filesystem: await filesystem(checkout) };
+      },
+      describe: async (settlement) => describeTurnSettlement(port, projectId, settlement),
+      claim: async (runId) =>
+        inRecordSection(runId, async () => {
+          const record = await leaseOf(runId);
+          if (record === undefined || record.holder === rootInstanceId) {
+            return 'free';
+          }
+          if (!(await markFree(record.holder))) {
+            return 'held';
+          }
+          /* Re-stamped in the same section, so a third root probes this one's mark from here on. */
+          await holdMark();
+          await writeLeaseRecord(Object.freeze({ ...record, holder: rootInstanceId }));
+          return 'free';
+        }),
+      retire: async (key) =>
+        inRecordSection(key.runId, async () => {
+          const record = await leaseOf(key.runId);
+          if (record === undefined || !namesAttempt(record, key)) {
+            return 'absent';
+          }
+          if (!(await markFree(record.holder))) {
+            return 'held';
+          }
+          await dropLease(key.runId);
+          return 'retired';
+        }),
+      holderReleased: async (runId, signal) => {
+        const lease = await leaseOf(runId);
+        const holder = lease?.holder;
+        if (holder === undefined || holder === rootInstanceId) {
+          return;
+        }
+        const name = markOf(holder);
+        const locks = lockManager();
+        await (locks === undefined ? heldMarks.get(name) : locks.request(name, { signal }, () => undefined));
+      },
+    },
+    release: releaseMark,
     checkout: {
       cut: fromAuthorityPromise<CheckoutCutActorOutput, CheckoutCutActorInput>(async ({ input }) => {
         const place = await placeOf(input.checkoutId);
@@ -1702,12 +1854,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           const format = await formatOf();
           const dirty =
             headTreeId === undefined ? tree.size > 0 : headTreeId !== revisionTreeId(await recordedTree(tree), format);
-          const leases = await readLeases();
-          const staleRunIds = leases
-            .filter((lease) => lease.authorityEpoch !== authorityEpoch)
-            .map((lease) => lease.runId);
           options.onPlacement?.({ turnId, chatId, runId, status: 'placed', checkout: place, baseRevisionId });
-          return { checkoutId: place.id, branch, baseRevisionId, dirty, staleRunIds };
+          return { checkoutId: place.id, branch, baseRevisionId, dirty };
         } catch (error) {
           /* A turn a host could not place is refused, never run unrecorded
            * (I-EDIT); the host learns here, because a `turn` that never
@@ -1726,7 +1874,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       /* RM-R12: the record, naming the attempt and the head read inside the fence, before any mint of the attempt. */
       writeLease: fromAuthorityPromise<TurnWriteLeaseActorOutput, TurnWriteLeaseActorInput>(async ({ input }) =>
         withCheckoutFence(input.checkoutId, async () => {
-          const records = await recordsFileSystem();
+          /* RM-R8 narrowed: the mark before the first record that names this root. */
+          await holdMark();
           const headRevisionId = await headOf(await placeOf(input.checkoutId));
           const lease: TurnLease = Object.freeze({
             runId: input.key.runId,
@@ -1735,10 +1884,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             checkoutId: input.checkoutId,
             attempt: input.key.attempt,
             ...(headRevisionId === undefined ? {} : { headRevisionId }),
-            authorityEpoch,
             startedAt: now(),
+            holder: rootInstanceId,
           });
-          await records.writeFile(leasePathOf(input.key.runId), `${JSON.stringify(lease, undefined, 2)}\n`);
+          await writeLeaseRecord(lease);
           /* Every lease on this checkout, this attempt's first: the provenance
            * set (AC9), never a retirement list. The others are announced as
            * `leaseHeld` (RM-R16). */
@@ -1939,17 +2088,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         swept.delete(input.id);
       }),
 
-      /* F13: a lease from a superseded epoch belongs to a process that no longer
-       * owns this project — a crashed daemon, a previous window — and is retired
-       * on open. A live turn is never rehydrated from one. */
-      sweepLeases: fromAuthorityPromise<SweepLeasesActorOutput, Readonly<{ projectId: string }>>(async () => {
-        const leases = await readLeases();
-        const stale = leases.filter((lease) => lease.authorityEpoch !== authorityEpoch);
-        await Promise.all(stale.map(async (lease) => dropLease(lease.runId)));
-        return { retiredRunIds: stale.map((lease) => lease.runId) };
-      }),
-
-      /* A turn's retirement names its attempt and is checked like the turn's own; a stale sweep's names only the run. */
+      /* A turn's retirement names its attempt and is checked like the turn's own; a run-only one drops the record. */
       retireLease: fromAuthorityPromise<void, Readonly<{ projectId: string; runId: string; key?: TurnAttemptKey }>>(
         async ({ input }) => {
           await (input.key === undefined ? dropLease(input.runId) : retireAttempt(input.key));
@@ -3058,6 +3197,20 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   };
 };
 
+/**
+ * One project's running revision actor tree, as {@link createProjectRevisionsActor} returns it.
+ *
+ * @public
+ */
+export type ProjectRevisions = Readonly<{
+  /** The root, unstarted. */
+  actor: ProjectRevisionsActor;
+  /** Resolves once nothing the tree started is still writing to the project. */
+  settled: () => Promise<void>;
+  /** The store reads a turn-placement adapter makes beside the root (W8 TS-S3). */
+  turns: TurnStore;
+}>;
+
 /** Options for one project's running revision actor tree. @public */
 export type ProjectRevisionActorOptions = RevisionActorsOptions &
   Pick<ActorOptions<AnyActorLogic>, 'inspect' | 'onRejectedEvent'> &
@@ -3084,8 +3237,9 @@ export type ProjectRevisionActorOptions = RevisionActorsOptions &
  * @param options - The same dependencies {@link createRevisionActors} takes, plus the
  *   tree's `inspect` and `onRejectedEvent`. Production passes neither; tests pass the
  *   harness (MC-R4).
- * @returns The root actor, ready to `start()`, and the `settled` wait a caller
- *   owes the project after it stops that actor.
+ * @returns The root actor, ready to `start()`, the `settled` wait a caller
+ *   owes the project after it stops that actor, and the store reads a
+ *   turn-placement adapter needs (`turns`).
  * @public
  *
  * @example <caption>Serve one project on a disk host</caption>
@@ -3097,16 +3251,13 @@ export type ProjectRevisionActorOptions = RevisionActorsOptions &
  * const { actor } = createProjectRevisionsActor({
  *   port: createNativeGitRevisionPort({ repositoryPath: '/srv/project' }),
  *   projectId: 'project-1',
- *   authorityEpoch: 'epoch-1',
  *   filesystem: () => new NodeFsProvider('/srv/project'),
  * });
  * actor.start();
  * actor.send({ type: 'admitTurn', key: { chatId: 'chat-1', turnId: 'turn-1', runId: 'run-1', attempt: 0 } });
  * ```
  */
-export const createProjectRevisionsActor = (
-  options: ProjectRevisionActorOptions,
-): Readonly<{ actor: ProjectRevisionsActor; settled: () => Promise<void> }> => {
+export const createProjectRevisionsActor = (options: ProjectRevisionActorOptions): ProjectRevisions => {
   const actors = createRevisionActors(options);
   const actor = createActor(
     projectRevisionsMachine.provide({
@@ -3146,21 +3297,21 @@ export const createProjectRevisionsActor = (
       reason: event.reason,
     });
   });
-  return { actor, settled: actors.settled };
+  /* RM-R8 narrowed: the root's liveness mark lives as long as the root and every write it started (W8.r1 L-D). */
+  const releaseAfterWrites = async (): Promise<void> => {
+    try {
+      await actors.settled();
+    } finally {
+      actors.release();
+    }
+  };
+  const releaseSettled = (): void => {
+    // async-iife: bootstrap -- the stop is synchronous and nothing awaits it; `settled` never rejects.
+    void releaseAfterWrites();
+  };
+  actor.subscribe({ complete: releaseSettled, error: releaseSettled });
+  return { actor, settled: actors.settled, turns: actors.turns };
 };
-
-/**
- * How long an admission waits for its turn to take its lease.
- *
- * The same bound the turn machine gives its own cut (`turnCutSettlementMilliseconds`),
- * spelled here rather than imported because it is the *host's* patience: a turn
- * whose base mint never settles must refuse the run rather than hold the client
- * open for the life of the process. Both compositions read this one value
- * (W10.5) — they had a copy each, and a bound kept in two places is a bound.
- *
- * @public
- */
-export const admissionMilliseconds = 30_000;
 
 /**
  * How long a host waits for the scheduler before it lets a project go.

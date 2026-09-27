@@ -17,9 +17,8 @@ import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths'
 /*
  * Path table — `checkouts.machine` (catalogue: 22).
  *
- *  1  `open` sweeps stale leases, then rehydrates the registry from records
- *  2  a sweep that retired runs announces `leaseRetired` for each
- *  3  `sweepLeases` failure → `failed`
+ *  1  `open` rehydrates the registry from records and retires no lease
+ *     (W8 TS-S7 deleted the epoch sweep and its rows 2, 3 and 13)
  *  4  `listCheckouts` failure → `failed`
  *  5  `failed` accepts `open` again
  *  6  `addCheckout` appends a checkout, announces the new registry and answers
@@ -31,7 +30,6 @@ import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths'
  * 10  a checkout a lease holds is never removed (A25/I9)
  * 11  `removeCheckout` failure answers `checkoutFailed` by id
  * 12  `turnEnded` retires the lease without removing the checkout (D17, RM-R10)
- * 13  `leaseStale { runId }` retires that lease
  * 14  two retirements in one burst are both served
  * 15  `leaseWritten { checkoutId, runId }` appends the lease and re-announces,
  *     arming the D10 switch guard and the A25/I9 removal guard (R1)
@@ -46,8 +44,7 @@ import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths'
  *     finished loading still retires its lease (R30)
  * 21  an add or remove that arrives while the registry is busy, still opening or
  *     failed is queued and answered by id — never dropped (RM-R11)
- * 22  a reopen while sweeping is served by the load that follows; a reopen while
- *     loading reads again
+ * 22  a reopen while loading reads again
  * --  a removable record offers removal; `open` rehydrates from records again;
  *     start and stop, serializable snapshot, one exported machine value
  */
@@ -95,7 +92,6 @@ const start = (): Harness => {
         listCheckouts: promises.actor('listCheckouts'),
         addCheckout: promises.actor('addCheckout'),
         removeCheckout: promises.actor('removeCheckout'),
-        sweepLeases: promises.actor('sweepLeases'),
         retireLease: promises.actor('retireLease'),
       },
     }),
@@ -107,12 +103,8 @@ const start = (): Harness => {
 };
 
 /** Open the registry with the two default records. */
-const toReady = async (
-  harness: Harness,
-  options?: Readonly<{ retired?: readonly string[]; checkouts?: readonly unknown[] }>,
-): Promise<void> => {
+const toReady = async (harness: Harness, options?: Readonly<{ checkouts?: readonly unknown[] }>): Promise<void> => {
   harness.actor.send({ type: 'open' });
-  harness.promises.settle('sweepLeases', { output: { retiredRunIds: options?.retired ?? [] } });
   await flush();
   harness.promises.settle('listCheckouts', { output: { checkouts: options?.checkouts ?? [live, linked] } });
   await flush();
@@ -123,17 +115,14 @@ const keyOf = (runId: string): TurnAttemptKey => ({ chatId: 'chat-1', turnId: 't
 const types = (events: ReadonlyArray<{ type: string }>): readonly string[] => events.map((event) => event.type);
 
 describe('checkoutsMachine', () => {
-  it('sweeps leases then rehydrates the registry from records', async () => {
+  /* W8 TS-S7: no epoch sweep; a lease retires only on `acknowledge`, after its settlement row (I25). */
+  it('rehydrates the registry from records on open, and retires no lease', async () => {
     const harness = start();
     const { actor, promises, parent } = harness;
 
     actor.send({ type: 'open' });
-    expect(actor.getSnapshot().matches('recovering')).toBe(true);
-    expect(promises.inputsFor('sweepLeases')).toEqual([{ projectId: 'project-1' }]);
-
-    promises.settle('sweepLeases', { output: { retiredRunIds: [] } });
-    await flush();
     expect(actor.getSnapshot().matches('loading')).toBe(true);
+    expect(promises.inputsFor('retireLease')).toEqual([]);
 
     promises.settle('listCheckouts', { output: { checkouts: [live, linked] } });
     await flush();
@@ -148,36 +137,10 @@ describe('checkoutsMachine', () => {
     actor.stop();
   });
 
-  it('announces every lease the sweep retired', async () => {
-    const harness = start();
-
-    await toReady(harness, { retired: ['run-1', 'run-2'] });
-
-    expect(harness.emitted.filter((event) => event.type === 'leaseRetired')).toEqual([
-      { type: 'leaseRetired', runId: 'run-1' },
-      { type: 'leaseRetired', runId: 'run-2' },
-    ]);
-
-    harness.actor.stop();
-  });
-
-  it('fails when the sweep rejects', async () => {
-    const { actor, promises } = start();
-
-    actor.send({ type: 'open' });
-    promises.settle('sweepLeases', { error: new Error('no runs directory') });
-    await flush();
-
-    expect(actor.getSnapshot().matches('failed')).toBe(true);
-
-    actor.stop();
-  });
-
   it('fails when listing checkouts rejects, and reopens on open', async () => {
     const { actor, promises } = start();
 
     actor.send({ type: 'open' });
-    promises.settle('sweepLeases', { output: { retiredRunIds: [] } });
     await flush();
     promises.settle('listCheckouts', { error: new Error('registry unreadable') });
     await flush();
@@ -185,7 +148,7 @@ describe('checkoutsMachine', () => {
     expect(actor.getSnapshot().matches('failed')).toBe(true);
 
     actor.send({ type: 'open' });
-    expect(actor.getSnapshot().matches('recovering')).toBe(true);
+    expect(actor.getSnapshot().matches('loading')).toBe(true);
 
     actor.stop();
   });
@@ -320,37 +283,23 @@ describe('checkoutsMachine', () => {
     actor.stop();
   });
 
-  it('retires a stale lease reported by a preparing turn', async () => {
-    const harness = start();
-    const { actor, promises } = harness;
-
-    await toReady(harness);
-    actor.send({ type: 'leaseStale', runId: 'run-7' });
-    promises.settle('retireLease', { output: undefined });
-    await flush();
-
-    expect(promises.inputsFor('retireLease')).toEqual([{ projectId: 'project-1', runId: 'run-7' }]);
-
-    actor.stop();
-  });
-
   it('serves every retirement in a burst', async () => {
     const harness = start();
     const { actor, promises } = harness;
 
     /* Both run ids are leases the registry actually knows: a retirement for a
-     * run id no record holds is left to `sweepLeases` (R23/R30). */
+     * run id no record holds retires nothing (R23/R30). */
     await toReady(harness, { checkouts: [live, { ...linked, leaseRunIds: ['run-7', 'run-8'] }] });
-    actor.send({ type: 'leaseStale', runId: 'run-7' });
-    actor.send({ type: 'leaseStale', runId: 'run-8' });
+    actor.send({ type: 'turnEnded', key: keyOf('run-7'), checkoutId: linked.id });
+    actor.send({ type: 'turnEnded', key: keyOf('run-8'), checkoutId: linked.id });
     promises.settle('retireLease', { output: undefined });
     await flush();
     promises.settle('retireLease', { output: undefined });
     await flush();
 
     expect(promises.inputsFor('retireLease')).toEqual([
-      { projectId: 'project-1', runId: 'run-7' },
-      { projectId: 'project-1', runId: 'run-8' },
+      { projectId: 'project-1', runId: 'run-7', key: keyOf('run-7') },
+      { projectId: 'project-1', runId: 'run-8', key: keyOf('run-8') },
     ]);
     expect(actor.getSnapshot().matches({ ready: 'idle' })).toBe(true);
 
@@ -362,7 +311,7 @@ describe('checkoutsMachine', () => {
     const { actor, promises, emitted } = harness;
 
     await toReady(harness);
-    actor.send({ type: 'leaseStale', runId: 'run-7' });
+    actor.send({ type: 'turnEnded', key: keyOf('run-7'), checkoutId: linked.id });
     promises.settle('retireLease', { error: new Error('lease file gone') });
     await flush();
 
@@ -432,9 +381,14 @@ describe('checkoutsMachine', () => {
     const { actor, promises, parent } = harness;
 
     await toReady(harness, {
-      retired: ['run-0'],
-      checkouts: [live, { ...linked, leaseRunIds: [], removable: true }],
+      checkouts: [
+        { ...live, leaseRunIds: ['run-0'] },
+        { ...linked, leaseRunIds: [], removable: true },
+      ],
     });
+    actor.send({ type: 'turnEnded', key: keyOf('run-0'), checkoutId: live.id });
+    promises.settle('retireLease', { output: undefined });
+    await flush();
     actor.send({ type: 'addCheckout', requestId: 'add-1', branch: 'main', from: 'rev-1' });
 
     expect(types(parent.events)).toContain('leaseRetired');
@@ -452,7 +406,6 @@ describe('checkoutsMachine', () => {
 
     actor.send({ type: 'open' });
     actor.send({ type: 'leaseWritten', checkoutId: 'checkout-live', runId: 'run-9' });
-    harness.promises.settle('sweepLeases', { output: { retiredRunIds: [] } });
     await flush();
     harness.promises.settle('listCheckouts', { output: { checkouts: [live, linked] } });
     await flush();
@@ -488,7 +441,6 @@ describe('checkoutsMachine', () => {
     const { actor, promises } = harness;
 
     actor.send({ type: 'open' });
-    promises.settle('sweepLeases', { output: { retiredRunIds: [] } });
     await flush();
     actor.send({ type: 'turnEnded', key: keyOf('run-7'), checkoutId: 'checkout-b' });
     promises.settle('listCheckouts', { output: { checkouts: [live, linked] } });
@@ -504,24 +456,6 @@ describe('checkoutsMachine', () => {
     actor.stop();
   });
 
-  it('retires a lease reported stale before the registry loaded', async () => {
-    const harness = start();
-    const { actor, promises } = harness;
-
-    actor.send({ type: 'open' });
-    actor.send({ type: 'leaseStale', runId: 'run-7' });
-    promises.settle('sweepLeases', { output: { retiredRunIds: [] } });
-    await flush();
-    promises.settle('listCheckouts', { output: { checkouts: [live, linked] } });
-    await flush();
-    promises.settle('retireLease', { output: undefined });
-    await flush();
-
-    expect(promises.inputsFor('retireLease')).toEqual([{ projectId: 'project-1', runId: 'run-7' }]);
-
-    actor.stop();
-  });
-
   it('cancels a buffered lease whose turn already ended', async () => {
     const harness = start();
     const { actor, promises } = harness;
@@ -529,7 +463,6 @@ describe('checkoutsMachine', () => {
     actor.send({ type: 'open' });
     actor.send({ type: 'leaseWritten', checkoutId: 'checkout-live', runId: 'run-9' });
     actor.send({ type: 'turnEnded', key: keyOf('run-9'), checkoutId: 'checkout-live' });
-    promises.settle('sweepLeases', { output: { retiredRunIds: [] } });
     await flush();
     promises.settle('listCheckouts', { output: { checkouts: [live, linked] } });
     await flush();
@@ -616,7 +549,7 @@ describe('checkoutsMachine', () => {
 
     actor.send({ type: 'open' });
     actor.send({ type: 'removeCheckout', requestId: 'remove-1', id: 'checkout-b' });
-    promises.settle('sweepLeases', { error: new Error('no runs directory') });
+    promises.settle('listCheckouts', { error: new Error('registry unreadable') });
     await flush();
     actor.send({ type: 'addCheckout', requestId: 'add-1', branch: 'agent/c', from: 'rev-1' });
 
@@ -638,14 +571,11 @@ describe('checkoutsMachine', () => {
     const { actor, promises } = harness;
 
     actor.send({ type: 'open' });
-    actor.send({ type: 'open' });
-    promises.settle('sweepLeases', { output: { retiredRunIds: [] } });
     await flush();
     actor.send({ type: 'open' });
     promises.settle('listCheckouts', { output: { checkouts: [live, linked] } });
     await flush();
 
-    expect(promises.inputsFor('sweepLeases')).toHaveLength(1);
     expect(promises.inputsFor('listCheckouts')).toHaveLength(2);
 
     actor.stop();
@@ -707,7 +637,6 @@ describe('checkoutsMachine', () => {
   it('should answer every public event in every reachable state', () => {
     const invokeId = (path: string): string =>
       checkoutsMachine.getStateNodeById(`checkouts.${path}`).invoke[0]?.id ?? '';
-    const sweepInvoke = invokeId('recovering');
     const listInvoke = invokeId('loading');
     const addInvoke = invokeId('ready.adding');
     const removeInvoke = invokeId('ready.removing');
@@ -716,7 +645,6 @@ describe('checkoutsMachine', () => {
       { type: 'open' },
       { type: 'addCheckout', requestId: 'add-1', branch: 'agent/c', from: 'rev-1' },
       { type: 'removeCheckout', requestId: 'remove-1', id: 'checkout-live' },
-      { type: 'leaseStale', runId: 'run-7' },
       { type: 'leaseWritten', checkoutId: 'checkout-live', runId: 'run-9' },
       { type: 'turnEnded', key: keyOf('run-7'), checkoutId: 'checkout-b' },
     ];
@@ -725,8 +653,6 @@ describe('checkoutsMachine', () => {
       events: [
         ...publicEvents,
         /* Effect outcomes reach the states behind each invoke; they are not public. */
-        { type: `xstate.done.actor.${sweepInvoke}`, output: { retiredRunIds: [] } },
-        { type: `xstate.error.actor.${sweepInvoke}`, error: new Error('no runs directory') },
         { type: `xstate.done.actor.${listInvoke}`, output: { checkouts: [live, linked] } },
         { type: `xstate.error.actor.${listInvoke}`, error: new Error('registry unreadable') },
         {

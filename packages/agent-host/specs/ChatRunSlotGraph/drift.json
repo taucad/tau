@@ -86,8 +86,11 @@
     "runningExternal.steer": "steer",
     "runningTau.interrupt": "interrupt",
     "runningTau.steer": "steer",
+    "settling.cancel": "cancel",
     "settling.close": "close",
     "settling.resolve-interrupt": "resolveInterrupt",
+    "settling.resume": "resume",
+    "settling.start": "start",
     "starting.appendRefused": "logFenced",
     "starting.rowsCommitted": "rowsCommitted",
     "stopping.agentEnded": "agentEnded",
@@ -129,7 +132,7 @@
     "steer"
   ],
   "specs": {
-    "ChatRunSlot.tla": "c99fc2a79e81981f1c56540e848b709e81cf4d87255176d95d7150134bc57775",
+    "ChatRunSlot.tla": "b9f3a8c69d1305afa58bee7148d41df1cb7b2bbf9c434565333c44411143994e",
     "ChatRunSlotGraph.tla": "0b7771d77712c10d9fc786bd89dccc5a6d9b464b68ddbe1bc589f6f5bd4084fd"
   },
   "tables": {},

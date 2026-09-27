@@ -92,18 +92,19 @@ describe('createProjectHosts', () => {
   /* W6.r1 round 3: a provide whose host fails to open closes every port it transferred. */
   it('should close every transferred port when the host fails to open', async () => {
     const { hosts, settleOpen } = registry();
-    const channels = [new MessageChannel(), new MessageChannel(), new MessageChannel()];
+    const channels = [new MessageChannel(), new MessageChannel(), new MessageChannel(), new MessageChannel()];
     const closes = channels.map(({ port1 }) => vi.spyOn(port1, 'close'));
     const provide = hosts.provide({
       ...provideOf('host-1'),
       fileSystemPort: channels[0]!.port1,
       projectRootPort: channels[1]!.port1,
       revisionsPort: channels[2]!.port1,
+      placementPort: channels[3]!.port1,
     });
     await settleOpen('fail');
 
     await expect(provide).rejects.toMatchObject({ code: 'STORAGE_NOT_WRITABLE' });
-    expect(closes.map((close) => close.mock.calls.length)).toEqual([1, 1, 1]);
+    expect(closes.map((close) => close.mock.calls.length)).toEqual([1, 1, 1, 1]);
   });
 
   it('should replace hosts provided concurrently in order and close every replaced one', async () => {

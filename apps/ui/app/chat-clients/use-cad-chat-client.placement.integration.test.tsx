@@ -40,9 +40,7 @@ const workspaceHarness = vi.hoisted(() => ({
   prepare: vi.fn(),
 }));
 const browserHostHarness = vi.hoisted(() => ({
-  registration: undefined as
-    | { createClient: () => Promise<unknown>; markRunId: (runId: string) => Promise<void> }
-    | undefined,
+  registration: undefined as { createClient: () => Promise<unknown> } | undefined,
   run: undefined as { runId: string; state: 'paused'; eventCount: number } | undefined,
   createClient: vi.fn((_options: AgentHostClientOptions): AgentHostClient => {
     const client = Object.create(null) as AgentHostClient;
@@ -161,6 +159,7 @@ vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', () => ({
     };
   },
   getBrowserAgentHostRun: () => browserHostHarness.run,
+  resumableBrowserAgentHostRunId: () => undefined,
   resolveBrowserAgentHostInterrupt: browserHostHarness.resolveInterrupt,
 }));
 vi.mock('#services/agent-host-client.js', () => ({
@@ -190,25 +189,9 @@ vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
       durability: 'transactional-rewrite',
     };
   },
-  useOptionalChatWorkspaceAuthority: () => ({
-    ready: true,
-    get: () => workspaceHarness.current,
-    prepare: workspaceHarness.prepare,
-    attachment: async () => workspaceHarness.current,
-    finalize: async () => undefined,
-    discard: async () => undefined,
-    markAdmitted: async () => {
-      await workspaceHarness.admissionGate;
-      workspaceHarness.current = { ...workspaceHarness.current!, admitted: true };
-    },
-    markCancelled: async () => undefined,
-    markRunId: async () => undefined,
-    subscribe: (listener: () => void) => {
-      workspaceHarness.listeners.add(listener);
-      return () => workspaceHarness.listeners.delete(listener);
-    },
-  }),
 }));
+/* ChatTurnHost composes a registration only once the project's revision root is connected (W8 TS-S5). */
+vi.mock('#hooks/use-revision-status.js', () => ({ useRevisionClient: () => ({}) }));
 
 const useCadAgentConfigMock = vi.mocked(useCadAgentConfig);
 const useActiveChatInstanceMock = vi.mocked(useActiveChatInstance);
@@ -362,12 +345,11 @@ describe('admission against the placement book a real discovery pass filled', ()
     expect(persistedErrors).toEqual([]);
   });
 
-  /* A daemon-placed chat holds no browser workspace claim, which is the whole
-     reason `ProjectChatRunSettlement` settles nothing for one — and therefore
-     the reason the host's own `revision.finalized` record is the turn's only
-     graph node. Answering an approval must not be the one path that mints one:
-     with no live host run to answer (a reload before the reattach), the stale
-     affordance is dropped rather than turned into a claim (5-review N5). */
+  /* A daemon-placed chat is placed and settled by the daemon, so the host's
+     own `revision.finalized` record is the turn's only graph node. Answering
+     an approval must not be the one path that mints one: with no live host
+     run to answer (a reload before the reattach), the stale affordance is
+     dropped (5-review N5). */
   it('claims no browser workspace when an approval is answered on a daemon-placed chat', async () => {
     await discoverHost(['direct']);
     mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-5.5', hostId: 'origin' } }));

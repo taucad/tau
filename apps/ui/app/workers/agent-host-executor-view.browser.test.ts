@@ -4,6 +4,7 @@ import type { FsLike } from '@taucad/runtime/filesystem';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import { openBrowserProjectHost } from '#workers/agent-host.impl.js';
 import type { BrowserProjectHost } from '#workers/agent-host.impl.js';
+import { livePlacementPort } from '#workers/test/agent-host-resident.fixture.js';
 import type * as RuntimeFileSystemModule from '@taucad/runtime/filesystem';
 import type * as GeoSpecClientModule from '#workers/geospec-runner.client.js';
 
@@ -73,6 +74,7 @@ it('should hand both executors of project code the agent view of the workspace',
         hostId: `host-${crypto.randomUUID()}`,
         fileSystemPort: createFileSystemBridgePort(workspace).port,
         projectRootPort: createFileSystemBridgePort(workspace).port,
+        placementPort: livePlacementPort(workspace, projectId, createFileSystemBridgePort),
         projectStorage: { projectId, backend: 'memory', storageRootKey: `memory:${projectId}`, providerBasePath: '' },
         authority: { projectId, workspaceId: projectId },
         gatewayBaseUrl: location.origin,

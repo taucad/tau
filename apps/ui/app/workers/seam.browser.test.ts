@@ -18,7 +18,11 @@ import { createAgentChannelClient, serveAgentWorkerChannel } from '@taucad/agent
 import type { AgentChannelClient } from '@taucad/agent-host/channel-client';
 import { agentWireLimits, agentWireVersion } from '@taucad/agent-host/wire';
 import type { CommandAnswer, ReadAnswer } from '@taucad/agent-host/wire';
-import { createBrowserAgentHostClient } from '#services/agent-host-client.js';
+import {
+  AgentHostWorkerError,
+  createBrowserAgentHostClient,
+  resendWhileSettling,
+} from '#services/agent-host-client.js';
 import type { AgentHostWorkerProtocol } from '#workers/agent-host.contract.js';
 import {
   agentHostWorkerBuild,
@@ -28,6 +32,7 @@ import {
 import { openBrowserProjectHost } from '#workers/agent-host.impl.js';
 import type { BrowserProjectHost } from '#workers/agent-host.impl.js';
 import { rootedProvider } from '#workers/test/rooted-provider.fixture.js';
+import { livePlacementPort } from '#workers/test/agent-host-resident.fixture.js';
 
 /** Which fault the owner suffers on its next `start`. */
 type Fault = 'none' | 'die-before-effect' | 'die-after-effect' | 'hang' | 'slow';
@@ -243,6 +248,7 @@ const harness = async (): Promise<Harness> => {
   const clientOptions = {
     openFileSystemBridge: () => createFileSystemBridgePort(fileSystemProvider),
     openProjectRootBridge: () => createFileSystemBridgePort(project),
+    openPlacementPort: () => livePlacementPort(project, providerBasePath, createFileSystemBridgePort),
     projectStorage: { projectId: providerBasePath, backend: 'opfs', providerBasePath },
     durability: 'exclusive-append',
     authority: { projectId: providerBasePath, workspaceId: providerBasePath },
@@ -270,6 +276,7 @@ const harness = async (): Promise<Harness> => {
           hostId: `leader-${crypto.randomUUID()}`,
           fileSystemPort: createFileSystemBridgePort(fileSystemProvider).port,
           projectRootPort: createFileSystemBridgePort(project).port,
+          placementPort: livePlacementPort(project, providerBasePath, createFileSystemBridgePort),
           computeMode: 'off',
         },
         {
@@ -332,6 +339,19 @@ const start = async (seam: Harness) =>
 
 const admittedRows = (rows: readonly AgentLogEvent[]): readonly AgentLogEvent[] =>
   rows.filter((row) => row.type === 'run.lifecycle' && row.state === 'admitted' && row.runId === 'run-1');
+
+/** The chat's rows once run-1's settlement row, which the host appends after the terminal one, is durable (W8 TS-S6). */
+const settledRows = async (seam: Harness): Promise<readonly AgentLogEvent[]> => {
+  let rows: readonly AgentLogEvent[] = [];
+  await vi.waitFor(
+    async () => {
+      rows = await seam.rows();
+      expect(rows.some((row) => row.type === 'turn.finalized' && row.runId === 'run-1')).toBe(true);
+    },
+    { timeout: 10_000, interval: 50 },
+  );
+  return rows;
+};
 
 /** A turn the scripted gateway model actually completed (the config's `/v1/llm` fixture), not a vacuous terminal. */
 const completedTurn = {
@@ -560,7 +580,7 @@ describe('the seam on the browser leg', () => {
   it('C5: should refuse an unreadable command, a cursor ahead and a wrong identity; page one row at 1 byte', async () => {
     const seam = await harness();
     await start(seam);
-    const rows = await seam.rows();
+    const rows = await settledRows(seam);
     const client = currentClient(seam);
 
     await expect(
@@ -607,15 +627,25 @@ describe('the seam on the browser leg', () => {
   it('control: should refuse the same run under a fresh key, not replay it (keys off)', async () => {
     const seam = await harness();
     await start(seam);
+    await settledRows(seam);
 
-    const again = await currentClient(seam).execute({
-      type: 'start',
-      commandId: 'req_seam-second',
-      payload: { chatId, runId: 'run-1', trigger: 'submit', message: { id: 'user-2', role: 'user', content: 'hi' } },
-    } as Parameters<AgentChannelClient['execute']>[0]);
+    /* The settled attempt is acknowledged after its row; a start in between is refused `CHAT_RUN_LIVE{settling}`, which
+     * the page re-sends with the product's own policy (W8.r1 item 6). */
+    const second = async (): Promise<CommandAnswer> => {
+      const answer = await currentClient(seam).execute({
+        type: 'start',
+        commandId: 'req_seam-second',
+        payload: { chatId, runId: 'run-1', trigger: 'submit', message: { id: 'user-2', role: 'user', content: 'hi' } },
+      } as Parameters<AgentChannelClient['execute']>[0]);
+      if (answer.status === 'refused') {
+        throw new AgentHostWorkerError(answer.code, answer.message, answer.details);
+      }
+      return answer;
+    };
+    const again: unknown = await resendWhileSettling(second).catch((error: unknown) => error);
 
     expect(again).not.toMatchObject({ status: 'replayed' });
-    expect(again).toMatchObject({ status: 'refused', code: 'RUN_ID_TAKEN' });
+    expect(again).toMatchObject({ name: 'AgentHostWorkerError', code: 'RUN_ID_TAKEN' });
     expect(admittedRows(await seam.rows())).toHaveLength(1);
   });
 

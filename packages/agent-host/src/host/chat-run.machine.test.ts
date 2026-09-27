@@ -500,14 +500,18 @@ describe('chatRun placement paths (W7.r1)', () => {
     expect(effects.map((effect) => effect.type)).toContain('abandonPlacement');
   });
 
-  it('should answer a resolve-interrupt CHAT_RUN_LIVE{settling} while the attempt settles', () => {
-    const settling = at((snapshot) => snapshot.matches('settling'));
-    const [, effects] = step(settling, commands['resolve-interrupt']('r9'));
+  /* W8.r1 item 6: every command the attempt's settlement holds answers `settling`, the page's `wait` retry class. */
+  it.each(['resolve-interrupt', 'start', 'resume', 'cancel'] as const)(
+    'should answer a %s CHAT_RUN_LIVE{settling} while the attempt settles',
+    (verb) => {
+      const settling = at((snapshot) => snapshot.matches('settling'));
+      const [, effects] = step(settling, commands[verb]('r9'));
 
-    expect(
-      effects.filter((effect) => effect.type === 'answer').map((effect) => effect.args?.[0]?.answer),
-    ).toMatchObject([{ status: 'refused', code: 'CHAT_RUN_LIVE', details: { state: 'settling' } }]);
-  });
+      expect(
+        effects.filter((effect) => effect.type === 'answer').map((effect) => effect.args?.[0]?.answer),
+      ).toMatchObject([{ status: 'refused', code: 'CHAT_RUN_LIVE', details: { state: 'settling' } }]);
+    },
+  );
 });
 
 describe('chatRun durable-driver readiness (RA-A11)', () => {

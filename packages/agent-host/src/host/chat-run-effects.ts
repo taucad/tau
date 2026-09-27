@@ -172,13 +172,50 @@ export const createChatRunEffects = (
     }
   };
   const requestId = (verb: string, key: TurnAttemptKey): string => `${verb}:${key.runId}:${String(key.attempt)}`;
+  /*
+   * Reconcile at opening (TS-S7 step 4; RA-S13): a lease whose attempt the log already settled, because a host died
+   * between the row and its acknowledge, is acknowledged before M1 serves any command. A record written before W5
+   * (attempt 0) is settled by the run's row of any attempt (TS-Q5). A record whose run this log does not hold (another
+   * device's, or a deleted chat's) is left and reported; the rest are M1's to settle after `logOpened`, which carries
+   * them. A reconcile or acknowledge that fails leaves the lease for the next opening.
+   */
+  const reconcileOpened = async (placement: TurnPlacementPort, ledger: ChatLedger): Promise<TurnAttemptKey[]> => {
+    const answer = await placement
+      .reconcile({ requestId: `reconcile:${input.chatId}:${input.leaderEpoch}`, chatId: input.chatId })
+      .catch(() => undefined);
+    if (answer === undefined || answer.status === 'refused') {
+      return [];
+    }
+    const held: TurnAttemptKey[] = [];
+    for (const { key, checkoutId } of answer.held) {
+      const run = ledger.runs[key.runId];
+      if (key.chatId !== input.chatId) {
+        continue;
+      }
+      if (run === undefined) {
+        console.warn(
+          `[agent-host] Lease ${key.runId} on checkout ${checkoutId} names chat ${key.chatId}, whose log holds no such run; it is left for its owner (TS-Q5).`,
+        );
+      } else if (run.settlements.some((settlement) => key.attempt === 0 || settlement.attempt === key.attempt)) {
+        // oxlint-disable-next-line no-await-in-loop -- one acknowledge at a time, in lease order.
+        await placement.acknowledge({ requestId: requestId('acknowledge', key), key }).catch(() => undefined);
+      } else {
+        held.push(key);
+      }
+    }
+    return held;
+  };
 
   return {
     openLog: (args) => {
       settleInto(
-        async () => services.openLog({ chatId: args.chatId, deliver }),
-        ({ ledger, repair }) => {
-          deliver({ type: 'logOpened', ledger, repair });
+        async () => {
+          const opened = await services.openLog({ chatId: args.chatId, deliver });
+          const held = port === undefined ? [] : await reconcileOpened(port, opened.ledger);
+          return { ...opened, held };
+        },
+        ({ ledger, repair, held }) => {
+          deliver({ type: 'logOpened', ledger, repair, held });
           if (port !== undefined) {
             /* A listen that ends is not an attempt's outcome: an attempt it leaves owed is settled at the next opening. */
             settleInto(
@@ -330,12 +367,14 @@ export const createChatRunEffects = (
           }),
         (answer) => {
           if (answer.status === 'refused') {
+            const base = answer.details?.['revisionId'];
             deliver({
               type: 'placementRefused',
               key: args.key,
               code: answer.code,
               message: answer.message,
               effect: 'not-applied',
+              ...(typeof base === 'string' ? { revisionId: base } : {}),
             });
             return;
           }

@@ -26,7 +26,7 @@ import type { ActorOptions, AnyActorLogic } from 'xstate';
 import { createAcpExternalAgentPort } from '#acp/index.js';
 import type { AcpAdapter } from '#acp/index.js';
 import { createHostToolRegistry } from '#agent-tools.js';
-import type { HostRuntimeClient, HostToolRegistryOptions } from '#agent-tools.js';
+import type { HostRuntimeClient, HostToolFileSystem, HostToolRegistryOptions } from '#agent-tools.js';
 import { keyedResource } from '#keyed-resource.js';
 import { projectHostMachine } from '#project-host.machine.js';
 import type { ProjectHostQueued } from '#project-host.schemas.js';
@@ -74,13 +74,18 @@ export type ProjectHostOptions = Pick<
     /** Each revision fact; reporting only, never fatal. */
     onRevisionEvent: (event: HostRevisionEvent) => void;
     /**
-     * W8 TS-S4: build this project's placement port over its revisions (`createTurnPlacementPort`), with the host's
-     * tool registry rooted at an attempt's checkout for its grant. Given, every attempt is placed and settled through
-     * it and runs on its grant's tools; the launcher reconciles the chats whose leases it holds (RH-R16).
+     * W8 TS-S4: build this project's placement port. Every attempt is placed and settled through it and runs on its
+     * grant's tools; the launcher reconciles the chats whose leases it holds (RH-R16). Absent: the in-process session
+     * over this project's revisions ({@link ProjectRevisions.placement}), whose grants are the host's tool registry
+     * over the attempt's revocable view of its checkout.
      */
     turnPlacement?:
       | ((
-          input: Readonly<{ revisions: ProjectRevisions; toolRegistryFor: (root: string) => ToolRegistry }>,
+          input: Readonly<{
+            revisions: ProjectRevisions;
+            /** The host's tools over one root; over `filesystem` when given, the attempt's revocable view. */
+            toolRegistryFor: (root: string, filesystem?: HostToolFileSystem) => ToolRegistry;
+          }>,
         ) => TurnPlacementPort)
       | undefined;
   }>;
@@ -342,10 +347,17 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
     ...(options.geospecRunner === undefined ? {} : { geospecRunner: options.geospecRunner }),
   };
   const toolRegistry = createHostToolRegistry({ ...registryOptions, workspaceRoot, checkouts });
-  const turnPlacement = options.turnPlacement?.({
-    revisions,
-    toolRegistryFor: (root) => createHostToolRegistry({ ...registryOptions, workspaceRoot: root }),
-  });
+  const toolRegistryFor = (root: string, filesystem?: HostToolFileSystem): ToolRegistry =>
+    createHostToolRegistry({
+      ...registryOptions,
+      workspaceRoot: root,
+      ...(filesystem === undefined ? {} : { filesystem: () => filesystem }),
+    });
+  /* The host process is the placement session (TS-R6 holds trivially); no Node host runs an attempt unplaced (D13). */
+  const turnPlacement = (
+    options.turnPlacement ??
+    ((input) => input.revisions.placement(({ root, filesystem }) => input.toolRegistryFor(root, filesystem)))
+  )({ revisions, toolRegistryFor });
 
   const externalAgents =
     options.externalAgents !== undefined && options.externalAgents.agents.length > 0
@@ -357,38 +369,36 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
       ? undefined
       : createHostMcpEndpoint({ secret: randomBytes(32).toString('base64url'), registry: toolRegistry });
 
-  const launcher = revisions.record(
-    createAgentLauncher({
-      chats: createNodeChatStore({ workspaceRoot }),
-      modelTransport: options.modelTransport,
-      credential: options.credential,
-      systemPrompt: options.systemPrompt,
-      ...(options.model === undefined ? {} : { model: options.model }),
-      toolRegistry,
-      ...(turnPlacement === undefined ? {} : { turnPlacement }),
-      ...(admitting === undefined
-        ? {}
-        : { admitting: (run) => admitting() || entered.get(run.chatId)?.has(run.runId) === true }),
-      ...(externalAgents === undefined || mcp === undefined
-        ? {}
-        : {
-            externalAgents: createAcpExternalAgentPort({
-              agents: externalAgents.agents,
-              workspaceRoot,
-              checkouts,
-              ...(options.systemSkillBundles === undefined ? {} : { systemSkillBundles: options.systemSkillBundles }),
-              mcp: {
-                /* Read per run: the caller's listener may bind after this host exists. */
-                get url(): string {
-                  return externalAgents.mcpUrl();
-                },
-                mint: (input) => mcp.mint(input),
-                activate: (input) => mcp.activate(input),
+  const launcher = createAgentLauncher({
+    chats: createNodeChatStore({ workspaceRoot }),
+    modelTransport: options.modelTransport,
+    credential: options.credential,
+    systemPrompt: options.systemPrompt,
+    ...(options.model === undefined ? {} : { model: options.model }),
+    toolRegistry,
+    turnPlacement,
+    ...(admitting === undefined
+      ? {}
+      : { admitting: (run) => admitting() || entered.get(run.chatId)?.has(run.runId) === true }),
+    ...(externalAgents === undefined || mcp === undefined
+      ? {}
+      : {
+          externalAgents: createAcpExternalAgentPort({
+            agents: externalAgents.agents,
+            workspaceRoot,
+            checkouts,
+            ...(options.systemSkillBundles === undefined ? {} : { systemSkillBundles: options.systemSkillBundles }),
+            mcp: {
+              /* Read per run: the caller's listener may bind after this host exists. */
+              get url(): string {
+                return externalAgents.mcpUrl();
               },
-            }),
+              mint: (input) => mcp.mint(input),
+              activate: (input) => mcp.activate(input),
+            },
           }),
-    }),
-  );
+        }),
+  });
 
   let mcpClosed = false;
   /* A second close waits for the first; one after a close that failed tries again. */
@@ -403,6 +413,8 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
       }
     };
     await settle(async () => launcher.close());
+    /* After the launcher: its attempts are settled, so the tree records what is on disk and stops. */
+    await settle(async () => revisions.release());
     await settle(async () => parameters.closeAll());
     await settle(async () => {
       if (mcp !== undefined && !mcpClosed) {

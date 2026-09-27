@@ -226,7 +226,13 @@ const lifecycleCondition = (entry: RunEntry | undefined): keyof typeof lifecycle
   if (!attemptEnded(entry)) {
     return 'settled-open';
   }
-  return reopenable(entry) ? 'reopenable' : 'settled';
+  if (!reopenable(entry)) {
+    return 'settled';
+  }
+  /* A settled native pause with nothing pending reopens on `running`, or is cancelled: a denial's or a cancel's
+   * `cancelled` row ends the paused attempt without reopening it (V8, RA's cancel after a restart). `reopenable` is a
+   * settled resumable failure only, which a `cancelled` row cannot follow. */
+  return entry.lifecycle === 'paused' ? 'paused-reopenable' : 'reopenable';
 };
 
 /** The chat's run state, in `run-operation.legality.json`'s domain; `reserved` is memory-only (D3). @internal */
@@ -832,6 +838,10 @@ export type StampRowsInput = Readonly<{
   bodies: readonly LogRowBody[];
 }>;
 
+/** The attempt a body states, when it states one from 1 (a legacy 0 states none). */
+const statedBodyAttempt = (body: LogRowBody): number | undefined =>
+  'attempt' in body && typeof body.attempt === 'number' && body.attempt > 0 ? body.attempt : undefined;
+
 /**
  * Stamp one append's bodies: the term's epoch (one above every epoch in the ledger for a new term: its claim, D5),
  * next sequences, the command id, and the attempt of each lifecycle and settlement row.
@@ -855,7 +865,8 @@ export const stampRows = (input: StampRowsInput): readonly AgentLogEvent[] => {
             ? entry.attempt + 1
             : entry.attempt
         : settlementTypes.has(body.type)
-          ? entry.attempt
+          ? /* N4: a settlement keeps the attempt it states; only an attempt-less legacy body takes the current one. */
+            (statedBodyAttempt(body) ?? entry.attempt)
           : undefined;
     // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a spread of the body union cannot narrow to one record shape.
     const row = {

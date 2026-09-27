@@ -55,8 +55,6 @@ export type CheckoutStatusEntry = Readonly<{
 export type TurnFact = Readonly<{
   key: TurnAttemptKey;
   checkoutId: string | undefined;
-  /** Admitted by today's commands: the root acknowledges it itself until W8's port does (RM-S9). */
-  legacy: boolean;
   /** The attempt holds its lease and may be completed. */
   placed: boolean;
   /** The attempt announced its outcome and waits for `acknowledge`. */
@@ -71,7 +69,7 @@ export type ProjectRevisionsMachineInput = Readonly<{
   selectedCheckoutId?: string;
 }>;
 
-type Admission = Readonly<{ key: TurnAttemptKey; checkoutId?: string; legacy?: true }>;
+type Admission = Readonly<{ key: TurnAttemptKey; checkoutId?: string }>;
 
 /** Serializable state owned by projectRevisionsMachine. @public */
 export type ProjectRevisionsMachineContext = Readonly<{
@@ -140,10 +138,10 @@ export type ProjectRevisionsMachineEvent =
       headRevisionId?: string;
       headTreeId?: string;
     }>
-  /* The host's turn verbs, keyed by attempt (D14). `legacy` marks today's commands (RM-S9). */
-  | Readonly<{ type: 'admitTurn'; key: TurnAttemptKey; checkoutId?: string; legacy?: true }>
-  | Readonly<{ type: 'turnCompleted'; key: TurnAttemptKey; legacy?: true }>
-  | Readonly<{ type: 'turnAbandoned'; key: TurnAttemptKey; legacy?: true }>
+  /* The host's turn verbs, keyed by attempt (D14). */
+  | Readonly<{ type: 'admitTurn'; key: TurnAttemptKey; checkoutId?: string }>
+  | Readonly<{ type: 'turnCompleted'; key: TurnAttemptKey }>
+  | Readonly<{ type: 'turnAbandoned'; key: TurnAttemptKey }>
   | Readonly<{ type: 'acknowledge'; key: TurnAttemptKey }>
   /* A cut names its request; a host's `save`, `hidden` and `close` mint their own id (RM-R1). */
   | Readonly<{
@@ -198,7 +196,6 @@ export type ProjectRevisionsMachineEvent =
   | (Readonly<{ type: 'turnRefused'; code?: TurnFailureCode; reason?: string }> & TurnAnswer)
   | (Readonly<{ type: 'turnRetired'; checkoutId: string | undefined }> & TurnAnswer)
   | (Readonly<{ type: 'acknowledgeRefused'; code?: TurnFailureCode | 'REVISIONS_BUSY'; reason: string }> & TurnAnswer)
-  | Readonly<{ type: 'leaseStale'; runId: string }>
   /* A producer's hint that a checkout moved: the checkout re-reads its head (RM-R5). */
   | Readonly<{
       type: 'checkoutChanged';
@@ -619,7 +616,6 @@ const spawnTurn = (
   const fact: TurnFact = {
     key,
     checkoutId,
-    legacy: admission.legacy === true,
     placed: adopt !== undefined,
     settled: false,
   };
@@ -637,31 +633,20 @@ const spawnTurn = (
 const actorFor = (
   context: ProjectRevisionsMachineContext,
   enq: ProjectRevisionsEnqueue,
-  { self, key, legacy }: Readonly<{ self: ProjectRevisionsSelf; key: TurnAttemptKey; legacy?: true }>,
+  { self, key }: Readonly<{ self: ProjectRevisionsSelf; key: TurnAttemptKey }>,
 ): Readonly<{ ref: ActorRefFrom<typeof turnMachine> | undefined; patch: ProjectRevisionsPatch }> => {
   const ref = context.turnRefs[attemptIdOf(key)];
   if (ref !== undefined) {
     return { ref, patch: {} };
   }
-  /* An adoption on today's command is acknowledged by the root, as its admission would have been (RM-S9). */
   return leasedCheckoutOf(context, key) === undefined
     ? { ref: undefined, patch: {} }
-    : spawnTurn(context, enq, { self, admission: { key, ...(legacy === undefined ? {} : { legacy }) } });
+    : spawnTurn(context, enq, { self, admission: { key } });
 };
 
-/* A settlement reaches the host; a legacy attempt is acknowledged here, since today's commands send no `acknowledge` (RM-S10). */
-const settleTurn = (
-  context: ProjectRevisionsMachineContext,
-  enq: ProjectRevisionsEnqueue,
-  key: TurnAttemptKey,
-): ProjectRevisionsPatch => {
-  const fact = context.turnFacts[attemptIdOf(key)];
-  const ref = context.turnRefs[attemptIdOf(key)];
-  if (fact?.legacy === true && ref !== undefined) {
-    enq.sendTo(ref, { type: 'acknowledge' });
-  }
-  return withFact(context, key, { settled: true });
-};
+/* A settlement reaches the host, which acknowledges it once its row is durable (RM-R10). */
+const settleTurn = (context: ProjectRevisionsMachineContext, key: TurnAttemptKey): ProjectRevisionsPatch =>
+  withFact(context, key, { settled: true });
 
 const keyOf = (
   event: Readonly<{ turnId: string; chatId: string; runId: string; attempt: number }>,
@@ -954,17 +939,25 @@ const projectRevisionsMachineDefinition = setup({
             return {};
           }
           const { type: _type, ...admission } = event;
-          return { context: spawnTurn(context, enq, { self, admission }).patch };
+          const spawned = spawnTurn(context, enq, { self, admission });
+          const adopted = spawned.patch.turnFacts?.[attemptIdOf(event.key)];
+          /* A replayed admission after a restart adopts the record, which already holds the lease (RM-R14, TS-R2). */
+          if (adopted?.placed === true) {
+            enq.emit({
+              type: 'turnPlaced',
+              key: event.key,
+              checkoutId: adopted.checkoutId,
+              branch: undefined,
+              baseRevisionId: undefined,
+            });
+          }
+          return { context: spawned.patch };
         },
         turnCompleted: (
           { context, event, self }: RootArgs<'turnCompleted'>,
           enq: ProjectRevisionsEnqueue,
         ): RootTransition => {
-          const { ref, patch } = actorFor(context, enq, {
-            self,
-            key: event.key,
-            ...(event.legacy === undefined ? {} : { legacy: event.legacy }),
-          });
+          const { ref, patch } = actorFor(context, enq, { self, key: event.key });
           if (ref !== undefined) {
             enq.sendTo(ref, { type: 'turnCompleted' });
           }
@@ -979,11 +972,7 @@ const projectRevisionsMachineDefinition = setup({
           { context, event, self }: RootArgs<'turnAbandoned'>,
           enq: ProjectRevisionsEnqueue,
         ): RootTransition => {
-          const { ref, patch } = actorFor(context, enq, {
-            self,
-            key: event.key,
-            ...(event.legacy === undefined ? {} : { legacy: event.legacy }),
-          });
+          const { ref, patch } = actorFor(context, enq, { self, key: event.key });
           if (ref !== undefined) {
             enq.sendTo(ref, { type: 'turnAbandoned' });
           }
@@ -1021,24 +1010,13 @@ const projectRevisionsMachineDefinition = setup({
           }
           return {};
         },
-        leaseStale: ({ event }: RootArgs<'leaseStale'>, enq: ProjectRevisionsEnqueue): RootTransition => {
-          enq.sendTo('checkouts', event);
-          return {};
-        },
         turnPlaced: ({ context, event }: RootArgs<'turnPlaced'>, enq: ProjectRevisionsEnqueue): RootTransition => {
           enq.emit(event);
           return { context: withFact(context, event.key, { placed: true, checkoutId: event.checkoutId }) };
         },
-        /* RM-R13: a legacy attempt gives up on a refused cut, so it settles `failed` as it did before W5. */
-        turnCutRefused: (
-          { context, event }: RootArgs<'turnCutRefused'>,
-          enq: ProjectRevisionsEnqueue,
-        ): RootTransition => {
+        /* RM-R13, TS-Q9: a refused cut keeps the lease; the host retries `complete`. */
+        turnCutRefused: ({ event }: RootArgs<'turnCutRefused'>, enq: ProjectRevisionsEnqueue): RootTransition => {
           enq.emit(event);
-          const ref = context.turnRefs[attemptIdOf(event.key)];
-          if (context.turnFacts[attemptIdOf(event.key)]?.legacy === true && ref !== undefined) {
-            enq.sendTo(ref, { type: 'turnAbandoned' });
-          }
           return {};
         },
         turnFinalized: (
@@ -1046,18 +1024,18 @@ const projectRevisionsMachineDefinition = setup({
           enq: ProjectRevisionsEnqueue,
         ): RootTransition => {
           enq.emit(event);
-          return { context: settleTurn(context, enq, keyOf(event)) };
+          return { context: settleTurn(context, keyOf(event)) };
         },
         turnConflicted: (
           { context, event }: RootArgs<'turnConflicted'>,
           enq: ProjectRevisionsEnqueue,
         ): RootTransition => {
           enq.emit(event);
-          return { context: settleTurn(context, enq, keyOf(event)) };
+          return { context: settleTurn(context, keyOf(event)) };
         },
         turnReleased: ({ context, event }: RootArgs<'turnReleased'>, enq: ProjectRevisionsEnqueue): RootTransition => {
           enq.emit(event);
-          return { context: settleTurn(context, enq, event.key) };
+          return { context: settleTurn(context, event.key) };
         },
         /* RM-R10: the lease is retired, so the registry drops it and the actor leaves (L7 P-1). */
         turnRetired: ({ context, event }: RootArgs<'turnRetired'>, enq: ProjectRevisionsEnqueue): RootTransition => {

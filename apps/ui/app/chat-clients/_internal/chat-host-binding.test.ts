@@ -5,21 +5,22 @@ import {
   armChatTurnHold,
   chatTurnAdmission,
   chatTurnSettlement,
-  clearChatTurnServices,
   publishChatTurnAdmission,
-  publishChatTurnSettlement,
   releaseChatTurnHold,
   resetChatTurnServices,
 } from '#chat-clients/_internal/chat-host-binding.js';
+import { retireBrowserAgentHostRun } from '#chat-clients/_internal/browser-agent-host-transport.js';
+import type * as BrowserAgentHostTransport from '#chat-clients/_internal/browser-agent-host-transport.js';
 import type { ChatTurn, ChatTurnSettlementInput } from '#machines/chat-session.machine.js';
 
+vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof BrowserAgentHostTransport>()),
+  retireBrowserAgentHostRun: vi.fn(),
+}));
+
 /**
- * The abandonment half of V4 — "every turn that takes a lease releases it".
- *
- * The rows that claimed to hold this asserted their own mock's `signal.aborted`
- * branch: the published `admit` takes no signal at all, so the fixture modelled
- * behaviour the product does not have, and the real path here had no test file.
- * These rows drive the real actor through the real registries (I8).
+ * The chat session's two turn services, driven as the real actors through the real registries (I8). The host places
+ * and settles every attempt (W8 TS-S5, TS-S6): the admission takes no lease, and the settlement writes nothing.
  */
 describe('chatTurnAdmission', () => {
   afterEach(() => {
@@ -28,23 +29,6 @@ describe('chatTurnAdmission', () => {
   });
 
   const turn: ChatTurn = { runId: 'run-1', leaseTurnId: 'user-1', request: { kind: 'regenerate' } };
-
-  /** Start the real admission actor and stop it the moment the lease is taken. */
-  const abandonAdmission = async (chatId: string): Promise<void> => {
-    const reached = Promise.withResolvers<void>();
-    const leased = Promise.withResolvers<ChatTurn>();
-    publishChatTurnAdmission(chatId, async () => {
-      reached.resolve();
-      return leased.promise;
-    });
-    const actor = createActor(chatTurnAdmission, { input: { chatId, gesture: { kind: 'regenerate' } } });
-    actor.start();
-    await reached.promise;
-
-    // A second gesture replaced this one: the invoking state exits and aborts.
-    actor.stop();
-    leased.resolve(turn);
-  };
 
   /*
    * T3-D4, I6. `loadChatActor` seeds a turn for any acquired chat with an
@@ -70,28 +54,6 @@ describe('chatTurnAdmission', () => {
     vi.useRealTimers();
   });
 
-  it('should settle the lease an abandoned admission took, and no other', async () => {
-    const settlements: ChatTurnSettlementInput[] = [];
-    publishChatTurnSettlement('chat-abandoned', async (input) => {
-      settlements.push(input);
-    });
-
-    await abandonAdmission('chat-abandoned');
-
-    await vi.waitFor(() => {
-      expect(settlements).toEqual([
-        { chatId: 'chat-abandoned', runId: 'run-1', leaseTurnId: 'user-1', outcome: 'cancelled' },
-      ]);
-    });
-  });
-
-  /*
-   * T3-D2: the abort that abandons the admission is usually the chat's own
-   * dispose, and `clearChatTurnServices` deletes this registry in the same
-   * breath. Reading it directly made the release an optional call on
-   * `undefined` — the lease stayed `admitted` with nothing left that could
-   * release it, and every later turn of the chat died on the stale claim.
-   */
   /*
    * F3/F4. The two states a browser row most needs to observe are the two it
    * cannot hold open from outside: `run.queued.admitting` lasts microseconds,
@@ -126,89 +88,42 @@ describe('chatTurnAdmission', () => {
   });
 
   it('should park a settlement until its debug hold is released', async () => {
-    const settlements: ChatTurnSettlementInput[] = [];
-    publishChatTurnSettlement('chat-held-settlement', async (input) => {
-      settlements.push(input);
-    });
     armChatTurnHold('settlement');
-
     const input: ChatTurnSettlementInput = {
       chatId: 'chat-held-settlement',
-      runId: 'run-1',
+      runId: 'run-held-settlement',
       leaseTurnId: 'user-1',
       outcome: 'completed',
     };
+    const done = vi.fn();
     const actor = createActor(chatTurnSettlement, { input });
+    actor.subscribe({ complete: done });
     actor.start();
     await new Promise<void>((resolve) => {
       setTimeout(resolve, 0);
     });
 
-    expect(settlements).toEqual([]);
+    expect(done).not.toHaveBeenCalled();
 
     releaseChatTurnHold('settlement');
 
     await vi.waitFor(() => {
-      expect(settlements).toEqual([input]);
+      expect(done).toHaveBeenCalledOnce();
     });
-    actor.stop();
   });
 
-  /*
-   * W10-6. The abort that abandons an admission is usually the chat's own
-   * dispose, which runs `clearChatTurnServices` — and the release runs *after*
-   * the admission ends, i.e. after dispose. Looking the publisher up then finds
-   * an emptied registry, so the bounded wait below simply expires and the lease
-   * is left held: the same leak T3-D2 closed, one registry read later. The
-   * publisher this admission started with is a function; holding it costs
-   * nothing and cannot be deleted out from under the release.
-   */
-  it('should release an abandoned lease through the publisher it started with, after dispose', async () => {
-    const settlements: ChatTurnSettlementInput[] = [];
-    publishChatTurnSettlement('chat-disposed', async (input) => {
-      settlements.push(input);
+  /* W8 TS-S6: the host appends the run's row itself; the page only lets the run's record go (D6, D7 deleted). */
+  it("should settle a turn without waiting for the host's row, letting its run record go", async () => {
+    const done = vi.fn();
+    const actor = createActor(chatTurnSettlement, {
+      input: { chatId: 'chat-settled-by-host', runId: 'run-settled-by-host', leaseTurnId: 'user-1', outcome: 'failed' },
     });
-    const reached = Promise.withResolvers<void>();
-    const leased = Promise.withResolvers<ChatTurn>();
-    publishChatTurnAdmission('chat-disposed', async () => {
-      reached.resolve();
-      return leased.promise;
-    });
-    const actor = createActor(chatTurnAdmission, {
-      input: { chatId: 'chat-disposed', gesture: { kind: 'regenerate' } },
-    });
+    actor.subscribe({ complete: done });
     actor.start();
-    await reached.promise;
-
-    // The session is disposed while the lease is still being taken.
-    clearChatTurnServices('chat-disposed');
-    actor.stop();
-    leased.resolve(turn);
 
     await vi.waitFor(() => {
-      expect(settlements).toEqual([
-        { chatId: 'chat-disposed', runId: 'run-1', leaseTurnId: 'user-1', outcome: 'cancelled' },
-      ]);
+      expect(done).toHaveBeenCalledOnce();
     });
-  });
-
-  it('should wait for the settlement publisher before giving up on an abandoned lease', async () => {
-    const settlements: ChatTurnSettlementInput[] = [];
-
-    await abandonAdmission('chat-abandoned-late');
-    // Two macrotasks: the release has run and found no publisher by now.
-    await new Promise<void>((resolve) => {
-      setTimeout(resolve, 0);
-    });
-
-    publishChatTurnSettlement('chat-abandoned-late', async (input) => {
-      settlements.push(input);
-    });
-
-    await vi.waitFor(() => {
-      expect(settlements).toEqual([
-        { chatId: 'chat-abandoned-late', runId: 'run-1', leaseTurnId: 'user-1', outcome: 'cancelled' },
-      ]);
-    });
+    expect(retireBrowserAgentHostRun).toHaveBeenCalledWith('chat-settled-by-host', 'run-settled-by-host');
   });
 });

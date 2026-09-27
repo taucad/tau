@@ -44,6 +44,8 @@ const seams = vi.hoisted(() => ({
   channel: undefined as undefined | { close(): void },
   /* The parameter actor the next creation returns instead of the real one. */
   parameterActor: undefined as undefined | (() => ParameterSetActor),
+  /* The options the last launcher was built with. */
+  launcherOptions: undefined as undefined | { turnPlacement?: unknown },
 }));
 
 vi.mock('@taucad/parameters/set-machine', async (importOriginal) => {
@@ -62,6 +64,7 @@ vi.mock('@taucad/agent-host/launcher', async (importOriginal) => {
   return {
     ...actual,
     createAgentLauncher: (options: Parameters<typeof actual.createAgentLauncher>[0]): AgentLauncher => {
+      seams.launcherOptions = options;
       const launcher = actual.createAgentLauncher(options);
       return {
         ...launcher,
@@ -779,6 +782,14 @@ describe('createProjectHost', () => {
       },
       { timeout: 15_000 },
     );
+    /* W8.a2 round 2, item 7: the tree is released even when the launcher's close failed, so this root's liveness
+     * mark (RM-R8) is freed and another host can reconcile its leases; the retry's release is a no-op. */
+    const releasedAfterCloses: number[] = [];
+    const { release } = project!.revisions;
+    vi.spyOn(project!.revisions, 'release').mockImplementation(async () => {
+      releasedAfterCloses.push(seams.closes);
+      await release();
+    });
 
     actor.send({ type: 'shutdown', requestId: 'quit' });
 
@@ -791,6 +802,7 @@ describe('createProjectHost', () => {
       },
       { timeout: 15_000 },
     );
+    expect(releasedAfterCloses[0]).toBe(1);
     /* The launcher closed, but the retried close still records its revision: the memoised close is that retry, so
      * awaiting it ends the case only once nothing writes into the sandbox (W6.r2 round 8). */
     await project?.close();
@@ -830,6 +842,19 @@ describe('createProjectHost', () => {
     expect(watch.closed).toBeInstanceOf(Promise);
     await watch.closed;
     expect(events).toEqual([]);
+  });
+
+  /* D13 (W8.r1 MU13): with no factory, the host still places every turn, through its own revisions. */
+  it('should hand the launcher a placement over its own revisions when no turnPlacement factory is given', async () => {
+    seams.launcherOptions = undefined as typeof seams.launcherOptions;
+    await desktopProjectHost();
+
+    const placement = seams.launcherOptions?.turnPlacement as TurnPlacementPort | undefined;
+    expect([placement?.admit, placement?.complete, placement?.acknowledge].map((verb) => typeof verb)).toEqual([
+      'function',
+      'function',
+      'function',
+    ]);
   });
 
   it('should hand the launcher the placement port its turnPlacement factory builds', async () => {

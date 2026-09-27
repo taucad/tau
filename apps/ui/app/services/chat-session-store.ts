@@ -2222,11 +2222,12 @@ export class ChatSessionStore {
    * Tell the chat's session actor about a terminal run its log never settled
    * (C6, V10).
    *
-   * The reload case: the tab that ran the turn closed before the revision root
-   * answered, so the log holds the run's terminal lifecycle and no settlement,
-   * and `finishing` would wait for an attestation nobody is going to write.
-   * The actor refuses this for a turn it admitted itself — that one settles
-   * through its own `settleTurn` — so this only ever reaches an adopted run.
+   * The reload case: the tab that ran the turn closed before its host appended
+   * the settlement row, so the log holds the run's terminal lifecycle and no
+   * settlement. The host's M1 appends it at its next reconciliation (W8 TS-S7);
+   * the page writes none, and `finishing` only lets the run's record go. The
+   * actor refuses this for a turn it admitted itself, so this only ever reaches
+   * an adopted run.
    *
    * @param session - The chat whose run just reached a terminal state.
    * @param outcome - The run the log named and how this page saw it end.

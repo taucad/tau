@@ -125,7 +125,6 @@ const fixture = async (
   const actors = createRevisionActors({
     port,
     projectId: 'project-1',
-    authorityEpoch: 'epoch-1',
     filesystem: async (checkout) =>
       wrap(
         native === undefined
@@ -262,7 +261,7 @@ describe('a turn lease', () => {
     await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
 
     const first = await run<{ leaseIds: readonly string[] }>(actors.turn.writeLease, {
-      key: { runId: 'run-1', turnId: 'turn-1', chatId: 'chat-1', attempt: 0 },
+      key: { runId: 'run-1', turnId: 'turn-1', chatId: 'chat-1', attempt: 1 },
       checkoutId: 'live',
       headRevisionId: undefined,
     });
@@ -270,7 +269,7 @@ describe('a turn lease', () => {
 
     /* Leases are plural: a second chat on the same checkout sees both, which is
      * the provenance set a settlement carries (AC9). */
-    const secondKey = { runId: 'run-2', turnId: 'turn-2', chatId: 'chat-2', attempt: 0 };
+    const secondKey = { runId: 'run-2', turnId: 'turn-2', chatId: 'chat-2', attempt: 1 };
     const second = await run<{ leaseIds: readonly string[]; held: readonly unknown[] }>(actors.turn.writeLease, {
       key: secondKey,
       checkoutId: 'live',
@@ -280,18 +279,17 @@ describe('a turn lease', () => {
      * records, and a directory read has no order of its own. */
     expect(second.leaseIds).toEqual(['run-2', 'run-1']);
     /* The other attempt holding the checkout, announced as `leaseHeld` (RM-R16). */
-    expect(second.held).toEqual([{ runId: 'run-1', turnId: 'turn-1', chatId: 'chat-1', attempt: 0 }]);
+    expect(second.held).toEqual([{ runId: 'run-1', turnId: 'turn-1', chatId: 'chat-1', attempt: 1 }]);
     expect(JSON.parse(await filesystem.readFile('.tau/runs/run-2.json', 'utf8'))).toMatchObject({
       runId: 'run-2',
       turnId: 'turn-2',
       chatId: 'chat-2',
       checkoutId: 'live',
-      attempt: 0,
-      authorityEpoch: 'epoch-1',
+      attempt: 1,
     });
 
-    /* Another attempt of the same run leaves the record alone (TS-R5). */
-    await run(actors.turn.retireLease, { key: { ...secondKey, attempt: 1 }, checkoutId: 'live', outcome: 'finalized' });
+    /* Another attempt of the same run leaves the record alone (TS-R5); attempt 0 is a record written before W5. */
+    await run(actors.turn.retireLease, { key: { ...secondKey, attempt: 2 }, checkoutId: 'live', outcome: 'finalized' });
     expect(await filesystem.exists('.tau/runs/run-2.json')).toBe(true);
     await run(actors.turn.retireLease, { key: secondKey, checkoutId: 'live', outcome: 'finalized' });
     /* Retiring one that is already gone resolves: a rejection here would reach
@@ -318,39 +316,6 @@ describe('a turn lease', () => {
 
     await run(actors.checkouts.retireLease, { projectId: 'project-1', runId: 'run-1', key });
     expect(await filesystem.exists('.tau/runs/run-1.json')).toBe(false);
-  }, 30_000);
-
-  it('sweeps only the leases a superseded authority wrote, and lists the rest on the record', async () => {
-    const { port, actors, filesystem } = await fixture({ 'main.ts': 'export const size = 1;\n' });
-    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
-    await filesystem.writeFile(
-      '.tau/runs/run-dead.json',
-      JSON.stringify({
-        runId: 'run-dead',
-        turnId: 'turn-dead',
-        chatId: 'chat-dead',
-        checkoutId: 'live',
-        authorityEpoch: 'epoch-0',
-        startedAt: 1,
-      }),
-    );
-    await run(actors.turn.writeLease, {
-      key: { runId: 'run-live', turnId: 'turn-live', chatId: 'chat-live', attempt: 0 },
-      checkoutId: 'live',
-      headRevisionId: undefined,
-    });
-
-    const swept = await run<{ retiredRunIds: readonly string[] }>(actors.checkouts.sweepLeases, {
-      projectId: 'project-1',
-    });
-    expect(swept.retiredRunIds).toEqual(['run-dead']);
-
-    const registry = await run<{ checkouts: ReadonlyArray<{ id: string; leaseRunIds: readonly string[] }> }>(
-      actors.checkouts.listCheckouts,
-      { projectId: 'project-1' },
-    );
-    expect(registry.checkouts).toHaveLength(1);
-    expect(registry.checkouts[0]).toMatchObject({ id: 'live', kind: 'live', leaseRunIds: ['run-live'] });
   }, 30_000);
 });
 
@@ -539,7 +504,6 @@ describe('settling a turn', () => {
         chatId: 'chat-tab',
         checkoutId: 'live',
         attempt: 0,
-        authorityEpoch: 'epoch-other',
         startedAt: 1,
       }),
     );
@@ -748,7 +712,6 @@ describe('the checkout registry', () => {
     const actors = createRevisionActors({
       port,
       projectId: 'project-1',
-      authorityEpoch: 'epoch-1',
       filesystem: () => filesystem,
       useFileSystem: async (checkout, operation) => {
         events.push(`open:${checkout.kind}`);
@@ -800,7 +763,6 @@ describe('the checkout registry', () => {
     const actors = createRevisionActors({
       port,
       projectId: 'project-1',
-      authorityEpoch: 'epoch-1',
       filesystem: () => filesystem,
       /* Forty days after the revision both branches name. */
       clock: clockAt(recordedAt + 40 * day),
@@ -840,7 +802,6 @@ describe('the checkout registry', () => {
     const actors = createRevisionActors({
       port,
       projectId: 'project-1',
-      authorityEpoch: 'epoch-1',
       filesystem: () => filesystem,
       clock: clockAt(recordedAt + 60_000),
     });
@@ -971,7 +932,6 @@ for (const actorSet of actorSets) {
       const failingActors = createRevisionActors({
         port: context.port,
         projectId: 'project-1',
-        authorityEpoch: 'epoch-1',
         filesystem: () => wrapped,
       });
       await expect(run(failingActors.sync.fastForward, { remote: 'tau', branch: 'main' })).rejects.toThrow(
@@ -996,7 +956,6 @@ for (const actorSet of actorSets) {
       const refusingActors = createRevisionActors({
         port: refusingPort,
         projectId: 'project-1',
-        authorityEpoch: 'epoch-1',
         filesystem: () => context.filesystem,
       });
       await expect(run(refusingActors.sync.fastForward, { remote: 'tau', branch: 'main' })).rejects.toMatchObject({
@@ -1028,7 +987,6 @@ for (const actorSet of actorSets) {
       const racingActors = createRevisionActors({
         port: racingPort,
         projectId: 'project-1',
-        authorityEpoch: 'epoch-1',
         filesystem: () => context.filesystem,
       });
 
@@ -1060,7 +1018,6 @@ for (const actorSet of actorSets) {
       const heldActors = createRevisionActors({
         port: heldPort,
         projectId: 'project-1',
-        authorityEpoch: 'epoch-1',
         filesystem: () => context.filesystem,
       });
       const running = createActor(heldActors.sync.fastForward, {
@@ -1094,7 +1051,6 @@ for (const actorSet of actorSets) {
       const actors = createRevisionActors({
         port: context.port,
         projectId: 'project-1',
-        authorityEpoch: 'epoch-1',
         filesystem: () => wrapped,
       });
 
@@ -1152,7 +1108,6 @@ for (const actorSet of actorSets) {
       const actors = createRevisionActors({
         port: wrappedPort,
         projectId: 'project-1',
-        authorityEpoch: 'epoch-1',
         filesystem: () => context.filesystem,
       });
 
@@ -1283,7 +1238,6 @@ describe('independent sync record failures', () => {
     const actors = createRevisionActors({
       port: isolatedPort,
       projectId: 'project-1',
-      authorityEpoch: 'epoch-1',
       filesystem: () => context.filesystem,
       deviceId: () => 'device-one',
     });
@@ -1330,7 +1284,6 @@ describe('independent sync record failures', () => {
     const actors = createRevisionActors({
       port: refusing,
       projectId: 'project-1',
-      authorityEpoch: 'epoch-1',
       filesystem: () => context.filesystem,
       deviceId: () => 'device-one',
     });
@@ -1362,7 +1315,6 @@ describe('independent sync record failures', () => {
     const actors = createRevisionActors({
       port: refusing,
       projectId: 'project-1',
-      authorityEpoch: 'epoch-1',
       filesystem: () => context.filesystem,
       deviceId: () => 'device-one',
     });
@@ -1419,7 +1371,6 @@ describe('independent sync record failures', () => {
     const actors = createRevisionActors({
       port: remote,
       projectId: 'project-1',
-      authorityEpoch: 'epoch-1',
       filesystem: () => projecting,
       deviceId: () => 'device-b',
     });
@@ -1486,7 +1437,6 @@ describe('independent sync record failures', () => {
     const actors = createRevisionActors({
       port: remote,
       projectId: 'project-1',
-      authorityEpoch: 'epoch-1',
       filesystem: () => context.filesystem,
     });
 
@@ -1660,7 +1610,6 @@ for (const actorSet of actorSets) {
       const actors = createRevisionActors({
         port: refusingPort,
         projectId: 'project-1',
-        authorityEpoch: 'epoch-1',
         filesystem: () => context.filesystem,
       });
 

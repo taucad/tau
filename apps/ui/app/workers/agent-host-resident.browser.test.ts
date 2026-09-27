@@ -18,10 +18,17 @@ const visibility = { visible: () => true, subscribe: () => () => undefined };
 
 /** A `provide` of one host incarnation over the control channel, with fresh bridges. */
 const provideOver = (control: ReturnType<typeof controlOf>, options: Awaited<ReturnType<typeof opfsProject>>) => {
-  const { openFileSystemBridge: _fs, openProjectRootBridge: _root, durability: _durability, ...rest } = options;
+  const {
+    openFileSystemBridge: _fs,
+    openProjectRootBridge: _root,
+    openPlacementPort: _placement,
+    durability: _durability,
+    ...rest
+  } = options;
   return async (hostId: string) => {
     const fileSystem = options.openFileSystemBridge();
     const projectRoot = options.openProjectRootBridge();
+    const placementPort = options.openPlacementPort();
     return control.call('provide', {
       value: {
         ...rest,
@@ -29,8 +36,9 @@ const provideOver = (control: ReturnType<typeof controlOf>, options: Awaited<Ret
         hostId,
         fileSystemPort: fileSystem.port,
         projectRootPort: projectRoot.port,
+        placementPort,
       },
-      transferables: [fileSystem.port, projectRoot.port],
+      transferables: [fileSystem.port, projectRoot.port, placementPort],
     });
   };
 };
@@ -121,7 +129,13 @@ it('should answer needs to a rebridge that names a host that is no longer open',
  * port its provide transferred, the unused ones included. Opened in the page, so the ports' closes are observed. */
 it('should close every transferred port when the project host fails to open', async () => {
   const options = await opfsProject('failed-open');
-  const { openFileSystemBridge: _fs, openProjectRootBridge: _root, durability: _durability, ...rest } = options;
+  const {
+    openFileSystemBridge: _fs,
+    openProjectRootBridge: _root,
+    openPlacementPort: _placement,
+    durability: _durability,
+    ...rest
+  } = options;
   const { createFileSystemBridgePort } = await import('@taucad/fs-bridge');
   const fileSystem = options.openFileSystemBridge();
   const rooted = rootedProvider(opfsProvider(), options.projectStorage.providerBasePath);

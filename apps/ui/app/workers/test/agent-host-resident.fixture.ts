@@ -6,7 +6,8 @@ import { expect, vi } from 'vitest';
 import { OPFSProvider } from '@taucad/filesystem/backend';
 import type { FileSystemProvider } from '@taucad/filesystem';
 import type { createFileSystemBridgePort as createBridgePort } from '@taucad/fs-bridge';
-import { connectAgentWorkerChannel } from '@taucad/agent-host/channel-client';
+import { connectAgentWorkerChannel, serveTurnPlacementChannel } from '@taucad/agent-host/channel-client';
+import type { TurnPlacementFact } from '@taucad/agent-host';
 import type { createBrowserAgentHostClient } from '#services/agent-host-client.js';
 import type { AgentHostWorkerProtocol } from '#workers/agent-host.contract.js';
 import { agentHostWorkerProtocolSchemas, parseAgentHostWorkerConnect } from '#workers/agent-host.contract.js';
@@ -29,6 +30,77 @@ export const disposeOpfsProject = (): void => {
   provider = undefined;
 };
 
+/**
+ * A page-side placement session (W8 TS-S5) that places every attempt directly on the project root and settles it
+ * `turn.finalized` on complete: the file-manager worker's session without revisions, for suites that run turns.
+ */
+export const livePlacementPort = (
+  projectRoot: FileSystemProvider,
+  projectId: string,
+  createFileSystemBridgePort: typeof createBridgePort,
+): MessagePort => {
+  const facts: TurnPlacementFact[] = [];
+  const wakes = new Set<() => void>();
+  const { port1, port2 } = new MessageChannel();
+  serveTurnPlacementChannel({
+    port: port2,
+    projectId,
+    session: {
+      admit: async ({ requestId, checkoutId }) => ({
+        requestId,
+        status: 'applied',
+        placement: {
+          checkoutId: checkoutId ?? 'live',
+          mode: 'direct',
+          root: '/',
+          tools: { port: createFileSystemBridgePort(projectRoot).port },
+        },
+      }),
+      complete: async ({ requestId, key }) => {
+        facts.push({
+          kind: 'settled',
+          key,
+          row: {
+            type: 'turn.finalized',
+            runId: key.runId,
+            attempt: key.attempt,
+            turnId: key.turnId,
+            chatId: key.chatId,
+            projectId,
+            changedPaths: [],
+            trigger: 'turn',
+            runIds: [key.runId],
+          },
+        });
+        for (const wake of wakes) {
+          wake();
+        }
+        wakes.clear();
+        return { requestId, status: 'applied' };
+      },
+      abandon: async ({ requestId }) => ({ requestId, status: 'applied' }),
+      acknowledge: async ({ requestId }) => ({ requestId, status: 'applied' }),
+      reconcile: async ({ requestId }) => ({ requestId, status: 'applied', held: [] }),
+      async *settlements({ signal }) {
+        let next = 0;
+        while (!signal.aborted) {
+          while (next < facts.length) {
+            yield facts[next++]!;
+          }
+          // oxlint-disable-next-line no-await-in-loop -- a listen waits for its next fact.
+          await new Promise<void>((resolve) => {
+            wakes.add(resolve);
+            signal.addEventListener('abort', () => {
+              resolve();
+            });
+          });
+        }
+      },
+    },
+  });
+  return port1;
+};
+
 /** The client options over one OPFS project directory. */
 const projectOptions = (
   fileSystemProvider: FileSystemProvider,
@@ -38,6 +110,12 @@ const projectOptions = (
   ({
     openFileSystemBridge: () => createFileSystemBridgePort(fileSystemProvider),
     openProjectRootBridge: () => createFileSystemBridgePort(rootedProvider(fileSystemProvider, providerBasePath)),
+    openPlacementPort: () =>
+      livePlacementPort(
+        rootedProvider(fileSystemProvider, providerBasePath),
+        providerBasePath,
+        createFileSystemBridgePort,
+      ),
     projectStorage: { projectId: providerBasePath, backend: 'opfs', providerBasePath },
     durability: 'exclusive-append',
     authority: { projectId: providerBasePath, workspaceId: providerBasePath },

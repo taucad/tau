@@ -246,9 +246,8 @@ const followToEnd = async (client: AgentChannelClient): Promise<readonly unknown
       throw new Error(`Unexpected refusal: ${page.reason}`);
     }
     rows.push(...page.events);
-    const ended = page.events.some(
-      (row) => (row as AgentLogEvent).type === 'run.lifecycle' && (row as { state?: string }).state === 'completed',
-    );
+    /* A run ends at its attempt's settlement row, which M1 appends after the terminal one (W8 TS-S6). */
+    const ended = page.events.some((row) => (row as AgentLogEvent).type === 'turn.finalized');
     if (ended) {
       return rows;
     }
@@ -371,7 +370,12 @@ describe('the seam on the daemon leg', () => {
     await client.execute(startCommand('cmd-first'));
     await followToEnd(client);
 
-    const again = await client.execute(startCommand('cmd-second'));
+    /* The settled attempt is acknowledged after its row; a start in between waits (`CHAT_RUN_LIVE`), as a client re-sends. */
+    let again = await client.execute(startCommand('cmd-second'));
+    while (again.status === 'refused' && again.code === 'CHAT_RUN_LIVE') {
+      // oxlint-disable-next-line no-await-in-loop -- a wait refusal is re-sent.
+      again = await client.execute(startCommand('cmd-second'));
+    }
 
     expect(again).not.toMatchObject({ status: 'replayed' });
     expect(again).toMatchObject({ status: 'refused', code: 'RUN_ID_TAKEN' });

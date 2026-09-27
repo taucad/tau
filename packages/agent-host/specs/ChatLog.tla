@@ -83,12 +83,14 @@ Reopens(e) ==
   /\ ~Has(e, "attempt") \/ e.attempt = AttemptOf(e.runId) + 1
   /\ lifecycle[e.runId] \in Rested /\ Reopenable(e.runId)
 
-(* The run's state in `run-lifecycle.legality.json`'s domain; "open" and "ended" have one row. *)
+(* The run's state in `run-lifecycle.legality.json`'s domain; "open" and "ended" have one row. A settled native  *)
+(* pause with nothing pending is "paused-reopenable": `running` reopens it and `cancelled` ends it (V8).          *)
 LegalityState(r) ==
   IF ~HasRun(r) THEN "unadmitted"
   ELSE IF SettledNow(r)
     THEN IF lifecycle[r] \notin Rested THEN "settled-open"
-         ELSE IF Reopenable(r) THEN "reopenable" ELSE "settled"
+         ELSE IF ~Reopenable(r) THEN "settled"
+         ELSE IF lifecycle[r] = "paused" THEN "paused-reopenable" ELSE "reopenable"
   ELSE IF lifecycle[r] \in Rested THEN "ended" ELSE "open"
 
 OpensRun(e) == IsLifecycle(e) /\ (e.state = "admitted" \/ Reopens(e))

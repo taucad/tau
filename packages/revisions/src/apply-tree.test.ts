@@ -242,7 +242,6 @@ const project = async (
       createRevisionActors({
         port,
         projectId: 'project-1',
-        authorityEpoch: 'epoch-1',
         clock: clockAt(clockReading),
         filesystem: async () => checkout,
       }),

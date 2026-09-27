@@ -32,10 +32,8 @@ import { useProject } from '#hooks/use-project.js';
 import { useOptionalFileManager } from '#hooks/use-file-manager.js';
 import { useModels } from '#hooks/use-models.js';
 import { useComputeReuseMode } from '#lib/compute-reuse-preference.js';
-import {
-  readRootedBridgeCapabilities,
-  useOptionalChatWorkspaceAuthority,
-} from '#providers/chat-workspace-authority-provider.js';
+import { readRootedBridgeCapabilities } from '#providers/chat-workspace-authority-provider.js';
+import { useRevisionClient } from '#hooks/use-revision-status.js';
 import type { BrowserAgentHostRegistration } from '#chat-clients/_internal/browser-agent-host-transport.js';
 import { publishChatHostServices, publishChatTurnAdmission } from '#chat-clients/_internal/chat-host-binding.js';
 import {
@@ -65,6 +63,10 @@ import { createUiRuntimeConfig } from '#runtime/ui-runtime.config.js';
  */
 const placementOf = (execution: CadAgentExecution): string => daemonPlacementOf(execution) ?? execution.kind;
 
+/* The project host's workspace is the project's live checkout; an attempt's own checkout arrives with its placement
+ * grant (W8 TS-S5). */
+const liveWorkspaceId = 'live';
+
 /** Publishes this chat's host binding ingredients and its bodyless body factory. */
 export function ChatTurnHost(): ReactNode {
   const agent = useCadAgentConfig();
@@ -77,10 +79,12 @@ export function ChatTurnHost(): ReactNode {
   const fileManager = useOptionalFileManager();
   const fileManagerRef = fileManager?.fileManagerRef;
   const syncProjectRoots = fileManager?.workspace.syncProjectRoots;
-  const workspaceAuthority = useOptionalChatWorkspaceAuthority();
+  /* The page's own revision port opens the project's revision root; the host's placement session and its `revisions`
+   * reader are served only behind it (RV9-F1). */
+  const revisionsReady = useRevisionClient() !== undefined;
   const computeMode = useComputeReuseMode();
   const { resolveModel } = useModels();
-  const { admitWorkspace, surfaceDispatchFailure } = useTurnAdmission(agent.execution);
+  const { admitExecution, surfaceDispatchFailure } = useTurnAdmission(agent.execution);
   const resolveModelRef = useRef(resolveModel);
   useEffect(() => {
     resolveModelRef.current = resolveModel;
@@ -124,7 +128,6 @@ export function ChatTurnHost(): ReactNode {
           projectStorage: async () => {
             throw new Error('A Tau Host turn reads its workspace from the daemon, not from this browser.');
           },
-          markRunId: async () => undefined,
           createClient: async () =>
             /* A dial *function*, not an already-open channel: a relayed channel
              * dies for reasons that have nothing to do with the run, and the
@@ -138,17 +141,11 @@ export function ChatTurnHost(): ReactNode {
       if (execution.kind !== 'tau') {
         return undefined;
       }
-      /* `ready` is part of the guard, not an extra check: a registration whose
-       * `createClient` cannot prepare is not a registration. Composing one
-       * before the file manager's worker existed is what broke open-time
-       * discovery — `prepare` threw inside the resume below, the AI SDK
-       * swallowed it into `onError`, and the chat's log was never attached. */
-      if (
-        !workspaceAuthority ||
-        !workspaceAuthority.ready ||
-        fileManagerRef === undefined ||
-        syncProjectRoots === undefined
-      ) {
+      /* The revision root is part of the guard, not an extra check: a registration whose host cannot place a turn
+       * is not a registration. Composing one before the file manager's worker existed is what broke open-time
+       * discovery — the resume below threw, the AI SDK swallowed it into `onError`, and the chat's log was never
+       * attached. */
+      if (!revisionsReady || fileManagerRef === undefined || syncProjectRoots === undefined) {
         return undefined;
       }
       /* I7: what the host knows about this chat's run, the page learns at chat
@@ -210,24 +207,18 @@ export function ChatTurnHost(): ReactNode {
          * checkout, not the overlays above it (G6, architecture V6). */
         return openFileSystemBridge(rootDirectory, 'working-copy');
       };
+      /* W8 TS-S5: a port into this project's revision root, for the host's placement session or its `revisions`
+       * tool. Asked for at every provide, so a replaced host gets a new session. */
+      const openRevisionSession = (kind: 'placement' | 'reader') => () =>
+        fileManagerRef.getSnapshot().context.openRevisionSessionPort?.(kind, projectId);
       return {
         projectStorage: resolveProjectStorage,
-        markRunId: async (runId) => workspaceAuthority.markRunId(activeChatId, runId),
         createClient: async () => {
           await syncProjectRoots();
-          /* Never `prepare`: every turn reaches here with `admitWorkspace`'s
-           * claim already taken, so minting one would only ever happen for the
-           * open-time attach — which drives nothing and must lease nothing.
-           * When it did, the chat's abandoned run settled under the id that
-           * attach minted and the durable log refused it (I7). */
-          const [prepared, storage, capabilities] = await Promise.all([
-            workspaceAuthority.attachment(activeChatId),
+          const [storage, capabilities] = await Promise.all([
             resolveProjectStorage(),
             readRootedBridgeCapabilities(openProjectRootBridge),
           ]);
-          if (prepared === undefined) {
-            throw new Error('This chat has no checkout to run or replay a turn on.');
-          }
           if (!capabilities.writable || !capabilities.durability) {
             throw new Error('The active project filesystem is not writable or did not declare durability.');
           }
@@ -247,8 +238,11 @@ export function ChatTurnHost(): ReactNode {
             resolvedModel: resolveModelRef.current(liveExecution.model),
           });
           return createBrowserAgentHostClient({
-            openFileSystemBridge: prepared.openFileSystemBridge,
+            /* The project's live checkout; each attempt's file tools run on the checkout its placement grants. */
+            openFileSystemBridge: openProjectRootBridge,
             openProjectRootBridge,
+            openRevisionsPort: openRevisionSession('reader'),
+            openPlacementPort: openRevisionSession('placement'),
             computeMode,
             openComputeStorePort: () => {
               const opener = fileManagerRef.getSnapshot().context.openComputeStorePort;
@@ -259,7 +253,7 @@ export function ChatTurnHost(): ReactNode {
             },
             projectStorage: storage,
             durability: capabilities.durability,
-            authority: { projectId, workspaceId: prepared.execution.workspaceId },
+            authority: { projectId, workspaceId: liveWorkspaceId },
             gatewayBaseUrl: ENV.TAU_API_URL,
             systemPrompt: config.systemPrompt,
             systemPromptBlocks: config.systemPromptBlocks,
@@ -270,7 +264,7 @@ export function ChatTurnHost(): ReactNode {
         },
       };
     },
-    [activeChatId, computeMode, fileManagerRef, projectId, store, syncProjectRoots, workspaceAuthority],
+    [activeChatId, computeMode, fileManagerRef, projectId, revisionsReady, store, syncProjectRoots],
   );
 
   const composeRef = useRef(composeRegistration);
@@ -281,16 +275,15 @@ export function ChatTurnHost(): ReactNode {
   const placement = placementOf(agent.execution);
   /* The binding actor calls `compose` when it binds and never again on its own.
    * The revision root connects after this component's first render, so the
-   * first composition would be the one that cannot prepare — re-publishing on
+   * first composition would be the one that cannot place — re-publishing on
    * the flip is what makes the actor compose a working registration. */
-  const authorityReady = workspaceAuthority?.ready ?? false;
   useEffect(
     () =>
       publishChatHostServices(activeChatId, {
         placement,
         compose: () => composeRef.current(boundExecutionRef.current),
       }),
-    [activeChatId, authorityReady, placement],
+    [activeChatId, revisionsReady, placement],
   );
   /* The chat session actor holds the binding; it re-invokes it when — and only
    * when — the placement it was given moves. */
@@ -302,12 +295,12 @@ export function ChatTurnHost(): ReactNode {
    * Take this chat's next turn (C3).
    *
    * The chat's session actor invokes this from `run.queued`; it is the only
-   * place a lease is taken and the only place a turn's request is composed.
+   * place a turn's request is composed. The host places the attempt (W8 TS-S5).
    * Every route — an explicit send, an edit, *Try again*, the auto-retry and
    * the homepage-seeded first turn — arrives here as one gesture, and
    * `turnIntentOf` is the one derivation of the rewind point (V7).
    *
-   * Every one of them is an *attempt*: one lease, one execution, one
+   * Every one of them is an *attempt*: one placement, one execution, one
    * settlement (I1). A continuation is the only one that does not mint its own
    * run id, because the run it continues is one the host already holds.
    */
@@ -336,11 +329,9 @@ export function ChatTurnHost(): ReactNode {
       }
       /* A run the host can still continue is the *same* turn, and rewinding it
        * would charge a second time for tool work the customer already paid for
-       * — but continuing it is still an *attempt*, and an attempt holds a
-       * lease. The lease-less `continue` this replaces wrote the resumed
-       * execution's files unfenced, minted no revision on completion and left
-       * nothing that could settle it (I1, T2-D3/D4). A turn nothing can
-       * continue is a new turn, so it falls through to the rewind below. */
+       * — but continuing it is still an *attempt*, which the host places and
+       * settles as its own (I1, TS-A12). A turn nothing can continue is a new
+       * turn, so it falls through to the rewind below. */
       const resumableRunId = gesture.kind === 'continue' ? resumableBrowserAgentHostRunId(activeChatId) : undefined;
       const messages = Array.isArray(chat.messages) ? chat.messages : [];
       try {
@@ -354,19 +345,12 @@ export function ChatTurnHost(): ReactNode {
                 ? { kind: 'continue' }
                 : { kind: 'regenerate' },
         );
-        /* The claim's run id must be the host's, so the settlement that ends
-         * this attempt names the run `drop` is holding. */
-        const [target, preparedRunId] = await admitWorkspace(intent.leaseTurnId, execution, resumableRunId);
+        const target = await admitExecution(execution);
         if (intent.trigger === 'resume') {
-          return {
-            runId: preparedRunId ?? resumableRunId,
-            leaseTurnId: intent.leaseTurnId,
-            request: { kind: 'continue' },
-          };
+          return { runId: resumableRunId, leaseTurnId: intent.leaseTurnId, request: { kind: 'continue' } };
         }
-        /* One id for the lease, the host request and the settlement. A daemon
-         * placement leases nothing here, so the key is minted for it. */
-        const runId = preparedRunId ?? generatePrefixedId(idPrefix.request);
+        /* One id for the host request and the settlement. */
+        const runId = generatePrefixedId(idPrefix.request);
         const body = createRunBody({
           agent: turnAgent,
           projectId,
@@ -399,7 +383,7 @@ export function ChatTurnHost(): ReactNode {
         throw error;
       }
     },
-    [activeChatId, admitWorkspace, chat, projectId, store, surfaceDispatchFailure],
+    [activeChatId, admitExecution, chat, projectId, store, surfaceDispatchFailure],
   );
 
   /* Deliberately not unpublished on unmount: the turn is the chat session's,

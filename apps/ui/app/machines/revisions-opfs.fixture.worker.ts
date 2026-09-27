@@ -61,7 +61,7 @@ const handle = async (request: OpfsRequest): Promise<unknown> => {
       await provider.mkdir(runsOf(request.directory), { recursive: true });
       await provider.writeFile(
         `${runsOf(request.directory)}/${request.runId}.json`,
-        `${JSON.stringify({ runId: request.runId, authorityEpoch: 'epoch-a', attempt: 0 })}\n`,
+        `${JSON.stringify({ runId: request.runId, attempt: 0 })}\n`,
       );
       return undefined;
     }

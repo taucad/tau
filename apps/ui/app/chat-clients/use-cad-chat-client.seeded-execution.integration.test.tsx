@@ -33,7 +33,6 @@ import { chatSessionMachine } from '#machines/chat-session.machine.js';
 import {
   chatTurnAdmission,
   chatTurnSettlement,
-  publishChatTurnSettlement,
   resetChatTurnServices,
 } from '#chat-clients/_internal/chat-host-binding.js';
 
@@ -160,22 +159,11 @@ vi.mock('#hooks/use-file-manager.js', () => ({
 vi.mock('#hooks/use-credit-preflight.js', () => ({ useCreditPreflight: () => () => undefined }));
 vi.mock('#hooks/use-draft-image-error-toast.js', () => ({ useDraftImageErrorToast: () => undefined }));
 vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
-  useOptionalChatWorkspaceAuthority: () => ({
-    ready: true,
-    get: () => undefined,
-    prepare: async () => ({ execution: harness.workspaceExecution }),
-    attachment: async () => ({ execution: harness.workspaceExecution }),
-    setRevisionMode: () => undefined,
-    subscribe: () => () => undefined,
-    markAdmitted: async () => undefined,
-    markRunId: async () => undefined,
-    finalize: async () => undefined,
-    discard: async () => undefined,
-    markCancelled: async () => undefined,
-  }),
   readRootedBridgeCapabilities: async () => ({ writable: true, durability: 'exclusive-append' }),
   waitForRootedBridgeOpener: async () => undefined,
 }));
+/* ChatTurnHost composes a registration only once the project's revision root is connected (W8 TS-S5). */
+vi.mock('#hooks/use-revision-status.js', () => ({ useRevisionClient: () => ({}) }));
 // A browser build: no implicit local daemon, and no host directory to probe.
 vi.mock('#lib/agent-host-placement.js', () => ({
   localAgentHostId: () => undefined,
@@ -246,7 +234,6 @@ const dispatchSeededTurn = async (activeExecution: CadAgentExecution): Promise<R
   );
   projectSession.start();
   harness.projectSession = projectSession;
-  publishChatTurnSettlement(chatId, async () => undefined);
   store.setFocusedProject(row.resourceId);
   store.setProjectSession(row.resourceId, projectSession);
 

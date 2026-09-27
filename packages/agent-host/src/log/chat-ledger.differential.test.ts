@@ -3,7 +3,7 @@
  *
  * Each corpus is regenerated from its seed and byte-compared with the committed
  * `specs/lean/corpus/<corpus>.trace`; the real appender, `foldChatLedger`, `foldReadAnswer`, `gateRows`,
- * `recordSettlement`, `readBatch`, `mergeLogSegments` and the legality tables then run it, and their output must equal
+ * the host's `appendChatRows` (M1's append), `readBatch`, `mergeLogSegments` and the legality tables then run it, and their output must equal
  * the committed Lean goldens `<corpus>.expected` line by line. The Lean tier (`agent-host:formal:lean`) regenerates the
  * goldens with the oracle and fails on stale ones, so this test needs no Lean. `formal update packages/agent-host`
  * rewrites the traces (this test, with `FORMAL_UPDATE=1`) and then the goldens.
@@ -20,8 +20,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { createTauAgentHost } from '#host/tau-agent-host.js';
-import type { TauAgentHost } from '#host/tau-agent-host.js';
+import { appendChatRows } from '#host/tau-agent-host.js';
 import {
   chatRunState,
   emptyChatLedger,
@@ -98,7 +97,7 @@ const base = Date.UTC(2026, 8, 1);
 const termId = (term: number) => `e${String(term).padStart(2, '0')}`;
 const lifeStates = ['admitted', 'running', 'paused', 'completed', 'failed', 'failed', 'cancelled'] as const;
 const settledOutcomes = ['settled', 'released', 'absorbed', 'voided'] as const;
-type Settlement = Parameters<TauAgentHost['recordSettlement']>[0]['event'];
+type Settlement = Extract<LogRowBody, { readonly type: 'turn.finalized' | 'turn.conflicted' | 'turn.failed' }>;
 
 const settlementBody = (content: number): Settlement =>
   content % 3 === 0
@@ -266,29 +265,22 @@ const tornFragment = '{"version":';
 
 const codeOf = (error: unknown) => String((error as { code?: string }).code ?? (error as Error).message);
 
-/** `recordSettlement` on a fresh host whose log is a copy of `bytes`. */
+/** The host's append (`appendChatRows`, M1's writer) of one settlement row, under a new term, on a copy of `bytes`. */
 const hostSettle = async (
   bytes: Uint8Array<ArrayBuffer>,
   settle: { readonly run: number; readonly content: number },
 ): Promise<string> => {
   const copy = await createEventLogAppender(memoryEventLogStorage(new Uint8Array(bytes)).storage);
-  const host = createTauAgentHost({
-    systemPrompt: 'differential',
-    model: { id: 'differential-model', contextWindow: 1000 },
-    modelTransport: {
-      funding: { type: 'unfunded' },
-      async *stream() {
-        yield* [];
-      },
-    },
-    toolRegistry: { list: () => [], invoke: async () => ({ content: null, isError: false }) },
-    openEventLog: async () => copy,
-    createLeaderEpoch: () => 'e99',
-    now: () => new Date(base + 999_999),
-  });
   const initial = await copy.read();
   try {
-    await host.recordSettlement({ chatId: 'chat', runId: `r${settle.run}`, event: settlementBody(settle.content) });
+    await appendChatRows({
+      chatId: 'chat',
+      log: copy,
+      ledger: foldChatLedger(emptyChatLedger, initial),
+      leaderEpoch: 'e99',
+      recordedAt: new Date(base + 999_999).toISOString(),
+      rows: [{ runId: `r${settle.run}`, body: settlementBody(settle.content) }],
+    });
     const after = await copy.read();
     return after.length > initial.length ? 'appended' : 'skipped';
   } catch (error) {

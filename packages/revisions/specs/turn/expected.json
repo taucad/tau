@@ -3,7 +3,7 @@
     "TurnProtocol.pr.cfg": {
       "tier": "pr",
       "expect": "pass",
-      "ref": "W5 RM-S7: the code's knobs, the interim; the blueprint's legacy configuration (the target machine under today's commands, nine properties); deleted with W8's TS-S6, when target is the code's"
+      "ref": "W5 RM-S7 graph export: the turn machine under every host verb it accepts (M1Host FALSE); W8 TS-S6 kept it, since M1's discipline is the host's (target.cfg)"
     },
     "TurnProtocol.no-unretired-lease.cfg": {
       "tier": "pr",

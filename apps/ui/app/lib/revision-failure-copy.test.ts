@@ -56,14 +56,6 @@ describe('describeRevisionFailure', () => {
     );
   });
 
-  /* The one sentence two layers refuse an unrooted placement with: the worker
-     client one hop from the seam, and the authority above it (finding 8). */
-  it('phrases a chat placed on files that are not there', () => {
-    expect(describeRevisionFailure('turn', 'PLACEMENT_UNROOTED').description).toBe(
-      'This chat’s files could not be found.',
-    );
-  });
-
   it('says the same thing about the engine whichever verb asked it', () => {
     expect(describeRevisionFailure('restore', 'ENGINE_UNAVAILABLE').description).toBe(
       describeRevisionFailure('save', 'ENGINE_UNAVAILABLE').description,

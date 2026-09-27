@@ -797,7 +797,7 @@ theorem stamp_S (L : Ledger) (term run arg ms : Nat) :
 theorem attemptOf_self (en : Entry) : en.attemptOf en.attempt = en.attempt := by
   unfold Entry.attemptOf; split <;> simp_all
 
-/-- **T3** (host): `recordSettlement` stamps the run's current attempt, appends only when that attempt has no
+/-- **T3** (host): the host's settlement append (`appendChatRows`) stamps the run's current attempt, appends only when that attempt has no
 settlement, skips an identical repeat and refuses a differing one `SETTLEMENT_CONFLICT`: the host never writes a
 second settlement for an attempt. -/
 theorem t3_host (F : File) (run c : Nat) (p : Settlement)
@@ -848,9 +848,11 @@ theorem t4_reopens_legal (en : Entry) (h : reopens en .running 0 = true) :
     unfold reopenable at hr; simp only [Bool.and_eq_true] at hr; exact hr.1
   have h1 : en.life.isNone = false := by
     unfold attemptEnded at he; cases hl : en.life <;> simp_all
+  have hc : lifecycleTable (reopenableCond en) .running = .ok := by
+    unfold reopenableCond; split <;> rfl
   unfold condition
   by_cases h2 : en.append = .settled
-  · simp [h1, h2, he, hr, lifecycleTable]
+  · simp [h1, h2, he, hr, hc]
   · simp [h1, h2, he, lifecycleTable]
 
 /-- The table admits `running` on a run exactly when it is not `settled` or it reopens. -/
@@ -923,6 +925,22 @@ theorem t4_paused_reopens (en : Entry) (hp : en.life = some .paused) (hq : en.pe
   have : reopens en .running 0 = true := by
     rw [reopens_def]; simp [reopenable, attemptEnded, rests, hp, hq]
   exact ⟨t4_reopens_legal en this, this⟩
+
+/-- **T4** (a resolved pause may be cancelled; V8, W8.a2 round 3): a native pause with no pending request admits
+`cancelled`, settled or not, so a denial's or a cancel's `cancelled` row ends the paused attempt without reopening it. -/
+theorem t4_paused_cancels (en : Entry) (hp : en.life = some .paused) (hq : en.pending = []) :
+    lifecycleTable (condition en) .cancelled = .ok := by
+  unfold condition
+  by_cases h2 : en.append = .settled
+  · simp [hp, hq, h2, attemptEnded, reopenable, rests, reopenableCond, lifecycleTable]
+  · simp [hp, h2, attemptEnded, lifecycleTable]
+
+/-- **T4** (a settled failure stays ended): the `paused-reopenable` state admits `cancelled`, but a settled failure,
+resumable or not, still refuses it `RUN_ID_TAKEN`. -/
+theorem t4_failed_cancel_refused (en : Entry) (r : Bool) (hf : en.life = some (.failed r))
+    (hs : en.append = .settled) : lifecycleTable (condition en) .cancelled = .runIdTaken := by
+  unfold condition
+  cases r <;> simp [hf, hs, attemptEnded, Life.ended, reopenable, rests, reopenableCond, lifecycleTable]
 
 /-! ## T5: a reader detects every clamp, refusal and stale batch (foldReadAnswer) -/
 

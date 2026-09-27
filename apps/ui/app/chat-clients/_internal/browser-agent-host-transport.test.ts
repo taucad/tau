@@ -13,7 +13,6 @@ import {
   retireBrowserAgentHostRun,
   getBrowserAgentHostRun,
   getHostFinalizedTurns,
-  persistBrowserTurnSettlement,
   recordHostTurnSettlement,
   registerAgentHost,
   registerAgentHostRunReset,
@@ -255,7 +254,6 @@ describe('BrowserPlacementChatTransport', () => {
       createClient: async () => {
         throw refusal;
       },
-      markRunId: async () => undefined,
     });
     const onError = vi.fn();
     const chat = new Chat<MyUIMessage>({
@@ -307,7 +305,6 @@ describe('BrowserPlacementChatTransport', () => {
         providerBasePath: 'project-cleared-run',
       }),
       createClient: async () => lifecycleOnly,
-      markRunId: async () => undefined,
     });
     const chat = new Chat<MyUIMessage>({ id: chatId, transport: new BrowserPlacementChatTransport() });
 
@@ -385,7 +382,6 @@ describe('BrowserPlacementChatTransport', () => {
       projectStorage: async () => {
         throw new Error('An external-agent turn reads its workspace from the daemon.');
       },
-      markRunId: async () => undefined,
       createClient: async () => scriptedClient(commands),
     });
 
@@ -537,7 +533,6 @@ describe('BrowserPlacementChatTransport', () => {
         throw new Error('An external-agent turn reads its workspace from the daemon.');
       },
       createClient: async () => client,
-      markRunId: async () => undefined,
     });
     const transport = new BrowserPlacementChatTransport();
     const stream = await transport.sendMessages({
@@ -626,7 +621,6 @@ describe('BrowserPlacementChatTransport', () => {
       projectStorage: async () => {
         throw new Error('A host-placed turn reads its workspace from the daemon.');
       },
-      markRunId: async () => undefined,
       createClient: async () => client,
     });
 
@@ -720,7 +714,6 @@ describe('BrowserPlacementChatTransport', () => {
       projectStorage: async () => {
         throw new Error('A host-placed turn reads its workspace from the daemon.');
       },
-      markRunId: async () => undefined,
       createClient: async () => client,
     });
 
@@ -739,24 +732,28 @@ describe('BrowserPlacementChatTransport', () => {
     }
   });
 
-  it('keeps the host lease alive when browser-root settlement follows completed lifecycle', async () => {
+  it("keeps the follow open until the host's settlement row follows the completed lifecycle", async () => {
     installBrowserGlobals();
     const chatId = 'chat-late-turn-settlement';
     const runId = 'run-late-turn-settlement';
     let listener: Parameters<AgentHostClient['subscribe']>[1] | undefined;
-    const recordSettlement = vi.fn(async () => undefined);
     const client = clientFor(chatId, runId, {
-      recordSettlement,
       start: vi.fn(async () => {
-        listener?.(chatId, {
+        const row = {
           version: 1,
           leaderEpoch: 'leader-late-settlement',
-          sequence: 1,
           recordedAt: '2026-09-14T00:00:01.000Z',
           runId,
+        } as const;
+        /* W8 TS-S5: the host states where it placed the attempt on its `running` row. */
+        listener?.(chatId, {
+          ...row,
+          sequence: 1,
           type: 'run.lifecycle',
-          state: 'completed',
+          state: 'running',
+          placement: { checkoutId: 'live', baseRevisionId: 'rev-base', mode: 'direct' },
         });
+        listener?.(chatId, { ...row, sequence: 2, type: 'run.lifecycle', state: 'completed' });
         return snapshot(chatId, runId);
       }),
       subscribe: vi.fn((_input: Follow[0], next: Follow[1]) => {
@@ -773,7 +770,6 @@ describe('BrowserPlacementChatTransport', () => {
         providerBasePath: 'project-late-turn-settlement',
       }),
       createClient: async () => client,
-      markRunId: async () => undefined,
     });
     const observed: HostTurnSettlement[] = [];
     const unsubscribe = subscribeHostTurnSettlements((event) => {
@@ -805,8 +801,8 @@ describe('BrowserPlacementChatTransport', () => {
         trigger: 'turn',
         runIds: [runId],
       } as const;
-      expect(await persistBrowserTurnSettlement(finalized)).toBe(true);
-      expect(recordSettlement).toHaveBeenCalledWith(finalized);
+      expect(getBrowserAgentHostRun(chatId)?.placement).toEqual({ baseRevisionId: 'rev-base' });
+      /* The host appends this run's row after the terminal one (W8 TS-S6); the follow projects it here. */
       recordHostTurnSettlement(finalized);
 
       await vi.waitFor(() => {
@@ -817,6 +813,44 @@ describe('BrowserPlacementChatTransport', () => {
       });
     } finally {
       unsubscribe();
+      unregister();
+    }
+  });
+
+  /* W8 TS-S6: a start the host refused before its first row has no settlement coming; the chat must not wait. */
+  it('should not hold the follow for a run the host recorded nothing of', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-never-recorded';
+    const runId = 'run-never-recorded';
+    const client = clientFor(chatId, runId, {
+      start: vi.fn(async () => {
+        throw new AgentHostWorkerError('CLIENT_CONTEXT_FAILED', 'The skills could not be read.');
+      }),
+    });
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({
+        projectId: 'project-never-recorded',
+        backend: 'opfs',
+        providerBasePath: 'project-never-recorded',
+      }),
+      createClient: async () => client,
+    });
+
+    try {
+      const stream = await new BrowserPlacementChatTransport().sendMessages({
+        chatId,
+        trigger: 'submit-message',
+        messageId: undefined,
+        messages: [{ id: 'turn-never-recorded', role: 'user', parts: [{ type: 'text', text: 'Build it.' }] }],
+        abortSignal: undefined,
+        body: browserBody({ runId, trigger: 'submit' }),
+      });
+      await drain(stream.getReader()).catch(() => undefined);
+
+      await vi.waitFor(() => {
+        expect(client.close).toHaveBeenCalledOnce();
+      });
+    } finally {
       unregister();
     }
   });
@@ -833,7 +867,6 @@ describe('BrowserPlacementChatTransport', () => {
       projectStorage: async () => {
         throw new Error('A Tau Host turn reads its workspace from the daemon.');
       },
-      markRunId: async () => undefined,
       createClient: async () => scriptedClient(commands),
     });
 
@@ -888,7 +921,6 @@ describe('BrowserPlacementChatTransport', () => {
         providerBasePath: 'project-reload',
       }),
       createClient: async () => clientFor(chatId, 'run-reload'),
-      markRunId: async () => undefined,
     });
     const transport = new BrowserPlacementChatTransport();
 
@@ -911,7 +943,6 @@ describe('BrowserPlacementChatTransport', () => {
     let unregister = registerAgentHost(chatId, {
       projectStorage: async () => ({ projectId: 'project-empty', backend: 'opfs', providerBasePath: 'project-empty' }),
       createClient: async () => clientFor(chatId, 'run-empty'),
-      markRunId: async () => undefined,
     });
     const chat = new Chat<MyUIMessage>({ id: chatId, transport: new BrowserPlacementChatTransport(), onFinish });
 
@@ -927,7 +958,6 @@ describe('BrowserPlacementChatTransport', () => {
       createClient: async () => {
         throw refusal;
       },
-      markRunId: async () => undefined,
     });
 
     await chat.resumeStream();
@@ -970,7 +1000,6 @@ describe('BrowserPlacementChatTransport', () => {
         },
       },
     ] satisfies AgentLogEvent[];
-    const markRunId = vi.fn(async () => undefined);
     const client = clientFor(chatId, runId, {
       attach: vi.fn(async () =>
         page({
@@ -995,7 +1024,6 @@ describe('BrowserPlacementChatTransport', () => {
         providerBasePath: 'project-reload-failed',
       }),
       createClient: async () => client,
-      markRunId,
     });
     const transport = new BrowserPlacementChatTransport();
 
@@ -1028,7 +1056,6 @@ describe('BrowserPlacementChatTransport', () => {
     // Settlement reads this: a terminal browser run must never be looked up
     // through the API projection, and a failed one releases its claim.
     expect(getBrowserAgentHostRun(chatId)).toMatchObject({ runId, state: 'failed', turnId: 'user-reload-failed' });
-    expect(markRunId).toHaveBeenCalledWith(runId);
     expect(transport.getBoundRunId(chatId)).toBe(runId);
     unregister();
   });
@@ -1108,7 +1135,6 @@ describe('BrowserPlacementChatTransport', () => {
         providerBasePath: 'project-refused-credit',
       }),
       createClient: async () => client,
-      markRunId: async () => undefined,
     });
     const transport = new BrowserPlacementChatTransport();
 
@@ -1196,7 +1222,6 @@ describe('BrowserPlacementChatTransport', () => {
         providerBasePath: 'project-resume-replay',
       }),
       createClient: async () => client,
-      markRunId: async () => undefined,
     });
     const transport = new BrowserPlacementChatTransport();
     const chunksOf = async (): Promise<UIMessageChunk[]> => {
@@ -1226,240 +1251,6 @@ describe('BrowserPlacementChatTransport', () => {
     expect(resumed.at(-1)).toMatchObject({ type: 'finish' });
 
     unregister();
-  });
-
-  /*
-   * E3, I7: a reattach that finds a completed run the log never settled is the
-   * page's to settle, and the writer that settlement needs is this stream's
-   * client. A read-only reattach used to close it at the end of the replay, so
-   * finalise-on-return minted the revision and recorded nothing — the log kept
-   * a `completed` run with no settlement and every later open reconciled it
-   * again.
-   */
-  it('opens a settlement writer for a completed run the log never settled', async () => {
-    installBrowserGlobals();
-    const chatId = 'chat-unsettled-return';
-    const runId = 'run-unsettled-return';
-    const turnId = 'user-unsettled-return';
-    const base = {
-      version: 1,
-      leaderEpoch: 'leader-unsettled-return',
-      recordedAt: '2026-09-01T00:00:01.000Z',
-      runId,
-    } as const;
-    const events = [
-      { ...base, sequence: 1, type: 'run.lifecycle', state: 'admitted' },
-      { ...base, sequence: 2, type: 'message.appended', message: { id: turnId, role: 'user', content: 'Build it.' } },
-      { ...base, sequence: 3, type: 'run.lifecycle', state: 'running' },
-      { ...base, sequence: 4, type: 'run.lifecycle', state: 'completed' },
-    ] satisfies AgentLogEvent[];
-    const finalized = {
-      type: 'turn.finalized',
-      chatId,
-      runId,
-      turnId,
-      projectId: 'project-unsettled-return',
-      checkoutId: 'live',
-      changedPaths: [],
-      trigger: 'turn',
-      runIds: [runId],
-      revisionId: 'rev-unsettled-return',
-    } as const satisfies HostTurnSettlement;
-    const client = clientFor(chatId, runId, {
-      attach: vi.fn(async () =>
-        page({
-          cursor: 0,
-          nextCursor: 4,
-          endCursor: 4,
-          events,
-          snapshot: {
-            chatId,
-            runId,
-            turnId,
-            state: 'completed',
-            messages: [{ id: turnId, role: 'user', content: 'Build it.' }],
-          } as const,
-        }),
-      ),
-      recordSettlement: vi.fn(async () => undefined),
-    });
-    const unregister = registerAgentHost(chatId, {
-      projectStorage: async () => ({
-        projectId: 'project-unsettled-return',
-        backend: 'opfs',
-        providerBasePath: 'project-unsettled-return',
-      }),
-      createClient: async () => client,
-      markRunId: async () => undefined,
-    });
-    const transport = new BrowserPlacementChatTransport();
-
-    const reattached = await transport.reconnectToStream({ chatId, metadata: undefined });
-    await drain(reattached!.getReader());
-    /* The readable is done once the replay ends; the settlement the page
-     * produces on return lands after it, and this stream still owns the
-     * writer for it. */
-    await expect(persistBrowserTurnSettlement(finalized)).resolves.toBe(true);
-    recordHostTurnSettlement(finalized);
-    unregister();
-  });
-
-  /*
-   * The stream deletes its `activeClients` entry and *then* closes its worker,
-   * which holds the chat's log lock for as long as the close takes. A fallback
-   * writer opened in that window is a second worker contending for the same
-   * lock over a leadership channel keyed on a workspace the first one may not
-   * share — seven seconds of nothing, and a lost settlement.
-   */
-  it('waits for a closing stream to let go of the chat log before it opens a settlement writer', async () => {
-    installBrowserGlobals();
-    const chatId = 'chat-close-window';
-    const runId = 'run-close-window';
-    const turnId = 'user-close-window';
-    const base = {
-      version: 1,
-      leaderEpoch: 'leader-close-window',
-      recordedAt: '2026-09-01T00:00:01.000Z',
-      runId,
-    } as const;
-    const events = [
-      { ...base, sequence: 1, type: 'run.lifecycle', state: 'admitted' },
-      { ...base, sequence: 2, type: 'message.appended', message: { id: turnId, role: 'user', content: 'Build it.' } },
-      { ...base, sequence: 3, type: 'run.lifecycle', state: 'completed' },
-    ] satisfies AgentLogEvent[];
-    const closing = Promise.withResolvers<void>();
-    const client = clientFor(chatId, runId, {
-      attach: vi.fn(async () =>
-        page({
-          cursor: 0,
-          nextCursor: 3,
-          endCursor: 3,
-          events,
-          snapshot: {
-            chatId,
-            runId,
-            turnId,
-            state: 'completed',
-            messages: [{ id: turnId, role: 'user', content: 'Build it.' }],
-          } as const,
-        }),
-      ),
-      recordSettlement: vi.fn(async () => undefined),
-      close: vi.fn(async () => closing.promise),
-    });
-    const createClient = vi.fn(async () => client);
-    const unregister = registerAgentHost(chatId, {
-      projectStorage: async () => ({
-        projectId: 'project-close-window',
-        backend: 'opfs',
-        providerBasePath: 'project-close-window',
-      }),
-      createClient,
-      markRunId: async () => undefined,
-    });
-    const transport = new BrowserPlacementChatTransport();
-
-    const reattached = await transport.reconnectToStream({ chatId, metadata: undefined });
-    await drain(reattached!.getReader());
-    await vi.waitFor(() => {
-      expect(client.close).toHaveBeenCalledTimes(1);
-    });
-    const persisted = persistBrowserTurnSettlement({
-      type: 'turn.finalized',
-      chatId,
-      runId,
-      turnId,
-      projectId: 'project-close-window',
-      checkoutId: 'live',
-      changedPaths: [],
-      trigger: 'turn',
-      runIds: [runId],
-      revisionId: 'rev-close-window',
-    });
-    await Promise.resolve();
-    await Promise.resolve();
-
-    // The first worker still holds the log; nothing may dial a second one yet.
-    expect(createClient).toHaveBeenCalledTimes(1);
-
-    closing.resolve();
-    await expect(persisted).resolves.toBe(true);
-    expect(createClient).toHaveBeenCalledTimes(2);
-    unregister();
-  });
-
-  /*
-   * A daemon registration builds its client with no `recordSettlement` — the
-   * option is the browser worker's alone — so this branch dialled the daemon
-   * and then walked away from the channel. Every settlement routed to a
-   * daemon-registered chat leaked one.
-   */
-  it('closes the writer it opened for a registration that cannot record settlements', async () => {
-    installBrowserGlobals();
-    const chatId = 'chat-writerless-registration';
-    const runId = 'run-writerless-registration';
-    const client = clientFor(chatId, runId);
-    const unregister = registerAgentHost(chatId, {
-      projectStorage: async () => ({
-        projectId: 'project-writerless',
-        backend: 'opfs',
-        providerBasePath: 'project-writerless',
-      }),
-      createClient: async () => client,
-      markRunId: async () => undefined,
-    });
-
-    await expect(
-      persistBrowserTurnSettlement({
-        type: 'turn.finalized',
-        chatId,
-        runId,
-        turnId: 'user-writerless',
-        projectId: 'project-writerless',
-        checkoutId: 'live',
-        changedPaths: [],
-        trigger: 'turn',
-        runIds: [runId],
-        revisionId: 'rev-writerless',
-      }),
-    ).resolves.toBe(false);
-
-    expect(client.close).toHaveBeenCalledTimes(1);
-    unregister();
-  });
-
-  /*
-   * I1/E3: `registrations` is written by the *focused* chat's turn host, while
-   * the settlement root publishes for every chat of the project — so an
-   * unfocused chat's settlement is dropped, and the next open of that chat
-   * reconciles the same run again and mints a second revision. Silence made
-   * that duplicate unattributable.
-   */
-  it('names the chat and run of a settlement it has no registration to write', async () => {
-    installBrowserGlobals();
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-
-    await expect(
-      persistBrowserTurnSettlement({
-        type: 'turn.finalized',
-        chatId: 'chat-unregistered-settlement',
-        runId: 'run-unregistered-settlement',
-        turnId: 'user-unregistered-settlement',
-        projectId: 'project-unregistered-settlement',
-        checkoutId: 'live',
-        changedPaths: [],
-        trigger: 'turn',
-        runIds: ['run-unregistered-settlement'],
-        revisionId: 'rev-unregistered-settlement',
-      }),
-    ).resolves.toBe(false);
-
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining('no settlement writer') as unknown,
-      'chat-unregistered-settlement',
-      'run-unregistered-settlement',
-    );
-    warn.mockRestore();
   });
 
   /*
@@ -1521,7 +1312,6 @@ describe('BrowserPlacementChatTransport', () => {
         providerBasePath: 'project-resume-refailed',
       }),
       createClient: async () => client,
-      markRunId: async () => undefined,
     });
     const transport = new BrowserPlacementChatTransport();
 
@@ -1544,16 +1334,15 @@ describe('BrowserPlacementChatTransport', () => {
 
   /*
    * I1: one attempt, one settlement — so the gate that holds this stream's
-   * durable writer open belongs to the attempt, not to the run id.
+   * follow open belongs to the attempt, not to the run id.
    *
    * The replay a continuation opens with republishes the *previous* attempt's
    * `turn.failed` under the same run id, which resolved the wait before the
    * reopened attempt had started. The stream then closed its client the moment
-   * `resume` answered, and the `turn.finalized` the root minted a tick later
-   * found no writer: a revision on screen, nothing in the chat's durable log,
-   * and every later open reconciling the run again.
+   * `resume` answered, and the `turn.finalized` row the host appends a tick
+   * later reached nobody on this page.
    */
-  it('holds its own settlement writer for the attempt a resume reopens', async () => {
+  it('holds its follow open for the settlement of the attempt a resume reopens', async () => {
     installBrowserGlobals();
     const chatId = 'chat-resume-settlement';
     const runId = 'run-resume-settlement';
@@ -1593,10 +1382,10 @@ describe('BrowserPlacementChatTransport', () => {
       ...settlement,
       revisionId: 'rev-resume-settlement',
     } as const satisfies HostTurnSettlement;
-    let persistedByThisStream: boolean | undefined;
+    let closesBeforeSettlement: number | undefined;
     let notify: Parameters<AgentHostClient['subscribe']>[1] | undefined;
-    const settleAfterTheStream = async (): Promise<void> => {
-      persistedByThisStream = await persistBrowserTurnSettlement(finalized);
+    const settleAfterTheStream = (): void => {
+      closesBeforeSettlement = vi.mocked(client.close).mock.calls.length;
       recordHostTurnSettlement(finalized);
     };
     const client = clientFor(chatId, runId, {
@@ -1622,7 +1411,6 @@ describe('BrowserPlacementChatTransport', () => {
           } as const,
         }),
       ),
-      recordSettlement: vi.fn(async () => undefined),
       resume: vi.fn(async (resumedChat: string) => {
         notify?.(resumedChat, {
           ...base,
@@ -1638,8 +1426,8 @@ describe('BrowserPlacementChatTransport', () => {
           type: 'run.lifecycle',
           state: 'completed',
         });
-        /* The page settles the reopened attempt after the stream's last chunk,
-         * one macrotask later — exactly where the real `settle` runs. */
+        /* The host appends the reopened attempt's row after the stream's last
+         * chunk, one macrotask later (W8 TS-S6). */
         globalThis.setTimeout(settleAfterTheStream, 0);
         return { chatId, runId, turnId, state: 'completed', messages: [] } as const;
       }),
@@ -1652,25 +1440,28 @@ describe('BrowserPlacementChatTransport', () => {
         providerBasePath: 'project-resume-settlement',
       }),
       createClient,
-      markRunId: async () => undefined,
     });
     const transport = new BrowserPlacementChatTransport();
 
     const reattached = await transport.reconnectToStream({ chatId, metadata: undefined });
     await drain(reattached!.getReader());
+    /* The read-only reattach closes its own client; the continuation's is the one that must wait. */
+    await vi.waitFor(() => {
+      expect(client.close).toHaveBeenCalledOnce();
+    });
     requestBrowserAgentHostResume(chatId);
     const continued = await transport.reconnectToStream({ chatId, metadata: undefined });
     await drain(continued!.getReader());
 
     expect(client.resume).toHaveBeenCalledTimes(1);
-    /* The readable is done once the last chunk is written; the writer this
-     * asserts is held open past it, for the settlement that follows. */
+    /* The readable is done once the last chunk is written; the follow this
+     * asserts is held open past it, for the settlement row that follows. */
     await vi.waitFor(() => {
-      expect(persistedByThisStream).toBe(true);
+      expect(closesBeforeSettlement).toBe(1);
     });
-    /* This stream's own client, not one opened for the write: two streams,
-     * two clients. A third call means the hold let go too early and the
-     * fallback writer had to cover for it. */
+    await vi.waitFor(() => {
+      expect(client.close).toHaveBeenCalledTimes(2);
+    });
     expect(createClient).toHaveBeenCalledTimes(2);
     unregister();
   });
@@ -1737,7 +1528,6 @@ describe('BrowserPlacementChatTransport', () => {
           } as const,
         }),
       ),
-      recordSettlement: vi.fn(async () => undefined),
       resume: vi.fn(async (resumedChat: string) => {
         /* The host's own ordering: the reopened attempt is already running and
          * its row is on the subscription before this command answers. */
@@ -1779,7 +1569,6 @@ describe('BrowserPlacementChatTransport', () => {
         providerBasePath: 'project-resume-open',
       }),
       createClient: async () => client,
-      markRunId: async () => undefined,
     });
     const transport = new BrowserPlacementChatTransport();
 
@@ -1849,7 +1638,6 @@ describe('BrowserPlacementChatTransport', () => {
         providerBasePath: 'project-refused-settled',
       }),
       createClient: async () => client,
-      markRunId: async () => undefined,
     });
     const transport = new BrowserPlacementChatTransport();
     const stream = await transport.sendMessages({
@@ -1909,7 +1697,6 @@ describe('BrowserPlacementChatTransport', () => {
         providerBasePath: 'project-refused-catalog',
       }),
       createClient: async () => client,
-      markRunId: async () => undefined,
     });
     const transport = new BrowserPlacementChatTransport();
 
@@ -1982,7 +1769,6 @@ describe('BrowserPlacementChatTransport', () => {
         providerBasePath: 'project-reload-running',
       }),
       createClient: async () => client,
-      markRunId: async () => undefined,
     });
     const transport = new BrowserPlacementChatTransport();
 
@@ -1994,7 +1780,7 @@ describe('BrowserPlacementChatTransport', () => {
       expect(listener).toBeDefined();
     });
     expect(read).toHaveBeenCalledOnce();
-    expect(client.subscribe).toHaveBeenCalledWith({ chatId, cursor: 2 }, expect.any(Function));
+    expect(client.subscribe).toHaveBeenCalledWith({ chatId, cursor: 2 }, expect.any(Function), expect.any(Function));
     expect(getBrowserAgentHostRun(chatId)).toMatchObject({ runId, state: 'running' });
     listener!(chatId, completed);
     await drain(reader);
@@ -2028,7 +1814,6 @@ describe('BrowserPlacementChatTransport', () => {
           providerBasePath: `project-${hostTrigger}`,
         }),
         createClient: async () => client,
-        markRunId: async () => undefined,
       });
       const transport = new BrowserPlacementChatTransport();
       const stream = await transport.sendMessages({
@@ -2078,7 +1863,6 @@ describe('BrowserPlacementChatTransport', () => {
     const firstRegistration = registerAgentHost(chatId, {
       projectStorage: async () => ({ projectId: 'project-retry', backend: 'opfs', providerBasePath: 'project-retry' }),
       createClient: async () => firstClient,
-      markRunId: async () => undefined,
     });
     const transport = new BrowserPlacementChatTransport();
     const chat = new Chat<MyUIMessage>({ id: chatId, transport });
@@ -2090,7 +1874,6 @@ describe('BrowserPlacementChatTransport', () => {
     const retryRegistration = registerAgentHost(chatId, {
       projectStorage: async () => ({ projectId: 'project-retry', backend: 'opfs', providerBasePath: 'project-retry' }),
       createClient: async () => retryClient,
-      markRunId: async () => undefined,
     });
     chat.messages = [user, { id: 'assistant-1', role: 'assistant', parts: [{ type: 'text', text: 'Done.' }] }];
 
@@ -2159,7 +1942,6 @@ describe('BrowserPlacementChatTransport', () => {
         providerBasePath: 'project-follower',
       }),
       createClient: async () => client,
-      markRunId: async () => undefined,
     });
     const transport = new BrowserPlacementChatTransport();
     transport.bindRun(chatId, runId);
@@ -2172,7 +1954,7 @@ describe('BrowserPlacementChatTransport', () => {
     /* Rows are pulled, not pushed (SC-R14): the follow starts after the replay, from the cursor it ended on, so nothing
      * between the two is lost and nothing is delivered twice. */
     expect(attach.mock.invocationCallOrder[0]).toBeLessThan(subscribe.mock.invocationCallOrder[0]!);
-    expect(subscribe).toHaveBeenCalledWith({ chatId, cursor: 2 }, expect.any(Function));
+    expect(subscribe).toHaveBeenCalledWith({ chatId, cursor: 2 }, expect.any(Function), expect.any(Function));
     expect(attach).toHaveBeenCalledWith({ chatId, cursor: 0 });
     expect(read).toHaveBeenCalledWith({ chatId, cursor: 1, last: { leaderEpoch: 'leader-1', sequence: 1 } });
     expect(client.resume).not.toHaveBeenCalled();
@@ -2248,7 +2030,6 @@ describe('BrowserPlacementChatTransport', () => {
       const unregister = registerAgentHost(chatId, {
         projectStorage: async () => ({ projectId: 'project-race', backend: 'opfs', providerBasePath: 'project-race' }),
         createClient: async () => client,
-        markRunId: async () => undefined,
       });
       try {
         const transport = new BrowserPlacementChatTransport();
@@ -2328,7 +2109,6 @@ describe('BrowserPlacementChatTransport', () => {
     const unregister = registerAgentHost(chatId, {
       projectStorage: async () => ({ projectId: 'project-live', backend: 'opfs', providerBasePath: 'project-live' }),
       createClient: async () => client,
-      markRunId: async () => undefined,
     });
     const transport = new BrowserPlacementChatTransport();
     const stream = await transport.sendMessages({
@@ -2399,7 +2179,6 @@ describe('BrowserPlacementChatTransport', () => {
         providerBasePath: 'project-snapshot-terminal',
       }),
       createClient: async () => client,
-      markRunId: async () => undefined,
     });
     const transport = new BrowserPlacementChatTransport();
     transport.bindRun(chatId, runId);
@@ -2480,7 +2259,6 @@ describe('BrowserPlacementChatTransport', () => {
         providerBasePath: 'project-unattended',
       }),
       createClient: async () => client,
-      markRunId: async () => undefined,
     });
     const transport = new BrowserPlacementChatTransport();
 
@@ -2543,7 +2321,6 @@ describe('BrowserPlacementChatTransport', () => {
         providerBasePath: 'project-terminal-repair',
       }),
       createClient: async () => client,
-      markRunId: async () => undefined,
     });
     const transport = new BrowserPlacementChatTransport();
 
@@ -2582,7 +2359,6 @@ describe('BrowserPlacementChatTransport', () => {
         providerBasePath: 'project-browser-cancel',
       }),
       createClient: async () => client,
-      markRunId: async () => undefined,
     });
     const transport = new BrowserPlacementChatTransport();
     const operation = new AbortController();
@@ -2605,20 +2381,17 @@ describe('BrowserPlacementChatTransport', () => {
   /**
    * V10/C6: every admitted run settles exactly once, whatever ended its stream.
    *
-   * A stopped turn closed its writer the moment the abort landed, so the
-   * settlement the page produced a beat later had nowhere durable to go: the
-   * run's outcome depended on whether the revision root answered before the
-   * stream closed (F6). The stream that drove the admission holds its writer
-   * open for the settlement of the run it admitted.
+   * A stopped turn closed its follow the moment the abort landed, so the
+   * settlement row the host appends a beat later reached nobody on this page
+   * (F6, W8 TS-S6). The stream that drove the admission holds its follow open
+   * for the settlement of the run it admitted.
    */
-  it('keeps the settlement writer open for a run whose turn was stopped', async () => {
+  it('keeps the follow open for the settlement of a run whose turn was stopped', async () => {
     installBrowserGlobals();
     const chatId = 'chat-cancel-settlement';
     const runId = 'run-cancel-settlement';
     const completion = Promise.withResolvers<Awaited<ReturnType<AgentHostClient['start']>>>();
-    const recordSettlement = vi.fn(async () => undefined);
     const client = clientFor(chatId, runId, {
-      recordSettlement,
       start: vi.fn(async () => completion.promise),
       cancel: vi.fn(async () => {
         const value = snapshot(chatId, runId, 'cancelled');
@@ -2633,7 +2406,6 @@ describe('BrowserPlacementChatTransport', () => {
         providerBasePath: 'project-cancel-settlement',
       }),
       createClient: async () => client,
-      markRunId: async () => undefined,
     });
     const operation = new AbortController();
 
@@ -2657,8 +2429,7 @@ describe('BrowserPlacementChatTransport', () => {
         checkoutId: undefined,
         reason: 'the person stopped this turn',
       } as const;
-      expect(await persistBrowserTurnSettlement(failed)).toBe(true);
-      expect(recordSettlement).toHaveBeenCalledWith(failed);
+      expect(client.close).not.toHaveBeenCalled();
       recordHostTurnSettlement(failed);
       await vi.waitFor(() => {
         expect(client.close).toHaveBeenCalledOnce();
@@ -2669,14 +2440,12 @@ describe('BrowserPlacementChatTransport', () => {
   });
 
   /* The same run of the same invariant for a refusal: `start` throws, the
-   * stream aborts, and the turn is settled as failed by its owner afterwards. */
-  it('keeps the settlement writer open for a run the host refused', async () => {
+   * stream aborts, and the host settles the turn as failed afterwards. */
+  it('keeps the follow open for the settlement of a run the host refused', async () => {
     installBrowserGlobals();
     const chatId = 'chat-refusal-settlement';
     const runId = 'run-refusal-settlement';
-    const recordSettlement = vi.fn(async () => undefined);
     const client = clientFor(chatId, runId, {
-      recordSettlement,
       start: vi.fn(async () => {
         throw new Error('Refused once.');
       }),
@@ -2688,7 +2457,6 @@ describe('BrowserPlacementChatTransport', () => {
         providerBasePath: 'project-refusal-settlement',
       }),
       createClient: async () => client,
-      markRunId: async () => undefined,
     });
 
     try {
@@ -2710,8 +2478,7 @@ describe('BrowserPlacementChatTransport', () => {
         checkoutId: undefined,
         reason: 'Refused once.',
       } as const;
-      expect(await persistBrowserTurnSettlement(failed)).toBe(true);
-      expect(recordSettlement).toHaveBeenCalledWith(failed);
+      expect(client.close).not.toHaveBeenCalled();
       recordHostTurnSettlement(failed);
       await vi.waitFor(() => {
         expect(client.close).toHaveBeenCalledOnce();
@@ -2788,7 +2555,6 @@ describe('BrowserPlacementChatTransport', () => {
         providerBasePath: 'project-live-refusal',
       }),
       createClient: async () => client,
-      markRunId: async () => undefined,
     });
 
     try {
@@ -2804,6 +2570,80 @@ describe('BrowserPlacementChatTransport', () => {
 
       expect(client.start).toHaveBeenCalledTimes(2);
       expect(refusals).toBe(2);
+    } finally {
+      unregister();
+    }
+  });
+
+  /*
+   * W8.r1 item 6 (probe P12): the previous attempt ended and its `turn.*` row freed the composer, but the host
+   * acknowledges its lease a few milliseconds later; a quick follow-up meanwhile is refused `CHAT_RUN_LIVE` naming a
+   * terminal (or settling) run. That is retry class `wait`: the stream re-sends until the host admits it.
+   */
+  it('re-sends a start the host refuses while the previous attempt settles, until it is admitted', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-settling';
+    const runId = 'run-next';
+    let listener: Parameters<AgentHostClient['subscribe']>[1] | undefined;
+    let sends = 0;
+    const client = clientFor(chatId, runId, {
+      start: vi.fn(async (input: Parameters<AgentHostClient['start']>[0]) => {
+        sends += 1;
+        if (sends <= 3) {
+          throw new AgentHostWorkerError(
+            'CHAT_RUN_LIVE',
+            `Chat ${chatId} has a ${sends === 1 ? 'terminal' : 'settling'} run; send the command again after it ends.`,
+            { state: sends === 1 ? 'terminal' : 'settling', runId: 'run-previous' },
+          );
+        }
+        listener?.(chatId, {
+          version: 1,
+          leaderEpoch: 'leader-settling',
+          sequence: 9,
+          recordedAt: '2026-09-27T00:00:09.000Z',
+          runId: input.runId,
+          type: 'run.lifecycle',
+          state: 'completed',
+        });
+        return snapshot(chatId, input.runId);
+      }),
+      attach: vi.fn(async () =>
+        page({
+          cursor: 0,
+          nextCursor: 0,
+          endCursor: 0,
+          events: [],
+          snapshot: snapshot(chatId, 'run-previous', 'completed'),
+        }),
+      ),
+      subscribe: vi.fn((_input: Follow[0], next: Follow[1]) => {
+        listener = next;
+        return () => {
+          listener = undefined;
+        };
+      }),
+    });
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({
+        projectId: 'project-settling',
+        backend: 'opfs',
+        providerBasePath: 'project-settling',
+      }),
+      createClient: async () => client,
+    });
+
+    try {
+      const stream = await new BrowserPlacementChatTransport().sendMessages({
+        chatId,
+        trigger: 'submit-message',
+        messageId: 'message-next',
+        messages: [{ id: 'message-next', role: 'user', parts: [{ type: 'text', text: 'Follow-up.' }] }],
+        abortSignal: undefined,
+        body: browserBody({ runId, trigger: 'submit' }),
+      });
+      await drain(stream.getReader());
+
+      expect(client.start).toHaveBeenCalledTimes(4);
     } finally {
       unregister();
     }
@@ -2857,7 +2697,6 @@ describe('BrowserPlacementChatTransport', () => {
         providerBasePath: 'project-live-forever',
       }),
       createClient: async () => client,
-      markRunId: async () => undefined,
     });
 
     try {
@@ -2921,7 +2760,6 @@ describe('BrowserPlacementChatTransport', () => {
         providerBasePath: 'project-browser-approval',
       }),
       createClient: async () => client,
-      markRunId: async () => undefined,
     });
     const transport = new BrowserPlacementChatTransport();
     const stream = await transport.sendMessages({
@@ -2986,7 +2824,6 @@ describe('BrowserPlacementChatTransport', () => {
             }),
           ),
         }),
-      markRunId: async () => undefined,
     });
     const transport = new BrowserPlacementChatTransport();
 
@@ -3042,7 +2879,6 @@ describe('BrowserPlacementChatTransport', () => {
         throw new Error('A daemon-placed turn reads its workspace from the daemon.');
       },
       createClient: async () => clientFor(chatId, streamingRunId, { attach: vi.fn(async () => batchFrom(0)), read }),
-      markRunId: async () => undefined,
     });
     const transport = new BrowserPlacementChatTransport();
     const chat = new Chat<MyUIMessage>({ id: chatId, transport, messages: [] });
@@ -3091,7 +2927,6 @@ describe('BrowserPlacementChatTransport', () => {
           attach: vi.fn(async () => batchFrom(0)),
           read: vi.fn(async (input: { readonly cursor: number }) => batchFrom(input.cursor)),
         }),
-      markRunId: async () => undefined,
     });
     const transport = new BrowserPlacementChatTransport();
     const expectedTexts = durableTexts(events);
@@ -3168,7 +3003,6 @@ describe('BrowserPlacementChatTransport', () => {
           providerBasePath: 'project-prior-settlement',
         }),
         createClient: async () => wedged,
-        markRunId: async () => undefined,
       });
       const transport = new BrowserPlacementChatTransport();
       // The reattach that never comes back, holding this chat's settlement.
@@ -3197,73 +3031,73 @@ describe('BrowserPlacementChatTransport', () => {
     }
   });
 
-  it('should fail a turn whose settlement never arrives within the deadline', async () => {
+  /* W8 TS-S6, D6 and D7 deleted: no clock ends the wait for a settlement. A follow that stops for a reason of its
+   * own (the host died) can deliver no row, so it frees the chat; the host that reconciles the attempt appends the
+   * row for the next attach. */
+  it('should free the chat when the follow ends before the settlement row arrives', async () => {
     installBrowserGlobals();
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    vi.useFakeTimers();
-    try {
-      const chatId = 'chat-settlement-never-arrives';
-      let listener: Parameters<AgentHostClient['subscribe']>[1] | undefined;
-      /* The run completes and the stream closes — the turn looks done on screen
-         — but no `turn.finalized` ever lands, so the late-settlement wait keeps
-         this chat's settlement and every later submit behind it. */
-      const lifecycleOnly = clientFor(chatId, 'run-unsettled', {
-        start: vi.fn(async (input: Parameters<AgentHostClient['start']>[0]) => {
-          listener?.(chatId, {
-            version: 1,
-            leaderEpoch: 'leader-unsettled',
-            sequence: 1,
-            recordedAt: '2026-09-01T00:00:01.000Z',
-            runId: input.runId,
-            type: 'run.lifecycle',
-            state: 'completed',
-          });
-          return snapshot(chatId, input.runId);
-        }),
-        subscribe: vi.fn((_input: Follow[0], next: Follow[1]) => {
-          listener = next;
-          return () => {
-            listener = undefined;
-          };
-        }),
-      });
-      const unregister = registerAgentHost(chatId, {
-        projectStorage: async () => ({
-          projectId: 'project-turn-settlement',
-          backend: 'opfs',
-          providerBasePath: 'project-turn-settlement',
-        }),
-        createClient: async () => lifecycleOnly,
-        markRunId: async () => undefined,
-      });
-      const transport = new BrowserPlacementChatTransport();
-      const send = async (runId: string): Promise<ReadableStream<UIMessageChunk>> =>
-        transport.sendMessages({
-          chatId,
-          trigger: 'submit-message',
-          messageId: undefined,
-          messages: [{ id: `user-${runId}`, role: 'user', parts: [{ type: 'text', text: 'Build it.' }] }],
-          abortSignal: undefined,
-          body: browserBody({ runId, trigger: 'submit' }),
+    const chatId = 'chat-follow-ends';
+    let listener: Follow[1] | undefined;
+    let ended: Follow[2];
+    const lifecycleOnly = clientFor(chatId, 'run-unsettled', {
+      start: vi.fn(async (input: Parameters<AgentHostClient['start']>[0]) => {
+        listener?.(chatId, {
+          version: 1,
+          leaderEpoch: 'leader-unsettled',
+          sequence: 1,
+          recordedAt: '2026-09-01T00:00:01.000Z',
+          runId: input.runId,
+          type: 'run.lifecycle',
+          state: 'completed',
         });
+        return snapshot(chatId, input.runId);
+      }),
+      subscribe: vi.fn((_input: Follow[0], next: Follow[1], onEnded: Follow[2]) => {
+        listener = next;
+        ended = onEnded;
+        return () => {
+          listener = undefined;
+        };
+      }),
+    });
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({
+        projectId: 'project-follow-ends',
+        backend: 'opfs',
+        providerBasePath: 'project-follow-ends',
+      }),
+      createClient: async () => lifecycleOnly,
+    });
+    const transport = new BrowserPlacementChatTransport();
+    const send = async (runId: string): Promise<ReadableStream<UIMessageChunk>> =>
+      transport.sendMessages({
+        chatId,
+        trigger: 'submit-message',
+        messageId: undefined,
+        messages: [{ id: `user-${runId}`, role: 'user', parts: [{ type: 'text', text: 'Build it.' }] }],
+        abortSignal: undefined,
+        body: browserBody({ runId, trigger: 'submit' }),
+      });
 
+    try {
       const unsettled = await send('run-unsettled');
       await drain(unsettled.getReader());
-      await vi.advanceTimersByTimeAsync(30_000);
+      await Promise.resolve();
+      /* Held: the row is still coming. */
+      expect(lifecycleOnly.close).not.toHaveBeenCalled();
 
-      expect(consoleError).toHaveBeenCalledWith(
-        '[browserAgentHost] stream failed after it settled',
-        chatId,
-        expect.objectContaining({ code: 'BROWSER_HOST_SETTLEMENT_TIMEOUT' }),
-      );
+      ended?.();
+
+      await vi.waitFor(() => {
+        expect(lifecycleOnly.close).toHaveBeenCalledOnce();
+      });
       // And the chat is free: the next turn runs rather than inheriting the wait.
       const next = await send('run-after-unsettled');
+      ended?.();
       await drain(next.getReader());
       expect(lifecycleOnly.start).toHaveBeenCalledTimes(2);
-      unregister();
     } finally {
-      vi.useRealTimers();
-      consoleError.mockRestore();
+      unregister();
     }
   });
 });
@@ -3285,7 +3119,6 @@ describe('BrowserPlacementChatTransport attachments', () => {
     const commands: Array<Record<string, unknown>> = [];
     const unregister = registerAgentHost(chatId, {
       projectStorage: async () => ({ projectId: `project-${chatId}`, backend: 'opfs', providerBasePath: chatId }),
-      markRunId: async () => undefined,
       createClient: async () =>
         clientFor(chatId, runId, {
           start: vi.fn(async (input: Parameters<AgentHostClient['start']>[0]) => {
@@ -3365,7 +3198,6 @@ describe('BrowserPlacementChatTransport attachments', () => {
     const transport = new BrowserPlacementChatTransport();
     const unregister = registerAgentHost(chatId, {
       projectStorage: async () => ({ projectId: `project-${chatId}`, backend: 'opfs', providerBasePath: chatId }),
-      markRunId: async () => undefined,
       createClient: async () => clientFor(chatId, runId),
     });
     const stream = await transport.sendMessages({
@@ -3394,7 +3226,6 @@ describe('BrowserPlacementChatTransport attachments', () => {
     const transport = new BrowserPlacementChatTransport();
     const unregister = registerAgentHost(chatId, {
       projectStorage: async () => ({ projectId: `project-${chatId}`, backend: 'opfs', providerBasePath: chatId }),
-      markRunId: async () => undefined,
       createClient: async () => clientFor(chatId, runId),
     });
     const stream = await transport.sendMessages({
@@ -3475,7 +3306,6 @@ describe('BrowserPlacementChatTransport attachments', () => {
         providerBasePath: 'project-errored-close',
       }),
       createClient: async () => failing,
-      markRunId: async () => undefined,
     });
     const logged: unknown[] = [];
     const consoleError = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {

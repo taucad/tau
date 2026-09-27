@@ -3,6 +3,7 @@ import { createTauAgentHost } from '#host/tau-agent-host.js';
 import { emptyChatLedger, foldChatLedger } from '#log/chat-ledger.js';
 import { createEventLogAppender } from '#log/event-log-appender.js';
 import type { EventLogAppender } from '#log/event-log-appender.js';
+import { fakePlacement } from '#host/tau-agent-host.fixture.js';
 import { memoryEventLogStorage } from '#log/event-log-storage.fixture.js';
 import { classifyLogRow, fileRefBlockSchema, userProviderMessageSchema } from '#log/event-schema.js';
 
@@ -141,6 +142,9 @@ describe('tolerant reading (CL-R1, CL-A2)', () => {
         },
       },
       toolRegistry: { list: () => [], invoke: async () => ({ content: null, isError: false }) },
+      placement: fakePlacement({
+        registry: { list: () => [], invoke: async () => ({ content: null, isError: false }) },
+      }).port,
       openEventLog: async () => log,
     });
 
@@ -161,6 +165,9 @@ describe('tolerant reading (CL-R1, CL-A2)', () => {
         },
       },
       toolRegistry: { list: () => [], invoke: async () => ({ content: null, isError: false }) },
+      placement: fakePlacement({
+        registry: { list: () => [], invoke: async () => ({ content: null, isError: false }) },
+      }).port,
       openEventLog: async () => log,
     });
   const brokenHistoryLines = (middle: (sequence: number) => string, counted: boolean): string[] => {

@@ -83,7 +83,13 @@ export type DriverOutcome = 'completed' | 'failed' | 'aborted';
 
 /** The outcomes M1's effects, drivers and host deliver. Each carries the correlation M1 checks first (MC-R18). */
 export type ChatRunOutcomeEvent =
-  | Readonly<{ type: 'logOpened'; ledger: ChatLedger; repair: readonly ChatRunRow[] }>
+  | Readonly<{
+      type: 'logOpened';
+      ledger: ChatLedger;
+      repair: readonly ChatRunRow[];
+      /** The chat's lease records opening left held, each keyed as the ledger reads it (TS-Q5); none without placement. */
+      held?: readonly TurnAttemptKey[];
+    }>
   | Readonly<{ type: 'logOpenFailed'; code: string; message: string }>
   /** `key` names M1's own append; a driver's rows arrive without one, carrying their message ids. */
   | Readonly<{ type: 'rowsCommitted'; key?: string; ledger: ChatLedger; messageIds: readonly string[] }>
@@ -99,6 +105,8 @@ export type ChatRunOutcomeEvent =
       code: string;
       message: string;
       effect: 'not-applied' | 'unknown';
+      /** A base the attempt minted before the root released it, which its row names (W8.r1 L2). */
+      revisionId?: string;
     }>
   | Readonly<{
       type: 'completeAnswered';

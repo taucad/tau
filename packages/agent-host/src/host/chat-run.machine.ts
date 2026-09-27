@@ -161,6 +161,8 @@ type ChatRunContext = Readonly<{
   leaderEpoch: string;
   placement: boolean;
   ledger: ChatLedger;
+  /** The chat's lease records opening left held (TS-Q5): each settles as its run's current attempt. */
+  held: readonly TurnAttemptKey[];
   /** Mints effect keys: `${label}:${seq}`. */
   seq: number;
   /** The key of M1's own append in flight, if any. */
@@ -458,22 +460,37 @@ export const isOrphaned = (ledger: ChatLedger): boolean => {
   );
 };
 
-/** Only attempts whose intent row carries a command id are settled; older runs have no `turn.*` rows (W8). */
+/*
+ * The attempt M1 settles next, if any. The current run's ended attempt, when its intent row carries a command id
+ * (older runs without a lease have no `turn.*` rows, W8). Then TS-Q5's migration: each lease record opening left held,
+ * of a run whose current attempt has ended (a live current run is abandoned first), settles as that attempt; a record
+ * written before W5 (attempt 0) names every attempt of its run.
+ */
 const unsettled = (context: ChatRunContext): Settle | undefined => {
+  if (!context.placement) {
+    return undefined;
+  }
   const runId = context.ledger.currentRunId;
   const entry = currentEntry(context.ledger);
-  if (!context.placement || runId === undefined || entry?.appendState !== 'terminal') {
-    return undefined;
-  }
   const keyed = Object.values(context.ledger.applied).some((applied) => applied.runId === runId);
-  if (!keyed) {
-    return undefined;
+  if (runId !== undefined && entry?.appendState === 'terminal' && keyed) {
+    return {
+      key: { chatId: context.chatId, turnId: entry.turnId ?? runId, runId, attempt: entry.attempt },
+      cut: entry.attempt > 1 || entry.placement !== undefined,
+      answered: false,
+    };
   }
-  return {
-    key: { chatId: context.chatId, turnId: entry.turnId ?? runId, runId, attempt: entry.attempt },
-    cut: entry.attempt > 1 || entry.placement !== undefined,
-    answered: false,
-  };
+  for (const key of context.held) {
+    const run = context.ledger.runs[key.runId];
+    const attempt = key.attempt === 0 ? run?.attempt : key.attempt;
+    if (run === undefined || attempt === undefined) {
+      continue;
+    }
+    if (!run.settlements.some((settlement) => key.attempt === 0 || settlement.attempt === attempt)) {
+      return { key: { ...key, attempt }, cut: true, answered: false };
+    }
+  }
+  return undefined;
 };
 
 const slotFor = (
@@ -497,6 +514,26 @@ const slotFor = (
   held: [],
   steers: [],
 });
+
+/**
+ * A refused placement's `turn.failed`, in the one settlement shape: it states its attempt, as a published settlement
+ * does (TS-S9). The log body type leaves `attempt` to the row stamp, which keeps a body's stated one (N4).
+ */
+const refusedSettlement = (
+  chatId: string,
+  key: TurnAttemptKey,
+  refusal: Readonly<{ reason: string; code: string; revisionId?: string }>,
+): LogRowBody => {
+  const row: Omit<Extract<TurnSettlementRow, { type: 'turn.failed' }>, 'runId'> = {
+    type: 'turn.failed',
+    chatId,
+    turnId: key.turnId,
+    attempt: key.attempt,
+    ...refusal,
+  };
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a stated attempt rides the body (N4).
+  return row as LogRowBody;
+};
 
 const sameAttempt = (slot: Slot, key: TurnAttemptKey): boolean =>
   key.runId === slot.key.runId && key.attempt === slot.key.attempt;
@@ -866,6 +903,7 @@ export const chatRunMachine = setup({
       newerHistory: false,
       anomalies: [],
     },
+    held: [],
     seq: 0,
     pending: undefined,
     takeover: false,
@@ -971,14 +1009,15 @@ export const chatRunMachine = setup({
       },
       on: {
         logOpened: refines('logOpened', ({ context, event, actions }, enq) => {
+          const held = event.held ?? [];
           if (event.repair.length === 0) {
-            return { target: '#idle', context: { ...context, ledger: event.ledger } };
+            return { target: '#idle', context: { ...context, ledger: event.ledger, held } };
           }
           const next = minted(context, 'reconcile');
           enq(actions.appendRows, { key: next.key, rows: event.repair });
           return {
             target: '#reconciling',
-            context: { ...context, ledger: event.ledger, seq: next.seq, pending: next.key },
+            context: { ...context, ledger: event.ledger, held, seq: next.seq, pending: next.key },
           };
         }),
         logOpenFailed: refines('Unmodelled', ({ context, event }) => ({
@@ -1556,13 +1595,11 @@ export const chatRunMachine = setup({
                   ...(event.effect === 'unknown'
                     ? {}
                     : {
-                        settlement: {
-                          type: 'turn.failed',
-                          chatId: context.chatId,
-                          turnId: context.slot.key.turnId,
+                        settlement: refusedSettlement(context.chatId, context.slot.key, {
                           reason: event.message,
-                          code: endingFailure(failure).code,
-                        } satisfies LogRowBody,
+                          code: endingFailure(failure).code ?? failure.code,
+                          ...(event.revisionId === undefined ? {} : { revisionId: event.revisionId }),
+                        }),
                       }),
                 },
               };
@@ -2006,7 +2043,32 @@ export const chatRunMachine = setup({
       tags: ['slotHeld'],
       on: {
         close: refines('close', ({ context }) => ({ context: { ...context, cause: context.cause ?? 'close' } })),
-        /* The totality matrix: a decision waits for the attempt to settle, `CHAT_RUN_LIVE{settling}`. */
+        /* The totality matrix: a command waits for the attempt to settle, `CHAT_RUN_LIVE{settling}` (retry class
+         * `wait`), which the page re-sends until it is admitted (W8.r1 item 6). */
+        start: refines('start', ({ context, event, actions }, enq) => {
+          enq(actions.answer, {
+            answer: context.ledger.applied[event.commandId]
+              ? durable(context.ledger, event.commandId, 'replayed')
+              : liveRefusal(context, event.commandId, 'settling'),
+          });
+          return {};
+        }),
+        resume: refines('resume', ({ context, event, actions }, enq) => {
+          enq(actions.answer, {
+            answer: context.ledger.applied[event.commandId]
+              ? durable(context.ledger, event.commandId, 'replayed')
+              : liveRefusal(context, event.commandId, 'settling'),
+          });
+          return {};
+        }),
+        cancel: refines('cancel', ({ context, event, actions }, enq) => {
+          enq(actions.answer, {
+            answer: context.ledger.applied[event.commandId]
+              ? durable(context.ledger, event.commandId, 'replayed')
+              : liveRefusal(context, event.commandId, 'settling'),
+          });
+          return {};
+        }),
         'resolve-interrupt': refines('resolveInterrupt', ({ context, event, actions }, enq) => {
           enq(actions.answer, {
             answer: context.ledger.applied[event.commandId]
@@ -2094,7 +2156,8 @@ export const chatRunMachine = setup({
               enq(actions.acknowledgePlacement, { key });
               return;
             }
-            const { runId, attempt: _attempt, ...body } = row;
+            /* The row keeps the attempt it settles (N4); the write gate requires it (TS-S9). */
+            const { runId, ...body } = row;
             enq(actions.appendRows, {
               key: `settle:${runId}:${String(key.attempt)}`,
               rows: [{ runId, body: body as LogRowBody }],

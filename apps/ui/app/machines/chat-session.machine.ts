@@ -21,14 +21,15 @@ import type { AttachmentReference } from '#utils/attachment.utils.js';
  *
  * The `run` region owns the chat's turn, as policy §16 requires: `queued`
  * invokes `admitTurn` — which derives the rewind point, waits out host
- * availability, resolves the model, pre-flights credits and takes the
- * checkout's lease — and `finishing` invokes `settleTurn`, which hands the
- * turn's end to the revision root and persists the outcome. The verbs send
+ * availability, resolves the model and pre-flights credits — and `finishing`
+ * invokes `settleTurn`, which only lets the run's record go: the agent host
+ * takes the checkout's lease, settles the turn through its placement port and
+ * appends its settlement row itself (W8 TS-S5, TS-S6); the page writes none. The verbs send
  * `requestTurn` and nothing else; what to dispatch is the admission's answer,
  * emitted as `startTurnRequest` for the request lifecycle to carry out.
  *
  * That ends the deviation this file used to document. A route component
- * (`ProjectChatRunSettlement`) owned settlement, a hook mounted once per
+ * owned settlement, a hook mounted once per
  * transcript message owned the host binding and the "one dispatch at a time"
  * guard, and two machines plus that hook each held an admission policy. One
  * owner refuses what the others could only race over: `requestTurn` while a
@@ -192,17 +193,16 @@ export type ChatSessionMachineEvent =
   | { readonly type: 'runLifecycle'; readonly phase: ChatRunPhase; readonly runId?: string; readonly reason?: string }
   /** The person asked for a turn. The only way a turn is ever started. */
   | { readonly type: 'requestTurn'; readonly gesture: ChatTurnGesture }
-  /** `admitTurn`'s answer: the lease is held and the request is composed. */
+  /** `admitTurn`'s answer: the request is composed; the host places it (W8 TS-S5). */
   | { readonly type: 'turnAdmitted'; readonly turn: ChatTurn }
   /** Reload discovery found a durable run for a chat this page never started (V5). */
   | { readonly type: 'adoptRun'; readonly runId: string }
   /**
    * A terminal run of this chat that the host's log holds no settlement for.
    *
-   * The tab that ran it died before the revision root answered, so no
-   * attestation is coming and `finishing.observing` would wait forever. The
-   * page that adopted the run settles it instead — once; the host refuses a
-   * second settlement of a run already settled (V10).
+   * The tab that ran it died before the host appended its settlement row, so
+   * `finishing.observing` would wait forever. The page that adopted the run
+   * follows the host until its reconcile appends that row (W8 TS-S7, V10).
    */
   | { readonly type: 'reconcileSettlement'; readonly runId: string; readonly outcome: ChatTurnOutcome }
   /** The route's live agent selection for this chat; only its placement is state. */
@@ -337,15 +337,14 @@ const observedSettlement =
   };
 
 /**
- * Settle a terminal run of this chat that the host's log holds no settlement
- * for (C6, V10).
+ * Leave a terminal run of this chat that the host's log holds no settlement
+ * for yet (C6, V10).
  *
  * Accepted only where the chat is not mid-turn: a turn this page admitted is
- * already on its way through `finishing.settling`, and the settlement it waits
- * for is the very one this event reports missing. Sent by the store, which
- * reads the log — so a run settled by this transition is not reported again;
- * and a page that asks twice regardless is refused by the host, which is where
- * exactly-once actually lives.
+ * already on its way through `finishing.settling`. The page writes no
+ * settlement (W8 TS-S6): `finishing` only releases this page's record of the
+ * run, and the host's M1 appends the row at its next reconciliation (TS-S7).
+ * W9 reduces this transition.
  */
 const reconcileSettlementTransition = (
   { context, event }: ChatSessionArgs<EventOf<'reconcileSettlement'>>,
@@ -593,7 +592,7 @@ export const chatSessionMachine = setup({
                 },
               },
             },
-            /* The lease is held and the request is out; the transport's own
+            /* The request is out and the host holds the lease; the transport's own
              * lifecycle takes the run from here. A gesture made in this state
              * is over a live turn exactly as one made in `running` is — the
              * transport reports `running` only once bytes flow. */
@@ -740,9 +739,9 @@ export const chatSessionMachine = setup({
       },
       on: {
         /* The one way a turn starts. Every verb sends this and nothing else;
-         * `queued.admitting` is where the lease is taken (V1, V2). A second
+         * `queued.admitting` is where the turn is admitted (V1, V2). A second
          * gesture re-enters the state, which aborts the admission in flight —
-         * that actor abandons its own lease and no other (V4). */
+         * nothing was placed, because the host places only a dispatched turn (V4). */
         requestTurn: ({ context, event }, enq) => {
           announce(context, enq);
           return { target: '.queued.admitting', reenter: true, context: { pendingGesture: event.gesture } };
@@ -762,8 +761,8 @@ export const chatSessionMachine = setup({
          *
          * The cancel belongs to the run's owner — the store dispatches
          * `stopRequest` to the persistence machine, whose settlement comes back
-         * here as `runLifecycle{phase:'cancelled'}` and releases the lease with
-         * it. This machine only records that the person stopped, and it stays
+         * here as `runLifecycle{phase:'cancelled'}`; the host settles the
+         * attempt and releases its lease. This machine only records that the person stopped, and it stays
          * alive so the row reads `Stopped`: telling the project session to let
          * go would stop this actor and blank the row.
          */

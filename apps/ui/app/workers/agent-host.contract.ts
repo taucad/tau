@@ -20,7 +20,6 @@ import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';
 import { z } from 'zod';
 import { skillMetadataSchema } from '@taucad/chat/schemas';
-import type { TurnConflictedEvent, TurnFailedEvent, TurnFinalizedEvent } from '@taucad/revisions/revision-effects';
 
 /** The page's build, the worker's hello `build` (I32); the timestamp `vite.config.ts` injects, as `build-skew.ts` reads it. */
 export const agentHostWorkerBuild = String(typeof tauBuildId === 'number' ? tauBuildId : 0);
@@ -99,8 +98,8 @@ export type AgentHostProjectProvide = {
   readonly computeStorePort?: MessagePort | undefined;
   /** A port into the file-manager worker's revision root for this project; the `revisions` tool is offered with it. */
   readonly revisionsPort?: MessagePort | undefined;
-  /** The project's placement session in the file-manager worker (W8 TS-S5); absent, turns run unplaced. */
-  readonly placementPort?: MessagePort | undefined;
+  /** The project's placement session in the file-manager worker (W8 TS-S5); required, so no turn runs unplaced (D13). */
+  readonly placementPort: MessagePort;
   readonly projectStorage: ProjectFileSystemConfig;
   readonly authority: { readonly projectId: string; readonly workspaceId: string };
   readonly gatewayBaseUrl: string;
@@ -170,14 +169,6 @@ export type AgentHostExternalContext = {
   readonly snapshot?: JsonValue | undefined;
 };
 
-type AgentHostWorkerSettlement =
-  | (Omit<TurnFinalizedEvent, 'checkoutId'> & { readonly checkoutId?: string | undefined })
-  | (Omit<TurnConflictedEvent, 'checkoutId'> & { readonly checkoutId?: string | undefined })
-  | (Omit<TurnFailedEvent, 'checkoutId'> & { readonly checkoutId?: string | undefined });
-
-/** One revision settlement the page records in the chat's log. ponytail: worker-only until W8 deletes it (drift 7). */
-export type AgentHostWorkerSettlementRecord = { readonly chatId: string; readonly event: AgentHostWorkerSettlement };
-
 /** One project in the worker: the host incarnation that serves it, if any, and the worker's capability (LT14). */
 export type AgentHostProjectStatus = {
   readonly hostId?: string | undefined;
@@ -188,8 +179,7 @@ export type AgentHostProjectStatus = {
  * The page↔resident-worker control channel (RH-S8). One worker per document serves every project and chat of the
  * tab: `provide` opens a project host, `connect` hands it one `MessagePort` per stream, served with the agent wire
  * (`serveAgentChannel`), `rebridge` gives it fresh bridges and `release` closes it once the project's last client
- * closed. Closing a stream only detaches it (D17). ponytail: `record-settlement` stays until W8 deletes
- * it (RH-S11).
+ * closed. Closing a stream only detaches it (D17). The host appends every settlement row itself (W8 TS-S6).
  */
 export type AgentHostWorkerProtocol = {
   readonly hello: AgentWireHello;
@@ -232,11 +222,6 @@ export type AgentHostWorkerProtocol = {
     /** The page's visibility: a hidden page never queues for a chat's lock (RH-R16). */
     readonly visibility: {
       readonly args: { readonly visible: boolean };
-      readonly result: undefined;
-      readonly wireResult: unknown;
-    };
-    readonly 'record-settlement': {
-      readonly args: AgentHostWorkerSettlementRecord & { readonly projectId: string };
       readonly result: undefined;
       readonly wireResult: unknown;
     };
@@ -335,44 +320,6 @@ export const agentHostExternalContextSchema = z.strictObject({
   snapshot: jsonValueSchema.optional(),
 });
 
-/** Wire validator for {@link AgentHostWorkerSettlementRecord}. */
-export const agentHostSettlementRecordSchema = z.strictObject({
-  chatId: nonEmptyString,
-  event: z.discriminatedUnion('type', [
-    z.strictObject({
-      type: z.literal('turn.finalized'),
-      turnId: nonEmptyString,
-      runId: nonEmptyString,
-      chatId: nonEmptyString,
-      projectId: nonEmptyString,
-      checkoutId: nonEmptyString.optional(),
-      revisionId: nonEmptyString.optional(),
-      branch: nonEmptyString.optional(),
-      changedPaths: z.array(z.string()),
-      treeId: nonEmptyString.optional(),
-      trigger: z.literal('turn'),
-      runIds: z.array(nonEmptyString),
-    }),
-    z.strictObject({
-      type: z.literal('turn.conflicted'),
-      turnId: nonEmptyString,
-      runId: nonEmptyString,
-      chatId: nonEmptyString,
-      checkoutId: nonEmptyString.optional(),
-    }),
-    z.strictObject({
-      type: z.literal('turn.failed'),
-      turnId: nonEmptyString,
-      runId: nonEmptyString,
-      chatId: nonEmptyString,
-      checkoutId: nonEmptyString.optional(),
-      reason: z.string(),
-      /* Why, as the page phrases it (P4); `reason` stays the diagnostic. */
-      code: nonEmptyString.optional(),
-    }),
-  ]),
-});
-
 const capabilityChecksSchema = z.strictObject({
   worker: z.boolean(),
   webLocks: z.boolean(),
@@ -402,7 +349,7 @@ const provideSchema = z.strictObject({
   computeMode: z.enum(['off', 'memory', 'durable']).optional(),
   computeStorePort: messagePortSchema.optional(),
   revisionsPort: messagePortSchema.optional(),
-  placementPort: messagePortSchema.optional(),
+  placementPort: messagePortSchema,
   projectStorage: projectStorageSchema,
   authority: z.strictObject({ projectId: nonEmptyString, workspaceId: nonEmptyString }),
   gatewayBaseUrl: z.url(),
@@ -449,10 +396,6 @@ export const agentHostWorkerProtocolSchemas = {
       result: z.strictObject({ hostId: nonEmptyString.optional(), capability: capabilityReportSchema }),
     },
     visibility: { args: z.strictObject({ visible: z.boolean() }), result: z.unknown() },
-    'record-settlement': {
-      args: agentHostSettlementRecordSchema.extend({ projectId: nonEmptyString }),
-      result: z.unknown(),
-    },
   },
   notifies: {},
   listens: {},

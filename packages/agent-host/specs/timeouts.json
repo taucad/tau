@@ -76,24 +76,6 @@
       "owner": "W5"
     },
     {
-      "id": "B1",
-      "bound": "Admission",
-      "site": "packages/host/src/revisions.ts",
-      "token": "admissions.has(input.runId)",
-      "class": "Peer",
-      "owner": "W8",
-      "fixedBy": "W8"
-    },
-    {
-      "id": "B1b",
-      "bound": "Admission, worker leg",
-      "site": "apps/ui/app/machines/file-manager.worker.revisions.ts",
-      "token": "admissions.has(input.runId)",
-      "class": "Peer",
-      "owner": "W8",
-      "fixedBy": "W8"
-    },
-    {
       "id": "B2",
       "bound": "Sync quiesce at close",
       "site": "packages/revisions/src/revision-effects.ts",
@@ -102,58 +84,12 @@
       "owner": "W8"
     },
     {
-      "id": "B3",
-      "bound": "Close flush",
-      "site": "packages/host/src/revisions.ts",
-      "token": "closeFlushMilliseconds",
-      "class": "Peer",
-      "owner": "W8",
-      "fixedBy": "W8"
-    },
-    {
-      "id": "B4",
-      "bound": "Registry",
-      "site": "packages/host/src/revisions.ts",
-      "token": "registryMilliseconds",
-      "class": "Peer",
-      "owner": "W8",
-      "fixedBy": "W8"
-    },
-    {
-      "id": "B5",
-      "bound": "Verb, and the publish verb (B6) through it",
-      "site": "packages/host/src/revisions.ts",
-      "token": "settled.resolve(timedOut)",
-      "class": "Peer",
-      "owner": "W8",
-      "fixedBy": "W8"
-    },
-    {
-      "id": "B7",
-      "bound": "Branch verb, worker leg",
-      "site": "apps/ui/app/machines/file-manager.worker.revisions.ts",
-      "token": "branchRegistryMilliseconds * 2",
-      "class": "Peer",
-      "owner": "W8",
-      "fixedBy": "W8"
-    },
-    {
-      "id": "B7b",
-      "bound": "Branch verb, page (awaitBranchCreated)",
-      "site": "apps/ui/app/hooks/use-revision-status.ts",
-      "token": "branchRegistryMilliseconds * 2",
-      "class": "Peer",
-      "owner": "W8",
-      "fixedBy": "W8"
-    },
-    {
       "id": "B8",
-      "bound": "Cut wait (awaitCut)",
+      "bound": "Cut wait (awaitCut), the `hidden` cut only: the page may be frozen after `pagehide`; `save` and `close` are answered by request id",
       "site": "apps/ui/app/machines/file-manager.worker.revisions.ts",
       "token": "syncQuiesceMilliseconds",
-      "class": "Peer",
-      "owner": "W8",
-      "fixedBy": "W8"
+      "class": "External edge",
+      "owner": "W8"
     },
     {
       "id": "B9",
@@ -280,15 +216,6 @@
       "fixedBy": "W8"
     },
     {
-      "id": "D7",
-      "bound": "Settlement grace",
-      "site": "apps/ui/app/chat-clients/_internal/browser-agent-host-transport.ts",
-      "token": "resolve, settlementTimeout",
-      "class": "Peer",
-      "owner": "W8",
-      "fixedBy": "W8"
-    },
-    {
       "id": "D8",
       "bound": "Registration",
       "site": "apps/ui/app/chat-clients/_internal/browser-agent-host-transport.ts",
@@ -302,15 +229,6 @@
       "bound": "Turn service",
       "site": "apps/ui/app/chat-clients/_internal/chat-host-binding.ts",
       "token": "turnServiceWaitTimeout",
-      "class": "Peer",
-      "owner": "W9",
-      "fixedBy": "W9"
-    },
-    {
-      "id": "D10",
-      "bound": "Admission claim",
-      "site": "apps/ui/app/chat-clients/_internal/use-turn-admission.ts",
-      "token": "admissionExpiry",
       "class": "Peer",
       "owner": "W9",
       "fixedBy": "W9"
@@ -621,6 +539,14 @@
       "token": "driverStopBound",
       "class": "External edge",
       "owner": "W7"
+    },
+    {
+      "id": "W8-R4",
+      "bound": "Re-send of a command refused CHAT_RUN_LIVE{settling} (20 ms doubling to 250 ms, within the 30 s settlement bound; W8.r1 item 6)",
+      "site": "apps/ui/app/services/agent-host-client.ts",
+      "token": "backoffMilliseconds",
+      "class": "Backoff",
+      "owner": "W8"
     },
     {
       "id": "W7-1",

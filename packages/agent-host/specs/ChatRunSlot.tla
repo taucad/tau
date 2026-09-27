@@ -206,7 +206,9 @@ CanAppend ==
 Barred == CloseBarrier /\ hostState # "open"
 Serving == alive /\ opened /\ ~Barred
 Busy == res # None \/ drivers # {}
-Held == SettlePerAttempt /\ Unsettled   \* CHAT_RUN_LIVE{settling}: the page holds and re-sends
+\* CHAT_RUN_LIVE{settling}, retry class `wait`: start, resume, cancel and a decision are held while the attempt
+\* settles, and the page re-sends each until it is admitted (M1's `settling` state answers all four; W8.r1 item 6).
+Held == SettlePerAttempt /\ Unsettled
 
 H(t, r, a, k, p, v) == Row(t, r, a, k, p, v, epoch)
 \* Session rows keep the epoch their attempt started under; external rows take the current one (L2a D12).
@@ -563,7 +565,10 @@ resolveInterrupt ==
     /\ IF KeyedCommands /\ Wrote(Resolve)
          THEN AnsGo(Resolve, "replayed", "done") /\ UNCHANGED <<log, claimed, waiters>>
        ELSE IF Pending(T) /\ (DurablePause \/ T \in waiters)
-         THEN /\ CanAppend /\ Put(<<H("resolved", T, Att(T), Resolve, TRUE, 0)>>)
+         THEN /\ CanAppend
+              /\ \/ Put(<<H("resolved", T, Att(T), Resolve, TRUE, 0)>>)   \* approve: the paused attempt continues
+                 \/ /\ DurablePause                                       \* deny (V8): the paused attempt ends
+                    /\ Put(<<H("resolved", T, Att(T), Resolve, TRUE, 0), H("cancelled", T, Att(T), Resolve, Executed(T), 0)>>)
               /\ AnsGo(Resolve, "applied", "done") /\ waiters' = waiters \ {T}
        ELSE IF Pending(X) /\ X \in drivers
          THEN /\ CanAppend   \* [resolved, running{same attempt}], then decideApproval

@@ -9,6 +9,7 @@ import { vi } from 'vitest';
 
 import { createBrowserChatStore } from '#browser.js';
 import type { BrowserChatStoreOptions, ProviderEventLogOptions } from '#browser.js';
+import { fakePlacement } from '#host/tau-agent-host.fixture.js';
 import { createAgentLauncher } from '#launchers/agent-launcher.js';
 import type { AgentLauncher } from '#launchers/agent-launcher.js';
 import type { AgentLogEvent } from '#log/event-types.js';
@@ -104,6 +105,7 @@ export const launch = (
     model,
     systemPrompt: 'You are Tau.',
     toolRegistry: emptyTools,
+    turnPlacement: fakePlacement({ registry: emptyTools }).port,
   });
   launchers.push(launcher);
   return launcher;

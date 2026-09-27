@@ -2,7 +2,7 @@ import { createCallbackLogic } from 'xstate';
 import type { EventObject } from 'xstate';
 import { Topic } from '@taucad/events';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
-import { registerAgentHost } from '#chat-clients/_internal/browser-agent-host-transport.js';
+import { registerAgentHost, retireBrowserAgentHostRun } from '#chat-clients/_internal/browser-agent-host-transport.js';
 import type { BrowserAgentHostRegistration } from '#chat-clients/_internal/browser-agent-host-transport.js';
 import type { ChatTurn, ChatTurnGesture, ChatTurnSettlementInput } from '#machines/chat-session.machine.js';
 
@@ -105,8 +105,8 @@ export const chatHostBinding = createCallbackLogic<
 
 /**
  * Take one chat's next turn: derive its rewind point, wait out host
- * availability, resolve the model, pre-flight credits, lease the checkout and
- * compose the request that runs it.
+ * availability, resolve the model, pre-flight credits and compose the request
+ * that runs it. The host places the attempt (W8 TS-S5).
  *
  * Published by the chat's `ChatTurnHost` — the one mount that has the project's
  * resources — and called by `chatSessionMachine`'s `queued` state, never by
@@ -114,17 +114,7 @@ export const chatHostBinding = createCallbackLogic<
  */
 export type ChatTurnAdmit = (gesture: ChatTurnGesture) => Promise<ChatTurn>;
 
-/**
- * End one chat's turn: hand it to the revision root and release the hold.
- *
- * Published per chat by `SingleChatRunSettlement`, which renders for every chat
- * of the project rather than only the focused one — a turn outlives the view
- * that started it. @public
- */
-export type ChatTurnSettle = (input: ChatTurnSettlementInput) => Promise<void>;
-
 const admissionsByChat = new Map<string, ChatTurnAdmit>();
-const settlementsByChat = new Map<string, ChatTurnSettle>();
 const turnServicesTopic = new Topic<{ readonly chatId: string }>({ name: 'chat.turn-services' });
 
 const publishTurnService = <T>(registry: Map<string, T>, chatId: string, service: T): (() => void) => {
@@ -148,22 +138,8 @@ const publishTurnService = <T>(registry: Map<string, T>, chatId: string, service
 export const publishChatTurnAdmission = (chatId: string, admit: ChatTurnAdmit): (() => void) =>
   publishTurnService(admissionsByChat, chatId, admit);
 
-/**
- * Publish how this chat settles a turn.
- *
- * @param chatId - The chat these services belong to.
- * @param settle - The settlement the chat's session actor invokes.
- * @returns The unpublication, for the publisher's effect cleanup.
- * @public
- */
-export const publishChatTurnSettlement = (chatId: string, settle: ChatTurnSettle): (() => void) =>
-  publishTurnService(settlementsByChat, chatId, settle);
-
 /** The admission last published for one chat. @public */
 export const chatTurnAdmit = (chatId: string): ChatTurnAdmit | undefined => admissionsByChat.get(chatId);
-
-/** The settlement last published for one chat. @public */
-export const chatTurnSettle = (chatId: string): ChatTurnSettle | undefined => settlementsByChat.get(chatId);
 
 /**
  * Forget one chat's turn services, when its session is disposed.
@@ -177,13 +153,11 @@ export const chatTurnSettle = (chatId: string): ChatTurnSettle | undefined => se
  */
 export const clearChatTurnServices = (chatId: string): void => {
   admissionsByChat.delete(chatId);
-  settlementsByChat.delete(chatId);
 };
 
 /** Test-only reset of the turn-service registries. @internal */
 export const resetChatTurnServices = (): void => {
   admissionsByChat.clear();
-  settlementsByChat.clear();
   releaseChatTurnHold('admission');
   releaseChatTurnHold('settlement');
 };
@@ -300,9 +274,9 @@ const awaitChatTurnHold = async (hold: ChatTurnHold): Promise<void> => {
 /**
  * The chat's admission, as `chatSessionMachine.run.queued` invokes it.
  *
- * On abort — a second gesture replaced this one — the lease this admission
- * took is released before the actor goes, and no other: the run id it settles
- * is the one it just minted (V4).
+ * It takes no lease: the host places the attempt when it runs it (W8 TS-S5),
+ * so a gesture that replaces this one before it starts leaves nothing to
+ * release (V4).
  *
  * @public
  */
@@ -310,14 +284,6 @@ export const chatTurnAdmission = fromSafeAsync<
   { readonly type: 'turnAdmitted'; readonly turn: ChatTurn },
   { readonly chatId: string; readonly gesture: ChatTurnGesture }
 >(async ({ input, signal }) => {
-  /* Held from here, because the release below runs *after* this admission ends
-   * — which is after the dispose that usually aborts it, and dispose empties
-   * this registry (`clearChatTurnServices`). Looking the publisher up on the
-   * abort path then found nothing and waited out the bound for a publisher
-   * that is never coming back, leaving the lease held: T3-D2's leak, one
-   * registry read later. A published settlement is a function; a reference to
-   * it cannot be deleted out from under the release. */
-  const publishedSettle = settlementsByChat.get(input.chatId);
   const admit = await awaitTurnService(admissionsByChat, input.chatId, signal);
   if (admit === undefined) {
     throw new Error('This chat is not ready to run a turn yet.');
@@ -325,22 +291,6 @@ export const chatTurnAdmission = fromSafeAsync<
   await awaitChatTurnHold('admission');
   const turn = await admit(input.gesture);
   if (signal.aborted) {
-    /* The publisher this admission started with, or — for a chat whose route
-     * had not published one yet — a wait under a bound of its own, not this
-     * actor's signal: that signal is already aborted. Reading the registry
-     * directly meant the release was an optional call on `undefined` — a
-     * silent no-op that left the checkout leased and `admitted` forever, so
-     * every later turn of the chat waited fifteen seconds and died on a stale
-     * claim (T3-D2). */
-    const settle = publishedSettle ?? (await awaitTurnService(settlementsByChat, input.chatId));
-    await settle?.({
-      chatId: input.chatId,
-      runId: turn.runId,
-      leaseTurnId: turn.leaseTurnId,
-      outcome: 'cancelled',
-    }).catch((error: unknown) => {
-      console.error('[chatTurnAdmission] an abandoned lease was not released', error);
-    });
     throw new Error('This turn was replaced before it started.');
   }
   return { type: 'turnAdmitted', turn };
@@ -349,12 +299,12 @@ export const chatTurnAdmission = fromSafeAsync<
 /**
  * The chat's settlement, as `chatSessionMachine.run.finishing` invokes it.
  *
- * A chat with no publisher settles nothing and resolves: the run it held was
- * never placed on this browser's checkout (a daemon owns its own), so there is
- * no hold to release here. @public
+ * The host settles every attempt and appends its `turn.*` row (W8 TS-S6), so
+ * the page settles nothing: it lets the run's record go. The chat's next
+ * stream still starts behind this one's, which follows the log until that row
+ * arrives. W9 reduces the machine's `finishing`. @public
  */
-export const chatTurnSettlement = fromSafeAsync<void, ChatTurnSettlementInput>(async ({ input, signal }) => {
-  const settle = await awaitTurnService(settlementsByChat, input.chatId, signal);
+export const chatTurnSettlement = fromSafeAsync<void, ChatTurnSettlementInput>(async ({ input }) => {
   await awaitChatTurnHold('settlement');
-  await settle?.(input);
+  retireBrowserAgentHostRun(input.chatId, input.runId);
 });

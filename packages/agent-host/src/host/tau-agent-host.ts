@@ -76,13 +76,9 @@ import type { CommandAnswer, CommandPayload, HostCommand } from '#wire/commands.
 import type { ReadAnswer, ReadInput } from '#wire/frames.schema.js';
 import { refusalOf } from '#wire/refusals.js';
 import type { RefusalCode } from '#wire/refusals.js';
+import { turnSettlementSchema } from '#wire/settlement.schema.js';
 
 type SessionEvent = LogRowBody;
-
-type HostSettlementEvent = Extract<
-  SessionEvent,
-  { readonly type: 'turn.finalized' | 'turn.conflicted' | 'turn.failed' }
->;
 
 /** One client-generated turn admitted to the portable host. @public */
 type TauAgentTurnRequestBase = {
@@ -143,6 +139,11 @@ export type ExternalAgentTurn = {
   readonly runId: string;
   /** The run's attempt, from 1; a resumed turn has the next one (W10 EA-S8). */
   readonly attempt: number;
+  /**
+   * Where the attempt's placement rooted its files in this host's namespace: the agent's working directory (W8).
+   * Absent on a host without placement, where the runner keeps its own root.
+   */
+  readonly root?: string | undefined;
   /** The new user turn; absent when resuming one a restart left unanswered. */
   readonly message?: UserProviderMessage | undefined;
   /**
@@ -327,7 +328,10 @@ export type CreateTauAgentHostOptions = {
    * refused at admission, never silently downgraded to a Tau turn.
    */
   readonly externalRunners?: Readonly<Record<string, ExternalAgentPort>> | undefined;
-  /** W8's placement port: when wired, every attempt is placed, settled and acknowledged (RA-R12). */
+  /**
+   * W8's placement port: every attempt is placed, settled and acknowledged (RA-R12). A host without one only reads: it
+   * refuses every `start` and `resume` `REVISIONS_UNAVAILABLE` before any row, so no run edits unplaced (D13).
+   */
   readonly placement?: TurnPlacementPort | undefined;
   /**
    * How many times one live run re-prepares a funded call whose reply was lost in transit (EQ1: a bound on repeated
@@ -428,12 +432,6 @@ export type TauAgentHost = {
     /** Serialized-byte budget for the page; unbounded by bytes when absent. */
     readonly maxBytes?: number | undefined;
   }): Promise<EventLogBatch>;
-  /** Append one revision-authority settlement through this chat's fenced writer. */
-  recordSettlement(input: {
-    readonly chatId: string;
-    readonly runId: string;
-    readonly event: HostSettlementEvent;
-  }): Promise<void>;
   /**
    * Lead one chat at `epoch`, the log's highest epoch plus one as the leader read it (D5, W6 RH-S3). Clears a
    * relinquished chat's fence; the next incarnation's first append claims the term, conditional on that read.
@@ -589,6 +587,82 @@ const deferredDriver = (build: Promise<DriverHandle>, report: (report: DriverRep
 };
 
 /**
+ * Append one batch to a chat's log under `leaderEpoch`: stamped against the ledger, checked by the pure gate (RA-R6),
+ * and appended one row at a time, skipping a settlement the ledger already holds (TS-R18). A keyed steer's message row
+ * carries its command id (RA-R10). Every writer of the host goes through it, M1's settlement rows included; the Lean
+ * model's `hostSettle` is this function over one settlement row.
+ *
+ * @param input - The chat, its log and ledger, the term and time the rows are stamped with, and a hook per landed row.
+ * @returns The ledger after the batch.
+ * @internal
+ */
+export const appendChatRows = async (
+  input: Readonly<{
+    chatId: string;
+    log: Pick<DurableEventLog, 'append'>;
+    ledger: ChatLedger;
+    leaderEpoch: string;
+    recordedAt: string;
+    rows: readonly ChatRunRow[];
+    onAppended?: (row: AgentLogEvent, ledger: ChatLedger) => void;
+  }>,
+): Promise<ChatLedger> => {
+  const { chatId, log, leaderEpoch, recordedAt, rows } = input;
+  let { ledger } = input;
+  let scratch = ledger;
+  const stamped = rows.map((row) => {
+    const steer =
+      row.body.type === 'message.appended' && row.body.message.id.startsWith('steer:')
+        ? row.body.message.id.slice('steer:'.length)
+        : undefined;
+    const commandId = row.commandId ?? steer;
+    const [event] = stampRows({
+      ledger: scratch,
+      leaderEpoch,
+      runId: row.runId,
+      recordedAt,
+      ...(commandId === undefined ? {} : { commandId }),
+      bodies: [row.body],
+    });
+    scratch = foldChatLedger(scratch, [event]);
+    return event!;
+  });
+  /* PrepareOnlyWhenResolved is on: every writer records a resolved attempt before the next is prepared (RA-S11). */
+  const gated = gateRows(ledger, stamped);
+  if (!gated.ok) {
+    const row = stamped[gated.row]!;
+    throw coded(
+      gated.code,
+      gated.code === 'CHAT_RUN_LIVE'
+        ? `Chat ${chatId} has a ${chatRunState(ledger)} run; send the command again after it ends.`
+        : `Run ${row.runId} cannot record ${row.type === 'run.lifecycle' ? `"${row.state}"` : row.type} (${gated.code}).`,
+      { effect: 'not-applied', ...(gated.code === 'RUN_ID_TAKEN' ? { runId: row.runId } : {}) },
+    );
+  }
+  let landed = 0;
+  for (const row of stamped) {
+    if (isRepeatSettlement(ledger, row)) {
+      continue;
+    }
+    let outcome: Awaited<ReturnType<DurableEventLog['append']>>;
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- W1 event ordering requires sequential durable appends.
+      outcome = await log.append(row);
+    } catch (error) {
+      throw Object.assign(error instanceof Error ? error : new Error(String(error)), {
+        effect: landed === 0 ? 'not-applied' : 'unknown',
+      });
+    }
+    if (outcome.appended) {
+      ledger = foldChatLedger(ledger, [row]);
+      landed += 1;
+      input.onAppended?.(row, ledger);
+    }
+  }
+  return ledger;
+};
+
+/**
  * Assemble Tau's portable host: one M1 incarnation per chat (W7), over the chat logs, the pi session driver and the
  * external runners.
  *
@@ -606,8 +680,6 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   const admissions = new Map<string, Readonly<{ runId?: string; answer: Promise<CommandAnswer> }>>();
   /** Host-shaped admissions the legacy `admit` hands `prepareAdmission` beside its command. */
   const legacyConfigs = new Map<string, TauAgentAdmissionConfig>();
-  /** The term a settlement is written under when no incarnation is live. */
-  const settlementTerms = new Map<string, string>();
   let closed = false;
   let closing: Promise<void> | undefined;
 
@@ -723,80 +795,50 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       signal?.addEventListener('abort', woken, { once: true });
     });
 
-  /**
-   * Write one batch under `leaderEpoch`, inside the chat's chain: stamped against the ledger, checked by the pure gate
-   * (RA-R6), and appended one row at a time. A keyed steer's message row carries its command id (RA-R10).
-   */
+  /* D13: a run edits only through its placement's lease, so a host with no placement runs none. */
+  const refuseUnplaced = (): void => {
+    if (options.placement === undefined) {
+      throw coded(
+        'REVISIONS_UNAVAILABLE' satisfies RefusalCode,
+        'This host has no revision placement, so it cannot run an agent turn. Open the project and send again.',
+        { effect: 'not-applied' },
+      );
+    }
+  };
+
+  /** Write one batch under `leaderEpoch`, inside the chat's chain ({@link appendChatRows}). */
   const write = async (
     chatId: string,
     leaderEpoch: string,
     rows: readonly ChatRunRow[],
   ): Promise<Readonly<{ ledger: ChatLedger; messageIds: readonly string[] }>> => {
-    const log = await logOf(chatId);
-    let ledger = await ledgerOf(chatId);
-    const recordedAt = now().toISOString();
-    let scratch = ledger;
-    const stamped = rows.map((row) => {
-      const steer =
-        row.body.type === 'message.appended' && row.body.message.id.startsWith('steer:')
-          ? row.body.message.id.slice('steer:'.length)
-          : undefined;
-      const commandId = row.commandId ?? steer;
-      const [event] = stampRows({
-        ledger: scratch,
-        leaderEpoch,
-        runId: row.runId,
-        recordedAt,
-        ...(commandId === undefined ? {} : { commandId }),
-        bodies: [row.body],
-      });
-      scratch = foldChatLedger(scratch, [event]);
-      return event!;
-    });
-    /* PrepareOnlyWhenResolved is on: every writer records a resolved attempt before the next is prepared (RA-S11). */
-    const gated = gateRows(ledger, stamped);
-    if (!gated.ok) {
-      const row = stamped[gated.row]!;
-      throw coded(
-        gated.code,
-        gated.code === 'CHAT_RUN_LIVE'
-          ? `Chat ${chatId} has a ${chatRunState(ledger)} run; send the command again after it ends.`
-          : `Run ${row.runId} cannot record ${row.type === 'run.lifecycle' ? `"${row.state}"` : row.type} (${gated.code}).`,
-        { effect: 'not-applied', ...(gated.code === 'RUN_ID_TAKEN' ? { runId: row.runId } : {}) },
-      );
-    }
     const store = storeOf(chatId);
     const messageIds: string[] = [];
-    let landed = 0;
-    for (const row of stamped) {
-      if (isRepeatSettlement(ledger, row)) {
-        continue;
+    try {
+      const ledger = await appendChatRows({
+        chatId,
+        log: await logOf(chatId),
+        ledger: await ledgerOf(chatId),
+        leaderEpoch,
+        recordedAt: now().toISOString(),
+        rows,
+        onAppended: (row, ledger) => {
+          store.ledger = ledger;
+          runChats.set(row.runId, chatId);
+          if (row.type === 'message.appended') {
+            messageIds.push(row.message.id);
+          }
+          wake(store);
+        },
+      });
+      return { ledger, messageIds };
+    } catch (error) {
+      if (codedFailureDetail(error).code === 'LOG_FENCED') {
+        // The log moved under this writer: the next incarnation rereads it (RA-A9).
+        store.ledger = undefined;
       }
-      let outcome: Awaited<ReturnType<DurableEventLog['append']>>;
-      try {
-        // oxlint-disable-next-line no-await-in-loop -- W1 event ordering requires sequential durable appends.
-        outcome = await log.append(row);
-      } catch (error) {
-        if (codedFailureDetail(error).code === 'LOG_FENCED') {
-          // The log moved under this writer: the next incarnation rereads it (RA-A9).
-          store.ledger = undefined;
-        }
-        throw Object.assign(error instanceof Error ? error : new Error(String(error)), {
-          effect: landed === 0 ? 'not-applied' : 'unknown',
-        });
-      }
-      if (outcome.appended) {
-        ledger = foldChatLedger(ledger, [row]);
-        store.ledger = ledger;
-        landed += 1;
-        runChats.set(row.runId, chatId);
-        if (row.type === 'message.appended') {
-          messageIds.push(row.message.id);
-        }
-        wake(store);
-      }
+      throw error;
     }
-    return { ledger, messageIds };
   };
 
   /** A driver's rows: refused once M1 closed its attempt's gate, then handed to M1's ledger (RA-R6, RA-R7). */
@@ -944,6 +986,18 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         return { ledger, repair };
       }),
     append: async ({ chatId, leaderEpoch, rows, ends }) => {
+      /* TS-S9: M1 writes a settlement only in the one shape, attempt and code included; nothing of the batch lands. */
+      const unwritable = rows.find(
+        ({ runId, body }) =>
+          (body.type === 'turn.finalized' || body.type === 'turn.conflicted' || body.type === 'turn.failed') &&
+          !turnSettlementSchema.safeParse({ ...body, runId }).success,
+      );
+      if (unwritable !== undefined) {
+        throw coded(
+          'EVENT_INVALID' satisfies RefusalCode,
+          `This settlement for run ${unwritable.runId} is not in the settlement shape.`,
+        );
+      }
       const store = storeOf(chatId);
       if (ends !== undefined) {
         /* The gate closes before the ending batch is queued: a driver row queued after it is refused (RA-R6). */
@@ -952,6 +1006,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       return serial(chatId, async () => write(chatId, leaderEpoch, rows));
     },
     prepareAdmission: async ({ chatId, commandId, payload }) => {
+      refuseUnplaced();
       const start = payload as unknown as CommandPayload<'start'>;
       const config =
         legacyConfigs.get(commandId) ?? admissionConfigOf(start.config, { systemPrompt: options.systemPrompt });
@@ -1071,6 +1126,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       };
     },
     prepareResume: async ({ chatId, runId, payload }) => {
+      refuseUnplaced();
       const resume = payload as unknown as CommandPayload<'resume'>;
       const log = await logOf(chatId);
       const ledger = await ledgerOf(chatId);
@@ -1197,6 +1253,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
                 chatId,
                 runId,
                 attempt: key.attempt,
+                ...(grant === undefined ? {} : { root: grant.root }),
                 ...(mode === 'start' && admission?.message ? { message: admission.message } : {}),
                 ...(mode === 'start' && admission?.config ? { config: admission.config } : {}),
                 ...(state === undefined ? {} : { state }),
@@ -1706,22 +1763,6 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     readEvents: async ({ chatId, cursor, limit, maxBytes }) => {
       // The version-1 wire's read: a cursor past the end is clamped here, and only here (CL-R7).
       return v1Batch(await readBatchOf(chatId, { cursor, limit, maxBytes }));
-    },
-    recordSettlement: async ({ chatId, runId, event }) => {
-      assertOpen();
-      if (registry.isFenced(chatId)) {
-        throw coded('LEADERSHIP_LOST' satisfies RefusalCode, `This host no longer leads chat ${chatId}.`);
-      }
-      /* A settlement is a fact about an ended attempt, not a command: it opens no incarnation, so it abandons
-       * nothing. Written under the live term, else the assumed one, else this host's own. */
-      let leaderEpoch = registry.termOf(chatId) ?? settlementTerms.get(chatId);
-      if (leaderEpoch === undefined) {
-        leaderEpoch = (options.createLeaderEpoch ?? createPortableId)();
-        settlementTerms.set(chatId, leaderEpoch);
-      }
-      const term = leaderEpoch;
-      const committed = await serial(chatId, async () => write(chatId, term, [{ runId, body: event }]));
-      storeOf(chatId).deliver?.({ type: 'rowsCommitted', ledger: committed.ledger, messageIds: [] });
     },
     assumeLeadership: (chatId, epoch) => {
       assertOpen();

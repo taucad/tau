@@ -9,6 +9,7 @@ import {
   kernelTypePackageMaps,
   manifoldTypes,
   opencascadeTypes,
+  picovoxelTypes,
   replicadTypes,
 } from '#kernel-types.js';
 
@@ -36,7 +37,9 @@ describe('@taucad/api-extractor runtime subpaths', () => {
         packages[packageName] = packageTypes;
       }
     }
-    expect(Object.keys(packages).sort()).toEqual(['libcascade', 'replicad', '@jscad/modeling', 'manifold-3d'].sort());
+    expect(Object.keys(packages).sort()).toEqual(
+      ['libcascade', 'replicad', '@jscad/modeling', 'manifold-3d', 'picovoxel'].sort(),
+    );
 
     const jscadPackage = packages['@jscad/modeling'];
     const manifoldPackage = packages['manifold-3d'];
@@ -64,6 +67,33 @@ describe('@taucad/api-extractor runtime subpaths', () => {
     );
     expect(replicadPackage?.content).toBe(replicadTypes['replicad']);
     expect(Object.keys(replicadPackage?.files ?? {})).toEqual([]);
+
+    // PicoVoxel keeps its relative chunk topology: assert structure, not the hashed chunk names.
+    const picovoxelPackage = packages['picovoxel'];
+    expect(picovoxelPackage).toBe(picovoxelTypes['picovoxel']);
+    const picovoxelExports = picovoxelPackage?.packageJson?.['exports'] as Record<string, { types: string }>;
+    expect(Object.keys(picovoxelExports)).toEqual([
+      '.',
+      './latticelibrary',
+      './numerics',
+      './shapekernel',
+      './slicing',
+    ]);
+    const picovoxelFiles: Readonly<Record<string, string | undefined>> = {
+      'index.d.ts': picovoxelPackage?.content,
+      ...picovoxelPackage?.files,
+    };
+    for (const { types } of Object.values(picovoxelExports)) {
+      expect(picovoxelFiles[types.slice(2)], types).toBeTypeOf('string');
+    }
+    for (const [name, declaration] of Object.entries(picovoxelFiles)) {
+      for (const [, chunk] of declaration!.matchAll(/from\s+["']\.\/([^"']+)\.js["']/gu)) {
+        expect(picovoxelFiles, `${name} imports ${chunk}`).toHaveProperty([`${chunk}.d.ts`]);
+      }
+    }
+    expect(Object.keys(picovoxelFiles).filter((name) => /^(?:multi|raw|three)\.d\.ts$/u.test(name))).toEqual([]);
+    expect(picovoxelPackage?.content).toContain('type Pico,');
+    expect(picovoxelFiles['shapekernel.d.ts']).toContain('BaseBox');
   });
 
   it('should keep KCL markdown assets out of the kernel-types module', () => {

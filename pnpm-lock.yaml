@@ -2968,6 +2968,10 @@ importers:
       typescript:
         specifier: 'catalog:'
         version: 5.9.3
+    devDependencies:
+      picovoxel:
+        specifier: file:../../packages/plugins/picovoxel/vendor/picovoxel-0.1.0.tgz
+        version: file:packages/plugins/picovoxel/vendor/picovoxel-0.1.0.tgz(three@0.184.0)
 
   libs/chat:
     dependencies:
@@ -4479,6 +4483,9 @@ importers:
       '@taucad/picogk':
         specifier: workspace:*
         version: link:../plugins/picogk
+      '@taucad/picovoxel':
+        specifier: workspace:*
+        version: link:../plugins/picovoxel
       '@taucad/replicad':
         specifier: workspace:*
         version: link:../plugins/replicad

@@ -319,13 +319,10 @@ typedef struct geospec_occt_regular_solid_containment_result {
   double residual_center_of_mass[3];
 } geospec_occt_regular_solid_containment_result;
 
-// S10 (INTERFERENCE-EXACT-01): one candidate pair of leaf occurrences. `work`
-// is always set; `work_exceeded` means no operand was qualified and no
-// Boolean ran. `unqualified` names the operand (1 left, 2 right) that is not
-// one regular solid, with its reason; otherwise the residual is exact.
+// S10 (INTERFERENCE-EXACT-01): one candidate pair of leaf occurrences.
+// `unqualified` names the operand (1 left, 2 right) that is not one regular
+// solid, with its reason; otherwise the residual is exact.
 typedef struct geospec_occt_occurrence_overlap_result {
-  uint64_t work;
-  int32_t work_exceeded;
   int32_t unqualified;
   uint32_t residual_solid_count;
   int32_t has_residual_bounds;
@@ -850,13 +847,19 @@ int geospec_occt_regular_solid_containment_dedicated(
     int grant_width, int* out_used_parallel,
     geospec_occt_regular_solid_containment_result* out_result,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
-// S10: the work is 1 plus the face pairs whose exact memo boxes, each enlarged
-// by `tolerance`, intersect; above `max_work` nothing else runs. The Common is
-// non-destructive, on the memo's regular-solid operands.
+// S10: one occurrence's exact-box price, M2's face-box units of its faces.
+int geospec_occt_occurrence_box_units(
+    const geospec_occt_document* document, uint32_t occurrence,
+    uint64_t* out_units, geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+// S10: each step of the pair is charged before it runs (ruling 28): the
+// face-box pre-count, each operand's first qualification in the memo, then
+// the Common, priced from the face pairs whose exact memo boxes, each
+// enlarged by `tolerance`, intersect. The Common is non-destructive, on the
+// memo's regular-solid operands.
 int geospec_occt_occurrence_overlap_dedicated(
     const geospec_occt_document* document, uint32_t left, uint32_t right,
-    double tolerance, uint64_t max_work, geospec_occt_operand_memo* memo,
-    int grant_width, int* out_used_parallel,
+    double tolerance, geospec_occt_operand_memo* memo, int grant_width,
+    geospec_occt_charge charge, void* context, int* out_used_parallel,
     geospec_occt_occurrence_overlap_result* out_result,
     geospec_occt_string* reason,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;

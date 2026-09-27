@@ -12,7 +12,7 @@ use std::{
 };
 
 use crate::{
-    analysis::mesh::{analyze, MeshAnalysisRecord, Primitive},
+    analysis::mesh::{analyze, exact::BOX_TESTS_PER_UNIT, MeshAnalysisRecord, Primitive},
     backend::{
         brep::{
             Bounds, BrepSubject, OccurrenceFacts, OccurrenceOverlap, OperandMemo,
@@ -257,11 +257,12 @@ enum OverlapRequest {
     },
     Boolean,
     Properties,
-    /// One exact pair's counted work (S10), replayed in order on a hit.
+    /// One exact pair's charged steps (S10) in order, zero past the last;
+    /// replayed in order on a hit.
     Pair {
         left: u32,
         right: u32,
-        work: u64,
+        charges: [u64; 4],
     },
 }
 
@@ -497,7 +498,7 @@ pub(crate) fn analyze_overlap(
                         csg.charge_cached_source(&operand_identity, *component, *units)?;
                     }
                     OverlapRequest::Boolean | OverlapRequest::Properties => csg.charge(1)?,
-                    OverlapRequest::Pair { work, .. } => csg.charge(*work)?,
+                    OverlapRequest::Pair { charges, .. } => csg.charge(charges.iter().sum())?,
                 }
             }
             if let Some(resident) = &subject.resident_overlaps {
@@ -539,7 +540,7 @@ pub(crate) fn analyze_overlap(
                             csg.charge_cached_source(&operand_identity, *component, *units)?;
                         }
                         OverlapRequest::Boolean | OverlapRequest::Properties => csg.charge(1)?,
-                        OverlapRequest::Pair { work, .. } => csg.charge(*work)?,
+                        OverlapRequest::Pair { charges, .. } => csg.charge(charges.iter().sum())?,
                     }
                 }
                 subject.observations.add(WorkCounter::OverlapDiskHits, 1);
@@ -655,6 +656,9 @@ pub(crate) fn analyze_overlap(
 /// occurrences, from their exact boxes, answers with the exact regular-solid
 /// Common. The claim's memo qualifies an occurrence once (C7), and only for a
 /// candidate pair, so an invalid non-candidate never refuses (ruling 10).
+/// Every step is charged before it runs, cold and warm alike (§16, ruling
+/// 28): the leaf boxes at M2's face-box price, the broad phase's box tests,
+/// then each pair's steps as the backend prices them.
 pub(crate) fn analyze_exact_overlap(
     subject: &Subject,
     brep: &dyn BrepSubject,
@@ -663,13 +667,8 @@ pub(crate) fn analyze_exact_overlap(
     tolerance: f64,
     selected: Option<&[SelectedPair]>,
 ) -> Result<Analysis, BackendError> {
-    // Every occurrence's exact box is requested, on warm replay too; the BRep
-    // demand was already charged by the claim owner.
-    if let Some(occurrences) = subject.source_occurrence_structure()? {
-        if occurrences.len() >= 2 {
-            charge(budget, occurrences.len() as u64)?;
-        }
-    }
+    // The BRep demand was already charged by the claim owner.
+    charge(budget, subject.overlap_box_units()?)?;
     let prepared_owner = subject.overlap_components()?;
     let prepared = match prepared_owner.as_ref() {
         PreparedComponents::Ready(value) => value,
@@ -684,6 +683,11 @@ pub(crate) fn analyze_exact_overlap(
         });
     }
     let components = &prepared.components;
+    let count = components.len() as u64;
+    let tests = selected.map_or(count * count.saturating_sub(1) / 2, |pairs| {
+        pairs.len() as u64
+    });
+    charge(budget, 1 + tests / BOX_TESTS_PER_UNIT)?;
     {
         let completed = prepared.completed.borrow();
         if let Some(cached) = completed
@@ -691,9 +695,17 @@ pub(crate) fn analyze_exact_overlap(
             .filter(|value| value.evidence.exact && value.matches(tolerance, selected))
         {
             for request in &cached.requests {
-                if let OverlapRequest::Pair { left, right, work } = request {
-                    if let Some(exhausted) = afford(budget, components, *left, *right, *work)? {
-                        return Ok(exhausted);
+                if let OverlapRequest::Pair {
+                    left,
+                    right,
+                    charges,
+                } = request
+                {
+                    // Zero past the last step: a zero charge always fits.
+                    for &units in charges {
+                        if let Some(exhausted) = afford(budget, components, *left, *right, units) {
+                            return Ok(exhausted);
+                        }
                     }
                 }
             }
@@ -718,43 +730,50 @@ pub(crate) fn analyze_exact_overlap(
     for (left_index, right_index) in &candidates {
         let left = &components[*left_index];
         let right = &components[*right_index];
-        let remaining = budget.limit().saturating_sub(budget.used());
-        let (work, volume, bounds) = match brep
-            .occurrence_overlap_memoized(left.id, right.id, tolerance, remaining, memo)?
-        {
-            OccurrenceOverlap::WorkExceeded { work } => {
-                return afford(budget, components, left.id, right.id, work)?
-                    .map(Ok)
-                    .unwrap_or_else(|| {
-                        Err(BackendError {
-                            kind: BackendErrorKind::ComputationFailed,
-                            message: "Exact overlap work exceeded an affordable limit.".into(),
-                        })
-                    });
+        let mut charges = [0; 4];
+        let mut steps = 0;
+        let mut refused = None;
+        let answer =
+            brep.occurrence_overlap_memoized(left.id, right.id, tolerance, memo, &mut |units| {
+                let Some(slot) = charges.get_mut(steps) else {
+                    return false;
+                };
+                if !fits(budget, units) {
+                    refused = Some(units);
+                    return false;
+                }
+                *slot = units;
+                steps += 1;
+                true
+            })?;
+        let (volume, bounds) = match (answer, refused) {
+            (_, Some(units)) => {
+                return Ok(pair_refusal(budget, components, left.id, right.id, units))
             }
-            OccurrenceOverlap::Unqualified {
-                left: is_left,
-                reason,
-            } => {
+            (None, None) => {
+                return Err(BackendError {
+                    kind: BackendErrorKind::ComputationFailed,
+                    message: "An exact overlap pair stopped without a refused charge.".into(),
+                })
+            }
+            (
+                Some(OccurrenceOverlap::Unqualified {
+                    left: is_left,
+                    reason,
+                }),
+                None,
+            ) => {
                 let component = if is_left { left } else { right };
                 return Ok(Analysis::Refused(vec![exact_component_diagnostic(
                     component, &reason,
                 )]));
             }
-            OccurrenceOverlap::Residual {
-                work,
-                volume,
-                bounds,
-                ..
-            } => (work, volume, bounds),
+            (Some(OccurrenceOverlap::Residual { volume, bounds, .. }), None) => (volume, bounds),
         };
-        if let Some(exhausted) = afford(budget, components, left.id, right.id, work)? {
-            return Ok(exhausted);
-        }
         requests.push(OverlapRequest::Pair {
             left: left.id,
             right: right.id,
-            work,
+            charges,
         });
         if volume > volume_epsilon {
             overlaps.push(Overlap {
@@ -795,19 +814,49 @@ pub(crate) fn analyze_exact_overlap(
     Ok(Analysis::Complete(evidence))
 }
 
-/// Charge one pair's counted work, or name the pair the budget cannot afford
+/// The faced leaves' exact boxes at M2's face-box price (ruling 28); nothing
+/// is measured below two leaves.
+pub(crate) fn box_units(subject: &Subject) -> Result<u64, BackendError> {
+    let (Some(brep), Some(occurrences)) = (
+        subject.brep.as_deref(),
+        subject.source_occurrence_structure()?,
+    ) else {
+        return Ok(0);
+    };
+    let leaves = leaf_components(&occurrences);
+    if leaves.len() < 2 {
+        return Ok(0);
+    }
+    leaves.into_iter().try_fold(0_u64, |units, id| {
+        Ok(units.saturating_add(brep.occurrence_box_units(id)?))
+    })
+}
+
+/// Charge one of a pair's steps, or name the pair the budget cannot afford
 /// without charging it, so the refusal keeps the pair (cold and warm alike).
 fn afford(
     budget: &Budget,
     components: &[Component],
     left: u32,
     right: u32,
-    work: u64,
-) -> Result<Option<Analysis>, BackendError> {
-    if work <= budget.limit().saturating_sub(budget.used()) {
-        charge(budget, work)?;
-        return Ok(None);
-    }
+    units: u64,
+) -> Option<Analysis> {
+    (!fits(budget, units)).then(|| pair_refusal(budget, components, left, right, units))
+}
+
+/// Checked before charging, so a refused step never leaves the budget spent
+/// past its limit, where the plan would refuse without the pair.
+fn fits(budget: &Budget, units: u64) -> bool {
+    units <= budget.limit().saturating_sub(budget.used()) && budget.charge(units).is_ok()
+}
+
+fn pair_refusal(
+    budget: &Budget,
+    components: &[Component],
+    left: u32,
+    right: u32,
+    units: u64,
+) -> Analysis {
     let label = |id: u32| {
         components
             .iter()
@@ -815,10 +864,10 @@ fn afford(
             .map(|component| component.label.clone())
             .unwrap_or_default()
     };
-    Ok(Some(Analysis::PairBudget {
+    Analysis::PairBudget {
         exceeded: BudgetExceeded {
             limit: budget.limit(),
-            used: budget.used().saturating_add(work),
+            used: budget.used().saturating_add(units),
         },
         pair: SelectedPair {
             left,
@@ -826,8 +875,8 @@ fn afford(
             left_label: label(left),
             right_label: label(right),
         },
-        work,
-    }))
+        work: units,
+    }
 }
 
 fn charge(budget: &Budget, units: u64) -> Result<(), BackendError> {

@@ -4058,6 +4058,28 @@ importers:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
 
+  packages/plugins/picovoxel:
+    dependencies:
+      '@taucad/geometry-core':
+        specifier: workspace:*
+        version: link:../../core/geometry
+      picovoxel:
+        specifier: file:./vendor/picovoxel-0.1.0.tgz
+        version: file:packages/plugins/picovoxel/vendor/picovoxel-0.1.0.tgz(three@0.184.0)
+    devDependencies:
+      '@taucad/esbuild':
+        specifier: workspace:*
+        version: link:../esbuild
+      '@taucad/runtime':
+        specifier: workspace:*
+        version: link:../../runtime
+      '@taucad/runtime-testing':
+        specifier: workspace:*
+        version: link:../../runtime-testing
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
+
   packages/plugins/replicad:
     dependencies:
       '@gltf-transform/core':
@@ -22766,6 +22788,16 @@ packages:
   picospinner@3.0.0:
     resolution: {integrity: sha512-lGA1TNsmy2bxvRsTI2cV01kfTwKzZjnZSDmF9llYNyMHMrU4sP87lQ5taiIKm88L3cbswjl008nwyGc3WpNvzg==}
     engines: {node: '>=18.0.0'}
+
+  picovoxel@file:packages/plugins/picovoxel/vendor/picovoxel-0.1.0.tgz:
+    resolution: {integrity: sha512-OeU3Lrfg+BdwVmlBbgGRRLBGd7kNRJYAI29yuU8fh98j1A6WV/NJYRYZwyXaMkbC2XARtIyvO/i+Odt9Pc6Vfg==, tarball: file:packages/plugins/picovoxel/vendor/picovoxel-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=20'}
+    peerDependencies:
+      three: '>=0.160'
+    peerDependenciesMeta:
+      three:
+        optional: true
 
   pidtree@0.6.1:
     resolution: {integrity: sha512-e0F9AOF1JMrCfBsyJOwU9lNvQ0WtXTq0j/4jk0BQ5JSI9VAybPXmDpPRw/2FQ3e5d3ZFN1mLh7jW99m/jjaptw==}
@@ -48089,6 +48121,10 @@ snapshots:
   picoquery@2.5.0: {}
 
   picospinner@3.0.0: {}
+
+  picovoxel@file:packages/plugins/picovoxel/vendor/picovoxel-0.1.0.tgz(three@0.184.0):
+    optionalDependencies:
+      three: 0.184.0
 
   pidtree@0.6.1: {}
 

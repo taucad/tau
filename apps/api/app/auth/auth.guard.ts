@@ -4,7 +4,6 @@ import { Reflector } from '@nestjs/core';
 import type { Auth } from 'better-auth';
 import { fromNodeHeaders } from 'better-auth/node';
 import type { FastifyRequest } from 'fastify';
-import type { Socket } from 'socket.io';
 import { authInstanceKey, isOptionalAuth, isPublicAuth } from '#constants/auth.constant.js';
 
 @Injectable()
@@ -15,7 +14,8 @@ export class AuthGuard implements CanActivate {
   ) {}
 
   /**
-   * Validates if the current request is authenticated for all REST & Websockets
+   * Validates if the current request is authenticated. WebSocket routes
+   * authenticate in their own upgrade handlers, not through this guard.
    * Attaches session and user information to the request object
    */
   public async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -25,24 +25,6 @@ export class AuthGuard implements CanActivate {
     ]);
 
     if (isAuthPublic) {
-      return true;
-    }
-
-    const contextType = context.getType();
-
-    if (contextType === 'ws') {
-      const socket = context.switchToWs().getClient<Socket>();
-      try {
-        const session = await this.auth.api.getSession({
-          headers: fromNodeHeaders(socket.handshake.headers),
-        });
-        // @ts-expect-error -- socket.session is not typed
-        socket.session = session;
-      } catch {
-        socket.disconnect();
-        return false;
-      }
-
       return true;
     }
 

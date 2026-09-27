@@ -45,6 +45,7 @@ import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
 import { projectManifestMaxBytes } from '@taucad/types';
 import { z } from 'zod';
 
+import { captureRtspsStill, findFfmpeg } from '#rtsps-still.js';
 import { createFileSecretVault, readJson, writeProtected } from '#secret-vault.js';
 import type { SecretVault, SecretVaultFacts, SecretVaultWriteOptions } from '#secret-vault.js';
 
@@ -348,7 +349,9 @@ export const probeCertificateTrust = async (
 const matchesTrust = (raw: Uint8Array<ArrayBuffer>, trust: MachineTransportTrust): boolean =>
   trust.type === 'system' || digestOf(raw) === trust.digest;
 
-const openSocket = async (input: MachineNetworkRequest): Promise<Socket | TLSSocket> => {
+const openSocket = async (
+  input: Pick<MachineNetworkRequest, 'connectTimeout' | 'endpoint' | 'signal' | 'transport' | 'trust'>,
+): Promise<Socket | TLSSocket> => {
   input.signal.throwIfAborted();
   const socket =
     input.transport === 'tls'
@@ -554,6 +557,11 @@ export type CreateNodeMachineRuntimeOptions = Readonly<{
   /** Told every entry a provider logs. */
   log?: (entry: MachineLogEntry) => void;
   /**
+   * Locate the `ffmpeg` that decodes camera stills, or `undefined` when there
+   * is none; by default `PATH`, then `/opt/homebrew/bin` and `/usr/local/bin`.
+   */
+  findFfmpeg?: () => Promise<string | undefined>;
+  /**
    * Read one artifact's bytes from the project its reference names
    * (`artifact.projectId`), rejecting `MACHINE_ARTIFACT_NOT_FOUND` when no
    * candidate holds a file with the reference's digest. The runtime verifies
@@ -565,12 +573,12 @@ export type CreateNodeMachineRuntimeOptions = Readonly<{
 /**
  * The host-owned runtime a machine host discovers, binds and prints with.
  *
- * ponytail: no `captureNetworkStill` — the RTSPS sampler stays in the
- * qualification script for now, so a real X1C reports stills unsupported while
- * the simulator's own capture works. Port `createRtspsStillSampler` here when
- * stills on hardware are wanted.
+ * Its `captureNetworkStill` decodes one JPEG from a pinned RTSPS camera with
+ * the system `ffmpeg`; without one, every capture rejects
+ * `MACHINE_STILL_FFMPEG_MISSING` rather than the camera reporting stills
+ * unsupported.
  *
- * @param options - Secret custody, artifact reader and log sink.
+ * @param options - Secret custody, artifact reader, log sink and `ffmpeg` lookup.
  * @returns The runtime for `createNodeMachineHost`, whose `credentials` answer
  * whether a printer's code is saved and forget a removed binding's code.
  * @public
@@ -607,6 +615,19 @@ export const createNodeMachineRuntime = (options: CreateNodeMachineRuntimeOption
           return options.secrets.resolve(input.reference);
         },
         uploadFile: async (input) => uploadFile(input, options.secrets),
+        captureNetworkStill: async (input) =>
+          captureRtspsStill(input, {
+            ffmpeg: await (options.findFfmpeg ?? findFfmpeg)(),
+            accessCode: async () => secrets.resolve(input.secretRef),
+            openUpstream: async () =>
+              openSocket({
+                endpoint: input.endpoint,
+                transport: 'tls',
+                trust: input.trust,
+                connectTimeout: input.connectTimeout,
+                signal: input.signal,
+              }),
+          }),
       }),
   });
 };

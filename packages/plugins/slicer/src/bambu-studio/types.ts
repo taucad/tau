@@ -59,9 +59,11 @@ export type BambuStudioSelection = Readonly<{
   printer: string;
   process: string;
   /**
-   * Filament presets in filament order. A slice of one part loads them all and prints with the first;
-   * a slice of several parts prints part *i* with filament *i*, repeating the first preset for parts
-   * the list does not reach.
+   * Filament presets, filament 1 first; the caller sets the order. A slice of one part loads them all
+   * and prints with the first; a slice of several parts prints part *i* with filament *i*, repeating
+   * the first preset for parts the list does not reach. `resolveBambuStudioSelection` fills its default
+   * in tray order, one preset per loaded slot, so a caller slicing several parts maps each part to a tray
+   * and passes the presets in part order.
    */
   filaments: readonly string[];
   plate: BambuPlate['id'];
@@ -151,7 +153,8 @@ export type BambuStudioErrorCode =
   | 'BAMBU_STUDIO_UNAVAILABLE'
   | 'BAMBU_STUDIO_PRESET_NOT_FOUND'
   | 'BAMBU_STUDIO_SETTINGS_INVALID'
-  | 'BAMBU_STUDIO_SLICE_FAILED';
+  | 'BAMBU_STUDIO_SLICE_FAILED'
+  | 'BAMBU_STUDIO_TIMEOUT';
 
 /** Typed refusal raised by `@taucad/slicer/bambu-studio`. @public */
 export class BambuStudioError extends Error {

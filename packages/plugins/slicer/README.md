@@ -98,7 +98,7 @@ With `engine: 'bambu-studio'` the reference-only options are ignored. Presets no
 options). `settings` apply over the resolved presets: a filament setting reaches every used filament
 whose preset has that key. Bambu Studio is found through `TAU_BAMBU_STUDIO_PATH` or its default
 install location, runs in a temporary directory with its own data directory, one slice at a time,
-and is stopped by the operation signal or after five minutes.
+and is stopped by the operation signal or, with `BAMBU_STUDIO_TIMEOUT`, after two minutes plus one minute per MiB of STL.
 
 ### Toolpath parser
 

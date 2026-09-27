@@ -117,12 +117,7 @@ describe('Vitest Browser test-runner ownership', () => {
       'apps/desktop-e2e/src/two-client.spec.ts',
       'apps/react-e2e/browser-command.ts',
       'apps/react-e2e/scripts/benchmark-bundler-products.mts',
-      // Provider-context augmentations: `@vitest/browser-playwright` does not re-export `BrowserContext`.
-      'apps/react-e2e/support/vitest-playwright.d.ts',
       'apps/ui-e2e/src/support/open-to-frame.ts',
-      'apps/ui-e2e/src/support/vitest-playwright.d.ts',
-      'packages/geospec-engine/e2e/browser-command.ts',
-      'packages/plugins/openrscad/e2e/vitest-playwright.d.ts',
       'scripts/src/canvas-vite.config.test.ts',
       'scripts/src/check-pack-install.ts',
       'scripts/src/reference-html.test.ts',

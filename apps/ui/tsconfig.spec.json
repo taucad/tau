@@ -8,9 +8,6 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "target": "ES2024",
-    "paths": {
-      "package.json": ["./package.json"]
-    },
     "outDir": "./out-tsc/spec",
     "rootDirs": [".", "./.react-router/types"],
     "types": ["vitest/importMeta", "vite/client", "node", "vitest"]

@@ -112,6 +112,7 @@
     "@taucad/replicad": "workspace:*",
     "@taucad/rhino": "workspace:*",
     "@taucad/runtime": "workspace:*",
+    "@taucad/tscircuit": "workspace:*",
     "geospec": "workspace:*",
     "manifold-3d": "catalog:",
     "zod": "catalog:"

@@ -72,7 +72,7 @@ console.log(program.layerTable.length, program.duration, md5Verified);
 | `loadBambuStudioCatalog`                  | `@taucad/slicer/bambu-studio` | printer, process and filament presets Bambu Studio offers, optionally per printer    |
 | `resolveBambuStudioSelection`             | `@taucad/slicer/bambu-studio` | complete a preset selection from printer hints (model, nozzle, trays, plate)         |
 | `describeBambuStudioSettings`             | `@taucad/slicer/bambu-studio` | grouped JSON Schema and current values of a selection's settings                     |
-| `sliceWithBambuStudio`                    | `@taucad/slicer/bambu-studio` | slice an STL with Bambu Studio and return its `.gcode.3mf` untouched                 |
+| `sliceWithBambuStudio`                    | `@taucad/slicer/bambu-studio` | slice parts with Bambu Studio, one filament each; return its `.gcode.3mf` untouched  |
 | `BambuStudioError`, `bambuPlates`         | `@taucad/slicer/bambu-studio` | typed refusal with a `BAMBU_STUDIO_*` code; plate ids and Bambu Studio's names       |
 
 ### Options

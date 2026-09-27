@@ -9,9 +9,9 @@
 //! where a vertex classifies on a boundary. Union-find skips joined pairs,
 //! and pairs run in cost order (face pairs first, nested bodies after), so a
 //! costly near miss inside an already joined component never runs. Every
-//! step is charged before it runs (ruling 28): face-box tests by the 4,096,
-//! the native steps as the bridge prices them, and faces x faces per
-//! whole-body distance.
+//! step is charged before it runs (ruling 28): sweep comparisons and
+//! face-box tests by the 4,096, the native steps as the bridge prices them,
+//! and faces x faces per whole-body distance.
 
 use super::{
     center, compare_utf16, empty_aabb, expand, find, overlaps_within, partial_cmp, sweep_axis,
@@ -196,8 +196,10 @@ struct Candidate {
     right_faces: Vec<u32>,
 }
 
-/// Broad-phase pairs whose boxes overlap within `tolerance`. Each pair's
-/// face-box tests are charged (by their faces x faces bound) before they run.
+/// Broad-phase pairs whose boxes overlap within `tolerance`. Every sweep
+/// comparison is charged, a unit per `BOX_TESTS_PER_UNIT` before each batch
+/// runs, and each pair's face-box tests (by their faces x faces bound)
+/// before they run.
 fn candidate_pairs(
     list: &[ComponentBody],
     tolerance: f64,
@@ -210,9 +212,17 @@ fn candidate_pairs(
             .then_with(|| left.cmp(&right))
     });
     let mut pairs = Vec::new();
+    let mut comparisons = 0_u64;
     for (position, &current) in order.iter().enumerate() {
         let bounds = aabb(list[current].bounds);
         for &candidate in &order[position + 1..] {
+            if comparisons % BOX_TESTS_PER_UNIT == 0 {
+                charge(budget, 1).map_err(|exceeded| ExactError::Budget {
+                    exceeded,
+                    pair: None,
+                })?;
+            }
+            comparisons += 1;
             let other = aabb(list[candidate].bounds);
             if other.min[axis] > bounds.max[axis] + tolerance {
                 break;
@@ -469,7 +479,8 @@ mod tests {
         let clusters = exact_clusters(&fake, &labels(3), 0.001, &budget).unwrap();
         assert_eq!(clusters.len(), 1);
         assert_eq!(*fake.calls.borrow(), [("faces", 0, 1), ("faces", 1, 2)]);
-        assert_eq!(budget.used(), 3 + 2 + 3);
+        // The sweep's one batch, the three broad-phase pairs, then the faces.
+        assert_eq!(budget.used(), 1 + 3 + 2 + 3);
         // Heaviest body names the cluster; ties keep the first body.
         assert_eq!(clusters[0].label, "b0");
         assert_eq!(clusters[0].total_vertices, 20);
@@ -485,7 +496,7 @@ mod tests {
             *fake.calls.borrow(),
             [("faces", 0, 1), ("faces", 1, 2), ("faces", 0, 2)]
         );
-        assert_eq!(budget.used(), 3 + 2 + 3 + 6);
+        assert_eq!(budget.used(), 1 + 3 + 2 + 3 + 6);
         assert_eq!(
             clusters
                 .iter()
@@ -497,7 +508,7 @@ mod tests {
 
     #[test]
     fn the_refusal_names_the_pair_whose_charge_would_pass_the_budget() {
-        for (limit, pair, used) in [(1, (0, 1), 2), (5, (1, 2), 8)] {
+        for (limit, pair, used) in [(2, (0, 1), 3), (6, (1, 2), 9)] {
             let fake = chain(&[(0, 1), (1, 2)]);
             let budget = Budget::new(limit);
             let Err(ExactError::Budget { exceeded, pair: at }) =
@@ -505,8 +516,9 @@ mod tests {
             else {
                 panic!("expected a budget refusal");
             };
-            // The broad phase refuses its second pair at 1 unit; the narrow
-            // phase refuses 1-2's faces after 0-1 joined at 5.
+            // After the sweep's batch, the broad phase refuses its second
+            // pair at 2 units; the narrow phase refuses 1-2's faces after
+            // 0-1 joined at 6.
             assert_eq!(at, Some(pair));
             assert_eq!((exceeded.limit, exceeded.used), (limit, used));
             // Nothing is spent past the limit, so the plan keeps this refusal.
@@ -540,7 +552,7 @@ mod tests {
                 false,
                 1,
                 &[("inside", 0, 1)],
-                1 + 1,
+                1 + 1 + 1,
             ),
             // Every point outside, both ways: apart, no distance.
             (
@@ -549,7 +561,7 @@ mod tests {
                 false,
                 2,
                 &[("inside", 0, 1), ("inside", 1, 0)],
-                1 + 2,
+                1 + 1 + 2,
             ),
             // A point on a boundary: the whole-body distance decides, charged
             // faces x faces.
@@ -559,7 +571,7 @@ mod tests {
                 true,
                 1,
                 &[("inside", 0, 1), ("inside", 1, 0), ("bodies", 0, 1)],
-                1 + 2 + 36,
+                1 + 1 + 2 + 36,
             ),
             (
                 true,
@@ -567,10 +579,10 @@ mod tests {
                 false,
                 2,
                 &[("inside", 0, 1), ("inside", 1, 0), ("bodies", 0, 1)],
-                1 + 2 + 36,
+                1 + 1 + 2 + 36,
             ),
             // No solid holds the other's box: nothing is asked.
-            (false, HashMap::new(), false, 2, &[], 1),
+            (false, HashMap::new(), false, 2, &[], 1 + 1),
         ];
         for (solid, states, nested, count, calls, units) in cases {
             let fake = Fake {
@@ -611,6 +623,43 @@ mod tests {
         let clusters = exact_clusters(&fake, &labels(64), 0.001, &budget).unwrap();
         assert_eq!(clusters.len(), 64);
         assert!(fake.calls.borrow().is_empty());
-        assert_eq!(budget.used(), 0);
+        // 63 sweep comparisons, each ending its body's scan: one batch.
+        assert_eq!(budget.used(), 1);
+    }
+
+    /// Review R5-3: bars whose x extents all overlap but which lie apart in
+    /// y make the sweep compare every pair and find none; the comparisons
+    /// are charged by the batch before they run.
+    #[test]
+    fn a_sweep_charges_every_comparison_before_it_runs() {
+        const BARS: usize = 128;
+        let bodies: Vec<_> = (0..BARS)
+            .map(|index| {
+                let (x, y) = (3.0 * index as f64, 2.0 * index as f64);
+                body(
+                    vec![slab([x, y, 0.0], [x + 3.0 * BARS as f64, y + 1.0, 1.0])],
+                    true,
+                    8,
+                )
+            })
+            .collect();
+        let fake = Fake {
+            bodies,
+            ..Fake::default()
+        };
+        // 128 x 127 / 2 = 8,128 comparisons, two batches of 4,096.
+        let budget = Budget::new(2);
+        let clusters = exact_clusters(&fake, &labels(BARS), 0.001, &budget).unwrap();
+        assert_eq!(clusters.len(), BARS);
+        assert!(fake.calls.borrow().is_empty());
+        assert_eq!(budget.used(), 2);
+        let budget = Budget::new(1);
+        let Err(ExactError::Budget { exceeded, pair }) =
+            exact_clusters(&fake, &labels(BARS), 0.001, &budget)
+        else {
+            panic!("the second batch passes the budget");
+        };
+        assert_eq!((pair, exceeded.limit, exceeded.used), (None, 1, 2));
+        assert_eq!(budget.used(), 1);
     }
 }

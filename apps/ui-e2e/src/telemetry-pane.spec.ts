@@ -53,7 +53,7 @@ const openSecondGeometryUnit = async (): Promise<void> => {
   }
 
   await target.hover(treeItem(secondaryPath));
-  await target.click(selectors.getByRole('button', { name: 'Actions for box-corner.js' }));
+  await target.click(selectors.getByRole('button', { name: 'More actions for box-corner.js', exact: true }));
   await target.click(selectors.getByRole('menuitem', { name: 'Open in Viewer' }));
   await target.expectVisible(selectors.getByCss(`.dv-tab[aria-label="${secondaryPath}"]`), 60_000);
 };

@@ -59,6 +59,10 @@ pnpm nx run ui:generate-svg-sprite
 - `csharp.svg` is sourced from [Simple Icons](https://simpleicons.org/)' `csharp.svg`
   (vendored at `repos/nx/astro-docs/public/images/icons/csharp.svg`), licensed under
   CC0-1.0, recoloured to the C# brand purple `#68217A`.
+- `picovoxel.svg` is the canonical project-owned PicoVoxel mark, `assets/logo.svg` in
+  [taucad/picovoxel](https://github.com/taucad/picovoxel) at commit
+  `802d86da6e6120a472b045fddb306ce0dfa5d5f8` (Apache-2.0), admitted under the project-owned logo
+  exception (no Lobe Icons entry exists).
 - `picogk.svg` is a vector reconstruction of the official PicoGK mark published only as
   raster at <https://picogk.org/images/PicoGK_sm.png> (Copyright LEAP 71). The wordmark is
   typeset from the `Jost` variable font PicoGK itself bundles

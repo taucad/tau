@@ -4535,9 +4535,47 @@ describe('ChatSessionStore — composer records (W7)', () => {
     await expect(store.promoteDraftAttachments(chatId, before)).rejects.toThrow(/missing/u);
 
     expect(session.draftActorRef.getSnapshot().context.draftAttachments).toEqual(before);
-    // The image copied before the PDF failed is taken back: nothing references it (G10).
-    expect(client.namesUnder(chatAttachmentsDirectory(projectId, chatId))).toEqual([]);
+    /* The image copied before the PDF failed stays: it is content-addressed, so another tab's send may name it
+     * (PV-R12). An orphan lives until the chat is deleted. */
+    expect(client.namesUnder(chatAttachmentsDirectory(projectId, chatId))).toEqual([`${pngHash}.png`]);
     store.release(chatId);
+  });
+
+  /*
+   * PV-A9 (L4 D-108, I37). Blobs are content-addressed, so another tab's send can reference the very bytes a failing
+   * promotion copied. The rollback that took them back deleted a blob a sent message names.
+   */
+  it('keeps a promoted blob when a concurrent send fails', async () => {
+    const client = createMemoryClient();
+    const tabA = openStore(client);
+    const tabB = openStore(client);
+    const sessionA = tabA.store.acquire(chatId, projectId);
+    tabB.store.acquire(chatId, projectId);
+    await attachBoth(sessionA);
+    const before = sessionA.draftActorRef.getSnapshot().context.draftAttachments;
+    const pdfDraft = `${draftAttachmentsDirectory(projectId, chatId)}/${pdfHash}.pdf`;
+    const pdfRead = Promise.withResolvers<void>();
+    const { readFile } = client;
+    client.readFile = async function (path: string) {
+      if (path === pdfDraft) {
+        await pdfRead.promise;
+        throw notFound(path);
+      }
+      return readFile.call(this, path);
+    };
+    const failing = tabA.store.promoteDraftAttachments(chatId, before);
+    await vi.waitFor(() => {
+      expect(client.namesUnder(chatAttachmentsDirectory(projectId, chatId))).toEqual([`${pngHash}.png`]);
+    });
+
+    // Tab B sends the same image: the chat already holds it, so B copies nothing and its message names it.
+    await tabB.store.promoteDraftAttachments(chatId, before.slice(0, 1));
+    pdfRead.resolve();
+
+    await expect(failing).rejects.toThrow(/missing/u);
+    expect(client.namesUnder(chatAttachmentsDirectory(projectId, chatId))).toEqual([`${pngHash}.png`]);
+    tabA.store.release(chatId);
+    tabB.store.release(chatId);
   });
 
   it('should keep a blob an earlier message holds when a later promotion fails (G10)', async () => {

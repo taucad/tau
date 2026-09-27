@@ -20,6 +20,20 @@ export type AttachmentName = Pick<Attachment, 'hash' | 'mediaType'>;
  */
 export type AttachmentReference = AttachmentName & Readonly<Partial<Pick<Attachment, 'filename' | 'byteLength'>>>;
 
+declare const storedAttachment: unique symbol;
+
+/**
+ * A reference to bytes a store holds (I37, PV-R12).
+ *
+ * Only an attachment store's `put` mints one, and a reference read back from a record whose writer required one
+ * (`attachmentReferenceOf`). Every row, draft and composer writer requires it, so no record names bytes before they
+ * are stored; a plain content hash does not typecheck.
+ */
+export type StoredAttachmentRef = AttachmentReference & { readonly [storedAttachment]: true };
+
+/** A stored attachment, as the store's `put` returns it. */
+export type StoredAttachment = Attachment & StoredAttachmentRef;
+
 /** A stored attachment. `hash` is the lowercase hex SHA-256 of the bytes. */
 export type Attachment = {
   readonly hash: string;
@@ -100,11 +114,13 @@ export const attachmentReferenceOf = (part: {
   readonly url: string;
   readonly mediaType: string;
   readonly filename?: string;
-}): AttachmentReference | undefined =>
+}): StoredAttachmentRef | undefined =>
   isAttachmentUrl(part.url)
-    ? {
+    ? /* The part was written from a stored reference (I37), so the bytes it names were stored first. */
+      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the one brand site for read-back references.
+      ({
         hash: part.url.slice(attachmentUrlPrefix.length, attachmentUrlPrefix.length + 64),
         mediaType: part.mediaType,
         ...(part.filename === undefined ? {} : { filename: part.filename }),
-      }
+      } as StoredAttachmentRef)
     : undefined;

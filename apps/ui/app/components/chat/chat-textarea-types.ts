@@ -13,7 +13,7 @@ import {
   isSupportedAttachmentMediaType,
   supportedAttachmentMediaTypes,
 } from '#utils/attachment.utils.js';
-import type { AttachmentReference } from '#utils/attachment.utils.js';
+import type { StoredAttachmentRef } from '#utils/attachment.utils.js';
 import { homeComposerAttachmentDirectory, useChatAttachmentDirectories } from '#components/chat/attachment-preview.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import type { KeyCombination } from '#utils/keys.utils.js';
@@ -42,7 +42,7 @@ import type { ClipboardPasteEvent } from '#components/chat/chat-paste-handler.js
 export type ChatTextareaSubmitPayload = {
   readonly content: string;
   /** The draft's stored attachments; the chat client promotes them before sending. */
-  readonly attachments: readonly AttachmentReference[];
+  readonly attachments: readonly StoredAttachmentRef[];
 };
 
 /** A dropped or picked file as the draft takes it: an image as a data URL, a document as its bytes (S7). */

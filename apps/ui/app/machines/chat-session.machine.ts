@@ -2,7 +2,7 @@ import { createCallbackLogic, setup, types } from 'xstate';
 import type { ActorRefFrom, AnyActorRef, EnqueueObject, EventObject, SystemRegistry } from 'xstate';
 import type { CadAgentExecution, MyUIMessage } from '@taucad/chat';
 import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
-import type { AttachmentReference } from '#utils/attachment.utils.js';
+import type { StoredAttachmentRef } from '#utils/attachment.utils.js';
 
 /**
  * One chat's live state (D32, S45).
@@ -92,7 +92,7 @@ export type ChatRequest =
       messageId: string;
       content: string;
       /** The edit's attachments, already promoted into the chat's directory. */
-      attachments?: readonly AttachmentReference[];
+      attachments?: readonly StoredAttachmentRef[];
       body?: ChatRequestBody;
     }
   | { kind: 'continue'; body?: ChatRequestBody };
@@ -107,8 +107,8 @@ export type ChatRequest =
  * @public
  */
 export type ChatTurnGesture =
-  | Readonly<{ kind: 'send'; message: MyUIMessage; attachments?: readonly AttachmentReference[] }>
-  | Readonly<{ kind: 'edit'; messageId: string; text: string; attachments?: readonly AttachmentReference[] }>
+  | Readonly<{ kind: 'send'; message: MyUIMessage; attachments?: readonly StoredAttachmentRef[] }>
+  | Readonly<{ kind: 'edit'; messageId: string; text: string; attachments?: readonly StoredAttachmentRef[] }>
   | Readonly<{ kind: 'regenerate'; execution?: CadAgentExecution }>
   /**
    * *Try again* on an error card: resume the stream if the host can still

@@ -10,6 +10,7 @@ import type {
   ChatTextareaSubmitPayload,
 } from '#components/chat/chat-textarea-types.js';
 import type { CadChatSubmitInput } from '#chat-clients/use-cad-chat-client.js';
+import { storedRef } from '#utils/attachment.test-utils.js';
 
 // `useKernel` must NOT be called from chat-history anymore — guard with a
 // throwing mock so any regression is caught loudly.
@@ -237,7 +238,7 @@ vi.mock('react-virtuoso', () => ({
 
 const { ChatHistory } = await import('#routes/w.$workspace.$project/chat-history.js');
 
-const draftAttachment = { hash: 'f'.repeat(64), mediaType: 'application/pdf', filename: 'spec.pdf' };
+const draftAttachment = storedRef({ hash: 'f'.repeat(64), mediaType: 'application/pdf', filename: 'spec.pdf' });
 
 const submitDraft = async (content = 'hello', attachments: ChatTextareaSubmitPayload['attachments'] = []) => {
   await capturedTextarea.onSubmit?.({ content, attachments });

@@ -40,13 +40,13 @@ import { generatePrefixedId } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
 import { base64ToUint8Array } from 'uint8array-extras';
 import { attachmentKind, attachmentReferenceOf, attachmentUrl } from '#utils/attachment.utils.js';
-import type { Attachment, AttachmentKind, AttachmentReference } from '#utils/attachment.utils.js';
+import type { AttachmentKind, StoredAttachment, StoredAttachmentRef } from '#utils/attachment.utils.js';
 
 /**
  * An attachment held by a draft: a reference, whose `byteLength` is known only
  * when this device stored the bytes (S3).
  */
-export type DraftAttachment = AttachmentReference;
+export type DraftAttachment = StoredAttachmentRef;
 
 /** The selected model, as the kind refusal needs it: what it reads, and its name for the reason. */
 export type DraftAttachmentModel = {
@@ -340,7 +340,7 @@ type DraftMachineEvents =
   | { type: 'imageResized'; resized: string }
   // Emitted by `storeAttachmentActor` once the queue head's bytes are durable.
   // Internal — callers must not send this directly.
-  | { type: 'attachmentStored'; attachment: Attachment };
+  | { type: 'attachmentStored'; attachment: StoredAttachment };
 
 // Placeholder actors - actual implementations provided via machine.provide()
 const persistDraftActor = fromSafeAsync<void, { draft: MyUIMessage }>(async () => {
@@ -378,7 +378,7 @@ const resizeImageActor = fromSafeAsync<
  * bytes into the record's attachment store; the store enforces kind and cap.
  */
 const storeAttachmentActor = fromSafeAsync<
-  { type: 'attachmentStored'; attachment: Attachment },
+  { type: 'attachmentStored'; attachment: StoredAttachment },
   { bytes: Uint8Array<ArrayBuffer>; mediaType: string; filename?: string }
 >(async () => {
   throw new Error('storeAttachmentActor not provided');

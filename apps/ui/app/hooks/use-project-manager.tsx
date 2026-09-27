@@ -64,7 +64,7 @@ import { nodeHomeRoot } from '#filesystem/desktop-bridge.js';
 import { createInitialProject } from '#constants/project.constants.js';
 import { attachmentKind, attachmentReferenceOf } from '#utils/attachment.utils.js';
 import { buildUserMessage } from '#utils/chat.utils.js';
-import type { AttachmentReference } from '#utils/attachment.utils.js';
+import type { StoredAttachmentRef } from '#utils/attachment.utils.js';
 import { createAttachmentStore, createChatAttachmentStore, isNotFound } from '#db/attachment-store.js';
 import { getMainFile, getEmptyCode } from '#utils/kernel.utils.js';
 import { encodeTextFile } from '#utils/filesystem.utils.js';
@@ -94,7 +94,7 @@ import type {
 } from '#hooks/workspace-connection.machine.js';
 
 /** A stored draft attachment, as the startup message references it. */
-export type InitialMessageAttachment = Omit<AttachmentReference, 'byteLength'>;
+export type InitialMessageAttachment = Omit<StoredAttachmentRef, 'byteLength'>;
 
 /** The operation field naming where a created chat's attachments are copied from, when not Home. */
 const attachmentSourceOf = (options: CreateProjectChatOptions): { attachmentSource?: string } => {

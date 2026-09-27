@@ -28,7 +28,7 @@ import { draftMachine } from '#hooks/draft.machine.js';
 import { resizeImageActor } from '#hooks/resize-image.actor.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { MAX_DATA_URL_LENGTH } from '#utils/resize-image.js';
-import type { Attachment } from '#utils/attachment.utils.js';
+import type { StoredAttachment } from '#utils/attachment.utils.js';
 import type { DraftAttachmentModel } from '#hooks/draft.machine.js';
 
 const SMALL_JPEG_DATA_URL = 'data:image/jpeg;base64,/9j/4AAQSkZJRg==';
@@ -111,16 +111,17 @@ const provideRealResize = () =>
   draftMachine.provide({
     actors: {
       resizeImageActor,
-      storeAttachmentActor: fromSafeAsync<{ type: 'attachmentStored'; attachment: Attachment }, StoreInput>(
+      storeAttachmentActor: fromSafeAsync<{ type: 'attachmentStored'; attachment: StoredAttachment }, StoreInput>(
         async ({ input }) => {
           stored.push(input);
           return {
             type: 'attachmentStored',
+            // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the fake store mints the brand as `put` does.
             attachment: {
               hash: String(stored.length).padStart(64, '0'),
               mediaType: input.mediaType,
               byteLength: input.bytes.byteLength,
-            },
+            } as StoredAttachment,
           };
         },
       ),

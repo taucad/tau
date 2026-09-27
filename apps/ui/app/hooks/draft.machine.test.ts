@@ -10,7 +10,7 @@ import { draftMachine } from '#hooks/draft.machine.js';
 import type { DraftAttachmentModel, DraftEmittedEvents } from '#hooks/draft.machine.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { attachmentCapBytes } from '#utils/attachment.utils.js';
-import type { Attachment } from '#utils/attachment.utils.js';
+import type { Attachment, StoredAttachment } from '#utils/attachment.utils.js';
 
 type PersistDraftInput = { draft: MyUIMessage };
 type PersistEditInput = { messageId: string; draft: MyUIMessage };
@@ -44,14 +44,15 @@ const bytesOf = (dataUrl: string): Uint8Array<ArrayBuffer> =>
   base64ToUint8Array(dataUrl.slice(dataUrl.indexOf(',') + 1));
 
 /** The attachment the fake store returns for these bytes: the real hash, so URLs are checkable. */
-const storedAs = async (dataUrl: string, filename?: string): Promise<Attachment> => {
+const storedAs = async (dataUrl: string, filename?: string): Promise<StoredAttachment> => {
   const bytes = bytesOf(dataUrl);
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the fake store mints the brand as `put` does.
   return {
     hash: await sha256Bytes(bytes),
     mediaType: dataUrl.slice(5, dataUrl.indexOf(';')),
     byteLength: bytes.byteLength,
     ...(filename === undefined ? {} : { filename }),
-  };
+  } as StoredAttachment;
 };
 
 const userMessage = (parts: MyUIMessage['parts']): MyUIMessage => ({
@@ -122,7 +123,7 @@ function createHarness(options: HarnessOptions = {}) {
         const resizer = options.resize ?? (async (image) => image);
         return { type: 'imageResized', resized: await resizer(input.image) };
       }),
-      storeAttachmentActor: fromSafeAsync<{ type: 'attachmentStored'; attachment: Attachment }, StoreInput>(
+      storeAttachmentActor: fromSafeAsync<{ type: 'attachmentStored'; attachment: StoredAttachment }, StoreInput>(
         async ({ input }) => {
           stored.push(input);
           const put =
@@ -133,7 +134,8 @@ function createHarness(options: HarnessOptions = {}) {
               byteLength: bytes.byteLength,
               ...(filename === undefined ? {} : { filename }),
             }));
-          return { type: 'attachmentStored', attachment: await put(input) };
+          // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the fake store mints the brand as `put` does.
+          return { type: 'attachmentStored', attachment: (await put(input)) as StoredAttachment };
         },
       ),
     },

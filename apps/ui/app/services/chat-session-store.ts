@@ -56,7 +56,7 @@ import { composerRecordPaths, createComposerRecordStore } from '#db/composer-rec
 import type { ComposerRecordClient } from '#db/composer-record-store.js';
 import { createChatAttachmentStore } from '#db/attachment-store.js';
 import { attachmentReferenceOf } from '#utils/attachment.utils.js';
-import type { AttachmentReference } from '#utils/attachment.utils.js';
+import type { StoredAttachmentRef } from '#utils/attachment.utils.js';
 import { deferredRecordStore, referencedAttachments, removeRecord } from '#services/chat-session-store-composer.js';
 import type { ComposerBinding, UnreadRecord } from '#services/chat-session-store-composer.js';
 import { resizeImageActor } from '#hooks/resize-image.actor.js';
@@ -1039,7 +1039,7 @@ export class ChatSessionStore {
    * @throws When any attachment cannot be copied; nothing should be sent then.
    * @public
    */
-  public async promoteDraftAttachments(chatId: string, attachments: readonly AttachmentReference[]): Promise<void> {
+  public async promoteDraftAttachments(chatId: string, attachments: readonly StoredAttachmentRef[]): Promise<void> {
     if (attachments.length === 0) {
       return;
     }
@@ -1053,20 +1053,14 @@ export class ChatSessionStore {
     }
     const { record, chatAttachments } = binding;
     const copies = await Promise.allSettled(
-      attachments.map(async (attachment) => {
-        // A blob the chat already holds is skipped, so an edit re-referencing a sent attachment moves nothing.
-        if (await chatAttachments.has(attachment)) {
-          return undefined;
-        }
-        await record.attachments.copyTo(chatAttachments, attachment);
-        return attachment;
-      }),
+      // `copyTo` skips a blob the chat already holds, so an edit re-referencing a sent attachment moves nothing.
+      attachments.map(async (attachment) => record.attachments.copyTo(chatAttachments, attachment)),
     );
     const failure = copies.find((copy) => copy.status === 'rejected');
     if (failure !== undefined) {
-      // Nothing was sent, so nothing references what this send copied; the chat ref would otherwise carry it.
-      const copied = copies.flatMap((copy) => (copy.status === 'fulfilled' && copy.value ? [copy.value] : []));
-      await Promise.allSettled(copied.map(async (attachment) => chatAttachments.remove(attachment)));
+      /* Nothing is taken back (PV-R12, L4 D-108): the blobs are content-addressed, so another tab's send may already
+       * name what this one copied. ponytail: orphaned blobs live until the chat is deleted; add a sweep over log
+       * file-refs and composer records if storage matters. */
       throw failure.reason instanceof Error
         ? failure.reason
         : new Error('Attachment promotion failed.', { cause: failure.reason });

@@ -56,7 +56,7 @@ import type {
   DraftAttachmentSource,
   draftMachine,
 } from '#hooks/draft.machine.js';
-import type { AttachmentReference } from '#utils/attachment.utils.js';
+import type { StoredAttachmentRef } from '#utils/attachment.utils.js';
 import type { ChatMode } from '#routes/w.$workspace.$project/chat-mode-selector.js';
 
 type ChatInstance = AiSdkChat<MyUIMessage>;
@@ -516,7 +516,7 @@ export function useDraftActions(): DraftActions {
  * was a second admission policy, and the two disagreed (F10).
  */
 export type ChatActions = DraftActions & {
-  sendMessage: (message: SendMessageInput, options?: { attachments?: readonly AttachmentReference[] }) => Promise<void>;
+  sendMessage: (message: SendMessageInput, options?: { attachments?: readonly StoredAttachmentRef[] }) => Promise<void>;
   regenerate: () => void;
   /**
    * Re-run the chat's last turn after a failure the person chose to retry.
@@ -528,7 +528,7 @@ export type ChatActions = DraftActions & {
   continueChat: () => void;
   stop: () => void;
   setMessages: (messages: MyUIMessage[]) => void;
-  editMessage: (messageId: string, content: string, options?: { attachments?: readonly AttachmentReference[] }) => void;
+  editMessage: (messageId: string, content: string, options?: { attachments?: readonly StoredAttachmentRef[] }) => void;
 };
 
 function warnNoCrossChatSession(action: string, chatId: string): void {

@@ -93,6 +93,28 @@ vi.mock('#runtime/ui-runtime.schema.js', () => ({
   uiRuntimeConfigSchema: workerMocks.uiRuntimeConfigSchema,
 }));
 
+const nativeMocks = vi.hoisted(() => {
+  const close = vi.fn();
+  return {
+    close,
+    initialize: vi.fn(),
+    engine: vi.fn(function () {
+      return { close };
+    }),
+    createNativeGeoSpecRunner: vi.fn(),
+  };
+});
+
+vi.mock('@taucad/geospec-engine-native', () => ({
+  initialize: nativeMocks.initialize,
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Match the public module's constructor export.
+  Engine: nativeMocks.engine,
+}));
+
+vi.mock('geospec/runner/native', () => ({
+  createNativeGeoSpecRunner: nativeMocks.createNativeGeoSpecRunner,
+}));
+
 const successfulRunnerResult = (): GeoSpecRunnerResult => ({
   success: true,
   passed: 1,
@@ -1038,6 +1060,56 @@ describe('geospec-runner.worker', () => {
       expect(workerMocks.runner.run).toHaveBeenCalledTimes(2);
     });
     expect(workerMocks.loadModel).toHaveBeenCalledTimes(2);
+  });
+
+  it('should select bounded success evidence when the native engine runs the session', async () => {
+    let messageListener: WorkerMessageListener | undefined;
+    vi.stubGlobal(
+      'addEventListener',
+      vi.fn((type: string, listener: WorkerMessageListener) => {
+        if (type === 'message') {
+          messageListener = listener;
+        }
+      }),
+    );
+    const postMessage = vi.fn<(message: GeoSpecRunnerWorkerResponse) => void>();
+    vi.stubGlobal('postMessage', postMessage);
+    vi.stubGlobal('close', vi.fn());
+
+    workerMocks.createFileSystemBridgeProxy.mockReturnValue(workerMocks.fsProxy);
+    workerMocks.fromFsLike.mockReturnValue({ kind: 'runtime-fs' });
+    workerMocks.createDefaultKernelOptions.mockImplementation((options: unknown) => ({ options }));
+    workerMocks.createRuntimeClient.mockReturnValue(workerMocks.runtimeClient);
+    nativeMocks.initialize.mockResolvedValue(undefined);
+    nativeMocks.createNativeGeoSpecRunner.mockReturnValue(workerMocks.runner);
+
+    await import('#workers/geospec-runner.worker.js');
+    messageListener?.({
+      data: {
+        type: 'initialize',
+        requestId: 'native-initialize',
+        sessionId: 'native-session',
+        runtimeConfig: defaultRuntimeConfig,
+        geoSpecEngine: 'native',
+        fileSystemPort: new MessageChannel().port1,
+      },
+    } as MessageEvent<GeoSpecRunnerWorkerRequest>);
+
+    await vi.waitFor(() => {
+      expect(postMessage).toHaveBeenCalledWith({
+        type: 'initialized',
+        requestId: 'native-initialize',
+        sessionId: 'native-session',
+      } satisfies GeoSpecRunnerWorkerResponse);
+    });
+    expect(nativeMocks.initialize).toHaveBeenCalledOnce();
+    expect(nativeMocks.engine).toHaveBeenCalledOnce();
+    expect(workerMocks.createGeoSpecWebRunner).not.toHaveBeenCalled();
+    expect(nativeMocks.createNativeGeoSpecRunner).toHaveBeenCalledOnce();
+    // The product reads verdicts and localized failures, not complete success witnesses.
+    expect(nativeMocks.createNativeGeoSpecRunner.mock.calls[0]?.[0]).toMatchObject({
+      nativeAssertions: { engine: { close: nativeMocks.close }, evidenceProfile: 'bounded' },
+    });
   });
 
   it('should dispose runner runtime and filesystem state on close', async () => {

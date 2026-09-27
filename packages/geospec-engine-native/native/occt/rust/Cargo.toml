@@ -17,6 +17,11 @@ serde = { version = "=1.0.219", features = ["derive"] }
 [build-dependencies]
 cc = "=1.4.4"
 
+[features]
+# Compiles the bridge through native/occt/tests/qualification.cpp, the
+# synthetic OCCT controls that tests/qualification.rs runs.
+qualification = []
+
 [dev-dependencies]
 serde_json = { version = "=1.0.143", features = ["float_roundtrip"] }
 
@@ -47,3 +52,8 @@ path = "tests/box_clearance_subjects.rs"
 [[test]]
 name = "edge_treatments"
 path = "tests/edge_treatments.rs"
+
+[[test]]
+name = "qualification"
+path = "tests/qualification.rs"
+required-features = ["qualification"]

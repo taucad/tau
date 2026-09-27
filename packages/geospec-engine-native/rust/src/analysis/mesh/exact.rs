@@ -9,9 +9,9 @@
 //! where a vertex classifies on a boundary. Union-find skips joined pairs,
 //! and pairs run in cost order (face pairs first, nested bodies after), so a
 //! costly near miss inside an already joined component never runs. Every
-//! step is charged before it runs (ruling 28): face-box tests by the 4,096,
-//! the native steps as the bridge prices them, and faces x faces per
-//! whole-body distance.
+//! step is charged before it runs (ruling 28): sweep comparisons and
+//! face-box tests by the 4,096, the native steps as the bridge prices them,
+//! and faces x faces per whole-body distance.
 
 use super::{
     center, compare_utf16, empty_aabb, expand, find, overlaps_within, partial_cmp, sweep_axis,
@@ -26,7 +26,7 @@ use crate::{
 };
 
 /// Face-box tests per work unit.
-const BOX_TESTS_PER_UNIT: u64 = 4096;
+pub(crate) const BOX_TESTS_PER_UNIT: u64 = 4096;
 
 /// Why exact components stopped: a charge that would pass the budget, with
 /// the body pair it was for (none while measuring the bodies), or a kernel
@@ -196,24 +196,37 @@ struct Candidate {
     right_faces: Vec<u32>,
 }
 
-/// Broad-phase pairs whose boxes overlap within `tolerance`. Each pair's
-/// face-box tests are charged (by their faces x faces bound) before they run.
+/// Broad-phase pairs whose reaches overlap within `tolerance`: a body's
+/// reach is the fold of its face boxes, which grow by each face's
+/// tolerances, where `bounds` is the exact fold (review R5-4). Every sweep
+/// comparison is charged, a unit per `BOX_TESTS_PER_UNIT` before each batch
+/// runs, and each pair's face-box tests (by their faces x faces bound)
+/// before they run.
 fn candidate_pairs(
     list: &[ComponentBody],
     tolerance: f64,
     budget: &Budget,
 ) -> Result<Vec<Candidate>, ExactError> {
-    let axis = sweep_axis(list.iter().map(|body| aabb(body.bounds)));
+    let reaches: Vec<Aabb> = list.iter().map(|body| aabb(reach(body))).collect();
+    let axis = sweep_axis(reaches.iter().copied());
     let mut order: Vec<usize> = (0..list.len()).collect();
     order.sort_by(|&left, &right| {
-        partial_cmp(list[left].bounds.min[axis], list[right].bounds.min[axis])
+        partial_cmp(reaches[left].min[axis], reaches[right].min[axis])
             .then_with(|| left.cmp(&right))
     });
     let mut pairs = Vec::new();
+    let mut comparisons = 0_u64;
     for (position, &current) in order.iter().enumerate() {
-        let bounds = aabb(list[current].bounds);
+        let bounds = reaches[current];
         for &candidate in &order[position + 1..] {
-            let other = aabb(list[candidate].bounds);
+            if comparisons % BOX_TESTS_PER_UNIT == 0 {
+                charge(budget, 1).map_err(|exceeded| ExactError::Budget {
+                    exceeded,
+                    pair: None,
+                })?;
+            }
+            comparisons += 1;
+            let other = reaches[candidate];
             if other.min[axis] > bounds.max[axis] + tolerance {
                 break;
             }
@@ -253,8 +266,22 @@ fn box_distance(left: Bounds, right: Bounds) -> f64 {
     squares.sqrt()
 }
 
-/// The face pairs whose memo boxes lie within `tolerance`. The boxes enclose
-/// their faces, so any other face pair is proven apart.
+/// The fold of a body's grown face boxes: as far as its faces' tolerances
+/// let the exact distances reach, where `bounds` is the exact fold.
+fn reach(body: &ComponentBody) -> Bounds {
+    let mut reach = empty_aabb();
+    for face in &body.faces {
+        expand(&mut reach, face.min);
+        expand(&mut reach, face.max);
+    }
+    Bounds {
+        min: reach.min,
+        max: reach.max,
+    }
+}
+
+/// The face pairs whose grown boxes lie within `tolerance`. The boxes enclose
+/// what the exact distances measure, so any other face pair is proven apart.
 fn face_pairs(
     left: &ComponentBody,
     right: &ComponentBody,
@@ -270,8 +297,8 @@ fn face_pairs(
     let mut left_used = vec![false; left.faces.len()];
     let mut right_used = vec![false; right.faces.len()];
     let mut count = 0;
-    let right_near = near(&right.faces, left.bounds);
-    for left_face in near(&left.faces, right.bounds) {
+    let right_near = near(&right.faces, reach(left));
+    for left_face in near(&left.faces, reach(right)) {
         for &right_face in &right_near {
             if box_distance(left.faces[left_face], right.faces[right_face]) <= tolerance {
                 count += 1;
@@ -294,13 +321,16 @@ fn face_pairs(
     }
 }
 
-/// Whether `inner` can lie inside the solid `outer`'s material.
+/// Whether `inner` can lie inside the solid `outer`'s material, which
+/// reaches as far as its grown face boxes.
 fn holds(outer: &ComponentBody, inner: &ComponentBody, tolerance: f64) -> bool {
-    outer.solid
-        && (0..3).all(|axis| {
-            outer.bounds.min[axis] - tolerance <= inner.bounds.min[axis]
-                && inner.bounds.max[axis] <= outer.bounds.max[axis] + tolerance
+    outer.solid && {
+        let reach = reach(outer);
+        (0..3).all(|axis| {
+            reach.min[axis] - tolerance <= inner.bounds.min[axis]
+                && inner.bounds.max[axis] <= reach.max[axis] + tolerance
         })
+    }
 }
 
 /// Clusters in body order, labelled by their body with the most vertices
@@ -469,7 +499,8 @@ mod tests {
         let clusters = exact_clusters(&fake, &labels(3), 0.001, &budget).unwrap();
         assert_eq!(clusters.len(), 1);
         assert_eq!(*fake.calls.borrow(), [("faces", 0, 1), ("faces", 1, 2)]);
-        assert_eq!(budget.used(), 3 + 2 + 3);
+        // The sweep's one batch, the three broad-phase pairs, then the faces.
+        assert_eq!(budget.used(), 1 + 3 + 2 + 3);
         // Heaviest body names the cluster; ties keep the first body.
         assert_eq!(clusters[0].label, "b0");
         assert_eq!(clusters[0].total_vertices, 20);
@@ -485,7 +516,7 @@ mod tests {
             *fake.calls.borrow(),
             [("faces", 0, 1), ("faces", 1, 2), ("faces", 0, 2)]
         );
-        assert_eq!(budget.used(), 3 + 2 + 3 + 6);
+        assert_eq!(budget.used(), 1 + 3 + 2 + 3 + 6);
         assert_eq!(
             clusters
                 .iter()
@@ -497,7 +528,7 @@ mod tests {
 
     #[test]
     fn the_refusal_names_the_pair_whose_charge_would_pass_the_budget() {
-        for (limit, pair, used) in [(1, (0, 1), 2), (5, (1, 2), 8)] {
+        for (limit, pair, used) in [(2, (0, 1), 3), (6, (1, 2), 9)] {
             let fake = chain(&[(0, 1), (1, 2)]);
             let budget = Budget::new(limit);
             let Err(ExactError::Budget { exceeded, pair: at }) =
@@ -505,8 +536,9 @@ mod tests {
             else {
                 panic!("expected a budget refusal");
             };
-            // The broad phase refuses its second pair at 1 unit; the narrow
-            // phase refuses 1-2's faces after 0-1 joined at 5.
+            // After the sweep's batch, the broad phase refuses its second
+            // pair at 2 units; the narrow phase refuses 1-2's faces after
+            // 0-1 joined at 6.
             assert_eq!(at, Some(pair));
             assert_eq!((exceeded.limit, exceeded.used), (limit, used));
             // Nothing is spent past the limit, so the plan keeps this refusal.
@@ -540,7 +572,7 @@ mod tests {
                 false,
                 1,
                 &[("inside", 0, 1)],
-                1 + 1,
+                1 + 1 + 1,
             ),
             // Every point outside, both ways: apart, no distance.
             (
@@ -549,7 +581,7 @@ mod tests {
                 false,
                 2,
                 &[("inside", 0, 1), ("inside", 1, 0)],
-                1 + 2,
+                1 + 1 + 2,
             ),
             // A point on a boundary: the whole-body distance decides, charged
             // faces x faces.
@@ -559,7 +591,7 @@ mod tests {
                 true,
                 1,
                 &[("inside", 0, 1), ("inside", 1, 0), ("bodies", 0, 1)],
-                1 + 2 + 36,
+                1 + 1 + 2 + 36,
             ),
             (
                 true,
@@ -567,10 +599,10 @@ mod tests {
                 false,
                 2,
                 &[("inside", 0, 1), ("inside", 1, 0), ("bodies", 0, 1)],
-                1 + 2 + 36,
+                1 + 1 + 2 + 36,
             ),
             // No solid holds the other's box: nothing is asked.
-            (false, HashMap::new(), false, 2, &[], 1),
+            (false, HashMap::new(), false, 2, &[], 1 + 1),
         ];
         for (solid, states, nested, count, calls, units) in cases {
             let fake = Fake {
@@ -596,6 +628,35 @@ mod tests {
     }
 
     #[test]
+    fn the_filters_reach_as_far_as_the_grown_face_boxes() {
+        // Face boxes grow by their faces' tolerances; `bounds` folds them
+        // ungrown. Body 0's second face (x 0.3-0.95) lies beyond the tolerance
+        // of body 1's exact bounds (x from 1.0005) but meets its grown face
+        // (x from 0.9005), so it joins the pair's faces.
+        let span = |min: f64, max: f64| slab([min, 0.0, 0.0], [max, 1.0, 1.0]);
+        let left = body(vec![span(0.0, 1.0), span(0.3, 0.95)], true, 8);
+        let right = ComponentBody {
+            bounds: span(1.0005, 2.0),
+            ..body(vec![span(0.9005, 2.1)], true, 8)
+        };
+        let pair = face_pairs(&left, &right, 0, 1, 0.001);
+        assert_eq!(
+            (pair.count, pair.left_faces, pair.right_faces),
+            (2, vec![0, 1], vec![0])
+        );
+        // A solid's material reaches its grown faces: a body there, beyond
+        // the exact bounds, may lie inside it; one beyond the reach may not.
+        let outer = ComponentBody {
+            bounds: slab([0.0; 3], [10.0; 3]),
+            ..body(vec![slab([-0.5; 3], [10.5; 3])], true, 8)
+        };
+        let within = body(vec![slab([9.0; 3], [10.4; 3])], true, 8);
+        let beyond = body(vec![slab([9.0; 3], [10.6; 3])], true, 8);
+        assert!(holds(&outer, &within, 0.001));
+        assert!(!holds(&outer, &beyond, 0.001));
+    }
+
+    #[test]
     fn separated_boxes_answer_from_the_broad_phase_alone() {
         let bodies: Vec<_> = (0..64)
             .map(|index| {
@@ -611,6 +672,63 @@ mod tests {
         let clusters = exact_clusters(&fake, &labels(64), 0.001, &budget).unwrap();
         assert_eq!(clusters.len(), 64);
         assert!(fake.calls.borrow().is_empty());
-        assert_eq!(budget.used(), 0);
+        // 63 sweep comparisons, each ending its body's scan: one batch.
+        assert_eq!(budget.used(), 1);
+    }
+
+    /// Review R5-3: bars whose x extents all overlap but which lie apart in
+    /// y make the sweep compare every pair and find none; the comparisons
+    /// are charged by the batch before they run.
+    #[test]
+    fn a_sweep_charges_every_comparison_before_it_runs() {
+        const BARS: usize = 128;
+        let bodies: Vec<_> = (0..BARS)
+            .map(|index| {
+                let (x, y) = (3.0 * index as f64, 2.0 * index as f64);
+                body(
+                    vec![slab([x, y, 0.0], [x + 3.0 * BARS as f64, y + 1.0, 1.0])],
+                    true,
+                    8,
+                )
+            })
+            .collect();
+        let fake = Fake {
+            bodies,
+            ..Fake::default()
+        };
+        // 128 x 127 / 2 = 8,128 comparisons, two batches of 4,096.
+        let budget = Budget::new(2);
+        let clusters = exact_clusters(&fake, &labels(BARS), 0.001, &budget).unwrap();
+        assert_eq!(clusters.len(), BARS);
+        assert!(fake.calls.borrow().is_empty());
+        assert_eq!(budget.used(), 2);
+        let budget = Budget::new(1);
+        let Err(ExactError::Budget { exceeded, pair }) =
+            exact_clusters(&fake, &labels(BARS), 0.001, &budget)
+        else {
+            panic!("the second batch passes the budget");
+        };
+        assert_eq!((pair, exceeded.limit, exceeded.used), (None, 1, 2));
+        assert_eq!(budget.used(), 1);
+    }
+
+    /// Review R5-4: the broad phase pairs bodies by their reach, the fold of
+    /// their face boxes, which grow by the faces' tolerances. Body 1's exact
+    /// bounds lie 0.5 beyond body 0, but its grown face meets it.
+    #[test]
+    fn the_broad_phase_pairs_bodies_by_their_reach() {
+        let bodies = vec![
+            body(vec![slab([0.0; 3], [1.0; 3])], true, 8),
+            ComponentBody {
+                bounds: slab([1.5, 0.0, 0.0], [2.5, 1.0, 1.0]),
+                ..body(vec![slab([0.9995, 0.0, 0.0], [2.5, 1.0, 1.0])], true, 8)
+            },
+        ];
+        let budget = Budget::new(2);
+        let pairs = candidate_pairs(&bodies, 0.001, &budget).unwrap();
+        assert_eq!(pairs.len(), 1);
+        assert_eq!((pairs[0].left, pairs[0].right), (0, 1));
+        // The sweep's batch, then the pair's face-box tests.
+        assert_eq!(budget.used(), 1 + 1);
     }
 }

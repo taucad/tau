@@ -151,6 +151,9 @@ pub struct BrepAdmissionFacts {
     pub source_length_unit: String,
     pub source_unit_to_millimeters: f64,
     pub occurrence_count: usize,
+    /// Located faces admitted without a surface: tessellated-only products
+    /// under the `OnNoBRep` read profile, whose exact claims refuse (ruling 32).
+    pub surfaceless_faces: usize,
 }
 
 /// Bounded public-subject metadata captured by the same successful STEP read.
@@ -451,7 +454,8 @@ pub struct ClosureFacts {
     pub free_faces: u32,
     pub open_edges: u32,
     pub nonmanifold_edges: u32,
-    /// Groups with an open or non-manifold edge: shells, then the free faces.
+    /// Groups that are not closed (an open or non-manifold edge, or no counted
+    /// edge use): shells, then the free faces.
     pub failing: Vec<ClosureGroup>,
 }
 
@@ -483,9 +487,12 @@ pub struct ComponentBody {
     /// A solid, so a body inside its material is at distance zero.
     pub solid: bool,
     pub vertices: u32,
-    /// The fold of `faces`, bit-equal to the shape's exact bounds.
+    /// The fold of the faces' memo boxes before they grow, bit-equal to the
+    /// shape's exact bounds.
     pub bounds: Bounds,
-    /// Each face's box from the per-located-face memo, in explorer order.
+    /// Each face's box from the per-located-face memo, grown by the largest
+    /// tolerance of the face, its edges and its vertices so it encloses what
+    /// the exact distances measure, in explorer order.
     pub faces: Vec<Bounds>,
 }
 
@@ -553,14 +560,11 @@ pub struct RegularSolidContainment {
 /// S10 (INTERFERENCE-EXACT-01): one candidate pair of leaf occurrences.
 #[derive(Clone, Debug, PartialEq)]
 pub enum OccurrenceOverlap {
-    /// The counted work exceeds the caller's limit; nothing else ran.
-    WorkExceeded { work: u64 },
     /// The left or right operand is not one regular solid.
     Unqualified { left: bool, reason: String },
     /// The exact Common's residual: empty (no solids, zero volume, no bounds)
     /// when the operands only touch.
     Residual {
-        work: u64,
         solids: u32,
         volume: f64,
         bounds: Option<Bounds>,
@@ -1196,16 +1200,18 @@ pub trait BrepSubject {
 
     /// S10 (ruling 23): the non-destructive exact Common of two leaf
     /// occurrences' regular-solid operands, each qualified once per memo (C7).
-    /// The work (the pair plus every face pair whose exact boxes, enlarged by
-    /// `tolerance`, intersect) is counted first; beyond `max_work` nothing runs.
+    /// Each step is charged before it runs (ruling 28): the face-box
+    /// pre-count, each operand's first qualification in the memo, and the
+    /// Common, priced from the face pairs whose exact boxes, enlarged by
+    /// `tolerance`, intersect; `None` when `charge` stops one.
     fn occurrence_overlap_memoized(
         &self,
         _left: u32,
         _right: u32,
         _tolerance: f64,
-        _max_work: u64,
         _memo: &mut OperandMemo,
-    ) -> Result<OccurrenceOverlap, BackendError> {
+        _charge: &mut Charge<'_>,
+    ) -> Result<Option<OccurrenceOverlap>, BackendError> {
         Err(BackendError {
             kind: super::BackendErrorKind::Unsupported,
             message: "The BRep connector has no exact occurrence overlap query.".into(),
@@ -1276,6 +1282,25 @@ pub trait BrepSubject {
         self.source_occurrences()
     }
 
+    /// The work units of measuring one occurrence's exact box: M2's face-box
+    /// price of its faces (ruling 28).
+    fn occurrence_box_units(&self, _occurrence: u32) -> Result<u64, BackendError> {
+        Ok(1)
+    }
+
+    /// One occurrence's `source_occurrences` bounds, measured alone, so a
+    /// caller measures only the occurrences it reads (ruling 32: a zero-face
+    /// leaf may have no finite box).
+    fn occurrence_bounds(&self, occurrence: u32) -> Result<Bounds, BackendError> {
+        self.source_occurrences()?
+            .get(occurrence as usize)
+            .map(|row| row.bounds)
+            .ok_or_else(|| BackendError {
+                kind: super::BackendErrorKind::InvalidInput,
+                message: "Occurrence index is out of range.".into(),
+            })
+    }
+
     /// All uniquely forward-transferred public faces for an original source face.
     /// Empty/missing and ambiguous bindings remain typed inventory states.
     fn pmi_source_faces(
@@ -1292,7 +1317,10 @@ pub trait BrepSubject {
     fn faces(&self) -> Result<Rc<[LocatedFace]>, BackendError>;
     fn validity(&self) -> Result<Rc<ValidityFacts>, BackendError>;
     /// Exact shell closure alone: no validity analyzer and no tessellation.
-    fn closure(&self) -> Result<Rc<ClosureFacts>, BackendError> {
+    /// Naming the failing groups' leaf occurrences is charged before it runs,
+    /// warm or cold, a unit per failing group and per occurrence (rulings 23
+    /// and 28); `None` when `charge` stops it.
+    fn closure(&self, _charge: &mut Charge<'_>) -> Result<Option<Rc<ClosureFacts>>, BackendError> {
         Err(BackendError {
             kind: super::BackendErrorKind::Unsupported,
             message: "The BRep connector has no exact shell-closure facet.".into(),

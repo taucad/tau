@@ -77,7 +77,8 @@ describe('native host GeoSpec composition', () => {
     expect(runtime.export).toHaveBeenCalledExactlyOnceWith('glb', { source: { path: 'widget.ts' } });
     expect(runner.sourceRevisions?.()).toEqual([sourceRevision]);
     expect(options?.model?.projectPath).toBe('/projects/widget');
-    expect(options?.nativeAssertions).toEqual({ engine: { close: native.close } });
+    // The product reads verdicts and localized failures, not complete success witnesses.
+    expect(options?.nativeAssertions).toEqual({ engine: { close: native.close }, evidenceProfile: 'bounded' });
     expect(options?.model?.carried).toBeInstanceOf(Map);
     await expect(options?.model?.readSource?.('widget.step')).resolves.toBe(bytes);
     expect(read).toHaveBeenCalledExactlyOnceWith('widget.step');

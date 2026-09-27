@@ -261,7 +261,7 @@ void describe('performance lab catalog', () => {
     }
   });
 
-  void it('times STEP-scale interference and wall without tessellating and tessellates in analyzeMesh', async () => {
+  void it('runs STEP-scale interference and wall untessellated and meshes once for analyzeMesh', async () => {
     const settling = new Set(['toHaveNoComponentInterference', 'toHaveMinimumWallThickness']);
     const cells = Map.groupBy(
       performanceLabScaleCases.filter(({ matcher }) => settling.has(matcher)),

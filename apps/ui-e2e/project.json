@@ -55,7 +55,7 @@
       "executor": "nx:run-commands",
       "dependsOn": [{ "projects": ["ui"], "target": "build" }],
       "metadata": {
-        "description": "The degraded mode of T2.9: the snapshot production server without COOP/COEP, so kernels must fall back to their single-threaded builds, say why, and still export exact bytes."
+        "description": "The degraded mode of T2.9: the snapshot production server without COOP/COEP, so kernels must fall back to their single-threaded builds, say why, and still export exact bytes. Its own PORT keeps it from reusing an isolated server another e2e target started."
       },
       "options": {
         "cwd": "{workspaceRoot}/apps/ui-e2e",
@@ -65,6 +65,7 @@
           "../../node_modules/.bin/vitest run --config vitest.config.ts --project firefox src/picovoxel-multi.spec.ts"
         ],
         "env": {
+          "PORT": "3015",
           "TAU_E2E_UI_SNAPSHOT": "true",
           "TAU_E2E_DISABLE_COI": "true"
         }

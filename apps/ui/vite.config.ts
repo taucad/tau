@@ -19,7 +19,6 @@ import { base64Loader } from '@taucad/vite/base64-loader';
 import { resolveTauCloudBuildEnabled } from './build-environment.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const testScriptsAlias = '#scripts';
 const uiReactCompilerPluginName = 'vite:react-compiler';
 const streamdownShikiFacade = path.resolve(__dirname, 'app/lib/streamdown-shiki.ts');
 /** The only specifiers `tau-ui-source-alias` resolves: `#` app aliases and Streamdown's `shiki`. */
@@ -163,14 +162,10 @@ export const createUiSourceAliasPlugin = (options: UiSourceAliasPluginOptions = 
           return null;
         }
 
+        // Every other package, @taucad/ui included, answers its own `#` specifiers
+        // through its package.json imports map in Vite's core resolver.
         const uiRoot = `${path.resolve(__dirname)}${path.sep}`;
-        const designSystemRoot = `${path.resolve(__dirname, '../../packages/ui/src')}${path.sep}`;
-        const resolvedImporter = importer === undefined ? undefined : path.resolve(importer);
-        if (
-          resolvedImporter !== undefined &&
-          !resolvedImporter.startsWith(uiRoot) &&
-          !resolvedImporter.startsWith(designSystemRoot)
-        ) {
+        if (importer !== undefined && !path.resolve(importer).startsWith(uiRoot)) {
           return null;
         }
 
@@ -191,10 +186,7 @@ export const createUiSourceAliasPlugin = (options: UiSourceAliasPluginOptions = 
           return null;
         }
 
-        const sourceRoot = resolvedImporter?.startsWith(designSystemRoot)
-          ? designSystemRoot
-          : path.resolve(__dirname, 'app');
-        const sourcePath = path.resolve(sourceRoot, specifier.slice(1));
+        const sourcePath = path.resolve(__dirname, 'app', specifier.slice(1));
         const candidatePaths = [sourcePath];
         if (specifier.endsWith('.js')) {
           const sourceBasePath = sourcePath.slice(0, -'.js'.length);
@@ -452,10 +444,6 @@ export default defineConfig(({ mode }) => {
       // https://vite.dev/config/worker-options.html#worker-plugins
       plugins: () => [createUiSourceAliasPlugin({ emitModuleGraph: true, tauCloudEnabled }), nxViteTsPaths()],
     },
-    resolve: {
-      alias: isTest ? [{ find: testScriptsAlias, replacement: path.resolve(__dirname, 'scripts') }] : [],
-    },
-
     ssr: uiSsrOptions,
 
     server: {

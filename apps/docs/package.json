@@ -4,6 +4,9 @@
   "description": "Tau documentation site",
   "type": "module",
   "private": true,
+  "imports": {
+    "#*": "./app/*"
+  },
   "dependencies": {
     "@react-router/node": "catalog:",
     "@taucad/esbuild": "workspace:*",

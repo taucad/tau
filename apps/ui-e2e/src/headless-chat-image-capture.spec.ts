@@ -777,7 +777,8 @@ test('capture edges retain the shared 800-pixel reference through the attachment
   expect(atCurrent.digest).toBe(toolbarCurrent.digest);
 
   await clearAttachments();
-  await withPresentationBridge('setPresentation', { surfaces: false, lines: false });
+  // The reference keeps the surfaces: against bare background, a stroke's anti-aliased fringe over a face reads as no coverage.
+  await withPresentationBridge('setPresentation', { surfaces: true, lines: false });
   await target.click(selectors.getByRole('button', { name: 'Capture view to chat' }));
   await waitForCaptureAttachments(1);
   const currentWithoutLines = await attachmentSource(0);

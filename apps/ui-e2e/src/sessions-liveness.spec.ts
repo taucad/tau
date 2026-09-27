@@ -10,6 +10,7 @@
 import { describe, expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
+import { openBackupChooser } from '#support/revision-session.js';
 
 const seedRoute = '/__e2e/project-file-tree';
 const liveProjectBudget = 8;
@@ -153,10 +154,7 @@ const waitForCurrentProjectToSettle = async (path: string): Promise<void> => {
   });
   await target.expectVisible(openRevisions, 120_000);
   await target.click(openRevisions);
-  const openSync = selectors.getByText('Back up to Tau Cloud', { exact: true }).last();
-  if (await target.isVisible(openSync)) {
-    await target.click(openSync);
-  }
+  await openBackupChooser();
   const noRemote = selectors.getByRole('radio', { name: 'No remote' });
   await target.expectVisible(noRemote, 60_000);
   await expect

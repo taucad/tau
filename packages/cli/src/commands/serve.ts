@@ -247,6 +247,12 @@ export const serveCommand = defineCommand({
       description: 'Acknowledge that remote project code executes on this machine',
       default: false,
     },
+    pair: {
+      type: 'boolean',
+      description:
+        'Pair interactively when this host has no accepted credential; --no-pair exits instead (a provisioned cloud host)',
+      default: true,
+    },
     agentPort: {
       type: 'string',
       description: 'Serve the agent channel on this loopback port (0 for an ephemeral one)',
@@ -387,6 +393,7 @@ export const serveCommand = defineCommand({
       },
       maxSessions,
       systemSkillBundles,
+      pair: args.pair,
       ...(configuredAgent ? { agent: configuredAgent } : {}),
       onEvent: reportEvent,
     });

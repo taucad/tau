@@ -269,6 +269,12 @@ const settingsCatalog = [
         description: 'View Home storage usage and available space',
         keywords: ['quota', 'disk'],
       },
+      {
+        id: 'tau-cloud-projects',
+        label: 'Tau Cloud Projects',
+        description: 'Bring your Tau Cloud projects to this device when you sign in',
+        keywords: ['sync', 'backup', 'download', 'materialize', 'sign in'],
+      },
     ],
   },
   {

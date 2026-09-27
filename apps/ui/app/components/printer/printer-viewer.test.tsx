@@ -142,7 +142,7 @@ describe('PrinterViewer', () => {
     expect(props.store.getSnapshot()).toMatchObject({ isPlaying: false, speed: 1, isLive: false });
     expect(props.isReducedMotion).toBe(false);
     expect(props.chamberLight).toBe('unknown');
-    expect(props.filamentColor).toBe(printerAccent);
+    expect(props.filamentColors).toEqual([printerAccent]);
     expect(props.geometry.buildVolume).toEqual([256, 256, 256]);
   });
 
@@ -217,7 +217,7 @@ describe('PrinterViewer', () => {
     const view = renderViewer();
     const controls = await screen.findByRole('group', { name: 'Playback controls' });
     const props = latestSceneProps();
-    expect(props.filamentColor).toBe(loadedSpoolColor);
+    expect(props.filamentColors).toEqual([loadedSpoolColor]);
     expect(props.chamberLight).toBe('on');
     expect(props.liveNozzleTarget).toBe(250);
     const hud = screen.getByRole('region', { name: 'Print HUD' });
@@ -339,7 +339,35 @@ describe('PrinterViewer', () => {
     );
     await screen.findByRole('region', { name: `Printer simulation: ${name}` });
     // oxlint-disable-next-line tau-lint/no-hardcoded-color -- the colour the file records
-    expect(latestSceneProps().filamentColor).toBe('#F5A623');
+    expect(latestSceneProps().filamentColors).toEqual(['#F5A623']);
+  });
+
+  it('should colour each tool by its own filament and list the filaments a multi-colour file prints with', async () => {
+    mocks.live = liveState({ isActive: false, printsThisFile: false, runState: 'idle' });
+    const threeFilaments = writeBambuContainer({
+      gcode: fixtureGcode({ layers: 3, tools: [0, 1, 2] }),
+      modelName: 'fixture',
+      // oxlint-disable-next-line tau-lint/no-hardcoded-color -- the colours Bambu Studio records for the model
+      filamentColors: ['#FF0000', '#0000FF'],
+    });
+    render(
+      <TooltipProvider>
+        <PrinterViewer
+          name={name}
+          kind='container'
+          revision={1}
+          readAll={async () => threeFilaments}
+          renderPane={renderPane}
+        />
+      </TooltipProvider>,
+    );
+    const filter = await screen.findByRole('region', { name: 'G-code filter' });
+    // The file records no colour for the third filament: it takes the loaded spool's, as a file with none would.
+    // oxlint-disable-next-line tau-lint/no-hardcoded-color -- the colours the file records
+    expect(latestSceneProps().filamentColors).toEqual(['#FF0000', '#0000FF', loadedSpoolColor]);
+    const filaments = within(within(filter).getByRole('list', { name: 'Filaments' })).getAllByRole('listitem');
+    expect(filaments.map((item) => item.textContent)).toEqual(['Filament 1', 'Filament 2', 'Filament 3']);
+    expect(filaments.map((item) => item.querySelectorAll('[data-slot="material-swatch"]').length)).toEqual([1, 1, 1]);
   });
 
   it('should say when the file records no plate and draw the Textured PEI Plate', async () => {
@@ -379,6 +407,8 @@ describe('PrinterViewer', () => {
       );
     // The fixture has a purge line, walls, infill and moves; no support, skirt or wipes.
     expect(shown()).toEqual({ Preparation: true, Walls: true, Infill: true, Travel: false });
+    // One filament: the walls' swatch stands for it, so no filament is listed.
+    expect(within(filter).queryByRole('list', { name: 'Filaments' })).not.toBeInTheDocument();
     expect(latestSceneProps().hiddenGroups).toEqual(new Set(['travel', 'wipe']));
 
     await user.click(within(filter).getByRole('checkbox', { name: 'Preparation' }));

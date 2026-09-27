@@ -59,7 +59,13 @@ vi.mock('#components/icons/svg-icon.js', () => ({
   SvgIcon: ({ id }: { readonly id?: string }) => <span data-testid='svg-icon' data-icon={id} />,
 }));
 
-const { ChatTextareaBar, acpCommandToSlashCommand } = await import('#components/chat/chat-textarea-desktop.js');
+vi.mock('#hooks/use-skills-catalog.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useSkillsCatalog: () => [],
+}));
+
+const { ChatTextareaBar, ChatTextareaDesktop, acpCommandToSlashCommand } =
+  await import('#components/chat/chat-textarea-desktop.js');
 
 const noop = (): void => undefined;
 const asyncNoop = async (): Promise<void> => undefined;
@@ -222,13 +228,81 @@ describe('ACP slash commands', () => {
       id: '$brep-design',
       label: '$brep-design',
       group: 'Commands',
-      commandText: '$brep-design ',
       source: 'codex',
     });
     expect(acpCommandToSlashCommand({ name: 'compact', description: 'Compact' }, 'codex')).toMatchObject({
       id: '/compact',
       label: '/compact',
-      commandText: '/compact ',
     });
+  });
+});
+
+describe('ChatTextareaDesktop draft rehydration', () => {
+  const renderComposer = (inputText: string, acpSessionData: AcpSessionData) => {
+    const element = (session: AcpSessionData): React.JSX.Element => (
+      <TooltipProvider>
+        <ChatTextareaDesktop
+          enableAutoFocus={false}
+          dragKind={undefined}
+          isSubmitting={false}
+          isAttaching={false}
+          inputText={inputText}
+          attachments={[]}
+          attachmentDirectory={undefined}
+          sendBlockReason={undefined}
+          attachmentAccept='image/png'
+          attachmentInputSupported
+          status='ready'
+          formattedCancelKeyCombination='⇧⌘⌫'
+          treeService={undefined}
+          chats={[]}
+          setDraftText={noop}
+          acpAgentId='codex'
+          acpSessionData={session}
+          fileInputReference={{ current: null }}
+          containerReference={{ current: null }}
+          focusEditorRef={{ current: undefined }}
+          addContextChipsRef={{ current: undefined }}
+          addContextReferencesRef={{ current: undefined }}
+          handleSubmit={asyncNoop}
+          handleCancelClick={noop}
+          handleDragOver={noop}
+          handleDragLeave={noop}
+          handleDrop={asyncNoop}
+          handlePaste={() => false}
+          handleFileSelect={noop}
+          handleFileChange={noop}
+          handleAddImage={noop}
+          onScreenshotAction={noop}
+          handleTextareaBlur={noop}
+          removeAttachment={noop}
+        />
+      </TooltipProvider>
+    );
+    const view = render(element(acpSessionData));
+    return {
+      ...view,
+      rerenderWith: (session: AcpSessionData): void => {
+        view.rerender(element(session));
+      },
+    };
+  };
+
+  it('chips a restored $skill once the agent advertises it, without changing the draft text', async () => {
+    execution.current = { kind: 'acp', hostId: 'desktop', agentId: 'codex' };
+    const view = renderComposer('Make a render of this using $imagegen', codexSession);
+
+    await vi.waitFor(() => {
+      expect(view.container.querySelector('.ProseMirror')).toHaveTextContent('Make a render of this using $imagegen');
+    });
+    /* A chip is the only thing in the editor that draws an icon. */
+    expect(view.container.querySelector('.ProseMirror svg')).toBeNull();
+
+    view.rerenderWith({ ...codexSession, commands: [{ name: '$imagegen', description: 'Generate images' }] });
+
+    await vi.waitFor(() => {
+      expect(view.container.querySelector('.ProseMirror svg')).not.toBeNull();
+    });
+    expect(view.container.querySelector('.ProseMirror')).toHaveTextContent('Make a render of this using $imagegen');
   });
 });

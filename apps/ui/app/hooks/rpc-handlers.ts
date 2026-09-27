@@ -466,7 +466,7 @@ function createBrowserGraphicsClient(
           return { success: false, errorCode: rpcClientErrorCode.unknown, message };
         }
 
-        return { success: true, files: exportResult.data };
+        return { success: true, files: exportResult.data, issues: exportResult.issues };
       } catch (error) {
         return {
           success: false,

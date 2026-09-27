@@ -41,6 +41,8 @@ export {
   createProjectRevisionPort,
   createProjectRevisions,
   openProjectRevisions,
+  projectCloseMilliseconds,
+  projectReleaseMilliseconds,
   requireRevisionToolchain,
 } from '#revisions.js';
 export type {
@@ -51,6 +53,7 @@ export type {
   RevisionDiscardOutcome,
   RevisionOpenOutcome,
   RevisionPublishOutcome,
+  RevisionSaveOutcome,
   RevisionSwitchOutcome,
   TurnCheckout,
   TurnConflictedEvent,

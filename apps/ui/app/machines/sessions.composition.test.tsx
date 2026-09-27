@@ -75,7 +75,7 @@ const {
   const revisionListeners = new Set<() => void>();
   let revisionStatus = {
     dirty: false,
-    branch: 'main',
+    line: { kind: 'branch', name: 'main' } as const,
     sync: { state: 'noRemote' as 'backedUp' | 'checking' | 'noRemote', pendingCount: 0 },
   };
   const editorSnapshot = (): unknown => ({
@@ -149,7 +149,11 @@ const {
     },
     revision: {
       reset: () => {
-        revisionStatus = { dirty: false, branch: 'main', sync: { state: 'noRemote', pendingCount: 0 } };
+        revisionStatus = {
+          dirty: false,
+          line: { kind: 'branch', name: 'main' } as const,
+          sync: { state: 'noRemote', pendingCount: 0 },
+        };
         revisionListeners.clear();
       },
       setSync: (state: typeof revisionStatus.sync.state, pendingCount = 0) => {
@@ -548,6 +552,13 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  /* A row that failed with the editor busy leaves its flush owed, and the
+   * registry is a singleton: release it here, or the next row's `settle`
+   * times out on the wedged session and reports a failure that is not its own. */
+  await act(async () => {
+    editor.setIdle(true);
+    await Promise.resolve();
+  });
   /* A refused open is remembered until somebody makes room (R8); drop it so
    * one test's refusal cannot open a project inside the next one. */
   if (sessionsActor.getSnapshot().status === 'active') {
@@ -940,15 +951,16 @@ describe('sessions composition', () => {
     view.unmount();
   });
 
-  it('flushes the focused project before showing a non-project route', async () => {
+  it('flushes the focused project before releasing a non-project route', async () => {
     const view = await renderRouteFamily('route-flush-a');
     editor.setIdle(false);
 
     await view.navigate('/projects');
 
+    /* Since 8451a6dca the shell stays in the document while the flush is owed
+     * (no frame without a sidebar), so "not shown yet" is: inert behind the
+     * overlay, and released only once the editor has stored. */
     expect(serviceCalls).toEqual(['editor:flushNow']);
-    /* The shell stays in the document while the flush holds the destination (8451a6dca), so the
-     * library is there — inert, behind the overlay — until the editor has stored. */
     expect(screen.getByRole('status', { name: 'Opening project' })).toBeInTheDocument();
     expect(screen.getByText('Project library').closest('[inert]')).not.toBeNull();
     await act(async () => {

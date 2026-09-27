@@ -1,0 +1,13 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_tSxwrSBEbOKY0qWkD2VgL",
+  "name": "Kestrel 240 Racing Quadcopter",
+  "description": "A 5-inch racing quadcopter modelled as a product: NACA-section fuselage shells and swept arm fairings over carbon spars, four motor modules with stators, bells, bearings and handed propellers, a flight-controller and power stack, and a two-axis camera gimbal. 43 part types are placed as 123 named parts. Pitch and yaw drive the gimbal, and GeoSpec checks the whole vehicle for collisions across its travel.",
+  "tags": ["assembly", "aerospace", "drone", "naca", "sysml", "replicad"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

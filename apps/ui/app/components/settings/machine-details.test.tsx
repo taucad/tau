@@ -43,7 +43,7 @@ describe('MachineDetails', () => {
       'Bed and plates 4 plates · up to 120 °C',
       'Chamber and fans Enclosed · Not heated · 3 fans',
       'Material system 1 unit × 4 slots · External spool',
-      'Camera Stills and stream',
+      'Camera Stills',
       'Storage Removable',
       'Network LAN mode',
       'Speed profiles 4 profiles · 50–166%',

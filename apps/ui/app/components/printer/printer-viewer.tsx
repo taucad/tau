@@ -45,7 +45,12 @@ import {
   formatDuration,
   playbackSpeeds,
 } from '#components/printer/printer-playback.js';
-import type { PlaybackSpeed } from '#components/printer/printer-playback.js';
+import type {
+  LiveRunPosition,
+  PlaybackSnapshot,
+  PlaybackSpeed,
+  PlaybackStore,
+} from '#components/printer/printer-playback.js';
 import { loadPrinterProgram } from '#components/printer/printer-program.js';
 import { defaultPrinterPlate, printerPlateById, x1cPlates } from '#components/printer/printer-plates.js';
 import type { PrinterPlateId, PrinterPlateModel } from '#components/printer/printer-plates.js';
@@ -53,6 +58,7 @@ import { PrinterScene } from '#components/printer/printer-scene.js';
 import {
   createToolpathPalette,
   defaultHiddenToolpathGroups,
+  extrudingTools,
   groupToolpath,
   toolpathGroupLabels,
   toolpathGroupSwatchKind,
@@ -77,7 +83,7 @@ type ProgramResource =
       kind: 'ready';
       program: ToolpathProgram;
       slicedPlate: PrinterPlateModel | undefined;
-      filamentColor: string | undefined;
+      filamentColors: readonly string[];
       digest: string | undefined;
     }>
   | Readonly<{ kind: 'error'; message: string }>;
@@ -134,12 +140,12 @@ function PrinterViewerContent({ name, kind, readAll, renderPane }: Omit<PrinterV
     const load = async (): Promise<void> => {
       try {
         const bytes = await readAll();
-        const { program, slicedPlate, filamentColor } = loadPrinterProgram(bytes, kind);
+        const { program, slicedPlate, filamentColors } = loadPrinterProgram(bytes, kind);
         // The print request ledger names artifacts by digest; Live mode follows a run only from its own bytes.
         // WebCrypto needs a secure context: without one (a LAN address over http) Live mode stays off.
         const digest = await digestBytes(bytes).catch(() => undefined);
         if (active) {
-          setResource({ kind: 'ready', program, slicedPlate, filamentColor, digest });
+          setResource({ kind: 'ready', program, slicedPlate, filamentColors, digest });
         }
       } catch (error) {
         if (active) {
@@ -220,7 +226,7 @@ function PrinterViewerContent({ name, kind, readAll, renderPane }: Omit<PrinterV
       <PrinterSimulation
         name={name}
         program={resource.program}
-        slicedFilamentColor={resource.filamentColor}
+        slicedFilamentColors={resource.filamentColors}
         digest={resource.digest}
         frameRequest={frameRequest}
         isWholePrinter={isWholePrinter}
@@ -244,23 +250,47 @@ const usePrinterGeometry = (live: PrinterLiveState | undefined) => {
 };
 
 /**
+ * Each tool's filament colour, each filter group's colours as the scene draws them, and the filaments the
+ * legend lists. A tool the file records no colour for takes the colour a file without any takes: the loaded
+ * spool's, else the accent. A program that prints with one filament lists none.
+ *
+ * @param colours - `recorded`: `#RRGGBB` per filament the file records, in filament order; `loaded`: the followed
+ * machine's loaded spool colour; `tools`: the tools the program extrudes with, ascending; `theme`: the resolved theme.
+ * @returns The colour per tool (one at least), per group and per listed filament.
+ */
+const useToolpathColors = ({
+  recorded,
+  loaded,
+  tools,
+  theme,
+}: Readonly<{
+  recorded: readonly string[];
+  loaded: string | undefined;
+  tools: readonly number[];
+  theme: 'light' | 'dark';
+}>) =>
+  useMemo(() => {
+    const fallback = loaded ?? printerAccent;
+    const toolColors = Array.from(
+      { length: Math.max(1, ...tools.map((tool) => tool + 1)) },
+      (_, tool) => recorded[tool] ?? fallback,
+    );
+    // The legend swatches read the scene's own palettes, so they match the drawn toolpath.
+    const palettes = (tools.length > 0 ? tools : [0]).map((tool) => createToolpathPalette(toolColors[tool]!, theme));
+    const groupColors = toolpathGroups.map((group) =>
+      palettes.map((palette) => `#${palette[toolpathGroupSwatchKind[group]].getHexString()}`),
+    );
+    const filaments = tools.length > 1 ? tools.map((tool) => ({ tool, color: toolColors[tool]! })) : [];
+    return { toolColors, groupColors, filaments };
+  }, [recorded, loaded, tools, theme]);
+
+/**
  * The G-code filter's state: every segment's group, and the groups hidden,
  * travel and wipes to begin with.
  *
  * @param program - The loaded toolpath.
  * @returns The grouping, the hidden set (a new set per change) and its toggle.
  */
-/** The first known filament colour, in priority order, and each filter group's colour as the scene draws it. */
-const useToolpathColors = (filaments: ReadonlyArray<string | undefined>, theme: 'light' | 'dark') => {
-  const filamentColor = filaments.find((color) => color !== undefined) ?? printerAccent;
-  // The legend swatches read the scene's own palette, so they match the drawn toolpath.
-  const groupColors = useMemo(() => {
-    const palette = createToolpathPalette(filamentColor, theme);
-    return toolpathGroups.map((group) => `#${palette[toolpathGroupSwatchKind[group]].getHexString()}`);
-  }, [filamentColor, theme]);
-  return { filamentColor, groupColors };
-};
-
 const useToolpathFilter = (program: ToolpathProgram) => {
   const grouping = useMemo(() => groupToolpath(program), [program]);
   const [hiddenGroups, setHiddenGroups] = useState(defaultHiddenToolpathGroups);
@@ -278,10 +308,45 @@ const useToolpathFilter = (program: ToolpathProgram) => {
   return { grouping, hiddenGroups, handleGroupShown };
 };
 
+/**
+ * Keep the cursor on the followed machine while Live is on, leave Live once the machine stops printing
+ * this file, and pause while the document is hidden.
+ */
+const useLivePlayback = (
+  store: PlaybackStore,
+  {
+    isLive,
+    position,
+    isLiveAvailable,
+  }: Readonly<{ isLive: boolean; position: LiveRunPosition | undefined; isLiveAvailable: boolean }>,
+): void => {
+  useEffect(() => {
+    if (isLive && position) {
+      store.followLive(position);
+    }
+  }, [position, isLive, store]);
+  useEffect(() => {
+    if (isLive && !isLiveAvailable) {
+      store.setLive(false);
+    }
+  }, [isLiveAvailable, isLive, store]);
+  useEffect(() => {
+    const pauseWhenHidden = (): void => {
+      if (document.hidden) {
+        store.pause();
+      }
+    };
+    document.addEventListener('visibilitychange', pauseWhenHidden);
+    return () => {
+      document.removeEventListener('visibilitychange', pauseWhenHidden);
+    };
+  }, [store]);
+};
+
 function PrinterSimulation({
   name,
   program,
-  slicedFilamentColor,
+  slicedFilamentColors,
   digest,
   frameRequest,
   isWholePrinter,
@@ -289,8 +354,8 @@ function PrinterSimulation({
 }: Readonly<{
   name: string;
   program: ToolpathProgram;
-  /** The colour the file was sliced with, which the model's own colour sets. */
-  slicedFilamentColor: string | undefined;
+  /** The colours the file was sliced with, in filament order, which the model's own colours set. */
+  slicedFilamentColors: readonly string[];
   digest: string | undefined;
   frameRequest: number;
   isWholePrinter: boolean;
@@ -308,31 +373,18 @@ function PrinterSimulation({
   const prefix = useMemo(() => createExtrusionPrefix(program), [program]);
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   const { grouping, hiddenGroups, handleGroupShown } = useToolpathFilter(program);
-  const { filamentColor, groupColors } = useToolpathColors([slicedFilamentColor, live?.filamentColor], theme);
-  const position = live?.position;
-  const isLiveAvailable = live?.printsThisFile === true;
-
-  useEffect(() => {
-    if (snapshot.isLive && position) {
-      store.followLive(position);
-    }
-  }, [position, snapshot.isLive, store]);
-  useEffect(() => {
-    if (snapshot.isLive && !isLiveAvailable) {
-      store.setLive(false);
-    }
-  }, [isLiveAvailable, snapshot.isLive, store]);
-  useEffect(() => {
-    const pauseWhenHidden = (): void => {
-      if (document.hidden) {
-        store.pause();
-      }
-    };
-    document.addEventListener('visibilitychange', pauseWhenHidden);
-    return () => {
-      document.removeEventListener('visibilitychange', pauseWhenHidden);
-    };
-  }, [store]);
+  const tools = useMemo(() => extrudingTools(program), [program]);
+  const { toolColors, groupColors, filaments } = useToolpathColors({
+    recorded: slicedFilamentColors,
+    loaded: live?.filamentColor,
+    tools,
+    theme,
+  });
+  useLivePlayback(store, {
+    isLive: snapshot.isLive,
+    position: live?.position,
+    isLiveAvailable: live?.printsThisFile === true,
+  });
 
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLElement>): void => {
@@ -366,22 +418,6 @@ function PrinterSimulation({
     store.pause();
     setSceneError('The graphics context was lost. Reopen the file to restart the simulation.');
   }, [store]);
-  const handleSpeed = useCallback(
-    (value: string): void => {
-      const speed = playbackSpeeds.find((candidate) => String(candidate) === value);
-      if (speed !== undefined) {
-        store.setSpeed(speed);
-      }
-    },
-    [store],
-  );
-
-  const layerCount = program.layerTable.length;
-  const layerNumber = Math.max(0, snapshot.layer + 1);
-  const nozzleTarget = live?.nozzleTarget ?? eventValueAt(program.events, 'nozzle-temperature', snapshot.time);
-  const bedTarget = live?.bedTarget ?? eventValueAt(program.events, 'bed-temperature', snapshot.time);
-  const filamentUsed = extrudedLengthAt(prefix, program, snapshot.time);
-  const duration = Math.ceil(program.duration);
 
   return (
     <section
@@ -403,7 +439,7 @@ function PrinterSimulation({
               geometry={geometry}
               store={store}
               theme={theme}
-              filamentColor={filamentColor}
+              filamentColors={toolColors}
               chamberLight={live?.chamberLight ?? 'unknown'}
               isReducedMotion={isReducedMotion}
               liveNozzleTarget={live?.nozzleTarget}
@@ -423,165 +459,218 @@ function PrinterSimulation({
         <p id={hintId} className='sr-only'>
           Space plays or pauses. Left and right arrows step one segment.
         </p>
-        <section
-          aria-label='Print HUD'
-          className='pointer-events-none absolute top-2 left-2 rounded-md bg-background/80 px-2 py-1.5 text-xs tabular-nums'
-        >
-          <dl className='grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-0.5'>
-            <dt className='text-muted-foreground'>Layer</dt>
-            <dd>
-              {layerNumber} / {layerCount}
-            </dd>
-            <dt className='text-muted-foreground'>Elapsed</dt>
-            <dd>{formatDuration(snapshot.time)}</dd>
-            <dt className='text-muted-foreground'>Remaining</dt>
-            <dd>{formatDuration(program.duration - snapshot.time)}</dd>
-            <dt className='text-muted-foreground'>Nozzle</dt>
-            <dd>{formatTemperature(nozzleTarget)}</dd>
-            <dt className='text-muted-foreground'>Bed</dt>
-            <dd>{formatTemperature(bedTarget)}</dd>
-            <dt className='text-muted-foreground'>Filament</dt>
-            <dd>
-              {formatFilament(filamentUsed)} / {formatFilament(program.filamentLength)}
-            </dd>
-            {isLiveAvailable ? (
-              <>
-                <dt className='text-muted-foreground'>Machine</dt>
-                <dd>
-                  {live.machineName} · {live.runState}
-                </dd>
-              </>
-            ) : null}
-          </dl>
-          {program.coverage.complete ? null : (
-            <p className='mt-1 text-muted-foreground'>Preview shows known motion only</p>
-          )}
-        </section>
+        <PrintHud program={program} snapshot={snapshot} prefix={prefix} live={live} />
         <ToolpathFilter
           counts={grouping.counts}
           colors={groupColors}
+          filaments={filaments}
           hiddenGroups={hiddenGroups}
           onGroupShown={handleGroupShown}
         />
       </div>
-      <div
-        role='group'
-        aria-label='Playback controls'
-        className='flex shrink-0 flex-wrap items-center gap-2 border-t border-border/70 px-2 py-1.5'
-      >
-        <Button type='button' size='sm' variant='outline' disabled={snapshot.isLive} onClick={store.toggle}>
-          {snapshot.isPlaying ? <Pause aria-hidden /> : <Play aria-hidden />}
-          {snapshot.isPlaying ? 'Pause' : 'Play'}
-        </Button>
-        <Button
-          type='button'
-          size='icon-sm'
-          variant='ghost'
-          aria-label='Previous segment'
-          disabled={snapshot.isLive}
-          onClick={() => {
-            store.step(-1);
-          }}
-        >
-          <SkipBack aria-hidden />
-        </Button>
-        <Button
-          type='button'
-          size='icon-sm'
-          variant='ghost'
-          aria-label='Next segment'
-          disabled={snapshot.isLive}
-          onClick={() => {
-            store.step(1);
-          }}
-        >
-          <SkipForward aria-hidden />
-        </Button>
-        <ToggleGroup
-          type='single'
-          size='sm'
-          variant='outline'
-          aria-label='Speed'
-          value={String(snapshot.speed)}
-          disabled={snapshot.isLive}
-          onValueChange={handleSpeed}
-        >
-          {playbackSpeeds.map((speed) => (
-            <ToggleGroupItem key={speed} value={String(speed)}>
-              {speedLabel(speed)}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
-        <label className='flex min-w-40 flex-1 items-center gap-2 text-xs'>
-          <span className='sr-only'>Time</span>
-          <input
-            type='range'
-            className='h-6 w-full cursor-action accent-primary disabled:cursor-not-allowed'
-            min={0}
-            max={duration}
-            step={1}
-            value={snapshot.time}
-            aria-valuetext={`${formatDuration(snapshot.time)} of ${formatDuration(program.duration)}`}
-            disabled={snapshot.isLive}
-            onChange={(event) => {
-              store.seek(Number(event.target.value));
-            }}
-          />
-        </label>
-        <label className='flex min-w-28 items-center gap-2 text-xs'>
-          <span className='text-muted-foreground'>Layer</span>
-          <input
-            type='range'
-            className='h-6 w-full cursor-action accent-primary disabled:cursor-not-allowed'
-            min={1}
-            max={Math.max(1, layerCount)}
-            step={1}
-            value={Math.max(1, layerNumber)}
-            aria-valuetext={`Layer ${layerNumber} of ${layerCount}`}
-            disabled={snapshot.isLive || layerCount === 0}
-            onChange={(event) => {
-              store.seekLayer(Number(event.target.value) - 1);
-            }}
-          />
-        </label>
-        <label className='flex h-6 items-center gap-2 text-xs'>
-          <Switch
-            size='sm'
-            aria-label='Live'
-            checked={snapshot.isLive}
-            disabled={!isLiveAvailable}
-            onCheckedChange={store.setLive}
-          />
-          <Radio aria-hidden className='size-3.5' />
-          Live
-          {isLiveAvailable ? null : (
-            <span className='text-muted-foreground'>
-              · {live?.isActive ? 'The printer is running another file' : 'No active run to follow'}
-            </span>
-          )}
-        </label>
-        <Button type='button' size='sm' variant='ghost' disabled={snapshot.isLive} onClick={store.reset}>
-          <RotateCcw aria-hidden />
-          Reset
-        </Button>
-      </div>
+      <PlaybackControls program={program} store={store} snapshot={snapshot} live={live} />
     </section>
   );
 }
 
+/** Where the run stands, top left over the scene: layer, time, temperatures, filament and the followed machine. */
+function PrintHud({
+  program,
+  snapshot,
+  prefix,
+  live,
+}: Readonly<{
+  program: ToolpathProgram;
+  snapshot: PlaybackSnapshot;
+  /** Filament fed before each segment, from `createExtrusionPrefix`. */
+  prefix: Float64Array;
+  live: PrinterLiveState | undefined;
+}>): React.JSX.Element {
+  const nozzleTarget = live?.nozzleTarget ?? eventValueAt(program.events, 'nozzle-temperature', snapshot.time);
+  const bedTarget = live?.bedTarget ?? eventValueAt(program.events, 'bed-temperature', snapshot.time);
+  const isLiveAvailable = live?.printsThisFile === true;
+  return (
+    <section
+      aria-label='Print HUD'
+      className='pointer-events-none absolute top-2 left-2 rounded-md bg-background/80 px-2 py-1.5 text-xs tabular-nums'
+    >
+      <dl className='grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-0.5'>
+        <dt className='text-muted-foreground'>Layer</dt>
+        <dd>
+          {Math.max(0, snapshot.layer + 1)} / {program.layerTable.length}
+        </dd>
+        <dt className='text-muted-foreground'>Elapsed</dt>
+        <dd>{formatDuration(snapshot.time)}</dd>
+        <dt className='text-muted-foreground'>Remaining</dt>
+        <dd>{formatDuration(program.duration - snapshot.time)}</dd>
+        <dt className='text-muted-foreground'>Nozzle</dt>
+        <dd>{formatTemperature(nozzleTarget)}</dd>
+        <dt className='text-muted-foreground'>Bed</dt>
+        <dd>{formatTemperature(bedTarget)}</dd>
+        <dt className='text-muted-foreground'>Filament</dt>
+        <dd>
+          {formatFilament(extrudedLengthAt(prefix, program, snapshot.time))} / {formatFilament(program.filamentLength)}
+        </dd>
+        {isLiveAvailable ? (
+          <>
+            <dt className='text-muted-foreground'>Machine</dt>
+            <dd>
+              {live.machineName} · {live.runState}
+            </dd>
+          </>
+        ) : null}
+      </dl>
+      {program.coverage.complete ? null : <p className='mt-1 text-muted-foreground'>Preview shows known motion only</p>}
+    </section>
+  );
+}
+
+/** Play, step, speed, the time and layer sliders, Live and Reset, under the scene. */
+function PlaybackControls({
+  program,
+  store,
+  snapshot,
+  live,
+}: Readonly<{
+  program: ToolpathProgram;
+  store: PlaybackStore;
+  snapshot: PlaybackSnapshot;
+  live: PrinterLiveState | undefined;
+}>): React.JSX.Element {
+  const handleSpeed = useCallback(
+    (value: string): void => {
+      const speed = playbackSpeeds.find((candidate) => String(candidate) === value);
+      if (speed !== undefined) {
+        store.setSpeed(speed);
+      }
+    },
+    [store],
+  );
+  const layerCount = program.layerTable.length;
+  const layerNumber = Math.max(0, snapshot.layer + 1);
+  const isLiveAvailable = live?.printsThisFile === true;
+  return (
+    <div
+      role='group'
+      aria-label='Playback controls'
+      className='flex shrink-0 flex-wrap items-center gap-2 border-t border-border/70 px-2 py-1.5'
+    >
+      <Button type='button' size='sm' variant='outline' disabled={snapshot.isLive} onClick={store.toggle}>
+        {snapshot.isPlaying ? <Pause aria-hidden /> : <Play aria-hidden />}
+        {snapshot.isPlaying ? 'Pause' : 'Play'}
+      </Button>
+      <Button
+        type='button'
+        size='icon-sm'
+        variant='ghost'
+        aria-label='Previous segment'
+        disabled={snapshot.isLive}
+        onClick={() => {
+          store.step(-1);
+        }}
+      >
+        <SkipBack aria-hidden />
+      </Button>
+      <Button
+        type='button'
+        size='icon-sm'
+        variant='ghost'
+        aria-label='Next segment'
+        disabled={snapshot.isLive}
+        onClick={() => {
+          store.step(1);
+        }}
+      >
+        <SkipForward aria-hidden />
+      </Button>
+      <ToggleGroup
+        type='single'
+        size='sm'
+        variant='outline'
+        aria-label='Speed'
+        value={String(snapshot.speed)}
+        disabled={snapshot.isLive}
+        onValueChange={handleSpeed}
+      >
+        {playbackSpeeds.map((speed) => (
+          <ToggleGroupItem key={speed} value={String(speed)}>
+            {speedLabel(speed)}
+          </ToggleGroupItem>
+        ))}
+      </ToggleGroup>
+      <label className='flex min-w-40 flex-1 items-center gap-2 text-xs'>
+        <span className='sr-only'>Time</span>
+        <input
+          type='range'
+          className='h-6 w-full cursor-action accent-primary disabled:cursor-not-allowed'
+          min={0}
+          max={Math.ceil(program.duration)}
+          step={1}
+          value={snapshot.time}
+          aria-valuetext={`${formatDuration(snapshot.time)} of ${formatDuration(program.duration)}`}
+          disabled={snapshot.isLive}
+          onChange={(event) => {
+            store.seek(Number(event.target.value));
+          }}
+        />
+      </label>
+      <label className='flex min-w-28 items-center gap-2 text-xs'>
+        <span className='text-muted-foreground'>Layer</span>
+        <input
+          type='range'
+          className='h-6 w-full cursor-action accent-primary disabled:cursor-not-allowed'
+          min={1}
+          max={Math.max(1, layerCount)}
+          step={1}
+          value={Math.max(1, layerNumber)}
+          aria-valuetext={`Layer ${layerNumber} of ${layerCount}`}
+          disabled={snapshot.isLive || layerCount === 0}
+          onChange={(event) => {
+            store.seekLayer(Number(event.target.value) - 1);
+          }}
+        />
+      </label>
+      <label className='flex h-6 items-center gap-2 text-xs'>
+        <Switch
+          size='sm'
+          aria-label='Live'
+          checked={snapshot.isLive}
+          disabled={!isLiveAvailable}
+          onCheckedChange={store.setLive}
+        />
+        <Radio aria-hidden className='size-3.5' />
+        Live
+        {isLiveAvailable ? null : (
+          <span className='text-muted-foreground'>
+            · {live?.isActive ? 'The printer is running another file' : 'No active run to follow'}
+          </span>
+        )}
+      </label>
+      <Button type='button' size='sm' variant='ghost' disabled={snapshot.isLive} onClick={store.reset}>
+        <RotateCcw aria-hidden />
+        Reset
+      </Button>
+    </div>
+  );
+}
+
 /**
- * Which groups of the G-code the scene draws, top right over the scene. Only
- * the groups the program contains are listed; it folds to its heading.
+ * Which groups of the G-code the scene draws, top right over the scene, and
+ * the filaments a multi-colour program prints with. Only the groups the
+ * program contains are listed; it folds to its heading.
  */
 function ToolpathFilter({
   counts,
   colors,
+  filaments,
   hiddenGroups,
   onGroupShown,
 }: Readonly<{
   counts: readonly number[];
-  /** CSS colour per {@link toolpathGroups} entry, as the scene tints the group. */
-  colors: readonly string[];
+  /** CSS colours per {@link toolpathGroups} entry, one per filament, as the scene tints the group. */
+  colors: ReadonlyArray<readonly string[]>;
+  /** Each filament listed, in filament order: its tool and colour. */
+  filaments: ReadonlyArray<Readonly<{ tool: number; color: string }>>;
   hiddenGroups: ReadonlySet<ToolpathGroup>;
   onGroupShown: (group: ToolpathGroup, isShown: boolean) => void;
 }>): React.JSX.Element {
@@ -607,24 +696,43 @@ function ToolpathFilter({
         />
       </button>
       {isOpen ? (
-        <ul id={listId} className='flex flex-col gap-1.5 px-2 pt-0.5 pb-2'>
-          {toolpathGroups.map((group, index) =>
-            counts[index] ? (
-              <li key={group}>
-                <label className='flex cursor-action items-center gap-2'>
-                  <Checkbox
-                    checked={!hiddenGroups.has(group)}
-                    onCheckedChange={(checked) => {
-                      onGroupShown(group, checked === true);
-                    }}
-                  />
-                  <MaterialSwatch materials={[{ color: colors[index], roughness: 1, metalness: 0, isUnlit: true }]} />
-                  {toolpathGroupLabels[group]}
-                </label>
-              </li>
-            ) : null,
-          )}
-        </ul>
+        <div id={listId}>
+          <ul className='flex flex-col gap-1.5 px-2 pt-0.5 pb-2'>
+            {toolpathGroups.map((group, index) =>
+              counts[index] ? (
+                <li key={group}>
+                  <label className='flex cursor-action items-center gap-2'>
+                    <Checkbox
+                      checked={!hiddenGroups.has(group)}
+                      onCheckedChange={(checked) => {
+                        onGroupShown(group, checked === true);
+                      }}
+                    />
+                    <MaterialSwatch
+                      materials={(colors[index] ?? []).map((color) => ({
+                        color,
+                        roughness: 1,
+                        metalness: 0,
+                        isUnlit: true,
+                      }))}
+                    />
+                    {toolpathGroupLabels[group]}
+                  </label>
+                </li>
+              ) : null,
+            )}
+          </ul>
+          {filaments.length > 0 ? (
+            <ul aria-label='Filaments' className='flex flex-col gap-1.5 border-t border-border/70 py-2 pr-2 pl-8'>
+              {filaments.map(({ tool, color }) => (
+                <li key={tool} className='flex items-center gap-2'>
+                  <MaterialSwatch materials={[{ color, roughness: 1, metalness: 0, isUnlit: true }]} />
+                  Filament {tool + 1}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
       ) : null}
     </section>
   );

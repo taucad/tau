@@ -18,6 +18,8 @@ import type { Environment } from '#config/environment.config.js';
 import { EmailModule } from '#email/email.module.js';
 import { EmailService } from '#email/email.service.js';
 import { BillingModule } from '#api/billing/billing.module.js';
+import { HostsModule } from '#api/hosts/hosts.module.js';
+import { HostsService } from '#api/hosts/hosts.service.js';
 
 type AuthInstance = ReturnType<typeof betterAuth>;
 
@@ -38,32 +40,38 @@ export class AuthModule implements NestModule, OnModuleInit {
     const authProvider = options.tauCloudEnabled
       ? {
           provide: authInstanceKey,
+          // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- Nest resolves five distinct auth composition tokens.
+          async useFactory(
+            databaseService: DatabaseService,
+            configService: ConfigService<Environment, true>,
+            emailService: EmailService,
+            cloudHosts: HostsService,
+            closure: BillingAccountClosureService,
+          ): Promise<AuthInstance> {
+            return betterAuth(
+              getBetterAuthConfig({ databaseService, configService, emailService, cloudHosts, closure }),
+            );
+          },
+          inject: [DatabaseService, ConfigService, EmailService, HostsService, BillingAccountClosureService],
+        }
+      : {
+          provide: authInstanceKey,
           // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- Nest resolves four distinct auth composition tokens.
           async useFactory(
             databaseService: DatabaseService,
             configService: ConfigService<Environment, true>,
             emailService: EmailService,
-            closure: BillingAccountClosureService,
+            cloudHosts: HostsService,
           ): Promise<AuthInstance> {
-            return betterAuth(getBetterAuthConfig({ databaseService, configService, emailService, closure }));
+            return betterAuth(getBetterAuthConfig({ databaseService, configService, emailService, cloudHosts }));
           },
-          inject: [DatabaseService, ConfigService, EmailService, BillingAccountClosureService],
-        }
-      : {
-          provide: authInstanceKey,
-          async useFactory(
-            databaseService: DatabaseService,
-            configService: ConfigService<Environment, true>,
-            emailService: EmailService,
-          ): Promise<AuthInstance> {
-            return betterAuth(getBetterAuthConfig({ databaseService, configService, emailService }));
-          },
-          inject: [DatabaseService, ConfigService, EmailService],
+          inject: [DatabaseService, ConfigService, EmailService, HostsService],
         };
     return {
       global: true,
       module: AuthModule,
-      imports: [DatabaseModule, EmailModule, ...(options.tauCloudEnabled ? [BillingModule] : [])],
+      /* HostsModule for account deletion's cloud-host stop (W10 a4). */
+      imports: [DatabaseModule, EmailModule, HostsModule, ...(options.tauCloudEnabled ? [BillingModule] : [])],
       providers: [authProvider, BetterAuthService],
       exports: [authInstanceKey, BetterAuthService],
     };

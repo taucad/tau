@@ -76,7 +76,7 @@ import type {
   PendingProjectRecoveryReason,
   PendingProjectStorage,
 } from '#types/pending-project-operation.types.js';
-import type { ProjectLibraryEntry, ProjectLibraryState } from '#types/project.types.js';
+import type { ProjectLibraryEntry, ProjectLibraryState } from '#types/project-library.types.js';
 import { allocateProjectDirectorySlug } from '#utils/project-directory.utils.js';
 import { directorySlug, homeWorkspaceSlug, projectSlugsOf } from '#utils/project-url.utils.js';
 import type { ProjectSlugs } from '#utils/project-url.utils.js';
@@ -85,6 +85,7 @@ import { metaConfig } from '#constants/meta.constants.js';
 import type { ProjectCreationLocation } from '#types/project-creation-location.types.js';
 import { selectWorkspaceConnectionState, workspaceConnectionMachine } from '#hooks/workspace-connection.machine.js';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
+import { tauCloudIntent, withNamedLock } from '#hooks/use-cloud-projects.js';
 import { getChatRecencyAt } from '#utils/chat-recency.utils.js';
 import type {
   PreparedWorkspaceCatalog,
@@ -981,7 +982,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     ],
   );
 
-  const createProject = useCallback(
+  const createProjectOnce = useCallback(
     async (options: CreateProjectOptions): Promise<CreatedProject> => {
       /* The id is a directory here and a repository name on the Tau Hosted
          Remote, so a supplied one is checked against the same rule a minted one
@@ -1125,6 +1126,14 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         storage: pendingStorage,
       });
       await resumePendingProjectOperation(operation, worker);
+      /* D19: a project born with no remote backs up to Tau Cloud from its first
+         revision — a template, a fork, a file or zip import. A caller that
+         supplies the id is adopting an identity that has a remote of its own (a
+         Tau Cloud open, a materialized project, a linked GitHub import), so it
+         is left alone. The session decides once it knows the account (W11). */
+      if (options.id === undefined) {
+        tauCloudIntent.set(projectId, 'default');
+      }
       /* Route callers navigate with the returned slugs immediately. Publish
        * the completed filesystem commit to every active project-list query
        * before that navigation can ask the sole slug resolver for its id. */
@@ -1436,6 +1445,41 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     }
   }, [discoverProjects, getReadiedWorker, settleRecovery]);
 
+  /* A supplied id is checked and then written, so two creations of it — an
+     *Open* racing materialize on sign-in, or two tabs — hold one lock per id
+     across the check and the write; the second sees the first's project and is
+     refused. A minted id cannot collide, so it takes no lock.
+     An earlier creation of the id that never finished — a reload, a re-init or
+     a tab closed between its directory commit and its route config (R2) — is
+     finished here rather than repeated: this page's own recovery first, then
+     any journal row another tab left since. Its directory is quarantined from
+     the library meanwhile, so a caller asking again cannot tell it is there. */
+  const createProject = useCallback(
+    async (options: CreateProjectOptions): Promise<CreatedProject> => {
+      const { id } = options;
+      if (id === undefined) {
+        return createProjectOnce(options);
+      }
+      return withNamedLock(`tau:create-project:${id}`, async () => {
+        await ensureDiscoveryReady();
+        await recoveryLoopRef.current;
+        const worker = await getReadiedWorker();
+        const operations = await worker.getPendingProjectOperations();
+        const unfinished = operations.find(
+          (operation) => operation.kind !== 'permanent-delete' && operation.manifest.id === id,
+        );
+        if (unfinished !== undefined) {
+          await settleRecovery(unfinished, worker);
+          if (recoveriesRef.current.has(unfinished.operationId)) {
+            throw new Error(`An earlier creation of this project has not finished on this device: ${id}`);
+          }
+        }
+        return createProjectOnce(options);
+      });
+    },
+    [createProjectOnce, ensureDiscoveryReady, getReadiedWorker, settleRecovery],
+  );
+
   /**
    * The routed project's manifest: strict, or degraded with the issue that
    * write-protects it (blueprint R3/R4). The route supplies the id only when the
@@ -1693,6 +1737,8 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         sourceChats: await chatStore.getChatsForResource(projectId),
       });
       await resumePendingProjectOperation(operation, worker);
+      /* D19: a copy has no remote of its own, so it backs up by default too. */
+      tauCloudIntent.set(targetId, 'default');
       return { ...operation.manifest, slugs: { workspaceSlug, projectSlug: directorySlug(providerBasePath) } };
     },
     [chatStore, ensureDiscoveryReady, fileManager, getProject, getReadiedWorker, resumePendingProjectOperation],

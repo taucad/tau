@@ -5,6 +5,7 @@ import { DurableEventsService } from '#api/durable-events/durable-events.service
 import type { DurableStreamReadOutcome } from '#api/durable-events/durable-events.types.js';
 import type { DatabaseService, DatabaseType } from '#database/database.service.js';
 import type { RedisService } from '#redis/redis.service.js';
+import type { ProjectAccessService } from '#api/collaboration/project-access.service.js';
 import { ShutdownService } from '#lifecycle/shutdown.service.js';
 
 type DatabaseTransaction = Parameters<Parameters<DatabaseType['transaction']>[0]>[0];
@@ -53,7 +54,7 @@ const createService = () => {
     databaseService,
     redisClient,
     shutdown,
-    service: new DurableEventsService(databaseService, redisService, shutdown),
+    service: new DurableEventsService(databaseService, redisService, mock<ProjectAccessService>(), shutdown),
   };
 };
 

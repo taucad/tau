@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -15,9 +16,11 @@ import {
   isLargeObjectPath,
   isTrackedLargeObjectPath,
   largeObjectThresholdBytes,
+  tauRevisionPolicy,
 } from '#workspace-config.js';
 import { parseRevisionCommitMessage, revisionCommitMessage } from '#revision-headers.js';
 import type { RevisionTrailer } from '#revision-headers.js';
+import { gitToolchainOnPath } from '#test/native-git-harness.js';
 
 describe('generated ignore file', () => {
   let ignoreRoot: string;
@@ -32,7 +35,7 @@ describe('generated ignore file', () => {
 
   it('excludes every unversioned path and keeps the versioned generated files', () => {
     const content = generatedIgnoreContent(undefined);
-    for (const entry of generatedIgnoreEntries(pathRegistry)) {
+    for (const entry of generatedIgnoreEntries(tauRevisionPolicy)) {
       expect(content).toContain(entry);
     }
     expect(content).toContain('/.tau/cache/');
@@ -46,9 +49,9 @@ describe('generated ignore file', () => {
   /* The ignore file is derived from the path registry, so the records rows
    * appear and the deleted Jujutsu configuration does not (W1 pin b). */
   it('lists the records rows and no engine configuration', () => {
-    expect(generatedIgnoreEntries(pathRegistry)).toContain('/.tau/runs/');
-    expect(generatedIgnoreEntries(pathRegistry)).toContain('/exports/');
-    expect(generatedIgnoreEntries(pathRegistry)).not.toContain('/.tau/jj-config.toml');
+    expect(generatedIgnoreEntries(tauRevisionPolicy)).toContain('/.tau/runs/');
+    expect(generatedIgnoreEntries(tauRevisionPolicy)).toContain('/exports/');
+    expect(generatedIgnoreEntries(tauRevisionPolicy)).not.toContain('/.tau/jj-config.toml');
   });
 
   /* PP5: `versioned` agrees with the ignore file — a path is unversioned exactly
@@ -66,10 +69,10 @@ describe('generated ignore file', () => {
    * path out of every tree, and that is the half PP5 exists to protect. */
   it('should exclude every unversioned row as far as it matches, and no versioned one', () => {
     for (const row of pathRegistry) {
-      const anywhere = generatedIgnoreEntries(pathRegistry).some(
+      const anywhere = generatedIgnoreEntries(tauRevisionPolicy).some(
         (entry) => entry.replace(/\/$/u, '') === `**/${row.prefix}`,
       );
-      const atRoot = generatedIgnoreEntries(pathRegistry).some(
+      const atRoot = generatedIgnoreEntries(tauRevisionPolicy).some(
         (entry) => entry.replace(/\/$/u, '') === `/${row.prefix}`,
       );
 
@@ -91,8 +94,12 @@ describe('generated ignore file', () => {
       stringMatching(/^[a-z][a-z0-9_-]{0,12}$/u),
     ).map(([directory, name]) => `src/${directory}/${name}.ts`);
 
+    /* P13: a `.tau` member no row names falls to the reserved answer, so the
+     * block's `/.tau/*` head has to exclude it (R8). */
+    const reservedPath = stringMatching(/^[a-z][a-z0-9_-]{0,12}$/u).map((name) => `.tau/${name}/entry.txt`);
+
     await assert(
-      asyncProperty(oneof(rowPath, authoredPath), async (path) => {
+      asyncProperty(oneof(rowPath, authoredPath, reservedPath), async (path) => {
         const excluded = await isIgnored({ fs, dir: ignoreRoot, filepath: path });
         expect(tauPathPolicy.classify(path).versioned).toBe(!excluded);
       }),
@@ -105,10 +112,10 @@ describe('generated ignore file', () => {
    * pattern would not exclude. `node_modules` keeps its slash: a file of that
    * name is not the cache. */
   it('should exclude a control-plane pointer file as well as its directory', () => {
-    expect(generatedIgnoreEntries(pathRegistry)).toContain('**/.git');
-    expect(generatedIgnoreEntries(pathRegistry)).toContain('**/.jj');
-    expect(generatedIgnoreEntries(pathRegistry)).not.toContain('**/.git/');
-    expect(generatedIgnoreEntries(pathRegistry)).toContain('**/node_modules/');
+    expect(generatedIgnoreEntries(tauRevisionPolicy)).toContain('**/.git');
+    expect(generatedIgnoreEntries(tauRevisionPolicy)).toContain('**/.jj');
+    expect(generatedIgnoreEntries(tauRevisionPolicy)).not.toContain('**/.git/');
+    expect(generatedIgnoreEntries(tauRevisionPolicy)).toContain('**/node_modules/');
   });
 
   /* The whole block, literally: it is the one artifact a person reads in their
@@ -117,6 +124,11 @@ describe('generated ignore file', () => {
   it('should write the generated block exactly as the registry orders it', () => {
     expect(generatedIgnoreContent(undefined)).toBe(
       `# BEGIN Tau generated — derived content is never versioned
+/.tau/*
+!/.tau/parameters
+!/.tau/machines
+!/.tau/skills
+!/.tau/AGENTS.md
 **/.tau/binding.json
 **/.jj
 **/.git
@@ -129,6 +141,7 @@ describe('generated ignore file', () => {
 /.tau/artifacts/
 /.tau/tool-results/
 /.tau/offloaded-tool-results/
+/.tau/library.json
 /exports/
 /thumbnail.webp
 /.tau/cache/
@@ -137,6 +150,84 @@ describe('generated ignore file', () => {
 `,
     );
   });
+
+  /* One negation re-includes a direct member of the reserved directory only:
+   * `/.tau/*` excludes `.tau/a`, and git cannot re-include `.tau/a/b` under it
+   * (R8). A nested authored control needs the generator to emit a chain. */
+  it('should keep every versioned row inside the reserved directory a direct member', () => {
+    const inside = tauRevisionPolicy.rows.filter(
+      (row) => row.versioned && row.prefix.startsWith(`${tauRevisionPolicy.reservedDirectory}/`),
+    );
+
+    expect(inside.map((row) => row.prefix)).toStrictEqual([
+      '.tau/parameters',
+      '.tau/machines',
+      '.tau/skills',
+      '.tau/AGENTS.md',
+    ]);
+    expect(inside.filter((row) => row.prefix.split('/').length !== 2)).toStrictEqual([]);
+  });
+
+  it('should emit only the rows when a layout has no reserved directory', () => {
+    expect(generatedIgnoreEntries({ rows: pathRegistry })).not.toContain('/.tau/*');
+    expect(generatedIgnoreEntries({ rows: pathRegistry }).some((entry) => entry.startsWith('!'))).toBe(false);
+  });
+
+  /* Stock Git is the reader PP5 protects, so the block is checked with the real
+   * binary rather than only with isomorphic-git's matcher (R8 / F9). */
+  it.runIf(gitToolchainOnPath)(
+    'should ignore unlisted .tau members for stock git and keep the authored controls',
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), 'tau-generated-ignore-git-'));
+      // A person's global `core.excludesFile` must not decide a verdict.
+      const env: NodeJS.ProcessEnv = { ...process.env };
+      env['GIT_CONFIG_GLOBAL'] = '/dev/null';
+      env['GIT_CONFIG_NOSYSTEM'] = '1';
+      try {
+        execFileSync('git', ['init', '--quiet'], { cwd: root, env });
+        await writeFile(join(root, '.gitignore'), generatedIgnoreContent(undefined));
+        const paths = {
+          '.tau/unknown/x': true,
+          /* eslint-disable no-restricted-syntax -- the retired residue F9 found in
+           * the field is this case's subject: the block has to ignore it. */
+          '.tau/workspaces/project/tau.json': true,
+          '.tau/revisions/objects/ab/cdef': true,
+          /* eslint-enable no-restricted-syntax -- the pin is back on below. */
+          '.tau/skills/a/.git/HEAD': true,
+          '.tau/parameters/x.json': false,
+          '.tau/machines/printer.json': false,
+          '.tau/skills/a/SKILL.md': false,
+          '.tau/AGENTS.md': false,
+          '.tau/cache/mesh.bin': true,
+          'src/part.ts': false,
+        };
+        await Promise.all(
+          Object.keys(paths).map(async (path) => {
+            await mkdir(join(root, path, '..'), { recursive: true });
+            await writeFile(join(root, path), '');
+          }),
+        );
+        /* `-v -n` lists every path with the pattern that decided it; a blank
+         * pattern, or a `!` one, means not ignored. */
+        const verdicts = execFileSync('git', ['check-ignore', '--no-index', '-v', '-n', ...Object.keys(paths)], {
+          cwd: root,
+          env,
+        })
+          .toString('utf8')
+          .trim()
+          .split('\n')
+          .map((line) => {
+            const [source, path] = line.split('\t');
+            const pattern = (source ?? '').split(':').slice(2).join(':');
+            return [path, pattern !== '' && !pattern.startsWith('!')] as const;
+          });
+
+        expect(Object.fromEntries(verdicts)).toStrictEqual(paths);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
 
   it('keeps a hand-written ignore file and is idempotent', () => {
     const authored = '# mine\n*.log\n';

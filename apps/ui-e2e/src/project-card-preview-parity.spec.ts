@@ -8,10 +8,10 @@ test('project card thumbnail and preview parity', async () => {
   await target.navigate('/community');
   const search = selectors.getByPlaceholder('Search projects...');
   await target.expectVisible(search, 60_000);
-  await target.fill(search, 'Involute Gear');
+  await target.fill(search, 'Cycloidal Gear');
 
-  const card = '[data-slot="card"]:has(img[alt="Involute Gear"])';
-  const thumbnail = selectors.getByCss(`${card} img[alt="Involute Gear"]`);
+  const card = '[data-slot="card"]:has(img[alt="Cycloidal Gear"])';
+  const thumbnail = selectors.getByCss(`${card} img[alt="Cycloidal Gear"]`);
   await target.expectVisible(thumbnail);
   await expect
     .poll(async () =>

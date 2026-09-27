@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
+import type { CadAgentExecution } from '@taucad/chat';
 import type { captureCadImages as captureCadImagesType } from '#services/headless-capture.js';
 
 const mockAddDraftAttachment = vi.fn();
@@ -9,6 +10,8 @@ const selectedModel = {
   name: 'Vision Model',
   model: { support: { modalities: { input: ['text', 'image'], output: ['text'] } } },
 };
+let mockSelectedModel: { name: string; model?: typeof selectedModel.model } = selectedModel;
+let mockExecution: CadAgentExecution = { kind: 'tau', model: 'vision' };
 const mockTrigger = vi.fn();
 const mockGraphicsRef = { send: vi.fn(), id: 'graphics-actor' };
 const mockCadRef = { send: vi.fn(), id: 'cad-actor' };
@@ -22,7 +25,9 @@ vi.mock('#services/headless-capture.js', () => ({
 vi.mock('#hooks/use-graphics.js', () => ({ useGraphics: () => mockGraphicsRef }));
 vi.mock('#hooks/use-cad.js', () => ({ useCad: () => mockCadRef }));
 vi.mock('#hooks/use-chat.js', () => ({ useChatActions: () => ({ addDraftAttachment: mockAddDraftAttachment }) }));
-vi.mock('#hooks/active-chat-provider.js', () => ({ useChatComposer: () => ({ model: { model: selectedModel } }) }));
+vi.mock('#hooks/active-chat-provider.js', () => ({
+  useChatComposer: () => ({ model: { model: mockSelectedModel }, execution: { execution: mockExecution } }),
+}));
 vi.mock('#hooks/use-tick-animation.js', () => ({
   useTickAnimation: () => ({ ticked: false, trigger: mockTrigger }),
 }));
@@ -62,6 +67,8 @@ const { CaptureViewControl, CaptureViewOverflowControl } =
 describe('CaptureViewControl', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockSelectedModel = selectedModel;
+    mockExecution = { kind: 'tau', model: 'vision' };
     mockCaptureCadImages.mockResolvedValue([
       { name: 'capture.webp', mimeType: 'image/webp', bytes: new Uint8Array([1, 2, 3]) },
     ]);
@@ -86,6 +93,21 @@ describe('CaptureViewControl', () => {
       model: { name: 'Vision Model', support: selectedModel.model.support },
     });
     expect(mockTrigger).toHaveBeenCalledOnce();
+  });
+
+  it('should admit a viewer capture for a local ACP agent without a Tau model row', async () => {
+    mockSelectedModel = { name: 'Stale Tau' };
+    mockExecution = { kind: 'acp', hostId: 'desktop', agentId: 'codex' };
+    const user = userEvent.setup();
+    render(<CaptureViewControl />);
+    await user.click(screen.getByTestId('capture-button'));
+
+    await waitFor(() => {
+      expect(mockAddDraftAttachment).toHaveBeenCalledWith('data:image/webp;base64,AQID', {
+        preserveOriginal: true,
+        model: { name: 'codex', support: { modalities: { input: ['text', 'image', 'pdf'], output: ['text'] } } },
+      });
+    });
   });
 
   it('completes the overflow capture after its dropdown item unmounts', async () => {

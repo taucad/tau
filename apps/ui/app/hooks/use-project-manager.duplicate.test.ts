@@ -172,6 +172,7 @@ vi.mock('xstate', async (importOriginal) => {
 });
 
 const { ProjectManagerProvider, useProjectManager } = await import('#hooks/use-project-manager.js');
+const { tauCloudIntent } = await import('#hooks/use-cloud-projects.js');
 
 const createWrapper = () => {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -217,6 +218,17 @@ describe('useProjectManager.duplicateProject', () => {
     });
     expect(phases).toEqual(['pending', 'commit', 'locator', 'roots', 'resources', 'complete']);
     expect(mockReadVersionedProjectFiles).toHaveBeenCalledWith(`/projects/${sourceProject.id}`);
+  });
+
+  /* D19 (W11 a2): a copy has no remote of its own, so it backs up by default. */
+  it('should mark the duplicate for backup by default', async () => {
+    localStorage.clear();
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    await act(async () => result.current.duplicateProject(sourceProject.id));
+
+    const targetId = mockDuplicate.mock.calls[0]?.[0].targetManifest.id ?? '';
+    expect(tauCloudIntent.get(targetId)).toBe('default');
+    expect(tauCloudIntent.get(sourceProject.id)).toBeUndefined();
   });
 
   it('journals only the project, never the control plane, records or cache beside it', async () => {

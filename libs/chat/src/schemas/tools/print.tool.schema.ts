@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { rootedFilePathSchema } from '#schemas/rooted-path.schema.js';
+import { kernelIssueSchema } from '#schemas/tools/issue.schema.js';
 
 /*
  * The print tools a CAD agent is offered. The machine host owns their behavior
@@ -48,7 +49,12 @@ const presetNameSchema = z.string().min(1).max(256);
 const printProfilesSchema = z.strictObject({
   printer: presetNameSchema.optional(),
   process: presetNameSchema.optional(),
-  filaments: z.array(presetNameSchema).min(1).max(16).optional().describe('One per loaded slot used, in slot order.'),
+  filaments: z
+    .array(presetNameSchema)
+    .min(1)
+    .max(16)
+    .optional()
+    .describe('One per filament the model prints, filament 1 first; a one-colour model takes one.'),
 });
 
 /**
@@ -177,6 +183,14 @@ const printIntentReportSchema = z
   })
   .optional();
 
+/** The host's advice on a request, as `request_print` and `get_print_request` both return it. */
+const nextStepSchema = z
+  .string()
+  .optional()
+  .describe(
+    'What to tell the person and do next, such as whether to retry; absent while the host is still working on the request.',
+  );
+
 /** @public */
 export const getMachineOutputSchema = z.looseObject({ machineId: z.string() });
 
@@ -188,8 +202,14 @@ export const requestPrintOutputSchema = z.looseObject({
     .enum(['approved', 'denied', 'cancelled'])
     .optional()
     .describe('How the person answered, when the call waited for them.'),
-  nextStep: z.string().optional(),
+  nextStep: nextStepSchema,
   printIntent: printIntentReportSchema,
+  warnings: z
+    .array(kernelIssueSchema)
+    .optional()
+    .describe(
+      'What the slice could not honour although it was made, such as a multi-colour model sliced in one colour; tell the person.',
+    ),
 });
 
 /** @public */
@@ -205,7 +225,10 @@ export const getPrintProfilesOutputSchema = z.looseObject({
 });
 
 /** @public */
-export const getPrintRequestOutputSchema = z.looseObject({ request: printRequestRecordSchema });
+export const getPrintRequestOutputSchema = z.looseObject({
+  request: printRequestRecordSchema,
+  nextStep: nextStepSchema,
+});
 
 /** @public */
 export const listPrintRequestsOutputSchema = z.looseObject({

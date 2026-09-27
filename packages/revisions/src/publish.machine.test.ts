@@ -278,6 +278,29 @@ describe('publishMachine', () => {
     actor.stop();
   });
 
+  it('4c: names and publishes an older revision when the dialog was opened on one, and the head again after', async () => {
+    const { actor, calls } = start();
+
+    actor.send({ type: 'publish', revisionId: 'rev-1' });
+    await settle();
+    actor.send({ type: 'confirm', draft });
+    await settle();
+
+    expect(actor.getSnapshot().matches('success')).toBe(true);
+    expect(calls[0]?.input).toStrictEqual({ name: 'v2', revisionId: 'rev-1' });
+    /* The branch still travels under its own lease: an older revision is already in its history. */
+    expect(calls[1]?.input).toStrictEqual({ branch: 'main', tag: 'v2', expected: 'rev-1', expectedTag: undefined });
+    expect(calls[2]?.input).toMatchObject({ tag: 'v2', revisionId: 'rev-1' });
+
+    /* A later publish without one names the head, not the revision the last dialog was opened on. */
+    actor.send({ type: 'publish' });
+    await settle();
+    actor.send({ type: 'confirm', draft: { ...draft, tag: 'v3' } });
+    await settle();
+    expect(calls[3]?.input).toStrictEqual({ name: 'v3', revisionId: 'rev-2' });
+    actor.stop();
+  });
+
   it('4b: asks its root for the push instead of declaring its own success (P39, W22 DEF-W22-2)', async () => {
     /* The whole defect in one row: `pushing` used to be left by a `pushSettled`
      * the machine raised at itself the moment the *request* resolved, so a push

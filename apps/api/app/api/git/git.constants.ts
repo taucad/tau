@@ -1,4 +1,4 @@
-import type { BillingTier } from '@taucad/billing';
+import { formatStorageLimit } from '@taucad/billing';
 
 /**
  * Server-side constants of the Tau Hosted Remote (architecture A16/A24/A39,
@@ -7,8 +7,10 @@ import type { BillingTier } from '@taucad/billing';
 
 /**
  * Refs a client may push (A39). Host-local namespaces —
- * `refs/tau/{owners,workspaces,revisions,transactions,head}`, `refs/remotes/*`
- * and `sync/*` — are refused by `pre-receive` and never leave a host (N28).
+ * `refs/tau/{owners,workspaces,revisions,transactions,head}` and `refs/remotes/*`
+ * — are refused by `pre-receive` and never leave a host (N28). Conflict lines,
+ * `refs/heads/conflicts/*`, are branches and travel (charter D14). A device's
+ * operation log, `refs/tau/ops/<device>`, is a Records ref and travels (D15).
  */
 export const pushableRefPrefixes = [
   'refs/heads/',
@@ -16,7 +18,15 @@ export const pushableRefPrefixes = [
   'refs/tau/chats/',
   'refs/tau/evidence/',
   'refs/tau/artifacts/',
+  'refs/tau/ops/',
 ] as const;
+
+/**
+ * Refs the audited removal verb may remove (D24): named versions, and conflict
+ * lines (D14). Everything else only ever moves forward (I2).
+ */
+export const isRemovableRef = (ref: string): boolean =>
+  /^refs\/(?:tags|heads\/conflicts)\/[\w.\-/]+$/u.test(ref) && !ref.includes('..') && !ref.endsWith('/');
 
 /**
  * DI token for the `RepositoryStore` port.
@@ -34,15 +44,45 @@ export const isGitService = (value: string | undefined): value is GitService =>
   value !== undefined && (gitServices as readonly string[]).includes(value);
 
 /**
- * Repository storage allowance per billing tier. The free tier cannot sync at
- * all (`canSyncFiles`), so its allowance is zero and the entitlement refusal
- * always fires first; Pro's 10 GB is the number the Sync region renders
- * (`2.1 GB of 10 GB`, architecture "Large-object policy").
+ * Who a quota refusal is addressed to (charter D17, I12): the one action a
+ * refused push offers depends on the caller's relationship to the project.
+ * `owner` may grow the plan (*Upgrade*); `ownerAtTopTier` has no larger plan,
+ * so the file list is the whole of what can be done; `collaborator` pushes
+ * against a plan they cannot change, so the sentence directs them to the owner.
  */
-export const storageLimitBytesByTier: Readonly<Record<BillingTier, number>> = {
-  free: 0,
-  pro: 10 * 1024 ** 3,
-  enterprise: 100 * 1024 ** 3,
+export type QuotaAudience = 'owner' | 'ownerAtTopTier' | 'collaborator';
+
+/**
+ * The fixed first words of the pre-receive quota refusal. A `pre-receive`
+ * refusal carries no HTTP status, so the client files it as a storage answer by
+ * these words (`packages/revisions/src/refusal-markers.ts` holds the same
+ * string), exactly as it does {@link ceilingRefusalMarker}.
+ */
+export const quotaRefusalMarker = 'Tau: storage quota exceeded';
+
+/**
+ * The one sentence a quota refusal says, on every leg (D17): the `413` of an
+ * exhausted allowance, the LFS batch `413` with its file list, and the
+ * `pre-receive` refusal. It names the allowance a person was sold — the figure
+ * the Sync region renders as `x of 1 GB` — to the owner, and never the owner's
+ * plan to a collaborator.
+ *
+ * @param audience - Who is being refused.
+ * @param limitBytes - The owner's allowance.
+ * @returns The sentence.
+ */
+export const quotaRefusalSentence = (audience: QuotaAudience, limitBytes: number): string => {
+  switch (audience) {
+    case 'owner': {
+      return `This push needs more room than your ${formatStorageLimit(limitBytes)} storage plan has left, so it was not backed up.`;
+    }
+    case 'ownerAtTopTier': {
+      return `This push needs more room than your ${formatStorageLimit(limitBytes)} storage plan has left, so it was not backed up. Remove or stop tracking the largest files to make room.`;
+    }
+    case 'collaborator': {
+      return "This push needs more room than the project owner's storage plan has left, so it was not backed up. Ask the owner to make room.";
+    }
+  }
 };
 
 /**
@@ -55,7 +95,7 @@ export const storageLimitBytesByTier: Readonly<Record<BillingTier, number>> = {
  * registration is a row, and every row is a tenant prefix a later push fills.
  *
  * One flat number rather than a per-tier table: the plan already bounds what a
- * project may *hold* (`storageLimitBytesByTier`), and a second per-tier
+ * project may *hold* (`storageLimitBytesByTier` in `@taucad/billing`), and a second per-tier
  * dimension would be a product decision nobody has made. It is a constant rather
  * than an operator environment value for the same reason `storageLimitBytesByTier`
  * is — none of the Hosted Remote's plan numbers is env-tunable today, and one
@@ -73,6 +113,68 @@ export const registeredProjectLimitPerOwner = 200;
  * so it only ever catches a script.
  */
 export const projectRegistrationsPerOwnerPerDay = 1000;
+
+/**
+ * The window every per-`(user, project)` git request budget is counted in (D22,
+ * charter I11).
+ */
+export const gitRequestWindowSeconds = 60;
+
+/**
+ * Requests one account may make against one project per window, per route
+ * family (D22, L6-F3). `rpc` is the three smart-HTTP routes, each of which
+ * hydrates a whole lease; `lfs` is the batch and verify API, which touches the
+ * database and presigns but hydrates nothing, and which a push of many large
+ * files calls once per object.
+ *
+ * The key is the account and the project, so every device of one account
+ * shares it. Sized from the two-client tier's busiest 60 s (W13d): a desktop
+ * and a browser editing one project at the tier's cadence made 235 `rpc`
+ * requests and drew 24 `429`s before W13d, and 123 with none after it. 240
+ * keeps that pair clear with room for the stream echo a peer's push still
+ * costs. A loop that is not a client meets it and is answered `429` with
+ * `Retry-After`.
+ */
+export const gitRequestsPerWindow = { rpc: 240, lfs: 1200 } as const;
+
+/**
+ * Requests one account may make per window across every project and route
+ * family together (D22, I11). Spent ahead of authorization with the
+ * per-project budget, so cycling project ids cannot buy unbounded
+ * authorization reads. Twice one project's `lfs` budget, so one project's
+ * large push never meets it.
+ */
+export const gitRequestsPerUserPerWindow = 2400;
+
+/**
+ * Leases one caller may hydrate from one owner's repositories per UTC day (D22,
+ * coordinator ruling 2026-09-25).
+ *
+ * Sized from the always-on case: a push is two hydrates (`info/refs` and
+ * `receive-pack`), and a client pushing on the 2 s debounce all day makes
+ * 43 200 pushes, or 86 400 hydrates, before its fetches. So a caller that is a
+ * client never meets it, and a loop that is not one does. The owner's own
+ * requests have a bucket of their own, which nobody else can spend.
+ */
+export const hydratesPerCallerPerDay = 100_000;
+
+/**
+ * Leases everybody who is not the owner may hydrate, together, from one owner's
+ * repositories per UTC day (D22, coordinator ruling 2026-09-25): three
+ * always-on collaborators' worth. Every lease is a full read billed to the
+ * owner, so third parties together must not make that egress unbounded;
+ * exhausting it refuses them and never the owner.
+ */
+export const hydratesFromOthersPerOwnerPerDay = 300_000;
+
+/**
+ * The fixed first words of the `GIT_REPOSITORY_INCOMPLETE` refusal (D22,
+ * L6-F8): the manifest names a pack the store does not hold, which no retry can
+ * repair. A leg that reads the JSON envelope keys on the body `code`; stock git
+ * sees only the `text/plain` sentence, so the client matches this marker the
+ * way it matches {@link ceilingRefusalMarker}.
+ */
+export const incompleteRepositoryMarker = "Tau: this project's cloud copy is damaged";
 
 /**
  * Where one large object lives in the private bucket. Same `oid` layout
@@ -146,8 +248,20 @@ export const serviceAdvertisementPrefix = (service: GitService): string => `${pk
 export const ceilingRefusalMarker = 'Tau: repository size limit exceeded';
 
 /**
+ * The words that refuse a conflicted revision outside a conflict line (charter D14).
+ *
+ * A conflicted revision still needs a person's decision, so it travels only on
+ * `refs/heads/conflicts/<branch>/<device>`; `main` and every named branch
+ * advance only by the merge that lands a decision, which has the conflicted
+ * revision as a parent, never on its first-parent line.
+ */
+export const conflictedRevisionRefusal = 'it carries a revision that still needs your decision';
+
+/**
  * `pre-receive`: the ref allow-list (A39), a fail-closed admission flag,
- * compare-and-swap for every ref family (I7/I9, ruling OQ4), and the two byte
+ * compare-and-swap for every ref family (I7/I9, ruling OQ4), append-only chat
+ * and operation log segments (charter I9, D22, ruling R4), conflicted revisions on conflict lines only
+ * (charter D14), and the two byte
  * bounds measured on the quarantine directory receive-pack has already written:
  * the owner's plan headroom, and D20's per-repository ceiling with the file
  * list that makes it actionable. A non-zero exit rejects the whole push and git
@@ -166,11 +280,73 @@ if [ "\${TAU_GIT_PUSH_ADMITTED:-}" != "1" ]; then
   exit 1
 fi
 
+# I9 (D22): a device's chat log only grows, and so does its operation log
+# (ruling R4). Between the old and the new tip of a chat or \`refs/tau/ops/*\`
+# ref, every change under \`events/\` must be a regular file
+# (\`100644\`) that was one before and whose old bytes are a byte prefix of
+# its new blob, or a new \`100644\` file; a deletion, a mode or type change
+# (a symlink, an executable, a submodule, a tree) and any rewrite are refused
+# (L6-F13, RV-W9 M2). A tree with duplicate or unsorted entries never reaches
+# this hook: \`receive.fsckObjects\` refuses it first (\`store/lease.ts\`).
+# \`diff-tree\` names each change by modes and object ids, so nothing here
+# parses a path, and a path git quotes cannot slip past. \`head -c 0\` is not
+# portable, so an empty old segment is a prefix of anything without reading it.
+segments_only_grow() {
+  if ! changes=$(git diff-tree -r --no-renames "$1" "$2" -- events/ 2>/dev/null); then
+    echo "Tau: refused $3 — its $4 could not be compared with the one it replaces." >&2
+    return 1
+  fi
+  printf '%s\\n' "$changes" | {
+    refused=0
+    while read -r was_mode now_mode was now change rest; do
+      case "$change" in
+        '') continue ;;
+        A) [ "$now_mode" = "100644" ] && continue ;;
+        M)
+          if [ "$was_mode" = ":100644" ] && [ "$now_mode" = "100644" ]; then
+            size=$(git cat-file -s "$was")
+            if [ "$size" -eq 0 ] || [ "$(git cat-file blob "$now" 2>/dev/null | head -c "$size" | git hash-object --stdin)" = "$was" ]; then
+              continue
+            fi
+          fi
+          ;;
+      esac
+      echo "Tau: refused $3 — it rewrites $rest, and a device's $4 only grows." >&2
+      refused=1
+    done
+    exit "$refused"
+  }
+}
+
+# D14: a conflicted revision — a commit with a \`jj:trees\` header — travels only
+# on a conflict line. Any other ref is refused when its new tip is one, or when
+# one sits on the tip's first-parent line among the commits this push brings:
+# the walk stops at anything a ref other than a conflict line already reaches,
+# so N tags at \`main\` read N tips and no history (RV-W6 F4). The merge that
+# lands a decision has the conflicted revision as a later parent, so it passes,
+# and \`main := C\` or a child of it does not. Only a commit's header block is
+# read, up to the blank line that ends it. Exit 0: carries one; 1: clean;
+# 2: the walk failed, which the caller refuses (fail closed — \`sh\` may have no
+# \`pipefail\`, so the walk's own status is read before anything is piped).
+carries_conflict() {
+  if ! walked=$(git rev-list --first-parent "$1" --not --exclude='refs/heads/conflicts/*' --all 2>/dev/null); then
+    return 2
+  fi
+  { printf '%s\\n' "$1"; [ -z "$walked" ] || printf '%s\\n' "$walked"; } \\
+    | git cat-file --batch 2>/dev/null \\
+    | awk '
+        /^[0-9a-f]+ commit [0-9]+$/ { header = 1; next }
+        header && /^$/ { header = 0; next }
+        header && /^jj:trees / { found = 1 }
+        END { exit found ? 0 : 1 }
+      '
+}
+
 status=0
 arriving=''
 while read -r _old _new ref; do
   case "$ref" in
-    refs/heads/sync|refs/heads/sync/?*|refs/remotes|refs/remotes/?*|refs/tau/owners|refs/tau/owners/?*|refs/tau/workspaces|refs/tau/workspaces/?*|refs/tau/revisions|refs/tau/revisions/?*|refs/tau/transactions|refs/tau/transactions/?*|refs/tau/head|refs/tau/head/?*|refs/tau/retention|refs/tau/retention/?*)
+    refs/remotes|refs/remotes/?*|refs/tau/owners|refs/tau/owners/?*|refs/tau/workspaces|refs/tau/workspaces/?*|refs/tau/revisions|refs/tau/revisions/?*|refs/tau/transactions|refs/tau/transactions/?*|refs/tau/head|refs/tau/head/?*|refs/tau/retention|refs/tau/retention/?*)
       echo "Tau: refused $ref — host-local refs never leave a host." >&2
       status=1
       continue
@@ -202,6 +378,36 @@ while read -r _old _new ref; do
       if ! git merge-base --is-ancestor "$_old^{commit}" "$_new^{commit}" 2>/dev/null; then
         echo "Tau: refused $ref — it does not fast-forward $_old; fetch and merge first." >&2
         status=1
+        continue
+      fi
+      case "$ref" in
+        refs/tau/chats/?*)
+          segments_only_grow "$_old" "$_new" "$ref" "chat log" || status=1
+          ;;
+        # Ruling R4: a device's operation log has the chat segment's shape.
+        refs/tau/ops/?*)
+          segments_only_grow "$_old" "$_new" "$ref" "operation log" || status=1
+          ;;
+      esac
+      ;;
+  esac
+  case "$ref" in
+    refs/heads/conflicts/?*/?*) ;;
+    refs/heads/conflicts|refs/heads/conflicts/*)
+      # RV-W6 F8: \`conflicts\` itself would shadow every device's lines.
+      echo "Tau: refused $ref — conflicts/ is kept for decisions that travel between devices, as refs/heads/conflicts/<branch>/<device>." >&2
+      status=1
+      continue
+      ;;
+    *)
+      verdict=0
+      carries_conflict "$_new" || verdict=$?
+      if [ "$verdict" -eq 0 ]; then
+        echo "Tau: refused $ref — ${conflictedRevisionRefusal}. Decide it in Tau; a conflict travels only on refs/heads/conflicts/." >&2
+        status=1
+      elif [ "$verdict" -ne 1 ]; then
+        echo "Tau: refused $ref — its history could not be checked for undecided revisions. Try again." >&2
+        status=1
       fi
       ;;
   esac
@@ -231,8 +437,16 @@ quarantine="\${GIT_QUARANTINE_PATH:-}"
 if [ -n "$quarantine" ] && [ -d "$quarantine" ]; then
   incoming=$(du -sk "$quarantine" | cut -f1)
   incoming=$((incoming * 1024))
+  # D17: the plan's refusal says who can act on it and carries the file list,
+  # because a free allowance equals the D20 ceiling and this is tested first
+  # (L6-F2) — without the list here, a free owner would never see one.
   if [ -n "$remaining" ] && [ "$incoming" -gt "$remaining" ]; then
-    echo "Tau: storage quota exceeded — this push needs $((incoming - remaining)) bytes more than the plan allows." >&2
+    echo "${quotaRefusalMarker} — this push needs $((incoming - remaining)) bytes more than the plan allows." >&2
+    if [ -n "\${TAU_GIT_QUOTA_SENTENCE:-}" ]; then
+      echo "Tau: $TAU_GIT_QUOTA_SENTENCE" >&2
+    fi
+    echo "Tau: the largest files it adds are:" >&2
+    arriving_files
     echo "Tau: nothing was written." >&2
     exit 1
   fi

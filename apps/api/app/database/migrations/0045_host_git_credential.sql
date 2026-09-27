@@ -1,0 +1,2 @@
+ALTER TABLE "agent_device" ADD COLUMN "git_credential_hash" text;--> statement-breakpoint
+CREATE UNIQUE INDEX "agent_device_git_credential_hash_idx" ON "agent_device" USING btree ("git_credential_hash");

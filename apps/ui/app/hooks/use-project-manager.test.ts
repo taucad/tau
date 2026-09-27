@@ -13,9 +13,9 @@ import { defaultPanelState } from '#constants/editor.constants.js';
 import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import type { FileManagerProxy } from '#machines/file-manager.machine.types.js';
 import type { PendingProjectOperation, PendingProjectStorage } from '#types/pending-project-operation.types.js';
-import type { ProjectLibraryState } from '#types/project.types.js';
+import type { ProjectLibraryState } from '#types/project-library.types.js';
 import type { ProjectCreationLocation } from '#types/project-creation-location.types.js';
-import type { ConnectedWorkspace, ProjectListing } from '#hooks/use-project-manager.js';
+import type { ConnectedWorkspace, CreateProjectOptions, ProjectListing } from '#hooks/use-project-manager.js';
 import type { ProjectNameInput } from '#chat-clients/use-project-name-client.js';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { uint8ArrayToBase64 } from 'uint8array-extras';
@@ -507,6 +507,7 @@ vi.mock('#hooks/use-cookie.js', () => ({
 }));
 
 const { ProjectManagerProvider, useProjectManager } = await import('#hooks/use-project-manager.js');
+const { tauCloudIntent } = await import('#hooks/use-cloud-projects.js');
 
 const createWrapper = () => {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -2206,6 +2207,39 @@ describe('useProjectManager.createProject', () => {
     expect(mockPrepareProjectCreation.mock.calls.at(-1)?.[0].manifest.id).toBe('proj_ccccccccccccccccccccc');
   });
 
+  /* D19 (W11 a2): a project born with no remote backs up by default; one
+     adopting an identity with a remote of its own does not. */
+  const remotelessCreations: ReadonlyArray<readonly [string, CreateProjectOptions]> = [
+    ['a fork', { project: { ...fakeProject, name: 'Fork of Test Project' }, files: {} }],
+    ['a file or zip import', { project: fakeProject, files: { 'main.ts': { content: new Uint8Array([1]) } } }],
+    ['a template', { kernel: 'openscad', projectName: 'Bracket' }],
+  ];
+  it.each(remotelessCreations)('should mark %s for backup by default', async (_label, options) => {
+    localStorage.clear();
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await act(async () => result.current.createProject({ ...options, location: { kind: 'home' } }));
+
+    const createdId = mockPrepareProjectCreation.mock.calls.at(-1)?.[0].manifest.id ?? '';
+    expect(tauCloudIntent.get(createdId)).toBe('default');
+  });
+
+  it('should not mark a project whose id the caller supplies (Tau Cloud open, linked GitHub import)', async () => {
+    localStorage.clear();
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await act(async () =>
+      result.current.createProject({
+        id: 'proj_ccccccccccccccccccccc',
+        project: fakeProject,
+        files: {},
+        location: { kind: 'home' },
+      }),
+    );
+
+    expect(tauCloudIntent.get('proj_ccccccccccccccccccccc')).toBeUndefined();
+  });
+
   /* Review R4: *Open* is offered from a 30 s cache against an asynchronous
      discovery pass, so the same row can be clicked twice. Two local projects
      under one id is a `duplicate-id` conflict neither of them recovers from, so
@@ -2227,6 +2261,93 @@ describe('useProjectManager.createProject', () => {
       }),
     ).rejects.toThrow(/already on this device/iu);
     expect(mockPrepareProjectCreation).not.toHaveBeenCalled();
+  });
+
+  /* RV-W11 3: an *Open* racing materialize on sign-in (or a second tab) checks
+     the same id before either has written it; the per-id lock orders them. */
+  it('creates one project when two creations of the same id race, refusing the second', async () => {
+    const id = 'proj_ccccccccccccccccccccc';
+    /* The route config exists once a creation of that id has been prepared. */
+    mockGetProjectFileSystemConfig.mockImplementation(async (projectId: string) =>
+      mockPrepareProjectCreation.mock.calls.some(([input]) => input.manifest.id === projectId)
+        ? { projectId, backend: 'opfs', providerBasePath: 'already-here' }
+        : undefined,
+    );
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    const create = async () =>
+      result.current.createProject({ id, project: fakeProject, files: {}, location: { kind: 'home' } });
+
+    const outcomes = await act(async () => Promise.allSettled([create(), create()]));
+
+    expect(outcomes.map((outcome) => outcome.status).toSorted()).toEqual(['fulfilled', 'rejected']);
+    const refused = outcomes.find((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected');
+    expect(refused?.reason).toEqual(new Error(`That project is already on this device: ${id}`));
+    expect(mockPrepareProjectCreation.mock.calls.filter(([input]) => input.manifest.id === id)).toHaveLength(1);
+  });
+
+  /* Defect R2: a reload mid-creation leaves the id's directory committed and its
+     journal row pending. The new page's recovery resumes it while its
+     materialize pass asks for the same id again; that must finish the one
+     creation, never allocate `<slug>-1` beside it. */
+  describe('an interrupted creation of a supplied id', () => {
+    const interrupted = { ...pendingCreate, files: {} };
+    const configured = async (projectId: string) =>
+      mockSetProjectFileSystemConfig.mock.calls.some(([config]) => config.projectId === projectId)
+        ? { projectId, backend: 'opfs', providerBasePath: interrupted.providerBasePath }
+        : undefined;
+    const createAgain = async (result: { readonly current: ReturnType<typeof useProjectManager> }) =>
+      result.current.createProject({
+        id: fakeProject.id,
+        chat: false,
+        project: fakeProject,
+        files: {},
+        location: { kind: 'home' },
+      });
+
+    beforeEach(() => {
+      mockGetProjectFileSystemConfig.mockImplementation(configured);
+      mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+    });
+
+    it('should finish the reloaded page’s recovery instead of creating a second directory', async () => {
+      let resolveCommit!: () => void;
+      mockGetPendingProjectOperations.mockResolvedValueOnce([interrupted]);
+      mockCommitPendingProjectDirectory.mockImplementationOnce(
+        async () =>
+          new Promise<{ status: 'already-committed' }>((resolve) => {
+            resolveCommit = () => {
+              resolve({ status: 'already-committed' });
+            };
+          }),
+      );
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+      await result.current.getProjectListing();
+
+      const again = createAgain(result);
+      resolveCommit();
+
+      await expect(again).rejects.toThrow(`That project is already on this device: ${fakeProject.id}`);
+      expect(mockPrepareProjectCreation).not.toHaveBeenCalled();
+      expect(mockCommitPendingProjectDirectory.mock.calls.map(([input]) => input.providerBasePath)).toEqual([
+        'test-project',
+      ]);
+    });
+
+    it('should finish a creation another tab left unfinished instead of creating a second directory', async () => {
+      mockListProjectManifests.mockResolvedValue({ roots: [], entries: [] });
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+      await result.current.getProjectListing();
+      /* Written after this page read the journal, by a tab closed mid-creation. */
+      mockGetPendingProjectOperations.mockResolvedValueOnce([interrupted]);
+      mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+
+      await expect(createAgain(result)).rejects.toThrow(`That project is already on this device: ${fakeProject.id}`);
+      expect(mockPrepareProjectCreation).not.toHaveBeenCalled();
+      expect(mockCommitPendingProjectDirectory.mock.calls.map(([input]) => input.providerBasePath)).toEqual([
+        'test-project',
+      ]);
+      expect(mockCompletePending).toHaveBeenCalledWith(interrupted.operationId);
+    });
   });
 
   /* Review R5: opening someone's project from Tau Cloud must not invent a chat

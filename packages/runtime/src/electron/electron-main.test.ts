@@ -461,6 +461,20 @@ describe('Electron main runtime helpers', () => {
     liveUtilities.length = 0;
   });
 
+  it('admits nine concurrent runtime leases under the desktop cap', async () => {
+    const { registerElectronRuntimeMain } = await import('#electron/main.js');
+    liveUtilities.length = 0;
+    const handle = registerElectronRuntimeMain({ utilityEntry: '/dist/main/kernel-host.js', maxUtilities: 64 });
+    const leases = Array.from({ length: 9 }, () => handle.connect({ purpose: 'main-process-client' }));
+    expect(liveUtilities).toHaveLength(9);
+    expect(liveUtilities.every((utility) => utility.postMessage.mock.calls.length === 1)).toBe(true);
+    for (const lease of leases) {
+      lease.dispose();
+    }
+    handle.dispose();
+    liveUtilities.length = 0;
+  });
+
   it('should answer a refused renderer request with the reason instead of a port', async () => {
     const { registerElectronRuntimeMain } = await import('#electron/main.js');
     liveUtilities.length = 0;

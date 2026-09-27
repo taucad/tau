@@ -67,7 +67,9 @@ design. It does not implement.
     artifact index, run `pnpm docs:validate`, and show the operator the page. Then **stop and
     await**: findings first, discussion next, implementation only on the operator's word. Record
     each ruling under `decisions` with its date, move `status` to `approved`, and only then hand
-    the approved revision to the blueprint's work package.
+    the approved revision to the blueprint's work package. The operator can pin comments on the
+    guide page; read them with `pnpm canvas:review list <subject>/api --open` and resolve each after
+    the revision that answers it (see [create-canvas](../create-canvas/SKILL.md), step 5).
 
 ## What a good guide does not do
 

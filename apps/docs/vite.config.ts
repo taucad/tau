@@ -1,7 +1,6 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { reactRouter } from '@react-router/dev/vite';
-import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 import tailwindcss from '@tailwindcss/vite';
 import mdx from 'fumadocs-mdx/vite';
 import { defineConfig } from 'vite';
@@ -9,6 +8,7 @@ import { defineConfig } from 'vite';
 import * as MdxConfig from './app/lib/fumadocs/source.config.js';
 
 const projectRoot = path.dirname(fileURLToPath(import.meta.url));
+const collectionsDirectory = path.resolve(projectRoot, '../../node_modules/.cache/fumadocs/apps/docs');
 
 const isNxGraphCreation =
   (globalThis as typeof globalThis & { NX_GRAPH_CREATION?: boolean }).NX_GRAPH_CREATION === true;
@@ -22,12 +22,16 @@ export default defineConfig({
     // the existing UI app discover this app's routes. The task process still loads it.
     ...(isNxGraphCreation ? [] : [reactRouter()]),
     tailwindcss(),
-    nxViteTsPaths(),
     mdx(MdxConfig, {
       configPath: path.resolve(projectRoot, 'app/lib/fumadocs/source.config.ts'),
-      outDir: path.resolve(projectRoot, '../../node_modules/.cache/fumadocs/apps/docs'),
+      outDir: collectionsDirectory,
     }),
   ],
+  resolve: {
+    // Fumadocs' virtual collections module has no resolver of its own; the tsconfig path of
+    // the same name only serves TypeScript.
+    alias: [{ find: /^fumadocs-mdx:collections\//u, replacement: `${collectionsDirectory}/` }],
+  },
   build: {
     target: 'es2022',
   },

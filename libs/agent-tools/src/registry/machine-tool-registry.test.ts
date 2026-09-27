@@ -39,6 +39,7 @@ import { createMachineToolRegistry } from '#registry/machine-tool-registry.js';
 import type { MachinePrintPlanner } from '#registry/machine-tool-registry.js';
 import type { BambuStudioEngine } from '#registry/print-profiles.js';
 import { placementOver, scriptedTransport } from '#registry/tau-host.fixture.js';
+import type { ScriptedResponse } from '#registry/tau-host.fixture.js';
 import { createRuntimeAgentClients } from '#runtime/runtime-agent-clients.js';
 import type { RuntimeAgentClient } from '#runtime/runtime-agent-clients.js';
 
@@ -672,15 +673,13 @@ describe('machine tool registry', () => {
       }
     });
 
-    const pausedOnPrint = async () => {
+    const printCall = { id: 'call-print', name: 'request_print', input: { targetFile: 'main.ts' } };
+    const pausedOnPrint = async (continued: readonly ScriptedResponse[] = [{ text: 'The print is on its way.' }]) => {
       directory = await mkdtemp(join(tmpdir(), 'tau-request-print-'));
       const logPath = join(directory, 'events.jsonl');
       const fixture = clientFixture();
       const registry = createMachineToolRegistry(fixture.client, { planPrint, projectId });
-      const transport = scriptedTransport([
-        { toolCalls: [{ id: 'call-print', name: 'request_print', input: { targetFile: 'main.ts' } }] },
-        { text: 'The print is on its way.' },
-      ]);
+      const transport = scriptedTransport([{ toolCalls: [printCall] }, ...continued]);
       let tick = 0;
       let id = 0;
       const host = createTauAgentHost({
@@ -758,6 +757,25 @@ describe('machine tool registry', () => {
         String.raw`approved: \"Print pyramid.gcode.3mf`,
       );
       await expect(host.snapshot('chat-print')).resolves.toMatchObject({ state: 'completed' });
+      await host.close();
+    });
+
+    it('should report the answer to a re-call that recalls a request the hand-over already settled (GM.r2 H1)', async () => {
+      const { fixture, host, transport, interruptId } = await pausedOnPrint([
+        { toolCalls: [{ ...printCall, id: 'call-print-again' }] },
+        { text: 'The print is on its way.' },
+      ]);
+
+      await host.resolveInterrupt({ runId: 'run-print', interruptId, outcome: 'approved' });
+      await vi.waitFor(() => {
+        expect(fixture.requests.get('call-print')?.state).toBe('approved');
+      });
+      await host.resume('chat-print');
+
+      expect(fixture.requestPrint).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify(transport.requests.at(-1)?.messages)).toContain(
+        '"machineName":"Workshop X1C","approval":"approved"',
+      );
       await host.close();
     });
   });

@@ -40,6 +40,7 @@ const mocks = vi.hoisted(() => {
   const gl: RendererMock = {};
   const sceneBounds = { min: [-20, -10, -5], max: [20, 10, 5] };
   return {
+    noHoveredComponentIds: [] as readonly string[],
     camera: { name: 'perspective' },
     cameraRig: {
       actorRef: {
@@ -129,6 +130,8 @@ vi.mock('#hooks/use-graphics.js', () => ({
   useModelInteractionRef: () => mocks.graphicsActor,
   useModelInteractionSelector: (selector: (state: { context: Record<string, unknown> }) => unknown) =>
     selector({ context: {} }),
+  // No kinematics unit hovers a component; one stable list keeps the model's visual state unchanged.
+  useKinematicsSelector: () => mocks.noHoveredComponentIds,
 }));
 
 vi.mock('#machines/model-interaction.machine.js', () => ({

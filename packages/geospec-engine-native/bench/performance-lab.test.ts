@@ -59,7 +59,7 @@ const scaleCellTessellation = async (
 
 void describe('performance lab catalog', () => {
   void it('explains only source-bound target outcomes and legacy records without changing claims', async () => {
-    const currentHash = 'fb0920d448648cf1ea82c1305f8701c7992156a72f5a592cc569b3b3bec0bd51';
+    const currentHash = 'ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86';
     const referenceHash = '0d0da6ad2b5c7beca4eced08d489f2d4da6fc56baeb3270cdf8481a3979dcd9e';
     const [currentBytes, referenceBytes] = await Promise.all(
       [currentHash, referenceHash].map(async (sha256) => {
@@ -261,7 +261,7 @@ void describe('performance lab catalog', () => {
     }
   });
 
-  void it('times STEP-scale interference and wall without tessellating and tessellates in analyzeMesh', async () => {
+  void it('runs STEP-scale interference and wall untessellated and meshes once for analyzeMesh', async () => {
     const settling = new Set(['toHaveNoComponentInterference', 'toHaveMinimumWallThickness']);
     const cells = Map.groupBy(
       performanceLabScaleCases.filter(({ matcher }) => settling.has(matcher)),

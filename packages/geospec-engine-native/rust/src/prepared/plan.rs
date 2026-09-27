@@ -341,6 +341,12 @@ impl PreparedPlan {
             if claim.refusal.is_some() {
                 continue;
             }
+            // Ruling 32: an exact claim on a tessellated-only product refuses
+            // from the admission count, before any charge or selector work.
+            if let Some(refusal) = subject.tessellated_only_refusal(claim.capability) {
+                claim.refusal = Some(refusal);
+                continue;
+            }
             // C8: each claim phase is accounted alone, whatever earlier claims retained.
             subject.begin_demand_phase();
             let demand = claim.payload.demand();

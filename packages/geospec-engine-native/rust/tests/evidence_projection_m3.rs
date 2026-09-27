@@ -107,6 +107,7 @@ impl BrepSubject for ProjectionBrep {
             source_length_unit: "millimetre".into(),
             source_unit_to_millimeters: 1.0,
             occurrence_count: 0,
+            surfaceless_faces: 0,
         })
     }
 

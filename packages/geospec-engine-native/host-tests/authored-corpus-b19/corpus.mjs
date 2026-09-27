@@ -60,6 +60,31 @@ export const writeJson = (path, value) => {
 
 /** @type {(bytes: HostBytes) => string} */
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
+// The authored healing profile (GeoSpec native close-out ruling 1) admits a frozen report-v2 STEP subject under its
+// authored-v5 descriptor: only these two strings change, and the subjectHash is the SHA-256 of the descriptor. The
+// fixture closure's authored-v5-identity-amendment.json records every successor and its admission.
+const AUTHORED_V5_PROFILES = [
+  [
+    '"backendProfile":"occt-8.1.0-dev1-3d097a-report-v2"',
+    '"backendProfile":"occt-8.1.0-dev1-3d097a-report-authored-v5"',
+  ],
+  ['"ingestProfile":"geospec-step-xde-report-v2"', '"ingestProfile":"geospec-step-xde-report-authored-v5"'],
+];
+/** @type {(identity: string, descriptorUtf8: string | undefined) => string} */
+const admittedIdentity = (identity, descriptorUtf8) => {
+  if (
+    descriptorUtf8 === undefined ||
+    sha256(Buffer.from(descriptorUtf8)) !== identity ||
+    !AUTHORED_V5_PROFILES.every(([from]) => descriptorUtf8.includes(from))
+  ) {
+    return identity;
+  }
+  let successor = descriptorUtf8;
+  for (const [from, to] of AUTHORED_V5_PROFILES) {
+    successor = successor.replace(from, to);
+  }
+  return sha256(Buffer.from(successor));
+};
 /** @type {(bytes: HostBytes) => ByteRecord} */
 const utf8Record = (bytes) => {
   const value = Buffer.from(bytes);
@@ -167,9 +192,9 @@ const normalizeRow = (row, block, directActual, wallSubjects) => {
   const authored = exactArguments(row, claim, authoredRequestUtf8);
   /** @type {'contentHash' | 'subjectHash'} */
   const identityField = subject.subjectHash === undefined ? 'contentHash' : 'subjectHash';
-  // Every frozen plan binds exactly one identity; admission verifies it below.
-  const identity = /** @type {!string} */ (subject[identityField]);
   const transport = subjectTransport(row, block, wallSubjects);
+  // Every frozen plan binds exactly one identity; admission verifies its current (authored-v5) successor below.
+  const identity = admittedIdentity(/** @type {!string} */ (subject[identityField]), transport.subjectDescriptorUtf8);
   const limitations = [];
   if (authored.derivation.includes('reverse')) {
     limitations.push(

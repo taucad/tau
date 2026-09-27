@@ -1155,11 +1155,24 @@ pub(crate) fn nearest_cluster_gaps(
     };
     let mut pairs = Vec::new();
     let mut stack = Vec::new();
+    // Every node visit and leaf item test is charged, a unit per
+    // `BOX_TESTS_PER_UNIT` before each batch runs.
+    let mut tests = 0_u64;
+    let mut test = || {
+        let batch = tests % exact::BOX_TESTS_PER_UNIT == 0;
+        tests += 1;
+        if batch {
+            budget.charge(1)
+        } else {
+            Ok(())
+        }
+    };
     for current in 0..clusters.len() {
         let mut best: Option<(usize, ClusterGap)> = None;
         stack.push(0);
         while let Some(node) = stack.pop() {
             let node = &tree.nodes[node];
+            test()?;
             if skip(
                 dominant_gap(bounds[current], node.bounds).1,
                 node.least,
@@ -1169,6 +1182,7 @@ pub(crate) fn nearest_cluster_gaps(
             }
             let Some(children) = node.children else {
                 for &candidate in &tree.items[node.items.clone()] {
+                    test()?;
                     if candidate == current
                         || skip(
                             dominant_gap(bounds[current], bounds[candidate]).1,
@@ -2010,8 +2024,9 @@ mod tests {
         }
         assert!(actual.iter().any(|gap| gap.gap_mm == 0.0));
         assert!(actual.iter().any(|gap| gap.gap_mm < 0.0));
-        // Units are the primitive pairs of the gaps evaluated: at least one
-        // per cluster, and a small fraction of the sweep's slab scans.
+        // Units are the primitive pairs of the gaps evaluated plus a unit per
+        // 4,096 node visits and item tests: at least one per cluster, and a
+        // small fraction of the sweep's slab scans.
         let units = budget.used();
         assert!(
             units >= count as u64 && units * 8 < sweep_work,
@@ -2023,5 +2038,40 @@ mod tests {
         );
         let exceeded = nearest_cluster_gaps(&clusters, &Budget::new(units - 1)).unwrap_err();
         assert_eq!(exceeded.limit, units - 1);
+    }
+
+    /// Review R5-3: the box tree charges its node visits and leaf item tests
+    /// by the batch before they run, on top of the primitive pairs it
+    /// evaluates. Two lone boxes: each query visits the root leaf and tests
+    /// both items (six tests, one batch) and evaluates the other box once.
+    #[test]
+    fn the_box_tree_charges_its_visits_before_they_run() {
+        let clusters: Vec<ClusterReport> = [[0.0, 0.0, 0.0], [5.0, 0.0, 0.0]]
+            .into_iter()
+            .enumerate()
+            .map(|(index, min)| {
+                let aabb = Aabb {
+                    min,
+                    max: min.map(|value| value + 1.0),
+                };
+                ClusterReport {
+                    label: format!("c{index}"),
+                    primitives: vec![PrimitiveRecord {
+                        name: format!("c{index}p0"),
+                        color: None,
+                        vertices: 8,
+                        aabb,
+                    }],
+                    aabb,
+                    centroid: [0.0; 3],
+                    total_vertices: 8,
+                }
+            })
+            .collect();
+        let budget = Budget::new(3);
+        let gaps = nearest_cluster_gaps(&clusters, &budget).unwrap();
+        assert_eq!((gaps.len(), budget.used()), (1, 1 + 2));
+        let exceeded = nearest_cluster_gaps(&clusters, &Budget::new(2)).unwrap_err();
+        assert_eq!(exceeded.limit, 2);
     }
 }

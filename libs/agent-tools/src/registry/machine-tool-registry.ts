@@ -1,5 +1,12 @@
 /* eslint-disable @typescript-eslint/naming-convention -- tool identifiers are an external wire contract */
-import type { HostToolInvocation, InterruptResolution, JsonObject, JsonValue, ToolRegistry } from '@taucad/agent-host';
+import type {
+  HostToolApprovalAnswer,
+  HostToolInvocation,
+  InterruptResolution,
+  JsonObject,
+  JsonValue,
+  ToolRegistry,
+} from '@taucad/agent-host';
 import type { KernelIssue } from '@taucad/runtime';
 import type {
   MachineArtifactReference,
@@ -741,6 +748,7 @@ export const createMachineToolRegistry = (
           (name !== 'prepare_machine_print' || options.projectId !== undefined),
       )
       .map((name) => definitionFor(name)),
+  answerApproval: async (answer) => answerPrintApproval(client, answer),
   async invoke(invocation) {
     if (!toolNames.has(invocation.toolName)) {
       return {
@@ -781,6 +789,30 @@ export const createMachineToolRegistry = (
     }
   },
 });
+
+/**
+ * Settle the print request a person answered in chat (D5, GM.r1 H2): the host hands every answer to the approval
+ * `request_print` asked for here, whether or not the run continues.
+ *
+ * A request no longer awaiting approval was already settled (by the call's own recall, the Print pane, or a replayed
+ * answer) and is left alone, so a second hand-over settles nothing twice.
+ *
+ * @param client - The negotiated machines facet.
+ * @param answer - The tool, its request's payload and the person's answer.
+ */
+const answerPrintApproval = async (client: MachineClient, answer: HostToolApprovalAnswer): Promise<void> => {
+  const { toolName, payload, resolution } = answer;
+  const { requestId } = payload;
+  if (toolName !== 'request_print' || payload['kind'] !== 'print-request' || typeof requestId !== 'string') {
+    return;
+  }
+  /* Nobody waits on the hand-over, and an approval's upload answers to the host rather than to a caller. */
+  const { signal } = new AbortController();
+  const request = await findRequest(client, requestId, signal);
+  if (request.state === 'awaiting-approval') {
+    await settleApproval(client, { requestId, resolution, signal });
+  }
+};
 
 /** Whether a name belongs to the bounded machine registry. @internal */
 export const isMachineToolName = (name: string): name is MachineToolName => toolNames.has(name);

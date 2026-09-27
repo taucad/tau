@@ -569,6 +569,8 @@ export const piMessageToProvider = (message: AgentMessage, identities: MessageId
     metadata: {
       timestamp: message.timestamp,
       ...(details ? { substituted: details.substituted } : {}),
+      /* The recalled approval this call used: recorded with its output, so it is spent once (D5). */
+      ...(details?.approval ? { approval: { interruptId: details.approval.interruptId } } : {}),
     },
   };
 };

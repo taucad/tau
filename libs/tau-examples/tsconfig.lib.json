@@ -6,7 +6,6 @@
     "types": ["node", "vite/client"],
     "target": "ESNext",
     "paths": {
-      "#*": ["./src/*"],
       "libcascade": ["../api-extractor/src/generated/opencascade/modules/libcascade/index.d.ts"]
     }
   },

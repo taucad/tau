@@ -1,5 +1,7 @@
-//! Approximate observation of f32-merged polyhedral Boolean output.
-//! Neither the scalar nor the reporting cutoff is a material-overlap proof.
+//! Pairwise component overlap. Mesh subjects: an approximate observation of
+//! f32-merged polyhedral Boolean output, never a material-overlap proof. STEP
+//! subjects (S10, INTERFERENCE-EXACT-01): the exact regular-solid Common of
+//! each candidate pair of leaf occurrences.
 
 use crate::protocol::WorkCounter;
 use std::{
@@ -12,11 +14,15 @@ use std::{
 use crate::{
     analysis::mesh::{analyze, MeshAnalysisRecord, Primitive},
     backend::{
-        brep::{Bounds, BrepEntity, TessellationProfile},
+        brep::{
+            Bounds, BrepSubject, OccurrenceFacts, OccurrenceOverlap, OperandMemo,
+            TessellationProfile,
+        },
         csg::{BooleanOp, SolidId},
         csg_scope::CsgScope,
         BackendError, BackendErrorKind, TriangleMesh,
     },
+    budget::{Budget, BudgetExceeded},
     codec::Json,
     result::Diagnostic,
     subject::Subject,
@@ -34,8 +40,18 @@ pub(crate) const TESSELLATION_PROFILE: TessellationProfile = TessellationProfile
 pub(crate) struct Component {
     pub id: u32,
     pub label: String,
-    pub mesh: Rc<TriangleMesh>,
+    /// The polyhedral operand of a mesh partition; an exact STEP leaf has none.
+    pub mesh: Option<Rc<TriangleMesh>>,
+    /// Mesh bounds, or a STEP leaf's exact `AddOptimal` occurrence box.
     pub bounds: Bounds,
+}
+
+impl Component {
+    fn mesh(&self) -> &Rc<TriangleMesh> {
+        self.mesh
+            .as_ref()
+            .expect("a mesh partition component owns its operand")
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -64,6 +80,8 @@ pub(crate) struct Overlap {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Evidence {
+    /// INTERFERENCE-EXACT-01 (STEP leaves) rather than the mesh observation.
+    pub exact: bool,
     pub component_count: usize,
     pub components: Vec<ComponentEvidence>,
     pub selected_pairs: Option<Vec<SelectedPair>>,
@@ -82,6 +100,13 @@ pub(crate) struct ComponentEvidence {
 pub(crate) enum Analysis {
     Complete(Evidence),
     Refused(Vec<Diagnostic>),
+    /// S10: the claim's budget cannot afford this pair's counted work, so its
+    /// Boolean never ran; shared budget exhaustion is `MATCHER_TIMEOUT` (§16).
+    PairBudget {
+        exceeded: BudgetExceeded,
+        pair: SelectedPair,
+        work: u64,
+    },
 }
 
 /// Identities and labels are retained admission facts. Lead uses this before
@@ -106,14 +131,32 @@ pub(crate) fn build_component_labels(
     let Some(occurrences) = subject.source_occurrence_structure()? else {
         return Ok(Vec::new());
     };
-    Ok(occurrences
-        .iter()
-        .enumerate()
-        .map(|(index, occurrence)| ComponentIdentity {
-            id: index as u32,
-            label: occurrence_label(occurrence, index),
+    Ok(leaf_components(&occurrences)
+        .into_iter()
+        .map(|id| ComponentIdentity {
+            id,
+            label: occurrence_label(&occurrences[id as usize], id as usize),
         })
         .collect())
+}
+
+/// C2 (rulings 6 and 32): the component partition is the leaves (occurrences
+/// no other occurrence names as parent) that own at least one face. A parent
+/// is assembly structure, and a zero-face leaf stays a selector occurrence.
+pub(crate) fn leaf_components(occurrences: &[OccurrenceFacts]) -> Vec<u32> {
+    let mut parents = vec![false; occurrences.len()];
+    for occurrence in occurrences {
+        if let Some(slot) = occurrence
+            .parent
+            .and_then(|parent| parents.get_mut(parent as usize))
+        {
+            *slot = true;
+        }
+    }
+    (0..occurrences.len())
+        .filter(|&index| !parents[index] && occurrences[index].face_count > 0)
+        .map(|index| index as u32)
+        .collect()
 }
 
 pub(crate) enum PreparedComponents {
@@ -208,9 +251,18 @@ struct CompletedOverlap {
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum OverlapRequest {
     // Identity is the enclosing PreparedOverlap's immutable operand_identity.
-    Source { component: u32, units: u64 },
+    Source {
+        component: u32,
+        units: u64,
+    },
     Boolean,
     Properties,
+    /// One exact pair's counted work (S10), replayed in order on a hit.
+    Pair {
+        left: u32,
+        right: u32,
+        work: u64,
+    },
 }
 
 impl CompletedOverlap {
@@ -270,17 +322,9 @@ fn operand_identity(subject: &Subject) -> Result<String, BackendError> {
 }
 
 pub(crate) fn prepare_components(subject: &Subject) -> Result<PreparedComponents, BackendError> {
-    let components = match components(subject)? {
-        Some(value) => value,
-        None => {
-            // ponytail: STEP's primitiveCount is the report mesh's (one primitive
-            // when it has triangles), so only this diagnostic still builds it,
-            // uncharged (ruling 11); a structure count replaces it in Wave 2 (C3b).
-            subject.report_mesh()?;
-            let primitive_count = subject
-                .mesh_record()
-                .and_then(named_identities)
-                .map_or(0, |identities| identities.len());
+    let mut components = match components(subject)? {
+        Partition::Components(value) => value,
+        Partition::Inconclusive(primitive_count) => {
             let mut diagnostic = Diagnostic::error(
                 "GEOSPEC_COMPONENT_PARTITION_INCONCLUSIVE",
                 "GeoSpec could not partition this subject into two or more components.",
@@ -294,83 +338,36 @@ pub(crate) fn prepare_components(subject: &Subject) -> Result<PreparedComponents
         }
     };
 
-    for component in &components {
-        let record = MeshAnalysisRecord {
-            positions: component.mesh.positions.clone(),
-            triangles: component.mesh.triangles.clone(),
-            triangle_primitives: vec![0; component.mesh.triangles.len()],
-            primitives: vec![Primitive {
-                name: component.label.clone(),
-                vertex_start: 0,
-                vertex_count: component.mesh.positions.len() as u32,
-            }],
-        };
-        let analysis = analyze(&Rc::new(record));
-        let watertight = analysis.watertight();
-        if !watertight.watertight {
-            let mut diagnostic = Diagnostic::error(
-                "GEOSPEC_MANIFOLD_COMPONENT_INVALID",
-                format!(
-                    "Component '{}' is not a closed oriented polyhedron, so the overlap observation is unavailable.",
-                    component.label
-                ),
-            );
-            diagnostic.suggestion = Some("Repair the operand mesh to a closed oriented polyhedron; this ancillary operation reports an approximate observation, not an interference verdict.".into());
-            diagnostic.spatial = Some(bounds_spatial(component.bounds));
-            diagnostic.details = Some(Json::object([
-                ("label", Json::string(&component.label)),
-                (
-                    "triangleCount",
-                    Json::Number(component.mesh.triangles.len() as f64),
-                ),
-                (
-                    "watertight",
-                    Json::object([
-                        ("watertight", Json::Bool(watertight.watertight)),
-                        (
-                            "irregularEdges",
-                            Json::Number(watertight.irregular_edges as f64),
-                        ),
-                        (
-                            "openBoundaryEdges",
-                            Json::Number(watertight.open_boundary_edges as f64),
-                        ),
-                        (
-                            "nonManifoldEdges",
-                            Json::Number(watertight.non_manifold_edges as f64),
-                        ),
-                        ("totalEdges", Json::Number(watertight.total_edges as f64)),
-                        (
-                            "irregularEdgeFraction",
-                            Json::Number(watertight.irregular_edge_fraction),
-                        ),
-                    ]),
-                ),
-            ]));
+    // Exact STEP leaves carry no mesh; their operands qualify per candidate pair.
+    for component in components.iter_mut().filter(|value| value.mesh.is_some()) {
+        if let Some(diagnostic) = closure_refusal(component) {
             return Ok(PreparedComponents::Refused(vec![diagnostic]));
         }
     }
 
     let operand_identity = operand_identity(subject)?;
+    let meshes = components
+        .iter()
+        .filter(|value| value.mesh.is_some())
+        .count();
     let bytes = components.iter().fold(
         (size_of::<PreparedComponents>() as u64)
             .saturating_add(allocation_bytes::<usize>(2)) // PreparedComponents Rc counters.
             .saturating_add(allocation_bytes::<Component>(components.capacity()))
             .saturating_add(operand_identity.capacity() as u64),
         |sum, component| {
+            let sum = sum.saturating_add(component.label.capacity() as u64);
+            let Some(mesh) = &component.mesh else {
+                return sum;
+            };
             sum.saturating_add(size_of::<TriangleMesh>() as u64)
                 .saturating_add(allocation_bytes::<usize>(2)) // Mesh Rc counters.
-                .saturating_add(allocation_bytes::<[f64; 3]>(
-                    component.mesh.positions.capacity(),
-                ))
-                .saturating_add(allocation_bytes::<[u32; 3]>(
-                    component.mesh.triangles.capacity(),
-                ))
-                .saturating_add(component.label.capacity() as u64)
+                .saturating_add(allocation_bytes::<[f64; 3]>(mesh.positions.capacity()))
+                .saturating_add(allocation_bytes::<[u32; 3]>(mesh.triangles.capacity()))
         },
     );
     if bytes > subject.retention_limits.max_mesh_bytes
-        || components.len() as u64 > u64::from(subject.retention_limits.max_mesh_entries)
+        || meshes as u64 > u64::from(subject.retention_limits.max_mesh_entries)
     {
         return Err(BackendError {
             kind: BackendErrorKind::Unsupported,
@@ -385,6 +382,78 @@ pub(crate) fn prepare_components(subject: &Subject) -> Result<PreparedComponents
     }))
 }
 
+/// C3(a): the closure guard of one mesh component reads the component's own
+/// vectors, moved into the analysis record and back rather than copied.
+fn closure_refusal(component: &mut Component) -> Option<Diagnostic> {
+    let mesh = component.mesh.take().expect("a mesh partition component");
+    let TriangleMesh {
+        positions,
+        triangles,
+    } = Rc::try_unwrap(mesh).unwrap_or_else(|shared| (*shared).clone());
+    let record = Rc::new(MeshAnalysisRecord {
+        triangle_primitives: vec![0; triangles.len()],
+        primitives: vec![Primitive {
+            name: component.label.clone(),
+            vertex_start: 0,
+            vertex_count: positions.len() as u32,
+        }],
+        positions,
+        triangles,
+    });
+    let watertight = analyze(&record).watertight();
+    let MeshAnalysisRecord {
+        positions,
+        triangles,
+        ..
+    } = Rc::try_unwrap(record).unwrap_or_else(|shared| (*shared).clone());
+    let triangle_count = triangles.len();
+    component.mesh = Some(Rc::new(TriangleMesh {
+        positions,
+        triangles,
+    }));
+    if watertight.watertight {
+        return None;
+    }
+    let mut diagnostic = Diagnostic::error(
+        "GEOSPEC_MANIFOLD_COMPONENT_INVALID",
+        format!(
+            "Component '{}' is not a closed oriented polyhedron, so the overlap observation is unavailable.",
+            component.label
+        ),
+    );
+    diagnostic.suggestion = Some("Repair the operand mesh to a closed oriented polyhedron; this ancillary operation reports an approximate observation, not an interference verdict.".into());
+    diagnostic.spatial = Some(bounds_spatial(component.bounds));
+    diagnostic.details = Some(Json::object([
+        ("label", Json::string(&component.label)),
+        ("triangleCount", Json::Number(triangle_count as f64)),
+        (
+            "watertight",
+            Json::object([
+                ("watertight", Json::Bool(watertight.watertight)),
+                (
+                    "irregularEdges",
+                    Json::Number(watertight.irregular_edges as f64),
+                ),
+                (
+                    "openBoundaryEdges",
+                    Json::Number(watertight.open_boundary_edges as f64),
+                ),
+                (
+                    "nonManifoldEdges",
+                    Json::Number(watertight.non_manifold_edges as f64),
+                ),
+                ("totalEdges", Json::Number(watertight.total_edges as f64)),
+                (
+                    "irregularEdgeFraction",
+                    Json::Number(watertight.irregular_edge_fraction),
+                ),
+            ]),
+        ),
+    ]));
+    Some(diagnostic)
+}
+
+/// The mesh route: Manifold Booleans of a mesh subject's named components.
 pub(crate) fn analyze_overlap(
     subject: &Subject,
     csg: &mut CsgScope<'_>,
@@ -392,13 +461,11 @@ pub(crate) fn analyze_overlap(
     selected: Option<&[SelectedPair]>,
 ) -> Result<Analysis, BackendError> {
     if subject.brep.is_some() {
-        // STEP's component preparation requests every occurrence profile even
-        // on warm replay; the BRep demand was already charged by the claim owner.
-        if let Some(occurrences) = subject.source_occurrence_structure()? {
-            if occurrences.len() >= 2 {
-                csg.charge(occurrences.len() as u64)?;
-            }
-        }
+        return Err(BackendError {
+            kind: BackendErrorKind::Unsupported,
+            message: "STEP overlap is the exact route; Manifold observes mesh subjects only."
+                .into(),
+        });
     }
     let prepared_owner = subject.overlap_components()?;
     let prepared = match prepared_owner.as_ref() {
@@ -430,6 +497,7 @@ pub(crate) fn analyze_overlap(
                         csg.charge_cached_source(&operand_identity, *component, *units)?;
                     }
                     OverlapRequest::Boolean | OverlapRequest::Properties => csg.charge(1)?,
+                    OverlapRequest::Pair { work, .. } => csg.charge(*work)?,
                 }
             }
             if let Some(resident) = &subject.resident_overlaps {
@@ -471,6 +539,7 @@ pub(crate) fn analyze_overlap(
                             csg.charge_cached_source(&operand_identity, *component, *units)?;
                         }
                         OverlapRequest::Boolean | OverlapRequest::Properties => csg.charge(1)?,
+                        OverlapRequest::Pair { work, .. } => csg.charge(*work)?,
                     }
                 }
                 subject.observations.add(WorkCounter::OverlapDiskHits, 1);
@@ -495,9 +564,9 @@ pub(crate) fn analyze_overlap(
             None => {
                 requests.push(OverlapRequest::Source {
                     component: left.id,
-                    units: CsgScope::mesh_cost(&left.mesh),
+                    units: CsgScope::mesh_cost(left.mesh()),
                 });
-                let value = match csg.admit_cached(&operand_identity, left.id, &left.mesh, &[]) {
+                let value = match csg.admit_cached(&operand_identity, left.id, left.mesh(), &[]) {
                     Ok(value) => value,
                     Err(error) if error.kind == BackendErrorKind::InvalidInput => {
                         return Ok(Analysis::Refused(vec![admission_diagnostic(left, &error)]));
@@ -513,9 +582,9 @@ pub(crate) fn analyze_overlap(
             None => {
                 requests.push(OverlapRequest::Source {
                     component: right.id,
-                    units: CsgScope::mesh_cost(&right.mesh),
+                    units: CsgScope::mesh_cost(right.mesh()),
                 });
-                let value = match csg.admit_cached(&operand_identity, right.id, &right.mesh, &[]) {
+                let value = match csg.admit_cached(&operand_identity, right.id, right.mesh(), &[]) {
                     Ok(value) => value,
                     Err(error) if error.kind == BackendErrorKind::InvalidInput => {
                         return Ok(Analysis::Refused(vec![admission_diagnostic(right, &error)]));
@@ -545,15 +614,9 @@ pub(crate) fn analyze_overlap(
         }
     }
     let evidence = Evidence {
+        exact: false,
         component_count: components.len(),
-        components: components
-            .iter()
-            .map(|component| ComponentEvidence {
-                id: component.id,
-                label: component.label.clone(),
-                bounds: component.bounds,
-            })
-            .collect(),
+        components: component_evidence(components),
         selected_pairs,
         checked_pairs: candidates.len(),
         tolerance,
@@ -586,6 +649,224 @@ pub(crate) fn analyze_overlap(
         }
     }
     Ok(Analysis::Complete(evidence))
+}
+
+/// S10 (ruling 23, INTERFERENCE-EXACT-01): each candidate pair of leaf
+/// occurrences, from their exact boxes, answers with the exact regular-solid
+/// Common. The claim's memo qualifies an occurrence once (C7), and only for a
+/// candidate pair, so an invalid non-candidate never refuses (ruling 10).
+pub(crate) fn analyze_exact_overlap(
+    subject: &Subject,
+    brep: &dyn BrepSubject,
+    memo: &mut OperandMemo,
+    budget: &Budget,
+    tolerance: f64,
+    selected: Option<&[SelectedPair]>,
+) -> Result<Analysis, BackendError> {
+    // Every occurrence's exact box is requested, on warm replay too; the BRep
+    // demand was already charged by the claim owner.
+    if let Some(occurrences) = subject.source_occurrence_structure()? {
+        if occurrences.len() >= 2 {
+            charge(budget, occurrences.len() as u64)?;
+        }
+    }
+    let prepared_owner = subject.overlap_components()?;
+    let prepared = match prepared_owner.as_ref() {
+        PreparedComponents::Ready(value) => value,
+        PreparedComponents::Refused(diagnostics) => {
+            return Ok(Analysis::Refused(diagnostics.clone()))
+        }
+    };
+    if prepared.operand_identity != operand_identity(subject)? {
+        return Err(BackendError {
+            kind: BackendErrorKind::ComputationFailed,
+            message: "Component partition identity differs from its immutable owner.".into(),
+        });
+    }
+    let components = &prepared.components;
+    {
+        let completed = prepared.completed.borrow();
+        if let Some(cached) = completed
+            .as_ref()
+            .filter(|value| value.evidence.exact && value.matches(tolerance, selected))
+        {
+            for request in &cached.requests {
+                if let OverlapRequest::Pair { left, right, work } = request {
+                    if let Some(exhausted) = afford(budget, components, *left, *right, *work)? {
+                        return Ok(exhausted);
+                    }
+                }
+            }
+            if let Some(resident) = &subject.resident_overlaps {
+                resident.borrow_mut().touch(&prepared_owner);
+            }
+            subject
+                .observations
+                .add(WorkCounter::OverlapResidentHits, 1);
+            return Ok(Analysis::Complete(cached.evidence.clone()));
+        }
+    }
+    *prepared.completed.borrow_mut() = None;
+    if let Some(resident) = &subject.resident_overlaps {
+        resident.borrow_mut().forget(&prepared_owner);
+    }
+
+    let candidates = overlap_candidates(components, selected, tolerance);
+    let volume_epsilon = tolerance.powi(3).max(1e-12);
+    let mut requests = Vec::with_capacity(candidates.len());
+    let mut overlaps = Vec::new();
+    for (left_index, right_index) in &candidates {
+        let left = &components[*left_index];
+        let right = &components[*right_index];
+        let remaining = budget.limit().saturating_sub(budget.used());
+        let (work, volume, bounds) = match brep
+            .occurrence_overlap_memoized(left.id, right.id, tolerance, remaining, memo)?
+        {
+            OccurrenceOverlap::WorkExceeded { work } => {
+                return afford(budget, components, left.id, right.id, work)?
+                    .map(Ok)
+                    .unwrap_or_else(|| {
+                        Err(BackendError {
+                            kind: BackendErrorKind::ComputationFailed,
+                            message: "Exact overlap work exceeded an affordable limit.".into(),
+                        })
+                    });
+            }
+            OccurrenceOverlap::Unqualified {
+                left: is_left,
+                reason,
+            } => {
+                let component = if is_left { left } else { right };
+                return Ok(Analysis::Refused(vec![exact_component_diagnostic(
+                    component, &reason,
+                )]));
+            }
+            OccurrenceOverlap::Residual {
+                work,
+                volume,
+                bounds,
+                ..
+            } => (work, volume, bounds),
+        };
+        if let Some(exhausted) = afford(budget, components, left.id, right.id, work)? {
+            return Ok(exhausted);
+        }
+        requests.push(OverlapRequest::Pair {
+            left: left.id,
+            right: right.id,
+            work,
+        });
+        if volume > volume_epsilon {
+            overlaps.push(Overlap {
+                left_component_id: left.id,
+                right_component_id: right.id,
+                left_label: left.label.clone(),
+                right_label: right.label.clone(),
+                intersection_volume: volume,
+                witness_point: bounds.map(bounds_center),
+            });
+        }
+    }
+    let evidence = Evidence {
+        exact: true,
+        component_count: components.len(),
+        components: component_evidence(components),
+        selected_pairs: selected.map(<[SelectedPair]>::to_vec),
+        checked_pairs: candidates.len(),
+        tolerance,
+        overlaps,
+    };
+    subject.observations.add(WorkCounter::OverlapBuilds, 1);
+    let completed = CompletedOverlap {
+        evidence: evidence.clone(),
+        requests,
+    };
+    // ponytail: resident reuse only; the authenticated disk family is the
+    // Manifold route's. Add an exact family when cross-process reuse matters.
+    if prepared
+        .retained_bytes
+        .saturating_add(completed.allocated_bytes())
+        <= subject.retention_limits.max_mesh_bytes
+    {
+        if let Some(resident) = &subject.resident_overlaps {
+            resident.borrow_mut().insert(&prepared_owner, completed);
+        }
+    }
+    Ok(Analysis::Complete(evidence))
+}
+
+/// Charge one pair's counted work, or name the pair the budget cannot afford
+/// without charging it, so the refusal keeps the pair (cold and warm alike).
+fn afford(
+    budget: &Budget,
+    components: &[Component],
+    left: u32,
+    right: u32,
+    work: u64,
+) -> Result<Option<Analysis>, BackendError> {
+    if work <= budget.limit().saturating_sub(budget.used()) {
+        charge(budget, work)?;
+        return Ok(None);
+    }
+    let label = |id: u32| {
+        components
+            .iter()
+            .find(|component| component.id == id)
+            .map(|component| component.label.clone())
+            .unwrap_or_default()
+    };
+    Ok(Some(Analysis::PairBudget {
+        exceeded: BudgetExceeded {
+            limit: budget.limit(),
+            used: budget.used().saturating_add(work),
+        },
+        pair: SelectedPair {
+            left,
+            right,
+            left_label: label(left),
+            right_label: label(right),
+        },
+        work,
+    }))
+}
+
+fn charge(budget: &Budget, units: u64) -> Result<(), BackendError> {
+    budget.charge(units).map_err(|error| BackendError {
+        kind: BackendErrorKind::BudgetExceeded {
+            limit: error.limit,
+            used: error.used,
+        },
+        message: "The claim exhausted its logical request budget.".into(),
+    })
+}
+
+fn component_evidence(components: &[Component]) -> Vec<ComponentEvidence> {
+    components
+        .iter()
+        .map(|component| ComponentEvidence {
+            id: component.id,
+            label: component.label.clone(),
+            bounds: component.bounds,
+        })
+        .collect()
+}
+
+fn exact_component_diagnostic(component: &Component, reason: &str) -> Diagnostic {
+    let mut diagnostic = Diagnostic::error(
+        "GEOSPEC_EXACT_COMPONENT_INVALID",
+        format!(
+            "Component '{}' is not one regular solid, so its exact overlap is unavailable.",
+            component.label
+        ),
+    );
+    diagnostic.suggestion = Some("Repair or re-export the part as one closed, valid solid; the exact overlap needs a regular-solid operand for every candidate pair.".into());
+    diagnostic.spatial = Some(bounds_spatial(component.bounds));
+    diagnostic.details = Some(Json::object([
+        ("label", Json::string(&component.label)),
+        ("componentId", Json::Number(f64::from(component.id))),
+        ("reason", Json::string(reason)),
+    ]));
+    diagnostic
 }
 
 fn overlap_candidates(
@@ -641,63 +922,60 @@ fn admission_diagnostic(component: &Component, error: &BackendError) -> Diagnost
         ("label", Json::string(&component.label)),
         (
             "triangleCount",
-            Json::Number(component.mesh.triangles.len() as f64),
+            Json::Number(component.mesh().triangles.len() as f64),
         ),
     ]));
     diagnostic
 }
 
-fn components(subject: &Subject) -> Result<Option<Vec<Component>>, BackendError> {
-    if let Some(record) = subject.mesh_record() {
-        if let Some(value) = named_partition(record) {
-            return Ok(Some(value));
-        }
-    }
-    let (Some(_), Some(occurrences)) = (
-        subject.brep.as_deref(),
-        subject.source_occurrence_structure()?,
-    ) else {
-        return Ok(None);
-    };
-    if occurrences.len() < 2 {
-        return Ok(None);
-    }
-    // Each occurrence becomes its own retained tessellation entry and the
-    // partition diagnostic's report mesh one more (R10 built it first), so N
-    // occurrences need N + 1 entries whatever is already retained: refuse with
-    // the tessellation refusal before the first BRepMesh pass.
-    if occurrences.len() as u64 >= u64::from(subject.retention_limits.max_mesh_entries) {
-        return Err(BackendError {
-            kind: BackendErrorKind::Unsupported,
-            message: "Tessellation demands exceed the declared analysis retention entry limit."
-                .into(),
-        });
-    }
-    let mut result = Vec::new();
-    for (index, occurrence) in occurrences.iter().enumerate() {
-        let mesh =
-            subject.tessellate(BrepEntity::Occurrence(index as u32), TESSELLATION_PROFILE)?;
-        if let Some(component) = occurrence_component(index, occurrence, mesh)? {
-            result.push(component);
-        }
-    }
-    Ok((result.len() >= 2).then_some(result))
+enum Partition {
+    Components(Vec<Component>),
+    /// Fewer than two components; the count found, from structure (C3).
+    Inconclusive(usize),
 }
 
-fn occurrence_component(
-    index: usize,
-    occurrence: &crate::backend::brep::OccurrenceFacts,
-    mesh: Rc<TriangleMesh>,
-) -> Result<Option<Component>, BackendError> {
-    if mesh.triangles.is_empty() {
-        return Ok(None);
+fn components(subject: &Subject) -> Result<Partition, BackendError> {
+    let Some(brep) = subject.brep.as_deref() else {
+        let record = subject.mesh_record();
+        if let Some(value) = record.and_then(named_partition) {
+            return Ok(Partition::Components(value));
+        }
+        let count = record
+            .and_then(named_identities)
+            .map_or(0, |identities| identities.len());
+        return Ok(Partition::Inconclusive(count));
+    };
+    // C2/C3/S10: the leaves with faces and their exact occurrence boxes; no
+    // tessellation. An occurrence-free document is one body when it has faces.
+    let Some(occurrences) = subject.source_occurrence_structure()? else {
+        return Ok(Partition::Inconclusive(0));
+    };
+    if occurrences.is_empty() {
+        return Ok(Partition::Inconclusive(usize::from(
+            !brep.faces()?.is_empty(),
+        )));
     }
-    Ok(Some(Component {
-        id: index as u32,
-        label: occurrence_label(occurrence, index),
-        bounds: mesh_bounds(&mesh)?,
-        mesh,
-    }))
+    let leaves = leaf_components(&occurrences);
+    if leaves.len() < 2 {
+        return Ok(Partition::Inconclusive(leaves.len()));
+    }
+    let occurrences = subject
+        .source_occurrences()?
+        .expect("a BRep subject has source occurrences");
+    Ok(Partition::Components(
+        leaves
+            .into_iter()
+            .map(|id| {
+                let occurrence = &occurrences[id as usize];
+                Component {
+                    id,
+                    label: occurrence_label(occurrence, id as usize),
+                    mesh: None,
+                    bounds: occurrence.bounds,
+                }
+            })
+            .collect(),
+    ))
 }
 
 fn named_identities(record: &MeshAnalysisRecord) -> Option<Vec<ComponentIdentity>> {
@@ -764,13 +1042,13 @@ fn named_partition(record: &MeshAnalysisRecord) -> Option<Vec<Component>> {
                 id: identity.id,
                 label: identity.label,
                 bounds: mesh_bounds(&mesh).ok()?,
-                mesh,
+                mesh: Some(mesh),
             })
         })
         .collect()
 }
 
-fn occurrence_label(occurrence: &crate::backend::brep::OccurrenceFacts, index: usize) -> String {
+fn occurrence_label(occurrence: &OccurrenceFacts, index: usize) -> String {
     for value in [
         Some(occurrence.path.as_str()),
         occurrence.instance_name.as_deref(),
@@ -825,7 +1103,21 @@ fn bounds_spatial(bounds: Bounds) -> Json {
 }
 
 pub(crate) fn evidence_json(evidence: &Evidence) -> Json {
-    let mut fields = vec![
+    let mut fields = if evidence.exact {
+        vec![
+            ("profile".into(), Json::string("INTERFERENCE-EXACT-01")),
+            ("assurance".into(), Json::string("exact-brep-boolean")),
+            ("representation".into(), Json::string("source-step-leaf-occurrence-solids")),
+            ("conformanceBasis".into(), Json::string("OCCT BRepAlgoAPI_Common of each candidate pair's regular-solid leaf operands; GProp volume of the residual")),
+            ("accuracyLimit".into(), Json::string("Exact within the source BRep tolerances; the residual volume is OCCT's GProp integration, not an allowance proof.")),
+            ("volumeUnit".into(), Json::string("mm^3")),
+            ("reportingCutoff".into(), Json::Number(evidence.tolerance.powi(3).max(1e-12))),
+            ("cutoffMeaning".into(), Json::string("reporting-only; an omitted pair's exact residual volume is at most the cutoff")),
+            ("diagnosticPointMeaning".into(), Json::string("residual-bounds midpoint; not an interior witness")),
+            ("componentSource".into(), Json::string("leaf-occurrences")),
+        ]
+    } else {
+        vec![
         ("profile".into(), Json::string("M3-CSG-OBSERVATION-01")),
         ("assurance".into(), Json::string("approximate-polyhedral-observation")),
         ("representation".into(), Json::string("legacy-f32-v1-merged-polyhedral-operands")),
@@ -836,6 +1128,9 @@ pub(crate) fn evidence_json(evidence: &Evidence) -> Json {
         ("cutoffMeaning".into(), Json::string("reporting-only; omitted pairs are not certified zero")),
         ("diagnosticPointMeaning".into(), Json::string("output-bounds midpoint; not an interior witness")),
         ("componentSource".into(), Json::string("named")),
+        ]
+    };
+    fields.extend([
         (
             "componentCount".into(),
             Json::Number(evidence.component_count as f64),
@@ -847,9 +1142,15 @@ pub(crate) fn evidence_json(evidence: &Evidence) -> Json {
         ("tolerance".into(), Json::Number(evidence.tolerance)),
         (
             "overlaps".into(),
-            Json::Array(evidence.overlaps.iter().map(overlap_json).collect()),
+            Json::Array(
+                evidence
+                    .overlaps
+                    .iter()
+                    .map(|overlap| overlap_json(overlap, evidence.exact))
+                    .collect(),
+            ),
         ),
-    ];
+    ]);
     if let Some(pairs) = &evidence.selected_pairs {
         fields.push((
             "selectedPairs".into(),
@@ -869,7 +1170,7 @@ pub(crate) fn evidence_json(evidence: &Evidence) -> Json {
     Json::Object(fields)
 }
 
-pub(crate) fn overlap_json(overlap: &Overlap) -> Json {
+fn overlap_json(overlap: &Overlap, exact: bool) -> Json {
     let mut fields = vec![
         (
             "leftComponentId".into(),
@@ -887,7 +1188,11 @@ pub(crate) fn overlap_json(overlap: &Overlap) -> Json {
         ),
         (
             "penetration".into(),
-            Json::string("observed-positive-polyhedral-volume"),
+            Json::string(if exact {
+                "exact-positive-residual-volume"
+            } else {
+                "observed-positive-polyhedral-volume"
+            }),
         ),
     ];
     if let Some(point) = overlap.witness_point {
@@ -907,8 +1212,13 @@ mod overlap_observation_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::brep::BrepEntity;
 
-    fn occurrence(path: &str) -> crate::backend::brep::OccurrenceFacts {
+    fn occurrence(
+        path: &str,
+        parent: Option<u32>,
+        face_count: u32,
+    ) -> crate::backend::brep::OccurrenceFacts {
         crate::backend::brep::OccurrenceFacts {
             name: path.into(),
             placement: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
@@ -917,11 +1227,12 @@ mod tests {
                 max: [1.0; 3],
             },
             path: path.into(),
-            parent: None,
+            parent,
             product: 0,
             product_name: path.into(),
             instance_name: None,
             ordinal_path: Vec::new(),
+            face_count,
         }
     }
 
@@ -951,18 +1262,18 @@ mod tests {
         };
         let components = named_partition(&record).unwrap();
         assert_eq!(
-            components[0].mesh.positions.len(),
+            components[0].mesh().positions.len(),
             4,
             "equal coordinates with distinct authored indices are not merged"
         );
-        assert_eq!(components[0].mesh.triangles, [[0, 1, 2], [3, 2, 1]]);
-        assert_eq!(components[1].mesh.positions.len(), 3);
+        assert_eq!(components[0].mesh().triangles, [[0, 1, 2], [3, 2, 1]]);
+        assert_eq!(components[1].mesh().positions.len(), 3);
         for component in components {
-            let observed: Vec<_> = component
-                .mesh
+            let mesh = component.mesh();
+            let observed: Vec<_> = mesh
                 .triangles
                 .iter()
-                .map(|triangle| triangle.map(|vertex| component.mesh.positions[vertex as usize]))
+                .map(|triangle| triangle.map(|vertex| mesh.positions[vertex as usize]))
                 .collect();
             let expected: Vec<_> = record
                 .triangles
@@ -979,22 +1290,16 @@ mod tests {
     }
 
     #[test]
-    fn empty_occurrence_does_not_compress_stable_component_ids() {
-        let empty = Rc::new(TriangleMesh {
-            positions: Vec::new(),
-            triangles: Vec::new(),
-        });
-        let triangle = Rc::new(TriangleMesh {
-            positions: vec![[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
-            triangles: vec![[0, 1, 2]],
-        });
-        let rows = [
-            occurrence_component(0, &occurrence("empty"), empty).unwrap(),
-            occurrence_component(1, &occurrence("A"), Rc::clone(&triangle)).unwrap(),
-            occurrence_component(2, &occurrence("B"), triangle).unwrap(),
+    fn components_are_leaves_with_faces_and_keep_occurrence_ids() {
+        let occurrences = [
+            occurrence("asm", None, 0),
+            occurrence("asm/a", Some(0), 6),
+            occurrence("asm/empty", Some(0), 0),
+            occurrence("asm/sub", Some(0), 0),
+            occurrence("asm/sub/b", Some(3), 6),
+            occurrence("loose", None, 6),
         ];
-        let ids: Vec<_> = rows.into_iter().flatten().map(|row| row.id).collect();
-        assert_eq!(ids, [1, 2]);
+        assert_eq!(leaf_components(&occurrences), [1, 4, 5]);
     }
 
     #[test]
@@ -1068,10 +1373,10 @@ mod tests {
             .map(|index| Component {
                 id: (index + 1) * 2,
                 label: format!("part-{index}"),
-                mesh: Rc::new(TriangleMesh {
+                mesh: Some(Rc::new(TriangleMesh {
                     positions: Vec::new(),
                     triangles: Vec::new(),
-                }),
+                })),
                 bounds: Bounds {
                     min: if index == 49 { [10.0; 3] } else { [0.0; 3] },
                     max: if index == 49 { [11.0; 3] } else { [1.0; 3] },
@@ -1111,6 +1416,7 @@ mod tests {
         assert_eq!(actual, baseline);
 
         let evidence_for = |candidates: &[(usize, usize)]| Evidence {
+            exact: false,
             component_count: components.len(),
             components: components
                 .iter()
@@ -1145,11 +1451,8 @@ mod tests {
         );
     }
 
-    /// Occurrence structure plus empty tessellations, counted.
-    struct Occurrences(
-        Rc<[crate::backend::brep::OccurrenceFacts]>,
-        Rc<std::cell::Cell<usize>>,
-    );
+    /// Occurrence structure only; any tessellation would be a failure.
+    struct Occurrences(Rc<[crate::backend::brep::OccurrenceFacts]>);
 
     impl crate::backend::brep::BrepSubject for Occurrences {
         fn source_occurrences(
@@ -1176,56 +1479,52 @@ mod tests {
             _: BrepEntity,
             _: TessellationProfile,
         ) -> Result<Rc<TriangleMesh>, BackendError> {
-            self.1.set(self.1.get() + 1);
-            Ok(Rc::new(TriangleMesh {
-                positions: Vec::new(),
-                triangles: Vec::new(),
-            }))
+            unreachable!("a STEP partition is structure and exact boxes only")
         }
     }
 
+    fn step_subject(occurrences: Vec<crate::backend::brep::OccurrenceFacts>) -> Subject {
+        let mut subject = Subject::new(
+            "leaves".into(),
+            crate::subject::SubjectFormat::Step,
+            "mm".into(),
+        );
+        subject.brep = Some(Box::new(Occurrences(Rc::from(occurrences))));
+        subject
+    }
+
     #[test]
-    fn occurrences_leaving_no_report_mesh_entry_refuse_before_tessellating() {
-        // Two occurrences plus the report mesh need three entries (R10 refused
-        // at the second tessellation because the report mesh held one): two
-        // entries refuse before the first BRepMesh pass, three tessellate both.
-        for (max_mesh_entries, tessellations) in [(2, 0), (3, 2)] {
-            let identity = crate::identity::SubjectIdentity::step(
-                b"entry-limit",
-                "millimetre",
-                1.0,
-                crate::backend::brep::BrepIdentityProfile {
-                    ingest_profile: "core-control",
-                    backend_profile: "core-control",
-                },
-                None,
-            )
-            .unwrap();
-            let mut subject = Subject::new(
-                identity.primary_hash().into(),
-                crate::subject::SubjectFormat::Step,
-                "mm".into(),
-            );
-            subject.semantic_identity.set(identity).unwrap();
-            subject.retention_limits.max_mesh_entries = max_mesh_entries;
-            let calls = Rc::new(std::cell::Cell::new(0));
-            subject.brep = Some(Box::new(Occurrences(
-                Rc::from(vec![occurrence("a"), occurrence("b")]),
-                Rc::clone(&calls),
-            )));
-            match components(&subject) {
-                Err(error) => {
-                    assert_eq!(max_mesh_entries, 2, "{error:?}");
-                    assert_eq!(error.kind, BackendErrorKind::Unsupported);
-                    assert_eq!(
-                        error.message,
-                        "Tessellation demands exceed the declared analysis retention entry limit."
-                    );
-                }
-                // Empty meshes leave no component to compare.
-                Ok(value) => assert!(max_mesh_entries == 3 && value.is_none()),
-            }
-            assert_eq!(calls.get(), tessellations, "{max_mesh_entries} entries");
-        }
+    fn step_partition_is_leaf_structure_and_exact_boxes_without_tessellating() {
+        let subject = step_subject(vec![
+            occurrence("asm", None, 0),
+            occurrence("asm/a", Some(0), 6),
+            occurrence("asm/empty", Some(0), 0),
+            occurrence("asm/b", Some(0), 6),
+        ]);
+        let Partition::Components(leaves) = components(&subject).unwrap() else {
+            panic!("two leaves with faces partition the assembly");
+        };
+        assert_eq!(
+            leaves
+                .iter()
+                .map(|component| (
+                    component.id,
+                    component.label.as_str(),
+                    component.mesh.is_none()
+                ))
+                .collect::<Vec<_>>(),
+            [(1, "asm/a", true), (3, "asm/b", true)]
+        );
+
+        // componentCount is structure (C3): one leaf with faces is one component.
+        let subject = step_subject(vec![
+            occurrence("asm", None, 0),
+            occurrence("asm/a", Some(0), 6),
+            occurrence("asm/empty", Some(0), 0),
+        ]);
+        assert!(matches!(
+            components(&subject).unwrap(),
+            Partition::Inconclusive(1)
+        ));
     }
 }

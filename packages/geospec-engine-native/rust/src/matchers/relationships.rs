@@ -2744,6 +2744,7 @@ mod tests {
                 product_name: "core-product".into(),
                 instance_name: None,
                 ordinal_path: vec![1],
+                face_count: 1,
             }]))
         }
         fn reported_shape(&self) -> Result<crate::backend::brep::ShapeFacts, BackendError> {

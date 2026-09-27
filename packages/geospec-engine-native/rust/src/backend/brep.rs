@@ -175,6 +175,10 @@ pub struct OccurrenceFacts {
     pub product_name: String,
     pub instance_name: Option<String>,
     pub ordinal_path: Vec<u32>,
+    /// Public faces of this occurrence. A parent (another occurrence names it
+    /// as `parent`) is structure and owns none (ruling 6); a zero-face leaf
+    /// owns none either (ruling 32).
+    pub face_count: u32,
 }
 
 /// Report face tables in public order: whole faces and one table per
@@ -487,6 +491,23 @@ pub struct RegularSolidContainment {
     pub residual_volume: f64,
     pub residual_bounds: Option<Bounds>,
     pub residual_center_of_mass: Option<[f64; 3]>,
+}
+
+/// S10 (INTERFERENCE-EXACT-01): one candidate pair of leaf occurrences.
+#[derive(Clone, Debug, PartialEq)]
+pub enum OccurrenceOverlap {
+    /// The counted work exceeds the caller's limit; nothing else ran.
+    WorkExceeded { work: u64 },
+    /// The left or right operand is not one regular solid.
+    Unqualified { left: bool, reason: String },
+    /// The exact Common's residual: empty (no solids, zero volume, no bounds)
+    /// when the operands only touch.
+    Residual {
+        work: u64,
+        solids: u32,
+        volume: f64,
+        bounds: Option<Bounds>,
+    },
 }
 
 /// Qualified full cylindrical-band trim; distances are along the unit axis.
@@ -1114,6 +1135,24 @@ pub trait BrepSubject {
         _memo: &mut OperandMemo,
     ) -> Result<RegularSolidContainment, BackendError> {
         self.regular_solid_containment(subject, target)
+    }
+
+    /// S10 (ruling 23): the non-destructive exact Common of two leaf
+    /// occurrences' regular-solid operands, each qualified once per memo (C7).
+    /// The work (the pair plus every face pair whose exact boxes, enlarged by
+    /// `tolerance`, intersect) is counted first; beyond `max_work` nothing runs.
+    fn occurrence_overlap_memoized(
+        &self,
+        _left: u32,
+        _right: u32,
+        _tolerance: f64,
+        _max_work: u64,
+        _memo: &mut OperandMemo,
+    ) -> Result<OccurrenceOverlap, BackendError> {
+        Err(BackendError {
+            kind: super::BackendErrorKind::Unsupported,
+            message: "The BRep connector has no exact occurrence overlap query.".into(),
+        })
     }
 
     /// One requested subject-target difference. Implementations must validate

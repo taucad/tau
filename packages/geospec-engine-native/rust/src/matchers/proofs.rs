@@ -675,7 +675,8 @@ fn evaluate_interference(
     }
 }
 
-/// Ancillary envelope for approximate polyhedral observations only.
+/// Ancillary overlap envelope: STEP takes the exact leaf-pair Common (S10,
+/// INTERFERENCE-EXACT-01); mesh subjects keep the Manifold observation.
 pub(crate) fn evaluate_overlap(
     tolerance: f64,
     selected: Option<&[SelectedPair]>,
@@ -685,10 +686,17 @@ pub(crate) fn evaluate_overlap(
         return evaluation;
     }
     let subject = std::rc::Rc::clone(&context.subjects[0]);
-    let Some(csg) = context.csg.as_mut() else {
-        return csg_refusal(Capability::AnalyzeMeshOverlap);
+    let analysis = if let Some(brep) = subject.brep.as_deref() {
+        let budget = context.budget;
+        let memo = context.operand_memo(brep);
+        interference::analyze_exact_overlap(&subject, brep, memo, budget, tolerance, selected)
+    } else {
+        let Some(csg) = context.csg.as_mut() else {
+            return csg_refusal(Capability::AnalyzeMeshOverlap);
+        };
+        interference::analyze_overlap(&subject, csg, tolerance, selected)
     };
-    match interference::analyze_overlap(&subject, csg, tolerance, selected) {
+    match analysis {
         Ok(OverlapAnalysis::Complete(evidence)) => Evaluation::Ancillary {
             success: true,
             value: Json::object([
@@ -709,8 +717,45 @@ pub(crate) fn evaluate_overlap(
             ]),
             diagnostics,
         },
+        Ok(OverlapAnalysis::PairBudget {
+            exceeded,
+            pair,
+            work,
+        }) => pair_budget_refusal(context.capability, exceeded, &pair, work),
         Err(error) => backend_refusal(error),
     }
+}
+
+/// S10's named refusal (§16 `MATCHER_TIMEOUT`): the claim's budget cannot
+/// afford one pair's counted Boolean work, so the timeout names that pair.
+fn pair_budget_refusal(
+    capability: Capability,
+    exceeded: crate::budget::BudgetExceeded,
+    pair: &SelectedPair,
+    work: u64,
+) -> Evaluation {
+    let mut evaluation = Evaluation::budget_exceeded(capability, exceeded);
+    if let Evaluation::Refused { diagnostics } = &mut evaluation {
+        for diagnostic in diagnostics {
+            diagnostic.message = format!(
+                "{} The exact overlap of '{}' and '{}' needs {work} work units.",
+                diagnostic.message, pair.left_label, pair.right_label
+            );
+            if let Some(Json::Object(fields)) = &mut diagnostic.details {
+                fields.push((
+                    "pair".into(),
+                    Json::object([
+                        ("leftComponentId", Json::Number(f64::from(pair.left))),
+                        ("rightComponentId", Json::Number(f64::from(pair.right))),
+                        ("leftLabel", Json::string(&pair.left_label)),
+                        ("rightLabel", Json::string(&pair.right_label)),
+                    ]),
+                ));
+                fields.push(("pairWork".into(), Json::Number(work as f64)));
+            }
+        }
+    }
+    evaluation
 }
 
 fn evaluate_wall(prepared: &Wall, context: &mut EvaluationContext<'_>) -> Evaluation {
@@ -1573,7 +1618,7 @@ fn nominal_point_mismatch(points: &PointEvidence) -> Vec<Diagnostic> {
     vec![diagnostic]
 }
 
-/// STEP overlap tessellates its own occurrences and never reads the report
+/// STEP overlap reads occurrence structure and exact boxes, never the report
 /// mesh, so it charges the BRep demand only (ruling 11 drops the report-mesh
 /// charge); mesh subjects keep their mesh-record charge.
 fn charge_overlap_mesh_base(context: &mut EvaluationContext<'_>) -> Result<(), Evaluation> {

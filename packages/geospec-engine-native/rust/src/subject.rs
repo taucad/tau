@@ -2,7 +2,7 @@
 
 use crate::protocol::{Observations, WorkCounter};
 use std::{
-    cell::{OnceCell, RefCell},
+    cell::{Cell, OnceCell, RefCell},
     mem::size_of,
     rc::Rc,
 };
@@ -100,7 +100,30 @@ pub(crate) struct Subject {
     pub binary_limits: crate::backend::resources::BinaryAdmissionLimits,
     selector_index: OnceCell<Rc<SelectorIndex>>,
     tessellations: RefCell<Vec<RetainedTessellation>>,
+    /// C8 (ruling 12, §16): the current claim phase. A retention limit counts
+    /// the facets this phase demanded (hit or build), never what earlier
+    /// claims retained; a facet's cell holds the last phase that demanded it.
+    demand_phase: Cell<u64>,
+    facet_demands: [Cell<u64>; FACETS],
+    selected_demands: [Cell<u64>; 16],
 }
+
+/// Retained singleton facets whose bytes count toward a phase's demand.
+#[derive(Clone, Copy)]
+enum Facet {
+    ReportMesh,
+    ReportShape,
+    ReportFaces,
+    SourceOccurrences,
+    CircularBores,
+    EdgeTreatmentCounts,
+    EdgeTreatments,
+    StepMetadata,
+    ContinuousWall,
+    ContinuousTopology,
+}
+
+const FACETS: usize = Facet::ContinuousTopology as usize + 1;
 
 /// Only the core retains derived meshes; adapters return an owned transfer.
 struct RetainedTessellation {
@@ -109,6 +132,8 @@ struct RetainedTessellation {
     angular_bits: u64,
     mesh: Rc<TriangleMesh>,
     bytes: u64,
+    /// The last claim phase that demanded this mesh (C8).
+    demand: Cell<u64>,
 }
 
 struct RetainedReportFaces {
@@ -182,7 +207,58 @@ impl Subject {
             binary_limits: crate::EngineConfig::entry().binary,
             selector_index: OnceCell::new(),
             tessellations: RefCell::new(Vec::new()),
+            demand_phase: Cell::new(0),
+            facet_demands: std::array::from_fn(|_| Cell::new(0)),
+            selected_demands: std::array::from_fn(|_| Cell::new(0)),
         }
+    }
+
+    /// Start a claim phase (C8): later limit checks count only what this phase
+    /// demands. Phase 0, before any plan, counts every retained facet.
+    pub(crate) fn begin_demand_phase(&self) {
+        self.demand_phase.set(self.demand_phase.get() + 1);
+    }
+
+    fn demand(&self, facet: Facet) {
+        self.facet_demands[facet as usize].set(self.demand_phase.get());
+    }
+
+    fn demanded(&self, facet: Facet) -> bool {
+        self.facet_demands[facet as usize].get() == self.demand_phase.get()
+    }
+
+    /// The report facets this phase demanded (`retained_report_bytes` less the
+    /// undemanded ones; the shape cells are the remainder).
+    fn demanded_report_bytes(&self) -> u64 {
+        let mesh = self.report_mesh_bytes.get().copied().unwrap_or(0);
+        let faces = self
+            .report_faces
+            .borrow()
+            .as_ref()
+            .map_or(0, |value| value.bytes);
+        let shape = self
+            .retained_report_bytes()
+            .saturating_sub(mesh)
+            .saturating_sub(faces);
+        [
+            (Facet::ReportMesh, mesh),
+            (Facet::ReportShape, shape),
+            (Facet::ReportFaces, faces),
+        ]
+        .into_iter()
+        .filter(|(facet, _)| self.demanded(*facet))
+        .fold(0, |sum, (_, bytes)| sum.saturating_add(bytes))
+    }
+
+    fn demanded_tessellations(&self) -> (u64, u64) {
+        let phase = self.demand_phase.get();
+        self.tessellations
+            .borrow()
+            .iter()
+            .filter(|entry| entry.demand.get() == phase)
+            .fold((0, 0), |(count, bytes), entry| {
+                (count + 1, bytes.saturating_add(entry.bytes))
+            })
     }
 
     pub(crate) fn identity_descriptor_bytes(&self) -> Result<Vec<u8>, BackendError> {
@@ -222,19 +298,20 @@ impl Subject {
                     && entry.linear_bits == linear_bits
                     && entry.angular_bits == angular_bits
             }) {
+                entry.demand.set(self.demand_phase.get());
                 return Ok(Rc::clone(&entry.mesh));
             }
-            let report_entry = u64::from(self.report_mesh_bytes.get().is_some());
-            if retained.len() as u64 + report_entry
-                >= u64::from(self.retention_limits.max_mesh_entries)
-            {
-                return Err(BackendError {
-                    kind: BackendErrorKind::Unsupported,
-                    message:
-                        "Tessellation demands exceed the declared analysis retention entry limit."
-                            .into(),
-                });
-            }
+        }
+        let report_entry =
+            u64::from(self.report_mesh_bytes.get().is_some() && self.demanded(Facet::ReportMesh));
+        if self.demanded_tessellations().0 + report_entry
+            >= u64::from(self.retention_limits.max_mesh_entries)
+        {
+            return Err(BackendError {
+                kind: BackendErrorKind::Unsupported,
+                message: "Tessellation demands exceed the declared analysis retention entry limit."
+                    .into(),
+            });
         }
         let brep = self.brep.as_deref().ok_or_else(|| BackendError {
             kind: BackendErrorKind::Unsupported,
@@ -249,23 +326,42 @@ impl Subject {
             .saturating_add(
                 (mesh.triangles.capacity() as u64).saturating_mul(size_of::<[u32; 3]>() as u64),
             );
-        let mut retained = self.tessellations.borrow_mut();
-        let total = retained.iter().fold(
-            bytes
-                .saturating_add(self.retained_report_bytes())
-                .saturating_add(self.continuous_owned_bytes())
-                .saturating_add(self.f2_owned_bytes())
-                .saturating_add(self.circular_bore_owned_bytes())
-                .saturating_add(self.edge_treatment_owned_bytes())
-                .saturating_add(self.step_metadata_owned_bytes())
-                .saturating_add(self.source_occurrence_owned_bytes()),
-            |sum, entry| sum.saturating_add(entry.bytes),
-        );
+        let total = bytes
+            .saturating_add(self.demanded_tessellations().1)
+            .saturating_add(self.demanded_report_bytes())
+            .saturating_add(self.continuous_owned_bytes())
+            .saturating_add(self.f2_owned_bytes())
+            .saturating_add(self.circular_bore_owned_bytes())
+            .saturating_add(self.edge_treatment_owned_bytes())
+            .saturating_add(self.step_metadata_owned_bytes())
+            .saturating_add(self.source_occurrence_owned_bytes());
         if total > self.retention_limits.max_mesh_bytes {
             return Err(BackendError {
                 kind: BackendErrorKind::Unsupported,
                 message: "Tessellations exceed the declared analysis retention byte limit.".into(),
             });
+        }
+        let phase = self.demand_phase.get();
+        let mut retained = self.tessellations.borrow_mut();
+        // Physical retention only (C8): meshes this phase does not hold give way,
+        // oldest first. ponytail: singleton facets are never evicted, so the
+        // physical bound is the limits plus the singletons; evict them too if
+        // resident memory ever matters more than their reuse.
+        let report_entry = u64::from(self.report_mesh_bytes.get().is_some());
+        let mut held = retained
+            .iter()
+            .fold(bytes, |sum, entry| sum.saturating_add(entry.bytes));
+        while retained.len() as u64 + 1 + report_entry
+            > u64::from(self.retention_limits.max_mesh_entries)
+            || held > self.retention_limits.max_mesh_bytes
+        {
+            let Some(index) = retained
+                .iter()
+                .position(|entry| entry.demand.get() != phase)
+            else {
+                break;
+            };
+            held -= retained.remove(index).bytes;
         }
         retained.push(RetainedTessellation {
             entity,
@@ -273,6 +369,7 @@ impl Subject {
             angular_bits,
             mesh: Rc::clone(&mesh),
             bytes,
+            demand: Cell::new(phase),
         });
         Ok(mesh)
     }
@@ -329,6 +426,7 @@ impl Subject {
     /// its vectors move into the record after the finite f32 check. A report
     /// facts failure cannot refuse mesh claims.
     pub(crate) fn report_mesh(&self) -> Result<(), BackendError> {
+        self.demand(Facet::ReportMesh);
         let Some(brep) = &self.brep else {
             return Ok(());
         };
@@ -359,9 +457,7 @@ impl Subject {
             .saturating_add(size_of::<MeshAnalysisRecord>() as u64)
             .saturating_add(size_of::<Primitive>() as u64)
             .saturating_add(self.display_name.len() as u64 + 2);
-        if self.tessellations.borrow().len() as u64
-            >= u64::from(self.retention_limits.max_mesh_entries)
-        {
+        if self.demanded_tessellations().0 >= u64::from(self.retention_limits.max_mesh_entries) {
             return Err(report_limit());
         }
         self.check_f2_pending(bytes)?;
@@ -381,6 +477,7 @@ impl Subject {
         &self,
         parts: ShapeParts,
     ) -> Result<Option<&ShapeFacts>, BackendError> {
+        self.demand(Facet::ReportShape);
         let Some(brep) = &self.brep else {
             return Ok(None);
         };
@@ -405,6 +502,7 @@ impl Subject {
         &self,
         measured: bool,
     ) -> Result<Option<Rc<ReportedFaces>>, BackendError> {
+        self.demand(Facet::ReportFaces);
         let Some(brep) = &self.brep else {
             return Ok(None);
         };
@@ -472,6 +570,7 @@ impl Subject {
         &self,
         bounds: bool,
     ) -> Result<Option<Rc<[OccurrenceFacts]>>, BackendError> {
+        self.demand(Facet::SourceOccurrences);
         let Some(brep) = self.brep.as_deref() else {
             return Ok(None);
         };
@@ -518,6 +617,9 @@ impl Subject {
     }
 
     fn source_occurrence_owned_bytes(&self) -> u64 {
+        if !self.demanded(Facet::SourceOccurrences) {
+            return 0;
+        }
         self.source_occurrences
             .borrow()
             .as_ref()
@@ -532,6 +634,7 @@ impl Subject {
         solid_count: usize,
         edge_count: usize,
     ) -> Result<Rc<CircularBoreInventory>, BackendError> {
+        self.demand(Facet::CircularBores);
         self.cache_identity()?;
         if let Some(value) = self.circular_bores.get() {
             return Ok(Rc::clone(value));
@@ -571,6 +674,9 @@ impl Subject {
     }
 
     fn circular_bore_owned_bytes(&self) -> u64 {
+        if !self.demanded(Facet::CircularBores) {
+            return 0;
+        }
         self.circular_bores.get().map_or(0, |value| {
             value
                 .owned_bytes()
@@ -584,6 +690,7 @@ impl Subject {
         &self,
         faces: &ReportedFaces,
     ) -> Result<EdgeTreatmentCounts, BackendError> {
+        self.demand(Facet::EdgeTreatmentCounts);
         self.cache_identity()?;
         if let Some(value) = self.edge_treatment_counts.get() {
             return Ok(*value);
@@ -614,6 +721,7 @@ impl Subject {
         occurrences: &[OccurrenceFacts],
         faces: &ReportedFaces,
     ) -> Result<Rc<EdgeTreatmentInventory>, BackendError> {
+        self.demand(Facet::EdgeTreatments);
         self.cache_identity()?;
         if let Some(value) = self.edge_treatments.get() {
             return Ok(Rc::clone(value));
@@ -646,8 +754,13 @@ impl Subject {
         let counts = self
             .edge_treatment_counts
             .get()
+            .filter(|_| self.demanded(Facet::EdgeTreatmentCounts))
             .map_or(0, |_| size_of::<EdgeTreatmentCounts>() as u64);
-        counts.saturating_add(self.edge_treatments.get().map_or(0, |value| {
+        let inventory = self
+            .edge_treatments
+            .get()
+            .filter(|_| self.demanded(Facet::EdgeTreatments));
+        counts.saturating_add(inventory.map_or(0, |value| {
             value
                 .owned_bytes()
                 .saturating_add((2 * size_of::<usize>()) as u64)
@@ -660,6 +773,7 @@ impl Subject {
         if self.format != SubjectFormat::Step {
             return Ok(None);
         }
+        self.demand(Facet::StepMetadata);
         if let Some(value) = self.step_metadata.get() {
             return Ok(Some(value));
         }
@@ -685,15 +799,13 @@ impl Subject {
             return Err(report_limit());
         }
         let bytes = step_metadata_owned_bytes(&metadata);
-        let total = self.tessellations.borrow().iter().fold(
-            bytes
-                .saturating_add(self.retained_report_bytes())
-                .saturating_add(self.continuous_owned_bytes())
-                .saturating_add(self.f2_owned_bytes())
-                .saturating_add(self.circular_bore_owned_bytes())
-                .saturating_add(self.edge_treatment_owned_bytes()),
-            |sum, entry| sum.saturating_add(entry.bytes),
-        );
+        let total = bytes
+            .saturating_add(self.demanded_report_bytes())
+            .saturating_add(self.continuous_owned_bytes())
+            .saturating_add(self.f2_owned_bytes())
+            .saturating_add(self.circular_bore_owned_bytes())
+            .saturating_add(self.edge_treatment_owned_bytes())
+            .saturating_add(self.demanded_tessellations().1);
         if total > self.retention_limits.max_mesh_bytes {
             return Err(report_limit());
         }
@@ -704,6 +816,7 @@ impl Subject {
     /// One fixed-profile owned certificate. The caller charges the logical
     /// request before this lookup, so retained and fresh results cost equally.
     pub(crate) fn continuous_wall_domain(&self) -> Result<Rc<ContinuousWallDomain>, BackendError> {
+        self.demand(Facet::ContinuousWall);
         self.cache_identity()?;
         if let Some(value) = self.continuous_wall.get() {
             return Ok(Rc::clone(value));
@@ -715,17 +828,15 @@ impl Subject {
         // The certificate is fixed-size, with no hidden vector or profile-key
         // growth. Include its Rc counters in the shared derived-data ceiling.
         let bytes = continuous_wall_owned_bytes();
-        let retained = self.tessellations.borrow().iter().fold(
-            bytes
-                .saturating_add(self.retained_report_bytes())
-                .saturating_add(self.selected_continuous_bytes())
-                .saturating_add(self.f2_owned_bytes())
-                .saturating_add(self.circular_bore_owned_bytes())
-                .saturating_add(self.edge_treatment_owned_bytes())
-                .saturating_add(self.step_metadata_owned_bytes())
-                .saturating_add(self.source_occurrence_owned_bytes()),
-            |sum, entry| sum.saturating_add(entry.bytes),
-        );
+        let retained = bytes
+            .saturating_add(self.demanded_report_bytes())
+            .saturating_add(self.selected_continuous_bytes())
+            .saturating_add(self.f2_owned_bytes())
+            .saturating_add(self.circular_bore_owned_bytes())
+            .saturating_add(self.edge_treatment_owned_bytes())
+            .saturating_add(self.step_metadata_owned_bytes())
+            .saturating_add(self.source_occurrence_owned_bytes())
+            .saturating_add(self.demanded_tessellations().1);
         if retained > self.retention_limits.max_mesh_bytes {
             return Err(report_limit());
         }
@@ -741,14 +852,19 @@ impl Subject {
         occurrence: u32,
     ) -> Result<Rc<SelectedContinuousDomain>, BackendError> {
         self.cache_identity()?;
-        if let Some(value) = self
+        if let Some((index, value)) = self
             .selected_continuous
             .borrow()
             .iter()
-            .flatten()
-            .find(|value| value.occurrence == occurrence)
+            .enumerate()
+            .find_map(|(index, cell)| {
+                cell.as_ref()
+                    .filter(|value| value.occurrence == occurrence)
+                    .map(|value| (index, Rc::clone(value)))
+            })
         {
-            return Ok(Rc::clone(value));
+            self.selected_demands[index].set(self.demand_phase.get());
+            return Ok(value);
         }
         let brep = self.brep.as_deref().ok_or_else(|| BackendError {
             kind: BackendErrorKind::Unsupported,
@@ -773,27 +889,27 @@ impl Subject {
         // certificate cardinalities, before publishing or retaining that output.
         let bytes = selected_continuous_owned_bytes(&value);
         let continuous = self.continuous_owned_bytes().saturating_add(bytes);
-        let total = self.tessellations.borrow().iter().fold(
-            continuous
-                .saturating_add(self.retained_report_bytes())
-                .saturating_add(self.f2_owned_bytes())
-                .saturating_add(self.circular_bore_owned_bytes())
-                .saturating_add(self.edge_treatment_owned_bytes())
-                .saturating_add(self.step_metadata_owned_bytes())
-                .saturating_add(self.source_occurrence_owned_bytes()),
-            |sum, entry| sum.saturating_add(entry.bytes),
-        );
+        let total = continuous
+            .saturating_add(self.demanded_report_bytes())
+            .saturating_add(self.f2_owned_bytes())
+            .saturating_add(self.circular_bore_owned_bytes())
+            .saturating_add(self.edge_treatment_owned_bytes())
+            .saturating_add(self.step_metadata_owned_bytes())
+            .saturating_add(self.source_occurrence_owned_bytes())
+            .saturating_add(self.demanded_tessellations().1);
         if continuous > 32 * 1024 * 1024 || total > self.retention_limits.max_mesh_bytes {
             return Err(report_limit());
         }
         let value = Rc::new(value);
-        if let Some(cell) = self
+        if let Some((index, cell)) = self
             .selected_continuous
             .borrow_mut()
             .iter_mut()
-            .find(|cell| cell.is_none())
+            .enumerate()
+            .find(|(_, cell)| cell.is_none())
         {
             *cell = Some(Rc::clone(&value));
+            self.selected_demands[index].set(self.demand_phase.get());
         }
         Ok(value)
     }
@@ -832,16 +948,14 @@ impl Subject {
             .continuous_owned_bytes()
             .saturating_add(pending)
             .saturating_add(extra_bytes);
-        let total = self.tessellations.borrow().iter().fold(
-            continuous
-                .saturating_add(self.retained_report_bytes())
-                .saturating_add(self.f2_owned_bytes())
-                .saturating_add(self.circular_bore_owned_bytes())
-                .saturating_add(self.edge_treatment_owned_bytes())
-                .saturating_add(self.step_metadata_owned_bytes())
-                .saturating_add(self.source_occurrence_owned_bytes()),
-            |sum, entry| sum.saturating_add(entry.bytes),
-        );
+        let total = continuous
+            .saturating_add(self.demanded_report_bytes())
+            .saturating_add(self.f2_owned_bytes())
+            .saturating_add(self.circular_bore_owned_bytes())
+            .saturating_add(self.edge_treatment_owned_bytes())
+            .saturating_add(self.step_metadata_owned_bytes())
+            .saturating_add(self.source_occurrence_owned_bytes())
+            .saturating_add(self.demanded_tessellations().1);
         if continuous > 32 * 1024 * 1024 || total > self.retention_limits.max_mesh_bytes {
             return Err(report_limit());
         }
@@ -869,21 +983,20 @@ impl Subject {
     fn step_metadata_owned_bytes(&self) -> u64 {
         self.step_metadata
             .get()
+            .filter(|_| self.demanded(Facet::StepMetadata))
             .map_or(0, step_metadata_owned_bytes)
     }
 
     pub(crate) fn check_f2_pending(&self, pending: u64) -> Result<(), BackendError> {
-        let total = self.tessellations.borrow().iter().fold(
-            pending
-                .saturating_add(self.f2_owned_bytes())
-                .saturating_add(self.circular_bore_owned_bytes())
-                .saturating_add(self.edge_treatment_owned_bytes())
-                .saturating_add(self.continuous_owned_bytes())
-                .saturating_add(self.retained_report_bytes())
-                .saturating_add(self.step_metadata_owned_bytes())
-                .saturating_add(self.source_occurrence_owned_bytes()),
-            |sum, entry| sum.saturating_add(entry.bytes),
-        );
+        let total = pending
+            .saturating_add(self.f2_owned_bytes())
+            .saturating_add(self.circular_bore_owned_bytes())
+            .saturating_add(self.edge_treatment_owned_bytes())
+            .saturating_add(self.continuous_owned_bytes())
+            .saturating_add(self.demanded_report_bytes())
+            .saturating_add(self.step_metadata_owned_bytes())
+            .saturating_add(self.source_occurrence_owned_bytes())
+            .saturating_add(self.demanded_tessellations().1);
         if total > self.retention_limits.max_mesh_bytes {
             return Err(report_limit());
         }
@@ -891,14 +1004,22 @@ impl Subject {
     }
 
     fn selected_continuous_bytes(&self) -> u64 {
-        self.selected_continuous.borrow().iter().flatten().fold(
-            size_of::<[Option<Rc<SelectedContinuousDomain>>; 16]>() as u64,
-            |sum, value| sum.saturating_add(selected_continuous_owned_bytes(value)),
-        )
+        let phase = self.demand_phase.get();
+        self.selected_continuous
+            .borrow()
+            .iter()
+            .zip(&self.selected_demands)
+            .filter(|(_, demand)| demand.get() == phase)
+            .filter_map(|(cell, _)| cell.as_ref())
+            .fold(
+                size_of::<[Option<Rc<SelectedContinuousDomain>>; 16]>() as u64,
+                |sum, value| sum.saturating_add(selected_continuous_owned_bytes(value)),
+            )
     }
 
     fn continuous_owned_bytes(&self) -> u64 {
-        let whole = if self.continuous_wall.get().is_some() {
+        let whole = if self.continuous_wall.get().is_some() && self.demanded(Facet::ContinuousWall)
+        {
             continuous_wall_owned_bytes()
         } else {
             0
@@ -909,6 +1030,7 @@ impl Subject {
                 self.continuous_topology
                     .borrow()
                     .as_ref()
+                    .filter(|_| self.demanded(Facet::ContinuousTopology))
                     .map_or(0, RetainedContinuousTopology::owned_bytes),
             )
     }
@@ -1352,7 +1474,7 @@ impl<'a> EvaluationContext<'a> {
         }
     }
 
-    fn operand_memo(&mut self, brep: &dyn BrepSubject) -> &mut OperandMemo {
+    pub(crate) fn operand_memo(&mut self, brep: &dyn BrepSubject) -> &mut OperandMemo {
         self.operand_memo.get_or_insert_with(|| brep.operand_memo())
     }
 
@@ -2119,6 +2241,7 @@ impl<'a> EvaluationContext<'a> {
             .as_ref()
             .filter(|cell| cell.key == key)
         {
+            self.subject().demand(Facet::ContinuousTopology);
             return Ok(Rc::clone(&value.value));
         }
         self.subject().continuous_topology.borrow_mut().take();
@@ -2134,6 +2257,7 @@ impl<'a> EvaluationContext<'a> {
         };
         self.check_continuous_output(cell.owned_bytes())?;
         *self.subject().continuous_topology.borrow_mut() = Some(cell);
+        self.subject().demand(Facet::ContinuousTopology);
         Ok(value)
     }
 
@@ -2193,6 +2317,10 @@ pub(crate) fn continuous_refusal(error: continuous::ContinuousError) -> Evaluati
         diagnostics: vec![Diagnostic::error(code, error.message)],
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/retention_history.rs"]
+mod retention_history_tests;
 
 #[cfg(test)]
 #[path = "../tests/report_facets_core.rs"]

@@ -491,6 +491,7 @@ impl BrepSubject for Control {
                 product_name: "core-product".into(),
                 instance_name: None,
                 ordinal_path: vec![index + 1],
+                face_count: 1,
             })
             .collect())
     }

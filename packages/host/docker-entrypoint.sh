@@ -71,10 +71,21 @@ fi
 export TAU_API_TOKEN="$TAU_HOST_GIT_CREDENTIAL"
 
 # `pnpm deploy` materialises @taucad/cli itself at /app, so its bin is /app/dist.
+#
+# `--agentPort` turns the agent capability on (`tau serve` offers it only when a
+# port is configured); `0` asks for an ephemeral loopback port, which is all a
+# relayed host needs. It lives here, not in the image, so running this script is
+# the whole recipe for a cloud host.
+#
+# `--no-pair`: this host was provisioned, never paired. A refused device
+# credential means it was revoked, and it exits rather than offering a pairing
+# code from a container that still holds the clone (D21).
 exec node /app/dist/bin/tau.mjs serve \
   --trust-projects \
   --workspace="$project_root" \
   --relay="$TAU_API_URL" \
   --gateway="$TAU_API_URL" \
+  --agentPort="${TAU_HOST_AGENT_PORT:-0}" \
+  --no-pair \
   --no-external-agents \
   "$@"

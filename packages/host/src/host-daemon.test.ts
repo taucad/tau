@@ -1277,6 +1277,45 @@ describe('startHostDaemon', () => {
     expect(await daemon.closed).toEqual({ cause: 'requested' });
   });
 
+  /*
+   * FX7 D3: a provisioned (cloud) host was never paired, so a refused device
+   * credential means it was revoked. It exits rather than offering a pairing
+   * code from a container that still holds a clone; a paired laptop keeps
+   * re-pairing as before.
+   */
+  const revokeAndClose = async (pair: boolean | undefined) => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-revoked-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    await writeHostCredential({ v: 1, deviceId: 'device-1', credential: 'revoked-credential-value-32-chars-min' });
+    const relay = await startRelay();
+    const daemon = startHostDaemon({
+      relayUrl: relay.url,
+      runtimeHost: { modulePath: fileURLToPath(new URL('fixtures/runtime-host-proof-child.mjs', import.meta.url)) },
+      ...(pair === undefined ? {} : { pair }),
+    });
+    await daemon.ready;
+    const control = await relay.control;
+    control.close(4401, 'device revoked');
+    const closed = await daemon.closed;
+    await daemon.close().catch(() => undefined);
+    return { closed, pairingRequests: relay.requests.filter(({ line }) => line.includes('/v1/agents/pairings')) };
+  };
+
+  it('should exit on a refused credential and never pair when it is a provisioned host', async () => {
+    const { closed, pairingRequests } = await revokeAndClose(false);
+
+    expect(closed.cause).toBe('fatal');
+    expect(closed.cause === 'fatal' ? closed.error.message : '').toContain('revoked');
+    expect(pairingRequests).toEqual([]);
+  }, 15_000);
+
+  it('should still start pairing on a refused credential when it is a paired host', async () => {
+    const { pairingRequests } = await revokeAndClose(undefined);
+
+    expect(pairingRequests.map(({ line }) => line)).toEqual(['POST /v1/agents/pairings']);
+  }, 15_000);
+
   it('keeps control alive across a child crash and reconnects after relay loss', async () => {
     temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-'));
     process.env['TAU_CONFIG_DIR'] = temporaryDirectory;

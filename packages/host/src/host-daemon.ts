@@ -203,6 +203,15 @@ export type HostDaemonOptions = {
   readonly onEvent?: (event: HostDaemonEvent) => void;
   /** Package-owned skills supplied by the embedding application. */
   readonly systemSkillBundles?: readonly HostSystemSkillBundle[];
+  /**
+   * Whether this daemon may pair interactively (default `true`).
+   *
+   * `false` for a provisioned cloud host (`tau serve --no-pair`, set by its
+   * entrypoint): it was never paired, so a refused or missing credential means
+   * it was revoked, and it exits rather than offering a pairing code from a
+   * container that still holds a clone (D21).
+   */
+  readonly pair?: boolean;
 };
 
 /** Final daemon closure result. @public */
@@ -1512,7 +1521,13 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     if (options.agent) {
       await startAgent(options.agent);
     }
-    let credential = (await readHostCredential()) ?? (await pairDevice(options.relayUrl, shutdown.signal, emit));
+    const pair = async (): Promise<HostCredential> => {
+      if (options.pair === false) {
+        throw new HostAuthenticationError('Tau Host device credential was revoked; a provisioned host does not pair.');
+      }
+      return pairDevice(options.relayUrl, shutdown.signal, emit);
+    };
+    let credential = (await readHostCredential()) ?? (await pair());
     currentCredential = credential;
     let reconnectAttempt = 0;
     while (!shutdown.signal.aborted) {
@@ -1548,7 +1563,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
           // oxlint-disable-next-line no-await-in-loop -- credential replacement must complete before reconnecting.
           await removeHostCredential();
           // oxlint-disable-next-line no-await-in-loop -- pairing is the next ordered authentication attempt.
-          credential = await pairDevice(options.relayUrl, shutdown.signal, emit);
+          credential = await pair();
           currentCredential = credential;
           reconnectAttempt = 0;
           continue;

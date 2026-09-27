@@ -108,6 +108,9 @@ describe('docker-entrypoint.sh', () => {
       const [token, ...argv] = daemonLines.trimEnd().split('\n');
       expect(token).toBe(pushCredential);
       expect(argv).toEqual(expect.arrayContaining(['serve', `--workspace=${clone}`, `--relay=${apiUrl}`]));
+      /* The entrypoint alone makes a cloud host: the agent channel is on without
+       * an image `ENV`, and a revoked host exits instead of pairing (FX7 D3). */
+      expect(argv).toEqual(expect.arrayContaining(['--agentPort=0', '--no-pair']));
     },
     30_000,
   );

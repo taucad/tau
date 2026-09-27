@@ -635,6 +635,105 @@ describe('machine tool registry', () => {
     });
   });
 
+  /* The start outcome in words: the agent reports what nextStep says, never an unconfirmed start as "submitted". */
+  describe('nextStep', () => {
+    const recorded = (state: PrintRequest['state'], overrides: Partial<PrintRequest> = {}): PrintRequest => ({
+      requestId: 'call-1',
+      machineId: 'machine-1',
+      artifact: artifactFixture,
+      configuration: {},
+      requestedBy: { kind: 'agent', id: 'tau', label: 'Tau agent' },
+      summary: { fileName: 'pyramid.gcode.3mf' },
+      state,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      ...overrides,
+    });
+    const start = { operationId: 'start-1', machineId: 'machine-1', kind: 'start', observedAt: timestamp } as const;
+    const awaiting =
+      "Waiting for a person to accept print request call-1 in Tau's Print pane; accepting uploads the file and starts the print. Do not retry; call get_print_request to observe it.";
+    /* Each state the person or the printer settles a request in, its record's own facts, and what the agent is told. */
+    const settledStates: ReadonlyArray<readonly [PrintRequest['state'], Partial<PrintRequest>, string]> = [
+      [
+        'started',
+        { receipt: { ...start, status: 'accepted', providerRunId: 'provider-run-7' } },
+        'The printer confirmed the start of pyramid.gcode.3mf and the print is running. Observe it with get_machine or get_print_request.',
+      ],
+      [
+        'unknown',
+        { receipt: { ...start, status: 'unknown', reason: 'reply-lost-after-possible-acceptance' } },
+        "The printer did not confirm the start of pyramid.gcode.3mf, so whether it is printing is unknown. Tell the person that, and to check the printer or Reconcile the request in Tau's Print pane. Do not retry or start another print.",
+      ],
+      [
+        'rejected',
+        {
+          receipt: { ...start, status: 'rejected', code: 'PROVIDER_REJECTED', message: 'mqtt message verify failed' },
+          failure: { code: 'PROVIDER_REJECTED', message: 'mqtt message verify failed' },
+        },
+        'The printer rejected the start of pyramid.gcode.3mf. Tell the person it failed and why, with any fix its message names: "mqtt message verify failed"',
+      ],
+      [
+        'failed',
+        {
+          failure: { code: 'ARTIFACT_UNQUALIFIED', message: 'This printer only accepts files sliced by Bambu Studio.' },
+        },
+        'Print request call-1 for pyramid.gcode.3mf failed. Tell the person it failed and why, with any fix its message names: "This printer only accepts files sliced by Bambu Studio."',
+      ],
+      [
+        'denied',
+        {},
+        'The person declined print request call-1; that is their decision. Do not retry it unless they ask.',
+      ],
+      [
+        'withdrawn',
+        {},
+        'Print request call-1 was withdrawn before it started. Do not retry it unless the person asks.',
+      ],
+    ];
+
+    it.each([['awaiting-approval', {}, awaiting] as const, ...settledStates])(
+      'should give the next step for the %s state when get_print_request reads it',
+      async (state, overrides, nextStep) => {
+        const fixture = clientFixture();
+        fixture.requests.set('call-1', recorded(state, overrides));
+        await expect(invoke(fixture.client, 'get_print_request', { requestId: 'call-1' })).resolves.toEqual({
+          isError: false,
+          content: { request: recorded(state, overrides), nextStep },
+        });
+      },
+    );
+
+    it.each(['preparing', 'approved', 'uploading', 'starting'] as const)(
+      'should give no next step while the host works on the %s state',
+      async (state) => {
+        const fixture = clientFixture();
+        fixture.requests.set('call-1', recorded(state));
+        const result = await invoke(fixture.client, 'get_print_request', { requestId: 'call-1' });
+        expect(result).toEqual({ isError: false, content: { request: recorded(state) } });
+      },
+    );
+
+    it.each(settledStates)(
+      'should give the next step for the %s state when request_print returns it',
+      async (state, overrides, nextStep) => {
+        const fixture = clientFixture();
+        /* An accepted request comes back as the host settled its upload and start. */
+        fixture.resolvePrintRequest.mockImplementation(async (input) =>
+          input.decision === 'deny' ? recorded('denied') : recorded(state, overrides),
+        );
+        const answer = state === 'denied' ? 'denied' : state === 'withdrawn' ? 'cancelled' : 'approved';
+
+        const result = await run(fixture.client, {
+          toolName: 'request_print',
+          input: { targetFile: 'main.ts' },
+          approve: approveWith(answer),
+        });
+
+        expect(result).toMatchObject({ isError: false, content: { approval: answer, request: { state }, nextStep } });
+      },
+    );
+  });
+
   describe('get_print_profiles', () => {
     const bambuProvider = {
       id: 'bambu',

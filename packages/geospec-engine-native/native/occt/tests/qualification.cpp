@@ -1,8 +1,8 @@
 // Synthetic OCCT controls for the bridge: shapes STEP cannot carry (INTERNAL
-// edge uses, instance scales, faces without edges), built here and run
-// against the bridge's own functions. The `qualification` feature compiles
-// the bridge through this translation unit, and tests/qualification.rs runs
-// each control by name.
+// edge uses, instance scales and orientations, faces without edges), built
+// here and run against the bridge's own functions. The `qualification`
+// feature compiles the bridge through this translation unit, and
+// tests/qualification.rs runs each control by name.
 #include "../bridge/geospec_occt_bridge.cpp"
 
 #include <BRepBuilderAPI_MakeEdge.hxx>
@@ -306,6 +306,33 @@ void rigid_instances_answer_from_one_analysis() {
         "three rigid instances of one valid definition answer from one analysis");
 }
 
+// V3: a REVERSED instance is not answered from its definition.
+void reversed_instance_falls_through() {
+  // A 10 mm box with a 2 mm void, placed FORWARD and REVERSED. Reversing
+  // the instance turns the void shell against the solid, so the analyzer
+  // rejects it though the FORWARD definition is valid.
+  const TopoDS_Shell outer = BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 0), 10, 10, 10).Shell();
+  const TopoDS_Shell cavity = BRepPrimAPI_MakeBox(gp_Pnt(4, 4, 4), 2, 2, 2).Shell();
+  BRep_Builder builder;
+  TopoDS_Solid solid;
+  builder.MakeSolid(solid);
+  builder.Add(solid, outer);
+  builder.Add(solid, cavity.Reversed());
+  const TopoDS_Shape reversed = place(solid, 50).Reversed();
+  check(analyzer_valid(solid) && !analyzer_valid(reversed),
+        "the FORWARD definition is valid and its REVERSED instance is not");
+  const TopoDS_Shape shape = compound({place(solid, 0), reversed});
+  std::vector<TopoDS_Shape> solids;
+  check(collect_validation_solids(shape, solids) && solids.size() == 2 &&
+            disjoint_validation_solids(solids),
+        "the control reaches the leaf branch");
+  check(!rigid_placements(solids), "a REVERSED instance is not a rigid placement");
+  uint32_t analyses = 0;
+  const SourceValidity validity = shape_is_valid(shape, &analyses);
+  check(!validity.valid && validity.invalid_solid_count == 1 && analyses == 2,
+        "both instances are analyzed and the REVERSED one is invalid");
+}
+
 // S4: the continuous-wall path judges its outer shell by computed edge-use
 // parity, never by the stored Closed() flag a healer may write. A box whose
 // shell stores Closed()=false still closes by parity; before this gate W2B
@@ -399,6 +426,7 @@ constexpr Control kControls[] = {
      edgeless_and_faceless_prove_nothing_closed},
     {"scale-two-falls-through", scale_two_falls_through},
     {"rigid-instances-answer-from-one-analysis", rigid_instances_answer_from_one_analysis},
+    {"reversed-instance-falls-through", reversed_instance_falls_through},
     {"wall-closure-ignores-the-stored-flag", wall_closure_ignores_the_stored_flag},
     {"product-owner-joins", product_owner_joins},
     {"prototype-copy-eligibility", prototype_copy_eligibility},

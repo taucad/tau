@@ -584,10 +584,12 @@ SourceValidity whole_shape_validity(const TopoDS_Shape& shape) {
 
 // V3 (ruling 8): scaled and mirrored placements change the located geometry
 // an analyzer checks, so only scale 1 with a positive determinant is rigid.
+// An instance that is not FORWARD turns its shells against its solid, so its
+// definition's analysis does not answer for it either.
 bool rigid_placements(const std::vector<TopoDS_Shape>& solids) {
   for (const TopoDS_Shape& solid : solids) {
     const gp_Trsf transform = solid.Location().Transformation();
-    if (transform.ScaleFactor() != 1.0 ||
+    if (solid.Orientation() != TopAbs_FORWARD || transform.ScaleFactor() != 1.0 ||
         transform.VectorialPart().Determinant() <= 0.0) {
       return false;
     }

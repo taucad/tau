@@ -597,7 +597,7 @@ function UnifiedProjectList({ projects, viewMode, actions }: UnifiedProjectListP
                 <p className='text-sm'>Start by describing what you want to build, or create from code</p>
               </div>
             </div>
-            <NewProjectChatComposer className='pt-1 shadow-none' />
+            <NewProjectChatComposer enableAutoFocus={false} className='pt-1 shadow-none' />
             <div className='flex items-center justify-center gap-4 text-sm text-muted-foreground'>
               <div className='h-px flex-1 bg-border' />
               <span>or</span>

@@ -142,6 +142,35 @@ export const getHostFinalizedTurns = (): readonly TurnFinalizedEvent[] => finali
 export const subscribeHostFinalizedTurns = (listener: () => void): (() => void) =>
   finalizedTurnTopic.subscribe(listener);
 
+/** One read answer a stream folded, for the page's projection of that chat's log (W9 PV-S7). @public */
+export type ChatLogAnswer = Readonly<{ chatId: string; answer: Parameters<typeof foldReadAnswer>[1] }>;
+const chatLogAnswerTopic = new Topic<ChatLogAnswer>({ name: 'agent-host-chat-log-answers' });
+
+/**
+ * Hear every answer a stream reads from a chat's log: its replay's pages, and each followed row as a one-row batch at
+ * that row's position. The chat store's projection folds them (W9 PV-S7).
+ *
+ * ponytail: tapped from today's replay path, so a chat is projected only while a stream reads it; PV-S12's
+ * attachment reads every listed chat itself and replaces this.
+ *
+ * @param listener - Called with each answer, in the order the stream read it.
+ * @returns Unsubscribe.
+ * @public
+ */
+export const subscribeChatLogAnswers = (listener: (event: ChatLogAnswer) => void): (() => void) =>
+  chatLogAnswerTopic.subscribe(listener);
+
+/**
+ * Hand one read answer to the chat's projection.
+ *
+ * @param chatId - The chat whose log answered.
+ * @param answer - The answer, as read.
+ * @public
+ */
+export const publishChatLogAnswer = (chatId: string, answer: ChatLogAnswer['answer']): void => {
+  chatLogAnswerTopic.emit({ chatId, answer });
+};
+
 /** Observe every host-attested turn outcome, including durable replay. */
 export const subscribeHostTurnSettlements = (listener: (event: HostTurnSettlement) => void): (() => void) =>
   hostTurnSettlementTopic.subscribe(listener);
@@ -1010,6 +1039,7 @@ const createHostStream = <Message extends UIMessage>(input: {
       let events: AgentLogEvent[] = [];
       let batch: ReadAnswer = first;
       for (let page = 0; ; page++) {
+        publishChatLogAnswer(input.chatId, batch);
         const fold = foldReadAnswer(ledger, batch);
         if (fold.kind === 'folded' && batch.status === 'batch') {
           ledger = fold.ledger;
@@ -1162,7 +1192,16 @@ const createHostStream = <Message extends UIMessage>(input: {
        * past this reader and nothing between the replay and the follow is lost. */
       unsubscribe = client.subscribe(
         { chatId: input.chatId, cursor },
-        (_chatId, event) => {
+        (_chatId, event, position) => {
+          if (position !== undefined) {
+            publishChatLogAnswer(input.chatId, {
+              status: 'batch',
+              cursor: position,
+              nextCursor: position + 1,
+              endCursor: position + 1,
+              events: [event],
+            });
+          }
           queueSubscribedEvent(event);
         },
         () => {

@@ -36,7 +36,6 @@ import type { Chat } from '@ai-sdk/react';
 import { createAsyncLogic } from 'xstate';
 import { waitUnlessGone } from '#lib/xstate.lib.js';
 import type { ActorRefFrom } from 'xstate';
-import { isAnyToolPart } from '@taucad/chat';
 import type { CadAgentExecution, ContextUsageData, MyUIMessage } from '@taucad/chat';
 import type { KernelEntry, KernelId } from '@taucad/types/constants';
 import { isKernelId, resolveKernel } from '@taucad/types/constants';
@@ -420,7 +419,7 @@ function ActiveChatSessionProvider({
   const model = useExecutionModel(execution);
   const kernel = useSessionKernel(session);
   const status = useSessionStatus(chatId);
-  const agentActivity = useSessionAgentActivity(session, chatId, status);
+  const agentActivity = useSessionAgentActivity(session, status);
   const stop = useSessionStop(session);
   const contextUsage = useSessionContextUsage(chatId);
   const consumeDraft = useConsumeDraft(session.draftActorRef);
@@ -683,16 +682,9 @@ function useSessionStatus(chatId: string): ChatInstance['status'] {
   return useChatSessionSnapshot(chatId, (s) => s?.chat.status ?? 'ready');
 }
 
-function useSessionAgentActivity(
-  session: ChatSession,
-  chatId: string,
-  status: ChatInstance['status'],
-): ChatAgentActivity {
-  const approvalRequired = useChatSessionSnapshot(chatId, (snapshot) =>
-    snapshot?.chat.messages.some((message) =>
-      message.parts.some((part) => isAnyToolPart(part) && part.state === 'approval-requested'),
-    ),
-  );
+function useSessionAgentActivity(session: ChatSession, status: ChatInstance['status']): ChatAgentActivity {
+  /* The chat's machine holds the open approvals its log's projection counted (PV-S7, D12); no transcript scan. */
+  const approvalRequired = useSelector(session.stateActorRef, (snapshot) => snapshot.context.pendingApprovalCount > 0);
   const stopping = useSelector(session.persistenceActorRef, (snapshot) =>
     snapshot.matches({ requestLifecycle: 'stopping' }),
   );

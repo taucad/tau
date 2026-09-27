@@ -82,6 +82,7 @@ import {
   isBrowserAgentHostPlaced,
   registerAgentHostRunReset,
   requestBrowserAgentHostResume,
+  subscribeChatLogAnswers,
   subscribeHostTurnSettlements,
 } from '#chat-clients/_internal/browser-agent-host-transport.js';
 import type { HostTurnSettlement } from '#chat-clients/_internal/browser-agent-host-transport.js';
@@ -93,6 +94,7 @@ import {
 } from '#chat-clients/_internal/chat-host-binding.js';
 import type { CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
 import { ENV } from '#environment.config.js';
+import { chatProjectionLogic, selectOpenInterrupts, selectToolsInFlight } from '#machines/chat-projection.logic.js';
 
 /** Run states a browser-placed run never leaves. */
 const terminalBrowserRunStates = new Set(['completed', 'failed', 'cancelled']);
@@ -245,42 +247,6 @@ function countPersistMilestones(message: MyUIMessage): number {
   return count;
 }
 
-/**
- * The whole tool picture of one chat, in one pass.
- *
- * The `chat-session` machine takes tool state batched per transport event
- * (F8) — one frame for a fifty-part turn, never one per delta — so this is
- * what the store hands it.
- *
- * @param messages - The chat's transcript.
- * @returns How many tool parts are running and how many wait for approval.
- */
-function countToolParts(messages: readonly MyUIMessage[]): { inFlight: number; approvals: number; toolName?: string } {
-  let inFlight = 0;
-  let approvals = 0;
-  let toolName: string | undefined;
-  for (const message of messages) {
-    for (const part of message.parts) {
-      if (!isAnyToolPart(part)) {
-        continue;
-      }
-      if (part.state === 'approval-requested') {
-        approvals += 1;
-      } else if (part.state === 'input-streaming' || part.state === 'input-available') {
-        inFlight += 1;
-        toolName = part.type === 'dynamic-tool' ? part.toolName : part.type.replace(/^tool-/u, '');
-      }
-    }
-  }
-  return { inFlight, approvals, ...(toolName === undefined ? {} : { toolName }) };
-}
-
-function hasPendingApproval(messages: readonly MyUIMessage[]): boolean {
-  return messages.some((message) =>
-    message.parts.some((part) => isAnyToolPart(part) && part.state === 'approval-requested'),
-  );
-}
-
 // ---------------------------------------------------------------------------
 // ChatSessionStore
 // ---------------------------------------------------------------------------
@@ -317,9 +283,6 @@ type InternalSession = ChatSession & {
   /** What was last handed to `stateActorRef`, so nothing is sent twice. */
   lastState: {
     phase?: ChatRunPhase;
-    inFlight: number;
-    approvals: number;
-    toolName?: string;
     durable?: string;
     lifecycle?: string;
   };
@@ -432,6 +395,11 @@ export class ChatSessionStore {
    */
   readonly #composerDrains = new Map<string, Promise<void>>();
   #settlementUnsubscribe: (() => void) | undefined;
+  /**
+   * Each chat's projection of its log (PV-S7), fed from every stream that reads it. Kept for the store's life, not a
+   * view's: a run outlives the view that started it (V5), and its rows keep arriving.
+   */
+  readonly #projections = new Map<string, Actor<typeof chatProjectionLogic>>();
   /** The chat the person has in front of them (R3); only it counts as attended. */
   #focusedChatId: string | undefined;
   readonly #membershipTopic = new Topic<void>({ name: 'ChatSessionStore.membership' });
@@ -487,6 +455,10 @@ export class ChatSessionStore {
         actors: { hostBinding: chatHostBinding, admitTurn: chatTurnAdmission, settleTurn: chatTurnSettlement },
       });
     this.#rootOptions = rootOptions;
+    // ponytail: the store lives as long as the document, so this subscription does too.
+    subscribeChatLogAnswers(({ chatId, answer }) => {
+      this.#projectionOf(chatId).send({ type: 'batch', answer });
+    });
     // E2E reads the same owner that drives the sidebar. Keeping this bridge
     // debug-only makes a liveness failure report the store's SDK/cache facts
     // and the project actors' run sets instead of guessing from labels.
@@ -1336,6 +1308,65 @@ export class ChatSessionStore {
     }
     /* A chat whose log this page already read shows how its last turn ended from the start. */
     this.#replayPersistedSettlement(session);
+    this.#syncProjection(session.chatId);
+  }
+
+  /** The chat's projection, created and started on its first answer. */
+  #projectionOf(chatId: string): Actor<typeof chatProjectionLogic> {
+    const existing = this.#projections.get(chatId);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const projection = createActor(chatProjectionLogic, this.#rootOptions);
+    this.#projections.set(chatId, projection);
+    projection.subscribe(() => {
+      this.#syncProjection(chatId);
+    });
+    projection.start();
+    return projection;
+  }
+
+  /**
+   * Hand the chat's machine what its projection says about tools and approvals (G03, G04): counted per row as the
+   * log is folded, never by scanning the transcript. The machine's own counts are the comparison, so nothing is sent
+   * twice.
+   *
+   * @param chatId - The chat whose projection moved, or whose machine was just created.
+   */
+  #syncProjection(chatId: string): void {
+    const session = this.#sessions.get(chatId);
+    const projection = this.#projections.get(chatId)?.getSnapshot().context;
+    if (session === undefined || projection === undefined) {
+      return;
+    }
+    const tools = selectToolsInFlight(projection);
+    const approvals = Object.keys(selectOpenInterrupts(projection)).length;
+    const { context } = session.stateActorRef.getSnapshot();
+    if (
+      tools.count === context.toolsInFlight &&
+      approvals === context.pendingApprovalCount &&
+      (tools.toolName === undefined || tools.toolName === context.toolName)
+    ) {
+      return;
+    }
+    /* The store's unread trigger for an approval that was not pending a moment ago (D9). */
+    if (approvals > 0 && context.pendingApprovalCount === 0) {
+      this.#markUnreadIfUnattended(session.projectId, chatId);
+    }
+    session.stateActorRef.send({
+      type: 'toolParts',
+      inFlight: tools.count,
+      approvals,
+      ...(tools.toolName === undefined ? {} : { toolName: tools.toolName }),
+    });
+  }
+
+  /** Record the chat unread unless the person is looking at it (R3). */
+  #markUnreadIfUnattended(projectId: string, chatId: string): void {
+    if (this.#focusedChatId === chatId && isDocumentActive()) {
+      return;
+    }
+    this.#setUnread(projectId, chatId, true);
   }
 
   #unreadRecord(projectId: string): UnreadRecord {
@@ -1422,7 +1453,6 @@ export class ChatSessionStore {
 
     // oxlint-disable-next-line eslint/prefer-const -- initialised only after the actor/chat callbacks that close over it are constructed.
     let session: InternalSession;
-    let approvalWasPending = false;
     /* Whether the current request wrote any assistant output. Opening a chat resumes it, and a host
      * holding no run closes that stream without a chunk; its `onFinish` is not a run finishing. */
     let requestWroteOutput = false;
@@ -1439,10 +1469,7 @@ export class ChatSessionStore {
     const composerRecordRef = createComposerRecordActor(recordStore);
 
     const markUnreadIfUnattended = (): void => {
-      if (this.#focusedChatId === chatId && isDocumentActive()) {
-        return;
-      }
-      this.#setUnread(projectId, chatId, true);
+      this.#markUnreadIfUnattended(projectId, chatId);
     };
 
     const readChatRow = async (id: string): Promise<ChatEntity | undefined> => depsRef().getChat(id);
@@ -1937,12 +1964,6 @@ export class ChatSessionStore {
     // the AI SDK's "internal-but-intended-for-subscribers" marker — see
     // node_modules/@ai-sdk/react/dist/index.d.ts).
     const unregisterMessages = chat['~registerMessagesCallback'](() => {
-      const approvalIsPending = hasPendingApproval(chat.messages);
-      if (approvalIsPending && !approvalWasPending) {
-        markUnreadIfUnattended();
-      }
-      approvalWasPending = approvalIsPending;
-
       const lastIndex = chat.messages.length - 1;
       const last = chat.messages[lastIndex];
       if (last?.role === 'assistant') {
@@ -1999,7 +2020,7 @@ export class ChatSessionStore {
       projectId,
       chatRoot,
       stateActorRef: chatRoot,
-      lastState: { inFlight: 0, approvals: 0 },
+      lastState: {},
       persistenceActorRef,
       draftActorRef,
       composerRecordRef,
@@ -2101,17 +2122,6 @@ export class ChatSessionStore {
     /* Run accounting is not gated on the chat machine: the project session has
      * to know a run started even where no `chat-session` exists yet, because
      * `busy` is what stops a policy closing a project mid-run (I24). */
-    const tools = countToolParts(session.chat.messages);
-    if (
-      tools.inFlight !== lastState.inFlight ||
-      tools.approvals !== lastState.approvals ||
-      tools.toolName !== lastState.toolName
-    ) {
-      lastState.inFlight = tools.inFlight;
-      lastState.approvals = tools.approvals;
-      lastState.toolName = tools.toolName;
-      stateActorRef.send({ type: 'toolParts', ...tools });
-    }
     this.#syncRunPhase(session);
     if (session.durableRunState !== lastState.durable) {
       lastState.durable = session.durableRunState;

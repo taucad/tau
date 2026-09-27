@@ -281,10 +281,11 @@ export type AgentHostClient = {
    * ponytail: rows are handed over one by one, in the push shape the page projection folds; W9 replaces it.
    *
    * `onEnded` hears the follow stop for any reason but its own unsubscribe: no later row reaches `listener`.
+   * `position` is the row's cursor in the log; it restarts at 0 when the follow starts over (SC-R12).
    */
   subscribe(
     input: { readonly chatId: string; readonly cursor: number },
-    listener: (chatId: string, event: AgentLogEvent) => void,
+    listener: (chatId: string, event: AgentLogEvent, position?: number) => void,
     onEnded?: () => void,
   ): () => void;
   /** One chat's live deltas. */
@@ -527,9 +528,9 @@ export const createAgentHostClient = (
         if (answer.cursor !== cursor) {
           continue;
         }
-        for (const event of answer.events) {
+        for (const [index, event] of answer.events.entries()) {
           // ponytail: rows cross the wire unparsed; W9's projection reads them through the ledger's tolerant reader.
-          listener(chatId, event as AgentLogEvent);
+          listener(chatId, event as AgentLogEvent, cursor + index);
         }
         cursor = answer.nextCursor;
       }

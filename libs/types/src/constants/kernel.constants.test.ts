@@ -13,6 +13,20 @@ describe('kernel configuration identity', () => {
     expect(configuration?.emptyCode).toContain('[Range(0.05, 5.0)]');
   });
 
+  it('should expose tscircuit as a TSX electronics offering', () => {
+    const configuration = kernelConfigurations.find(({ id }) => id === 'tscircuit');
+    expect(configuration).toMatchObject({
+      language: 'tsx',
+      mainFile: 'main.tsx',
+      backendProvider: 'tscircuit',
+    });
+    // The browser runtime hosts the kernel, so no native-runtime or trust gate applies.
+    expect(configuration).not.toHaveProperty('requiresRuntimeKernelId');
+    expect(configuration).not.toHaveProperty('requiresNativeCodeTrust');
+    expect(configuration?.emptyCode).toContain('<board width="20mm" height="20mm">');
+    expect(configuration?.emptyCode).toContain('<trace name="R1_LED1" from=".R1 > .pin2" to=".LED1 > .anode" />');
+  });
+
   it('presents exactly one OpenSCAD-language kernel with engine-independent copy', () => {
     const scadKernels = kernelConfigurations.filter(({ language }) => language === 'openscad');
 

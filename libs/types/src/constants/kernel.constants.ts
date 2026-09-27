@@ -7,7 +7,7 @@ import type { CodeLanguage } from '#types/code.types.js';
 export type KernelDimensions = 2 | 3;
 
 /** @public */
-export type KernelBackend = 'manifold' | 'opencascade' | 'zoo' | 'jscad' | 'build123d' | 'picogk';
+export type KernelBackend = 'manifold' | 'opencascade' | 'zoo' | 'jscad' | 'build123d' | 'picogk' | 'tscircuit';
 
 /**
  * Product catalog entry for a kernel offering, not an engine registry.
@@ -236,6 +236,29 @@ export default function main(p = defaultParams) {}
       'Advanced boolean operations',
       'Precise tolerancing',
     ],
+  },
+  {
+    id: 'tscircuit',
+    name: 'tscircuit',
+    dimensions: [2, 3],
+    language: 'tsx',
+    description: 'Electronics design in TSX: boards, schematics, PCB layouts and BOM',
+    mainFile: 'main.tsx',
+    backendProvider: 'tscircuit',
+    longDescription:
+      'Describe circuits as React-style TSX with tscircuit. Place resistors, capacitors, LEDs and chips on a board, wire them with traces and nets, then render the 3D board, the schematic or the PCB layout and export the BOM, netlist and circuit JSON.',
+    emptyCode: `export default () => (
+  <board width="20mm" height="20mm">
+    <resistor name="R1" resistance="1k" footprint="0402" pcbX={-4} pcbY={0} />
+    <led name="LED1" color="red" footprint="0603" pcbX={4} pcbY={0} />
+    <trace name="R1_LED1" from=".R1 > .pin2" to=".LED1 > .anode" />
+    <schematicsheet />
+  </board>
+);
+`,
+    recommended: 'Electronics & PCB Design',
+    tags: ['tscircuit', 'TSX', 'Electronics', 'PCB', 'Schematic'],
+    features: ['3D board preview', 'Schematic and PCB SVG', 'Offline autorouting', 'BOM and netlist export'],
   },
 ] as const satisfies KernelConfiguration[];
 

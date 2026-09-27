@@ -24,7 +24,9 @@ import { isRecord } from '@taucad/utils/schema';
 export type CommandAction =
   | { readonly type: 'read'; readonly path: string }
   | { readonly type: 'list'; readonly path?: string }
-  | { readonly type: 'search'; readonly query?: string; readonly path?: string };
+  | { readonly type: 'search'; readonly query?: string; readonly path?: string }
+  /** A read-only inspection with no file to name, such as `git status`. */
+  | { readonly type: 'check'; readonly command: string };
 
 /* Bounds that keep a hostile command from costing more than a normal one. */
 const maxCommandLength = 4096;
@@ -340,6 +342,35 @@ const findActions = (args: readonly string[]): CommandAction[] | undefined => {
     : [{ type: 'search', query, ...(paths[0] === undefined ? {} : { path: paths[0] }) }];
 };
 
+/* Subcommands that only report repository state. */
+const gitInspections = wordSet('status diff log show');
+
+/**
+ * The exploration a `git` invocation performs.
+ *
+ * Only `--no-pager` and `-C <dir>` may precede the subcommand: `-c` can set a
+ * pager or diff program that git then runs. `--output` writes a file and
+ * `--ext-diff` runs a configured program, so neither is an inspection.
+ *
+ * @param args - Arguments after `git`.
+ * @returns Its actions, or `undefined` when it is not read-only.
+ */
+const gitActions = (args: readonly string[]): CommandAction[] | undefined => {
+  let index = 0;
+  while (args[index] === '--no-pager' || args[index] === '-C') {
+    index += args[index] === '-C' ? 2 : 1;
+  }
+  const [subcommand = '', ...rest] = args.slice(index);
+  if (subcommand === 'grep') {
+    return searchOf(rest, grepFlags);
+  }
+  if (subcommand === 'ls-files') {
+    return lists(operandsOf(rest, wordSet('--exclude --exclude-from')));
+  }
+  const writes = rest.some((argument) => argument.startsWith('--output') || argument === '--ext-diff');
+  return gitInspections.has(subcommand) && !writes ? [{ type: 'check', command: `git ${subcommand}` }] : undefined;
+};
+
 /**
  * The exploration a single program invocation performs.
  *
@@ -393,12 +424,7 @@ const stageActions = (words: readonly string[]): CommandAction[] | undefined => 
       return searchOf(args, grepFlags);
     }
     case 'git': {
-      const [subcommand, ...rest] = args;
-      return subcommand === 'grep'
-        ? searchOf(rest, grepFlags)
-        : subcommand === 'ls-files'
-          ? lists(operandsOf(rest, wordSet('--exclude --exclude-from')))
-          : undefined;
+      return gitActions(args);
     }
     default: {
       return inert.has(program) ? [] : undefined;
@@ -412,7 +438,9 @@ const joinPath = (base: string, path: string): string =>
     : `${base.endsWith('/') ? base.slice(0, -1) : base}/${path}`;
 
 const withBase = (action: CommandAction, base: string | undefined): CommandAction =>
-  base === undefined || action.path === undefined ? action : { ...action, path: joinPath(base, action.path) };
+  base === undefined || action.type === 'check' || action.path === undefined
+    ? action
+    : { ...action, path: joinPath(base, action.path) };
 
 /** `bash -lc '<script>'` and friends: the script they run, or `undefined`. */
 const wrappedScript = (words: readonly string[]): string | undefined => {
@@ -548,25 +576,31 @@ const targetLabel = (target: CommandTarget): string =>
 /** How a summarised call is presented. */
 export type CommandSummary = {
   /** ACP kind whose icon the card borrows. */
-  readonly kind: 'read' | 'search';
+  readonly kind: 'read' | 'search' | 'execute';
   /** Activity family the group summary counts it under. */
-  readonly family: 'skill' | 'read' | 'search';
+  readonly family: 'skill' | 'read' | 'search' | 'execute';
   readonly verb: string;
   readonly activeVerb: string;
   readonly detail: string;
   readonly activeDetail: string;
+  /** The files it read, as the command named them, for the card to link. */
+  readonly locations: readonly string[];
 };
 
 const verbs = {
   read: ['Read', 'Reading'],
   list: ['Listed', 'Listing'],
   search: ['Searched', 'Searching'],
+  check: ['Checked', 'Checking'],
 } as const;
 
 const phraseOf = (actions: readonly CommandAction[]): string => {
   const { type } = actions[0]!;
+  if (type === 'check') {
+    return [...new Set(actions.map((action) => (action.type === 'check' ? action.command : '')))].join(', ');
+  }
   if (type === 'read') {
-    const targets = actions.map((action) => describeCommandTarget(action.path!));
+    const targets = actions.flatMap((action) => (action.type === 'read' ? [describeCommandTarget(action.path)] : []));
     const labels = [...new Set(targets.map((target) => targetLabel(target)))];
     /* "skills a, b" reads better than "skill a, skill b". */
     return labels.length > 1 && targets.every((target) => target.type === 'skill')
@@ -575,14 +609,15 @@ const phraseOf = (actions: readonly CommandAction[]): string => {
   }
   if (type === 'list') {
     const paths = actions.flatMap((action) =>
-      action.path === undefined ? [] : [targetLabel(describeCommandTarget(action.path))],
+      action.type === 'list' && action.path !== undefined ? [targetLabel(describeCommandTarget(action.path))] : [],
     );
     return paths.length === 0 ? 'files' : [...new Set(paths)].join(', ');
   }
   return actions
     .map((action) => {
       const query = action.type === 'search' ? action.query : undefined;
-      const where = action.path === undefined ? '' : `in ${targetLabel(describeCommandTarget(action.path))}`;
+      const path = action.type === 'check' ? undefined : action.path;
+      const where = path === undefined ? '' : `in ${targetLabel(describeCommandTarget(path))}`;
       return query === undefined ? where || 'files' : `for ${query}${where === '' ? '' : ` ${where}`}`;
     })
     .join(', ');
@@ -608,17 +643,19 @@ export const describeCommandActions = (actions: readonly CommandAction[]): Comma
   const [head, ...tail] = runs.map((run) => ({ verbs: verbs[run[0]!.type], phrase: phraseOf(run) }));
   const detailOf = (active: 0 | 1): string =>
     [head!.phrase, ...tail.map((run) => `${run.verbs[active].toLowerCase()} ${run.phrase}`)].join(', ');
-  const first = actions[0]!;
+  const { type } = actions[0]!;
+  const kind = type === 'search' ? 'search' : type === 'check' ? 'execute' : 'read';
   const allSkills = actions.every(
     (action) => action.type === 'read' && describeCommandTarget(action.path).type === 'skill',
   );
   return {
-    kind: first.type === 'search' ? 'search' : 'read',
-    family: allSkills ? 'skill' : first.type === 'search' ? 'search' : 'read',
+    kind,
+    family: allSkills ? 'skill' : kind,
     verb: head!.verbs[0],
     activeVerb: head!.verbs[1],
     detail: detailOf(0),
     activeDetail: detailOf(1),
+    locations: [...new Set(actions.flatMap((action) => (action.type === 'read' ? [action.path] : [])))],
   };
 };
 

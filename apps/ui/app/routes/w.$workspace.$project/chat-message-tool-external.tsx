@@ -281,6 +281,8 @@ type ExternalHeading = {
   readonly isCommand: boolean;
   /** What leads the body: the command, once the header no longer shows it. */
   readonly bodyPrefix: string;
+  /** Files the call read, linked in its body. */
+  readonly locations: readonly string[];
 };
 
 /**
@@ -316,7 +318,16 @@ const headingOf = (part: DynamicToolUIPart, facts: AcpFacts, label: string): Ext
     return lowerLabel === lowerCandidate || lowerLabel.startsWith(`${lowerCandidate} `);
   });
   const detail = repeatedVerb === undefined ? label : label.slice(repeatedVerb.length).trimStart();
-  return { icon, verb, activeVerb, detail, activeDetail: detail, isCommand: body === 'command', bodyPrefix: '' };
+  return {
+    icon,
+    verb,
+    activeVerb,
+    detail,
+    activeDetail: detail,
+    isCommand: body === 'command',
+    bodyPrefix: '',
+    locations: facts.locations,
+  };
 };
 
 /**
@@ -365,7 +376,14 @@ export function ChatMessageToolExternal({ part }: { readonly part: DynamicToolUI
 
   const text = `${heading.bodyPrefix}${bodyText(facts, output)}`;
   const exitCode = exitCodeOf(output);
-  const hasBody = text !== '' || facts.locations.length > 0;
+  const hasBody = text !== '' || heading.locations.length > 0;
+  /* A parsed read links its files just as an adapter-labelled read does. */
+  const locationItems = heading.locations.map((path) => (
+    <ChatToolCardListItem key={path} icon={FileText}>
+      {/* The child is what is read; the prop is what is opened. */}
+      <FileLink path={path}>{sanitizeAgentPath(path)}</FileLink>
+    </ChatToolCardListItem>
+  ));
   /* The call's product, not its log: shown open under the card, as Codex shows a render. */
   const media = externalToolMedia(facts, output);
   const mediaList =
@@ -405,17 +423,15 @@ export function ChatMessageToolExternal({ part }: { readonly part: DynamicToolUI
         {header}
         <ChatToolCardContent>
           {body === 'command' || body === 'text' ? (
-            <CodeBlockContent>
-              <Pre language={body === 'command' ? 'bash' : 'plaintext'}>{sanitizeAgentText(text, 4000)}</Pre>
-            </CodeBlockContent>
+            <>
+              {locationItems.length === 0 ? null : <ChatToolCardList>{locationItems}</ChatToolCardList>}
+              <CodeBlockContent>
+                <Pre language={body === 'command' ? 'bash' : 'plaintext'}>{sanitizeAgentText(text, 4000)}</Pre>
+              </CodeBlockContent>
+            </>
           ) : (
             <ChatToolCardList>
-              {facts.locations.map((path) => (
-                <ChatToolCardListItem key={path} icon={FileText}>
-                  {/* The child is what is read; the prop is what is opened. */}
-                  <FileLink path={path}>{sanitizeAgentPath(path)}</FileLink>
-                </ChatToolCardListItem>
-              ))}
+              {locationItems}
               {text
                 .split('\n')
                 .filter((line) => line.trim() !== '')

@@ -142,6 +142,10 @@ describe('assistant message activity', () => {
       'Searched files',
     );
     expect(describeActivity([dynamic({ kind: 'execute', input: { command: 'git status' } })])).toBe('Ran commands');
+    expect(
+      describeActivity([dynamic({ kind: 'execute', input: { command: "sed -n '1,9p' a.ts && git status" } })]),
+    ).toBe('Read files');
+    expect(describeActivity([dynamic({ kind: 'execute', input: { command: 'git push' } })])).toBe('Ran commands');
   });
 
   it('keeps approvals, mixed failures, and denials truthful', () => {

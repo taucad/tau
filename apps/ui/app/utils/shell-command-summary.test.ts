@@ -47,14 +47,24 @@ describe('summarizeShellCommand', () => {
     ["grep -rn 'drawCircle' src 2>&1 | head", 'Searched for drawCircle in src'],
     ["find . -name '*.scad'", 'Searched for *.scad in .'],
     ["find src -type f -not -name '*.geospec.ts' -print 2>/dev/null | sort", 'Listed src'],
+    // Read-only git inspection: shown as a step rather than blocking the summary.
+    ["sed -n '1,220p' main.geospec.ts && git status --short", 'Read main.geospec.ts, checked git status'],
+    ['git status --short', 'Checked git status'],
+    ['git --no-pager diff --stat && git -C packages log --oneline -5', 'Checked git diff, git log'],
+    ['git diff -- main.scad | head -40', 'Checked git diff'],
     ['cat main.ts && rg -n foo src', 'Read main.ts, searched for foo in src'],
   ])('summarises %s', (command, header) => {
     expect(headerOf(command)).toBe(header);
   });
 
   it.each([
-    'git status --short',
     'shasum -a 256 main.ts; git diff --check',
+    'git -c core.pager=less log',
+    'git diff --output=patch.diff',
+    'git diff --ext-diff',
+    "git commit -m 'x'",
+    'git push',
+    'git stash && cat a.ts',
     "sed -i 's/a/b/' main.ts",
     "sed -n '1,10p' a.ts > copy.ts",
     'cat $(ls)',

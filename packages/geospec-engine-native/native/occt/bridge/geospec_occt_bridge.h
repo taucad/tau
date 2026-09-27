@@ -787,8 +787,9 @@ int geospec_occt_validity_closure_group(
     size_t occurrence_capacity, geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 // M2 narrow phase. The bodies of the listed occurrences (the whole shape when
 // the count is zero) are their top-level solids, then free shells, then free
-// faces, each with its faces' boxes from the per-located-face memo; bodies
-// without a finite face box are omitted. The boxes are charged before any is
+// faces, each with its faces' boxes from the per-located-face memo, grown by
+// each face's largest face, edge or vertex tolerance (the body bounds fold
+// them ungrown); bodies without a finite face box are omitted. The boxes are charged before any is
 // measured. The caller releases the set before the document. `facts` writes
 // every body, then every face box in body order.
 int geospec_occt_component_bodies_new(

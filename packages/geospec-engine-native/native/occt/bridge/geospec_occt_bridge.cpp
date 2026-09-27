@@ -7212,6 +7212,21 @@ uint64_t component_box_units(const TopoDS_Face& face) {
   }
 }
 
+// The largest tolerance of a face, its edges and its vertices. The exact
+// distances measure vertex points and edge curves, which may lie that far off
+// the face's surface, and so outside its memo box.
+double component_face_tolerance(const TopoDS_Face& face) {
+  double tolerance = BRep_Tool::Tolerance(face);
+  for (TopExp_Explorer edge(face, TopAbs_EDGE); edge.More(); edge.Next()) {
+    tolerance = std::max(tolerance, BRep_Tool::Tolerance(TopoDS::Edge(edge.Current())));
+  }
+  for (TopExp_Explorer vertex(face, TopAbs_VERTEX); vertex.More(); vertex.Next()) {
+    tolerance =
+        std::max(tolerance, BRep_Tool::Tolerance(TopoDS::Vertex(vertex.Current())));
+  }
+  return tolerance;
+}
+
 // A solid classifier builds one intersector per face (UV bounds over its
 // edges, a sampled polyhedron on free-form surfaces).
 uint64_t component_classifier_units(const TopoDS_Face& face) {
@@ -7437,6 +7452,14 @@ int geospec_occt_component_bodies_new(
                   bounds.max[1], bounds.max[2]);
         box.Update(bounds.min[0], bounds.min[1], bounds.min[2], bounds.max[0],
                    bounds.max[1], bounds.max[2]);
+        // The filters read the face boxes, grown by the face's tolerances so
+        // they enclose what the exact distances measure; the body bounds fold
+        // them ungrown, bit-equal to bounds().
+        const double grow = component_face_tolerance(TopoDS::Face(face.Current()));
+        for (int axis = 0; axis < 3; ++axis) {
+          bounds.min[axis] -= grow;
+          bounds.max[axis] += grow;
+        }
         body.faces.push_back(TopoDS::Face(face.Current()));
         body.boxes.push_back(bounds);
       }

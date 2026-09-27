@@ -65,8 +65,9 @@ test('renders PicoVoxel on the variant its isolation allows and exports exact ST
   const header = new TextDecoder().decode(bytes.subarray(0, 80)).replace(/[\0 ]+$/u, '');
   expect(header).toBe('PicoGK UNITS=mm');
 
-  // DP18 evidence: the exact bytes are the serial build's in every host, so this digest
-  // must equal a Node serial export of the same example.
+  // DP18: the exact bytes are the serial build's in every host, so they equal the pin a Node
+  // serial export of the same example asserts in runtime-e2e.
   const hex = uint8ArrayToHex(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)));
   await target.writeArtifact(`picovoxel-exact-stl-${server.browser}.sha256`, `${hex}  ${bytes.byteLength}\n`);
+  expect({ sha256: hex, bytes: bytes.byteLength }).toEqual(inject('picovoxelExactStlPin'));
 });

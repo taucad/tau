@@ -51,6 +51,25 @@
         }
       }
     },
+    "test:e2e:non-isolated": {
+      "executor": "nx:run-commands",
+      "dependsOn": [{ "projects": ["ui"], "target": "build" }],
+      "metadata": {
+        "description": "The degraded mode of T2.9: the snapshot production server without COOP/COEP, so kernels must fall back to their single-threaded builds, say why, and still export exact bytes."
+      },
+      "options": {
+        "cwd": "{workspaceRoot}/apps/ui-e2e",
+        "parallel": false,
+        "commands": [
+          "../../node_modules/.bin/vitest run --config vitest.config.ts --project chromium src/picovoxel-multi.spec.ts",
+          "../../node_modules/.bin/vitest run --config vitest.config.ts --project firefox src/picovoxel-multi.spec.ts"
+        ],
+        "env": {
+          "TAU_E2E_UI_SNAPSHOT": "true",
+          "TAU_E2E_DISABLE_COI": "true"
+        }
+      }
+    },
     "test:e2e:browser-host": {
       "executor": "nx:run-commands",
       "dependsOn": [{ "projects": ["ui"], "target": "build" }],

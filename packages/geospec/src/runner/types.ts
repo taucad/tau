@@ -655,9 +655,10 @@ export type GeoSpecTestStatus = 'passed' | 'failed' | 'skipped';
 /**
  * Worker-local cache for successful GeoSpec bundles.
  *
- * The cache is internal runner infrastructure and must only be shared by
- * serial executions. Each invocation still creates a fresh collector and
- * host binding.
+ * The cache is internal runner infrastructure. Each invocation still creates a
+ * fresh collector, run token and host binding, so runs that reuse one entry
+ * stay isolated. An entry is reused only while every read its bundle was built
+ * from still returns the answer the bundler got.
  *
  * @public
  */
@@ -665,9 +666,19 @@ export type GeoSpecModuleBundleCache = Map<
   string,
   {
     builtinIdentity: string;
+    /** The run token embedded in `bundle.code`; a reuse executes a copy under its own run's token. */
     runToken: string;
     bundle: BundleResult;
-    dependencyContents: ReadonlyMap<string, Uint8Array<ArrayBuffer>>;
+    /**
+     * Each filesystem read the bundler made while building `bundle`, with the
+     * answer it got. Existence probes are reads too: they decide which file an
+     * import resolves to.
+     */
+    bundlerReads: ReadonlyArray<{
+      question: 'exists' | 'utf8' | 'bytes';
+      path: string;
+      answer: boolean | string | Uint8Array<ArrayBuffer>;
+    }>;
   }
 >;
 

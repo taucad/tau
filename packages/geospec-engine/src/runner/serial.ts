@@ -237,11 +237,8 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
   // closure-written field to `undefined` after the `delete` below.
   const abortedReason = (): string | undefined => state.aborted;
   const events = createRunnerEventChannel();
-  // Cached bundles reuse their run token, so a file shares the cache only while its run is the sole active run.
+  // Every run executes a cached bundle under its own run token, so overlapping runs can share this cache.
   const bundleCache: GeoSpecModuleBundleCache = new Map();
-  let activeRuns = 0;
-  const soleRunBundleCache = (): { bundleCache?: GeoSpecModuleBundleCache } =>
-    activeRuns === 1 ? { bundleCache } : {};
 
   return {
     async run(runOptions: GeoSpecRunnerRunOptions): Promise<GeoSpecRunnerResult> {
@@ -283,7 +280,6 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
         }
       }
 
-      activeRuns += 1;
       try {
         for (const file of files) {
           const abortReason = abortedReason();
@@ -314,7 +310,7 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
               : { matcherWallBackstop: runOptions.matcherWallBackstop }),
             ...(runOptions.forensic === undefined ? {} : { forensic: runOptions.forensic }),
             ...(forensicSink === undefined ? {} : { forensicSink }),
-            ...soleRunBundleCache(),
+            bundleCache,
           });
           const durationMs = performance.now() - fileStartedAt;
           const primaryLoadKey = context.fileLoadKey();
@@ -340,7 +336,6 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
           }
         }
       } finally {
-        activeRuns -= 1;
         await context.resourceScope.dispose();
       }
 

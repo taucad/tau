@@ -27,20 +27,18 @@
  *   1 — validation, consent, trust, credential, transport, or protocol failure.
  */
 import assert from 'node:assert/strict';
-import { execFile, spawn } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createSocket } from 'node:dgram';
 import type { RemoteInfo } from 'node:dgram';
 import { on } from 'node:events';
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { createServer as createHttpServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { createServer as createTcpServer, isIP } from 'node:net';
-import type { Socket } from 'node:net';
-import { homedir, tmpdir } from 'node:os';
-import { dirname, isAbsolute, join } from 'node:path';
-import { Readable, Transform } from 'node:stream';
-import type { TransformCallback } from 'node:stream';
+import { isIP } from 'node:net';
+import { homedir } from 'node:os';
+import { dirname, isAbsolute, join, relative } from 'node:path';
+import { Readable } from 'node:stream';
 import { promisify } from 'node:util';
 import process from 'node:process';
 import { connect as connectTls } from 'node:tls';
@@ -64,6 +62,7 @@ import type {
   MachineNetworkStream,
   MachineOperationReceipt,
   MachineSession,
+  MachineStill,
   MachineTransportTrust,
 } from '@taucad/runtime/machine';
 import { connectMachineChannel } from '@taucad/runtime/machine';
@@ -72,10 +71,17 @@ import { Client as FtpClient } from 'basic-ftp';
 import { z } from 'zod';
 
 import { bambuMachine } from '#bambu.machine.js';
-import { parseBambuDiscoveryDatagram, parseBambuStill } from '#bambu.protocol.js';
+import { parseBambuDiscoveryDatagram } from '#bambu.protocol.js';
+
+// oxlint-disable-next-line no-restricted-imports -- The operator script's own sibling module; scripts have no `#` alias.
+import { tapProjectFileReplies } from './project-file-reply.mjs';
+// oxlint-disable-next-line no-restricted-imports -- The same sibling module's reply type.
+import type { ProjectFileReply } from './project-file-reply.mjs';
 
 const execFileAsync = promisify(execFile);
 const cameraReconnectDelay = 5000;
+/** The live view's pause between captures; each capture is its own camera session. Milliseconds. */
+const cameraCaptureInterval = 1000;
 const maximumCachedStillAge = 5 * 60 * 1000;
 const cubeArtifactRelativePath = 'out/hardware/bambu-x1c/tau-x1c-petg-25mm-cube.gcode.3mf';
 const cubeArtifactDigest = 'sha256:1691bdaffa902a383ff58fac43864d8d03c9724b1393bbd96130e9695637798d';
@@ -119,46 +125,6 @@ const failureCode = (error: unknown): string => {
     return error.message;
   }
   return 'X1C_QUALIFICATION_FAILED';
-};
-
-const classifyCameraCaptureFailure = (diagnostic: string): QualificationError => {
-  const normalized = diagnostic.toLowerCase();
-  if (/401 unauthorized|authorization failed|authentication failed/u.test(normalized)) {
-    return new QualificationError('X1C_CAMERA_AUTH_FAILED');
-  }
-  if (/certificate verify failed|unable to get local issuer|hostname mismatch/u.test(normalized)) {
-    return new QualificationError('X1C_CAMERA_TLS_FAILED');
-  }
-  if (/protocol not found|protocol .* not on whitelist/u.test(normalized)) {
-    return new QualificationError('X1C_CAMERA_PROTOCOL_FAILED');
-  }
-  if (/option .* not found|unrecognized option/u.test(normalized)) {
-    return new QualificationError('X1C_CAMERA_DECODER_OPTION_FAILED');
-  }
-  if (/connection refused|network is unreachable|no route to host/u.test(normalized)) {
-    return new QualificationError('X1C_CAMERA_CONNECT_FAILED');
-  }
-  if (/timed out|timeout/u.test(normalized)) {
-    return new QualificationError('X1C_CAMERA_CAPTURE_TIMEOUT');
-  }
-  if (/invalid data found|error opening input|could not open input/u.test(normalized)) {
-    return new QualificationError('X1C_CAMERA_INPUT_FAILED');
-  }
-  return new QualificationError('X1C_CAMERA_CAPTURE_FAILED');
-};
-
-const classifyCameraTimeout = (
-  diagnostic: string,
-  phase: Readonly<{ tlsConnected: boolean; upstreamResponded: boolean }>,
-): QualificationError => {
-  const diagnosticFailure = classifyCameraCaptureFailure(diagnostic);
-  if (diagnosticFailure.code !== 'X1C_CAMERA_CAPTURE_FAILED') {
-    return diagnosticFailure;
-  }
-  if (!phase.tlsConnected) {
-    return new QualificationError('X1C_CAMERA_TLS_TIMEOUT');
-  }
-  return new QualificationError(phase.upstreamResponded ? 'X1C_CAMERA_FRAME_TIMEOUT' : 'X1C_CAMERA_RTSP_TIMEOUT');
 };
 
 const digest = (bytes: Uint8Array<ArrayBuffer>): string => `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
@@ -529,152 +495,6 @@ const uploadBambuFile = async (
   }
 };
 
-const createStreamingRtspRequestRewriter = (source: string, replacement: string) => {
-  let pending = '';
-  const rewriteLine = (line: string): string =>
-    /^[A-Z_]+\s/u.test(line) && /\sRTSP\/\d\.\d$/u.test(line) ? line.replace(source, replacement) : line;
-  return Object.freeze({
-    push(chunk: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
-      const input = pending + Buffer.from(chunk).toString('latin1');
-      const lines = input.split('\r\n');
-      pending = lines.pop() ?? '';
-      if (pending.length > 16 * 1024) {
-        const output = `${lines.map((line) => rewriteLine(line)).join('\r\n')}${lines.length > 0 ? '\r\n' : ''}${pending}`;
-        pending = '';
-        return Uint8Array.from(Buffer.from(output, 'latin1'));
-      }
-      const output = lines.map((line) => rewriteLine(line)).join('\r\n');
-      return Uint8Array.from(Buffer.from(`${output}${lines.length > 0 ? '\r\n' : ''}`, 'latin1'));
-    },
-    flush(): Uint8Array<ArrayBuffer> {
-      const output = Uint8Array.from(Buffer.from(rewriteLine(pending), 'latin1'));
-      pending = '';
-      return output;
-    },
-  });
-};
-
-const createPinnedRtspProxy = async (
-  input: Readonly<{
-    address: string;
-    port: number;
-    trust: PinnedTrust;
-    connectTimeout: number;
-  }>,
-) => {
-  let proxyFailure: QualificationError | undefined;
-  let tlsConnected = false;
-  let upstreamResponded = false;
-  const clientSockets = new Set<Socket>();
-  const upstreamSockets = new Set<ReturnType<typeof connectTls>>();
-  let localPort = 0;
-  const server = createTcpServer((client) => {
-    clientSockets.add(client);
-    client.pause();
-    const upstream = connectTls({
-      host: input.address,
-      port: input.port,
-      rejectUnauthorized: false,
-      ...(isIP(input.address) === 0 ? { servername: input.address } : {}),
-    });
-    upstreamSockets.add(upstream);
-    const connectTimeout = setTimeout(() => {
-      proxyFailure ??= new QualificationError('X1C_CAMERA_TLS_TIMEOUT');
-      upstream.destroy();
-      client.destroy();
-    }, input.connectTimeout);
-    client.once('error', () => {
-      upstream.destroy();
-    });
-    client.once('close', () => {
-      clientSockets.delete(client);
-      upstream.destroy();
-    });
-    upstream.once('error', () => {
-      proxyFailure ??= new QualificationError('X1C_CAMERA_TLS_FAILED');
-      client.destroy();
-    });
-    upstream.once('close', () => {
-      clearTimeout(connectTimeout);
-      upstreamSockets.delete(upstream);
-      client.destroy();
-    });
-    upstream.once('secureConnect', () => {
-      clearTimeout(connectTimeout);
-      const certificate = upstream.getPeerCertificate(true);
-      if (certificate.raw.byteLength === 0 || !matchesPin(Uint8Array.from(certificate.raw), input.trust.digest)) {
-        proxyFailure ??= new QualificationError('X1C_TLS_PIN_MISMATCH');
-        upstream.destroy();
-        client.destroy();
-        return;
-      }
-      tlsConnected = true;
-      const remoteAddress = isIP(input.address) === 6 ? `[${input.address}]` : input.address;
-      const replacement = createStreamingRtspRequestRewriter(
-        `rtsp://127.0.0.1:${localPort}`,
-        `rtsps://${remoteAddress}:${input.port}`,
-      );
-      const rewrite = new Transform({
-        transform(chunk: Uint8Array<ArrayBuffer>, _encoding: BufferEncoding, callback: TransformCallback) {
-          callback(undefined, replacement.push(Uint8Array.from(chunk)));
-        },
-        flush(callback) {
-          callback(undefined, replacement.flush());
-        },
-      });
-      rewrite.once('error', () => {
-        proxyFailure ??= new QualificationError('X1C_CAMERA_PROXY_FAILED');
-        upstream.destroy();
-        client.destroy();
-      });
-      client.pipe(rewrite).pipe(upstream);
-      upstream.once('data', () => {
-        upstreamResponded = true;
-      });
-      upstream.pipe(client);
-      client.resume();
-    });
-  });
-  server.maxConnections = 1;
-  await new Promise<void>((resolve, reject) => {
-    const fail = (): void => {
-      reject(new QualificationError('X1C_CAMERA_PROXY_FAILED'));
-    };
-    server.once('error', fail);
-    server.listen({ host: '127.0.0.1', port: 0, exclusive: true }, () => {
-      server.off('error', fail);
-      resolve();
-    });
-  });
-  server.on('error', () => {
-    proxyFailure ??= new QualificationError('X1C_CAMERA_PROXY_FAILED');
-  });
-  const address = server.address();
-  if (!address || typeof address === 'string') {
-    server.close();
-    throw new QualificationError('X1C_CAMERA_PROXY_FAILED');
-  }
-  localPort = address.port;
-  return Object.freeze({
-    port: localPort,
-    failure: (): QualificationError | undefined => proxyFailure,
-    phase: () => Object.freeze({ tlsConnected, upstreamResponded }),
-    close: async (): Promise<void> => {
-      for (const client of clientSockets) {
-        client.destroy();
-      }
-      for (const upstream of upstreamSockets) {
-        upstream.destroy();
-      }
-      await new Promise<void>((resolve) => {
-        server.close(() => {
-          resolve();
-        });
-      });
-    },
-  });
-};
-
 const validateRtspsStillInput = (input: MachineNetworkStillInput, configuration: QualificationConfiguration): void => {
   if (
     input.endpoint.address !== configuration.address ||
@@ -694,196 +514,58 @@ const validateRtspsStillInput = (input: MachineNetworkStillInput, configuration:
   input.signal.throwIfAborted();
 };
 
-const splitMjpegFrames = (
-  pending: Uint8Array<ArrayBuffer>,
-  chunk: Uint8Array<ArrayBuffer>,
-  maximumBytes: number,
-): Readonly<{
-  frames: ReadonlyArray<Uint8Array<ArrayBuffer>>;
-  pending: Uint8Array<ArrayBuffer>;
-}> => {
-  const bytes = Buffer.concat([Buffer.from(pending), Buffer.from(chunk)]);
-  const frames: Array<Uint8Array<ArrayBuffer>> = [];
-  let offset = 0;
-  while (offset < bytes.byteLength) {
-    const start = bytes.indexOf(Buffer.from([0xff, 0xd8]), offset);
-    if (start === -1) {
-      const tail = bytes.at(-1) === 0xff ? bytes.subarray(-1) : new Uint8Array();
-      return { frames, pending: Uint8Array.from(tail) };
-    }
-    const end = bytes.indexOf(Buffer.from([0xff, 0xd9]), start + 2);
-    if (end === -1) {
-      const remainder = bytes.subarray(start);
-      if (remainder.byteLength > maximumBytes) {
-        throw new QualificationError('X1C_CAMERA_READ_LIMIT');
-      }
-      return { frames, pending: Uint8Array.from(remainder) };
-    }
-    if (end + 2 - start > maximumBytes) {
-      throw new QualificationError('X1C_CAMERA_READ_LIMIT');
-    }
-    frames.push(Uint8Array.from(bytes.subarray(start, end + 2)));
-    offset = end + 2;
+/**
+ * Capture stills through the host's own camera capture, as the desktop app does. Its loopback proxy answers the
+ * camera's authentication, so the access code, read from the keychain once here, never reaches ffmpeg, and each
+ * capture retries transient failures until its connect timeout.
+ */
+const createHostStillCapture = async (
+  configuration: QualificationConfiguration,
+): Promise<NonNullable<MachineConnectionRuntime['captureNetworkStill']>> => {
+  // Only the camera stages load the host; the other stages start without it.
+  const { createMachineSecretStore, createMemorySecretVault, createNodeMachineRuntime } = await import('@taucad/host');
+  const secrets = createMachineSecretStore({ vault: createMemorySecretVault() });
+  secrets.stage('keychain:x1c-qualification', await readAccessCode(configuration));
+  const { captureNetworkStill } = createNodeMachineRuntime({
+    secrets,
+    async readArtifact() {
+      throw new QualificationError('X1C_READ_ONLY_STAGE');
+    },
+  }).connection();
+  if (!captureNetworkStill) {
+    throw new QualificationError('X1C_CAMERA_UNAVAILABLE');
   }
-  return { frames, pending: new Uint8Array() };
+  return captureNetworkStill;
 };
 
 const createRtspsStillSampler = async (input: MachineNetworkStillInput, configuration: QualificationConfiguration) => {
   validateRtspsStillInput(input, configuration);
-  const accessCode = await readAccessCode(configuration);
+  const captureStill = await createHostStillCapture(configuration);
   const cancellation = new AbortController();
   const signal = AbortSignal.any([input.signal, cancellation.signal]);
-  let latest: ReturnType<typeof parseBambuStill> | undefined;
+  let latest: MachineStill | undefined;
   let lastFailure: string | undefined;
   let startedAt = new Date().toISOString();
 
+  // ponytail: one camera session per capture; hold a session open if the camera minds the churn.
   const running = (async (): Promise<void> => {
     while (!signal.aborted) {
-      // oxlint-disable-next-line no-await-in-loop -- the supervisor owns exactly one camera attempt at a time.
-      const temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-x1c-camera-'));
-      const inputPath = join(temporaryDirectory, 'camera.ffconcat');
-      let proxy: Awaited<ReturnType<typeof createPinnedRtspProxy>> | undefined;
+      startedAt = new Date().toISOString();
       try {
-        startedAt = new Date().toISOString();
-        // oxlint-disable-next-line no-await-in-loop -- reconnect attempts must remain serial.
-        const activeProxy = await createPinnedRtspProxy({
-          address: input.endpoint.address,
-          port: input.endpoint.port,
-          trust: input.trust as PinnedTrust,
-          connectTimeout: input.connectTimeout,
-        });
-        proxy = activeProxy;
-        const cameraUrl = new URL(`rtsp://127.0.0.1:${activeProxy.port}${input.path}`);
-        cameraUrl.username = input.username;
-        cameraUrl.password = accessCode;
-        // oxlint-disable-next-line no-await-in-loop -- each private input belongs to its active attempt.
-        await writeFile(
-          inputPath,
-          [
-            'ffconcat version 1.0',
-            `file '${cameraUrl.toString().replaceAll("'", '%27')}'`,
-            'option rtsp_transport tcp',
-            'option rtsp_flags prefer_tcp',
-            `option timeout ${input.connectTimeout * 1000}`,
-            '',
-          ].join('\n'),
-          { encoding: 'utf8', mode: 0o600 },
-        );
-        const child = spawn(
-          'ffmpeg',
-          [
-            '-hide_banner',
-            '-loglevel',
-            'error',
-            '-nostdin',
-            '-f',
-            'concat',
-            '-safe',
-            '0',
-            '-protocol_whitelist',
-            'file,tcp,tls,rtp,udp,crypto',
-            '-i',
-            inputPath,
-            '-f',
-            'image2pipe',
-            '-vcodec',
-            'mjpeg',
-            '-q:v',
-            '2',
-            'pipe:1',
-          ],
-          { stdio: ['ignore', 'pipe', 'pipe'] },
-        );
-        // oxlint-disable-next-line no-await-in-loop, no-loop-func -- callbacks own only this attempt's child process.
-        await new Promise<void>((resolve, reject) => {
-          let diagnostic = '';
-          let pending = new Uint8Array(new ArrayBuffer(0));
-          let failure: QualificationError | undefined;
-          let receivedFrame = false;
-          let settled = false;
-          let forcedStop: ReturnType<typeof setTimeout> | undefined;
-          const terminate = (): void => {
-            if (child.exitCode !== null || child.signalCode !== null) {
-              return;
-            }
-            child.kill('SIGTERM');
-            forcedStop ??= setTimeout(() => {
-              if (child.exitCode === null && child.signalCode === null) {
-                child.kill('SIGKILL');
-              }
-            }, 2000);
-            forcedStop.unref();
-          };
-          const finish = (error?: QualificationError): void => {
-            if (settled) {
-              return;
-            }
-            settled = true;
-            clearTimeout(firstFrameTimeout);
-            clearTimeout(forcedStop);
-            signal.removeEventListener('abort', abortCapture);
-            if (error) {
-              reject(error);
-            } else {
-              resolve();
-            }
-          };
-          const stop = (error: QualificationError): void => {
-            failure ??= error;
-            terminate();
-          };
-          const abortCapture = terminate;
-          const firstFrameTimeout = setTimeout(() => {
-            stop(classifyCameraTimeout(diagnostic, activeProxy.phase()));
-          }, input.connectTimeout);
-          signal.addEventListener('abort', abortCapture, { once: true });
-          child.stdout.on('data', (chunk: Uint8Array<ArrayBuffer>) => {
-            try {
-              const decoded = splitMjpegFrames(pending, chunk, input.maximumBytes);
-              pending = decoded.pending;
-              for (const frame of decoded.frames) {
-                latest = parseBambuStill(frame, new Date().toISOString());
-                lastFailure = undefined;
-                receivedFrame = true;
-                clearTimeout(firstFrameTimeout);
-              }
-            } catch (error) {
-              stop(error instanceof QualificationError ? error : new QualificationError('X1C_CAMERA_CAPTURE_FAILED'));
-            }
-          });
-          child.stderr.setEncoding('utf8');
-          child.stderr.on('data', (chunk: string) => {
-            diagnostic += chunk.slice(0, Math.max(0, 32 * 1024 - diagnostic.length));
-          });
-          child.once('error', () => {
-            finish(new QualificationError('X1C_CAMERA_DECODER_UNAVAILABLE'));
-          });
-          child.once('close', () => {
-            finish(
-              signal.aborted
-                ? undefined
-                : (failure ??
-                    activeProxy.failure() ??
-                    (receivedFrame
-                      ? new QualificationError('X1C_CAMERA_STREAM_ENDED')
-                      : classifyCameraCaptureFailure(diagnostic))),
-            );
-          });
-        });
+        // oxlint-disable-next-line no-await-in-loop -- the supervisor owns exactly one camera capture at a time.
+        latest = await captureStill({ ...input, signal });
+        lastFailure = undefined;
+        // oxlint-disable-next-line no-await-in-loop -- the pause bounds how often the camera is asked.
+        await delay(cameraCaptureInterval, undefined, { signal }).catch(() => undefined);
       } catch (error) {
         lastFailure = failureCode(error);
         // oxlint-disable-next-line no-await-in-loop -- bounded backoff prevents a hot reconnect loop.
         await delay(cameraReconnectDelay, undefined, { signal }).catch(() => undefined);
-      } finally {
-        // oxlint-disable-next-line no-await-in-loop -- attempt cleanup completes before reconnect.
-        await proxy?.close();
-        // oxlint-disable-next-line no-await-in-loop -- attempt secrets are removed before reconnect.
-        await rm(temporaryDirectory, { recursive: true, force: true });
       }
     }
   })();
 
-  const capture = async (signal_: AbortSignal): Promise<ReturnType<typeof parseBambuStill>> => {
+  const capture = async (signal_: AbortSignal): Promise<MachineStill> => {
     signal_.throwIfAborted();
     const now = Date.now();
     if (!latest || Date.parse(latest.capturedAt) + maximumCachedStillAge <= now) {
@@ -904,26 +586,6 @@ const createRtspsStillSampler = async (input: MachineNetworkStillInput, configur
         capturedAt: latest?.capturedAt,
         failure: lastFailure,
       }),
-    async waitForFrame(signal_: AbortSignal): Promise<ReturnType<typeof parseBambuStill>> {
-      const deadline = Date.now() + input.connectTimeout;
-      while (Date.now() < deadline) {
-        signal_.throwIfAborted();
-        try {
-          // oxlint-disable-next-line no-await-in-loop -- this bounded wait observes without opening a connection.
-          return await capture(signal_);
-        } catch (error) {
-          if (
-            !(error instanceof QualificationError) ||
-            !/^X1C_CAMERA_(?:WARMING|TLS_TIMEOUT|RTSP_TIMEOUT|FRAME_TIMEOUT|CAPTURE_FAILED)$/u.test(error.code)
-          ) {
-            throw error;
-          }
-        }
-        // oxlint-disable-next-line no-await-in-loop -- the poll is bounded by the caller's connect deadline.
-        await delay(50, undefined, { signal: signal_ });
-      }
-      throw new QualificationError(lastFailure ?? 'X1C_CAMERA_FRAME_TIMEOUT');
-    },
     async close(): Promise<void> {
       cancellation.abort();
       await running;
@@ -934,13 +596,10 @@ const createRtspsStillSampler = async (input: MachineNetworkStillInput, configur
 const captureRtspsStill = async (
   input: MachineNetworkStillInput,
   configuration: QualificationConfiguration,
-): Promise<ReturnType<typeof parseBambuStill>> => {
-  const sampler = await createRtspsStillSampler(input, configuration);
-  try {
-    return await sampler.waitForFrame(input.signal);
-  } finally {
-    await sampler.close();
-  }
+): Promise<MachineStill> => {
+  validateRtspsStillInput(input, configuration);
+  const captureStill = await createHostStillCapture(configuration);
+  return captureStill(input);
 };
 
 const configuredX1cStillInput = (
@@ -963,16 +622,10 @@ const configuredX1cStillInput = (
   };
 };
 
-const captureConfiguredX1cStillOnce = async (
-  configuration: QualificationConfiguration,
-  signal: AbortSignal,
-): Promise<ReturnType<typeof parseBambuStill>> =>
-  captureRtspsStill(configuredX1cStillInput(configuration, signal), configuration);
-
 const captureConfiguredX1cStill = async (
   configuration: QualificationConfiguration,
   signal: AbortSignal,
-): Promise<ReturnType<typeof parseBambuStill>> => captureConfiguredX1cStillOnce(configuration, signal);
+): Promise<MachineStill> => captureRtspsStill(configuredX1cStillInput(configuration, signal), configuration);
 
 const connectPinnedStream = async (input: MachineNetworkRequest): Promise<MachineNetworkStream> => {
   if (input.transport !== 'tls' || input.trust.type !== 'pinned') {
@@ -1118,11 +771,33 @@ const loadCubeArtifact = async (): Promise<
   return Object.freeze({ artifact, bytes });
 };
 
+/** Write the start's redacted `project_file` replies to `out/hardware/bambu-x1c/project-file-reply-<timestamp>.json`. */
+const writeProjectFileReplies = async (replies: readonly ProjectFileReply[]): Promise<void> => {
+  const directory = join(process.cwd(), 'out', 'hardware', 'bambu-x1c');
+  const path = join(directory, `project-file-reply-${new Date().toISOString().replaceAll(':', '-')}.json`);
+  await mkdir(directory, { recursive: true });
+  await writeFile(path, `${JSON.stringify({ operationId: printOperationId, replies }, undefined, 2)}\n`, {
+    encoding: 'utf8',
+    flag: 'wx',
+    mode: 0o600,
+  });
+  process.stdout.write(
+    `${JSON.stringify({ stage: 'print-cube', status: 'project-file-replies', count: replies.length, path: relative(process.cwd(), path) })}\n`,
+  );
+};
+
 const createPrintConnectionRuntime = (
   configuration: QualificationConfiguration,
   expected: Awaited<ReturnType<typeof loadCubeArtifact>>,
+  replies: ProjectFileReply[],
 ): MachineConnectionRuntime => ({
   ...createConnectionRuntime(configuration),
+  async connectStream(input) {
+    return tapProjectFileReplies(await connectPinnedStream(input), replies, [
+      configuration.serial,
+      configuration.address,
+    ]);
+  },
   async *readArtifact(input) {
     if (
       input.maximumBytes < expected.bytes.byteLength ||
@@ -1637,12 +1312,13 @@ const runPrintCube = async (configuration: QualificationConfiguration): Promise<
     throw new QualificationError('X1C_APPROVED_TRUST_PINS_REQUIRED');
   }
   const cancellation = new AbortController();
+  const replies: ProjectFileReply[] = [];
   const runtime = Object.freeze({
     discovery: Object.freeze({
       clock: Object.freeze({ now: () => new Date().toISOString() }),
       listenDatagrams,
     }),
-    connection: () => createPrintConnectionRuntime(activeConfiguration, artifact),
+    connection: () => createPrintConnectionRuntime(activeConfiguration, artifact, replies),
   });
   const admission = createHostAdmissionAuthority({ hostId: 'x1c-qualification-host' });
   await mkdir(join(dirname(configurationPath), 'x1c-machine-store'), {
@@ -1881,6 +1557,12 @@ const runPrintCube = async (configuration: QualificationConfiguration): Promise<
     client.close();
     server.dispose();
     await host.close();
+    // Once a start may have been sent, its replies (or their absence) are evidence either way.
+    if (phase === 'START') {
+      await writeProjectFileReplies(replies).catch(() => {
+        process.stderr.write('X1C_PROJECT_FILE_REPLY_WRITE_FAILED\n');
+      });
+    }
   }
 };
 
@@ -1932,34 +1614,6 @@ const selfCheck = async (): Promise<void> => {
   assert.equal(redacted.includes(sample.trust.mqtt), false);
   assert.equal(failureCode(new Error('BAMBU_MQTT_CONNECT_FAILED')), 'BAMBU_MQTT_CONNECT_FAILED');
   assert.equal(failureCode(new Error('secret detail')), 'X1C_QUALIFICATION_FAILED');
-  assert.equal(classifyCameraCaptureFailure('tls: certificate verify failed').code, 'X1C_CAMERA_TLS_FAILED');
-  assert.equal(classifyCameraCaptureFailure('server returned 401 Unauthorized').code, 'X1C_CAMERA_AUTH_FAILED');
-  assert.equal(
-    classifyCameraTimeout('', { tlsConnected: false, upstreamResponded: false }).code,
-    'X1C_CAMERA_TLS_TIMEOUT',
-  );
-  assert.equal(
-    classifyCameraTimeout('', { tlsConnected: true, upstreamResponded: false }).code,
-    'X1C_CAMERA_RTSP_TIMEOUT',
-  );
-  assert.equal(
-    classifyCameraTimeout('', { tlsConnected: true, upstreamResponded: true }).code,
-    'X1C_CAMERA_FRAME_TIMEOUT',
-  );
-  const firstFrameChunk = splitMjpegFrames(new Uint8Array(), Uint8Array.from([0xff, 0xd8, 1]), 16);
-  const secondFrameChunk = splitMjpegFrames(
-    firstFrameChunk.pending,
-    Uint8Array.from([2, 0xff, 0xd9, 0, 0xff, 0xd8, 3, 0xff, 0xd9]),
-    16,
-  );
-  assert.deepEqual(
-    secondFrameChunk.frames.map((frame) => [...frame]),
-    [
-      [0xff, 0xd8, 1, 2, 0xff, 0xd9],
-      [0xff, 0xd8, 3, 0xff, 0xd9],
-    ],
-  );
-  assert.equal(secondFrameChunk.pending.byteLength, 0);
   assert.equal(matchesLiveViewGrant(`Bearer ${'x'.repeat(43)}`, 'x'.repeat(43)), true);
   assert.equal(matchesLiveViewGrant(`Bearer ${'x'.repeat(43)}`, 'y'.repeat(43)), false);
   const liveRequest = {
@@ -1979,20 +1633,6 @@ const selfCheck = async (): Promise<void> => {
       origin: 'http://localhost:4173',
     }),
     false,
-  );
-  const replacement = createStreamingRtspRequestRewriter('rtsp://127.0.0.1:1234', 'rtsps://printer:322');
-  const rewritten = Buffer.concat([
-    replacement.push(Uint8Array.from(Buffer.from('OPTIONS rtsp://127.0.'))),
-    replacement.push(
-      Uint8Array.from(
-        Buffer.from('0.1:1234/stream RTSP/1.0\r\nAuthorization: Digest uri="rtsp://127.0.0.1:1234/stream"\r\n\r\n'),
-      ),
-    ),
-    replacement.flush(),
-  ]).toString('latin1');
-  assert.equal(
-    rewritten,
-    'OPTIONS rtsps://printer:322/stream RTSP/1.0\r\nAuthorization: Digest uri="rtsp://127.0.0.1:1234/stream"\r\n\r\n',
   );
   process.stdout.write('X1C qualification self-check passed.\n');
 };

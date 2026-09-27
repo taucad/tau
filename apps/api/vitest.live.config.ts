@@ -3,7 +3,6 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from 'dotenv';
 import { defineConfig } from 'vitest/config';
-import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -26,7 +25,6 @@ for (const [key, value] of Object.entries(process.env)) {
 export default defineConfig({
   root: __dirname,
   cacheDir: '../../node_modules/.vite/apps/api-live',
-  plugins: [nxViteTsPaths()],
   test: {
     environment: 'node',
     include: ['app/testing/live/**/*.live.test.ts'],

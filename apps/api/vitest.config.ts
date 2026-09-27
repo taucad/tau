@@ -2,7 +2,6 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config as loadDotenv } from 'dotenv';
 import { defineConfig } from 'vitest/config';
-import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -10,7 +9,6 @@ loadDotenv({ path: path.resolve(__dirname, '.env') });
 
 export default defineConfig({
   root: __dirname,
-  plugins: [nxViteTsPaths()],
   cacheDir: '../../node_modules/.vite/apps/api',
   test: {
     coverage: {

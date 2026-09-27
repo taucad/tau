@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { pathToFileURL } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
@@ -10,7 +11,7 @@ import type { ZodType } from 'zod';
 import { rpcName, toolName } from '@taucad/chat/constants';
 import { exportGeometryInputSchema, exportGeometryOutputSchema } from '@taucad/chat/schemas/tools/export-geometry';
 import { getKernelResultInputSchema, getKernelResultOutputSchema } from '@taucad/chat/schemas/tools/get-kernel-result';
-import { screenshotInputSchema, screenshotOutputSchema } from '@taucad/chat/schemas/tools/screenshot';
+import { screenshotInputSchema, screenshotMcpOutputSchema } from '@taucad/chat/schemas/tools/screenshot';
 import { testModelInputSchema, testModelOutputSchema } from '@taucad/chat/schemas/tools/test-model';
 
 const exposedRpcNames = [
@@ -167,7 +168,7 @@ const canonicalToolDefinitions = {
   [toolName.screenshot]: {
     description: descriptions.screenshot,
     inputSchema: screenshotInputSchema,
-    outputSchema: screenshotOutputSchema,
+    outputSchema: screenshotMcpOutputSchema,
   },
   [toolName.exportGeometry]: {
     description: descriptions.exportGeometry,
@@ -198,6 +199,7 @@ export type TauMcpAdapter = {
 const rpcFailure = (result: { errorCode: string; message: string }): CallToolResult => ({
   isError: true,
   content: [{ type: 'text', text: `${result.errorCode}: ${result.message}` }],
+  structuredContent: { errorCode: result.errorCode, message: result.message },
 });
 
 const rpcSuccess = (result: Record<string, unknown>): CallToolResult => ({
@@ -205,21 +207,35 @@ const rpcSuccess = (result: Record<string, unknown>): CallToolResult => ({
   structuredContent: result,
 });
 
-const screenshotSuccess = (result: {
-  readonly images: ReadonlyArray<{ readonly view: string; readonly dataUrl: string }>;
-}): CallToolResult => ({
+const testModelSuccess = (result: z.infer<typeof testModelOutputSchema>): CallToolResult => ({
   content: [
     {
       type: 'text',
-      text: `Captured ${String(result.images.length)} CAD ${result.images.length === 1 ? 'view' : 'views'}: ${result.images.map(({ view }) => view).join(', ')}.`,
+      text: `GeoSpec passed ${String(result.passed)} of ${String(result.total)} requirements.${
+        result.failures.length === 0
+          ? ''
+          : ` Failing IDs: ${result.failures
+              .slice(0, 20)
+              .map((failure) => failure.id)
+              .join(', ')}${result.failures.length > 20 ? ` and ${String(result.failures.length - 20)} more` : ''}.`
+      }${result.fullResult ? ` Full report: ${result.fullResult.absolutePath}.` : ''}`,
     },
-    ...result.images.map(({ dataUrl }): CallToolResult['content'][number] => {
-      const match = /^data:([^;,]+);base64,(.*)$/su.exec(dataUrl);
-      if (!match?.[1] || match[2] === undefined) {
-        throw new Error('Tau screenshot output contained an invalid base64 data URL.');
-      }
-      return { type: 'image', mimeType: match[1], data: match[2] };
-    }),
+  ],
+  structuredContent: result,
+});
+
+const screenshotSuccess = (result: z.infer<typeof screenshotMcpOutputSchema>): CallToolResult => ({
+  content: [
+    {
+      type: 'text',
+      text: `Captured ${String(result.images.length)} CAD ${result.images.length === 1 ? 'view' : 'views'}. Open each local image with your image-viewing tool:\n${result.images.map(({ view, absolutePath }) => `${view}: ${absolutePath}`).join('\n')}`,
+    },
+    ...result.images.map(({ view, absolutePath, mimeType }): CallToolResult['content'][number] => ({
+      type: 'resource_link',
+      uri: pathToFileURL(absolutePath).href,
+      name: `${view} screenshot`,
+      mimeType,
+    })),
   ],
   structuredContent: result,
 });
@@ -256,7 +272,7 @@ export const createTauMcpAdapter = (options: { dispatch: TauMcpDispatch }): TauM
         if (result.success !== true) {
           return rpcFailure(result);
         }
-        return rpcSuccess(testModelOutputSchema.parse(withoutSuccess(result)));
+        return testModelSuccess(testModelOutputSchema.parse(withoutSuccess(result)));
       }
       case toolName.screenshot: {
         const args = screenshotInputSchema.parse(input.arguments);
@@ -264,7 +280,7 @@ export const createTauMcpAdapter = (options: { dispatch: TauMcpDispatch }): TauM
         if (result.success !== true) {
           return rpcFailure(result);
         }
-        return screenshotSuccess(screenshotOutputSchema.parse(withoutSuccess(result)));
+        return screenshotSuccess(screenshotMcpOutputSchema.parse(withoutSuccess(result)));
       }
       case toolName.exportGeometry: {
         const args = exportGeometryInputSchema.parse(input.arguments);

@@ -96,7 +96,7 @@ import {
   getKernelResultInputSchema,
   getKernelResultOutputSchema,
   screenshotInputSchema,
-  screenshotOutputSchema,
+  screenshotMcpOutputSchema,
   testModelInputSchema,
   testModelOutputSchema,
 } from '@taucad/chat';
@@ -558,7 +558,7 @@ type JsonSchema = {
 const tauMcpSchemas = {
   [toolName.getKernelResult]: { input: getKernelResultInputSchema, output: getKernelResultOutputSchema },
   [toolName.testModel]: { input: testModelInputSchema, output: testModelOutputSchema },
-  [toolName.screenshot]: { input: screenshotInputSchema, output: screenshotOutputSchema },
+  [toolName.screenshot]: { input: screenshotInputSchema, output: screenshotMcpOutputSchema },
   [toolName.exportGeometry]: { input: exportGeometryInputSchema, output: exportGeometryOutputSchema },
 } as const;
 
@@ -622,6 +622,13 @@ const mcpResult = (
     };
   }
   if (result['isError'] === true || failed) {
+    const structured = asRecord(result['structuredContent']);
+    if (typeof structured?.['errorCode'] === 'string' && typeof structured['message'] === 'string') {
+      return {
+        content: { errorCode: structured['errorCode'], message: structured['message'] },
+        isError: true,
+      };
+    }
     const content = Array.isArray(result['content'])
       ? result['content']
           .map((block) => asRecord(block))
@@ -634,12 +641,32 @@ const mcpResult = (
     };
   }
   const parsed = tool.outputSchema.safeParse(result['structuredContent']);
+  const clipped =
+    Array.isArray(result['content']) &&
+    result['content'].some((block) => {
+      const text = asRecord(block)?.['text'];
+      return typeof text === 'string' && /…\d+ chars truncated…/u.test(text);
+    });
+  const missing = result['structuredContent'] === undefined;
+  const blocks: readonly unknown[] = Array.isArray(result['content']) ? result['content'] : [];
+  let textBytes = 0;
+  for (const block of blocks) {
+    const value = asRecord(block)?.['text'];
+    if (typeof value === 'string') {
+      textBytes += Buffer.byteLength(value, 'utf8');
+    }
+  }
+  const shape = `${String(blocks.length)} content blocks, ${String(textBytes)} text bytes`;
   return parsed.success
     ? { content: asJson(parsed.data), isError: false }
     : {
         content: {
-          errorCode: 'MCP_RESULT_INVALID',
-          message: `Tau MCP returned an invalid ${tool.toolName} result.`,
+          errorCode: clipped ? 'MCP_RESULT_TRUNCATED' : missing ? 'MCP_RESULT_MISSING' : 'MCP_RESULT_INVALID',
+          message: clipped
+            ? `The ${tool.toolName} result was truncated before Tau received its structured output (${shape}).`
+            : missing
+              ? `Tau MCP returned no structured ${tool.toolName} result (${shape}).`
+              : `Tau MCP returned an invalid ${tool.toolName} result (${shape}).`,
         },
         isError: true,
       };

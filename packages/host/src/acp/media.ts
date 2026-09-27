@@ -14,8 +14,8 @@
  * readable exactly as before (D14).
  */
 
-import { createHash } from 'node:crypto';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { link, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 
 import type { ExternalAgentLogEvent, JsonObject, JsonValue } from '@taucad/agent-host';
@@ -28,6 +28,58 @@ const attachmentExtensions: Readonly<Record<string, string>> = {
   'image/webp': 'webp',
   'image/gif': 'gif',
   'application/pdf': 'pdf',
+  'application/json': 'json',
+};
+
+/**
+ * Persist one attachment for a chat and return both the transcript and local paths.
+ * @param input - Workspace, chat, MIME type and canonical base64 bytes.
+ * @returns Content-addressed chat and local file references.
+ */
+export const saveChatAttachment = async (input: {
+  readonly workspaceRoot: string;
+  readonly chatId: string;
+  readonly data: string;
+  readonly mimeType: string;
+}): Promise<{
+  readonly path: string;
+  readonly absolutePath: string;
+  readonly byteLength: number;
+  readonly sha256: string;
+}> => {
+  if (!/^[\w-]+$/u.test(input.chatId)) {
+    throw new Error('Chat attachment has an invalid chat id.');
+  }
+  const extension = attachmentExtensions[input.mimeType];
+  if (extension === undefined) {
+    throw new Error(`Chat attachment media type ${input.mimeType} is unsupported.`);
+  }
+  const bytes = Buffer.from(input.data, 'base64');
+  if (bytes.length === 0 || bytes.toString('base64') !== input.data) {
+    throw new Error('Chat attachment contains invalid base64 bytes.');
+  }
+  const sha256 = createHash('sha256').update(bytes).digest('hex');
+  const path = `attachments/${sha256}.${extension}`;
+  const absolutePath = join(input.workspaceRoot, '.tau', 'chats', input.chatId, path);
+  await mkdir(join(input.workspaceRoot, '.tau', 'chats', input.chatId, 'attachments'), { recursive: true });
+  const temporaryPath = `${absolutePath}.${randomUUID()}.tmp`;
+  await writeFile(temporaryPath, bytes, { flag: 'wx' });
+  try {
+    try {
+      await link(temporaryPath, absolutePath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+        throw error;
+      }
+      const existing = await readFile(absolutePath);
+      if (!existing.equals(bytes)) {
+        throw error;
+      }
+    }
+  } finally {
+    await unlink(temporaryPath);
+  }
+  return { path, absolutePath, byteLength: bytes.length, sha256 };
 };
 
 /**
@@ -87,35 +139,26 @@ export const createAcpMediaStore = (
   workspaceRoot: string,
   chatId: string,
 ): ((events: readonly ExternalAgentLogEvent[]) => Promise<readonly ExternalAgentLogEvent[]>) => {
-  const directory = join(workspaceRoot, '.tau', 'chats', chatId, 'attachments');
   /* The durable `file-ref` block (agent-host's `FileRefContentBlock`, validated by its strict schema). */
   const stored = new Map<string, JsonObject & { readonly path: string }>();
 
   const store = async (media: NonNullable<ReturnType<typeof inlineMediaOf>>): Promise<JsonValue | undefined> => {
     const known = stored.get(media.data);
     const extension = attachmentExtensions[media.mimeType];
-    if (known !== undefined || extension === undefined) {
+    if (known !== undefined || extension === undefined || media.mimeType === 'application/json') {
       return known;
     }
     const bytes = Buffer.from(media.data, 'base64');
-    // Buffer skips what is not base64; a payload that does not round-trip is not bytes this row can name.
     if (bytes.length === 0 || bytes.toString('base64') !== media.data) {
       return undefined;
     }
-    const hash = createHash('sha256').update(bytes).digest('hex');
-    await mkdir(directory, { recursive: true });
-    await writeFile(join(directory, `${hash}.${extension}`), bytes, { flag: 'wx' }).catch((error: unknown) => {
-      // Content-addressed: an existing file already holds these bytes.
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
-        throw error;
-      }
-    });
+    const saved = await saveChatAttachment({ workspaceRoot, chatId, data: media.data, mimeType: media.mimeType });
     const filename = filenameOf(media.uri);
     const reference = {
       type: 'file-ref',
-      path: `attachments/${hash}.${extension}`,
+      path: saved.path,
       mimeType: media.mimeType,
-      byteLength: bytes.length,
+      byteLength: saved.byteLength,
       ...(filename === undefined ? {} : { filename }),
     };
     stored.set(media.data, reference);

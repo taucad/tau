@@ -1123,7 +1123,11 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
      * the channel token: it travels into a vendor adapter's process. */
     const mcp =
       discovery.agents.length > 0
-        ? createHostMcpEndpoint({ secret: randomBytes(32).toString('base64url'), registry: toolRegistry })
+        ? createHostMcpEndpoint({
+            secret: randomBytes(32).toString('base64url'),
+            registry: toolRegistry,
+            workspaceRoot: agent.workspaceRoot,
+          })
         : undefined;
     /* V17 / I-EDIT: the host records the turn, so the revision tree wraps the
      * launcher rather than sitting beside it — the turn has to be placed and

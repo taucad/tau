@@ -86,7 +86,9 @@ export const attachmentCapBytes = (kind: AttachmentKind): number => (kind === 'i
 
 /** The prefix every attachment reference URL carries. */
 export const attachmentUrlPrefix = 'attachments/';
-const attachmentFileNamePattern = /^[\da-f]{64}\.(?:jpg|png|webp|gif|pdf)$/;
+/* GeoSpec report JSON is readable as an agent-produced reference; `put` still
+ * accepts only the user attachment types above. */
+const attachmentFileNamePattern = /^[\da-f]{64}\.(?:jpg|png|webp|gif|pdf|json)$/;
 
 /** Whether a URL is an attachment reference, as opposed to a `data:` URL or anything else. */
 export const isAttachmentUrl = (url: string): boolean =>

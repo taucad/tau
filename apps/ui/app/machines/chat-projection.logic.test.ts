@@ -9,12 +9,14 @@ import { describe, expect, it } from 'vitest';
 import { createActor } from 'xstate';
 import { foreignEventChanges } from '@taucad/xstate-testing/paths';
 import type { AgentLogEvent } from '@taucad/agent-host';
-import { projectAgentHostEvent } from '#services/agent-host-event-projection.js';
+import { projectAgentHostEvent, runFailureText } from '#services/agent-host-event-projection.js';
 import {
   chatProjectionLogic,
   initialChatProjection,
   reduceChatProjection,
+  selectCaughtUp,
   selectOpenInterrupts,
+  selectRunFailure,
   selectPosition,
   selectRunPhase,
   selectToolsInFlight,
@@ -155,16 +157,40 @@ describe('chatProjectionLogic (PV-S7)', () => {
     const rows = readLog('recorded/daemon-reattach-hexnut-4runs');
     const held = project(rows.slice(0, 10), 10);
     expect(project(rows, 16, held)).toEqual(project(rows, 1));
-    expect(reduceChatProjection(held, { type: 'batch', answer: batch(rows.slice(0, 4), 0, rows.length) }).state).toBe(
-      held,
-    );
+    const replayed = reduceChatProjection(held, { type: 'batch', answer: batch(rows.slice(0, 4), 0, rows.length) });
+    expect(replayed.state.ledger).toBe(held.ledger);
+    expect(replayed.state.openTools).toBe(held.openTools);
+    /* It still learns where the log ends, so it knows it no longer holds all of it. */
+    expect(replayed.state.endCursor).toBe(rows.length);
+  });
+
+  it('holds the log only once its cursor reaches the end the last answer stated', () => {
+    const rows = readLog('recorded/in-project-ping-pong-turn');
+    const first = reduceChatProjection(initialChatProjection, {
+      type: 'batch',
+      answer: batch(rows.slice(0, 16), 0, rows.length),
+    }).state;
+    expect(selectCaughtUp(first)).toBe(false);
+    expect(selectCaughtUp(project(rows, 16))).toBe(true);
+  });
+
+  it('keeps what a failed row said until its run’s next lifecycle row', () => {
+    const rows = readLog('seeded/legal-attempts');
+    const failedAt = rows.findIndex((row) => row.type === 'run.lifecycle' && row.state === 'failed');
+    const failed = rows[failedAt]!;
+    const detail = failed.type === 'run.lifecycle' ? failed.detail : undefined;
+    const atFailure = project(rows.slice(0, failedAt + 1), 1);
+    expect(selectRunFailure(atFailure, failed.runId)).toBe(runFailureText(detail));
+    expect(selectRunFailure(atFailure, 'another-run')).toBeUndefined();
+    const reopened = rows.findIndex((row, index) => index > failedAt && row.type === 'run.lifecycle');
+    expect(selectRunFailure(project(rows.slice(0, reopened + 1), 1), failed.runId)).toBeUndefined();
   });
 
   it('discards a batch that does not start at its cursor, and asks for it again', () => {
     const rows = readLog('recorded/in-project-ping-pong-turn');
     const state = project(rows.slice(0, 5), 5);
     const skipped = reduceChatProjection(state, { type: 'batch', answer: batch(rows.slice(6, 9), 6, rows.length) });
-    expect(skipped.state).toBe(state);
+    expect(skipped.state.ledger).toBe(state.ledger);
     expect(skipped.emit).toEqual({ type: 'stale' });
   });
 

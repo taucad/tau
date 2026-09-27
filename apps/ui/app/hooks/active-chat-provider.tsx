@@ -419,7 +419,7 @@ function ActiveChatSessionProvider({
   const model = useExecutionModel(execution);
   const kernel = useSessionKernel(session);
   const status = useSessionStatus(chatId);
-  const agentActivity = useSessionAgentActivity(session, status);
+  const agentActivity = useSessionAgentActivity(session);
   const stop = useSessionStop(session);
   const contextUsage = useSessionContextUsage(chatId);
   const consumeDraft = useConsumeDraft(session.draftActorRef);
@@ -682,9 +682,19 @@ function useSessionStatus(chatId: string): ChatInstance['status'] {
   return useChatSessionSnapshot(chatId, (s) => s?.chat.status ?? 'ready');
 }
 
-function useSessionAgentActivity(session: ChatSession, status: ChatInstance['status']): ChatAgentActivity {
-  /* The chat's machine holds the open approvals its log's projection counted (PV-S7, D12); no transcript scan. */
+/**
+ * What the chat's agent is doing, as the composer names it: a select over the chat's machine, whose run and approvals
+ * come from its log's projection (PV-S7, D12), and the request's stop. No transcript scan and no SDK status.
+ */
+function useSessionAgentActivity(session: ChatSession): ChatAgentActivity {
   const approvalRequired = useSelector(session.stateActorRef, (snapshot) => snapshot.context.pendingApprovalCount > 0);
+  /* A paused run waits for the person, so the composer is theirs. */
+  const working = useSelector(
+    session.stateActorRef,
+    (snapshot) =>
+      snapshot.matches({ run: 'queued' }) ||
+      (snapshot.matches({ run: 'running' }) && !snapshot.matches({ run: { running: 'waiting' } })),
+  );
   const stopping = useSelector(session.persistenceActorRef, (snapshot) =>
     snapshot.matches({ requestLifecycle: 'stopping' }),
   );
@@ -694,7 +704,7 @@ function useSessionAgentActivity(session: ChatSession, status: ChatInstance['sta
   if (stopping) {
     return 'stopping';
   }
-  return status === 'submitted' || status === 'streaming' ? 'working' : 'ready';
+  return working ? 'working' : 'ready';
 }
 
 /**

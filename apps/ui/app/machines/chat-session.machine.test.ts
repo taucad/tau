@@ -93,6 +93,15 @@ const agentStateRows: ReadonlyArray<{
     run: 'running.waiting.input',
   },
   {
+    signal: 'run.lifecycle: paused on an open approval (the log states the approval, then the pause)',
+    events: [
+      { type: 'runLifecycle', phase: 'running' },
+      { type: 'toolParts', inFlight: 0, approvals: 1 },
+      { type: 'runLifecycle', phase: 'paused' },
+    ],
+    run: 'running.waiting.approval',
+  },
+  {
     signal: 'durableRunState: reattaching',
     events: [{ type: 'durableRunState', state: 'reattaching' }],
     run: 'running.reconnecting',

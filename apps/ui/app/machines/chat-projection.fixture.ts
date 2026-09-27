@@ -21,10 +21,21 @@ export const logRow = (sequence: number, fields: Readonly<Record<string, unknown
   ...fields,
 });
 
+/**
+ * One `run.lifecycle` row of attempt 1.
+ *
+ * @param sequence - Its position in the log.
+ * @param state - The lifecycle it states.
+ * @param runId - Its run.
+ * @returns The row.
+ */
+export const lifecycleRow = (sequence: number, state: string, runId = 'run_1'): Record<string, unknown> =>
+  logRow(sequence, { runId, type: 'run.lifecycle', state, attempt: 1 });
+
 /** A run that is running, as its first two rows. */
 export const runningRows = (runId = 'run_1'): Array<Record<string, unknown>> => [
-  logRow(0, { runId, type: 'run.lifecycle', state: 'admitted', attempt: 1 }),
-  logRow(1, { runId, type: 'run.lifecycle', state: 'running', attempt: 1 }),
+  lifecycleRow(0, 'admitted', runId),
+  lifecycleRow(1, 'running', runId),
 ];
 
 /**
@@ -35,11 +46,20 @@ export const runningRows = (runId = 'run_1'): Array<Record<string, unknown>> => 
  * @param cursor - The first row's position.
  */
 export const publishLogRows = (chatId: string, rows: readonly unknown[], cursor = 0): void => {
-  publishChatLogAnswer(chatId, {
-    status: 'batch',
-    cursor,
-    nextCursor: cursor + rows.length,
-    endCursor: cursor + rows.length,
-    events: rows,
-  });
+  publishLogPage(chatId, rows, { cursor, endCursor: cursor + rows.length });
+};
+
+/**
+ * Publish one page of a longer replay: its answer says the log ends at `endCursor`, past these rows.
+ *
+ * @param chatId - The chat.
+ * @param rows - The page's rows, in log order.
+ * @param page - The first row's position and where the log ends.
+ */
+export const publishLogPage = (
+  chatId: string,
+  rows: readonly unknown[],
+  { cursor, endCursor }: Readonly<{ cursor: number; endCursor: number }>,
+): void => {
+  publishChatLogAnswer(chatId, { status: 'batch', cursor, nextCursor: cursor + rows.length, endCursor, events: rows });
 };

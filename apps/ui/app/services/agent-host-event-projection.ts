@@ -94,6 +94,15 @@ const errorText = (value: unknown, fallback: string): string => {
   return value === undefined ? fallback : JSON.stringify(value);
 };
 
+/**
+ * What a failed run's terminal row says, as the chat's error and its row's reason read it.
+ *
+ * @param detail - The `failed` row's detail.
+ * @returns The failure's text.
+ * @public
+ */
+export const runFailureText = (detail: unknown): string => errorText(detail, 'Browser agent host failed.');
+
 const blockKey = (runId: string, messageId: string, contentIndex: number): string =>
   JSON.stringify([runId, messageId, contentIndex]);
 
@@ -810,7 +819,7 @@ const lifecycleChunks = (
       return [{ type: 'finish', finishReason: 'stop', messageMetadata: { status: 'success' } }];
     }
     case 'failed': {
-      return [{ type: 'error', errorText: errorText(event.detail, 'Browser agent host failed.') }];
+      return [{ type: 'error', errorText: runFailureText(event.detail) }];
     }
     case 'cancelled': {
       return [{ type: 'abort', reason: errorText(event.detail, 'cancelled') }];

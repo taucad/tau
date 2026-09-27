@@ -18,6 +18,7 @@ const hostRuntimeChildPath = resolve(repoRoot, 'packages/cli/dist/bin/host-runti
 const computeStoreWorkerPath = resolve(repoRoot, 'packages/cli/dist/bin/compute-store-worker.mjs');
 const birdhouse = resolve(repoRoot, 'libs/tau-examples/src/kernels/replicad/birdhouse/main.ts');
 const openrscadKitchenSink = resolve(repoRoot, 'libs/tau-examples/src/kernels/openscad/kitchen-sink/main.scad');
+const picovoxelHelloWorld = resolve(repoRoot, 'libs/tau-examples/src/kernels/picovoxel/hello-world/main.ts');
 const picogkSphere = resolve(repoRoot, 'libs/tau-examples/src/kernels/picogk/parameterized-sphere/main.cs');
 const picogkResourceRoot = resolve(repoRoot, 'apps/desktop/resources/picogk');
 const picogkResourceRootEnvironment = 'TAU_PICOGK_RESOURCE_ROOT';
@@ -168,6 +169,17 @@ describe('tau CLI dist (real binary)', () => {
     const bytes = await readFile(outputPath);
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     expect(view.getUint32(0, true)).toBe(gltfMagicBytes);
+  }, 120_000);
+
+  it('should export PicoVoxel source in the exact lane through the built-in plugin', async () => {
+    const outputPath = join(workspace, 'picovoxel.stl');
+
+    const result = await runCli(['export', picovoxelHelloWorld, '--ext=stl', `--output=${outputPath}`]);
+
+    expect(result.exitCode, `stderr: ${result.stderr}`).toBe(0);
+    const bytes = await readFile(outputPath);
+    // Exact STL carries no LANE stamp; a fast-lane export would end the header with LANE=fast.
+    expect(bytes.subarray(0, 80).toString('latin1').trimEnd()).toBe('PicoGK UNITS=mm');
   }, 120_000);
 
   it('should export OpenSCAD source to USDZ through the native engine addon', async () => {

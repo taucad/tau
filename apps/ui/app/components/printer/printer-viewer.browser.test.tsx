@@ -241,47 +241,57 @@ describe('Printer viewer framing', () => {
     const framed = await measurePrint(scene);
     expectFramed(framed, 0.1);
 
-    // Zoom in with the wheel until the print is clearly larger than framed; each step settles before the next.
+    // Zoom out with the wheel until the print is clearly smaller than framed; each step settles before the next.
     let zoomed = framed;
-    for (let attempt = 0; attempt < 10 && zoomed.width < framed.width * 1.6; attempt += 1) {
+    for (let attempt = 0; attempt < 10 && zoomed.width > framed.width * 0.6; attempt += 1) {
       const bounds = scene.getBoundingClientRect();
       // The camera listens on the canvas's own wrapper; a canvas has no role to query it by.
       fireEvent.wheel(scene.querySelector('canvas')!, {
-        deltaY: -40,
+        deltaY: 40,
         clientX: bounds.left + bounds.width / 2,
         clientY: bounds.top + bounds.height / 2,
       });
-      // oxlint-disable-next-line no-await-in-loop -- the camera eases between steps; measuring needs each settled
+      // oxlint-disable-next-line no-await-in-loop -- the camera moves between steps; measuring needs each settled
       await nextFrames(40);
       // oxlint-disable-next-line no-await-in-loop -- as above: one measurement per settled step
       zoomed = await measurePrint(scene);
     }
-    expect(zoomed.width).toBeGreaterThan(framed.width * 1.6);
+    expect(zoomed.width).toBeLessThan(framed.width * 0.6);
 
     resize(frame, [640, 720]);
     await nextFrames(40);
     const afterResize = await measurePrint(scene);
-    expect(afterResize.width, 'a resize leaves the zoom alone').toBeGreaterThan(framed.width * 1.3);
+    expect(afterResize.width, 'a resize leaves the zoom alone').toBeLessThan(framed.width * 0.8);
 
     await chooseFromMore(frame, 'menuitem', 'Frame the print');
     const reframed = await measurePrint(scene);
     expectFramed(reframed, 0.1);
-    expect(reframed.width).toBeLessThan(afterResize.width);
+    expect(reframed.width).toBeGreaterThan(afterResize.width);
     await capture(frame, 'printer-reframed-light.png');
   });
 
-  it('frames the part alone, larger, once the preparation is hidden', async () => {
+  it('centres the finished part as the CAD viewer does and holds still while it prints', async () => {
     mocks.live = idleLive;
     const { frame, scene } = await mount('dark', [1280, 720]);
-    await pauseAt(frame, 0.55, /^6\d \/ 120$/u);
-    const withPreparation = await measurePrint(scene);
+    // The preview opens on the finished print: the whole part, centred in the pane.
+    const finished = await measurePrint(scene);
+    await capture(frame, 'plate-focus-finished-dark.png');
+    expectFramed(finished, 0.1);
+    expect(Math.abs((finished.top + finished.bottom) / 2 - 0.5), 'centred down the pane').toBeLessThan(0.1);
+
+    // Earlier in the run, and with the preparation hidden, the part stands in the same place: the camera never moved.
+    await pauseAt(frame, 0.3, /^3\d \/ 120$/u);
+    const midway = await measurePrint(scene);
     const filter = within(frame).getByRole('region', { name: 'G-code filter' });
     await userEvent.click(within(filter).getByRole('checkbox', { name: 'Preparation' }));
     await nextFrames(60);
-    await capture(frame, 'plate-focus-no-preparation-dark.png');
-    const partOnly = await measurePrint(scene);
-    expectFramed(partOnly, 0.2);
-    expect(partOnly.width).toBeGreaterThan(withPreparation.width);
+    const filtered = await measurePrint(scene);
+    for (const extent of [midway, filtered]) {
+      // The base stands where it did; the sides narrow a little only because a shorter part's top is nearer the eye.
+      expect(extent.bottom).toBeCloseTo(finished.bottom, 2);
+      expect(Math.abs(extent.left - finished.left)).toBeLessThan(0.03);
+      expect(Math.abs(extent.right - finished.right)).toBeLessThan(0.03);
+    }
   });
 
   it('shades the plate from below so the print shows through it', async () => {

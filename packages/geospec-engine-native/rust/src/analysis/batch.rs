@@ -11,6 +11,7 @@ use std::{
 use super::mesh::{ClusterGap, ClusterReport, ConnectedComponents, MeshAnalysis, PrimitiveRecord};
 use crate::{
     backend::{AnalysisRetentionLimits, BackendError, BackendErrorKind},
+    budget::Budget,
     ErrorKind, ProtocolError,
 };
 
@@ -59,49 +60,130 @@ impl BatchAnalysis {
         analysis: &MeshAnalysis,
     ) -> Result<Rc<ConnectedComponents>, BackendError> {
         let bits = tolerance_bits(tolerance);
-        let cell = self
-            .components
+        let cell = self.cell(subject, bits)?;
+        if let Some(value) = cell.get() {
+            self.observe(WorkCounter::DerivedHits);
+            return Ok(Rc::clone(value));
+        }
+        // A result an earlier plan accepted skips the build; the exact check
+        // in `keep` implies the floor, so this plan's accounting is unchanged.
+        let value = if let Some(value) = analysis.retained_components(bits) {
+            self.observe(WorkCounter::DerivedHits);
+            value
+        } else {
+            self.observe(WorkCounter::ComponentBuilds);
+            self.gaps(analysis.component_clusters(tolerance))?
+        };
+        self.keep(cell, &value)?;
+        analysis.retain_components(bits, &value);
+        Ok(value)
+    }
+
+    /// M2 exact STEP clusters, retained by the subject's `slot` at the first
+    /// tolerance a claim built them for, as a mesh analysis retains its
+    /// result, with the work units their build charged; a refused build is
+    /// never retained (policy §16). A later claim charges those units at
+    /// once when its budget covers them and otherwise rebuilds, so it spends
+    /// and answers exactly as a cold claim: a build's charges never refuse
+    /// below their total.
+    pub(crate) fn exact_clusters<E>(
+        &self,
+        slot: &OnceCell<(u64, Rc<ExactClusters>)>,
+        tolerance: f64,
+        budget: &Budget,
+        build: impl FnOnce() -> Result<Vec<ClusterReport>, E>,
+    ) -> Result<Rc<ExactClusters>, E> {
+        let bits = tolerance_bits(tolerance);
+        if let Some((_, value)) = slot.get().filter(|(key, _)| *key == bits) {
+            if budget.used().saturating_add(value.units) <= budget.limit() {
+                let _ = budget.charge(value.units);
+                self.observe(WorkCounter::DerivedHits);
+                return Ok(Rc::clone(value));
+            }
+        }
+        self.observe(WorkCounter::ComponentBuilds);
+        let before = budget.used();
+        let clusters = build()?;
+        let value = Rc::new(ExactClusters {
+            units: budget.used() - before,
+            clusters,
+        });
+        // ponytail: one tolerance per subject, as the mesh slot; key a
+        // byte-bounded map by tolerance if specs alternate tolerances.
+        if retained_component_bytes(&value.clusters, &Vec::new()) <= self.byte_limit {
+            let _ = slot.set((bits, Rc::clone(&value)));
+        }
+        Ok(value)
+    }
+
+    /// The complete profile's STEP result from exact clusters, under the
+    /// mesh route's accounting: the floor before any of the C(C-1)/2 gaps
+    /// exists, then the exact retained bytes of the declared batch cell.
+    pub(crate) fn step_components(
+        &self,
+        subject: &str,
+        tolerance: f64,
+        clusters: &ExactClusters,
+    ) -> Result<Rc<ConnectedComponents>, BackendError> {
+        let cell = self.cell(subject, tolerance_bits(tolerance))?;
+        if let Some(value) = cell.get() {
+            self.observe(WorkCounter::DerivedHits);
+            return Ok(Rc::clone(value));
+        }
+        let value = self.gaps(clusters.clusters.clone())?;
+        self.keep(cell, &value)?;
+        Ok(value)
+    }
+
+    fn cell(
+        &self,
+        subject: &str,
+        bits: u64,
+    ) -> Result<&OnceCell<Rc<ConnectedComponents>>, BackendError> {
+        self.components
             .get(&(subject.to_owned(), bits))
             .ok_or_else(|| BackendError {
                 kind: BackendErrorKind::ComputationFailed,
                 message: "Connected-component demand was not declared by the prepared batch."
                     .into(),
-            })?;
-        if let Some(value) = cell.get() {
-            if let Some(observations) = &self.observations {
-                observations.add(WorkCounter::DerivedHits, 1);
-            }
-            return Ok(Rc::clone(value));
+            })
+    }
+
+    fn observe(&self, counter: WorkCounter) {
+        if let Some(observations) = &self.observations {
+            observations.add(counter, 1);
         }
-        // A result an earlier plan accepted skips the build; the exact check
-        // below implies the floor, so this plan's accounting is unchanged.
-        let value = if let Some(value) = analysis.retained_components(bits) {
-            if let Some(observations) = &self.observations {
-                observations.add(WorkCounter::DerivedHits, 1);
-            }
-            value
-        } else {
-            if let Some(observations) = &self.observations {
-                observations.add(WorkCounter::ComponentBuilds, 1);
-            }
-            let clusters = analysis.component_clusters(tolerance);
-            // The floor implies the refusal below, before C(C-1)/2 gaps exist.
-            let floor = retained_component_bytes_floor(&clusters);
-            if self.retained_bytes.get().saturating_add(floor) > self.byte_limit {
-                return Err(retention_refusal());
-            }
-            Rc::new(ConnectedComponents::from_clusters(clusters))
-        };
+    }
+
+    /// The floor implies the refusal in `keep`, before C(C-1)/2 gaps exist.
+    fn gaps(&self, clusters: Vec<ClusterReport>) -> Result<Rc<ConnectedComponents>, BackendError> {
+        let floor = retained_component_bytes_floor(&clusters);
+        if self.retained_bytes.get().saturating_add(floor) > self.byte_limit {
+            return Err(retention_refusal());
+        }
+        Ok(Rc::new(ConnectedComponents::from_clusters(clusters)))
+    }
+
+    fn keep(
+        &self,
+        cell: &OnceCell<Rc<ConnectedComponents>>,
+        value: &Rc<ConnectedComponents>,
+    ) -> Result<(), BackendError> {
         let bytes = retained_component_bytes(&value.clusters, &value.gaps);
         let total = self.retained_bytes.get().saturating_add(bytes);
         if total > self.byte_limit {
             return Err(retention_refusal());
         }
-        let _ = cell.set(Rc::clone(&value));
+        let _ = cell.set(Rc::clone(value));
         self.retained_bytes.set(total);
-        analysis.retain_components(bits, &value);
-        Ok(value)
+        Ok(())
     }
+}
+
+/// M2 exact STEP clusters and the work units their build charged.
+pub(crate) struct ExactClusters {
+    pub(crate) clusters: Vec<ClusterReport>,
+    pub(crate) units: u64,
 }
 
 fn tolerance_bits(value: f64) -> u64 {
@@ -268,6 +350,58 @@ mod tests {
             max_solid_entries: 0,
         };
         BatchAnalysis::new([("a".to_owned(), 0), ("b".to_owned(), 0)], limits).unwrap()
+    }
+
+    #[test]
+    fn exact_clusters_spend_and_answer_warm_as_cold() {
+        // W2-COMP open issue 3: a later claim reuses the subject's exact STEP
+        // clusters, charging what their build charged, and rebuilds when its
+        // budget cannot cover that total, refusing exactly as a cold claim.
+        let clusters = scattered_clusters(2).component_clusters(0.0);
+        let batch = batch(u64::MAX);
+        let slot = OnceCell::new();
+        let builds = Cell::new(0);
+        let build = |budget: &Budget| {
+            builds.set(builds.get() + 1);
+            budget.charge(1)?;
+            budget.charge(2)?;
+            Ok::<_, crate::budget::BudgetExceeded>(clusters.clone())
+        };
+        let claim = |limit: u64| {
+            let budget = Budget::new(limit);
+            let result = batch
+                .exact_clusters(&slot, 0.0, &budget, || build(&budget))
+                .map(|value| value.clusters.clone());
+            (result, budget.used())
+        };
+        let cold = claim(100);
+        assert_eq!((builds.get(), cold.1), (1, 3));
+        assert_eq!(cold.0.as_ref().unwrap(), &clusters);
+        // Warm: no build, the same three units, the same clusters.
+        assert_eq!(claim(100), cold);
+        assert_eq!(builds.get(), 1);
+        // Exactly the total still answers warm; one unit less rebuilds and
+        // refuses at the charge a cold claim refuses at.
+        assert_eq!(claim(3), cold);
+        assert_eq!(builds.get(), 1);
+        let short = claim(2);
+        assert_eq!(builds.get(), 2);
+        let fresh = OnceCell::new();
+        let budget = Budget::new(2);
+        let cold_short = batch
+            .exact_clusters(&fresh, 0.0, &budget, || build(&budget))
+            .map(|value| value.clusters.clone());
+        assert_eq!(short, (cold_short, budget.used()));
+        assert!(
+            short.0.is_err() && fresh.get().is_none(),
+            "a refusal is never retained"
+        );
+        // Another tolerance builds without replacing the retained one.
+        let other = Budget::new(100);
+        batch
+            .exact_clusters(&slot, 1.0, &other, || build(&other))
+            .unwrap();
+        assert_eq!((builds.get(), slot.get().unwrap().0), (4, 0));
     }
 
     #[test]

@@ -9,11 +9,11 @@ use std::{
 
 use crate::{
     analysis::{
-        batch::BatchAnalysis,
+        batch::{BatchAnalysis, ExactClusters},
         continuous::{self, GridPlan, Topology},
         mesh::{
-            analyze, analyze_indexed, ConnectedComponents, MeshAnalysis, MeshAnalysisRecord,
-            Primitive,
+            analyze, analyze_indexed, ClusterReport, ConnectedComponents, MeshAnalysis,
+            MeshAnalysisRecord, Primitive,
         },
         selection::{build_report_index, SelectorIndex},
     },
@@ -81,6 +81,11 @@ pub(crate) struct Subject {
     pub mesh_record: OnceCell<Rc<MeshAnalysisRecord>>,
     pub brep: Option<Box<dyn BrepSubject>>,
     mesh_analysis: OnceCell<Rc<MeshAnalysis>>,
+    /// M2 exact STEP clusters at one tolerance (`BatchAnalysis::exact_clusters`):
+    /// one result per subject, at most the analysis retention bytes, never read
+    /// by a retention check (C8: bounded and excluded by design, as the mesh
+    /// analysis's retained components are).
+    exact_components: OnceCell<(u64, Rc<ExactClusters>)>,
     /// Accounted bytes of the report mesh, retained once as `mesh_record` (F9).
     report_mesh_bytes: OnceCell<u64>,
     /// Report facts facet: whole-shape facts on the source (F1), one cell per
@@ -194,6 +199,7 @@ impl Subject {
             mesh_record: OnceCell::new(),
             brep: None,
             mesh_analysis: OnceCell::new(),
+            exact_components: OnceCell::new(),
             report_mesh_bytes: OnceCell::new(),
             report_shape: std::array::from_fn(|_| OnceCell::new()),
             shape_demands: std::array::from_fn(|_| Cell::new(0)),
@@ -1534,6 +1540,44 @@ impl<'a> EvaluationContext<'a> {
         let analysis = self.mesh_analysis()?;
         batch
             .connected_components(&identity, tolerance_mm, &analysis)
+            .map_err(backend_refusal)
+    }
+
+    /// M2 exact STEP clusters through the plan's batch, which retains them on
+    /// the subject; a context without a batch builds them each time.
+    pub(crate) fn exact_clusters(
+        &self,
+        tolerance_mm: f64,
+        build: impl FnOnce() -> Result<Vec<ClusterReport>, Evaluation>,
+    ) -> Result<Rc<ExactClusters>, Evaluation> {
+        match self.batch {
+            Some(batch) => batch.exact_clusters(
+                &self.subject().exact_components,
+                tolerance_mm,
+                self.budget,
+                build,
+            ),
+            None => build().map(|clusters| Rc::new(ExactClusters { clusters, units: 0 })),
+        }
+    }
+
+    /// The complete profile's STEP components under the batch's retained-byte
+    /// accounting, the mesh route's (W2-COMP open issue 4).
+    pub(crate) fn step_components(
+        &self,
+        tolerance_mm: f64,
+        clusters: &ExactClusters,
+    ) -> Result<Rc<ConnectedComponents>, Evaluation> {
+        let batch = self.batch.ok_or_else(|| {
+            backend_refusal(BackendError {
+                kind: BackendErrorKind::ComputationFailed,
+                message: "Connected-component evaluation requires a complete prepared batch."
+                    .into(),
+            })
+        })?;
+        let identity = self.subject().cache_identity().map_err(backend_refusal)?;
+        batch
+            .step_components(&identity, tolerance_mm, clusters)
             .map_err(backend_refusal)
     }
 

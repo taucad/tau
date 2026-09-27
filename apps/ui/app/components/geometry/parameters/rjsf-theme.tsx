@@ -174,6 +174,17 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
   const layoutContext = useRjsfLayoutContext();
   const renderedField = useRenderedFieldPath();
   const fieldPath = renderedField?.path;
+  const instancePointer = fieldPath === undefined ? undefined : toInstancePointer(fieldPath);
+  const { parameterManifest, parameterGroup } = formContext;
+  /* Every field template re-renders on each filter keystroke; the projection depends on none of it.
+   * A group's pointer has no binding, so projecting it returns at once. */
+  const fieldProjection = useMemo(
+    () =>
+      instancePointer === undefined
+        ? undefined
+        : projectParameterField(parameterManifest, instancePointer, {}, parameterGroup),
+    [instancePointer, parameterGroup, parameterManifest],
+  );
 
   if (layoutContext.embeddedDiscriminator !== undefined && layoutContext.embeddedDiscriminator === fieldPath?.at(-1)) {
     return null;
@@ -266,11 +277,6 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
     fieldPath !== undefined &&
     (Object.is(formData, null) ? !Object.is(defaultValue, null) : hasCustomValue(formData, defaultValue, fieldPath));
   const canReset = !(renderedField?.isArrayItem && defaultValue === undefined);
-  const instancePointer = fieldPath === undefined ? undefined : toInstancePointer(fieldPath);
-  const fieldProjection =
-    instancePointer === undefined
-      ? undefined
-      : projectParameterField(formContext.parameterManifest, instancePointer, {}, formContext.parameterGroup);
   const inferredHint =
     fieldProjection?.guessed === true
       ? fieldProjection.inferredFields?.includes('unit') === true

@@ -55,6 +55,8 @@ TAU_CANVAS_PATH=docs/research/artifacts/<subject>/canvas \
 TAU_CANVAS_PATH=docs/research/artifacts/<subject>/canvas \
   pnpm exec vite build --config scripts/src/canvas-vite.config.ts
 
+TAU_CANVAS_PATH=docs/research/artifacts/<subject>/canvas pnpm canvas:typecheck
+
 pnpm nx test scripts --watch=false --args=src/canvas-vite.config.test.ts
 ```
 
@@ -66,6 +68,8 @@ URL, not an uncompiled HTML file served by a generic static server.
 Use an explicit free `--port` when running several canvases; occupied ports
 fail rather than silently opening the wrong scene. The regression check exercises
 both production compilation and live-browser component geometry.
+`canvas:typecheck` runs tsgo over the canvas with the runner's module map and
+fails only on diagnostics inside the canvas; Vite's build does not typecheck.
 
 ## Scene contract
 

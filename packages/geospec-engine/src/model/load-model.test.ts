@@ -315,7 +315,7 @@ describe('loadModel — the runtime branch', () => {
   it('retains successful-export issues and analyzes retained evidence without exporting again', async () => {
     registerGeoSpecEngine(geoSpecEngineImplementation);
     const issues: KernelIssue[] = ['warning', 'error', 'info'].map((severity) => ({
-      code: `RUNTIME_${severity}`,
+      code: 'RUNTIME',
       type: 'kernel',
       severity: severity as KernelIssue['severity'],
       message: `Original ${severity}`,

@@ -16,10 +16,6 @@ export default defineConfig({
         find: 'fumadocs-core/server',
         replacement: path.resolve(projectRoot, 'app/lib/fumadocs/server-compat.ts'),
       },
-      {
-        find: /^#(.*)\.js$/u,
-        replacement: path.resolve(projectRoot, 'app/$1'),
-      },
     ],
   },
   plugins: [

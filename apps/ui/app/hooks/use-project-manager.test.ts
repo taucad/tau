@@ -19,6 +19,7 @@ import type { ConnectedWorkspace, CreateProjectOptions, ProjectListing } from '#
 import type { ProjectNameInput } from '#chat-clients/use-project-name-client.js';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { uint8ArrayToBase64 } from 'uint8array-extras';
+import { storedRef } from '#utils/attachment.test-utils.js';
 
 const fakeProject: ProjectManifest = projectToManifest({
   id: 'proj_aaaaaaaaaaaaaaaaaaaaa',
@@ -553,7 +554,7 @@ const seedHomeAttachment = async (bytes: Uint8Array<ArrayBuffer>, mediaType: str
   const hash = await sha256Bytes(bytes);
   const extension = mediaType === 'application/pdf' ? 'pdf' : 'png';
   attachmentFiles.set(`/.tau/composers/new-project/attachments/${hash}.${extension}`, bytes);
-  return { hash, mediaType, ...(filename === undefined ? {} : { filename }) };
+  return storedRef({ hash, mediaType, ...(filename === undefined ? {} : { filename }) });
 };
 
 describe('useProjectManager.createProject', () => {
@@ -2085,7 +2086,7 @@ describe('useProjectManager.createProject', () => {
           kernel: 'openscad',
           initialMessage: {
             content: 'Build it',
-            attachments: [{ hash, mediaType: 'image/png' }],
+            attachments: [storedRef({ hash, mediaType: 'image/png' })],
             attachmentSource: source,
           },
           location: { kind: 'home' },

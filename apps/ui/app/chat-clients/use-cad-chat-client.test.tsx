@@ -25,7 +25,8 @@ import {
   resetChatTurnServices,
 } from '#chat-clients/_internal/chat-host-binding.js';
 import type { ChatTurn, ChatTurnGesture } from '#machines/chat-session.machine.js';
-import type { AttachmentReference } from '#utils/attachment.utils.js';
+import type { StoredAttachmentRef } from '#utils/attachment.utils.js';
+import { storedRef } from '#utils/attachment.test-utils.js';
 
 /* Whether the project's revision root is connected yet (W8 TS-S5): the host places turns through it. */
 const revisionRoot = vi.hoisted(() => ({ connected: true }));
@@ -296,12 +297,12 @@ const requestTurn = async (gesture: ChatTurnGesture): Promise<void> => {
 };
 
 const buildActions = (): ActionsMock => ({
-  sendMessage: vi.fn(async (message: MyUIMessage, options?: { attachments?: readonly AttachmentReference[] }) =>
+  sendMessage: vi.fn(async (message: MyUIMessage, options?: { attachments?: readonly StoredAttachmentRef[] }) =>
     requestTurn({ kind: 'send', message, ...options }),
   ),
   regenerate: vi.fn(async () => requestTurn({ kind: 'regenerate' })),
   editMessage: vi.fn(
-    async (messageId: string, text: string, options?: { attachments?: readonly AttachmentReference[] }) =>
+    async (messageId: string, text: string, options?: { attachments?: readonly StoredAttachmentRef[] }) =>
       requestTurn({ kind: 'edit', messageId, text, ...options }),
   ),
   stop: vi.fn(),
@@ -345,8 +346,8 @@ let reattachHostChat = vi.fn();
 /** The store's draft-attachment promotion, re-armed per test. */
 let promoteDraftAttachments = vi.fn<ChatSessionStore['promoteDraftAttachments']>();
 
-const imageAttachment = { hash: 'a'.repeat(64), mediaType: 'image/png', byteLength: 11 };
-const pdfAttachment = { hash: 'b'.repeat(64), mediaType: 'application/pdf', filename: 'bracket-spec.pdf' };
+const imageAttachment = storedRef({ hash: 'a'.repeat(64), mediaType: 'image/png', byteLength: 11 });
+const pdfAttachment = storedRef({ hash: 'b'.repeat(64), mediaType: 'application/pdf', filename: 'bracket-spec.pdf' });
 
 /**
  * Mount a chat view beside the chat's one turn host.

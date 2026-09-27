@@ -9,7 +9,7 @@ import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
 import { useActiveChatSession } from '#hooks/active-chat-provider.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { attachmentSendBlockReason, buildUserMessage } from '#utils/chat.utils.js';
-import type { AttachmentReference } from '#utils/attachment.utils.js';
+import type { StoredAttachmentRef } from '#utils/attachment.utils.js';
 import { useProject } from '#hooks/use-project.js';
 import {
   getBrowserAgentHostRun,
@@ -33,7 +33,7 @@ import { browserHostId, useTurnAdmission } from '#chat-clients/_internal/use-tur
 export type CadChatSubmitInput = {
   readonly text: string;
   /** The draft's attachments, stored beside its record; the client promotes them before sending (D18). */
-  readonly attachments?: readonly AttachmentReference[];
+  readonly attachments?: readonly StoredAttachmentRef[];
 };
 
 /**
@@ -157,7 +157,7 @@ export const useCadChatClient = (): CadChatClient => {
    * leaves the draft as it is and sends nothing.
    */
   const withAttachments = useCallback(
-    async (attachments: readonly AttachmentReference[], send: () => void | Promise<void>): Promise<void> => {
+    async (attachments: readonly StoredAttachmentRef[], send: () => void | Promise<void>): Promise<void> => {
       if (agent.execution.kind === 'tau' && attachments.length > 0) {
         const resolved = resolveModelRef.current(agent.execution.model);
         const blocked = attachmentSendBlockReason(attachments, {

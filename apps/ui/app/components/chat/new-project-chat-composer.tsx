@@ -87,11 +87,9 @@ export function NewProjectChatComposer({
       }
       // The stored draft is the source of truth for attachments: the new
       // project's chat receives copies of exactly these bytes.
-      const attachments = draftActorRef.getSnapshot().context.draftAttachments.map(({ hash, mediaType, filename }) => ({
-        hash,
-        mediaType,
-        ...(filename === undefined ? {} : { filename }),
-      }));
+      const attachments = draftActorRef
+        .getSnapshot()
+        .context.draftAttachments.map(({ byteLength: _byteLength, ...stored }) => stored);
       try {
         const created = await projectManager.createProject({
           kernel,

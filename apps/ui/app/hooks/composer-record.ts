@@ -25,12 +25,12 @@ import { createEmptyDraftMessage } from '#hooks/draft.machine.js';
 import type { DraftHydration } from '#hooks/draft.machine.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { composerRecordActors, composerRecordMachine } from '#machines/composer-record.machine.js';
-import type { Attachment } from '#utils/attachment.utils.js';
+import type { StoredAttachment } from '#utils/attachment.utils.js';
 
 /** A running record actor, as every consumer of this seam holds it; its owners start and stop it. */
 export type ComposerRecordRef = Actor<typeof composerRecordMachine>;
 
-type AttachmentStoredEvent = { type: 'attachmentStored'; attachment: Attachment };
+type AttachmentStoredEvent = { type: 'attachmentStored'; attachment: StoredAttachment };
 type StoreAttachmentInput = { bytes: Uint8Array<ArrayBuffer>; mediaType: string; filename?: string };
 type StoreAttachmentActor = ReturnType<typeof fromSafeAsync<AttachmentStoredEvent, StoreAttachmentInput>>;
 

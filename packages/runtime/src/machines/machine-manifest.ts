@@ -108,7 +108,8 @@ export const machineManifestSchema = z.strictObject({
     externalSpool: z.boolean(),
     drying: z.boolean(),
   }),
-  camera: z.strictObject({ stills: z.boolean(), stream: z.boolean() }),
+  /** Whether the machine's camera can capture a still; no live-stream contract exists. */
+  camera: z.strictObject({ stills: z.boolean() }),
   storage: z.strictObject({ removable: z.boolean() }),
   network: z.strictObject({ lanMode: z.boolean(), cloud: z.boolean() }),
   speedProfiles: z.array(z.strictObject({ id: identifier, label, percent: z.number().int().min(1).max(400) })).max(8),

@@ -35,10 +35,11 @@ Concrete kernels ship in their own packages. Each package declares a package-nam
 | `@taucad/assimp`             | `assimp`             | Explicit mesh/scene formats          | `assimpKernel`            |
 | `@taucad/opencascade-native` | `opencascade-native` | `ts`, `js`                           | `opencascadeNativeKernel` |
 | `@taucad/build123d`          | `build123d`          | `py`                                 | `build123dKernel`         |
+| `@taucad/tscircuit`          | `tscircuit`          | `tsx`, `jsx`                         | `tscircuitKernel`         |
 
 No first-party kernel uses `'*'`. Import formats are owned by explicit backend kernels.
 
-`@taucad/opencascade-native` targets Node hosts. `@taucad/openrscad` needs no twin: its engine binds the N-API addon or WebAssembly build by export condition, and `backend` says which. Build123d additionally requires an explicit packaged interpreter/resource manifest and a host-owned project trust marker; it never falls back to system Python.
+`@taucad/opencascade-native` targets Node hosts. `@taucad/openrscad` needs no twin: its engine binds the N-API addon or WebAssembly build by export condition, and `backend` says which. Build123d additionally requires an explicit packaged interpreter/resource manifest and a host-owned project trust marker; it never falls back to system Python. tscircuit selects its artifact through the `output` render option; see [tscircuit](../reference/tscircuit).
 
 ## Toolkit composition
 

@@ -1707,18 +1707,15 @@ export type RevisionSaveOutcome =
       line: string;
       /**
        * How the push that followed ended; `noRemote` when this project backs up
-       * nowhere, `timedOut` when the push did not answer in time (its outcome is
-       * unknown, not failed).
+       * nowhere. A hung push ends at the scheduler's own deadline (A12).
        */
-      backup: SyncPushOutcome | 'noRemote' | 'timedOut';
+      backup: SyncPushOutcome | 'noRemote';
       /** The scheduler's own sentence, when `backup` is neither `backedUp` nor `noRemote`. */
       reason?: string;
     }>
   /** The files already are the head's revision, or a turn is recording them. */
   | Readonly<{ status: 'unchanged'; line: string }>
-  | Readonly<{ status: 'refused'; reason: string }>
-  /** The cut did not answer in time: whether a revision was recorded is unknown, not refused. */
-  | Readonly<{ status: 'timedOut'; reason: string }>;
+  | Readonly<{ status: 'refused'; reason: string }>;
 
 /** What an `openFromRemote` did, or why it did not (W18 DEF-2). @public */
 export type RevisionOpenOutcome =
@@ -2067,7 +2064,6 @@ export const openProjectRevisions = (
       | Readonly<{ status: 'minted'; revisionId: string }>
       | Readonly<{ status: 'unchanged' }>
       | Readonly<{ status: 'refused'; reason: string }>
-      | Readonly<{ status: 'timedOut'; reason: string }>
     >(
       (resolve) => {
         const subscriptions = [
@@ -2104,7 +2100,7 @@ export const openProjectRevisions = (
       },
       /* Answered by its request id in every state (B3, RM-R11): no host bound of its own. */
     );
-    if (cut.status === 'refused' || cut.status === 'timedOut') {
+    if (cut.status === 'refused') {
       return cut;
     }
     if (cut.status === 'unchanged') {
@@ -2114,7 +2110,7 @@ export const openProjectRevisions = (
     /* A push already running when this asks was built before the mint, so the
      * scheduler answers with the next one (sync.machine row 65). */
     const pushId = randomUUID();
-    const pushed = await answered<SyncPushOutcome | 'timedOut'>(
+    const pushed = await answered<SyncPushOutcome>(
       (resolve) => {
         const settled = scheduler.on('pushSettled', (event) => {
           if (event.pushId === pushId) {
@@ -2139,12 +2135,7 @@ export const openProjectRevisions = (
       backup,
       ...(backup === 'backedUp' || backup === 'noRemote'
         ? {}
-        : {
-            reason:
-              backup === 'timedOut'
-                ? 'The backup did not answer in time; whether it reached the remote is unknown.'
-                : (sync.error ?? 'This revision is saved here and was not backed up yet.'),
-          }),
+        : { reason: sync.error ?? 'This revision is saved here and was not backed up yet.' }),
     });
   };
 

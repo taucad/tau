@@ -1,25 +1,22 @@
-//! PERF-DEMAND-01 report facets: mesh demands never wait on report facts, and
-//! the report mesh is retained once, as the analysis record (F9).
+//! PERF-DEMAND-01 report facets: mesh demands never wait on report facts,
+//! facts demands never wait on the report mesh (F1), and the report mesh is
+//! retained once, as the analysis record (F9).
 
 use std::cell::Cell;
 
 use super::*;
 use crate::backend::brep::{
-    BrepIdentityProfile, DocumentFacts, PointState, ReportedBrepBundle, ReportedFaces,
-    TopologyCounts, ValidityFacts,
+    BrepIdentityProfile, PointState, ReportedFaces, TopologyCounts, ValidityFacts,
 };
 
 #[derive(Default)]
 struct Calls {
-    combined: Cell<usize>,
     mesh: Cell<usize>,
     facts: Cell<usize>,
     faces: Cell<usize>,
 }
 
-/// `facets == false` is a connector that only reports the combined bundle.
 struct FacetBrep {
-    facets: bool,
     fail_mesh: bool,
     fail_facts: bool,
     calls: Rc<Calls>,
@@ -63,37 +60,24 @@ fn cube() -> Rc<TriangleMesh> {
     })
 }
 
-fn bundle(mesh: Rc<TriangleMesh>) -> ReportedBrepBundle {
-    ReportedBrepBundle {
-        facts: Rc::new(DocumentFacts {
-            source_length_unit: "millimetre".into(),
-            source_unit_to_millimeters: 1.0,
-            occurrences: Vec::new(),
-            shape: crate::backend::brep::ShapeFacts {
-                bounds: Bounds {
-                    min: [0.0; 3],
-                    max: [1.0; 3],
-                },
-                volume: 1.0,
-                surface_area: 6.0,
-                center_of_mass: [0.5; 3],
-                topology: TopologyCounts {
-                    compounds: 0,
-                    solids: 1,
-                    shells: 1,
-                    faces: 6,
-                    wires: 6,
-                    edges: 12,
-                    vertices: 8,
-                },
-            },
-            subshapes: Vec::new(),
-            datum_placements: Vec::new(),
-            semantic_datums: Vec::new(),
-        }),
-        whole_faces: Rc::from(Vec::new()),
-        occurrence_faces: Vec::new(),
-        mesh,
+fn shape() -> ShapeFacts {
+    ShapeFacts {
+        bounds: Bounds {
+            min: [0.0; 3],
+            max: [1.0; 3],
+        },
+        volume: 1.0,
+        surface_area: 6.0,
+        center_of_mass: [0.5; 3],
+        topology: TopologyCounts {
+            compounds: 0,
+            solids: 1,
+            shells: 1,
+            faces: 6,
+            wires: 6,
+            edges: 12,
+            vertices: 8,
+        },
     }
 }
 
@@ -109,43 +93,21 @@ impl BrepSubject for FacetBrep {
         }))
     }
 
-    fn reported_facts_and_mesh(&self) -> Result<ReportedBrepBundle, BackendError> {
-        bump(&self.calls.combined);
-        failure(self.fail_mesh, "mesh")?;
-        failure(self.fail_facts, "facts")?;
-        Ok(bundle(cube()))
-    }
-
-    // The combined connector keeps the trait defaults' slices of its bundle.
     fn reported_mesh(&self) -> Result<TriangleMesh, BackendError> {
-        if !self.facets {
-            return Ok(self.reported_facts_and_mesh()?.mesh.as_ref().clone());
-        }
         bump(&self.calls.mesh);
         failure(self.fail_mesh, "mesh")?;
         Ok(cube().as_ref().clone())
     }
 
+    // F1: the facts read the source, so no mesh failure reaches them.
     fn reported_shape(&self) -> Result<ShapeFacts, BackendError> {
-        if !self.facets {
-            return Ok(self.reported_facts_and_mesh()?.facts.shape.clone());
-        }
         bump(&self.calls.facts);
-        // Both facets share one copy+mesh generation.
-        failure(self.fail_mesh, "mesh")?;
         failure(self.fail_facts, "facts")?;
-        Ok(bundle(cube()).facts.shape.clone())
+        Ok(shape())
     }
 
+    // Face tables read the source: no generation, so no mesh failure.
     fn reported_faces(&self, _: bool) -> Result<ReportedFaces, BackendError> {
-        if !self.facets {
-            let bundle = self.reported_facts_and_mesh()?;
-            return Ok(ReportedFaces {
-                whole_faces: bundle.whole_faces,
-                occurrence_faces: bundle.occurrence_faces,
-            });
-        }
-        // Face tables read the source: no generation, so no mesh failure.
         bump(&self.calls.faces);
         Ok(ReportedFaces {
             whole_faces: Rc::from(Vec::new()),
@@ -156,21 +118,10 @@ impl BrepSubject for FacetBrep {
     fn source_occurrences(
         &self,
     ) -> Result<Rc<[crate::backend::brep::OccurrenceFacts]>, BackendError> {
-        if !self.facets {
-            return Ok(self
-                .reported_facts_and_mesh()?
-                .facts
-                .occurrences
-                .clone()
-                .into());
-        }
         Ok(Rc::from(Vec::new()))
     }
 
     fn document_rows(&self) -> Result<crate::backend::brep::DocumentRows, BackendError> {
-        if !self.facets {
-            self.reported_facts_and_mesh()?;
-        }
         Ok(crate::backend::brep::DocumentRows::default())
     }
 
@@ -198,6 +149,10 @@ impl BrepSubject for FacetBrep {
 }
 
 fn subject(brep: FacetBrep) -> Rc<Subject> {
+    Rc::new(step_subject(brep))
+}
+
+fn step_subject(brep: FacetBrep) -> Subject {
     let identity = SubjectIdentity::step(
         b"report-facet-unit-control",
         "millimetre",
@@ -216,7 +171,7 @@ fn subject(brep: FacetBrep) -> Rc<Subject> {
     );
     subject.semantic_identity.set(identity).unwrap();
     subject.brep = Some(Box::new(brep));
-    Rc::new(subject)
+    subject
 }
 
 /// One claim on a fresh context: the charged units and the refusal message.
@@ -259,10 +214,9 @@ fn run(brep: FacetBrep, mesh_first: bool) -> ([(u64, Option<String>); 2], Rc<Sub
     (outcomes, subject)
 }
 
-fn brep(facets: bool, fail_mesh: bool, fail_facts: bool) -> (FacetBrep, Rc<Calls>) {
+fn brep(fail_mesh: bool, fail_facts: bool) -> (FacetBrep, Rc<Calls>) {
     let calls = Rc::new(Calls::default());
     let brep = FacetBrep {
-        facets,
         fail_mesh,
         fail_facts,
         calls: Rc::clone(&calls),
@@ -277,37 +231,90 @@ const MESH_UNITS: u64 = 1 + 36 + 36;
 fn facts_failure_no_longer_refuses_mesh_claims_in_either_order() {
     let facts_refusal = Some("deliberate facts failure".to_owned());
     for mesh_first in [true, false] {
-        let (facets, _) = brep(true, false, true);
+        let (facets, _) = brep(false, true);
         let (outcomes, subject) = run(facets, mesh_first);
         assert_eq!(outcomes, [(MESH_UNITS, None), (1, facts_refusal.clone())]);
         assert!(subject.mesh_record().is_some());
+    }
+}
 
-        // A connector with only the combined report keeps the prior coupling.
-        let (combined, _) = brep(false, false, true);
-        let (outcomes, subject) = run(combined, mesh_first);
-        assert_eq!(
-            outcomes,
-            [(1, facts_refusal.clone()), (1, facts_refusal.clone())]
-        );
+#[test]
+fn mesh_failure_no_longer_refuses_facts_claims_in_either_order() {
+    // F1: the facts come from the source shape, not the copy+mesh generation.
+    let refusal = Some("deliberate mesh failure".to_owned());
+    for mesh_first in [true, false] {
+        let (brep, _) = brep(true, false);
+        let (outcomes, subject) = run(brep, mesh_first);
+        assert_eq!(outcomes, [(1, refusal.clone()), (1, None)]);
         assert!(subject.mesh_record().is_none());
     }
 }
 
 #[test]
-fn mesh_failure_refuses_both_facets_in_either_order() {
-    let refusal = Some("deliberate mesh failure".to_owned());
-    for (facets, mesh_first) in [(true, true), (true, false), (false, true)] {
-        let (brep, _) = brep(facets, true, false);
-        let (outcomes, subject) = run(brep, mesh_first);
-        assert_eq!(outcomes, [(1, refusal.clone()), (1, refusal.clone())]);
-        assert!(subject.mesh_record().is_none());
+fn facts_claims_answer_over_the_report_mesh_limits_that_refuse_mesh_claims() {
+    // F1 under ruling 9: the report-mesh limits bound the mesh facet alone.
+    let limit = "The report bundle exceeds the declared binary or retained derived-data limits.";
+    let (brep, calls) = brep(false, false);
+    let mut subject = step_subject(brep);
+    // The cube soup has 12 triangles.
+    subject.binary_limits.max_triangles = 11;
+    let subjects = [Rc::new(subject)];
+    for capability in [
+        Capability::ToHaveVolume,
+        Capability::ToHaveTopologyCounts,
+        Capability::ToHaveBoundingBox,
+    ] {
+        let budget = Budget::new(10_000);
+        let expected = Json::Null;
+        let mut context =
+            EvaluationContext::new(&subjects, capability, "facts", &expected, &budget, None);
+        assert_eq!(context.brep_shape().ok().flatten(), Some(&shape()));
+    }
+    assert_eq!(claim(&subjects, true), (1, Some(limit.to_owned())));
+    let budget = Budget::new(10_000);
+    let expected = Json::Null;
+    let mut context = EvaluationContext::new(
+        &subjects,
+        Capability::AnalyzeMesh,
+        "mesh",
+        &expected,
+        &budget,
+        None,
+    );
+    match crate::matchers::mesh::analyze_mesh(&mut context) {
+        Evaluation::Refused { diagnostics } => assert_eq!(diagnostics[0].message, limit),
+        _ => panic!("analyzeMesh must refuse over the report-mesh limits"),
+    }
+    assert!(subjects[0].mesh_record().is_none());
+    // One facts cell per demanded part set; the mesh is built twice, refused.
+    assert_eq!([&calls.mesh, &calls.facts].map(Cell::get), [2, 3]);
+}
+
+#[test]
+fn a_facts_cell_answers_the_part_sets_it_covers_and_each_cell_is_accounted() {
+    // F1: one cell per demanded part set; a demand reads any retained cell
+    // that covers it, and retention counts every cell (ruling 14).
+    let (brep, calls) = brep(false, false);
+    let subject = subject(brep);
+    let cell = size_of::<ShapeFacts>() as u64;
+    for (parts, backend_calls, cells) in [
+        (ShapeParts::VOLUME, 1, 1),
+        (ShapeParts::VOLUME, 1, 1),
+        (ShapeParts::BOUNDS, 2, 2),
+        (ShapeParts::ALL, 3, 3),
+        (ShapeParts::COUNTS, 3, 3),
+        (ShapeParts::AREA, 3, 3),
+    ] {
+        assert_eq!(subject.report_shape(parts).unwrap(), Some(&shape()));
+        assert_eq!(calls.facts.get(), backend_calls);
+        assert_eq!(subject.retained_report_bytes(), cells * cell);
     }
 }
 
 #[test]
 fn facts_demands_build_no_mesh_record_and_each_facet_builds_once() {
-    for facets in [true, false] {
-        let (brep, calls) = brep(facets, false, false);
+    {
+        let (brep, calls) = brep(false, false);
         let subjects = [subject(brep)];
         assert_eq!(claim(&subjects, false), (1, None));
         assert!(subjects[0].mesh_record().is_none());
@@ -322,13 +329,7 @@ fn facts_demands_build_no_mesh_record_and_each_facet_builds_once() {
             + subjects[0].display_name.len()
             + 2) as u64;
         assert_eq!(subjects[0].retained_report_bytes(), facts_bytes + record);
-        // A combined connector reports once per facet slice: the shape for
-        // the facts, then the mesh.
-        let expected = if facets { [0, 1, 1] } else { [2, 0, 0] };
-        assert_eq!(
-            [&calls.combined, &calls.mesh, &calls.facts].map(Cell::get),
-            expected
-        );
+        assert_eq!([&calls.mesh, &calls.facts].map(Cell::get), [1, 1]);
     }
 }
 
@@ -370,20 +371,20 @@ fn a_report_soup_moves_into_its_record_and_other_meshes_expand() {
 fn the_selector_index_reads_facts_facets_without_the_report_mesh() {
     // F8: face tables, occurrences and rows, plus the whole-shape facts of an
     // occurrence-free document; a failing report mesh cannot refuse it.
-    let (brep, calls) = brep(true, false, false);
+    let (brep, calls) = brep(true, false);
     let subjects = [subject(brep)];
     assert!(subjects[0].selector_index().unwrap().is_some());
     assert!(subjects[0].mesh_record().is_none());
     assert_eq!(
-        [&calls.combined, &calls.mesh, &calls.facts, &calls.faces].map(Cell::get),
-        [0, 0, 1, 1]
+        [&calls.mesh, &calls.facts, &calls.faces].map(Cell::get),
+        [0, 1, 1]
     );
 }
 
 #[test]
 fn step_analyze_mesh_reads_occurrences_and_rows_without_the_report_facts() {
     // F8: a failing report facts facet cannot refuse analyzeMesh on STEP.
-    let (brep, calls) = brep(true, false, true);
+    let (brep, calls) = brep(false, true);
     let subjects = [subject(brep)];
     let budget = Budget::new(10_000);
     let expected = Json::Null;
@@ -400,15 +401,12 @@ fn step_analyze_mesh_reads_occurrences_and_rows_without_the_report_facts() {
         evaluation,
         Evaluation::Ancillary { success: true, .. }
     ));
-    assert_eq!(
-        [&calls.combined, &calls.mesh, &calls.facts].map(Cell::get),
-        [0, 1, 0]
-    );
+    assert_eq!([&calls.mesh, &calls.facts].map(Cell::get), [1, 0]);
 }
 
 #[test]
 fn a_measured_face_table_replaces_the_address_table() {
-    let (brep, calls) = brep(true, true, true);
+    let (brep, calls) = brep(true, true);
     let subjects = [subject(brep)];
     let subject = &subjects[0];
     subject.report_faces(false).unwrap();

@@ -163,29 +163,6 @@ pub struct StepSubjectMetadata {
     pub native_read_stream: bool,
 }
 
-/// One coherent fixed-profile report of a connector without separate facets;
-/// the `BrepSubject` facet defaults slice it. Entity ordinals still address
-/// immutable nominal query shapes.
-#[derive(Clone, Debug)]
-pub struct ReportedBrepBundle {
-    pub facts: Rc<DocumentFacts>,
-    pub whole_faces: Rc<[LocatedFace]>,
-    pub occurrence_faces: Vec<Rc<[LocatedFace]>>,
-    pub mesh: Rc<TriangleMesh>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DocumentFacts {
-    pub source_length_unit: String,
-    pub source_unit_to_millimeters: f64,
-    pub occurrences: Vec<OccurrenceFacts>,
-    pub shape: ShapeFacts,
-    pub subshapes: Vec<SubshapeFacts>,
-    pub datum_placements: Vec<DatumPlacementFacts>,
-    pub semantic_datums: Vec<SemanticDatumFacts>,
-}
-
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OccurrenceFacts {
@@ -225,6 +202,30 @@ pub struct ShapeFacts {
     pub surface_area: f64,
     pub center_of_mass: [f64; 3],
     pub topology: TopologyCounts,
+}
+
+/// The parts of [`ShapeFacts`] a claim reads, each measured on demand (F1):
+/// a scalar claim pays for its own integral only. Unrequested parts are
+/// unmeasured (NaN, counts zero) and must not be read.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ShapeParts(u8);
+
+impl ShapeParts {
+    /// Volume and centre of mass: one volume integral.
+    pub const VOLUME: Self = Self(1);
+    pub const AREA: Self = Self(2);
+    /// Exact `AddOptimal` bounds (ruling 4 (A)).
+    pub const BOUNDS: Self = Self(4);
+    pub const COUNTS: Self = Self(8);
+    pub const ALL: Self = Self(15);
+
+    pub const fn bits(self) -> u8 {
+        self.0
+    }
+
+    pub const fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
@@ -943,6 +944,15 @@ pub struct FiniteContactLine {
     pub edge_tolerance: f64,
     pub vertex_tolerances: [f64; 2],
 }
+
+/// The report facets' default: a connector reports none of them.
+fn no_report() -> BackendError {
+    BackendError {
+        kind: super::BackendErrorKind::Unsupported,
+        message: "The BRep connector has no qualified fixed-profile report bundle.".into(),
+    }
+}
+
 pub trait BrepSubject {
     /// Complete bounded plane region or source-attached circular rim evidence.
     fn finite_contact_face(&self, _face: BrepEntity) -> Result<FiniteContactFace, BackendError> {
@@ -962,42 +972,30 @@ pub trait BrepSubject {
         Ok(None)
     }
 
-    /// The combined report. A connector with separate facets overrides the
-    /// facets below instead; their defaults slice this bundle.
-    fn reported_facts_and_mesh(&self) -> Result<ReportedBrepBundle, BackendError> {
-        Err(BackendError {
-            kind: super::BackendErrorKind::Unsupported,
-            message: "The BRep connector has no qualified fixed-profile report bundle.".into(),
-        })
-    }
-
     /// The report mesh facet, owned so the caller can move it into its record.
     fn reported_mesh(&self) -> Result<TriangleMesh, BackendError> {
-        Ok(self.reported_facts_and_mesh()?.mesh.as_ref().clone())
+        Err(no_report())
     }
 
     /// The report's whole-shape facts.
     fn reported_shape(&self) -> Result<ShapeFacts, BackendError> {
-        Ok(self.reported_facts_and_mesh()?.facts.shape.clone())
+        Err(no_report())
+    }
+
+    /// Whole-shape facts measuring only `parts` (F1); the others may be
+    /// unmeasured. The default measures them all.
+    fn reported_shape_parts(&self, _parts: ShapeParts) -> Result<ShapeFacts, BackendError> {
+        self.reported_shape()
     }
 
     /// The report face tables; `measured == false` may leave them address-only.
     fn reported_faces(&self, _measured: bool) -> Result<ReportedFaces, BackendError> {
-        let bundle = self.reported_facts_and_mesh()?;
-        Ok(ReportedFaces {
-            whole_faces: bundle.whole_faces,
-            occurrence_faces: bundle.occurrence_faces,
-        })
+        Err(no_report())
     }
 
     /// Subshape names and datums without a report.
     fn document_rows(&self) -> Result<DocumentRows, BackendError> {
-        let facts = self.reported_facts_and_mesh()?.facts;
-        Ok(DocumentRows {
-            subshapes: facts.subshapes.clone(),
-            datum_placements: facts.datum_placements.clone(),
-            semantic_datums: facts.semantic_datums.clone(),
-        })
+        Err(no_report())
     }
 
     /// The `AddOptimal` box of one public whole face, measured only for the
@@ -1173,12 +1171,7 @@ pub trait BrepSubject {
     /// transferring whole-document face/PMI inventories. `name` may be left
     /// empty.
     fn source_occurrences(&self) -> Result<Rc<[OccurrenceFacts]>, BackendError> {
-        Ok(self
-            .reported_facts_and_mesh()?
-            .facts
-            .occurrences
-            .clone()
-            .into())
+        Err(no_report())
     }
 
     /// `source_occurrences` without measuring occurrence bounds: every field

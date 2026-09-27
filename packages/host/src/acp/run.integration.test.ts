@@ -154,7 +154,7 @@ const startHarness = async (
   roots.push(workspaceRoot);
   await writeFile(join(workspaceRoot, 'main.scad'), 'cube(10);\n', 'utf8');
   const api = await startStubApi();
-  const mcp = createHostMcpEndpoint({ secret: randomBytes(32).toString('base64url'), registry });
+  const mcp = createHostMcpEndpoint({ secret: randomBytes(32).toString('base64url'), registry, workspaceRoot });
   closers.push(async () => mcp.close());
 
   const launcherRef: { current?: NodeAgentLauncher } = {};

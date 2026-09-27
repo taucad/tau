@@ -349,8 +349,10 @@ const findActions = (args: readonly string[]): CommandAction[] | undefined => {
 /* Checksums read a file and print a digest; `-a`/`-c` take a value. */
 const hashers = wordSet('shasum sha1sum sha256sum sha512sum md5 md5sum b3sum');
 
-const perPath = <Type extends 'hash' | 'count'>(type: Type, paths: readonly string[]): CommandAction[] | undefined =>
-  paths.length === 0 || paths.includes('-') ? undefined : paths.map((path) => ({ type, path }) as CommandAction);
+const perPath = (type: 'hash' | 'count', paths: readonly string[]): CommandAction[] | undefined =>
+  paths.length === 0 || paths.includes('-')
+    ? undefined
+    : paths.map((path): CommandAction => (type === 'hash' ? { type: 'hash', path } : { type: 'count', path }));
 
 /**
  * A lookup of installed programs. `command` without `-v`/`-V` runs its
@@ -478,12 +480,10 @@ const joinPath = (base: string, path: string): string =>
 /** The file an action names, if it names one. */
 const pathOf = (action: CommandAction): string | undefined => ('path' in action ? action.path : undefined);
 
-const withBase = (action: CommandAction, base: string | undefined): CommandAction => {
-  const path = pathOf(action);
-  return base === undefined || path === undefined
+const withBase = (action: CommandAction, base: string | undefined): CommandAction =>
+  base === undefined || !('path' in action) || action.path === undefined
     ? action
-    : ({ ...action, path: joinPath(base, path) } as CommandAction);
-};
+    : { ...action, path: joinPath(base, action.path) };
 
 /** `bash -lc '<script>'` and friends: the script they run, or `undefined`. */
 const wrappedScript = (words: readonly string[]): string | undefined => {

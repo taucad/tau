@@ -57,6 +57,47 @@ const after = (title: string, prefix: string): string => {
 const stringAt = (record: unknown, key: string): string | undefined =>
   isRecord(record) && typeof record[key] === 'string' && record[key] !== '' ? record[key] : undefined;
 
+type WebAction = Record<string, unknown> | undefined;
+
+const openPageSummary = (title: string, action: WebAction): CommandSummary => {
+  const url = stringAt(action, 'url') ?? after(title, 'Open page:');
+  return summary({
+    kind: 'fetch',
+    family: 'web-read',
+    verb: 'Opened',
+    activeVerb: 'Opening',
+    detail: url === '' ? 'a page' : displayUrl(url),
+  });
+};
+
+const findInPageSummary = (title: string, action: WebAction): CommandSummary => {
+  const pattern = stringAt(action, 'pattern');
+  const url = stringAt(action, 'url');
+  const where = url === undefined ? 'a page' : displayUrl(url);
+  const detail =
+    pattern === undefined && url === undefined
+      ? after(title, 'Find in page')
+      : `${where}${pattern === undefined ? '' : ` for '${pattern}'`}`;
+  return summary({ kind: 'fetch', family: 'web-read', verb: 'Searched', activeVerb: 'Searching', detail });
+};
+
+const webSearchSummary = (title: string, input: unknown, action: WebAction): CommandSummary => {
+  const queries = Array.isArray(action?.['queries']) ? action['queries'] : [];
+  const joined = queries.filter((entry) => typeof entry === 'string' && entry !== '').join(', ');
+  const query =
+    stringAt(action, 'query') ??
+    (joined === '' ? undefined : joined) ??
+    stringAt(input, 'query') ??
+    after(title, 'Web search:');
+  return summary({
+    kind: 'fetch',
+    family: 'web-search',
+    verb: 'Searched',
+    activeVerb: 'Searching',
+    detail: query === '' || query === 'Web search' ? 'the web' : `the web for ${query}`,
+  });
+};
+
 /**
  * A web search, page open or find-in-page. Codex reports all three as ACP
  * `search` with a `webSearch` raw input; the title is the fallback.
@@ -66,41 +107,12 @@ const webSummary = (title: string, input: unknown): CommandSummary | undefined =
   const action = isRecord(input) && isRecord(input['action']) ? input['action'] : undefined;
   const actionType = stringAt(action, 'type');
   if (actionType === 'openPage' || (!isWeb && title.startsWith('Open page'))) {
-    const url = stringAt(action, 'url') ?? after(title, 'Open page:');
-    return summary({
-      kind: 'fetch',
-      family: 'web-read',
-      verb: 'Opened',
-      activeVerb: 'Opening',
-      detail: url === '' ? 'a page' : displayUrl(url),
-    });
+    return openPageSummary(title, action);
   }
   if (actionType === 'findInPage' || (!isWeb && title.startsWith('Find in page'))) {
-    const pattern = stringAt(action, 'pattern');
-    const url = stringAt(action, 'url');
-    const detail =
-      pattern === undefined && url === undefined
-        ? after(title, 'Find in page')
-        : `${url === undefined ? 'a page' : displayUrl(url)}${pattern === undefined ? '' : ` for '${pattern}'`}`;
-    return summary({ kind: 'fetch', family: 'web-read', verb: 'Searched', activeVerb: 'Searching', detail });
+    return findInPageSummary(title, action);
   }
-  if (isWeb || title.startsWith('Web search')) {
-    const queries = isRecord(action) && Array.isArray(action['queries']) ? action['queries'] : [];
-    const joined = queries.filter((entry) => typeof entry === 'string' && entry !== '').join(', ');
-    const query =
-      stringAt(action, 'query') ??
-      (joined === '' ? undefined : joined) ??
-      stringAt(input, 'query') ??
-      after(title, 'Web search:');
-    return summary({
-      kind: 'fetch',
-      family: 'web-search',
-      verb: 'Searched',
-      activeVerb: 'Searching',
-      detail: query === '' || query === 'Web search' ? 'the web' : `the web for ${query}`,
-    });
-  }
-  return undefined;
+  return isWeb || title.startsWith('Web search') ? webSearchSummary(title, input, action) : undefined;
 };
 
 /** Codex's own read titles, restated without the path it already carries in `locations`. */

@@ -7,6 +7,7 @@ import { mock } from 'vitest-mock-extended';
 import type { ProjectRootConfiguration } from '@taucad/filesystem';
 import { fileManagerMachine } from '#machines/file-manager.machine.js';
 import type * as WorkspaceTelemetryModule from '#utils/workspace-telemetry.utils.js';
+import type * as RuntimeFileSystemModule from '@taucad/runtime/filesystem';
 import type { WorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import type { WorkspaceEntry } from '#filesystem/handle-store.js';
 
@@ -82,11 +83,10 @@ const mockOpenFileSystemBridge = vi.fn((_worker: unknown, _options: unknown) => 
 const runtimeBridgeOpens = vi.hoisted(() => [] as Array<() => unknown>);
 
 vi.mock('@taucad/runtime/filesystem', async (importOriginal) => {
-  type RuntimeFileSystemModule = typeof import('@taucad/runtime/filesystem');
-  const original = await importOriginal<RuntimeFileSystemModule>();
+  const original = await importOriginal<typeof RuntimeFileSystemModule>();
   return {
     ...original,
-    fromFileSystemBridge: (open: Parameters<RuntimeFileSystemModule['fromFileSystemBridge']>[0]) => {
+    fromFileSystemBridge: (open: Parameters<(typeof RuntimeFileSystemModule)['fromFileSystemBridge']>[0]) => {
       runtimeBridgeOpens.push(open);
       return original.fromFileSystemBridge(open);
     },

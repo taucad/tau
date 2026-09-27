@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import type { ReactNode } from 'react';
-import { render, renderHook, waitFor } from '@testing-library/react';
+import { act, render, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RemoteFacet, RevisionStatusProjection } from '@taucad/revisions';
 
@@ -19,10 +19,17 @@ vi.mock('#cloud/commercial-features.js', () => ({
   useCommercialFeatures: () => ({ isResolved: account.isResolved, canSyncFiles: account.canSyncFiles }),
 }));
 const { mockToast } = vi.hoisted(() => ({
-  mockToast:
-    vi.fn<
-      (message: string, options: { description?: string; action: { label: string; onClick: () => void } }) => void
-    >(),
+  mockToast: vi.fn<
+    (
+      message: string,
+      options: {
+        description?: string;
+        action: { label: string; onClick: () => void };
+        onDismiss?: () => void;
+        onAutoClose?: () => void;
+      },
+    ) => void
+  >(),
 }));
 vi.mock('#components/ui/sonner.js', () => ({ toast: mockToast }));
 
@@ -33,6 +40,8 @@ const {
   materializedCloudProjects,
   nextTauCloudStep,
   tauCloudIntent,
+  turnOffBackupConsequence,
+  useBackupAnnouncing,
   useTauCloudIntent,
   useTauCloudIntentConnection,
 } = await import('#hooks/use-cloud-projects.js');
@@ -252,6 +261,10 @@ describe('useTauCloudIntentConnection', () => {
 
   beforeEach(() => {
     localStorage.clear();
+    /* The toasts an earlier row raised close, as a person's would. */
+    for (const [, options] of mockToast.mock.calls) {
+      options.onAutoClose?.();
+    }
     vi.clearAllMocks();
     Object.assign(account, { auth: 'authed', isResolved: true, canSyncFiles: true });
   });
@@ -293,9 +306,37 @@ describe('useTauCloudIntentConnection', () => {
     });
     const [message, options] = mockToast.mock.calls[0] ?? [];
     expect(message).toBe('Backs up to Tau Cloud automatically after your first save.');
-    expect(options?.description).toBe('Stops backing up. The copy already on Tau Cloud stays.');
+    /* Nothing is on Tau Cloud yet, so the toast names no copy there. */
+    expect(options?.description).toBe('Turning it off keeps this project on this device.');
     expect(options?.action.label).toBe('Turn off backup');
     expect(tauCloudIntent.get(projectId)).toBe('noticed');
+  });
+
+  /* DESIGN: one backup offer at a time. The pane's line waits while the toast shows it. */
+  it('should hold the pane offer back only while the creation toast is on screen', async () => {
+    tauCloudIntent.set(projectId, 'default');
+    const announcing = renderHook(() => useBackupAnnouncing(projectId));
+    expect(announcing.result.current).toBe(false);
+
+    renderConnection(undefined);
+    await waitFor(() => {
+      expect(announcing.result.current).toBe(true);
+    });
+
+    act(() => {
+      mockToast.mock.calls[0]?.[1].onAutoClose?.();
+    });
+    expect(announcing.result.current).toBe(false);
+  });
+
+  it('should name the copy on Tau Cloud only once there is one', () => {
+    expect(turnOffBackupConsequence(remote('none'))).toBe('Turning it off keeps this project on this device.');
+    expect(turnOffBackupConsequence(remote('tau', 'connecting'))).toBe(
+      'Turning it off keeps this project on this device.',
+    );
+    expect(turnOffBackupConsequence(remote('tau', 'connected'))).toBe(
+      'Stops backing up. The copy already on Tau Cloud stays.',
+    );
   });
 
   it('should never connect while the intent is default and unannounced', () => {

@@ -316,8 +316,44 @@ export const nextTauCloudStep = (
   return status.headRevisionId === undefined ? 'wait' : 'connect';
 };
 
-/** The opt-out's consequence, said wherever the opt-out is offered (RV-W11 8). @public */
-export const turnOffBackupConsequence = 'Stops backing up. The copy already on Tau Cloud stays.';
+/**
+ * The opt-out's consequence, said wherever the opt-out is offered (RV-W11 8).
+ * The copy on Tau Cloud is named only once there is one to keep.
+ *
+ * @param remote - The project's remote facet, when the root has answered.
+ * @returns The sentence.
+ * @public
+ */
+export const turnOffBackupConsequence = (remote: Pick<RemoteFacet, 'kind' | 'phase'> | undefined): string =>
+  remote?.kind === 'tau' && remote.phase === 'connected'
+    ? 'Stops backing up. The copy already on Tau Cloud stays.'
+    : 'Turning it off keeps this project on this device.';
+
+/* The projects whose creation toast is on screen in this document. The pane's
+ * line waits for it to close, so one backup offer shows at a time (DESIGN). */
+const announcing = new Set<string>();
+const announcingTopic = new Topic<void>({ name: 'backup-announcing' });
+const subscribeAnnouncing = (listener: () => void): (() => void) => announcingTopic.subscribe(listener);
+const endAnnouncing = (projectId: string): void => {
+  if (announcing.delete(projectId)) {
+    announcingTopic.emit();
+  }
+};
+
+/**
+ * Whether this project's creation toast is still on screen, so the pane holds
+ * its own backup offer back until the toast closes.
+ *
+ * @param projectId - The project.
+ * @returns `true` while the toast shows.
+ * @public
+ */
+export const useBackupAnnouncing = (projectId: string): boolean =>
+  useSyncExternalStore(
+    subscribeAnnouncing,
+    () => announcing.has(projectId),
+    () => false,
+  );
 
 /**
  * *Turn off backup*, from the toast or the Revisions pane: one handler, reading
@@ -404,13 +440,23 @@ export const useTauCloudIntentConnection = ({
       }
       case 'announce': {
         tauCloudIntent.set(projectId, 'noticed');
+        announcing.add(projectId);
+        announcingTopic.emit();
         toast('Backs up to Tau Cloud automatically after your first save.', {
-          description: turnOffBackupConsequence,
+          description: turnOffBackupConsequence(live.current.readRemote()),
           action: {
             label: 'Turn off backup',
             onClick: () => {
+              endAnnouncing(projectId);
               turnOffBackupByDefault(projectId, live.current.readRemote(), live.current.commands);
             },
+          },
+          /* Closed any way at all, the pane's line takes the offer over. */
+          onDismiss: () => {
+            endAnnouncing(projectId);
+          },
+          onAutoClose: () => {
+            endAnnouncing(projectId);
           },
         });
         return;

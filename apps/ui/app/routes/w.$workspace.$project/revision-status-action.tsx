@@ -9,6 +9,7 @@ import type { RevisionCard } from '#hooks/use-revisions.js';
 import { useRevisionCommands } from '#hooks/use-revision-status.js';
 import { useChats } from '#hooks/use-chats.js';
 import { formatRelativeTime } from '#utils/date.utils.js';
+import { backupByDefaultNotice, useTauCloudEligibility, useTauCloudIntent } from '#hooks/use-cloud-projects.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import {
   backupCopy,
@@ -112,6 +113,9 @@ export function RevisionStatusAction(): React.JSX.Element | undefined {
   const { chats } = useChats(projectId);
   const { openPanel } = useProjectWorkspace();
   const focusedChatId = useSelector(editorRef, (state) => state.context.focusedChatId);
+  /* Before the first save of a project backed up by default, the pane's own line (D19). */
+  const pendingBackup =
+    backupByDefaultNotice(useTauCloudIntent(projectId), useTauCloudEligibility(), status?.remote) === 'pending';
 
   /* Before the root answers there is nothing to be on; an *unborn* branch is a
    * different thing, and the trigger says *Setting up* rather than vanishing
@@ -149,7 +153,10 @@ export function RevisionStatusAction(): React.JSX.Element | undefined {
           <RevisionHoverCard
             where={where}
             facts={facts}
-            backup={backupCopy(status.sync, where.role) ?? 'No backup connected'}
+            backup={
+              backupCopy(status.sync, where.role) ??
+              (pendingBackup ? 'Backs up to Tau Cloud automatically after your first save' : 'No backup connected')
+            }
             chat={hasDiverged && focusedChat !== undefined ? `${focusedChat.name} · on ${chatBranch}` : undefined}
             revisions={revisions}
           />

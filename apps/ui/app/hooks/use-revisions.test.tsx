@@ -564,6 +564,39 @@ describe('useRevisions after a mint (E6)', () => {
     expect(result.current.hasOlder).toBe(true);
   });
 
+  /*
+   * A head this store does not hold yet: the root named a host's revision
+   * before its objects arrived. When they land the head does not move, so
+   * only the report of their arrival can bring its row in (W10-L D1).
+   */
+  it('reads a head the store did not hold again once the root reports anything new', async () => {
+    const { result, rerender } = await mounted();
+
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-3' };
+    rerender();
+    await waitFor(() => {
+      expect(result.current.headRevisionId).toBe('rev-3');
+    });
+    await act(async () => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+    });
+    expect(result.current.revisions.map((card) => card.n)).toEqual([2, 1]);
+
+    /* The fetch lands: same head, a new report. */
+    revisionStatusHarness.rows = [row({ revisionId: 'rev-3', revisionNumber: 3, parent: 'rev-2' }), ...history];
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      branches: [{ name: 'main', head: 'rev-3', checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] }],
+    };
+    rerender();
+
+    await waitFor(() => {
+      expect(result.current.revisions.map((card) => card.n)).toEqual([3, 2, 1]);
+    });
+  });
+
   it('re-reads the whole history when the new head is a merge, whose other side lands further down', async () => {
     const { result, rerender, log } = await mounted();
 

@@ -103,6 +103,10 @@ vi.mock('#filesystem/handle-store.js', () => ({
   requestHandlePermission: vi.fn(),
 }));
 
+/* The self-host build gates nothing; the Free row closes the gate the cloud build reads. */
+const plan = vi.hoisted(() => ({ isResolved: true, canSyncFiles: true }));
+vi.mock('#cloud/commercial-features.js', () => ({ useCommercialFeatures: () => plan }));
+
 vi.mock('#components/ui/sonner.js', () => ({
   toast: {
     error: mockToastError,
@@ -302,6 +306,7 @@ describe('FileSystemSettings Tau Cloud projects', () => {
   } satisfies Workspace;
 
   beforeEach(async () => {
+    Object.assign(plan, { isResolved: true, canSyncFiles: true });
     const { materializeOnSignIn } = await import('#hooks/use-cloud-projects.js');
     materializeOnSignIn.set(undefined);
     stubEstimate(async () => ({ usage: 0, quota: 0 }));
@@ -325,5 +330,14 @@ describe('FileSystemSettings Tau Cloud projects', () => {
     expect(materializeOnSignIn.get()).toEqual({ kind: 'workspace', workspaceId: 'wsp_aaaaaaaaaaaaaaaaaaaaa' });
     expect(screen.getByRole('radio', { name: 'Parts' })).toBeChecked();
     expect(screen.getByRole('radio', { name: 'Off' })).not.toBeChecked();
+  });
+
+  it('should not offer the setting on a plan without backup', async () => {
+    Object.assign(plan, { canSyncFiles: false });
+    render(<FileSystemSettings />);
+
+    await screen.findAllByText('Parts');
+    expect(screen.queryByRole('group', { name: 'Workspace for Tau Cloud projects' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Tau Cloud Projects')).not.toBeInTheDocument();
   });
 });

@@ -88,6 +88,7 @@ import {
   tauCloudIntent,
   turnOffBackupByDefault,
   turnOffBackupConsequence,
+  useBackupAnnouncing,
   useTauCloudEligibility,
   useTauCloudIntent,
 } from '#hooks/use-cloud-projects.js';
@@ -145,7 +146,9 @@ function BackupByDefaultLine({ intent }: { readonly intent: TauCloudIntent }): R
   const client = useRevisionClient();
   const commands = useRevisionCommands();
   const notice = backupByDefaultNotice(intent, useTauCloudEligibility(), status?.remote);
-  if (notice === undefined) {
+  /* One offer at a time: while the creation toast carries it, this line waits (DESIGN). */
+  const announcing = useBackupAnnouncing(projectId);
+  if (notice === undefined || (notice === 'pending' && announcing)) {
     return undefined;
   }
   return (
@@ -158,7 +161,7 @@ function BackupByDefaultLine({ intent }: { readonly intent: TauCloudIntent }): R
       <Cloud aria-hidden className='mt-px size-3.5 shrink-0' />
       <div className='min-w-0 flex-auto'>
         <p>Backs up to Tau Cloud automatically.</p>
-        <p>{turnOffBackupConsequence}</p>
+        <p>{turnOffBackupConsequence(status?.remote)}</p>
       </div>
       <Button
         size='xs'

@@ -33,6 +33,7 @@ import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { materializeOnSignIn, useMaterializeOnSignInLocation } from '#hooks/use-cloud-projects.js';
+import { useCommercialFeatures } from '#cloud/commercial-features.js';
 import type { ProjectCreationLocation } from '#types/project-creation-location.types.js';
 import { homeProjectCreationLocation } from '#types/project-creation-location.types.js';
 
@@ -49,6 +50,9 @@ export function FileSystemSettings(): React.JSX.Element {
   const telemetry = useWorkspaceTelemetry();
   const projectManager = useProjectManager();
   const { workspaceConnection } = projectManager;
+  /* A plan without backup has no Tau Cloud projects to bring: the setting is absent,
+   * as the no-train toggle is on a plan it does not apply to. */
+  const { isResolved, canSyncFiles } = useCommercialFeatures();
   const { workspace } = useFileManager();
 
   const reloadRows = useCallback(async (): Promise<void> => {
@@ -361,9 +365,11 @@ export function FileSystemSettings(): React.JSX.Element {
         </SettingsItem>
       ) : undefined}
 
-      <SettingsItem settingId='tau-cloud-projects'>
-        <TauCloudProjectsSetting workspaces={rows.map((row) => row.workspace)} />
-      </SettingsItem>
+      {isResolved && canSyncFiles ? (
+        <SettingsItem settingId='tau-cloud-projects'>
+          <TauCloudProjectsSetting workspaces={rows.map((row) => row.workspace)} />
+        </SettingsItem>
+      ) : undefined}
 
       {storageUsage ? (
         <SettingsItem settingId='browser-storage'>

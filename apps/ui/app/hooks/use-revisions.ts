@@ -131,7 +131,16 @@ const emptyView: RevisionsView = {
 const loadingView: RevisionsView = { ...emptyView, isLoading: true };
 
 /** One branch's loaded rows, the head they were read at, and how many rows the reader asked for. */
-type HeadLog = Readonly<{ head: string | undefined; rows: readonly RevisionRow[]; wanted: number }>;
+type HeadLog = Readonly<{
+  head: string | undefined;
+  rows: readonly RevisionRow[];
+  wanted: number;
+  /** The store did not hold `head` yet: its log was read without it. */
+  unheld?: true;
+}>;
+
+const headLog = (head: string | undefined, rows: readonly RevisionRow[], wanted: number): HeadLog =>
+  head !== undefined && rows[0]?.revisionId !== head ? { head, rows, wanted, unheld: true } : { head, rows, wanted };
 
 /**
  * The title a person reads, never the generator's own string (C37).
@@ -346,11 +355,11 @@ export function useRevisions(): RevisionsView {
     queryFn: async (): Promise<HeadLog> => {
       /* A re-read keeps what the reader loaded with Show more, and never less than a page. */
       const wanted = queryClient.getQueryData<HeadLog>(logKey)?.wanted ?? revisionPageSize;
-      return {
-        head: headRevisionId,
-        rows: (await client?.log(branch === undefined ? { limit: wanted } : { branch, limit: wanted })) ?? [],
+      return headLog(
+        headRevisionId,
+        (await client?.log(branch === undefined ? { limit: wanted } : { branch, limit: wanted })) ?? [],
         wanted,
-      };
+      );
     },
     /* Exact for the head it was read at; the effect below re-reads it for any other. */
     staleTime: Number.POSITIVE_INFINITY,
@@ -402,6 +411,18 @@ export function useRevisions(): RevisionsView {
     void appendMinted();
   }, [branch, client, headRevisionId, log, logKey, projectId, queryClient, readAt, refetch]);
   /*
+   * A head the store does not hold yet (a host's revision whose objects are
+   * still on their way) moves nothing when it lands, so the effect above never
+   * fires again for it. Read again whenever the root reports anything new —
+   * the fetch that brings the revision is one such report — until it is held.
+   */
+  const unheld = log?.unheld === true;
+  useEffect(() => {
+    if (unheld) {
+      void refetch({ cancelRefetch: false });
+    }
+  }, [refetch, status, unheld]);
+  /*
    * ponytail: Show more re-reads the loaded rows with the next page under them,
    * so page k walks k pages of commits, once per click — `limit` already crosses
    * every hop. A cursor on the wire if deep paging ever shows up hot.
@@ -415,7 +436,7 @@ export function useRevisions(): RevisionsView {
     const rows = await client.log({ branch, limit: wanted });
     /* Only onto the log it was read against: a head that moved meanwhile re-reads on its own. */
     queryClient.setQueryData<HeadLog>(logKey, (latest) =>
-      latest?.head === current.head ? { head: current.head, rows, wanted } : latest,
+      latest?.head === current.head ? headLog(current.head, rows, wanted) : latest,
     );
   }, [branch, client, logKey, queryClient]);
   const rows = log?.rows;

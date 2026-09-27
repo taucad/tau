@@ -135,7 +135,9 @@
   "devDependencies": {
     "@libcascade/toolchain": "catalog:",
     "@taucad/openrscad": "workspace:*",
-    "@taucad/tau-examples": "workspace:*"
+    "@taucad/tau-examples": "workspace:*",
+    "@vitest/browser-playwright": "catalog:",
+    "vitest": "catalog:"
   },
   "scripts": {
     "prepack": "node scripts/generate-provenance.mjs"

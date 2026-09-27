@@ -5,21 +5,21 @@ import { assimp } from '@taucad/assimp';
 import { esbuild } from '@taucad/esbuild';
 import { jscad } from '@taucad/jscad';
 import { openrscad } from '@taucad/openrscad';
-import { geometryCache, gltfEdgeDetection, parameterCache, parameterUnits } from '@taucad/middleware';
+import { geometryCache, gltfEdgeDetection, parameterUnits } from '@taucad/middleware';
 
 const openScadRuntime = defineRuntime({
   plugins: [assimp(), openrscad(), esbuild()],
-  middleware: [parameterCache(), parameterUnits(), geometryCache(), gltfEdgeDetection()],
+  middleware: [parameterUnits(), geometryCache(), gltfEdgeDetection()],
 });
 
 const gearRuntime = defineRuntime({
   plugins: [assimp(), jscad(), esbuild()],
-  middleware: [parameterCache(), parameterUnits(), geometryCache()],
+  middleware: [parameterUnits(), geometryCache()],
 });
 
 const splashRuntime = defineRuntime({
   plugins: [jscad(), esbuild()],
-  middleware: [parameterCache(), parameterUnits(), geometryCache()],
+  middleware: [parameterUnits(), geometryCache()],
 });
 
 const openScadClientOptions = {

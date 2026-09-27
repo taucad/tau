@@ -6,6 +6,7 @@ import type { GetParametersResult } from '@taucad/runtime/types';
 import { createMockInput, createMockRuntime } from '@taucad/runtime-testing';
 import { parameterCache } from '#parameter-cache.middleware.js';
 
+// oxlint-disable-next-line typescript/no-deprecated -- The deprecated export keeps its behaviour until it is removed.
 const resolveMiddleware = async () => resolveRuntimePluginDefinition('middleware', parameterCache());
 const dependency = contentDigest({ value: `sha256:${'1'.repeat(64)}` });
 const middlewareIdentity = contentDigest({ value: `sha256:${'2'.repeat(64)}` });

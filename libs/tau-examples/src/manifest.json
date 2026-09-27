@@ -385,7 +385,7 @@
     ]
   },
   {
-    "kind": "model",
+    "kind": "reference",
     "geometry": "3d",
     "kernel": "picovoxel",
     "name": "implicit-gyroid-genus",
@@ -411,7 +411,7 @@
     ]
   },
   {
-    "kind": "model",
+    "kind": "reference",
     "geometry": "3d",
     "kernel": "picovoxel",
     "name": "implicit-logic-split",
@@ -424,7 +424,7 @@
     ]
   },
   {
-    "kind": "model",
+    "kind": "reference",
     "geometry": "3d",
     "kernel": "picovoxel",
     "name": "implicit-modular",
@@ -437,7 +437,7 @@
     ]
   },
   {
-    "kind": "model",
+    "kind": "reference",
     "geometry": "3d",
     "kernel": "picovoxel",
     "name": "implicit-radial",
@@ -450,7 +450,7 @@
     ]
   },
   {
-    "kind": "model",
+    "kind": "reference",
     "geometry": "3d",
     "kernel": "picovoxel",
     "name": "implicit-random",
@@ -476,7 +476,7 @@
     ]
   },
   {
-    "kind": "model",
+    "kind": "reference",
     "geometry": "3d",
     "kernel": "picovoxel",
     "name": "implicit-super-ellipsoid",

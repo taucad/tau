@@ -13,8 +13,6 @@
 import { toolpathSegmentKinds } from '@taucad/slicer/toolpath';
 import type { ToolpathProgram } from '@taucad/slicer/toolpath';
 import type { PrinterManifest } from '#components/printer/printer-manifest.fixture.js';
-import { toolpathGroups } from '#components/printer/printer-toolpath.js';
-import type { ToolpathGroup, ToolpathGrouping } from '#components/printer/printer-toolpath.js';
 
 /** Axis-aligned box: centre and full size, millimetres. */
 export type PrinterBox = Readonly<{
@@ -250,73 +248,25 @@ export const partBounds = (
   return Number.isFinite(max[2]!) ? { min: [min[0]!, min[1]!, min[2]!], max: [max[0]!, max[1]!, max[2]!] } : undefined;
 };
 
-/** Groups that never widen the framing: they move the head without laying down filament. */
-const unframedGroups: ReadonlySet<ToolpathGroup> = new Set(['travel', 'wipe']);
-
 /**
- * The extent of the filament the G-code filter shows: every extruding segment
- * in a shown group, measured on the centrelines and standing on the plate
- * (Z starts at 0). Travel and wipes never count, shown or not.
+ * The box the camera frames when only the plate is drawn: the finished part,
+ * standing on the plate, as the CAD viewer frames a model. It is the same for
+ * the whole run, so the camera stays still while the part prints; a G-code that
+ * labels no part frames the whole plate.
  *
- * @param program - The parsed toolpath.
- * @param grouping - The filter group of every segment.
- * @param hidden - The groups the filter hides.
- * @returns The bounds, or `undefined` when nothing shown lays down filament.
- */
-export const shownExtrusionBounds = (
-  program: Pick<ToolpathProgram, 'segmentCount' | 'positions' | 'extrusion'>,
-  { groupOf }: Pick<ToolpathGrouping, 'groupOf'>,
-  hidden: ReadonlySet<ToolpathGroup>,
-): PrinterBounds | undefined => {
-  const isFramed = toolpathGroups.map((group) => !hidden.has(group) && !unframedGroups.has(group));
-  const min = [Infinity, Infinity, 0];
-  const max = [-Infinity, -Infinity, -Infinity];
-  for (let segment = 0; segment < program.segmentCount; segment += 1) {
-    if (program.extrusion[segment]! <= 0 || !isFramed[groupOf[segment]!]) {
-      continue;
-    }
-    for (let offset = segment * 6; offset < segment * 6 + 6; offset += 1) {
-      const axis = offset % 3;
-      const value = program.positions[offset]!;
-      min[axis] = Math.min(min[axis]!, value);
-      max[axis] = Math.max(max[axis]!, value);
-    }
-  }
-  return Number.isFinite(max[2]!) ? { min: [min[0]!, min[1]!, min[2]!], max: [max[0]!, max[1]!, max[2]!] } : undefined;
-};
-
-/** Millimetres of plate kept around a small print, so the plate reads as the surface it stands on. */
-const plateContextSpan = 90;
-
-/**
- * The box the camera frames when only the plate is drawn. It is centred on the
- * part and reaches every shown filament line on each side, so the part sits in
- * the middle of the view with the purge line and skirt still in it; a small
- * part keeps at least {@link plateContextSpan} of plate around it. It runs from
- * the plate's underside to just above the nozzle at the top of the print, and
- * holds for the whole run because the plate stays still in this view.
- *
- * @param geometry - The machine, for the plate's size when nothing is shown.
- * @param extent - The shown filament's bounds, and the part's among them, from {@link shownExtrusionBounds}.
+ * @param geometry - The machine, for the plate's size when there is no part.
+ * @param part - The part's bounds from {@link partBounds}.
  * @returns The box in the plate frame, which is world space in this view.
  */
-export const framedPlateBox = (
+export const framedPartBox = (
   geometry: Pick<PrinterGeometry, 'buildVolume'>,
-  { shown, part }: Readonly<{ shown: PrinterBounds | undefined; part: PrinterBounds | undefined }>,
+  part: PrinterBounds | undefined,
 ): PrinterBounds => {
-  if (!shown) {
+  if (!part) {
     const [width, depth] = geometry.buildVolume;
     return { min: [0, 0, -plateThickness], max: [width, depth, nozzleContext] };
   }
-  const subject = part ?? shown;
-  const across = (axis: 0 | 1): readonly [number, number] => {
-    const center = (subject.min[axis] + subject.max[axis]) / 2;
-    const half = Math.max(center - shown.min[axis], shown.max[axis] - center, plateContextSpan / 2);
-    return [center - half, center + half];
-  };
-  const [minX, maxX] = across(0);
-  const [minY, maxY] = across(1);
-  return { min: [minX, minY, -plateThickness], max: [maxX, maxY, Math.max(0, shown.max[2]) + nozzleContext] };
+  return { min: [part.min[0], part.min[1], 0], max: [part.max[0], part.max[1], Math.max(part.max[2], 1)] };
 };
 
 /** Plate group Z offset in world space for the print height reached so far. */
@@ -341,6 +291,8 @@ const viewAzimuth = 32;
 const viewElevation = 30;
 /** Share of the view the framed box fills on its binding axis. */
 const framingFill = 0.88;
+/** The share a part alone fills: the CAD viewer's framing, a tenth of the view kept clear on each side. */
+export const partFramingFill = 0.8;
 /** Millimetres kept in frame above the nozzle plane, so the nozzle tip shows over the part. */
 const nozzleContext = 12;
 /** Millimetres the eye keeps outside the enclosure, so no near wall or door frame sits on the lens. */
@@ -381,8 +333,11 @@ export const framedPrintBox = (
  * canvas aspect: the binding axis meets the fill margin exactly, the other
  * axis is centred, and the eye stays outside the enclosure.
  *
- * @param geometry - The machine whose enclosure the eye keeps clear of; `undefined` when no enclosure is drawn.
+ * @param geometry - The machine whose enclosure the eye keeps clear of; `undefined` when only the plate is drawn.
  * @param box - The world-space box to frame, from {@link framedPrintBox}.
+ * Without a machine the part alone is the subject, and it fills {@link partFramingFill} as the CAD
+ * viewer frames a model; with one, the plate and machine fill a little more.
+ *
  * @param aspect - Canvas width over height.
  * @returns The camera pose; the target is on the view axis at the box's depth.
  */
@@ -391,6 +346,7 @@ export const framePrinterCamera = (
   box: PrinterBounds,
   aspect: number,
 ): PrinterCameraPose => {
+  const fill = geometry ? framingFill : partFramingFill;
   const azimuth = (viewAzimuth * Math.PI) / 180;
   const elevation = (viewElevation * Math.PI) / 180;
   const forward = [
@@ -402,7 +358,7 @@ export const framePrinterCamera = (
   const up = [-Math.sin(azimuth) * Math.sin(elevation), Math.cos(azimuth) * Math.sin(elevation), Math.cos(elevation)];
   const dot = (a: readonly number[], b: readonly number[]): number => a[0]! * b[0]! + a[1]! * b[1]! + a[2]! * b[2]!;
   const center = [0, 1, 2].map((axis) => (box.min[axis]! + box.max[axis]!) / 2);
-  const tanVertical = Math.tan((printerCameraFov * Math.PI) / 360) * framingFill;
+  const tanVertical = Math.tan((printerCameraFov * Math.PI) / 360) * fill;
   const tanHorizontal = tanVertical * Math.max(0.05, aspect);
   // For each frustum side, the furthest a corner reaches past it; opposite sides meet at the tightest eye.
   let pastRight = -Infinity;

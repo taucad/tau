@@ -13,13 +13,12 @@ import {
 } from '#components/geometry/graphics/three/controls/tau-camera-controls.js';
 import { printerBackground, printerBody } from '#components/printer/printer-colors.constants.js';
 import {
-  framedPlateBox,
+  framedPartBox,
   framedPrintBox,
   framePrinterCamera,
   partBounds,
   plateOffsetForHeight,
   printerCameraFov,
-  shownExtrusionBounds,
   toolheadLiftForHeight,
 } from '#components/printer/printer-geometry.js';
 import type { PrinterBounds, PrinterBox, PrinterGeometry, PrinterPanel } from '#components/printer/printer-geometry.js';
@@ -95,6 +94,7 @@ const plateRoughness: Readonly<Record<PrinterPlateModel['finish'], number>> = {
 const plateSurfaceLift = 0.3;
 const plateSurfaceLiftTarget = new THREE.Color(printerBody.plateSurfaceLift);
 const gltfLoader = new GLTFLoader();
+const boundsKey = ({ min, max }: PrinterBounds): string => [...min, ...max].join(',');
 /** The CAD viewer's own camera feel, without its easing. */
 const printerCameraControlProps = resolveCameraControlProps({ enablePan: true, enableZoom: true });
 
@@ -700,6 +700,11 @@ function PrinterCamera({
 }>): React.JSX.Element {
   const controls = useRef<CameraControlsImpl>(null);
   const aspect = useThree((state) => state.size.width / Math.max(1, state.size.height));
+  // A re-read file hands over an equal box; keeping the first one means only new values move the camera.
+  const [framedBox, setFramedBox] = useState(box);
+  if (boundsKey(framedBox) !== boundsKey(box)) {
+    setFramedBox(box);
+  }
   const invalidate = useThree((state) => state.invalidate);
   // The person's view wins over the pane size: telemetry and resizes never move a camera they placed.
   const isFollowing = useRef(true);
@@ -716,30 +721,25 @@ function PrinterCamera({
     if (!isFollowing.current || !controls.current) {
       return;
     }
-    const { position, target } = framePrinterCamera(geometry, box, aspect);
+    const { position, target } = framePrinterCamera(geometry, framedBox, aspect);
     void controls.current.setLookAt(...position, ...target, isRequested && !isReducedMotion);
     invalidate();
-  }, [aspect, box, frameRequest, geometry, invalidate, isReducedMotion]);
+  }, [aspect, framedBox, frameRequest, geometry, invalidate, isReducedMotion]);
   return <TauCameraControls ref={controls} makeDefault onControl={release} {...printerCameraControlProps} />;
 }
 
 /** The printer or its plate alone, the toolpath and the camera for one program. */
 export function PrinterScene(props: PrinterSceneProps): React.JSX.Element {
-  const { geometry, program, frameRequest, isReducedMotion, onContextLost, isWholePrinter, grouping, hiddenGroups } =
-    props;
+  const { geometry, program, frameRequest, isReducedMotion, onContextLost, isWholePrinter } = props;
   // Public viewers stay on WebGL; the existing internal override is used for parity checks.
   const backend = readGraphicsBackendQueryOverride() ?? 'webgl';
   const gl = useMemo(() => createTauR3fGlProp(backend), [backend]);
-  // The whole printer frames the plate and its travel; the plate alone frames the shown filament.
+  // The whole printer frames the plate and its travel; the plate alone frames the finished part. Neither
+  // depends on playback or the G-code filter, so the camera holds still while the part prints.
+  const part = useMemo(() => partBounds(program), [program]);
   const box = useMemo(
-    () =>
-      isWholePrinter
-        ? framedPrintBox(geometry, partBounds(program) ?? program.bounds)
-        : framedPlateBox(geometry, {
-            shown: shownExtrusionBounds(program, grouping, hiddenGroups),
-            part: shownExtrusionBounds(program, grouping, new Set([...hiddenGroups, 'preparation'])),
-          }),
-    [geometry, grouping, hiddenGroups, isWholePrinter, program],
+    () => (isWholePrinter ? framedPrintBox(geometry, part ?? program.bounds) : framedPartBox(geometry, part)),
+    [geometry, isWholePrinter, part, program.bounds],
   );
   return (
     <Canvas

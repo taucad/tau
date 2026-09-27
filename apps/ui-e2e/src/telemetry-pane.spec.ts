@@ -148,10 +148,10 @@ test('modernizes Telemetry as a filterable, truthful, accessible trace explorer'
   await target.expectAttribute(main, 'aria-expanded', 'true');
   await target.expectAttribute(secondary, 'aria-expanded', 'false');
 
-  const filter = selectors.getByRole('textbox', { name: 'Filter telemetry' });
+  const filter = selectors.getByRole('searchbox', { name: 'Filter telemetry' });
   await target.expectVisible(filter);
   await target.expectAttribute(filter, 'placeholder', 'Filter telemetry...');
-  await target.expectCount(selectors.getByRole('textbox', { name: 'Filter telemetry' }), 1);
+  await target.expectCount(selectors.getByRole('searchbox', { name: 'Filter telemetry' }), 1);
   await target.expectCount(selectors.getByRole('button', { name: /show search|hide search/iu }), 0);
 
   await target.expectVisible(selectors.getByRole('button', { name: /^Selected trace: Latest$/u }), 60_000);

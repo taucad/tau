@@ -134,10 +134,10 @@ test('modernizes Console as a global-filtered multi-unit bottom-following log su
   await target.expectAttribute(main, 'aria-expanded', 'true');
   await target.expectAttribute(secondary, 'aria-expanded', 'false');
 
-  const filter = selectors.getByRole('textbox', { name: 'Filter logs' });
+  const filter = selectors.getByRole('searchbox', { name: 'Filter logs' });
   await target.expectVisible(filter);
   await target.expectAttribute(filter, 'placeholder', 'Filter logs...');
-  await target.expectCount(selectors.getByRole('textbox', { name: 'Filter logs' }), 1);
+  await target.expectCount(selectors.getByRole('searchbox', { name: 'Filter logs' }), 1);
   await target.expectVisible(selectors.getByRole('button', { name: 'Filter by log level' }));
   await target.expectVisible(selectors.getByRole('button', { name: 'Console settings' }));
   await target.expectVisible(selectors.getByRole('button', { name: 'Clear logs' }));

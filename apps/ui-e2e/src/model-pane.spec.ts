@@ -135,10 +135,10 @@ test('keeps the Model hierarchy filterable, accessible, and reorderable through 
   await target.expectAttribute(main, 'aria-expanded', 'true');
   await target.expectAttribute(secondary, 'aria-expanded', 'true');
 
-  const filter = selectors.getByRole('textbox', { name: 'Filter parts' });
+  const filter = selectors.getByRole('searchbox', { name: 'Filter parts' });
   await target.expectVisible(filter);
   await target.expectAttribute(filter, 'placeholder', 'Filter parts...');
-  await target.expectCount(selectors.getByRole('textbox', { name: 'Filter parts' }), 1);
+  await target.expectCount(selectors.getByRole('searchbox', { name: 'Filter parts' }), 1);
   await target.expectCount(selectors.getByRole('button', { name: /show search|hide search/iu }), 0);
 
   const mainList = selectors.getByRole('list', { name: `Model components for ${mainPath}` });

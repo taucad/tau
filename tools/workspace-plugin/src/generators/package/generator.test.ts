@@ -225,6 +225,8 @@ describe('package generator', () => {
     for (const config of ['tsconfig.lib.json', 'tsconfig.spec.json']) {
       expect(readText(tree, `${root}/${config}`)).not.toContain('"paths"');
     }
+    // Vite resolves `#` from the imports map; nxViteTsPaths would apply tsconfig paths to every importer.
+    expect(vitestConfig).not.toContain('nxViteTsPaths');
     const instructions = readText(tree, `${root}/AGENTS.md`);
     expect(instructions).toContain('Build mode: source-consumed; no build target');
     expect(instructions).toContain('React mode: enabled with jsdom test setup');

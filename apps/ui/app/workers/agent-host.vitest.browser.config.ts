@@ -1,8 +1,6 @@
 /* oxlint-disable import/extensions -- The composed source fixture is replaced by the package export when FIX-PROJ adds the UI dependency. */
-import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { playwright } from '@vitest/browser-playwright';
-import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 import { defineConfig } from 'vitest/config';
 import type { BrowserProviderOption } from 'vitest/node';
 import { tauRuntime } from '@taucad/runtime/vite';
@@ -12,30 +10,6 @@ import { authoritativeGatewayWireFixtures } from '../../../../packages/agent-hos
 export default defineConfig({
   root: fileURLToPath(new URL('../..', import.meta.url)),
   plugins: [
-    {
-      // Minimal mirror of the app config's tau-ui-source-alias: '#X.js' -> app/X.ts.
-      name: 'agent-host-ui-source-alias',
-      enforce: 'pre',
-      resolveId(source: string) {
-        if (!source.startsWith('#')) {
-          return null;
-        }
-        const [specifier, query] = source.split('?', 2);
-        if (specifier === undefined) {
-          return null;
-        }
-        // Preserve import queries (e.g. `?worker`) so Vite's own handling —
-        // worker-constructor wrapping in particular — still engages.
-        const suffix = query === undefined ? '' : `?${query}`;
-        const base = fileURLToPath(new URL(`../${specifier.slice(1)}`, import.meta.url));
-        for (const candidate of [base, base.replace(/\.js$/, '.ts'), base.replace(/\.js$/, '.tsx')]) {
-          if (existsSync(candidate)) {
-            return candidate + suffix;
-          }
-        }
-        return null;
-      },
-    },
     {
       name: 'agent-host-gateway-fixture',
       configureServer(server) {
@@ -53,7 +27,6 @@ export default defineConfig({
       },
     },
     tauRuntime(),
-    nxViteTsPaths(),
   ],
   server: {
     host: '127.0.0.1',

@@ -32,21 +32,23 @@ CreateVoxelsOptions: {
   radius?: number;
   startRadius?: number;
   endRadius?: number;
-} /** Alias of 'beam' kept for continuity with the R12 surface. */ | {
+} |
+/** Alias of 'beam' kept for continuity with the R12 surface. */
+{
   shape: 'capsule';
   start: Vec3;
   end: Vec3;
   radius?: number;
   startRadius?: number;
   endRadius?: number;
-}
+} |
 /**
  * A JS `sdf` function runs on upstream's serial fill (the callback is only
  * reachable from the main thread). A serializable {@link SdfExpression} is
  * compiled to a tape and filled in parallel in-module — on the /multi build
  * this engages every worker thread.
  */
-| {
+{
   shape: 'implicit';
   boundsMin: Vec3;
   boundsMax: Vec3;

@@ -1,38 +1,60 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
+import { dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-
-import { picovoxelKernel } from '#picovoxel.kernel.js';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 
-// ponytail: resolved beside the root entry until picovoxel exports `./wasm`, `./multi/wasm` and
-// `./package.json` (blueprint D13); then resolve those subpaths directly.
-const installed = (file: string): URL => new URL(file, import.meta.resolve('picovoxel'));
-const digest = (file: string): string =>
-  createHash('sha256')
-    .update(readFileSync(fileURLToPath(installed(file))))
-    .digest('hex');
-const installedVersion = (
-  JSON.parse(readFileSync(fileURLToPath(installed('../package.json')), 'utf8')) as { version: string }
-).version;
+import { picovoxelKernel } from '#picovoxel.kernel.js';
+
+const source = readFileSync(new URL('picovoxel.kernel.ts', import.meta.url), 'utf8');
+const packageRoot = dirname(fileURLToPath(import.meta.resolve('picovoxel/package.json')));
+const installedVersion = (JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8')) as { version: string })
+  .version;
+
+const sha256 = (bytes: Uint8Array<ArrayBuffer>): string => createHash('sha256').update(bytes).digest('hex');
+const assetDigest = (specifier: string): string => sha256(readFileSync(fileURLToPath(import.meta.resolve(specifier))));
+
+/** One SHA-256 over every shipped JavaScript file, in path order: `path NUL bytes NUL` each. */
+const scriptsDigest = (): string => {
+  const distribution = join(packageRoot, 'dist');
+  const files = readdirSync(distribution, { recursive: true, encoding: 'utf8' })
+    .filter((file) => /\.m?js$/u.test(file))
+    .map((file) => file.split(sep).join('/'))
+    .toSorted();
+  const hash = createHash('sha256');
+  for (const file of files) {
+    hash
+      .update(`${file}\0`)
+      .update(readFileSync(join(distribution, file)))
+      .update('\0');
+  }
+  return hash.digest('hex');
+};
+
+const declared = (key: string): string => new RegExp(`${key}: '([^']+)'`, 'u').exec(source)?.[1] ?? 'not declared';
 
 describe('PicoVoxel asset ownership', () => {
+  it('should load both artifacts through picovoxel asset subpaths the runtime asset plugin rewrites (D20)', () => {
+    for (const specifier of ['picovoxel/wasm', 'picovoxel/multi/wasm', 'picovoxel/multi/worker']) {
+      expect(source).toContain(`new URL(import.meta.resolve('${specifier}')).href`);
+    }
+  });
+
   // The kernel version keys cached geometry: a stale constant would reuse geometry built by another
-  // PicoVoxel build, so it tracks the installed package and both artifacts.
-  it('should declare the version and artifact digests the installed package actually has', async () => {
+  // PicoVoxel build, so every part of it tracks the installed package.
+  it('should declare the version, artifact digests and script digest the installed package actually has', () => {
+    expect(declared('version')).toBe(installedVersion);
+    expect(declared('serial')).toBe(assetDigest('picovoxel/wasm'));
+    expect(declared('multi')).toBe(assetDigest('picovoxel/multi/wasm'));
+    expect(declared('scripts')).toBe(scriptsDigest());
+  });
+
+  it('should key the kernel version on all four', async () => {
     const { version } = await resolveRuntimePluginDefinition('kernel', picovoxelKernel());
 
     expect(version).toBe(
-      `1.1.0+picovoxel.${installedVersion}.serial-${digest('pico.wasm').slice(0, 12)}.multi-${digest('pico-multi.wasm').slice(0, 12)}`,
+      `1.1.0+picovoxel.${installedVersion}.serial-${assetDigest('picovoxel/wasm').slice(0, 12)}.multi-${assetDigest('picovoxel/multi/wasm').slice(0, 12)}.scripts-${scriptsDigest().slice(0, 12)}`,
     );
-  });
-
-  it('should keep the full digests in the kernel source', () => {
-    const source = readFileSync(new URL('picovoxel.kernel.ts', import.meta.url), 'utf8');
-
-    expect(source).toContain(`serial: '${digest('pico.wasm')}'`);
-    expect(source).toContain(`multi: '${digest('pico-multi.wasm')}'`);
-    expect(source).toContain(`version: '${installedVersion}'`);
   });
 });

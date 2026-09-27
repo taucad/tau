@@ -75,6 +75,10 @@ describe('bundled kernel types mount', () => {
       await expect(fileService.readFile('/node_modules/picovoxel/shapekernel.d.ts', 'utf8')).resolves.toBe(
         picovoxelPackage.files?.['shapekernel.d.ts'],
       );
+      // Unbundled declarations keep picovoxel's directories, so relative imports resolve in the editor.
+      await expect(fileService.readFile('/node_modules/picovoxel/shapekernel/baseBox.d.ts', 'utf8')).resolves.toBe(
+        picovoxelPackage.files?.['shapekernel/baseBox.d.ts'],
+      );
       // Session internals and the untyped three bridge are not authoring surface.
       await expect(fileService.exists('/node_modules/picovoxel/multi.d.ts')).resolves.toBe(false);
       await expect(fileService.exists('/node_modules/picovoxel/raw.d.ts')).resolves.toBe(false);

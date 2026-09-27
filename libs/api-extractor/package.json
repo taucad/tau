@@ -30,6 +30,6 @@
     "typescript": "catalog:"
   },
   "devDependencies": {
-    "picovoxel": "file:../../packages/plugins/picovoxel/vendor/picovoxel-0.1.0.tgz"
+    "picovoxel": "catalog:"
   }
 }

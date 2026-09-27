@@ -79,10 +79,32 @@ describe('PicoVoxel dual path through the runtime', () => {
       const exact = await exportStl(client);
       const again = await exportStl(client);
 
-      // DP4, settled: the runtime does not retain a replayed (unpublished) exact handle, so a second
-      // export after a fast render replays again; the bytes are identical.
+      // DP4 in a bare runtime: the export's exact replay is request-local (never published), and
+      // with no geometry cache nothing retains it, so a second export replays again. Same bytes.
       expect(sessions.lanes).toEqual(['fast', 'exact', 'exact']);
       expect(header(exact)).toBe('PicoGK UNITS=mm');
+      expect(again).toEqual(exact);
+    } finally {
+      await client.shutdown();
+    }
+  }, 120_000);
+
+  it('should replay once for any number of exports in a host with the geometry cache (DP4)', async () => {
+    // The UI and desktop compose `geometryCache()`, which keys the replayed exact build like any
+    // other, so the second export after a fast render is a cache hit: 2 builds, not 3.
+    const client = createTestRuntimeClient({
+      runtime: defineRuntime({
+        plugins: [picovoxel({ kernels: { default: { wasm: 'serial' } } }), esbuild()],
+        middleware: [geometryCache()],
+      }),
+      files: { 'main.ts': model },
+    });
+    try {
+      await render(client);
+      const exact = await exportStl(client);
+      const again = await exportStl(client);
+
+      expect(sessions.lanes).toEqual(['fast', 'exact']);
       expect(again).toEqual(exact);
     } finally {
       await client.shutdown();

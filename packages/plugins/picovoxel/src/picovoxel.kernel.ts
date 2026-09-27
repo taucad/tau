@@ -6,13 +6,22 @@
  * runtime's native-build replay. `exportGeometry` stays a pure function of its handle.
  */
 
-import type { CreatePicoOptions, CreatePicoRuntimeOptions, Mesh, Pico, PicoRuntime, Voxels } from 'picovoxel';
+import type {
+  CreatePicoOptions,
+  CreatePicoRuntimeOptions,
+  Mesh,
+  Pico,
+  PicoErrorCode,
+  PicoRuntime,
+  Voxels,
+} from 'picovoxel';
 import type * as PicovoxelModule from 'picovoxel';
 import { createExportFile } from '@taucad/runtime/types';
 import type { GeometryGltf, KernelIssue, KernelIssueCode } from '@taucad/runtime/types';
 import {
   asBuffer,
   checkAbort,
+  compileWasmStreaming,
   createFrameClassifier,
   createKernelError,
   createKernelParameterDeclaration,
@@ -27,6 +36,7 @@ import {
   parseStackTrace,
   quantityKinds,
   registerKernelModule,
+  resolveFileUrl,
   resolveSourcePath,
   toVmEntryPath,
 } from '@taucad/runtime/kernel';
@@ -48,20 +58,37 @@ import type { PicovoxelArtifact, PicovoxelLane } from '#picovoxel.schemas.js';
 // =============================================================================
 
 /**
- * The installed `picovoxel` package version and the SHA-256 of its two WebAssembly artifacts.
+ * The installed `picovoxel` package: its version, the SHA-256 of its two WebAssembly artifacts, and
+ * one SHA-256 over every JavaScript file it ships (the facade and both glues).
  *
- * The digest of a shipped asset is a build-time constant; `picovoxel.asset-ownership.test.ts`
- * recomputes all three from the installed package and fails when the dependency moves, so geometry
- * cached under one PicoVoxel build is never reused under another.
+ * The digest of a shipped file is a build-time constant; `picovoxel.asset-ownership.test.ts`
+ * recomputes all four from the installed package and fails when the dependency moves, so geometry
+ * cached under one PicoVoxel build is never reused under another. The script digest catches a
+ * facade-only change (lane semantics, defaults) that keeps the version and both binaries.
  */
 const picovoxelBuild = {
-  version: '0.1.0',
-  serial: 'f11f51032c14cd8c8b00f41d835c1e5dfa97c1974702c33ab8f4749584e7482b',
-  multi: '987da3b8d16a83f532fa108b2a5336e795e6f8a3571c1c419ddcfb5c633985c6',
+  version: '0.0.0-preview-09a1108',
+  serial: '8da4e9ed5604a20be1e7fb926f5da76775553b18ef5258b3557579d2e9126ee8',
+  multi: '99e4eb5e1298edce6d8555f530ee361f6b3bdb49a9f1caa89c5490ebf488a2a5',
+  scripts: 'bdd3176be18dc34ec792be85796f28c88b27adf571964185328ccac1330d5cb9',
 } as const;
 
 /** Kernel version: the plugin's handle semantics (1.1: zero-area triangles dropped) plus the PicoVoxel build it runs. */
-const kernelVersion = `1.1.0+picovoxel.${picovoxelBuild.version}.serial-${picovoxelBuild.serial.slice(0, 12)}.multi-${picovoxelBuild.multi.slice(0, 12)}`;
+const kernelVersion = `1.1.0+picovoxel.${picovoxelBuild.version}.serial-${picovoxelBuild.serial.slice(0, 12)}.multi-${picovoxelBuild.multi.slice(0, 12)}.scripts-${picovoxelBuild.scripts.slice(0, 12)}`;
+
+/**
+ * Explicit URLs of the assets each artifact loads (D20): the WebAssembly binary and, for the
+ * pthread build, the glue every worker runs. Resolved through picovoxel's asset subpaths so hosts
+ * emit and serve them as files (the runtime's asset plugin rewrites these expressions), never by
+ * trusting a bundler to follow the glue's own `new URL(…, import.meta.url)` lookups.
+ */
+const picovoxelAssets = {
+  serial: { wasm: new URL(import.meta.resolve('picovoxel/wasm')).href },
+  multi: {
+    wasm: new URL(import.meta.resolve('picovoxel/multi/wasm')).href,
+    worker: new URL(import.meta.resolve('picovoxel/multi/worker')).href,
+  },
+} as const;
 
 const kernelId = 'picovoxel';
 const defaultVoxelSize = 0.5;
@@ -144,20 +171,70 @@ const artifactFor = (lane: PicovoxelLane, wasm: PicovoxelArtifact): PicovoxelArt
   lane === 'exact' ? 'serial' : wasm;
 
 /**
+ * The artifact's compiled WebAssembly module, compiled at most once per worker (D20, D31).
+ *
+ * A module the host compiled for this URL wins; otherwise the runtime's URL-keyed compile cache
+ * holds it for the worker's life, so a recycled runtime instantiates the same module again instead
+ * of recompiling it. On the pthread build the module is also what every worker instantiates.
+ *
+ * @param runtime - Kernel runtime, which holds any module the host compiled.
+ * @param wasmUrl - The artifact's `.wasm` URL.
+ * @returns The module every runtime of this artifact instantiates.
+ */
+const compiledModuleFor = async (runtime: KernelRuntime, wasmUrl: string): Promise<WebAssembly.Module> =>
+  runtime.getCompiledWasmModule(wasmUrl) ?? compileWasmStreaming(wasmUrl);
+
+/**
+ * Emscripten overrides for an artifact (D20): its binary by explicit URL and, for the pthread
+ * build, the worker script. Emscripten's Node branch spawns `worker_threads` from a filesystem path,
+ * so a `file:` URL is converted there.
+ *
+ * @param artifact - `'serial'` or `'multi'`.
+ * @returns The `wasm` overrides for `createPicoRuntime`.
+ */
+const emscriptenOverrides = async (artifact: PicovoxelArtifact): Promise<Record<string, unknown>> => {
+  const { wasm } = picovoxelAssets[artifact];
+  const locateFile = (path: string, scriptDirectory: string): string =>
+    path.endsWith('.wasm') ? wasm : `${scriptDirectory}${path}`;
+  return artifact === 'multi'
+    ? { locateFile, mainScriptUrlOrBlob: await resolveFileUrl(picovoxelAssets.multi.worker) }
+    : { locateFile };
+};
+
+/**
  * Start an artifact's runtime; a runtime that fails to start is not kept, so the next render tries again.
  *
+ * Any failure to load, compile or instantiate the artifact is a `PICO_WASM_INIT_FAILED`, so a
+ * multi build that cannot start takes the D21 serial retry whatever step refused.
+ *
  * @param context - Kernel context; its entry for `artifact` is removed on failure.
+ * @param runtime - Kernel runtime.
  * @param artifact - `'serial'` or `'multi'`.
  * @returns The started runtime.
  */
-const startRuntime = async (context: PicovoxelContext, artifact: PicovoxelArtifact): Promise<PicoRuntime> => {
+const startRuntime = async (
+  context: PicovoxelContext,
+  runtime: KernelRuntime,
+  artifact: PicovoxelArtifact,
+): Promise<PicoRuntime> => {
   try {
     const artifactModule: PicovoxelArtifactModule =
       artifact === 'serial' ? context.root : await import('picovoxel/multi');
-    return await artifactModule.createPicoRuntime();
+    const [wasmModule, wasm] = await Promise.all([
+      compiledModuleFor(runtime, picovoxelAssets[artifact].wasm),
+      emscriptenOverrides(artifact),
+    ]);
+    return await artifactModule.createPicoRuntime({ wasmModule, wasm });
   } catch (error) {
     context.runtimes.delete(artifact);
-    throw error;
+    if (isPicoError(error)) {
+      throw error;
+    }
+    throw new context.root.PicoError(
+      'PICO_WASM_INIT_FAILED',
+      `PicoVoxel's ${artifact} build could not be loaded: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
   }
 };
 
@@ -166,13 +243,18 @@ const startRuntime = async (context: PicovoxelContext, artifact: PicovoxelArtifa
  * multi failure never poisons serial.
  *
  * @param context - Kernel context.
+ * @param runtime - Kernel runtime.
  * @param artifact - `'serial'` or `'multi'`.
  * @returns The warm runtime.
  */
-const loadRuntime = async (context: PicovoxelContext, artifact: PicovoxelArtifact): Promise<PicoRuntime> => {
+const loadRuntime = async (
+  context: PicovoxelContext,
+  runtime: KernelRuntime,
+  artifact: PicovoxelArtifact,
+): Promise<PicoRuntime> => {
   let loading = context.runtimes.get(artifact);
   if (!loading) {
-    loading = startRuntime(context, artifact);
+    loading = startRuntime(context, runtime, artifact);
     context.runtimes.set(artifact, loading);
   }
   return loading;
@@ -234,6 +316,19 @@ const isCallable = (value: unknown): value is (...arguments_: readonly unknown[]
 const abortChecked = new WeakSet<Record<string, unknown>>();
 
 /**
+ * PicoVoxel calls the current build has made, reset per build; builds in one worker never overlap
+ * (the runtime serializes kernel operations). Logged when a superseded build stops, as the evidence
+ * of where the cooperative check caught it.
+ */
+let buildCalls = 0;
+
+/** Admit one PicoVoxel call: throw if the render was superseded, otherwise count it. */
+const admitCall = (): void => {
+  checkAbort();
+  buildCalls++;
+};
+
+/**
  * Make every method of a PicoVoxel facade object check for cancellation before it runs (D21).
  *
  * Methods are replaced on the object itself, not behind a proxy: PicoVoxel keys session ownership
@@ -255,7 +350,7 @@ const withAbortChecks = <Value>(value: Value): Value => {
     const method: unknown = descriptor.value;
     if (key !== 'dispose' && isCallable(method)) {
       methods[key] = function (this: unknown, ...arguments_: unknown[]): unknown {
-        checkAbort();
+        admitCall();
         return withAbortChecks(method.apply(this, arguments_));
       };
     }
@@ -267,14 +362,16 @@ const withAbortChecks = <Value>(value: Value): Value => {
  * Open one PicoVoxel session for one render on the artifact's warm runtime.
  *
  * @param context - Kernel context.
+ * @param kernelRuntime - The Tau kernel runtime, which supplies host-compiled modules.
  * @param input - Session artifact, lane and voxel size.
  * @returns The session; the caller disposes it.
  */
 const openSession = async (
   context: PicovoxelContext,
+  kernelRuntime: KernelRuntime,
   input: { readonly artifact: PicovoxelArtifact; readonly lane: PicovoxelLane; readonly voxelSize: number },
 ): Promise<Pico> => {
-  const runtime = await loadRuntime(context, input.artifact);
+  const runtime = await loadRuntime(context, kernelRuntime, input.artifact);
   // No explicit `fastRenorm` or `serialLattice`: the lane bundle decides both. `memoryWarningBytes: 0`
   // silences PicoVoxel's console warning; the kernel reports memory through its logger instead.
   return runtime.createPico({ voxelSize: input.voxelSize, lane: input.lane, memoryWarningBytes: 0 });
@@ -439,13 +536,13 @@ const snapshotMesh = (mesh: Mesh, index: number, sessionLane: PicovoxelLane): Pi
       );
     }
   }
+  const kept = dropZeroAreaTriangles(vertices, triangles);
+  if (kept.length === 0) {
+    // Checked after the D36 filter: a shape of zero-area triangles only is empty, not an index-less mesh.
+    throw new TypeError(`PicoVoxel ${name} is empty: every triangle has zero area. Return [] for an empty scene.`);
+  }
   const meshLane: unknown = mesh.lane;
-  return {
-    name,
-    vertices,
-    triangles: dropZeroAreaTriangles(vertices, triangles),
-    lane: isLane(meshLane) ? meshLane : sessionLane,
-  };
+  return { name, vertices, triangles: kept, lane: isLane(meshLane) ? meshLane : sessionLane };
 };
 
 const describeValue = (value: unknown): string =>
@@ -483,8 +580,16 @@ const normalizeResult = (result: unknown, sessionLane: PicovoxelLane): Picovoxel
 // Issues
 // =============================================================================
 
-type PicoErrorLike = Error & { readonly code: string };
+type PicoErrorLike = Error & { readonly code: PicoErrorCode };
 
+/**
+ * Whether a failure is a PicoVoxel error. The `PICO_` prefix is the runtime check; the typed code is
+ * what ties every comparison below to picovoxel's exported `PicoErrorCode`, so a renamed code
+ * breaks the build instead of silently falling through.
+ *
+ * @param error - The failure.
+ * @returns `true` for a PicoVoxel error.
+ */
 const isPicoError = (error: unknown): error is PicoErrorLike => {
   if (!(error instanceof Error) || !('code' in error)) {
     return false;
@@ -499,7 +604,7 @@ const isPicoError = (error: unknown): error is PicoErrorLike => {
  * @param picoCode - The PicoVoxel error code, when the failure carried one.
  * @returns The Tau issue code.
  */
-const issueCodeFor = (picoCode: string | undefined): KernelIssueCode =>
+const issueCodeFor = (picoCode: PicoErrorCode | undefined): KernelIssueCode =>
   picoCode === 'PICO_OUT_OF_MEMORY'
     ? 'RESOURCE_LIMIT'
     : picoCode === 'PICO_LANE_LOOSENED'
@@ -516,7 +621,7 @@ const outOfMemoryRemedy =
 const laneLoosenedMessage =
   "PicoVoxel refused fast-lane data in an exact build: this model reads geometry stamped LANE=fast (an STL or .vdb from a fast export) or asks for fastRenorm, and exact builds, which every export and GeoSpec check uses, never accept either. Regenerate the input with an exact export (lane: 'exact', the default) and remove fastRenorm (the lane decides it), or export this model with lane: 'fast' (STL only; the file is stamped LANE=fast).";
 
-const messageFor = (picoCode: string | undefined, message: string): string =>
+const messageFor = (picoCode: PicoErrorCode | undefined, message: string): string =>
   picoCode === 'PICO_OUT_OF_MEMORY'
     ? `${message}${outOfMemoryRemedy}`
     : picoCode === 'PICO_LANE_LOOSENED'
@@ -589,16 +694,23 @@ const noShapesIssue = (): KernelIssue => ({
  * @param picoCode - The failure the multi build raised.
  * @returns The warning issue.
  */
-const serialRetryIssue = (picoCode: string): KernelIssue => ({
-  message: `PicoVoxel's multi-threaded build ${picoCode === 'PICO_WASM_INIT_FAILED' ? 'could not start' : 'ran out of WebAssembly memory'}, so this render was rebuilt on the single-threaded build. Increase voxelSize (cost grows with 1/voxelSize³) or shrink the model bounds to render multi-threaded again.`,
-  code: 'RESOURCE_LIMIT',
+const serialRetryIssue = (picoCode: PicoErrorCode): KernelIssue => ({
+  message:
+    picoCode === 'PICO_WASM_INIT_FAILED'
+      ? "PicoVoxel's multi-threaded build could not start in this worker, so this render was rebuilt on the single-threaded build. The device may be short of memory for the shared heap; exports are unaffected."
+      : "PicoVoxel's multi-threaded build ran out of WebAssembly memory, so this render was rebuilt on the single-threaded build. Increase voxelSize (cost grows with 1/voxelSize³) or shrink the model bounds to render multi-threaded again.",
+  // A build that cannot start is a missing capability; one that ran out of memory hit a limit.
+  code: picoCode === 'PICO_WASM_INIT_FAILED' ? 'KERNEL_CAPABILITY_MISSING' : 'RESOURCE_LIMIT',
   type: 'runtime',
   severity: 'warning',
   details: { producer: { kernelId }, picoCode, retry: 'PICOVOXEL_SERIAL_RETRY', from: 'multi', to: 'serial' },
 });
 
 /** Failures of a multi fast session that one serial rebuild may recover (D21). */
-const serialRetryCodes: ReadonlySet<string> = new Set(['PICO_OUT_OF_MEMORY', 'PICO_WASM_INIT_FAILED']);
+const serialRetryCodes: ReadonlySet<PicoErrorCode> = new Set<PicoErrorCode>([
+  'PICO_OUT_OF_MEMORY',
+  'PICO_WASM_INIT_FAILED',
+]);
 
 /**
  * Whether a failure leaves the runtime unusable: a WebAssembly trap (PicoVoxel maps a guarded one to
@@ -759,7 +871,11 @@ export const picovoxelKernel = defineKernel({
       let pico: Pico | undefined;
       let recycleReason: string | undefined;
       try {
-        pico = await openSession(context, { artifact: sessionArtifact, lane, voxelSize: resolveVoxelSize(parameters) });
+        pico = await openSession(context, runtime, {
+          artifact: sessionArtifact,
+          lane,
+          voxelSize: resolveVoxelSize(parameters),
+        });
         runtime.logger.debug(
           `PicoVoxel session variant=${sessionArtifact} pthreads=${pico.module.PThread?.runningWorkers.length ?? 0} lane=${pico.lane}`,
         );
@@ -788,6 +904,7 @@ export const picovoxelKernel = defineKernel({
 
     const fail = (error: unknown, sessionArtifact: PicovoxelArtifact, extra: readonly KernelIssue[] = []): never => {
       if (isRenderAborted(error)) {
+        runtime.logger.debug(`PicoVoxel stopped a superseded build after ${buildCalls} PicoVoxel calls`);
         throw error;
       }
       throw new PicovoxelBuildError([
@@ -796,6 +913,7 @@ export const picovoxelKernel = defineKernel({
       ]);
     };
 
+    buildCalls = 0;
     try {
       return { nativeHandle: await build(artifact) };
     } catch (error) {
@@ -821,11 +939,14 @@ export const picovoxelKernel = defineKernel({
   async cleanup(context) {
     const runtimes = await Promise.allSettled(context.runtimes.values());
     context.runtimes.clear();
+    // Author resources left by module top-level code, then every started runtime; a teardown that
+    // throws never stops the rest.
     for (const settled of runtimes) {
       if (settled.status === 'fulfilled') {
-        settled.value.dispose();
+        context.authorResources.add(settled.value);
       }
     }
+    releaseRender(undefined, context.authorResources);
   },
 
   serializeNativeHandle({ nativeHandle }) {

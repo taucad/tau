@@ -91,7 +91,11 @@ describe.runIf(install !== undefined)('Bambu Studio parity (installed app)', { t
   });
 
   it('should produce byte-identical plate G-code across runs', () => {
-    expect(unzipSync(second.archive)[plateMember]).toEqual(unzipSync(first.archive)[plateMember]);
+    const ours = unzipSync(first.archive)[plateMember]!;
+    const again = unzipSync(second.archive)[plateMember]!;
+    // A native byte comparison: `toEqual` walks the G-code element by element and takes seconds under load.
+    expect(again.byteLength).toBeGreaterThan(0);
+    expect(Buffer.compare(again, ours)).toBe(0);
   });
 
   it('should describe the selection’s settings as a schema whose defaults are the preset values', async () => {

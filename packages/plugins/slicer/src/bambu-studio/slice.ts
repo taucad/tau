@@ -20,8 +20,13 @@ import { encodeBambuSettings } from '#bambu-studio/options/index.js';
 import { BambuStudioError, bambuPlates } from '#bambu-studio/types.js';
 import type { BambuStudioSelection, BambuStudioSliceInput, BambuStudioSliceResult } from '#bambu-studio/types.js';
 
-/** Milliseconds one slice may run before Bambu Studio is stopped. */
-const sliceTimeout = 5 * 60 * 1000;
+/**
+ * Milliseconds every slice may run. A 20 mm cube slices in about 0.6 s; a small file filling the build
+ * volume took 25 s at load 120, so the floor keeps several times that.
+ */
+const sliceTimeoutFloor = 120_000;
+/** Milliseconds added per MiB of STL (about 21,000 triangles). */
+const sliceTimeoutPerMebibyte = 60_000;
 /** Characters of Bambu Studio's log kept for a failure message. */
 const logTail = 2000;
 const hexColor = /^#[\dA-F]{6}$/iu;
@@ -98,12 +103,26 @@ const applySettings = (
   }
 };
 
+// ponytail: linear in STL size, which covers mesh work; a per-layer term if tall, dense prints outgrow it.
+const sliceTimeoutFor = (parts: BambuStudioSliceInput['parts']): number => {
+  let bytes = 0;
+  for (const { stl } of parts) {
+    bytes += stl.byteLength;
+  }
+  return sliceTimeoutFloor + Math.round((bytes / 2 ** 20) * sliceTimeoutPerMebibyte);
+};
+
+const describeDuration = (milliseconds: number): string => {
+  const seconds = Math.round(milliseconds / 1000);
+  return seconds < 120 ? `${seconds} s` : `${Math.round(seconds / 60)} minutes`;
+};
+
 const run = async (
   executable: string,
   args: readonly string[],
-  options: Readonly<{ cwd: string; signal: AbortSignal }>,
+  options: Readonly<{ cwd: string; signal: AbortSignal; sliceTimeout: number }>,
 ): Promise<{ code?: number; log: string }> => {
-  const deadline = AbortSignal.timeout(sliceTimeout);
+  const deadline = AbortSignal.timeout(options.sliceTimeout);
   return new Promise((resolve, reject) => {
     const child = spawn(executable, args, {
       cwd: options.cwd,
@@ -125,7 +144,11 @@ const run = async (
           ? reason
           : new Error(String(reason))
         : deadline.aborted
-          ? new BambuStudioError('BAMBU_STUDIO_SLICE_FAILED', 'Bambu Studio did not finish slicing within 5 minutes.')
+          ? new BambuStudioError(
+              'BAMBU_STUDIO_TIMEOUT',
+              `Bambu Studio did not finish slicing within ${describeDuration(options.sliceTimeout)} and was stopped. ` +
+                'Slice again; if it stops again, lower the model’s mesh resolution or close other busy apps first.',
+            )
           : new BambuStudioError('BAMBU_STUDIO_SLICE_FAILED', `Bambu Studio could not start: ${error.message}`, {
               cause: error,
             });
@@ -250,7 +273,7 @@ const sliceNow = async ({
         'model.gcode.3mf',
         ...partFiles.map((file) => join(directory, file)),
       ],
-      { cwd: directory, signal },
+      { cwd: directory, signal, sliceTimeout: sliceTimeoutFor(parts) },
     );
     let report: ResultReport | undefined;
     try {
@@ -292,13 +315,15 @@ const sliceNow = async ({
  * the model places them, part *i* printed with filament *i* and recorded in its colour. Presets are
  * resolved (`inherits`, then `include`, then own keys), setting overrides applied last, and the
  * command line runs in a temporary directory with its own data directory. Slices run one at a time
- * per process; the signal stops Bambu Studio, and so does a five-minute ceiling.
+ * per process; the signal stops Bambu Studio, and so does a deadline of two minutes plus one minute per
+ * MiB of STL, counted from the moment Bambu Studio starts.
  *
  * @param input - Install, selection, the parts as STL in millimetres and the caller's signal.
  * @returns Bambu Studio's `.gcode.3mf`, its version, the presets it loaded and its result report.
  * @throws BambuStudioError - `BAMBU_STUDIO_SLICE_FAILED` with Bambu Studio's message or for no parts,
- * `BAMBU_STUDIO_SETTINGS_INVALID` for a setting the option catalog cannot encode or a colour that is not
- * `#RRGGBB`, or `BAMBU_STUDIO_PRESET_NOT_FOUND`.
+ * `BAMBU_STUDIO_TIMEOUT` when Bambu Studio runs past the deadline and is stopped (slicing again usually
+ * succeeds), `BAMBU_STUDIO_SETTINGS_INVALID` for a setting the option catalog cannot encode or a colour
+ * that is not `#RRGGBB`, or `BAMBU_STUDIO_PRESET_NOT_FOUND`.
  * @public
  * @example <caption>Slice with the default presets for an X1 Carbon</caption>
  * ```typescript

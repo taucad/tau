@@ -330,7 +330,15 @@ describe('sliceWithBambuStudio', () => {
     expect(await gone(cwd)).toBe(true);
   });
 
-  it('should stop Bambu Studio after five minutes', async () => {
+  it.each([
+    { size: 'a small model', stls: [stl], sliceTimeout: 120_000, within: '2 minutes' },
+    {
+      size: 'two parts of 1 MiB',
+      stls: [new Uint8Array(2 ** 20), new Uint8Array(2 ** 20)],
+      sliceTimeout: 240_000,
+      within: '4 minutes',
+    },
+  ])('should stop a hung Bambu Studio after $within for $size', async ({ stls, sliceTimeout, within }) => {
     await fake.control({ mode: 'hang' });
     await rm(fake.record, { force: true });
     const deadline = new AbortController();
@@ -339,15 +347,18 @@ describe('sliceWithBambuStudio', () => {
       const slice = sliceWithBambuStudio({
         install: fake.install,
         selection,
-        parts,
+        parts: stls.map((part) => ({ stl: part })),
         signal: new AbortController().signal,
       });
       await vi.waitFor(async () => access(fake.record), { timeout: 10_000, interval: 25 });
-      expect(sliceTimeoutSpy).toHaveBeenCalledWith(300_000);
+      expect(sliceTimeoutSpy).toHaveBeenCalledWith(sliceTimeout);
       deadline.abort(new DOMException('The operation timed out.', 'TimeoutError'));
       await expect(slice).rejects.toMatchObject({
-        code: 'BAMBU_STUDIO_SLICE_FAILED',
-        message: 'Bambu Studio did not finish slicing within 5 minutes.',
+        name: 'BambuStudioError',
+        code: 'BAMBU_STUDIO_TIMEOUT',
+        message:
+          `Bambu Studio did not finish slicing within ${within} and was stopped. ` +
+          'Slice again; if it stops again, lower the model’s mesh resolution or close other busy apps first.',
       });
     } finally {
       sliceTimeoutSpy.mockRestore();

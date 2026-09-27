@@ -142,6 +142,12 @@ const pickFilament = (
  * then the shortest name (PLA when the slot reports nothing); the textured PEI
  * plate. Ties break by name, so the result is deterministic.
  *
+ * The returned `filaments` are `partial.filaments` as the caller ordered them,
+ * else one preset per hinted slot in ascending slot order (one PLA preset when
+ * no slot is hinted). That tray order is not a part order: to slice several
+ * parts, map each part to a tray and pass the presets in part order as
+ * `partial.filaments`.
+ *
  * @param catalog - Catalog from `loadBambuStudioCatalog`.
  * @param hints - What the bound printer reports.
  * @param partial - Presets the person or agent already chose.

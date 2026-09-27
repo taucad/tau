@@ -251,7 +251,7 @@ export function MaterialSwatch({ materials }: { readonly materials: SurfaceMater
     <span
       aria-hidden
       data-slot='material-swatch'
-      className='size-3.5 shrink-0 rounded-full ring-1 ring-border'
+      className='size-4 shrink-0 rounded-full ring-1 ring-border'
       style={{ background: `${highlight}, ${rim}, ${fill}` }}
     />
   );

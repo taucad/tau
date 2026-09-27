@@ -470,8 +470,7 @@ Library.Go(2f, () => Library.oViewer().Add(Voxels.voxSphere(Vector3.Zero, 3)));
             ModelRunner.Execute(CompilationService.Compile(root), Path.Combine(root, "artifacts"))).Issues[0].Code);
 
         Write("main.cs", "using PicoGK; Library.Go(1f, () => { });");
-        Assert.Equal("CS_TAU_EMPTY_SCENE", Assert.Throws<WorkerException>(() =>
-            ModelRunner.Execute(CompilationService.Compile(root), Path.Combine(root, "artifacts"))).Issues[0].Code);
+        Assert.Empty(ModelRunner.Execute(CompilationService.Compile(root), Path.Combine(root, "artifacts")).Components);
 
         Write("main.cs", "using PicoGK; Library.Go(1f, () => throw new InvalidOperationException(\"task exploded\"));");
         Assert.Contains("task exploded", Assert.Throws<InvalidOperationException>(() =>

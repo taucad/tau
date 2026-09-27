@@ -197,6 +197,18 @@ const publishDistributedEnvelope = async (input: {
 };
 
 /** Redis-Streams relay for one route side; peers may be attached to different API replicas. */
+/** One side of a relay that crosses Machines through Redis. */
+export type DistributedRelayHandle = {
+  /** Tears this side down without telling the peer. */
+  close(): void;
+  /**
+   * Tells the peer this side is gone with `code`, then tears this side down.
+   * Resolves once the departure is published or has failed; a no-op once either
+   * has happened.
+   */
+  depart(code: number, reason: string): Promise<void>;
+};
+
 export const relayHostFramesThroughRedis = async (input: {
   readonly socket: WebSocket;
   readonly writer: Redis;
@@ -204,7 +216,7 @@ export const relayHostFramesThroughRedis = async (input: {
   readonly sessionId: string;
   readonly route: 'fs' | 'runtime' | 'agent';
   readonly side: 'browser' | 'host';
-}): Promise<{ close(): void }> => {
+}): Promise<DistributedRelayHandle> => {
   const routePrefix = `host:relay:${input.sessionId}:${input.route}`;
   const outbound = `${routePrefix}:${input.side === 'browser' ? 'browser-host' : 'host-browser'}`;
   const inbound = `${routePrefix}:${input.side === 'browser' ? 'host-browser' : 'browser-host'}`;
@@ -286,18 +298,18 @@ export const relayHostFramesThroughRedis = async (input: {
       close();
     }
   };
-  const depart = (code: number, reason: string): void => {
+  const depart = async (code: number, reason: string): Promise<void> => {
     if (departed || closed) {
       return;
     }
     departed = true;
-    void publishDeparture(code, reason);
+    await publishDeparture(code, reason);
   };
   input.socket.once('close', (code, reason) => {
-    depart(code, reason.toString());
+    void depart(code, reason.toString());
   });
   input.socket.once('error', () => {
-    depart(1011, 'relay socket failed');
+    void depart(1011, 'relay socket failed');
   });
 
   const read = async (): Promise<void> => {
@@ -347,7 +359,7 @@ export const relayHostFramesThroughRedis = async (input: {
    * died during admission emitted its `close` to nobody. Its peer still has to
    * hear about it, or it parks a socket on a session no one is using. */
   if (input.socket.readyState === WebSocket.CLOSED) {
-    depart(1001, 'relay peer closed');
+    void depart(1001, 'relay peer closed');
   }
-  return { close };
+  return { close, depart };
 };

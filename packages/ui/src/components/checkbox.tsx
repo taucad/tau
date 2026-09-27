@@ -39,7 +39,8 @@ function Checkbox({ className, size = 'default', ...properties }: CheckboxProps)
     <CheckboxPrimitive.Root
       data-slot='checkbox'
       className={cn(
-        'peer flex shrink-0 items-center justify-center bg-input transition-colors duration-500 outline-none focus-visible:focus-outline disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive data-[state=checked]:primary-action',
+        // The muted-foreground border gives the unchecked box its 3:1 boundary (WCAG 1.4.11) on any surface.
+        'peer flex shrink-0 items-center justify-center border border-muted-foreground bg-input transition-colors duration-500 outline-none focus-visible:focus-outline disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive data-[state=checked]:border-transparent data-[state=checked]:primary-action',
         size === 'default' ? 'size-4 rounded-sm' : 'size-8 rounded-md',
         className,
       )}

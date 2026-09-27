@@ -270,6 +270,35 @@ const desktopDockviewStyleOverrides = isDesktopTarget()
   : undefined;
 
 /**
+ * Scroll one tab strip so its active tab sits fully beyond the edge fades,
+ * then notify Dockview's custom scrollbar so its cached offset follows.
+ */
+function revealActiveTab(tabsContainer: HTMLElement): void {
+  const activeTab = tabsContainer.querySelector<HTMLElement>('.dv-tab.dv-active-tab');
+  if (!activeTab) {
+    return;
+  }
+
+  const tabLeft = activeTab.offsetLeft;
+  const tabRight = tabLeft + activeTab.offsetWidth;
+  const { scrollLeft } = tabsContainer;
+  const fadeSize = Number.parseFloat(getComputedStyle(tabsContainer).getPropertyValue('--scroll-fade-size')) || 0;
+  const visibleLeft = scrollLeft + fadeSize;
+  const visibleRight = scrollLeft + tabsContainer.clientWidth - fadeSize;
+
+  if (tabLeft < visibleLeft) {
+    tabsContainer.scrollLeft = Math.max(0, tabLeft - fadeSize);
+    tabsContainer.dispatchEvent(new Event('scroll'));
+  } else if (tabRight > visibleRight) {
+    tabsContainer.scrollLeft = Math.max(
+      0,
+      Math.min(tabLeft - fadeSize, tabRight - tabsContainer.clientWidth + fadeSize),
+    );
+    tabsContainer.dispatchEvent(new Event('scroll'));
+  }
+}
+
+/**
  * Scroll the active tab fully beyond its group's tab-bar fades.
  *
  * Dockview's built-in scroll fires synchronously before the browser
@@ -279,33 +308,9 @@ const desktopDockviewStyleOverrides = isDesktopTarget()
  */
 export function scrollActiveTabIntoView(api: DockviewApi): void {
   const correctScrollPosition = (): void => {
-    const group = api.activeGroup;
-    if (!group) {
-      return;
-    }
-
-    const tabsContainer = group.element.querySelector<HTMLElement>('.dv-tabs-container');
-    const activeTab = tabsContainer?.querySelector<HTMLElement>('.dv-tab.dv-active-tab');
-    if (!tabsContainer || !activeTab) {
-      return;
-    }
-
-    const tabLeft = activeTab.offsetLeft;
-    const tabRight = tabLeft + activeTab.offsetWidth;
-    const { scrollLeft } = tabsContainer;
-    const fadeSize = Number.parseFloat(getComputedStyle(tabsContainer).getPropertyValue('--scroll-fade-size')) || 0;
-    const visibleLeft = scrollLeft + fadeSize;
-    const visibleRight = scrollLeft + tabsContainer.clientWidth - fadeSize;
-
-    if (tabLeft < visibleLeft) {
-      tabsContainer.scrollLeft = Math.max(0, tabLeft - fadeSize);
-      tabsContainer.dispatchEvent(new Event('scroll'));
-    } else if (tabRight > visibleRight) {
-      tabsContainer.scrollLeft = Math.max(
-        0,
-        Math.min(tabLeft - fadeSize, tabRight - tabsContainer.clientWidth + fadeSize),
-      );
-      tabsContainer.dispatchEvent(new Event('scroll'));
+    const tabsContainer = api.activeGroup?.element.querySelector<HTMLElement>('.dv-tabs-container');
+    if (tabsContainer) {
+      revealActiveTab(tabsContainer);
     }
   };
 
@@ -313,6 +318,41 @@ export function scrollActiveTabIntoView(api: DockviewApi): void {
     correctScrollPosition();
     requestAnimationFrame(correctScrollPosition);
   });
+}
+
+/**
+ * Keep a group's active tab clear of the fades whenever its strip resizes.
+ *
+ * Activation only corrects the active group, but restoring a layout or resizing
+ * a pane re-applies Dockview's cached scroll offset to every strip, which can
+ * leave another group's active tab clipped under the edge fade.
+ */
+function useRevealActiveTabOnResize(group: IDockviewHeaderActionsProps['group']): void {
+  useEffect(() => {
+    const tabsContainer = group.element.querySelector<HTMLElement>('.dv-tabs-container');
+    if (!tabsContainer) {
+      return;
+    }
+
+    let frame: number | undefined;
+    const observer = new ResizeObserver(() => {
+      if (frame !== undefined) {
+        cancelAnimationFrame(frame);
+      }
+      frame = requestAnimationFrame(() => {
+        frame = undefined;
+        revealActiveTab(tabsContainer);
+      });
+    });
+    observer.observe(tabsContainer);
+
+    return () => {
+      if (frame !== undefined) {
+        cancelAnimationFrame(frame);
+      }
+      observer.disconnect();
+    };
+  }, [group]);
 }
 
 /**
@@ -350,6 +390,7 @@ export function Dockview({
     const ComposedRightHeaderActions = function DockviewRightHeaderActions(
       actionProperties: IDockviewHeaderActionsProps,
     ): React.JSX.Element {
+      useRevealActiveTabOnResize(actionProperties.group);
       return (
         <div className='flex h-full items-center gap-1'>
           <DockviewTabOverflowPicker {...actionProperties} getIcon={getTabIcon} leadingIcon={tabLeadingIcon} />

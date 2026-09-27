@@ -24,6 +24,8 @@ export function useProjects(options?: { includeDeleted?: boolean }) {
     isLoading: isWorkerLoading,
     duplicateProject,
     adoptProject,
+    repairProject,
+    chooseProjectDirectory,
   } = useProjectManager();
 
   const {
@@ -121,6 +123,26 @@ export function useProjects(options?: { includeDeleted?: boolean }) {
     [adoptProject, queryClient],
   );
 
+  const handleRepairProject = useCallback(
+    async (projectId: string): Promise<void> => {
+      await repairProject(projectId);
+      void queryClient.invalidateQueries({ queryKey: ['projects'] });
+      void queryClient.invalidateQueries({ queryKey: ['project', projectId] });
+    },
+    [repairProject, queryClient],
+  );
+
+  const handleChooseProjectDirectory = useCallback(
+    async (locator: ProjectLocator, projectId: string): Promise<void> => {
+      // An open session reads the folder the route named when it opened.
+      await closeProjectSession(projectId);
+      await chooseProjectDirectory(locator, projectId);
+      void queryClient.invalidateQueries({ queryKey: ['projects'] });
+      void queryClient.invalidateQueries({ queryKey: ['project', projectId] });
+    },
+    [chooseProjectDirectory, closeProjectSession, queryClient],
+  );
+
   const handleUpdateName = useCallback(
     async (projectId: string, name: string) => {
       const updated = await updateProject(projectId, { name });
@@ -152,6 +174,8 @@ export function useProjects(options?: { includeDeleted?: boolean }) {
     permanentlyDeleteProject: handlePermanentlyDeleteProject,
     duplicateProject: handleDuplicateProject,
     adoptProject: handleAdoptProject,
+    repairProject: handleRepairProject,
+    chooseProjectDirectory: handleChooseProjectDirectory,
     updateName: handleUpdateName,
   };
 }

@@ -422,6 +422,24 @@ describe('projectAgentHostEvent', () => {
     ]);
   });
 
+  it("projects an agent's media recorded by attachment reference as a file part the chat resolves", () => {
+    const path = `attachments/${'e'.repeat(64)}.png`;
+    const message = {
+      id: 'assistant-render',
+      role: 'assistant',
+      content: [
+        { type: 'file-ref', path, mimeType: 'image/png', byteLength: 4, filename: 'exec-1.png' },
+        // Not a path any attachment store could have written: dropped, never rendered as a broken source.
+        { type: 'file-ref', path: 'attachments/../../tau.json', mimeType: 'image/png' },
+      ],
+    } as const;
+
+    expect(projectAgentHostEvent({ ...base, type: 'message.appended', message })).toEqual([
+      { type: 'file', mediaType: 'image/png', url: path },
+      { type: 'finish-step' },
+    ]);
+  });
+
   it('projects text, thinking, usage, and tool calls from an assistant message', () => {
     const chunks = projectAgentHostEvent({
       ...base,

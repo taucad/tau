@@ -4,10 +4,7 @@
     "outDir": "./out-tsc/lib",
     "module": "NodeNext",
     "types": ["node"],
-    "target": "ESNext",
-    "paths": {
-      "#*": ["./src/*"]
-    }
+    "target": "ESNext"
   },
   "include": ["src/**/*.ts", "src/**/*.json"],
   "exclude": ["src/**/*.test.ts", "src/**/*.spec.ts", "src/**/*.test-d.ts"]

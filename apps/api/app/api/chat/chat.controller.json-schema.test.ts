@@ -230,6 +230,7 @@ describe('chatTurnRequestSchema JSON Schema contract (R13)', () => {
                 "zoo",
                 "jscad",
                 "opencascadejs",
+                "tscircuit",
               ],
               "type": "string",
             },

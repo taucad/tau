@@ -13,7 +13,7 @@ import type { Chat } from '@taucad/chat';
 import type { FileEntry } from '@taucad/types';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import type { ChipType } from '#components/chat/context-chip.js';
-import { buildPastedContent, slashCommandRegex } from '#utils/at-reference.utils.js';
+import { buildPastedContent, invocationTokenRegex } from '#utils/at-reference.utils.js';
 import type { PastedContentSegment } from '#utils/at-reference.utils.js';
 import { ContextChipNode } from '#components/chat/tiptap/context-chip-node.js';
 import { SubmitOnEnter } from '#components/chat/tiptap/submit-on-enter.js';
@@ -211,6 +211,18 @@ export function useChatEditor({
   actionItemsRef.current = actionItems;
   const slashCommandItemsRef = useRef(slashCommandItems);
   slashCommandItemsRef.current = slashCommandItems;
+  const knownItemsCacheRef = useRef<{ items?: SlashCommandItem[]; byToken: ReadonlyMap<string, SlashCommandItem> }>({
+    byToken: new Map(),
+  });
+  /** Enabled agent items keyed by their exact invocation token (`/brep-design`, `$imagegen`). */
+  const getKnownItems = useCallback((): ReadonlyMap<string, SlashCommandItem> => {
+    const cache = knownItemsCacheRef.current;
+    if (cache.items !== slashCommandItemsRef.current) {
+      cache.items = slashCommandItemsRef.current;
+      cache.byToken = new Map(getEnabledSlashCommandItems(cache.items ?? []).map((item) => [item.label, item]));
+    }
+    return cache.byToken;
+  }, []);
   const onContextActionRef = useRef(onContextAction);
   onContextActionRef.current = onContextAction;
   const onSlashCommandRef = useRef(onSlashCommand);
@@ -300,6 +312,7 @@ export function useChatEditor({
       }),
       SlashCommand.configure({
         getItems: getSlashCommandItems,
+        getKnownItems,
         renderCallbacks: slashRenderCallbacks,
         onCommand: handleSlashCommand,
       }),
@@ -326,21 +339,17 @@ export function useChatEditor({
         }
 
         const hasAtRef = text.includes('@');
-        const slashTest = new RegExp(slashCommandRegex.source, slashCommandRegex.flags);
-        const hasSlashCmd = slashTest.test(text);
-        if (!hasAtRef && !hasSlashCmd) {
+        const hasInvocation = new RegExp(invocationTokenRegex.source).test(text);
+        if (!hasAtRef && !hasInvocation) {
           return false;
         }
 
         const lazyTree: Map<string, FileEntry> =
           treeServiceRef.current?.getTreeSnapshot() ?? new Map<string, FileEntry>();
-        const knownSkillIds = new Set(
-          getEnabledSlashCommandItems(slashCommandItemsRef.current ?? []).map((item) => item.id),
-        );
         const segments = buildPastedContent(text, {
           fileTree: lazyTree,
           chats: chatsRef.current,
-          knownSkills: knownSkillIds,
+          knownTokens: new Set(getKnownItems().keys()),
         });
         const json = buildEditorContentJson(segments);
 

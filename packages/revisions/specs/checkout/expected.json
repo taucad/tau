@@ -74,6 +74,14 @@
       },
       "kind": "witness",
       "ref": "W5 RM-R5: HeadFacts adoptHead"
+    },
+    "CheckoutRequests.witness-adopt-fact.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "ViewAgreesAtRest"
+      },
+      "kind": "witness",
+      "ref": "GM.r1 M3: HeadFacts adoptFact, geospec 3be494514's line-and-head adoption with abort and casLost"
     }
   },
   "graphs": {

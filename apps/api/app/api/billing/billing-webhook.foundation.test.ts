@@ -153,8 +153,8 @@ describe('billing webhook native foundation', () => {
     const parsed: unknown = JSON.parse(body);
     // The digest covers the event content without the per-delivery `pending_webhooks` count.
     expect(retained?.payloadDigest).toBe(
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- Stripe's wire field name.
       createHash('sha256')
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Stripe's wire field name.
         .update(JSON.stringify({ ...(parsed as Record<string, unknown>), pending_webhooks: undefined }))
         .digest('hex'),
     );

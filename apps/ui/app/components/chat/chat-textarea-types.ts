@@ -287,7 +287,7 @@ export function useChatTextareaLogic({
     () => attachmentModelForExecution(execution, selectedModel),
     [execution, selectedModel],
   );
-  const support = attachmentModel.support;
+  const { support } = attachmentModel;
   const imageInputSupported = modelSupportsInput(support, 'image');
   const pdfInputSupported = modelSupportsInput(support, 'pdf');
   const attachmentInputSupported = imageInputSupported || pdfInputSupported;

@@ -664,7 +664,7 @@ describe('BillableModelInvocationService', () => {
       markDispatchIntent: vi.fn(async () => true),
       markDispatchAccepted: vi.fn(async () => true),
       getDispatchTimeRemaining: vi.fn(async () => 30_000),
-      recordInvocationEvidence: vi.fn(),
+      recordInvocationEvidence: vi.fn<(input: { readonly evidence: TerminalEvidence }) => Promise<void>>(),
       recordCancellation: vi.fn(),
       terminalizeOperation: vi.fn(),
     };
@@ -691,14 +691,11 @@ describe('BillableModelInvocationService', () => {
     await reader.cancel();
     await result.completion;
 
-    expect(ledger.recordInvocationEvidence).toHaveBeenCalledWith(
-      expect.objectContaining({
-        operationId: 'operation',
-        evidence: expect.objectContaining({
-          kind: 'final_usage',
-          meterItems: expect.arrayContaining([expect.objectContaining({ dimension: 'output', quantity: 1n })]),
-        }),
-      }),
+    const recorded = ledger.recordInvocationEvidence.mock.calls.at(-1)?.[0];
+    expect(recorded).toMatchObject({ operationId: 'operation', evidence: { kind: 'final_usage' } });
+    expect(recorded?.evidence).toHaveProperty(
+      'meterItems',
+      expect.arrayContaining([expect.objectContaining({ dimension: 'output', quantity: 1n })]),
     );
     expect(ledger.terminalizeOperation).toHaveBeenCalledOnce();
     // A turn the supplier finished has settled; the late cancel neither absorbs nor flags it.

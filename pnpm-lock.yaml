@@ -2937,6 +2937,9 @@ importers:
       '@taucad/slicer':
         specifier: workspace:*
         version: link:../../packages/plugins/slicer
+      '@taucad/types':
+        specifier: workspace:*
+        version: link:../types
       '@taucad/units':
         specifier: workspace:*
         version: link:../../packages/units

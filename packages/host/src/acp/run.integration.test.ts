@@ -2654,6 +2654,37 @@ describe('external turns through the revision port', () => {
     });
   }, 60_000);
 
+  /* Manifest recovery blueprint R8: a second model is just another source file.
+   * An agent that registers it in `tau.json` hears why, instead of the project
+   * becoming unreachable at its next discovery. */
+  it('refuses an fs/write_text_file that would break tau.json and accepts a valid edit', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'tau-acp-manifest-'));
+    roots.push(cwd);
+    const manifest = {
+      $schema: 'https://tau.new/schemas/tau-schema-v1.json',
+      id: 'proj_0123456789ABCDEFGHIJK',
+      name: 'Relief',
+      description: '',
+      tags: [],
+      assets: { main: { entryPath: 'main.cs' } },
+    };
+    const original = `${JSON.stringify(manifest, undefined, 2)}\n`;
+    await writeFile(join(cwd, 'tau.json'), original, 'utf8');
+
+    const secondAsset = { ...manifest, assets: { ...manifest.assets, second: { entryPath: 'second.cs' } } };
+    await expect(
+      writeSessionTextFile(cwd, { path: 'tau.json', content: JSON.stringify(secondAsset) }),
+    ).rejects.toMatchObject({
+      code: 'VALIDATION_ERROR',
+      /* oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- `expect.stringContaining` is typed `any` by vitest. */
+      message: expect.stringContaining('assets: Unrecognized key: "second"'),
+    });
+    expect(await readSessionTextFile(cwd, { path: 'tau.json' })).toBe(original);
+
+    await writeSessionTextFile(cwd, { path: 'tau.json', content: JSON.stringify({ ...manifest, name: 'Renamed' }) });
+    expect(JSON.parse(await readSessionTextFile(cwd, { path: 'tau.json' }))).toMatchObject({ name: 'Renamed' });
+  });
+
   it('refuses an agent write under Tau’s own control metadata and still serves the read', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'tau-acp-mask-'));
     roots.push(cwd);

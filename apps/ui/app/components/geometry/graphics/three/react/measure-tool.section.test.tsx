@@ -6,10 +6,15 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import * as THREE from 'three';
 import { createActor, createAsyncLogic } from 'xstate';
 import type { Actor } from 'xstate';
+import { mock } from 'vitest-mock-extended';
+import type { MockProxy } from 'vitest-mock-extended';
 import { GraphicsProvider } from '#hooks/use-graphics.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
+import type { AddSectionCutPayload } from '#machines/graphics.machine.js';
+import type { SectionCutPatch } from '#components/geometry/graphics/section-cuts.js';
 import { MeasureTool } from '#components/geometry/graphics/three/react/measure-tool.js';
 import { SectionHandles } from '#components/geometry/graphics/three/react/section-handles.js';
+import type { SectionPlanePicker } from '#components/geometry/graphics/three/controls/section-plane-picker.js';
 import { hasSceneTag, sceneTag } from '#components/geometry/graphics/three/utils/scene-tags.js';
 
 // The handles draw in their own overlay; a press picks their objects directly, which need no scene.
@@ -40,6 +45,8 @@ describe('MeasureTool with section cuts', () => {
   let root: ReconcilerRoot<HTMLCanvasElement>;
   let getState: () => RootState;
   let measureCommits = 0;
+  // Beside the view cube in the viewer; here only its picks matter, and it picks nothing unless a test says so.
+  let planePicker: MockProxy<SectionPlanePicker>;
   // Looking along +Y at the -Y face of a 2 m cube about the origin, which the cut crosses near its middle.
   const camera = new THREE.PerspectiveCamera(75, 800 / 600, 0.1, 1000);
   camera.position.set(0, -10, 0);
@@ -80,6 +87,40 @@ describe('MeasureTool with section cuts', () => {
     dispatch('click', at);
   };
 
+  /** Moves the first cut to `offset` and lets the caps commit it, as a drag step does. */
+  const moveFirstCut = (offset: number): void => {
+    const [cut] = actor.getSnapshot().context.sectionCuts;
+    act(() => {
+      actor.send({ type: 'updateSectionCut', payload: { id: cut!.id, patch: { offset } } });
+      certify();
+    });
+  };
+
+  /** Holds animation frames until `run`, so a test decides when a coalesced pointer step lands. */
+  const holdFrames = (): Readonly<{ run: () => void }> => {
+    const frames = new Map<number, FrameRequestCallback>();
+    let nextFrame = 0;
+    vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => {
+      nextFrame += 1;
+      frames.set(nextFrame, callback);
+      return nextFrame;
+    });
+    vi.spyOn(globalThis, 'cancelAnimationFrame').mockImplementation((id) => {
+      frames.delete(id);
+    });
+    return {
+      run: () => {
+        const callbacks = [...frames.values()];
+        frames.clear();
+        act(() => {
+          for (const callback of callbacks) {
+            callback(0);
+          }
+        });
+      },
+    };
+  };
+
   /** Heights of the measurement marks drawn: snap indicators, the start point and the preview line. */
   const measurementMarkHeights = (): number[] => {
     const heights: number[] = [];
@@ -99,6 +140,7 @@ describe('MeasureTool with section cuts', () => {
 
   beforeEach(async () => {
     measureCommits = 0;
+    planePicker = mock<SectionPlanePicker>();
     actor = createActor(
       graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
       { input: {} },
@@ -148,7 +190,7 @@ describe('MeasureTool with section cuts', () => {
           >
             <MeasureTool />
           </Profiler>
-          <SectionHandles />
+          <SectionHandles planePicker={planePicker} />
         </GraphicsProvider>,
       );
       getState = store.getState;
@@ -165,6 +207,7 @@ describe('MeasureTool with section cuts', () => {
     });
     actor.stop();
     canvas.parentElement?.remove();
+    vi.restoreAllMocks();
   });
 
   it('should measure only what the cut leaves, never snapping to a point it removes', () => {
@@ -217,5 +260,66 @@ describe('MeasureTool with section cuts', () => {
     // Only the moved cut leaves this part of the face: under the first one the ray passed through to nothing.
     click(pixelOf(0.9, -1, 0.3));
     expect(actor.getSnapshot().context.currentMeasurementStart?.[2]).toBeGreaterThan(cutHeight);
+  });
+
+  it("should drop a resting pointer's snap marker when a cut removes its point, rendering nothing more", () => {
+    const frames = holdFrames();
+    // Above the face's middle, the cut leaves its centre and side midpoints on z = 0.
+    moveFirstCut(0.5);
+    dispatch('mousemove', pixelOf(0.2, -1, -0.5));
+    frames.run();
+    expect(measurementMarkHeights().filter((height) => height >= cutHeight).length).toBeGreaterThan(0);
+
+    // The cut comes down past them while the pointer rests: no pointer event.
+    moveFirstCut(cutHeight);
+    frames.run();
+    const marks = measurementMarkHeights();
+    expect(marks.length).toBeGreaterThan(0);
+    expect(marks.filter((height) => height >= cutHeight)).toEqual([]);
+
+    // A cut step that leaves the pointer's snaps as they were renders nothing.
+    const settled = measureCommits;
+    moveFirstCut(cutHeight - 0.01);
+    frames.run();
+    expect(measureCommits).toBe(settled);
+    expect(measurementMarkHeights()).toEqual(marks);
+  });
+
+  it('should leave a press on a dimmed plane picker tile to the picker while Measure is on', () => {
+    const add = (payload: AddSectionCutPayload, patch: SectionCutPatch): void => {
+      actor.send({ type: 'addSectionCut', payload });
+      const id = actor.getSnapshot().context.selectedSectionCutId!;
+      actor.send({ type: 'updateSectionCut', payload: { id, patch } });
+    };
+    // Four cuts, none of them a selected plane, so the picker is dimmed. The three new ones stand clear of the face.
+    act(() => {
+      add({ kind: 'plane', plane: 'yz' }, { offset: 1.5, isFlipped: false });
+      add({ kind: 'plane', plane: 'xz' }, { offset: 1.5, isFlipped: false });
+      add({ kind: 'revolution', axis: 'z' }, { start: 45, sweep: 5 });
+      actor.send({ type: 'selectSectionCut', payload: undefined });
+      certify();
+    });
+    const cuts = actor.getSnapshot().context.sectionCuts;
+    const controls = Object.assign(new THREE.EventDispatcher(), { enabled: true });
+    act(() => {
+      getState().set({ controls });
+    });
+    // The tile covers part of the face the cuts leave, which Measure picks when the press is its own.
+    const tile = pixelOf(0.8, -1, -0.6);
+    planePicker.pick.mockReturnValue('yz');
+
+    dispatch('pointerdown', tile);
+    expect(controls.enabled).toBe(false);
+    dispatch('pointerup', tile);
+    dispatch('click', tile);
+
+    expect(actor.getSnapshot().context.currentMeasurementStart).toBeUndefined();
+    expect(actor.getSnapshot().context.sectionCuts).toBe(cuts);
+    expect(controls.enabled).toBe(true);
+
+    // Without the picker there, the same press measures the model.
+    planePicker.pick.mockReturnValue(undefined);
+    click(tile);
+    expect(actor.getSnapshot().context.currentMeasurementStart).toBeDefined();
   });
 });

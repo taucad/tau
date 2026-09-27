@@ -193,17 +193,6 @@ export function SectionHandles({ planePicker }: SectionHandlesProperties): React
     const readContext = (): ReturnType<typeof graphicsActor.getSnapshot>['context'] =>
       graphicsActor.getSnapshot().context;
 
-    const setCursor = (): void => {
-      canvas.classList.remove('cursor-action', 'cursor-grab', 'cursor-grabbing');
-      if (press?.drag) {
-        canvas.classList.add('cursor-grabbing');
-      } else if (press?.tile !== undefined || hoveredTile !== undefined || hovered?.target.kind === 'select') {
-        canvas.classList.add('cursor-action');
-      } else if (hovered) {
-        canvas.classList.add('cursor-grab');
-      }
-    };
-
     /** At the cut limit a tile can only move the selected plane cut; with none selected the picker is inert. */
     const isPickerLive = (): boolean => {
       const { sectionCuts, selectedSectionCutId } = readContext();
@@ -211,6 +200,21 @@ export function SectionHandles({ planePicker }: SectionHandlesProperties): React
         sectionCuts.length < maxSectionCuts ||
         sectionCuts.some((cut) => cut.id === selectedSectionCutId && cut.kind === 'plane')
       );
+    };
+
+    const setCursor = (): void => {
+      canvas.classList.remove('cursor-action', 'cursor-grab', 'cursor-grabbing');
+      if (press?.drag) {
+        canvas.classList.add('cursor-grabbing');
+      } else if (
+        (press?.tile !== undefined && isPickerLive()) ||
+        hoveredTile !== undefined ||
+        hovered?.target.kind === 'select'
+      ) {
+        canvas.classList.add('cursor-action');
+      } else if (hovered) {
+        canvas.classList.add('cursor-grab');
+      }
     };
 
     const paint = (): void => {
@@ -234,9 +238,12 @@ export function SectionHandles({ planePicker }: SectionHandlesProperties): React
       return raycaster.ray;
     };
 
-    /** The tile or handle under a canvas point: the live picker first, then the nearest handle. */
+    /**
+     * The tile or handle under a canvas point: the picker first, then the nearest handle. A dimmed picker still owns
+     * its tiles, so a press on one reaches neither Measure, the camera nor the model; it does nothing with it.
+     */
     const pickAt = (x: number, y: number): Picked => {
-      const tile = isPickerLive() ? planePicker?.pick(x, y) : undefined;
+      const tile = planePicker?.pick(x, y);
       if (tile) {
         return { tile };
       }
@@ -266,7 +273,9 @@ export function SectionHandles({ planePicker }: SectionHandlesProperties): React
     // Hover picks run once per frame, the latest pointer winning (graphics policy §10).
     const hoverPicks = createRafCoalescer((point: Readonly<{ x: number; y: number }>) => {
       if (!press) {
-        setHover(pickAt(point.x, point.y));
+        const picked = pickAt(point.x, point.y);
+        // A dimmed picker takes no hover.
+        setHover(picked.tile === undefined || isPickerLive() ? picked : {});
       }
     });
 
@@ -417,7 +426,7 @@ export function SectionHandles({ planePicker }: SectionHandlesProperties): React
       }
       steps.flush();
       endPress();
-      if (!tile || moved) {
+      if (!tile || moved || !isPickerLive()) {
         return;
       }
       // A click on a tile moves the selected plane cut to its plane, through the centre, or adds that plane. Either

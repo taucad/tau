@@ -501,7 +501,7 @@ describe('SectionHandles', () => {
       { selection: 'a revolution cut', isDeselected: false },
       { selection: 'no cut', isDeselected: true },
     ])(
-      'should dim the picker and pass its presses on at the cut limit with $selection selected',
+      'should dim the picker at the cut limit with $selection selected, and own a press on a tile without acting on it',
       ({ isDeselected }) => {
         const picker = createPicker();
         harness = mountHandles({
@@ -517,14 +517,26 @@ describe('SectionHandles', () => {
           harness.send({ type: 'selectSectionCut', payload: undefined });
         }
         const before = harness.cuts();
+        const isActionCursor = (): boolean => harness?.canvas.classList.contains('cursor-action') === true;
 
+        // A dimmed tile takes no hover.
         harness.pointer('pointermove', { x: 660, y: 60, buttons: 0 });
         harness.runFrame();
+        expect(isActionCursor()).toBe(false);
+
+        // Its press is held from the camera and stopped before Measure and the model, and then does nothing.
+        const received: string[] = [];
+        harness.actor.system.inspect((inspection) => {
+          if (inspection.type === '@xstate.transition') {
+            received.push(inspection.eventType);
+          }
+        });
         harness.pointer('pointerdown', { x: 660, y: 60 });
+        expect(harness.controls.enabled).toBe(false);
+        expect(isActionCursor()).toBe(false);
         harness.pointer('pointerup', { x: 660, y: 60 });
         harness.pointer('click', { x: 660, y: 60 });
 
-        expect(picker.pick).not.toHaveBeenCalled();
         expect(picker.paint).toHaveBeenLastCalledWith({
           current: undefined,
           hovered: undefined,
@@ -532,8 +544,12 @@ describe('SectionHandles', () => {
           isDimmed: true,
         });
         expect(harness.cuts()).toBe(before);
+        // It holds and releases the viewer, and asks for no cut (which the machine would refuse at the limit anyway).
+        expect(received).toEqual(['beginViewerModelHoverSuppression', 'endViewerModelHoverSuppression']);
+        expect(harness.controls.enabled).toBe(true);
         expect(isHoverSuppressed(harness)).toBe(false);
-        expect(harness.parentEvents).toEqual(['pointermove', 'pointerdown', 'pointerup', 'click']);
+        // Only the hover move reached the tools behind the picker.
+        expect(harness.parentEvents).toEqual(['pointermove']);
       },
     );
 

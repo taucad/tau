@@ -394,7 +394,7 @@ test('uses inferred units through checked edits, scrubbing, reopen, reset, and d
   const geometryBeforeDisplayChange = await target.evaluateLocator(canvas, (element) =>
     (element as HTMLCanvasElement).toDataURL(),
   );
-  await target.click(selectors.getByRole('button', { name: /^1 mm$/u }).first());
+  await target.click(selectors.getByRole('button', { name: /^Grid 1 mm, unit settings$/u }).first());
   await target.click(selectors.getByRole('menuitemradio', { name: /Centimeter\s+cm/u }));
   await target.keyboardPress('Escape');
   const widthInCentimeters = selectors.getByLabelText('Input for Width').first();

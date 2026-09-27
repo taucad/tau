@@ -10,6 +10,7 @@ import { codeToHtml } from 'shiki';
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@taucad/ui/components/card';
+import { RadioGroup, RadioGroupItem } from '@taucad/ui/components/radio-group';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@taucad/ui/components/table';
 
 /**
@@ -97,7 +98,8 @@ export type ApiGuide = Readonly<{
     Readonly<{
       id: string;
       question: string;
-      options: ReadonlyArray<Readonly<{ label: string; consequence: string }>>;
+      /** Mark the recommended choice with `recommended`; a label containing "(recommended)" also counts. */
+      options: ReadonlyArray<Readonly<{ label: string; consequence: string; recommended?: boolean }>>;
       recommendation: string;
     }>
   >;
@@ -305,6 +307,170 @@ function OptionView({ option, evidence }: { option: GuideOption; evidence: Evide
 
 /** How far below the top of the viewport a heading must pass before its section counts as being read. */
 const readingLine = 96;
+
+type Question = ApiGuide['questions'][number];
+
+/** The choice a reviewer should get by default: the flagged one, else the one labelled recommended, else the first. */
+const recommendedOf = (question: Question): string =>
+  (
+    question.options.find((choice) => choice.recommended) ??
+    question.options.find((choice) => /\(recommended\)/i.test(choice.label)) ??
+    question.options[0]
+  )?.label ?? '';
+
+const decisionPrefix = (id: string): string => `Decision ${id}: `;
+
+/**
+ * Records a choice as an immutable review comment on the question's card, through the review layer the
+ * canvas runner injects (scripts/canvas/review-layer.ts). Resolves false where there is no layer (a static build).
+ */
+const recordChoice = async (question: Question, label: string): Promise<string | undefined> => {
+  const card = document.querySelector(`#question-${CSS.escape(question.id)}`);
+  if (!card || !document.querySelector('tau-review-layer')) {
+    return 'Recording needs the canvas runner (pnpm canvas dev server); this page is read-only.';
+  }
+  const suffix = label === recommendedOf(question) && !/\(recommended\)/i.test(label) ? ' (recommended)' : '';
+  return new Promise((resolve) => {
+    card.dispatchEvent(
+      new CustomEvent('tau-review:comment', {
+        bubbles: true,
+        composed: true,
+        detail: {
+          body: `${decisionPrefix(question.id)}${label}${suffix}`,
+          done: (ok: boolean, message: string) => {
+            resolve(ok ? undefined : message);
+          },
+        },
+      }),
+    );
+  });
+};
+
+/** Choices already recorded in this canvas's review events, keyed by question id (latest wins). */
+const useRecordedChoices = (): readonly [ReadonlyMap<string, string>, (id: string, label: string) => void] => {
+  const [recorded, setRecorded] = useState<ReadonlyMap<string, string>>(new Map());
+  useEffect(() => {
+    // async-iife: bootstrap — one read of the review events on mount; failures leave nothing recorded.
+    void (async () => {
+      try {
+        const response = await fetch('/__tau/review/threads');
+        const { threads } = (await response.json()) as { threads?: Array<{ comment: { body: string } }> };
+        const found = new Map<string, string>();
+        for (const { comment } of threads ?? []) {
+          const match = /^Decision ([\w.-]+): (.*)$/s.exec(comment.body);
+          if (match?.[1] && match[2] !== undefined) {
+            found.set(match[1], match[2]);
+          }
+        }
+        setRecorded(found);
+      } catch {
+        // No review endpoint (a static build): nothing recorded to show.
+      }
+    })();
+  }, []);
+  const record = (id: string, label: string): void => {
+    setRecorded((current) => new Map(current).set(id, label));
+  };
+  return [recorded, record];
+};
+
+function QuestionChoice({
+  question,
+  recorded,
+  onRecorded,
+}: {
+  question: Question;
+  recorded: string | undefined;
+  onRecorded: (id: string, label: string) => void;
+}): React.JSX.Element {
+  const recommended = recommendedOf(question);
+  const [choice, setChoice] = useState(recommended);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string>();
+  const confirm = async (): Promise<void> => {
+    setPending(true);
+    const failure = await recordChoice(question, choice);
+    setPending(false);
+    setError(failure);
+    if (!failure) {
+      onRecorded(question.id, choice);
+    }
+  };
+  return (
+    <div className='space-y-3'>
+      <RadioGroup value={choice} onValueChange={setChoice} aria-label={`${question.id} choice`} className='gap-2'>
+        {question.options.map((option, index) => {
+          const id = `question-${question.id}-option-${index}`;
+          return (
+            <div key={option.label} className='flex items-start gap-2'>
+              <RadioGroupItem id={id} value={option.label} className='mt-0.5' />
+              <label htmlFor={id} className='cursor-default'>
+                <span className='font-medium'>{option.label}.</span> {option.consequence}
+              </label>
+            </div>
+          );
+        })}
+      </RadioGroup>
+      <div className='flex flex-wrap items-center gap-2'>
+        <Button size='sm' disabled={pending} onClick={confirm}>
+          {choice === recommended ? 'Confirm recommended' : 'Confirm choice'}
+        </Button>
+        {recorded ? (
+          <span className='text-muted-foreground' role='status'>
+            Recorded: {recorded}
+          </span>
+        ) : undefined}
+        {error ? (
+          <span className='text-destructive' role='alert'>
+            {error}
+          </span>
+        ) : undefined}
+      </div>
+    </div>
+  );
+}
+
+/** Records the recommended choice for every question still open, one review event each. */
+function AcceptAll({
+  questions,
+  onRecorded,
+}: {
+  questions: readonly Question[];
+  onRecorded: (id: string, label: string) => void;
+}): React.JSX.Element | undefined {
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string>();
+  if (questions.length === 0) {
+    return undefined;
+  }
+  const acceptAll = async (): Promise<void> => {
+    setPending(true);
+    for (const question of questions) {
+      const label = recommendedOf(question);
+      // Sequential: each event is its own file and the thread list reloads after each write.
+      // oxlint-disable-next-line no-await-in-loop -- one event per question, in order
+      const failure = await recordChoice(question, label);
+      if (failure) {
+        setError(failure);
+        break;
+      }
+      onRecorded(question.id, label);
+    }
+    setPending(false);
+  };
+  return (
+    <div className='flex flex-wrap items-center gap-2 text-sm'>
+      <Button variant='outline' size='sm' disabled={pending} onClick={acceptAll}>
+        Accept all {questions.length} recommendations
+      </Button>
+      {error ? (
+        <span className='text-destructive' role='alert'>
+          {error}
+        </span>
+      ) : undefined}
+    </div>
+  );
+}
 
 type ReadingPosition = Readonly<{ section: string | undefined; item: string | undefined }>;
 
@@ -520,6 +686,7 @@ function Contents({
 }
 
 function Guide({ guide }: { guide: ApiGuide }): React.JSX.Element {
+  const [recorded, record] = useRecordedChoices();
   const [dark, setDark] = useState(() => globalThis.matchMedia('(prefers-color-scheme: dark)').matches);
   const [optionId, setOptionId] = useState(
     guide.options.find((option) => option.standing === 'recommended')?.id ?? guide.options[0]?.id,
@@ -782,6 +949,10 @@ function Guide({ guide }: { guide: ApiGuide }): React.JSX.Element {
           </Section>
 
           <Section id='questions' title='Open questions for the reviewer'>
+            <AcceptAll
+              questions={guide.questions.filter((question) => !recorded.has(question.id))}
+              onRecorded={record}
+            />
             {guide.questions.map((question) => (
               <Card key={question.id} id={`question-${question.id}`} className='scroll-mt-14 md:scroll-mt-6'>
                 <CardHeader>
@@ -790,13 +961,7 @@ function Guide({ guide }: { guide: ApiGuide }): React.JSX.Element {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className='space-y-2 text-sm'>
-                  <ul className='space-y-1'>
-                    {question.options.map((choice) => (
-                      <li key={choice.label}>
-                        <span className='font-medium'>{choice.label}.</span> {choice.consequence}
-                      </li>
-                    ))}
-                  </ul>
+                  <QuestionChoice question={question} recorded={recorded.get(question.id)} onRecorded={record} />
                   <p className='text-muted-foreground'>Recommendation: {question.recommendation}</p>
                 </CardContent>
               </Card>

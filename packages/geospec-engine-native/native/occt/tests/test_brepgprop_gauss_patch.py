@@ -12,17 +12,14 @@ SOURCE = ROOT / 'node_modules/.cache/geospec-engine-native/sources/occt'
 ASSEMBLY = Path('src/DataExchange/TKDESTEP/STEPConstruct/STEPConstruct_Assembly.cxx')
 ACTOR = Path('src/DataExchange/TKDESTEP/STEPControl/STEPControl_ActorRead.cxx')
 STEPCAF = Path('src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx')
-SHAPE_FIX = Path('src/ModelingAlgorithms/TKShHealing/ShapeFix/ShapeFix_IntersectionTool.cxx')
 # The header is installed into the prefix include dir, so its patched bytes are pinned too.
 GAUSS_HXX = Path('src/ModelingAlgorithms/TKTopAlgo/BRepGProp/BRepGProp_Gauss.hxx')
 GAUSS_CXX = Path('src/ModelingAlgorithms/TKTopAlgo/BRepGProp/BRepGProp_Gauss.cxx')
-B2A = OCCT / 'shape-fix-outer-edge.patch'
 B2B = OCCT / 'stepcaf-early-assembly.patch'
 P1C = OCCT / 'step-assembly-sharings.patch'
 GAUSS = OCCT / 'brepgprop-gauss-direct-arith.patch'
 
 APPLIED = {
-    SHAPE_FIX: '5b259d58f50501568cba43b931afa67f8ecf531d1ecfe93d559e294f8d33f8ba',
     STEPCAF: '778a56e3a4f6b0d479116fd7dd885119d5584bfb932b476f170c429a02a4d8f6',
     ASSEMBLY: '9d81709657351cd7d4768d928d9501bc1e7b9058b80fdac8d04cb9b38731cc92',
     ACTOR: 'f75f55b9ab11b8bcbaed82204519de6f34c2ff1ba9ca9ab33bc5a0d096e0d0fd',
@@ -47,12 +44,11 @@ def between(text, start, end):
 def main():
     assert sha256(SOURCE / GAUSS_HXX) == '2dd68fb606dba46fffea2a6cbfa9b18d3784236236fe21c0c5fcc91209553cdf'
     assert sha256(SOURCE / GAUSS_CXX) == '1152dcfea90bd2dcdd56be7664f115a5860313904d3164a4398d3a0df14a486e'
-    assert sha256(B2A) == 'e01565c2c9569c4dd8e2f849ac98987f4e0e74d142035c85c3ba1e1a97cb4279'
     assert sha256(B2B) == '0c0f128fcdf169c4cbf478bf6017e123bf4e246d7fd4889c4a64446dc740a491'
     assert sha256(P1C) == 'cb6393aad502bcfc6d39c01fa17dc533ba0e15f4a82a3c25e797fe7c96a055c5'
     assert sha256(GAUSS) == '7ceabdea39bc8b8e8bed213e11f10e47a6c91a43cc14fe40041ffe20ac82f8ae'
     assert patched_files(GAUSS) == {str(GAUSS_HXX), str(GAUSS_CXX)}
-    assert not patched_files(GAUSS) & (patched_files(B2A) | patched_files(B2B) | patched_files(P1C)), 'patches overlap'
+    assert not patched_files(GAUSS) & (patched_files(B2B) | patched_files(P1C)), 'patches overlap'
 
     builder = (OCCT / 'build-occt.sh').read_text()
     apply_p1c = builder.index('patch -t -F 0 -p1 -d "${build_source}" -i "${sharings_patch_file}"')
@@ -74,7 +70,7 @@ def main():
             target = temp / rel
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes((SOURCE / rel).read_bytes())
-        for patch in (B2A, B2B, P1C, GAUSS):
+        for patch in (B2B, P1C, GAUSS):
             subprocess.run(['patch', '-t', '-F', '0', '-p1', '-d', directory, '-i', str(patch)], check=True)
         assert not list(temp.rglob('*.orig')) and not list(temp.rglob('*.rej'))
         for rel, digest in APPLIED.items():
@@ -95,7 +91,7 @@ def main():
         bounds = between(source, 'void BRepGProp_Gauss::checkBounds(', '\n}\n')
         assert 'myIsInfinite = true;' in bounds and 'add ' not in bounds and 'mult ' not in bounds
 
-    print('BRepGProp_Gauss: pinned patch after B2a/B2b/P1c; applied hashes, ordering and guards pass')
+    print('BRepGProp_Gauss: pinned patch after B2b/P1c; applied hashes, ordering and guards pass')
 
 
 if __name__ == '__main__':

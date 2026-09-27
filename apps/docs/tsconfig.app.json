@@ -21,7 +21,6 @@
     "resolveJsonModule": true,
     "target": "ES2024",
     "paths": {
-      "package.json": ["./package.json"],
       "fumadocs-mdx:collections/*": ["../../node_modules/.cache/fumadocs/apps/docs/*"]
     }
   },

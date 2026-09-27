@@ -248,12 +248,17 @@ fn every_native_step_is_charged_before_it_runs() {
     assert!(setup.get("pair").is_none(), "{setup}");
     let boxes = setup["unitsUsed"].as_u64().unwrap();
     assert!(boxes > 1, "{setup}");
-    // With exactly the gate and the boxes, the first pair's charge crosses.
-    let pair = refusal(boxes);
+    // With exactly the gate and the boxes, the broad phase's first batch of
+    // sweep comparisons crosses and names no pair (review R5-3); one unit
+    // more pays it, and the first pair's charge crosses.
+    let sweep = refusal(boxes);
+    assert!(sweep.get("pair").is_none(), "{sweep}");
+    assert_eq!(sweep["unitsUsed"], boxes + 1);
+    let pair = refusal(boxes + 1);
     let names = pair["pair"].as_array().unwrap();
     assert_eq!(names.len(), 2);
     assert!(names.iter().all(Value::is_string), "{pair}");
-    assert!(pair["unitsUsed"].as_u64().unwrap() > boxes);
+    assert!(pair["unitsUsed"].as_u64().unwrap() > boxes + 1);
     // The answer charges its exact total: one unit less refuses.
     let (result, charged) =
         charged_components(Box::new(OcctConnector), &source, 4, 8_000_000, false);
@@ -267,16 +272,29 @@ fn every_native_step_is_charged_before_it_runs() {
 fn many_occurrences_answer_from_the_broad_phase_alone() {
     let source =
         workspace("packages/geospec-engine-native/bench/fixtures/performance-lab/generated/many-occurrences-4096.step");
-    // The BRep gate and the face boxes are the only units: no pair reaches
-    // the narrow phase.
+    // The BRep gate, the face boxes and the broad phase's sweep are the only
+    // units: no pair reaches the narrow phase. The sweep runs along x over 64
+    // columns of 64 boxes (spacing 2): each box meets the rest of its column
+    // and the next column's first box ends its scan, 63 x 2,080 + 2,016 =
+    // 133,056 comparisons, charged as 33 batches of 4,096 (review R5-3).
     let setup = components(Box::new(OcctConnector), &source, 4096, 1, true);
     assert_eq!(
         setup["diagnostics"][0]["code"], "MATCHER_TIMEOUT",
         "{setup}"
     );
-    let budget = setup["diagnostics"][0]["details"]["unitsUsed"]
+    let boxes = setup["diagnostics"][0]["details"]["unitsUsed"]
         .as_u64()
         .unwrap();
+    let budget = boxes + 33;
+    let short = components(Box::new(OcctConnector), &source, 4096, budget - 1, true);
+    assert_eq!(
+        short["diagnostics"][0]["code"], "MATCHER_TIMEOUT",
+        "{short}"
+    );
+    assert_eq!(
+        short["diagnostics"][0]["details"]["unitsUsed"], budget,
+        "{short}"
+    );
     let bounded = components(Box::new(OcctConnector), &source, 4096, budget, true);
     assert_eq!(bounded["status"], "passed", "{bounded}");
     assert_eq!(bounded["evidence"]["measured"]["count"], 4096);

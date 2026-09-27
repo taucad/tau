@@ -9,7 +9,7 @@ import type { CreatePicoOptions, Mesh, Pico, Voxels } from 'picovoxel';
 import type * as PicovoxelModule from 'picovoxel';
 
 import type { PicovoxelNativeHandle } from '#picovoxel.geometry.js';
-import { picovoxelBuiltinModuleNames, picovoxelKernel } from '#picovoxel.kernel.js';
+import { picovoxelBuiltinModuleNames, picovoxelDetectPattern, picovoxelKernel } from '#picovoxel.kernel.js';
 import type { PicovoxelOptionsInput } from '#picovoxel.schemas.js';
 
 const isolation = vi.hoisted(() => ({ status: undefined as IsolationStatus | undefined }));
@@ -149,6 +149,15 @@ describe('picovoxel kernel', () => {
         'picovoxel/shapekernel',
         'picovoxel/slicing',
       ]);
+    });
+    it.each([
+      ["import { createMesh } from 'picovoxel';", true],
+      ["import { BaseBox } from 'picovoxel/shapekernel';", true],
+      ["const pico = await import('picovoxel');", true],
+      ["import { TorusKnotGeometry } from 'three';", false],
+      ["import { makeBaseBox } from 'replicad';", false],
+    ])('should claim %s only when it imports picovoxel (%s)', (source, claimed) => {
+      expect(picovoxelDetectPattern.test(source)).toBe(claimed);
     });
   });
 

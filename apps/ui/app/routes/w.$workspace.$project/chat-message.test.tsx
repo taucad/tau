@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { MyUIMessage, SkillMetadata } from '@taucad/chat';
 import { ChatMessage } from '#routes/w.$workspace.$project/chat-message.js';
+import { AtReferenceProvider } from '#components/chat/at-reference-context.js';
 
 const { mockMessagesById, mockMessageOrder, mockStatus, mockSkillsCatalog } = vi.hoisted(() => ({
   mockMessagesById: new Map<string, MyUIMessage>(),
@@ -721,20 +722,26 @@ describe('ChatMessage slash command rendering', () => {
   const longMessageWith = (line: string): string =>
     [line, ...Array.from({ length: 10 }, (_, index) => `filler line ${index}`)].join('\n');
 
-  it('should render /create-skill as a skill chip when rehydrating message text', () => {
-    mockSkillsCatalog.push({
-      name: 'create-skill',
-      description: 'Create or update a skill',
-      resourceUri: 'system:skills/create-skill/SKILL.md',
-      source: 'system',
-      version: '1.0.0',
-      fingerprint: 'test-create-skill',
-      enabled: true,
-      shadowedSources: [],
-    });
+  const renderWithTokens = (messageId: string, knownTokens: ReadonlySet<string>): void => {
+    render(
+      <AtReferenceProvider treeService={undefined} chats={[]} knownTokens={knownTokens}>
+        <ChatMessage messageId={messageId} />
+      </AtReferenceProvider>,
+    );
+  };
+
+  it('should render /create-skill as a skill chip when the chat knows the token', () => {
     setMessages([userMessage('msg-1', longMessageWith('Use /create-skill now'))]);
 
-    render(<ChatMessage messageId='msg-1' />);
+    renderWithTokens('msg-1', new Set(['/create-skill']));
+
+    expect(screen.getByTestId('context-chip')).toBeInTheDocument();
+  });
+
+  it('should render a Codex $skill as a skill chip when the agent advertised it', () => {
+    setMessages([userMessage('msg-1', longMessageWith('Make a render of this using $imagegen'))]);
+
+    renderWithTokens('msg-1', new Set(['$imagegen']));
 
     expect(screen.getByTestId('context-chip')).toBeInTheDocument();
   });

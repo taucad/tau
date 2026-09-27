@@ -781,7 +781,6 @@ describe('WorkspaceFileService external webaccess observation', () => {
     expect(alphaEvents).toEqual([{ type: 'reset' }]);
     const manifests = await service.listProjectManifests();
     const droppedProject = manifests.entries.find(({ locator }) => locator.relativeDirectory === 'dropped-project');
-    // `{}` carries no identity, so discovery offers it for adoption rather than quarantining it.
     expect(droppedProject?.status).toBe('adoption-required');
     await service.pollExternalChanges();
     expect(globalEvents).toHaveLength(3);

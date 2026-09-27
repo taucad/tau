@@ -38,7 +38,13 @@ export type JointLimits = Readonly<{ lower: number; upper: number }>;
  *
  * @public
  */
-export type JointConnection = Readonly<{ parent: string; child: string; origin: SpatialVector }>;
+export type JointConnection = Readonly<{
+  /** How people read the joint, such as `Fan` for joint `n1`; tools fall back to the joint id. */
+  name?: string;
+  parent: string;
+  child: string;
+  origin: SpatialVector;
+}>;
 
 /** Zero degrees of freedom; the child is welded to the parent. @public */
 export type FixedJoint = JointConnection & Readonly<{ type: 'fixed' }>;

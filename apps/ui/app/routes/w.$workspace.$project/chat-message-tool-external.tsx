@@ -38,6 +38,8 @@ import { CodeBlockContent, Pre } from '#components/code/code-block.js';
 import { FileLink } from '#components/files/file-link.js';
 import { ChatMessageMedia } from '#routes/w.$workspace.$project/chat-message-media.js';
 import type { ChatMedia } from '#routes/w.$workspace.$project/chat-message-media.js';
+import { summarizeExternalCall, summaryNoun } from '#utils/external-call-summary.js';
+import { externalCommandOf } from '#utils/shell-command-summary.js';
 
 /** ACP's whole `ToolKind` taxonomy, in the order the protocol declares it. @see https://agentclientprotocol.com */
 export const externalToolKinds = [
@@ -270,6 +272,73 @@ const cardStatus = (part: DynamicToolUIPart): 'loading' | 'ready' | 'error' =>
       ? 'error'
       : 'ready';
 
+type ExternalHeading = {
+  readonly icon: LucideIcon;
+  readonly verb: string;
+  readonly activeVerb: string;
+  readonly detail: string;
+  readonly activeDetail: string;
+  /** Whether the detail is a raw command, set in monospace. */
+  readonly isCommand: boolean;
+  /** What leads the body: the command, once the header no longer shows it. */
+  readonly bodyPrefix: string;
+  /** Files the call read, linked in its body. */
+  readonly locations: readonly string[];
+  /** What a failed call attempted, for the error card whose code owns the verb. */
+  readonly noun: string;
+  /** Alternative text for media the call produced: the agent's own name for the action. */
+  readonly mediaAlt: string;
+};
+
+/**
+ * The header for a call.
+ *
+ * A command that only explored reads as what it explored ("Read skill
+ * cad-picogk") and its body leads with the command it ran. Any other call
+ * reads its own title, without the verb that title repeats ("Search for x"
+ * under "Searched" reads "Searched for x").
+ *
+ * @param part - The dynamic tool part.
+ * @param facts - Its ACP facts.
+ * @param label - Its sanitized title.
+ * @returns The heading in both tenses.
+ */
+const headingOf = (part: DynamicToolUIPart, facts: AcpFacts, label: string): ExternalHeading => {
+  const presentation = externalToolPresentation(facts.kind);
+  const summary = summarizeExternalCall({ ...facts, input: part.input });
+  if (summary !== undefined) {
+    const command = presentation.body === 'command' ? externalCommandOf(part.input) : undefined;
+    return {
+      ...summary,
+      icon: externalToolPresentation(summary.kind).icon,
+      isCommand: false,
+      bodyPrefix: command === undefined ? '' : `$ ${command}\n`,
+      noun: summaryNoun(summary),
+      mediaAlt: label,
+    };
+  }
+  const { icon, verb, activeVerb, body } = presentation;
+  const lowerLabel = label.toLowerCase();
+  const titleVerbs = facts.kind === 'search' ? [verb, activeVerb, 'Search'] : [verb, activeVerb];
+  const repeatedVerb = titleVerbs.find((candidate) => {
+    const lowerCandidate = candidate.toLowerCase();
+    return lowerLabel === lowerCandidate || lowerLabel.startsWith(`${lowerCandidate} `);
+  });
+  const detail = repeatedVerb === undefined ? label : label.slice(repeatedVerb.length).trimStart();
+  return {
+    icon,
+    verb,
+    activeVerb,
+    detail,
+    activeDetail: detail,
+    isCommand: body === 'command',
+    bodyPrefix: '',
+    locations: facts.locations,
+    noun: label,
+    mediaAlt: detail === '' ? label : detail,
+  };
+};
+
 /**
  * One external agent's tool call, rendered from the ACP facts it sent.
  *
@@ -280,23 +349,25 @@ const cardStatus = (part: DynamicToolUIPart): 'loading' | 'ready' | 'error' =>
 export function ChatMessageToolExternal({ part }: { readonly part: DynamicToolUIPart }): ReactNode {
   const output = part.state === 'output-available' ? part.output : undefined;
   const facts = factsOf(part, output);
-  const { icon, verb, activeVerb, body } = externalToolPresentation(facts.kind);
+  const { body } = externalToolPresentation(facts.kind);
   const status = cardStatus(part);
   const isLoading = status === 'loading';
   const label = sanitizeAgentText(facts.title ?? facts.nativeName ?? part.toolName);
+  const heading = headingOf(part, facts, label);
+  const { icon } = heading;
 
   if (part.state === 'output-error') {
-    return <ChatToolError errorText={sanitizeAgentText(part.errorText, 400)} icon={icon} noun={label} />;
+    return (
+      <ChatToolError
+        errorText={sanitizeAgentText(part.errorText, 400)}
+        icon={icon}
+        noun={sanitizeAgentText(heading.noun)}
+      />
+    );
   }
 
-  const displayVerb = isLoading ? activeVerb : verb;
-  const lowerLabel = label.toLowerCase();
-  const titleVerbs = facts.kind === 'search' ? [verb, activeVerb, 'Search'] : [verb, activeVerb];
-  const repeatedVerb = titleVerbs.find((candidate) => {
-    const lowerCandidate = candidate.toLowerCase();
-    return lowerLabel === lowerCandidate || lowerLabel.startsWith(`${lowerCandidate} `);
-  });
-  const detail = repeatedVerb === undefined ? label : label.slice(repeatedVerb.length).trimStart();
+  const displayVerb = isLoading ? heading.activeVerb : heading.verb;
+  const detail = sanitizeAgentText(isLoading ? heading.activeDetail : heading.detail);
 
   const diffs = diffBlocks(facts.content);
   if (body === 'diff' && diffs.length > 0) {
@@ -318,16 +389,23 @@ export function ChatMessageToolExternal({ part }: { readonly part: DynamicToolUI
     );
   }
 
-  const text = bodyText(facts, output);
+  const text = `${heading.bodyPrefix}${bodyText(facts, output)}`;
   const exitCode = exitCodeOf(output);
-  const hasBody = text !== '' || facts.locations.length > 0;
+  const hasBody = text !== '' || heading.locations.length > 0;
+  /* A parsed read links its files just as an adapter-labelled read does. */
+  const locationItems = heading.locations.map((path) => (
+    <ChatToolCardListItem key={path} icon={FileText}>
+      {/* The child is what is read; the prop is what is opened. */}
+      <FileLink path={path}>{sanitizeAgentPath(path)}</FileLink>
+    </ChatToolCardListItem>
+  ));
   /* The call's product, not its log: shown open under the card, as Codex shows a render. */
   const media = externalToolMedia(facts, output);
   const mediaList =
     media.length === 0 ? null : (
       <div className='mt-1 flex flex-col gap-2'>
         {media.map((item) => (
-          <ChatMessageMedia key={item.url} media={item} alt={detail === '' ? label : detail} />
+          <ChatMessageMedia key={item.url} media={item} alt={heading.mediaAlt} />
         ))}
       </div>
     );
@@ -337,7 +415,7 @@ export function ChatMessageToolExternal({ part }: { readonly part: DynamicToolUI
       <ChatToolCardIcon icon={icon} {...(exitCode !== undefined && exitCode !== 0 ? { tone: 'destructive' } : {})} />
       <ChatToolCardTitle>
         <ChatToolLabel verb={displayVerb}>
-          <ChatToolDescription className={body === 'command' ? 'font-mono' : undefined}>{detail}</ChatToolDescription>
+          <ChatToolDescription className={heading.isCommand ? 'font-mono' : undefined}>{detail}</ChatToolDescription>
         </ChatToolLabel>
       </ChatToolCardTitle>
     </ChatToolCardHeader>
@@ -360,17 +438,15 @@ export function ChatMessageToolExternal({ part }: { readonly part: DynamicToolUI
         {header}
         <ChatToolCardContent>
           {body === 'command' || body === 'text' ? (
-            <CodeBlockContent>
-              <Pre language={body === 'command' ? 'bash' : 'plaintext'}>{sanitizeAgentText(text, 4000)}</Pre>
-            </CodeBlockContent>
+            <>
+              {locationItems.length === 0 ? null : <ChatToolCardList>{locationItems}</ChatToolCardList>}
+              <CodeBlockContent>
+                <Pre language={body === 'command' ? 'bash' : 'plaintext'}>{sanitizeAgentText(text, 4000)}</Pre>
+              </CodeBlockContent>
+            </>
           ) : (
             <ChatToolCardList>
-              {facts.locations.map((path) => (
-                <ChatToolCardListItem key={path} icon={FileText}>
-                  {/* The child is what is read; the prop is what is opened. */}
-                  <FileLink path={path}>{sanitizeAgentPath(path)}</FileLink>
-                </ChatToolCardListItem>
-              ))}
+              {locationItems}
               {text
                 .split('\n')
                 .filter((line) => line.trim() !== '')

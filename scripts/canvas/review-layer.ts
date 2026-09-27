@@ -535,7 +535,9 @@ view.render = (): void => {
   const open = state.threads.filter((thread) => thread.status === 'open').length;
   toolbar.innerHTML = html`<button data-action="comment" aria-pressed="${commenting}" title="Comment (C)">Comment<kbd>C</kbd></button><button data-action="panel" aria-expanded="${panelOpen}">Feedback · ${open} open</button>`;
   pins.innerHTML = state.threads
+    // A page that shows a comment itself (a guide's decision) marks its anchor `data-review-pinless`.
     .filter((thread) => thread.status === 'open' || thread.id === openThread)
+    .filter((thread) => !elementFor(thread)?.closest('[data-review-pinless]'))
     .map(
       (thread) =>
         html`<button class="pin" data-thread="${thread.id}" aria-expanded="${thread.id === openThread}" aria-label="Comment ${numberOf(thread)}: ${thread.comment.anchor.excerpt}">${numberOf(thread)}</button>`,
@@ -562,16 +564,18 @@ const show = (thread: Thread): void => {
   view.render();
 };
 
-const finishReview = async (): Promise<void> => {
+const finishReview = async (): Promise<boolean> => {
   try {
     const result = await request('/finish', {});
     notice = result.commit
       ? `Committed ${result.events} events as ${result.commit.slice(0, 9)}.`
       : 'Nothing new to commit.';
     await load();
+    return true;
   } catch (error) {
     notice = messageOf(error);
     view.render();
+    return false;
   }
 };
 
@@ -701,6 +705,32 @@ addEventListener(
   },
   true,
 );
+
+// Pages record a comment without the composer (an API guide's decision) by dispatching
+// `tau-review:comment` from the element it is about, with `{ body, excerpt?, done }` as detail…
+type CommentRequest = { body: string; excerpt?: string; done?: (ok: boolean, message: string) => void };
+addEventListener('tau-review:comment', async (event) => {
+  const { detail, target } = event as CustomEvent<CommentRequest>;
+  if (!(target instanceof Element)) {
+    return;
+  }
+  const box = target.getBoundingClientRect();
+  const { target: anchor, offset, excerpt } = draftAt(target, { x: box.left + 8, y: box.top + 8 });
+  const ok = await send({
+    type: 'comment',
+    body: detail.body,
+    anchor: { target: anchor, offset, excerpt: detail.excerpt ?? excerpt },
+    context: contextFor(target),
+  });
+  detail.done?.(ok, ok ? '' : notice);
+});
+
+// …and end the review (one Brain commit) by dispatching `tau-review:finish` on the window, `{ done }` as detail.
+type FinishRequest = { done?: (ok: boolean, message: string) => void };
+addEventListener('tau-review:finish', async (event) => {
+  const ok = await finishReview();
+  (event as CustomEvent<FinishRequest>).detail.done?.(ok, notice);
+});
 
 addEventListener('scroll', schedule, { capture: true, passive: true });
 addEventListener('resize', schedule);

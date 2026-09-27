@@ -663,8 +663,9 @@ test.skipIf(!codexAvailable)(
       await authenticatePackagedDesktop(session, token);
     }
     const { page } = session;
-    /* The shell opens at 1440×900 (`apps/desktop/src/main/main.ts`), and at that
-     * width the project route's composer is narrow enough that its right-hand
+    /* The shell opens filling the display work area
+     * (`apps/desktop/src/main/main.ts`); on a 1440 px wide area the project
+     * route's composer is narrow enough that its right-hand
      * action group sits *over* the left group's last controls — the revision
      * selector included, which is the one control this spec has to click.
      * Maximizing does not clear it (the chat pane still opens at its Allotment

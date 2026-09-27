@@ -168,6 +168,11 @@ vi.mock('electron', () => ({
   net: { fetch: vi.fn() },
   protocol: { registerSchemesAsPrivileged: vi.fn(), handle: vi.fn() },
   safeStorage: { isEncryptionAvailable: vi.fn(() => false), encryptString: vi.fn(), decryptString: vi.fn() },
+  screen: {
+    getAllDisplays: vi.fn(() => [{ workArea: { x: 0, y: 0, width: 1440, height: 900 } }]),
+    getCursorScreenPoint: vi.fn(() => ({ x: 0, y: 0 })),
+    getDisplayNearestPoint: vi.fn(() => ({ workArea: { x: 0, y: 0, width: 1440, height: 900 } })),
+  },
   session: {
     defaultSession: {
       setPermissionRequestHandler: vi.fn(),

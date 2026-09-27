@@ -12,6 +12,7 @@ import { toast } from '#components/ui/sonner.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
 import { captureCadImages, captureFilesToDataUrls } from '#services/headless-capture.js';
 import { recordHeadlessImageTiming } from '#services/headless-image-debug.js';
+import { attachmentModelForExecution } from '#utils/chat.utils.js';
 
 const useCaptureCurrentViewToChat = (onSuccess?: () => void): (() => Promise<void>) => {
   const graphicsRef = useGraphics();
@@ -19,6 +20,7 @@ const useCaptureCurrentViewToChat = (onSuccess?: () => void): (() => Promise<voi
   const { addDraftAttachment } = useChatActions();
   const {
     model: { model: selectedModel },
+    execution: { execution },
   } = useChatComposer();
   const imageService = useHeadlessImageService();
 
@@ -38,7 +40,7 @@ const useCaptureCurrentViewToChat = (onSuccess?: () => void): (() => Promise<voi
       const publishStartedAt = performance.now();
       addDraftAttachment(captureFilesToDataUrls(files)[0]!, {
         preserveOriginal: true,
-        model: { name: selectedModel.name, support: selectedModel.model?.support },
+        model: attachmentModelForExecution(execution, selectedModel),
       });
       recordHeadlessImageTiming('capture.publish-draft', publishStartedAt, { count: 1 });
       onSuccess?.();
@@ -46,7 +48,7 @@ const useCaptureCurrentViewToChat = (onSuccess?: () => void): (() => Promise<voi
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to capture view');
     }
-  }, [addDraftAttachment, cadRef, graphicsRef, imageService, onSuccess, selectedModel]);
+  }, [addDraftAttachment, cadRef, execution, graphicsRef, imageService, onSuccess, selectedModel]);
 };
 
 /**

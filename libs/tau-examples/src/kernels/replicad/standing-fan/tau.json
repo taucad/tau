@@ -1,0 +1,13 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_mC8Y8nun527gDz9iKINvY",
+  "name": "Standing Fan",
+  "description": "A pedestal fan built part by part: weighted base, telescopic column, tilt-and-oscillation yoke, vented motor housing, five swept blades and 36-spoke guards. Change the height, tilt it, swing it ±45° or fit 3–7 blades; GeoSpec checks that the rotor clears the guards through a full revolution.",
+  "tags": ["consumer-product", "assembly", "appliance", "replicad"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

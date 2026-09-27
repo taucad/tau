@@ -694,6 +694,28 @@ describe('applyModelComponentVisualStateToScene', () => {
     expect(emphasis.hover).toEqual([scene.children[1]]);
   });
 
+  it('should light the parts the Kinematics pane points at as hovered parts', () => {
+    const scene = new Group();
+    for (const componentId of [firstComponentId, secondComponentId]) {
+      const mesh = buildMeshWithPositions([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+      assignComponentOwner(mesh, componentId);
+      scene.add(mesh);
+    }
+
+    const emphasis = applyModelComponentVisualStateToScene({
+      scene,
+      componentManifest: createManifest(),
+      modelVisualState: createModelVisualState({
+        hoveredComponentId: firstComponentId,
+        kinematicsHoveredComponentIds: [secondComponentId],
+      }),
+      enableSurfaces: true,
+      enableLines: true,
+    });
+
+    expect(emphasis.hover).toEqual([scene.children[0], scene.children[1]]);
+  });
+
   it('should skip empty emphasis ancestry and descendant queries', () => {
     const ancestorQuery = vi.spyOn(componentVisibility, 'hasComponentOrAncestor');
     const descendantQuery = vi.spyOn(componentVisibility, 'hasComponentOrDescendant');

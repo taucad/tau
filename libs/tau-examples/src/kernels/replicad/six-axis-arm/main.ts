@@ -29,6 +29,16 @@ type Params = typeof defaultParams;
 type Vec = [number, number, number];
 type JointId = 'j1' | 'j2' | 'j3' | 'j4' | 'j5' | 'j6';
 
+// What each axis does, for people; the ids stay the keys of limits, params and clips.
+const jointNames: Record<JointId, string> = {
+  j1: 'Base',
+  j2: 'Shoulder',
+  j3: 'Elbow',
+  j4: 'Forearm roll',
+  j5: 'Wrist',
+  j6: 'Flange',
+};
+
 // Absolute joint travel in degrees; one table drives parameter checks and mechanism limits.
 const limits: Record<JointId, [number, number]> = {
   j1: [-170, 170],
@@ -332,6 +342,7 @@ export function mechanism(params: Partial<Params> = defaultParams) {
     axis,
   }: (typeof joints)[number]): MechanismSource['joints'][string] => ({
     type: 'revolute',
+    name: jointNames[id],
     parent,
     child,
     origin,

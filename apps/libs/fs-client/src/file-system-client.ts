@@ -195,8 +195,8 @@ export type FileSystemClient = {
   commitPendingProjectDirectory(
     input: CommitPendingProjectDirectoryInput,
   ): Promise<CommitPendingProjectDirectoryResult>;
-  /** Mint a fresh identity for an `adoption-required` project directory (R11). */
-  adoptProjectDirectory(locator: ProjectLocator): Promise<ProjectManifest>;
+  /** Give an `adoption-required` project directory an identity: `id` restores its route's previous one (R11). */
+  adoptProjectDirectory(locator: ProjectLocator, options?: { readonly id?: string }): Promise<ProjectManifest>;
   /** Permanently remove one exact physical project after verifying its manifest identity. */
   permanentlyDeleteProjectDirectory(
     input: PermanentDeleteProjectDirectoryInput,

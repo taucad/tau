@@ -835,6 +835,39 @@ impl BrepSubject for Document {
         Ok(unsafe { transfer_occurrences(raw, product_count, false)? }.into())
     }
 
+    fn occurrence_bounds(&self, occurrence: u32) -> Result<Bounds, BackendError> {
+        self.require_occurrence(occurrence)?;
+        let mut output = ffi::OccurrenceFacts::default();
+        let mut error = ErrorBuffer::new();
+        // SAFETY: the document lives for &self, the index is in range, and
+        // the bridge skips null string outputs.
+        check(
+            unsafe {
+                ffi::geospec_occt_occurrence(
+                    self.raw.as_ptr(),
+                    occurrence as usize,
+                    &mut output,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    error.raw(),
+                )
+            },
+            &error,
+        )?;
+        let bounds = output.bounds;
+        if (0..3).any(|axis| {
+            !bounds.min[axis].is_finite()
+                || !bounds.max[axis].is_finite()
+                || bounds.min[axis] > bounds.max[axis]
+        }) {
+            return Err(backend_error(
+                "OCCT source occurrence placement/bounds are not finite and ordered.",
+            ));
+        }
+        Ok(bounds.into())
+    }
+
     fn faces(&self) -> Result<Rc<[LocatedFace]>, BackendError> {
         if let Some(faces) = self.whole_faces.get() {
             return Ok(Rc::clone(faces));

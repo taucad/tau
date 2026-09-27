@@ -959,23 +959,20 @@ fn components(subject: &Subject) -> Result<Partition, BackendError> {
     if leaves.len() < 2 {
         return Ok(Partition::Inconclusive(leaves.len()));
     }
-    let occurrences = subject
-        .source_occurrences()?
-        .expect("a BRep subject has source occurrences");
-    Ok(Partition::Components(
-        leaves
-            .into_iter()
-            .map(|id| {
-                let occurrence = &occurrences[id as usize];
-                Component {
-                    id,
-                    label: occurrence_label(occurrence, id as usize),
-                    mesh: None,
-                    bounds: occurrence.bounds,
-                }
+    // Ruling 32: only the faced leaves are measured; a parent or a zero-face
+    // leaf is structure and may have no finite box.
+    leaves
+        .into_iter()
+        .map(|id| {
+            Ok(Component {
+                id,
+                label: occurrence_label(&occurrences[id as usize], id as usize),
+                mesh: None,
+                bounds: brep.occurrence_bounds(id)?,
             })
-            .collect(),
-    ))
+        })
+        .collect::<Result<_, BackendError>>()
+        .map(Partition::Components)
 }
 
 fn named_identities(record: &MeshAnalysisRecord) -> Option<Vec<ComponentIdentity>> {
@@ -1451,14 +1448,31 @@ mod tests {
         );
     }
 
-    /// Occurrence structure only; any tessellation would be a failure.
+    /// Occurrence structure only; any tessellation would be a failure. A
+    /// zero-face row has no finite box, as OCCT's geometry-free leaf, so a
+    /// transfer that measures every occurrence fails.
     struct Occurrences(Rc<[crate::backend::brep::OccurrenceFacts]>);
 
     impl crate::backend::brep::BrepSubject for Occurrences {
         fn source_occurrences(
             &self,
         ) -> Result<Rc<[crate::backend::brep::OccurrenceFacts]>, BackendError> {
+            if self.0.iter().any(|row| row.face_count == 0) {
+                return Err(no_finite_bounds());
+            }
             Ok(Rc::clone(&self.0))
+        }
+        fn source_occurrence_structure(
+            &self,
+        ) -> Result<Rc<[crate::backend::brep::OccurrenceFacts]>, BackendError> {
+            Ok(Rc::clone(&self.0))
+        }
+        fn occurrence_bounds(&self, occurrence: u32) -> Result<Bounds, BackendError> {
+            let row = &self.0[occurrence as usize];
+            if row.face_count == 0 {
+                return Err(no_finite_bounds());
+            }
+            Ok(row.bounds)
         }
         fn faces(&self) -> Result<Rc<[crate::backend::brep::LocatedFace]>, BackendError> {
             unreachable!()
@@ -1483,6 +1497,13 @@ mod tests {
         }
     }
 
+    fn no_finite_bounds() -> BackendError {
+        BackendError {
+            kind: BackendErrorKind::ComputationFailed,
+            message: "Shape has no finite bounds.".into(),
+        }
+    }
+
     fn step_subject(occurrences: Vec<crate::backend::brep::OccurrenceFacts>) -> Subject {
         let mut subject = Subject::new(
             "leaves".into(),
@@ -1495,11 +1516,17 @@ mod tests {
 
     #[test]
     fn step_partition_is_leaf_structure_and_exact_boxes_without_tessellating() {
+        let mut b = occurrence("asm/b", Some(0), 6);
+        b.bounds = Bounds {
+            min: [5.0; 3],
+            max: [6.0; 3],
+        };
+        // The geometry-free leaf and the parent are never measured (ruling 32).
         let subject = step_subject(vec![
             occurrence("asm", None, 0),
             occurrence("asm/a", Some(0), 6),
             occurrence("asm/empty", Some(0), 0),
-            occurrence("asm/b", Some(0), 6),
+            b,
         ]);
         let Partition::Components(leaves) = components(&subject).unwrap() else {
             panic!("two leaves with faces partition the assembly");
@@ -1510,10 +1537,11 @@ mod tests {
                 .map(|component| (
                     component.id,
                     component.label.as_str(),
-                    component.mesh.is_none()
+                    component.mesh.is_none(),
+                    component.bounds.min[0]
                 ))
                 .collect::<Vec<_>>(),
-            [(1, "asm/a", true), (3, "asm/b", true)]
+            [(1, "asm/a", true, 0.0), (3, "asm/b", true, 5.0)]
         );
 
         // componentCount is structure (C3): one leaf with faces is one component.

@@ -1,9 +1,9 @@
-//! S13 re-pin gate for the circular-bore inventory (O4-1): sixteen adversarial
+//! S13 re-pin gate for the circular-bore inventory (O4-1): seventeen adversarial
 //! plates, each 40 x 40 x 20 with a through bore of radius 5 and material placed
 //! just outside or inside the bore cylinder (fixture provenance in
 //! `fixtures/circular-bores-adversarial/provenance.json`). A bore-interior
 //! certificate, a Boolean option or an OCCT re-pin must keep every disposition
-//! the exact Common decided, including the three hanging pins that stay
+//! the exact Common decided, including the four hanging pins that stay
 //! OBSTRUCTED_INTERIOR, and every candidate byte of the pinned bridge.
 use geospec_engine_native_core::backend::brep::{
     BrepSubject, CircularBoreDisposition, CircularBoreInventory, CircularBoreNonMember,
@@ -26,8 +26,9 @@ use Expected::{NonMember, Qualified, Unqualified};
 
 // Dispositions are the exact bridge Common's verdicts recorded by O4
 // (`adv_bores.jsonl`, bridge rows); the digest is FNV-1a 64 over `serialize`
-// on the M0 bridge (446ff8ba0, prefix delivery-n10-20260926).
-const CASES: [(&str, &[Expected], u64); 16] = [
+// on the M0 bridge (446ff8ba0, prefix delivery-n10-20260926). The tilted far
+// pin (review W1 R3) is pinned on the W2B authored-healing profile.
+const CASES: [(&str, &[Expected], u64); 17] = [
     ("a0-clean-through.step", &[Qualified], 0x778a_5cdd_697a_605e),
     ("a1-blind.step", &[Qualified], 0xdc94_c957_5c4e_68c4),
     ("b-pocket-wall-1.step", &[Qualified], 0x778a_5cdd_697a_605e),
@@ -100,6 +101,11 @@ const CASES: [(&str, &[Expected], u64); 16] = [
         &[NonMember(ExteriorCylinder), NonMember(ObstructedInterior)],
         0x371c_ecf6_47e5_4baa,
     ),
+    (
+        "f-tilted-far-pin.step",
+        &[NonMember(ExteriorCylinder), NonMember(ObstructedInterior)],
+        0x3b68_1b35_d300_6dfc,
+    ),
 ];
 
 /// Every field the adapter transfers, doubles as exact bits, in public-face order.
@@ -155,17 +161,33 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
     })
 }
 
-fn observe(name: &str) -> Result<CircularBoreInventory, String> {
+fn open(name: &str) -> Result<Document, String> {
     let bytes = std::fs::read(
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/circular-bores-adversarial")
             .join(name),
     )
     .map_err(|error| format!("fixture: {error}"))?;
-    let document = Document::from_step(&bytes).map_err(|error| format!("admission: {error:?}"))?;
-    document
+    Document::from_step(&bytes).map_err(|error| format!("admission: {error:?}"))
+}
+
+fn observe(name: &str) -> Result<CircularBoreInventory, String> {
+    open(name)?
         .circular_bores(16)
         .map_err(|error| format!("query: {error:?}"))
+}
+
+/// Dispositions in public-face order.
+fn dispositions(inventory: &CircularBoreInventory) -> Vec<Expected> {
+    inventory
+        .candidates
+        .iter()
+        .map(|candidate| match &candidate.disposition {
+            CircularBoreDisposition::Qualified(_) => Qualified,
+            CircularBoreDisposition::NonMember(reason) => NonMember(*reason),
+            CircularBoreDisposition::Unqualified(reason) => Unqualified(*reason),
+        })
+        .collect()
 }
 
 #[test]
@@ -181,16 +203,8 @@ fn adversarial_bores_keep_the_exact_common_dispositions_and_candidate_bytes() {
                 continue;
             }
         };
-        // Dispositions in public-face order (the digest pins every other transferred byte).
-        let actual: Vec<_> = inventory
-            .candidates
-            .iter()
-            .map(|candidate| match &candidate.disposition {
-                CircularBoreDisposition::Qualified(_) => Qualified,
-                CircularBoreDisposition::NonMember(reason) => NonMember(*reason),
-                CircularBoreDisposition::Unqualified(reason) => Unqualified(*reason),
-            })
-            .collect();
+        // The digest pins every other transferred byte.
+        let actual = dispositions(&inventory);
         if actual != *expected {
             failures.push(format!(
                 "{name}: dispositions {actual:?}, exact Common decided {expected:?}"
@@ -215,4 +229,25 @@ fn adversarial_bores_keep_the_exact_common_dispositions_and_candidate_bytes() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn the_certificate_clears_a_clean_bore_and_leaves_the_tilted_far_pin_to_the_common() {
+    // A certificate that never proves clearance fails on the clean through
+    // bore. The pin hangs 4 mm off the bore axis, its own axis tilted 9e-7 rad
+    // with the surface Location 1.4e6 mm down it: measured at that Location it
+    // sat 5.26 mm off and the bore certified clear; only the Common finds it.
+    for (name, expected, certified) in [
+        ("a0-clean-through.step", vec![Qualified], 1),
+        (
+            "f-tilted-far-pin.step",
+            vec![NonMember(ExteriorCylinder), NonMember(ObstructedInterior)],
+            0,
+        ),
+    ] {
+        let document = open(name).unwrap();
+        let inventory = document.circular_bores(16).unwrap();
+        assert_eq!(dispositions(&inventory), expected, "{name}");
+        assert_eq!(document.certified_clear_bores(), certified, "{name}");
+    }
 }

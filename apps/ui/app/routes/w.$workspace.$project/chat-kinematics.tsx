@@ -460,68 +460,73 @@ function LiveKinematicsUnit({
   );
 
   return (
-    <div className={cn('flex min-h-full flex-col pb-2', paneviewAttachedBodyClassName)}>
-      {mechanism === undefined ? null : (
-        <div className='flex flex-col gap-1 px-2.5 pt-2'>
-          <KinematicsToolbar kinematicsRef={kinematicsRef} unitId={unitId} unit={unit} />
-          <p className='text-xs text-muted-foreground'>
-            Root {mechanism.root} · {plural(Object.keys(mechanism.links).length, 'link')} ·{' '}
-            {plural(Object.keys(mechanism.joints).length, 'joint')}
-          </p>
-          {hasDrivers ? (
+    <div className={cn('h-full', paneviewAttachedBodyClassName)}>
+      <div
+        data-slot='kinematics-unit-scroller'
+        className='flex size-full scroll-shadows-y flex-col overflow-y-auto pb-2 [--scroll-fade-end:transparent] [--scroll-fade-size:28px]'
+      >
+        {mechanism === undefined ? null : (
+          <div className='flex flex-col gap-1 px-2.5 pt-2'>
+            <KinematicsToolbar kinematicsRef={kinematicsRef} unitId={unitId} unit={unit} />
             <p className='text-xs text-muted-foreground'>
-              Drag parts in the viewer to move them while this pane is open.
+              Root {mechanism.root} · {plural(Object.keys(mechanism.links).length, 'link')} ·{' '}
+              {plural(Object.keys(mechanism.joints).length, 'joint')}
             </p>
-          ) : null}
-        </div>
-      )}
-      <KinematicsLiveRegions
-        unit={unit}
-        isUpdating={isUpdating}
-        isBuilding={isBuilding}
-        mechanismIssue={mechanismIssue}
-      />
-      {mechanism === undefined ? (
-        isBuilding || mechanismIssue !== undefined ? null : (
-          <PanelEmptyState
-            icon={Rotate3d}
-            title='This model declares no mechanism'
-            description={
-              <>
-                Export a mechanism from the entry file, for example <code>export function mechanism</code>, to move its
-                parts here.
-              </>
-            }
-            className='min-h-40'
-          />
-        )
-      ) : (
-        <>
-          {visible.length === 0 ? (
-            <p className='px-2.5 py-2 text-sm text-muted-foreground'>
-              {degreesOfFreedom.length === 0
-                ? 'No movable joints. Every joint in this mechanism is fixed.'
-                : 'No matching joints'}
-            </p>
-          ) : null}
-          {drivers.length > 0 ? (
-            <section aria-labelledby={`${headingId}-drivers`}>
-              <h3 id={`${headingId}-drivers`} className='px-2.5 pt-2 text-xs font-medium text-muted-foreground'>
-                Drivers
-              </h3>
-              {drivers.map((dof) => row(dof, mechanism))}
-            </section>
-          ) : null}
-          {followers.length > 0 ? (
-            <section aria-labelledby={`${headingId}-followers`}>
-              <h3 id={`${headingId}-followers`} className='px-2.5 pt-2 text-xs font-medium text-muted-foreground'>
-                Followers
-              </h3>
-              {followers.map((dof) => row(dof, mechanism))}
-            </section>
-          ) : null}
-        </>
-      )}
+            {hasDrivers ? (
+              <p className='text-xs text-muted-foreground'>
+                Drag parts in the viewer to move them while this pane is open.
+              </p>
+            ) : null}
+          </div>
+        )}
+        <KinematicsLiveRegions
+          unit={unit}
+          isUpdating={isUpdating}
+          isBuilding={isBuilding}
+          mechanismIssue={mechanismIssue}
+        />
+        {mechanism === undefined ? (
+          isBuilding || mechanismIssue !== undefined ? null : (
+            <PanelEmptyState
+              icon={Rotate3d}
+              title='This model declares no mechanism'
+              description={
+                <>
+                  Export a mechanism from the entry file, for example <code>export function mechanism</code>, to move
+                  its parts here.
+                </>
+              }
+              className='min-h-40'
+            />
+          )
+        ) : (
+          <>
+            {visible.length === 0 ? (
+              <p className='px-2.5 py-2 text-sm text-muted-foreground'>
+                {degreesOfFreedom.length === 0
+                  ? 'No movable joints. Every joint in this mechanism is fixed.'
+                  : 'No matching joints'}
+              </p>
+            ) : null}
+            {drivers.length > 0 ? (
+              <section aria-labelledby={`${headingId}-drivers`}>
+                <h3 id={`${headingId}-drivers`} className='px-2.5 pt-2 text-xs font-medium text-muted-foreground'>
+                  Drivers
+                </h3>
+                {drivers.map((dof) => row(dof, mechanism))}
+              </section>
+            ) : null}
+            {followers.length > 0 ? (
+              <section aria-labelledby={`${headingId}-followers`}>
+                <h3 id={`${headingId}-followers`} className='px-2.5 pt-2 text-xs font-medium text-muted-foreground'>
+                  Followers
+                </h3>
+                {followers.map((dof) => row(dof, mechanism))}
+              </section>
+            ) : null}
+          </>
+        )}
+      </div>
     </div>
   );
 }

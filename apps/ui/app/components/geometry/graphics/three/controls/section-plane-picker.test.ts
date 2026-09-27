@@ -87,6 +87,23 @@ describe('section plane picker', () => {
     expect(picker.pick(600, 14 + 44)).toBeUndefined();
   });
 
+  it('should pick the tile under a point once a WebGPU renderer has drawn it with reversed depth', () => {
+    const renderer = createRenderer(true);
+    // Mirrors the WebGPU renderer, which puts its coordinate system and reversed depth on the camera it draws with.
+    renderer.render.mockImplementation((_scene, camera) => {
+      if (camera instanceof THREE.OrthographicCamera) {
+        camera.coordinateSystem = THREE.WebGPUCoordinateSystem;
+        Object.assign(camera, { _reversedDepth: true });
+        camera.updateProjectionMatrix();
+      }
+    });
+    const picker = createSectionPlanePicker();
+    picker.render({ renderer, camera: createTopCamera(), cubeViewport: [704, canvasHeight - 96, 96, 96] });
+
+    expect(picker.camera).toHaveProperty('reversedDepth', true);
+    expect(picker.pick(620 + 44, 508 + 44)).toBe('xy');
+  });
+
   it('should stand the current plane forward and the others back until hovered', () => {
     const picker = createSectionPlanePicker();
     const renderer = createRenderer(false);

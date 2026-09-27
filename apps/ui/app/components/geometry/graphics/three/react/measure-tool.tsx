@@ -31,6 +31,7 @@ import {
 } from '#hooks/use-graphics.js';
 import { createRafCoalescer } from '#components/geometry/graphics/three/utils/raf-coalescer.js';
 import type { RafCoalescer } from '#components/geometry/graphics/three/utils/raf-coalescer.js';
+import { setRaycasterFromCamera } from '#components/geometry/graphics/three/utils/raycaster-from-camera.js';
 import {
   createRaycastClipTest,
   raycastFirstVisibleMeshHit,
@@ -236,7 +237,7 @@ export function MeasureTool(): React.JSX.Element {
       mouseRef.current.x = ((clientX - rect.left) / rect.width) * 2 - 1;
       mouseRef.current.y = -((clientY - rect.top) / rect.height) * 2 + 1;
 
-      raycasterRef.current.setFromCamera(mouseRef.current, camera);
+      setRaycasterFromCamera(raycasterRef.current, mouseRef.current, camera);
 
       // Read here, not selected: a section drag step must not re-render the tool or reset its pointer coalescer.
       const clipping = resolveSectionViewRaycastClip(graphicsActor.getSnapshot().context, renderFrame);

@@ -1,5 +1,5 @@
 import type { CanvasProps, RootState } from '@react-three/fiber';
-import { Canvas } from '@react-three/fiber';
+import { Canvas, events as createPointerEvents } from '@react-three/fiber';
 import { useCallback, useLayoutEffect, useMemo, useState } from 'react';
 import type { WebGPURenderer } from 'three/webgpu';
 import { ActorBridge } from '#components/geometry/graphics/three/actor-bridge.js';
@@ -17,6 +17,7 @@ import {
   infiniteGridFadeEndVisibleSpans,
   infiniteGridPresentationPlaneByUpDirection,
 } from '#components/geometry/graphics/three/utils/infinite-grid-frame.js';
+import { setRaycasterFromCamera } from '#components/geometry/graphics/three/utils/raycaster-from-camera.js';
 import { WebGpuInspectorOverlay } from '#components/geometry/graphics/three/webgpu-inspector-overlay.js';
 import { useFeature } from '#flags/use-feature.js';
 import { cn } from '@taucad/ui/utils/cn';
@@ -25,6 +26,22 @@ import { useCameraRig } from '#hooks/use-graphics.js';
 export type ThreeCanvasInstanceProps = ThreeContextProperties & {
   /** Parent bumps canvas key — remount this instance fresh after real device/context loss retry. */
   readonly onRetry: () => void;
+};
+
+/**
+ * R3F's pointer events with rays set by {@link setRaycasterFromCamera}: three's `setFromCamera` starts an orthographic
+ * ray beyond the scene under WebGPU reversed depth, so model hover, selection and clicks missed in orthographic view.
+ * ponytail: an `eventPrefix` Canvas replaces this compute in R3F's own `onCreated`; no caller sets one.
+ */
+const tauPointerEvents: NonNullable<CanvasProps['events']> = (store) => {
+  const manager = createPointerEvents(store);
+  return {
+    ...manager,
+    compute(event, state, previous) {
+      manager.compute?.(event, state, previous);
+      setRaycasterFromCamera(state.raycaster, state.pointer, state.camera);
+    },
+  };
 };
 
 /**
@@ -111,6 +128,7 @@ export function ThreeCanvasInstance({
       {...canvasProperties}
       camera={cameraRig.activeCamera}
       gl={glProperty}
+      events={tauPointerEvents}
       dpr={dpr}
       frameloop='demand'
       className={cn('bg-background', className)}

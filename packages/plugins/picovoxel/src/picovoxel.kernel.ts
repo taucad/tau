@@ -60,8 +60,8 @@ const picovoxelBuild = {
   multi: '987da3b8d16a83f532fa108b2a5336e795e6f8a3571c1c419ddcfb5c633985c6',
 } as const;
 
-/** Kernel version: the plugin's handle semantics plus the PicoVoxel build it runs. */
-const kernelVersion = `1.0.0+picovoxel.${picovoxelBuild.version}.serial-${picovoxelBuild.serial.slice(0, 12)}.multi-${picovoxelBuild.multi.slice(0, 12)}`;
+/** Kernel version: the plugin's handle semantics (1.1: zero-area triangles dropped) plus the PicoVoxel build it runs. */
+const kernelVersion = `1.1.0+picovoxel.${picovoxelBuild.version}.serial-${picovoxelBuild.serial.slice(0, 12)}.multi-${picovoxelBuild.multi.slice(0, 12)}`;
 
 const kernelId = 'picovoxel';
 const defaultVoxelSize = 0.5;

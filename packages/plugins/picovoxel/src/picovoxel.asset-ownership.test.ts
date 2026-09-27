@@ -24,7 +24,7 @@ describe('PicoVoxel asset ownership', () => {
     const { version } = await resolveRuntimePluginDefinition('kernel', picovoxelKernel());
 
     expect(version).toBe(
-      `1.0.0+picovoxel.${installedVersion}.serial-${digest('pico.wasm').slice(0, 12)}.multi-${digest('pico-multi.wasm').slice(0, 12)}`,
+      `1.1.0+picovoxel.${installedVersion}.serial-${digest('pico.wasm').slice(0, 12)}.multi-${digest('pico-multi.wasm').slice(0, 12)}`,
     );
   });
 

@@ -132,8 +132,10 @@ const buildNode = (shape: PicovoxelShapeSnapshot, options: GeometryOutputTransfo
       // The writer copies from this view into the GLB, so no copy is made here.
       indices: shape.triangles,
       material: {
-        // ponytail: double-sided until a section-view check proves the native picogk plugin's
-        // `false` renders voxel meshes correctly (D30).
+        // Double-sided, like jscad and replicad (D30 check): the section view rejects a cap whose cut
+        // leaves unresolved edges (one-voxel lattice walls are non-manifold), and hides caps while a
+        // drag recomputes them. Back faces then shade the cut instead of leaving a see-through hole.
+        // Back-face culling would pay off only at >=5M triangles, which needs a real-GPU benchmark first.
         doubleSided: true,
         pbrMetallicRoughness: {
           baseColorFactor: [...cadMaterialDefaults.baseColorFactor],

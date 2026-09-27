@@ -223,7 +223,7 @@ beforeEach(() => {
 describe('picovoxel kernel', () => {
   describe('identity', () => {
     it('should key the kernel version on the PicoVoxel version and both artifact digests', () => {
-      expect(definition.version).toMatch(/^1\.0\.0\+picovoxel\.0\.1\.0\.serial-[\da-f]{12}\.multi-[\da-f]{12}$/);
+      expect(definition.version).toMatch(/^1\.1\.0\+picovoxel\.0\.1\.0\.serial-[\da-f]{12}\.multi-[\da-f]{12}$/);
     });
 
     it('should expose neither the session factories nor three to author code', () => {

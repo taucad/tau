@@ -22,6 +22,7 @@ export function ParameterGroupCard({
   headerProps,
   headerClassName,
   headerActions,
+  bodyClassName,
   children,
 }: {
   readonly title: string;
@@ -39,6 +40,8 @@ export function ParameterGroupCard({
   readonly headerClassName?: string;
   /** Controls beside the trigger, outside it, such as an array item's remove button. */
   readonly headerActions?: ReactNode;
+  /** Layout for the body's children, such as the composite grid. */
+  readonly bodyClassName?: string;
   readonly children: ReactNode;
 }): React.JSX.Element {
   return (
@@ -81,7 +84,12 @@ export function ParameterGroupCard({
       </div>
       <CollapsibleContent data-slot='parameter-group-content' className={disclosureMotion}>
         {/* Padding sits inside the animated content, so the height animation starts without a jump. */}
-        <div className='border-t border-border/70 py-1 [&>.field-group]:mx-1'>{children}</div>
+        <div
+          data-slot='parameter-group-body'
+          className={cn('border-t border-border/70 py-1 [&>.field-group]:mx-1', bodyClassName)}
+        >
+          {children}
+        </div>
       </CollapsibleContent>
     </Collapsible>
   );

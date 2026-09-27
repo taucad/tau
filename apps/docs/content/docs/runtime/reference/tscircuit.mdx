@@ -1,0 +1,76 @@
+---
+title: tscircuit
+description: Author electronics boards in TSX and render them as 3D, schematic, or PCB.
+docType: reference
+icon: lucide:cpu
+wordBudgetOverride: 450
+---
+
+tscircuit is Tau's EDA kernel. `@taucad/tscircuit` claims `.tsx` and `.jsx` files, bundles them with the runtime bundler, evaluates the board once with `@tscircuit/core`, and keeps the settled circuit JSON as the native handle. It runs in browser workers and Node hosts and never reaches the network while rendering or exporting.
+
+## Authoring contract
+
+Each entry file default-exports one board component. `React` is provided as a global by the worker, so the import is optional. Every component needs a unique `name`; footprints are footprinter strings such as `0402`, `0603`, `soic8`, or `dip8`; positions are millimetres.
+
+```tsx
+export default () => (
+  <board width='20mm' height='20mm'>
+    <resistor name='R1' resistance='1k' footprint='0402' pcbX={-4} pcbY={0} />
+    <led name='LED1' color='red' footprint='0603' pcbX={4} pcbY={0} />
+    <trace from='.R1 > .pin2' to='.LED1 > .anode' />
+  </board>
+);
+```
+
+Traces use tscircuit selectors (`.R1 > .pin1`, `net.GND`). Optional `defaultParameters` exports become editable parameters that Tau passes to the component as props.
+
+## Outputs and the `output` render option
+
+The kernel declares one render option:
+
+```typescript
+render: {
+  optionsSchema: z.object({ output: z.enum(['3d', 'schematic', 'pcb']).default('3d') });
+}
+```
+
+| `output`    | Artifact                        |
+| ----------- | ------------------------------- |
+| `3d`        | GLB board with component bodies |
+| `schematic` | Schematic SVG                   |
+| `pcb`       | PCB layout SVG                  |
+
+Pass it through `client.render({ source, renderOptions: { output: 'pcb' } })`. Each value is its own render identity: the runtime caches output kinds separately and never re-evaluates the circuit when switching. Exports derive from the retained circuit JSON: `glb`, `csv` (BOM), `txt` (readable netlist), and `json` (circuit JSON).
+
+## Offline behaviour
+
+The circuit uses the local autorouter and no parts engine. `fetch` is disabled during evaluation and GLB conversion, so `http(s)://` footprint and `cadModel` URLs are never requested; each attempt becomes a `warning` naming the URL. Library references (`kicad:`, `jlcpcb:`) produce a `warning` and an unplaced part. The render completes with local bodies and bounding boxes.
+
+## Install note for zod
+
+Several tscircuit packages (`@tscircuit/props`, `@tscircuit/circuit-json-util`, `@tscircuit/soup-util`, `circuit-json`) target the zod 3 API but declare zod as a loose peer or not at all. In a zod 4 workspace they resolve zod 4 and fail at load. Until upstream manifests are zod-4 clean, add this pnpm hook to the consumer's `.pnpmfile.cjs` so zod 3 nests under them:
+
+```javascript
+const zod3Consumers = new Set([
+  '@tscircuit/props',
+  '@tscircuit/circuit-json-util',
+  '@tscircuit/soup-util',
+  'circuit-json',
+]);
+
+function readPackage(pkg) {
+  if (zod3Consumers.has(pkg.name)) {
+    delete pkg.peerDependencies?.zod;
+    pkg.dependencies = { ...pkg.dependencies, zod: '^3.25.76' };
+  }
+  return pkg;
+}
+
+module.exports = { hooks: { readPackage } };
+```
+
+## Related
+
+- [Choose a Kernel](../guides/choosing-a-kernel)
+- [Kernel Plugins](../api/kernels)
+- [Kernel Selection](../concepts/kernel-selection)

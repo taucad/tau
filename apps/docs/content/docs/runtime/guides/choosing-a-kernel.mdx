@@ -20,6 +20,7 @@ Pick kernels by source language or import format, and install only the packages 
 | `@taucad/rhino`       | 3DM                                       | Rhino file import                            |
 | `@taucad/assimp`      | Mesh and scene formats                    | OBJ, FBX, STL, PLY, DAE, and related imports |
 | `@taucad/build123d`   | Python using Build123d                    | Native desktop BRep, topology, and STEP      |
+| `@taucad/tscircuit`   | TSX using tscircuit                       | Electronics: 3D board, schematic, PCB, BOM   |
 
 There is no catch-all Tau kernel. Every first-party import extension has one explicit owner.
 
@@ -54,6 +55,10 @@ Use a direct role factory instead for app-local capabilities, isolated tests, or
 ## Choose Build123d only in a native host
 
 Build123d needs a packaged CPython payload and a project trust grant, so only a native host such as Tau Desktop can advertise it. Its `.py` files skip the JavaScript bundler entirely -- see [Build123d](../reference/build123d) for the authoring contract.
+
+## Choose tscircuit for electronics
+
+A `.tsx` or `.jsx` file exports a board component. The `output` render option picks the artifact: `3d` (default) meshes a GLB board, `schematic`/`pcb` return SVG, each a separate render identity. Rendering is offline: local autorouter, no parts engine; URL footprints and models are never fetched; each attempt or `kicad:`/`jlcpcb:` reference becomes a warning. See [tscircuit](../reference/tscircuit) for the authoring contract and zod note.
 
 ## Related
 

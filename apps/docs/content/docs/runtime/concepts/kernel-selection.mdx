@@ -42,7 +42,7 @@ For each kernel plugin in registration order:
 
 1. Skip unless the file extension is in the plugin's `extensions`.
 2. A `'*'` catch-all is deferred to pass 3 when any registered kernel declares `builtinModuleNames`, so import analysis gets first chance; with no such kernels registered, the catch-all matches here directly.
-3. No `detectImport` regex: select this kernel immediately. Examples: `.scad` selects OpenRSCAD, `.kcl` selects Zoo, and a desktop runtime advertising Build123d selects `.py`.
+3. No `detectImport` regex: select this kernel immediately. Examples: `.scad` selects OpenRSCAD, `.kcl` selects Zoo, `.tsx` selects tscircuit, and a desktop runtime advertising Build123d selects `.py`.
 4. With `detectImport`: read the entry file and test the regex. A match selects the kernel -- `.ts` containing `import ... from 'replicad'` selects Replicad.
 
 Cost: at most one file read. No bundling.

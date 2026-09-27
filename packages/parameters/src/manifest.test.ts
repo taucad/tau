@@ -127,6 +127,27 @@ it('admits nested partial values without requiring untouched siblings', async ()
   }).not.toThrow();
 });
 
+it('should admit decimal multipleOf steps despite binary floating-point remainders', async () => {
+  // OpenSCAD Customizer `Overall_Size = 50; // [10:0.1:200]`; `50 % 0.1` is ≈ 0.0999… in binary64.
+  const manifest = await compile({
+    ...declaration(),
+    schema: {
+      ...declaration().schema,
+      properties: { size: { type: 'double', ucumUnit: 'mm', minimum: 10, maximum: 200, multipleOf: 0.1 } },
+      required: ['size'],
+    },
+    defaults: { size: 50 },
+    bindings: {},
+  });
+
+  expect(() => {
+    admitParameterValues(manifest, { size: 10.6 });
+  }).not.toThrow();
+  expect(() => {
+    admitParameterValues(manifest, { size: 10.25 });
+  }).toThrow(ParameterAdmissionError);
+});
+
 describe('native parameter manifest', () => {
   it('binds unknown numeric and array leaves while preserving unsupported decimal execution', async () => {
     const producer = declaration();

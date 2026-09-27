@@ -18,10 +18,12 @@ export type PrinterProgram = Readonly<{
   program: ToolpathProgram;
   /** The X1C plate the file was sliced for; `undefined` when it names none Tau knows. */
   slicedPlate: PrinterPlateModel | undefined;
+  /** `#RRGGBB` of the filament the file was sliced with; `undefined` when it records none. */
+  filamentColor: string | undefined;
 }>;
 
 /** Parse the G-code inside a printer file and resolve the plate it was sliced for. */
 export const loadPrinterProgram = (bytes: Uint8Array<ArrayBuffer>, kind: PrinterFileKind): PrinterProgram => {
-  const { gcode, slicedPlate } = readPrinterFile(bytes, kind);
-  return { program: parseGcode(gcode), slicedPlate };
+  const { gcode, slicedPlate, filamentColor } = readPrinterFile(bytes, kind);
+  return { program: parseGcode(gcode), slicedPlate, filamentColor };
 };

@@ -4,11 +4,8 @@ import {
   defaultPrinterPlate,
   plateForBedType,
   plateModelMatrix,
-  readGcodeBedType,
   x1cPlates,
 } from '#components/printer/printer-plates.js';
-
-const encode = (text: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(text);
 
 describe('plateForBedType', () => {
   it('should map Bambu Studio names, its plate_1.json values and Tau ids to the same plate', () => {
@@ -42,24 +39,6 @@ describe('plateForBedType', () => {
       'High Temp Plate',
       'Textured PEI Plate',
     ]);
-  });
-});
-
-describe('readGcodeBedType', () => {
-  it("should read Bambu Studio's leading config block", () => {
-    expect(readGcodeBedType(encode('; HEADER_BLOCK_START\n; curr_bed_type = Textured PEI Plate\nG28\n'))).toBe(
-      'Textured PEI Plate',
-    );
-  });
-
-  it('should read a config block at the end of a long file and ignore the middle', () => {
-    const middle = 'G1 X1 Y1\n'.repeat(20_000);
-    expect(readGcodeBedType(encode(`G28\n${middle}; curr_bed_type = Cool Plate\n`))).toBe('Cool Plate');
-    expect(readGcodeBedType(encode(`G28\n${middle}; curr_bed_type = Cool Plate\n${middle}`))).toBeUndefined();
-  });
-
-  it('should report nothing when no setting is present', () => {
-    expect(readGcodeBedType(encode('G28\nG1 X1 F600\n'))).toBeUndefined();
   });
 });
 

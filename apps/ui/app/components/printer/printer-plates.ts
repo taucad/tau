@@ -74,21 +74,3 @@ export const plateForBedType = (name: string | undefined): PrinterPlateModel | u
     ? x1cPlates.find(({ bedTypeNames }) => bedTypeNames.some((candidate) => candidate.toLowerCase() === wanted))
     : undefined;
 };
-
-/** Bytes at each end of the G-code searched for the setting: Bambu Studio writes its config block first, Orca last. */
-const configScanBytes = 64 * 1024;
-const bedTypeSetting = /^;\s*curr_bed_type\s*=\s*(.+?)\s*$/mu;
-
-/**
- * The `; curr_bed_type = …` setting from a slicer's config block, read from
- * the first and last 64 KiB of the G-code only.
- *
- * @param gcode - The plate G-code.
- * @returns The recorded plate name, or `undefined` when neither end states one.
- */
-export const readGcodeBedType = (gcode: Uint8Array<ArrayBuffer>): string | undefined => {
-  const decoder = new TextDecoder();
-  const head = decoder.decode(gcode.subarray(0, configScanBytes));
-  const tail = gcode.byteLength > configScanBytes ? decoder.decode(gcode.subarray(-configScanBytes)) : '';
-  return (bedTypeSetting.exec(head) ?? bedTypeSetting.exec(tail))?.[1];
-};

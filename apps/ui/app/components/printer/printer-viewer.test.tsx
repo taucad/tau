@@ -319,6 +319,29 @@ describe('PrinterViewer', () => {
     expect(latestSceneProps().store).toBe(initial.store);
   });
 
+  it("should tint the toolpath with the file's own filament colour ahead of the loaded spool", async () => {
+    mocks.live = liveState({ isActive: false, printsThisFile: false, runState: 'idle' });
+    const coloured = writeBambuContainer({
+      // oxlint-disable-next-line tau-lint/no-hardcoded-color -- the colour Bambu Studio records for the model
+      gcode: `; CONFIG_BLOCK_START\n; filament_colour = #F5A623\n; CONFIG_BLOCK_END\n${fixtureGcode({ layers: 3 })}`,
+      modelName: 'fixture',
+    });
+    render(
+      <TooltipProvider>
+        <PrinterViewer
+          name={name}
+          kind='container'
+          revision={1}
+          readAll={async () => coloured}
+          renderPane={renderPane}
+        />
+      </TooltipProvider>,
+    );
+    await screen.findByRole('region', { name: `Printer simulation: ${name}` });
+    // oxlint-disable-next-line tau-lint/no-hardcoded-color -- the colour the file records
+    expect(latestSceneProps().filamentColor).toBe('#F5A623');
+  });
+
   it('should say when the file records no plate and draw the Textured PEI Plate', async () => {
     const user = userEvent.setup();
     const unrecorded = writeBambuContainer({ gcode: fixtureGcode({ layers: 3 }), modelName: 'fixture' });

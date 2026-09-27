@@ -1,10 +1,12 @@
 //! V1/M1 end to end: STEP `toBeWatertight` and `toHaveMeshIntegrity` answer
 //! from the exact shell-closure facet (one BRep unit, no tessellation), and
 //! STEP integrity refuses the mesh-only options. Expected counts are O2's
-//! independent v1 probe rows (2026-09-26 OCCT substrate run).
+//! independent v1 probe rows (2026-09-26 OCCT substrate run). Ruling 32:
+//! tessellated-only products (faces with no surface) refuse every exact
+//! claim, and the facet never proves a faceless or edgeless subject closed.
 use geospec_engine_native_core::backend::{csg::*, BackendError, TriangleMesh};
 use geospec_engine_native_core::{Engine, EngineConfig};
-use geospec_engine_native_occt::OcctConnector;
+use geospec_engine_native_occt::{BrepSubject, Document, OcctConnector};
 use serde_json::{json, Value};
 use std::path::PathBuf;
 
@@ -64,13 +66,17 @@ const MESH_ONLY: [&str; 4] = [
     "triangleCount",
 ];
 
-fn admitted(name: &str) -> (Engine, String) {
-    let source = std::fs::read(
+fn fixture(name: &str) -> Vec<u8> {
+    std::fs::read(
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures")
             .join(name),
     )
-    .expect("retained fixture must be readable");
+    .expect("retained fixture must be readable")
+}
+
+fn admitted(name: &str) -> (Engine, String) {
+    let source = fixture(name);
     let mut engine = Engine::with_backends(
         EngineConfig::entry(),
         Box::new(OcctConnector),
@@ -94,12 +100,22 @@ fn admitted(name: &str) -> (Engine, String) {
 
 /// One positive claim, cold and warm; the result and the observations after it.
 fn claim(engine: &Engine, hash: &str, capability: &str, payload: Value) -> (Value, Value) {
+    claim_with(engine, hash, capability, payload, "positive")
+}
+
+fn claim_with(
+    engine: &Engine,
+    hash: &str,
+    capability: &str,
+    payload: Value,
+    polarity: &str,
+) -> (Value, Value) {
     let request = serde_json::to_vec(&json!({
         "method": "submitClaims", "requestId": "closure-query", "protocolVersion": 3,
         "registryVersion": 5, "canonicalProfile": "geospec-jcs-v1",
         "plan": {"subjects": [{"slot": "subject", "subjectHash": hash}], "claims": [{
             "claimId": "c", "capability": capability, "subjectSlots": ["subject"],
-            "payload": payload, "polarity": "positive", "workUnitBudget": 8000000
+            "payload": payload, "polarity": polarity, "workUnitBudget": 8000000
         }]}
     }))
     .unwrap();
@@ -302,4 +318,231 @@ fn step_validity_reads_the_closure_facet() {
             assert_eq!(measured["closedShells"], false, "{name}");
         }
     }
+}
+
+/// Every capability that measures the admitted faces or edges, with a valid
+/// payload (the bench authority cases' shapes).
+fn exact_claims() -> Vec<(&'static str, Value)> {
+    vec![
+        (
+            "toHaveBoundingBox",
+            json!({"kind": "boundingBox", "expected": {"size": [10, 20, 30], "tolerance": 0.001}}),
+        ),
+        (
+            "toHaveConnectedComponents",
+            json!({"kind": "connectedComponents", "expected": {"count": 1, "toleranceMm": 0.001}}),
+        ),
+        (
+            "toBeWatertight",
+            json!({"kind": "watertight", "expected": true}),
+        ),
+        (
+            "toHaveNoComponentInterference",
+            json!({"kind": "componentInterference", "expected": {}}),
+        ),
+        (
+            "toHaveAssemblyOccurrences",
+            json!({"kind": "assemblyOccurrences", "expected": {"occurrences": [{"count": 1, "name": "Product 1"}]}}),
+        ),
+        (
+            "toHaveSpatialRelationships",
+            json!({"kind": "spatialRelationships", "expected": {"relationships": [{"kind": "clearance", "max": 0.3, "min": 0.1, "subject": "bolt.shank", "target": "plate.hole", "tolerance": 0.001}]}}),
+        ),
+        (
+            "toHaveMeshIntegrity",
+            json!({"kind": "meshIntegrity", "expected": {}}),
+        ),
+        (
+            "toHaveSurfaceArea",
+            json!({"kind": "surfaceArea", "expected": {"value": 2200, "tolerance": 0.001}}),
+        ),
+        (
+            "toHaveVolume",
+            json!({"kind": "volume", "expected": {"value": 6000, "tolerance": 0.001}}),
+        ),
+        (
+            "toHaveMass",
+            json!({"kind": "mass", "expected": {"density": 1, "value": 6000, "tolerance": 0.001}}),
+        ),
+        (
+            "toHaveCenterOfMass",
+            json!({"kind": "centerOfMass", "expected": {"point": [5, 10, 15], "tolerance": 0.001}}),
+        ),
+        (
+            "toBeValidBrep",
+            json!({"kind": "validBrep", "expected": {}}),
+        ),
+        (
+            "toHaveTopologyCounts",
+            json!({"kind": "topologyCounts", "expected": {}}),
+        ),
+        (
+            "toHavePlanarFace",
+            json!({"kind": "planarFace", "expected": {"normal": [0, 0, 1], "offset": 0}}),
+        ),
+        (
+            "toHaveCylindricalFace",
+            json!({"kind": "cylindricalFace", "expected": {"axis": "z", "radius": 1}}),
+        ),
+        (
+            "toHaveCircularHole",
+            json!({"kind": "circularHole", "expected": {"axis": "z", "diameter": 1}}),
+        ),
+        (
+            "toHaveCircularHolePattern",
+            json!({"kind": "circularHolePattern", "expected": {"count": 1, "holeDiameter": 1}}),
+        ),
+        (
+            "toHaveChamferFeature",
+            json!({"kind": "chamferFeature", "expected": {"distance": 1}}),
+        ),
+        (
+            "toHaveFilletFeature",
+            json!({"kind": "filletFeature", "expected": {"radius": 1}}),
+        ),
+        (
+            "toHaveMinimumWallThickness",
+            json!({"kind": "minimumWallThickness", "expected": {"value": {"greaterThanOrEqual": 5}}}),
+        ),
+        (
+            "toHaveVoidContinuity",
+            json!({"kind": "voidContinuity", "expected": {"material": ["guide"], "minCrossSection": 1, "path": [[0, 0, 3], [0, 0, 42]]}}),
+        ),
+        (
+            "toSatisfyParallelPlaneDistance",
+            json!({"contract": "geospec.pmi.parallel-plane-distance/v1"}),
+        ),
+        ("analyzeBrep", Value::Null),
+        ("inspectGeometry", json!({"selectors": ["housing.bore"]})),
+        ("analyzeMeshOverlap", json!({"tolerance": 0.001})),
+    ]
+}
+
+#[test]
+fn tessellated_only_products_refuse_every_exact_claim_before_any_work() {
+    // Ruling 32: faces with no surface (a TESSELLATED_SOLID read under
+    // OnNoBRep) carry no exact geometry. Head measured volume on the file's
+    // triangles as "brep", passed the open box as watertight and counted zero
+    // components; every exact claim now refuses with one named refusal.
+    for (name, surfaceless) in [
+        ("read-profile/tess-only-open.step", 5),
+        ("read-profile/tess-only-closed.step", 6),
+        ("read-profile/box-tessellated-only.step", 6),
+    ] {
+        let document = Document::from_step(&fixture(name)).unwrap();
+        assert_eq!(
+            document.admission_facts().unwrap().surfaceless_faces,
+            surfaceless
+        );
+        for (capability, payload) in exact_claims() {
+            let (engine, hash) = admitted(name);
+            let (result, observations) = claim(&engine, &hash, capability, payload);
+            assert_eq!(result["status"], "refused", "{name} {capability}: {result}");
+            assert!(result.get("evidence").is_none(), "{name} {capability}");
+            let diagnostics = result["diagnostics"].as_array().unwrap();
+            assert_eq!(diagnostics.len(), 1, "{name} {capability}: {result}");
+            assert_eq!(diagnostics[0]["code"], "GEOSPEC_EVIDENCE_UNSUPPORTED");
+            assert_eq!(
+                diagnostics[0]["details"],
+                json!({
+                    "matcher": capability, "missing": "exact BRep geometry",
+                    "surfacelessFaces": surfaceless
+                }),
+                "{name} {capability}"
+            );
+            assert_exact_work(&format!("{name} {capability}"), &observations, "0");
+        }
+        // Units, product structure and subject diagnostics read no face.
+        let (engine, hash) = admitted(name);
+        for (capability, payload) in [
+            (
+                "toHaveStepUnits",
+                json!({"kind": "stepUnits", "expected": {"unit": "mm"}}),
+            ),
+            (
+                "toHaveProductStructure",
+                json!({"kind": "productStructure", "expected": {"count": 0}}),
+            ),
+            (
+                "toHaveNoDiagnostics",
+                json!({"kind": "noDiagnostics", "expected": {}}),
+            ),
+        ] {
+            let (result, _) = claim(&engine, &hash, capability, payload);
+            assert_eq!(result["status"], "passed", "{name} {capability}: {result}");
+        }
+    }
+    // A BRep read beside its linked tessellation keeps exact faces only.
+    let document =
+        Document::from_step(&fixture("read-profile/box-brep-plus-tessellation.step")).unwrap();
+    assert_eq!(document.admission_facts().unwrap().surfaceless_faces, 0);
+}
+
+#[test]
+fn the_facet_never_proves_a_faceless_or_edgeless_group_closed() {
+    // A shell whose faces have no counted edge use proves nothing closed.
+    let document = Document::from_step(&fixture("read-profile/tess-only-closed.step")).unwrap();
+    let closure = BrepSubject::closure(&document).unwrap();
+    assert_eq!(
+        (
+            closure.shells,
+            closure.free_faces,
+            closure.open_edges,
+            closure.nonmanifold_edges
+        ),
+        (1, 0, 0, 0)
+    );
+    assert_eq!(closure.failing.len(), 1);
+    let group = &closure.failing[0];
+    assert!(!group.free_faces && group.samples.is_empty());
+    assert_eq!((group.open_edges, group.nonmanifold_edges), (0, 0));
+    assert_eq!(
+        BrepSubject::validity(&document).unwrap().closed_shells,
+        Some(false)
+    );
+
+    // A product with an edge and no face encloses nothing: W2B's mesh route
+    // failed it (no welded edge), and the exact route fails it again.
+    let name = "read-profile/wireframe-only.step";
+    let document = Document::from_step(&fixture(name)).unwrap();
+    assert_eq!(document.admission_facts().unwrap().surfaceless_faces, 0);
+    let closure = BrepSubject::closure(&document).unwrap();
+    assert_eq!((closure.shells, closure.free_faces), (0, 0));
+    assert!(closure.failing.is_empty());
+    let (engine, hash) = admitted(name);
+    let (result, observations) = claim(
+        &engine,
+        &hash,
+        "toBeWatertight",
+        json!({"kind": "watertight", "expected": true}),
+    );
+    assert_eq!(result["status"], "failed", "{result}");
+    assert_eq!(
+        result["evidence"]["measured"],
+        json!({"watertight": false, "openBoundaryEdges": 0, "nonManifoldEdges": 0, "shells": 0, "freeFaces": 0})
+    );
+    assert_eq!(result["evidence"]["witnesses"]["failingShells"], json!([]));
+    let diagnostic = &result["diagnostics"][0];
+    assert_eq!(diagnostic["code"], "GEOSPEC_WATERTIGHT_MISMATCH");
+    assert_eq!(
+        diagnostic["message"],
+        "The exact BRep topology has no face, so it encloses no closed manifold surface."
+    );
+    assert_exact_work(name, &observations, "1");
+    let (result, _) = claim_with(
+        &engine,
+        &hash,
+        "toBeWatertight",
+        json!({"kind": "watertight", "expected": true}),
+        "negative",
+    );
+    assert_eq!(result["status"], "passed", "{result}");
+    let (result, _) = claim(
+        &engine,
+        &hash,
+        "toHaveMeshIntegrity",
+        json!({"kind": "meshIntegrity", "expected": {"watertight": true}}),
+    );
+    assert_eq!(result["status"], "failed", "{result}");
+    assert_eq!(result["evidence"]["measured"], json!({"watertight": false}));
 }

@@ -274,7 +274,8 @@ typedef struct geospec_occt_validity_facts {
 
 // V1 shell closure: per unique shell definition, face uses per edge, skipping
 // degenerated and INTERNAL/EXTERNAL uses; odd is open, three or more is
-// non-manifold. Faces outside any shell form one group.
+// non-manifold. Faces outside any shell form one group. A group with no
+// counted use fails with no open or non-manifold edge.
 typedef struct geospec_occt_closure_facts {
   uint32_t shell_count;
   uint32_t free_face_count;
@@ -604,11 +605,12 @@ size_t geospec_occt_triangulated_face_count(
 
 // Admission keeps source identity and addresses only. Occurrence bounds, edge
 // addresses and whole-face numerics are computed on first demand by their
-// getters, which may then return GEOSPEC_OCCT_NATIVE_ERROR.
+// getters, which may then return GEOSPEC_OCCT_NATIVE_ERROR. The surfaceless
+// face count (tessellated-only products, ruling 32) is taken at admission.
 int geospec_occt_admission_facts(
     const geospec_occt_document* document,
     double* out_source_unit_to_millimeters, size_t* out_occurrence_count,
-    geospec_occt_string* source_unit,
+    size_t* out_surfaceless_face_count, geospec_occt_string* source_unit,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 int geospec_occt_step_subject_metadata(
     const geospec_occt_document* document, size_t* out_source_byte_length,

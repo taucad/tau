@@ -319,7 +319,8 @@ it('accepts the project Runtime mesh', async () => {
     try {
       const subject = await load({ source: Uint8Array.from(fixtureBytes), format: 'glb', sourceUnit: 'mm' });
       apiSubjectHash = subject.subjectHash;
-      const client = assertionApi.createGeoSpecAssertionClient({ engine });
+      // The chat's runner selects bounded success evidence, so the API reports compare in that profile.
+      const client = assertionApi.createGeoSpecAssertionClient({ engine, evidenceProfile: 'bounded' });
       apiReports.push(
         canonicalChatReport(await client.expectGeo(subject).toHaveVolume({ value: 6000, tolerance: 0.000001 })),
       );
@@ -354,6 +355,14 @@ it('accepts the project Runtime mesh', async () => {
       expect(report.result).toMatchObject({ claimId: report.claimId, status: report.status });
     }
     expect(rows.slice(0, 2).map((row) => row.reports![0])).toEqual(apiReports);
+    // Equal verdicts on another subject must not pass: each report names the source bytes it measured.
+    const measuredSubjects = rows.map(
+      (row) =>
+        z.object({ evidence: z.object({ subjectContentHash: z.string() }) }).parse(row.reports![0]!.result).evidence
+          .subjectContentHash,
+    );
+    expect(measuredSubjects.slice(0, 2)).toEqual([nativeFixtureHash, nativeFixtureHash]);
+    expect(measuredSubjects[2]).not.toBe(nativeFixtureHash);
     await target.click(selectors.getByRole('button', { name: /^(?:Edited files, )?ran tests$/iu }));
     await target.expectVisible(selectors.getByText('Tested 3 requirements', { exact: true }));
     await target.expectVisible(selectors.getByText('1. rejects the impossible fixed box volume', { exact: true }));
@@ -378,7 +387,7 @@ it('accepts the project Runtime mesh', async () => {
           apiReleased,
           apiClosed,
           limitations: [
-            'Runtime row has independent verdict coverage; finalized export bytes are not exposed. Fixed fixture rows require exact same-profile API report equality.',
+            'Runtime row has independent verdict coverage; finalized export bytes are not exposed. Fixed fixture rows require exact report equality with a bounded-profile API client, the profile the chat runner selects.',
           ],
         },
         null,

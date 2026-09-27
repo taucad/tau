@@ -85,8 +85,17 @@ let activeBudget: ActiveBudget | undefined;
 /**
  * Per-family deterministic unit budgets (OQ7 calibration: sized so no
  * currently-completing proof regresses — generous, provisional; tighten from
- * R2 span telemetry once suite-scale unit counts are recorded). One unit = one
- * native classification point, one extrema solve, or one pair volume.
+ * R2 span telemetry once suite-scale unit counts are recorded). The budget is
+ * each claim's `workUnitBudget` in the native engine. Exact STEP components
+ * charge each native step before it runs, priced by kind: face boxes by
+ * surface kind and edge count, the near-pair decomposition, sweep box tests,
+ * and a calibrated class price per vertex, edge or face pair, about 20 µs per
+ * unit on the calibration host. Exact STEP overlap charges its leaf boxes
+ * and box tests the same way, then each candidate pair's face-box tests,
+ * each operand's first qualification by edge count, and the Common by faces
+ * and meeting face pairs, dearer for free-form or near-coincident surfaces
+ * and B-spline edges. The in-process proofs that call {@link chargeBudget}
+ * charge one unit per classification point, extrema solve or pair volume.
  */
 /** Default unit budget for matcher families without a dedicated entry. */
 const defaultUnitBudget = 8_000_000;

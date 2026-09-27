@@ -134,6 +134,28 @@ describe('startGeoSpecPoolWorkerHost', () => {
     });
   });
 
+  it('should report a native release failure as that pass error and keep serving', async () => {
+    const releaseAll = vi
+      .fn(async () => undefined)
+      .mockRejectedValueOnce(new Error('shard release failed'))
+      .mockRejectedValueOnce(new Error('list release failed'));
+    const nativeModelLoader = Object.assign(async () => ({ subjectHash: 'unused' }), { releaseAll });
+    const host = startHost({ 'a.geospec.ts': passingSpec('a') }, { nativeModelLoader });
+
+    const shard = await host.send({ type: 'run-shard', shard: { id: 0, file: 'a.geospec.ts' } });
+    const listed = await host.send({ type: 'list-tests', shardId: 1, file: 'a.geospec.ts' });
+    const next = await host.send({ type: 'run-shard', shard: { id: 2, file: 'a.geospec.ts' } });
+
+    expect(shard.slice(1)).toStrictEqual([
+      { type: 'shard-error', shardId: 0, file: 'a.geospec.ts', message: 'shard release failed' },
+    ]);
+    expect(listed).toStrictEqual([
+      { type: 'list-error', shardId: 1, file: 'a.geospec.ts', message: 'list release failed' },
+    ]);
+    expect(next.map(({ type }) => type)).toStrictEqual(['file-start', 'shard-complete']);
+    expect(host.posted.some(({ type }) => type === 'initialization-error')).toBe(false);
+  });
+
   it('should announce readiness before any shard arrives', () => {
     const host = startHost({});
 

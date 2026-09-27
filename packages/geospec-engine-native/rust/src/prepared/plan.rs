@@ -14,7 +14,7 @@ use crate::{
     codec::Json,
     protocol::{
         array, as_invalid_claim, field, invalid_claim, logical_id, object, optional_field,
-        require_fields, string_field, validate_budget,
+        require_fields, string_field, validate_budget, EvidenceProfile,
     },
     registry::Capability,
     result::{self, Diagnostic, Evaluation, Polarity},
@@ -69,6 +69,7 @@ pub(crate) struct PreparedPlan {
     subjects: Json,
     claims: Vec<Claim>,
     regex: SelectorRegex,
+    evidence_profile: EvidenceProfile,
 }
 
 impl PreparedPlan {
@@ -86,10 +87,11 @@ impl PreparedPlan {
         let fields = object(plan, "plan")?;
         require_fields(
             fields,
-            &["subjects", "claims"],
+            &["subjects", "claims", "evidenceProfile"],
             &["subjects", "claims"],
             "plan",
         )?;
+        let evidence_profile = EvidenceProfile::parse(optional_field(fields, "evidenceProfile"))?;
         let subjects = field(fields, "subjects")?;
         let mut bindings = HashMap::new();
         for value in array(subjects, "plan.subjects")? {
@@ -247,11 +249,12 @@ impl PreparedPlan {
             subjects: subjects.clone(),
             claims,
             regex,
+            evidence_profile,
         })
     }
 
     pub(crate) fn normalized_plan(&self) -> Json {
-        Json::object([
+        let mut plan = Json::object([
             ("subjects", self.subjects.clone()),
             (
                 "claims",
@@ -271,7 +274,12 @@ impl PreparedPlan {
                         .collect(),
                 ),
             ),
-        ])
+        ]);
+        if let (EvidenceProfile::Bounded, Json::Object(fields)) = (self.evidence_profile, &mut plan)
+        {
+            fields.push(("evidenceProfile".into(), Json::string("bounded")));
+        }
+        plan
     }
 
     pub(crate) fn resolve(
@@ -333,6 +341,14 @@ impl PreparedPlan {
             if claim.refusal.is_some() {
                 continue;
             }
+            // Ruling 32: an exact claim on a tessellated-only product refuses
+            // from the admission count, before any charge or selector work.
+            if let Some(refusal) = subject.tessellated_only_refusal(claim.capability) {
+                claim.refusal = Some(refusal);
+                continue;
+            }
+            // C8: each claim phase is accounted alone, whatever earlier claims retained.
+            subject.begin_demand_phase();
             let demand = claim.payload.demand();
             if subject.brep.is_some() && (demand.selectors || demand.csg) {
                 if let Err(error) = claim.execution_budget.charge(1) {
@@ -368,6 +384,7 @@ impl PreparedPlan {
             claims: self.claims,
             retained,
             batch,
+            evidence_profile: self.evidence_profile,
         })
     }
 }
@@ -379,6 +396,7 @@ pub(crate) struct ResolvedPlan {
     claims: Vec<Claim>,
     retained: Vec<Rc<Subject>>,
     batch: BatchAnalysis,
+    evidence_profile: EvidenceProfile,
 }
 
 impl ResolvedPlan {
@@ -414,6 +432,7 @@ impl ResolvedPlan {
             let evaluation = if let Some(refusal) = claim.refusal {
                 refusal
             } else {
+                subject.begin_demand_phase();
                 let payload = claim.payload.normalized();
                 let subjects = [subject];
                 let scope = if claim.payload.demand().csg {
@@ -437,7 +456,9 @@ impl ResolvedPlan {
                     scope,
                 )
                 .with_batch(&self.batch)
-                .with_report_paid(claim.report_paid);
+                .with_report_paid(claim.report_paid)
+                .with_polarity(claim.polarity)
+                .with_evidence_profile(self.evidence_profile);
                 let value = match claim.payload {
                     Payload::Matcher(value) => value.evaluate(&mut context),
                     Payload::Query(value) => value.evaluate(&mut context),

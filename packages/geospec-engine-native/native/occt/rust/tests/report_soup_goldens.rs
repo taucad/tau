@@ -61,11 +61,11 @@ fn report_soup_matches_the_pinned_generation_on_the_mesh_authority_fixtures() {
                 .join(name),
         )
         .expect("retained fixture must be readable");
-        let report = Document::from_step(&bytes)
-            .and_then(|document| BrepSubject::reported_facts_and_mesh(&document));
+        let report =
+            Document::from_step(&bytes).and_then(|document| BrepSubject::reported_mesh(&document));
         match report {
-            Ok(report) => {
-                let observed = (report.mesh.triangles.len(), soup_hash(&report.mesh));
+            Ok(mesh) => {
+                let observed = (mesh.triangles.len(), soup_hash(&mesh));
                 if observed != (triangles, digest) {
                     failures.push(format!(
                         "{id} ({name}): soup {} triangles {:#018x} != pinned {triangles} {digest:#018x}",

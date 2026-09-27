@@ -57,10 +57,6 @@ class RecordingEngine implements GeoSpecNativeEngine {
     };
   }
 
-  protected canonicalClaim(claim: Record<string, JSONValue>): Uint8Array<ArrayBuffer> {
-    return encode(claim);
-  }
-
   public processRequest(request: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
     this.initializeCalls += 1;
     expect(new TextDecoder().decode(request)).toBe(
@@ -78,6 +74,10 @@ class RecordingEngine implements GeoSpecNativeEngine {
         registryVersion: 5,
       },
     });
+  }
+
+  protected canonicalClaim(claim: Record<string, JSONValue>): Uint8Array<ArrayBuffer> {
+    return encode(claim);
   }
 }
 
@@ -262,6 +262,18 @@ describe('runner-independent GeoSpec assertion client', () => {
     const request = record(engine.canonicalInput!);
     const plan = record(request['plan']!);
     expect(plan['subjects']).toStrictEqual([{ slot: 'subject', contentHash: hash }]);
+  });
+
+  it('names the evidence profile on the plan only when a client selects one', async () => {
+    const engine = new RecordingEngine();
+
+    await createGeoSpecAssertionClient({ engine, workUnitLimit: 1 }).expectGeo({ subjectHash: hash }).toBeWatertight();
+    expect(record(record(engine.canonicalInput!)['plan']!)).not.toHaveProperty('evidenceProfile');
+
+    await createGeoSpecAssertionClient({ engine, evidenceProfile: 'bounded', workUnitLimit: 1 })
+      .expectGeo({ subjectHash: hash })
+      .toBeWatertight();
+    expect(record(record(engine.canonicalInput!)['plan']!)['evidenceProfile']).toBe('bounded');
   });
 
   it('reuses the engine-owned default budget once per engine across clients', async () => {

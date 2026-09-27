@@ -7,28 +7,35 @@ extern crate self as geospec_engine_native_occt;
 mod finite_contact_engagement_tests;
 
 pub use geospec_engine_native_core::backend::brep::{
-    Bounds, BrepAdmissionFacts, BrepConnector, BrepEntity, BrepSubject, CircularBoreCandidate,
-    CircularBoreDisposition, CircularBoreEnd, CircularBoreInventory, CircularBoreNonMember,
-    CircularBoreTermination, CircularBoreTopology, CircularBoreUnqualified, ContinuousWallDomain,
-    ContinuousWallShape, CurveFacts, CylinderAttachmentProfile, CylinderAxialExtent,
-    CylinderBoundaryOrientation, CylinderBoundarySide, CylinderBoundaryUse,
-    CylinderPeriodicAttachment, CylinderVertex, CylindricalBandBoundaryResidual,
-    CylindricalBandProfile, CylindricalBandRim, DatumPlacementFacts, DocumentFacts, DocumentRows,
-    EdgeFacts, EdgeTreatmentBoundaryRole, EdgeTreatmentBoundaryUse, EdgeTreatmentCertificate,
-    EdgeTreatmentCounts, EdgeTreatmentDisposition, EdgeTreatmentInventory, EdgeTreatmentKind,
-    EdgeTreatmentLabel, EdgeTreatmentMaterialSide, EdgeTreatmentReason, EdgeTreatmentResidual,
+    Bounds, BrepAdmissionFacts, BrepConnector, BrepEntity, BrepSubject, Charge,
+    CircularBoreCandidate, CircularBoreDisposition, CircularBoreEnd, CircularBoreInventory,
+    CircularBoreNonMember, CircularBoreTermination, CircularBoreTopology, CircularBoreUnqualified,
+    ComponentBodies, ComponentBody, ContinuousWallDomain, ContinuousWallShape, CurveFacts,
+    CylinderAttachmentProfile, CylinderAxialExtent, CylinderBoundaryOrientation,
+    CylinderBoundarySide, CylinderBoundaryUse, CylinderPeriodicAttachment, CylinderVertex,
+    CylindricalBandBoundaryResidual, CylindricalBandProfile, CylindricalBandRim,
+    DatumPlacementFacts, DocumentRows, EdgeFacts, EdgeTreatmentBoundaryRole,
+    EdgeTreatmentBoundaryUse, EdgeTreatmentCertificate, EdgeTreatmentCounts,
+    EdgeTreatmentDisposition, EdgeTreatmentInventory, EdgeTreatmentKind, EdgeTreatmentLabel,
+    EdgeTreatmentMaterialSide, EdgeTreatmentReason, EdgeTreatmentResidual,
     EdgeTreatmentResidualKind, EdgeTreatmentRow, EdgeTreatmentSupport, FaceFacts,
     FiniteContactCircle, FiniteContactFace, LocatedFace, NominalCylindricalBand, OccurrenceFacts,
-    OperandMemo, PointState, RegularSolidContainment, ReportedBrepBundle, ReportedFaces,
+    OccurrenceOverlap, OperandMemo, PointState, RegularSolidContainment, ReportedFaces,
     ResolvedSourceFace, SelectedBoreVoid, SelectedContinuousDomain, SemanticDatumFacts, ShapeFacts,
-    SourceFaceKey, StepSubjectMetadata, SubshapeFacts, SubshapeType, SurfaceFacts,
+    ShapeParts, SourceFaceKey, StepSubjectMetadata, SubshapeFacts, SubshapeType, SurfaceFacts,
     TessellationProfile, TopologyCounts, ValidityFacts, MAX_CIRCULAR_BORE_CANDIDATES,
     MAX_CIRCULAR_BORE_OWNED_BYTES, MAX_EDGE_TREATMENT_BOUNDARY_USES,
     MAX_EDGE_TREATMENT_OWNED_BYTES, MAX_EDGE_TREATMENT_RESIDUALS, MAX_EDGE_TREATMENT_ROWS,
 };
+use geospec_engine_native_core::backend::brep::{ClosureEdgeSample, ClosureFacts, ClosureGroup};
 use geospec_engine_native_core::backend::pmi::{PmiFaceAssociation, PmiField, PmiFieldStatus};
 use geospec_engine_native_core::backend::{BackendError, BackendErrorKind, TriangleMesh};
-use std::{cell::OnceCell, ffi::c_char, ptr::NonNull, rc::Rc};
+use std::{
+    cell::OnceCell,
+    ffi::{c_char, c_void},
+    ptr::NonNull,
+    rc::Rc,
+};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct OcctConnector;
@@ -99,6 +106,7 @@ pub struct Document {
     parallel_grant_width: Option<u32>,
     whole_faces: OnceCell<Rc<[LocatedFace]>>,
     validity: OnceCell<Rc<ValidityFacts>>,
+    closure: OnceCell<Rc<ClosureFacts>>,
     _single_threaded: std::marker::PhantomData<*mut ()>,
 }
 
@@ -119,6 +127,7 @@ impl Document {
             parallel_grant_width: None,
             whole_faces: OnceCell::new(),
             validity: OnceCell::new(),
+            closure: OnceCell::new(),
             _single_threaded: std::marker::PhantomData,
         })
     }
@@ -131,6 +140,18 @@ impl Document {
     /// Diagnostic count of admitted faces that carry a triangulation; 0 for a BRep.
     pub fn triangulated_faces(&self) -> usize {
         unsafe { ffi::geospec_occt_triangulated_face_count(self.raw.as_ptr()) }
+    }
+
+    /// Diagnostic count of occurrence operand qualifications run on this
+    /// document: operand-memo misses and memo-less queries.
+    pub fn occurrence_qualifications(&self) -> usize {
+        unsafe { ffi::geospec_occt_occurrence_qualifications(self.raw.as_ptr()) }
+    }
+
+    /// Diagnostic count of bore interiors the separation certificate cleared
+    /// without a Common in this document's inventories.
+    pub fn certified_clear_bores(&self) -> usize {
+        unsafe { ffi::geospec_occt_certified_clear_bores(self.raw.as_ptr()) }
     }
 
     /// Validity under a dedicated grant. The bridge reuses the admission proof
@@ -470,41 +491,18 @@ impl BrepSubject for Document {
         unsafe { step_subject_metadata(self.raw.as_ptr()).map(Some) }
     }
 
-    /// The facets together, in the order a combined report used to build
-    /// them: mesh, whole-shape facts, occurrences and rows, measured faces.
-    fn reported_facts_and_mesh(&self) -> Result<ReportedBrepBundle, BackendError> {
-        let mesh = Rc::new(self.reported_mesh()?);
-        let shape = self.reported_shape()?;
-        let raw = self.raw.as_ptr();
-        let product_count = unsafe { ffi::geospec_occt_product_count(raw) };
-        let occurrences = unsafe { transfer_occurrences(raw, product_count, true)? };
-        let rows = self.document_rows()?;
-        let faces = self.reported_faces(true)?;
-        let admission = self.admission_facts()?;
-        Ok(ReportedBrepBundle {
-            facts: Rc::new(DocumentFacts {
-                source_length_unit: admission.source_length_unit,
-                source_unit_to_millimeters: admission.source_unit_to_millimeters,
-                occurrences,
-                shape,
-                subshapes: rows.subshapes,
-                datum_placements: rows.datum_placements,
-                semantic_datums: rows.semantic_datums,
-            }),
-            whole_faces: faces.whole_faces,
-            occurrence_faces: faces.occurrence_faces,
-            mesh,
-        })
-    }
-
     // SAFETY (granted documents): see the connector's lifetime permit contract.
     fn reported_mesh(&self) -> Result<TriangleMesh, BackendError> {
         unsafe { reported_mesh(self.raw.as_ptr(), self.parallel_grant_width) }
     }
 
-    // SAFETY (granted documents): see the connector's lifetime permit contract.
     fn reported_shape(&self) -> Result<ShapeFacts, BackendError> {
-        unsafe { reported_shape(self.raw.as_ptr(), self.parallel_grant_width) }
+        self.reported_shape_parts(ShapeParts::ALL)
+    }
+
+    // SAFETY (granted documents): see the connector's lifetime permit contract.
+    fn reported_shape_parts(&self, parts: ShapeParts) -> Result<ShapeFacts, BackendError> {
+        unsafe { reported_shape(self.raw.as_ptr(), parts, self.parallel_grant_width) }
     }
 
     fn reported_faces(&self, measured: bool) -> Result<ReportedFaces, BackendError> {
@@ -796,6 +794,56 @@ impl BrepSubject for Document {
         .0)
     }
 
+    fn occurrence_overlap_memoized(
+        &self,
+        left: u32,
+        right: u32,
+        tolerance: f64,
+        memo: &mut OperandMemo,
+        charge: &mut Charge<'_>,
+    ) -> Result<Option<OccurrenceOverlap>, BackendError> {
+        self.require_occurrence(left)?;
+        self.require_occurrence(right)?;
+        let width = self.parallel_grant_width.map(dedicated_width).transpose()?;
+        // SAFETY: see the connector's lifetime permit contract.
+        let Some((value, used_parallel)) = (unsafe {
+            occurrence_overlap_with_control(
+                self.raw.as_ptr(),
+                left,
+                right,
+                tolerance,
+                memo_raw(memo),
+                width.unwrap_or(0),
+                charge,
+            )?
+        }) else {
+            return Ok(None);
+        };
+        if let Some(width) = self.parallel_grant_width {
+            require_grant_mode(width, used_parallel)?;
+        }
+        Ok(Some(value))
+    }
+
+    fn occurrence_box_units(&self, occurrence: u32) -> Result<u64, BackendError> {
+        self.require_occurrence(occurrence)?;
+        let mut units = 0;
+        let mut error = ErrorBuffer::new();
+        // SAFETY: the document lives for &self and the index is in range.
+        check(
+            unsafe {
+                ffi::geospec_occt_occurrence_box_units(
+                    self.raw.as_ptr(),
+                    occurrence,
+                    &mut units,
+                    error.raw(),
+                )
+            },
+            &error,
+        )?;
+        Ok(units)
+    }
+
     fn source_occurrences(&self) -> Result<Rc<[OccurrenceFacts]>, BackendError> {
         let raw = self.raw.as_ptr();
         let product_count = unsafe { ffi::geospec_occt_product_count(raw) };
@@ -806,6 +854,39 @@ impl BrepSubject for Document {
         let raw = self.raw.as_ptr();
         let product_count = unsafe { ffi::geospec_occt_product_count(raw) };
         Ok(unsafe { transfer_occurrences(raw, product_count, false)? }.into())
+    }
+
+    fn occurrence_bounds(&self, occurrence: u32) -> Result<Bounds, BackendError> {
+        self.require_occurrence(occurrence)?;
+        let mut output = ffi::OccurrenceFacts::default();
+        let mut error = ErrorBuffer::new();
+        // SAFETY: the document lives for &self, the index is in range, and
+        // the bridge skips null string outputs.
+        check(
+            unsafe {
+                ffi::geospec_occt_occurrence(
+                    self.raw.as_ptr(),
+                    occurrence as usize,
+                    &mut output,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    error.raw(),
+                )
+            },
+            &error,
+        )?;
+        let bounds = output.bounds;
+        if (0..3).any(|axis| {
+            !bounds.min[axis].is_finite()
+                || !bounds.max[axis].is_finite()
+                || bounds.min[axis] > bounds.max[axis]
+        }) {
+            return Err(backend_error(
+                "OCCT source occurrence placement/bounds are not finite and ordered.",
+            ));
+        }
+        Ok(bounds.into())
     }
 
     fn faces(&self) -> Result<Rc<[LocatedFace]>, BackendError> {
@@ -832,6 +913,82 @@ impl BrepSubject for Document {
         });
         let _ = self.validity.set(Rc::clone(&validity));
         Ok(validity)
+    }
+
+    fn closure(&self, charge: &mut Charge<'_>) -> Result<Option<Rc<ClosureFacts>>, BackendError> {
+        if let Some(closure) = self.closure.get() {
+            let occurrences = unsafe { ffi::geospec_occt_occurrence_count(self.raw.as_ptr()) };
+            let units = closure_units(closure.failing.len(), occurrences);
+            return Ok(charge(units).then(|| Rc::clone(closure)));
+        }
+        let Some(closure) = (unsafe { closure(self.raw.as_ptr(), charge)? }) else {
+            return Ok(None);
+        };
+        let closure = Rc::new(closure);
+        let _ = self.closure.set(Rc::clone(&closure));
+        Ok(Some(closure))
+    }
+
+    fn component_bodies(
+        &self,
+        occurrences: &[u32],
+        charge: &mut Charge<'_>,
+    ) -> Result<Option<Box<dyn ComponentBodies + '_>>, BackendError> {
+        let mut raw = std::ptr::null_mut();
+        let (mut body_count, mut face_count) = (0, 0);
+        let mut error = ErrorBuffer::new();
+        let mut charge = charge;
+        let status = unsafe {
+            ffi::geospec_occt_component_bodies_new(
+                self.raw.as_ptr(),
+                occurrences.as_ptr(),
+                occurrences.len(),
+                charge_units,
+                charge_context(&mut charge),
+                &mut raw,
+                &mut body_count,
+                &mut face_count,
+                error.raw(),
+            )
+        };
+        if status == ffi::STOPPED {
+            return Ok(None);
+        }
+        check(status, &error)?;
+        let raw = NonNull::new(raw).ok_or_else(|| backend_error("OCCT returned no bodies."))?;
+        // Owned from here, so an error below still releases the set.
+        let mut owned = OcctComponentBodies {
+            document: self,
+            raw,
+            bodies: Vec::new(),
+        };
+        let mut facts = vec![ffi::ComponentBody::default(); body_count];
+        let mut faces = vec![ffi::Bounds::default(); face_count];
+        unsafe {
+            check(
+                ffi::geospec_occt_component_bodies_facts(
+                    raw.as_ptr(),
+                    facts.as_mut_ptr(),
+                    facts.len(),
+                    faces.as_mut_ptr(),
+                    faces.len(),
+                    error.raw(),
+                ),
+                &error,
+            )?;
+        }
+        let mut faces = faces.into_iter().map(Bounds::from);
+        owned.bodies = facts
+            .into_iter()
+            .map(|body| ComponentBody {
+                occurrence: (body.occurrence != u32::MAX).then_some(body.occurrence),
+                solid: body.solid != 0,
+                vertices: body.vertex_count,
+                bounds: body.bounds.into(),
+                faces: faces.by_ref().take(body.face_count as usize).collect(),
+            })
+            .collect();
+        Ok(Some(Box::new(owned)))
     }
 
     fn classify_face_points(
@@ -914,6 +1071,124 @@ fn invalid_input(message: impl Into<String>) -> BackendError {
     BackendError {
         kind: BackendErrorKind::InvalidInput,
         message: message.into(),
+    }
+}
+
+/// M2's bodies of one document, released before the document they borrow.
+struct OcctComponentBodies<'a> {
+    document: &'a Document,
+    raw: NonNull<ffi::ComponentBodies>,
+    bodies: Vec<ComponentBody>,
+}
+
+impl Drop for OcctComponentBodies<'_> {
+    fn drop(&mut self) {
+        unsafe { ffi::geospec_occt_component_bodies_release(self.raw.as_ptr()) }
+    }
+}
+
+impl ComponentBodies for OcctComponentBodies<'_> {
+    fn bodies(&self) -> &[ComponentBody] {
+        &self.bodies
+    }
+
+    fn faces_within(
+        &self,
+        left: usize,
+        left_faces: &[u32],
+        right: usize,
+        right_faces: &[u32],
+        tolerance: f64,
+        charge: &mut Charge<'_>,
+    ) -> Result<Option<bool>, BackendError> {
+        let mut within = 0;
+        let mut error = ErrorBuffer::new();
+        let mut charge = charge;
+        let status = unsafe {
+            ffi::geospec_occt_component_faces_within(
+                self.raw.as_ptr(),
+                left,
+                left_faces.as_ptr(),
+                left_faces.len(),
+                right,
+                right_faces.as_ptr(),
+                right_faces.len(),
+                tolerance,
+                charge_units,
+                charge_context(&mut charge),
+                &mut within,
+                error.raw(),
+            )
+        };
+        if status == ffi::STOPPED {
+            return Ok(None);
+        }
+        check(status, &error)?;
+        Ok(Some(within != 0))
+    }
+
+    fn body_inside(
+        &self,
+        outer: usize,
+        inner: usize,
+        charge: &mut Charge<'_>,
+    ) -> Result<Option<PointState>, BackendError> {
+        let mut state = 0;
+        let mut error = ErrorBuffer::new();
+        let mut charge = charge;
+        let status = unsafe {
+            ffi::geospec_occt_component_body_inside(
+                self.raw.as_ptr(),
+                outer,
+                inner,
+                charge_units,
+                charge_context(&mut charge),
+                &mut state,
+                error.raw(),
+            )
+        };
+        if status == ffi::STOPPED {
+            return Ok(None);
+        }
+        check(status, &error)?;
+        Ok(Some(match state {
+            0 => PointState::Out,
+            1 => PointState::In,
+            _ => PointState::On,
+        }))
+    }
+
+    fn bodies_within(
+        &self,
+        left: usize,
+        right: usize,
+        tolerance: f64,
+    ) -> Result<bool, BackendError> {
+        let width = self.document.parallel_grant_width;
+        let mut used_parallel = 0;
+        let mut within = 0;
+        let mut error = ErrorBuffer::new();
+        // SAFETY: a grant exists only under the connector's lifetime permit
+        // contract, which reserves it for every document query.
+        unsafe {
+            check(
+                ffi::geospec_occt_component_bodies_within_dedicated(
+                    self.raw.as_ptr(),
+                    left,
+                    right,
+                    tolerance,
+                    width.map_or(Ok(0), dedicated_width)?,
+                    &mut used_parallel,
+                    &mut within,
+                    error.raw(),
+                ),
+                &error,
+            )?;
+        }
+        if let Some(width) = width {
+            require_grant_mode(width, used_parallel != 0)?;
+        }
+        Ok(within != 0)
     }
 }
 
@@ -1126,6 +1401,18 @@ impl ErrorBuffer {
         let length = self.raw.length.min(self.bytes.len());
         String::from_utf8_lossy(&self.bytes[..length]).into_owned()
     }
+}
+
+/// The bridge's charge callback over a `&mut Charge` context; nonzero stops
+/// the step before the work it prices.
+unsafe extern "C" fn charge_units(context: *mut c_void, units: u64) -> i32 {
+    // SAFETY: `context` comes from `charge_context` for the call in progress.
+    let charge = unsafe { &mut *context.cast::<&mut Charge<'_>>() };
+    i32::from(!charge(units))
+}
+
+fn charge_context(charge: &mut &mut Charge<'_>) -> *mut c_void {
+    (charge as *mut &mut Charge<'_>).cast()
 }
 
 fn check(status: i32, error: &ErrorBuffer) -> Result<(), BackendError> {
@@ -1389,11 +1676,13 @@ fn edge_treatment_vec<T>(count: usize, owned: &mut u64) -> Result<Vec<T>, Backen
 unsafe fn admission_facts(raw: *const ffi::Document) -> Result<BrepAdmissionFacts, BackendError> {
     let mut source_unit_to_millimeters = 0.0;
     let mut occurrence_count = 0;
+    let mut surfaceless_faces = 0;
     let source_length_unit = copied_string(|unit, error| {
         ffi::geospec_occt_admission_facts(
             raw,
             &mut source_unit_to_millimeters,
             &mut occurrence_count,
+            &mut surfaceless_faces,
             unit,
             error,
         )
@@ -1402,6 +1691,7 @@ unsafe fn admission_facts(raw: *const ffi::Document) -> Result<BrepAdmissionFact
         source_length_unit,
         source_unit_to_millimeters,
         occurrence_count,
+        surfaceless_faces,
     })
 }
 
@@ -1458,7 +1748,7 @@ fn checked_transfer_bytes(count: usize, width: usize) -> Result<usize, BackendEr
 }
 
 fn validate_report_sizes(sizes: &ffi::ReportSizes, facets: u32) -> Result<(), BackendError> {
-    let has_facts = facets & ffi::REPORT_FACTS != 0;
+    let has_facts = facets & ffi::REPORT_SHAPE != 0;
     let has_mesh = facets & ffi::REPORT_MESH != 0;
     let has_faces = facets & ffi::REPORT_FACES != 0;
     let expected = [
@@ -1546,13 +1836,25 @@ unsafe fn reported_mesh(
     report_mesh(raw, &sizes)
 }
 
-/// Whole-shape facts from the same generation as the mesh facet (F2: no
-/// validity).
+/// Whole-shape facts of the admitted source measuring `parts` (F1; the others
+/// come back unmeasured). Only BOUNDS takes the grant, for V2's per-face box
+/// pass; the integrals and counts are serial plain calls.
 unsafe fn reported_shape(
     raw: *const ffi::Document,
+    parts: ShapeParts,
     grant: Option<u32>,
 ) -> Result<ShapeFacts, BackendError> {
-    let (_sizes, _transfer) = prepare_report(raw, ffi::REPORT_FACTS, grant)?;
+    let facets = [
+        (ShapeParts::VOLUME, ffi::REPORT_VOLUME),
+        (ShapeParts::AREA, ffi::REPORT_AREA),
+        (ShapeParts::BOUNDS, ffi::REPORT_BOUNDS),
+        (ShapeParts::COUNTS, ffi::REPORT_COUNTS),
+    ]
+    .into_iter()
+    .filter(|(part, _)| parts.contains(*part))
+    .fold(0, |facets, (_, bit)| facets | bit);
+    let grant = grant.filter(|_| parts.contains(ShapeParts::BOUNDS));
+    let (_sizes, _transfer) = prepare_report(raw, facets, grant)?;
     let mut shape = ffi::ShapeFacts::default();
     let mut error = ErrorBuffer::new();
     check(
@@ -1790,6 +2092,10 @@ unsafe fn transfer_occurrences(
                 (!value.is_empty()).then_some(value)
             },
             ordinal_path,
+            face_count: u32::try_from(ffi::geospec_occt_occurrence_face_count(raw, index as u32))
+                .map_err(|_| {
+                backend_error("OCCT occurrence face count exceeds indexed range.")
+            })?,
         });
     }
     if ffi::geospec_occt_occurrence_count(raw) != occurrence_count
@@ -2072,11 +2378,81 @@ unsafe fn validity_with_control(
             solid_count: Some(value.solid_count),
             invalid_solid_count: Some(value.invalid_solid_count),
             open_edge_count: Some(value.open_edge_count),
+            nonmanifold_edge_count: Some(value.nonmanifold_edge_count),
             closed_wires: Some(value.closed_wires != 0),
             reason: (!reason.is_empty()).then_some(reason),
         },
         used_parallel != 0,
     ))
+}
+
+/// Rulings 23 and 28: naming the failing groups' leaves is one pass over the
+/// occurrences that yields each group, so it costs a unit per occurrence and
+/// per group; a closed subject names nothing.
+fn closure_units(groups: usize, occurrences: usize) -> u64 {
+    if groups == 0 {
+        0
+    } else {
+        groups.saturating_add(occurrences) as u64
+    }
+}
+
+unsafe fn closure(
+    raw: *const ffi::Document,
+    charge: &mut Charge<'_>,
+) -> Result<Option<ClosureFacts>, BackendError> {
+    let mut value = ffi::ClosureFacts::default();
+    let mut error = ErrorBuffer::new();
+    check(
+        ffi::geospec_occt_validity_closure(raw, &mut value, error.raw()),
+        &error,
+    )?;
+    let capacity = ffi::geospec_occt_occurrence_count(raw);
+    if !charge(closure_units(value.failing_group_count, capacity)) {
+        return Ok(None);
+    }
+    // One scratch buffer; each group keeps only its own ordinals.
+    let mut scratch = vec![0_u32; capacity];
+    let mut failing = Vec::with_capacity(value.failing_group_count);
+    for index in 0..value.failing_group_count {
+        let mut group = ffi::ClosureGroup::default();
+        check(
+            ffi::geospec_occt_validity_closure_group(
+                raw,
+                index,
+                &mut group,
+                scratch.as_mut_ptr(),
+                capacity,
+                error.raw(),
+            ),
+            &error,
+        )?;
+        if group.sample_count > 4 || group.occurrence_count > capacity {
+            return Err(backend_error("Invalid OCCT closure group transfer."));
+        }
+        failing.push(ClosureGroup {
+            free_faces: group.free_faces != 0,
+            open_edges: group.open_edge_count,
+            nonmanifold_edges: group.nonmanifold_edge_count,
+            occurrences: scratch[..group.occurrence_count].to_vec(),
+            samples: group.samples[..group.sample_count as usize]
+                .iter()
+                .map(|sample| ClosureEdgeSample {
+                    face_uses: sample.face_uses,
+                    start: sample.start,
+                    end: sample.end,
+                    center: sample.center,
+                })
+                .collect(),
+        });
+    }
+    Ok(Some(ClosureFacts {
+        shells: value.shell_count,
+        free_faces: value.free_face_count,
+        open_edges: value.open_edge_count,
+        nonmanifold_edges: value.nonmanifold_edge_count,
+        failing,
+    }))
 }
 
 unsafe fn classify_face_points(
@@ -2138,6 +2514,83 @@ unsafe fn regular_solid_containment_with_control(
         },
         used_parallel != 0,
     ))
+}
+
+/// S10: `None` when a charge stopped the pair; a residual must be consistent
+/// (solids iff positive volume and bounds).
+unsafe fn occurrence_overlap_with_control(
+    raw: *const ffi::Document,
+    left: u32,
+    right: u32,
+    tolerance: f64,
+    memo: *mut ffi::OperandMemo,
+    grant_width: i32,
+    charge: &mut Charge<'_>,
+) -> Result<Option<(OccurrenceOverlap, bool)>, BackendError> {
+    let mut value = ffi::OccurrenceOverlap::default();
+    let mut used_parallel = 0;
+    let mut charge = charge;
+    // One call, never the sized retry: a second call would charge the pair's
+    // steps again. Reasons are the bridge's short constant texts.
+    let mut bytes = [0u8; 256];
+    let mut reason = ffi::StringBuffer {
+        data: bytes.as_mut_ptr().cast(),
+        capacity: bytes.len(),
+        length: 0,
+    };
+    let mut error = ErrorBuffer::new();
+    let status = ffi::geospec_occt_occurrence_overlap_dedicated(
+        raw,
+        left,
+        right,
+        tolerance,
+        memo,
+        grant_width,
+        charge_units,
+        charge_context(&mut charge),
+        &mut used_parallel,
+        &mut value,
+        &mut reason,
+        error.raw(),
+    );
+    if status == ffi::STOPPED {
+        return Ok(None);
+    }
+    check(status, &error)?;
+    let reason = String::from_utf8(bytes[..reason.length.min(bytes.len())].to_vec())
+        .map_err(|_| backend_error("OCCT returned non-UTF-8 text."))?;
+    let overlap = match value.unqualified {
+        1 | 2 if !reason.is_empty() => OccurrenceOverlap::Unqualified {
+            left: value.unqualified == 1,
+            reason,
+        },
+        0 => {
+            let bounds =
+                (value.has_residual_bounds != 0).then(|| Bounds::from(value.residual_bounds));
+            let volume = value.residual_volume;
+            let consistent = if value.residual_solid_count == 0 {
+                bounds.is_none() && volume == 0.0
+            } else {
+                bounds.is_some() && volume.is_finite() && volume > 0.0
+            };
+            if !consistent {
+                return Err(backend_error(
+                    "OCCT returned inconsistent exact overlap residual facts.",
+                ));
+            }
+            OccurrenceOverlap::Residual {
+                solids: value.residual_solid_count,
+                volume: value.residual_volume,
+                bounds,
+            }
+        }
+        _ => {
+            return Err(backend_error(
+                "OCCT returned an invalid exact overlap result.",
+            ))
+        }
+    };
+    Ok(Some((overlap, used_parallel != 0)))
 }
 
 unsafe fn cylinder_axial_extent(
@@ -3402,7 +3855,9 @@ impl TryFrom<ffi::FaceFacts> for FaceFacts {
 }
 
 mod ffi {
-    use super::c_char;
+    use super::{c_char, c_void};
+
+    pub type Charge = unsafe extern "C" fn(context: *mut c_void, units: u64) -> i32;
 
     pub const OK: i32 = 0;
     pub const INVALID_ARGUMENT: i32 = 1;
@@ -3411,10 +3866,15 @@ mod ffi {
     pub const NO_SHAPE: i32 = 4;
     pub const BUFFER_TOO_SMALL: i32 = 6;
     pub const UNSUPPORTED: i32 = 7;
+    pub const STOPPED: i32 = 8;
     pub const REPORT_MESH: u32 = 1;
-    pub const REPORT_FACTS: u32 = 2;
+    pub const REPORT_VOLUME: u32 = 2;
     pub const REPORT_FACES: u32 = 4;
     pub const REPORT_FACE_MEASURES: u32 = 8;
+    pub const REPORT_AREA: u32 = 16;
+    pub const REPORT_BOUNDS: u32 = 32;
+    pub const REPORT_COUNTS: u32 = 64;
+    pub const REPORT_SHAPE: u32 = REPORT_VOLUME | REPORT_AREA | REPORT_BOUNDS | REPORT_COUNTS;
 
     #[repr(C)]
     pub struct Document {
@@ -3423,6 +3883,11 @@ mod ffi {
 
     #[repr(C)]
     pub struct OperandMemo {
+        _private: [u8; 0],
+    }
+
+    #[repr(C)]
+    pub struct ComponentBodies {
         _private: [u8; 0],
     }
 
@@ -3443,7 +3908,6 @@ mod ffi {
     #[derive(Clone, Copy, Default)]
     #[repr(C)]
     pub struct ShapeFacts {
-        pub valid: i32,
         pub bounds: Bounds,
         pub volume: f64,
         pub surface_area: f64,
@@ -3530,7 +3994,6 @@ mod ffi {
         pub face: FaceFacts,
         pub bounds: Bounds,
         pub reversed: i32,
-        pub edge_count: usize,
     }
 
     #[derive(Clone, Copy, Default)]
@@ -3561,6 +4024,47 @@ mod ffi {
         pub invalid_solid_count: u32,
         pub open_edge_count: u32,
         pub closed_wires: i32,
+        pub nonmanifold_edge_count: u32,
+    }
+
+    #[derive(Clone, Copy, Default)]
+    #[repr(C)]
+    pub struct ClosureFacts {
+        pub shell_count: u32,
+        pub free_face_count: u32,
+        pub open_edge_count: u32,
+        pub nonmanifold_edge_count: u32,
+        pub failing_group_count: usize,
+    }
+
+    #[derive(Clone, Copy, Default)]
+    #[repr(C)]
+    pub struct ClosureEdgeSample {
+        pub face_uses: u32,
+        pub start: [f64; 3],
+        pub end: [f64; 3],
+        pub center: [f64; 3],
+    }
+
+    #[derive(Clone, Copy, Default)]
+    #[repr(C)]
+    pub struct ClosureGroup {
+        pub free_faces: i32,
+        pub open_edge_count: u32,
+        pub nonmanifold_edge_count: u32,
+        pub sample_count: u32,
+        pub samples: [ClosureEdgeSample; 4],
+        pub occurrence_count: usize,
+    }
+
+    #[derive(Clone, Copy, Default)]
+    #[repr(C)]
+    pub struct ComponentBody {
+        pub occurrence: u32,
+        pub solid: i32,
+        pub vertex_count: u32,
+        pub face_count: u32,
+        pub bounds: Bounds,
     }
 
     #[derive(Clone, Copy, Default)]
@@ -3573,6 +4077,16 @@ mod ffi {
         pub residual_bounds: Bounds,
         pub has_residual_center_of_mass: i32,
         pub residual_center_of_mass: [f64; 3],
+    }
+
+    #[derive(Clone, Copy, Default)]
+    #[repr(C)]
+    pub struct OccurrenceOverlap {
+        pub unqualified: i32,
+        pub residual_solid_count: u32,
+        pub has_residual_bounds: i32,
+        pub residual_volume: f64,
+        pub residual_bounds: Bounds,
     }
 
     #[derive(Clone, Copy, Default)]
@@ -3921,6 +4435,7 @@ mod ffi {
             document: *const Document,
             unit_scale: *mut f64,
             occurrence_count: *mut usize,
+            surfaceless_face_count: *mut usize,
             unit: *mut StringBuffer,
             error: *mut StringBuffer,
         ) -> i32;
@@ -4081,6 +4596,72 @@ mod ffi {
             reason: *mut StringBuffer,
             error: *mut StringBuffer,
         ) -> i32;
+        pub fn geospec_occt_validity_closure(
+            document: *const Document,
+            closure: *mut ClosureFacts,
+            error: *mut StringBuffer,
+        ) -> i32;
+        pub fn geospec_occt_validity_closure_group(
+            document: *const Document,
+            index: usize,
+            group: *mut ClosureGroup,
+            occurrences: *mut u32,
+            occurrence_capacity: usize,
+            error: *mut StringBuffer,
+        ) -> i32;
+        pub fn geospec_occt_component_bodies_new(
+            document: *const Document,
+            occurrences: *const u32,
+            occurrence_count: usize,
+            charge: Charge,
+            context: *mut c_void,
+            bodies: *mut *mut ComponentBodies,
+            body_count: *mut usize,
+            face_count: *mut usize,
+            error: *mut StringBuffer,
+        ) -> i32;
+        pub fn geospec_occt_component_bodies_release(bodies: *mut ComponentBodies);
+        pub fn geospec_occt_component_bodies_facts(
+            bodies: *const ComponentBodies,
+            output: *mut ComponentBody,
+            body_capacity: usize,
+            face_bounds: *mut Bounds,
+            face_capacity: usize,
+            error: *mut StringBuffer,
+        ) -> i32;
+        pub fn geospec_occt_component_faces_within(
+            bodies: *const ComponentBodies,
+            left: usize,
+            left_faces: *const u32,
+            left_count: usize,
+            right: usize,
+            right_faces: *const u32,
+            right_count: usize,
+            tolerance: f64,
+            charge: Charge,
+            context: *mut c_void,
+            within: *mut i32,
+            error: *mut StringBuffer,
+        ) -> i32;
+        pub fn geospec_occt_component_body_inside(
+            bodies: *const ComponentBodies,
+            outer: usize,
+            inner: usize,
+            charge: Charge,
+            context: *mut c_void,
+            state: *mut i32,
+            error: *mut StringBuffer,
+        ) -> i32;
+        pub fn geospec_occt_component_bodies_within_dedicated(
+            bodies: *const ComponentBodies,
+            left: usize,
+            right: usize,
+            tolerance: f64,
+            grant_width: i32,
+            used_parallel: *mut i32,
+            within: *mut i32,
+            error: *mut StringBuffer,
+        ) -> i32;
         pub fn geospec_occt_cylinder_axial_extent(
             document: *const Document,
             face: Entity,
@@ -4104,6 +4685,7 @@ mod ffi {
             error: *mut StringBuffer,
         ) -> i32;
         pub fn geospec_occt_circular_bores_discard(document: *const Document);
+        pub fn geospec_occt_certified_clear_bores(document: *const Document) -> usize;
         pub fn geospec_occt_edge_treatment_counts_get(
             document: *const Document,
             counts: *mut EdgeTreatmentCounts,
@@ -4161,6 +4743,7 @@ mod ffi {
         ) -> i32;
         pub fn geospec_occt_operand_memo_new(document: *const Document) -> *mut OperandMemo;
         pub fn geospec_occt_operand_memo_release(memo: *mut OperandMemo);
+        pub fn geospec_occt_occurrence_qualifications(document: *const Document) -> usize;
         pub fn geospec_occt_regular_solid_containment_dedicated(
             document: *const Document,
             subject: Entity,
@@ -4169,6 +4752,26 @@ mod ffi {
             grant_width: i32,
             used_parallel: *mut i32,
             result: *mut RegularSolidContainment,
+            error: *mut StringBuffer,
+        ) -> i32;
+        pub fn geospec_occt_occurrence_box_units(
+            document: *const Document,
+            occurrence: u32,
+            units: *mut u64,
+            error: *mut StringBuffer,
+        ) -> i32;
+        pub fn geospec_occt_occurrence_overlap_dedicated(
+            document: *const Document,
+            left: u32,
+            right: u32,
+            tolerance: f64,
+            memo: *mut OperandMemo,
+            grant_width: i32,
+            charge: Charge,
+            context: *mut c_void,
+            used_parallel: *mut i32,
+            result: *mut OccurrenceOverlap,
+            reason: *mut StringBuffer,
             error: *mut StringBuffer,
         ) -> i32;
         pub fn geospec_occt_tessellate_dedicated(

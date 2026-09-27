@@ -1,7 +1,7 @@
 //! O3-02: one `AddOptimal` box per located face serves occurrence bounds
-//! (F4) and the whole-face boxes read lazily (F6).
+//! (F4), the whole-face boxes read lazily (F6) and the whole-shape bounds (V2).
 
-use geospec_engine_native_occt::{Bounds, BrepSubject, Document};
+use geospec_engine_native_occt::{Bounds, BrepSubject, Document, ShapeParts};
 use std::path::PathBuf;
 
 fn fixture(name: &str) -> Vec<u8> {
@@ -88,4 +88,44 @@ fn occurrence_and_face_boxes_are_bit_equal_in_either_demand_order() {
             "{name}"
         );
     }
+}
+
+#[test]
+fn free_edges_and_vertices_fold_into_the_whole_shape_and_occurrence_boxes() {
+    // AddOptimal folds the face boxes, then the edges outside faces, then the
+    // vertices outside edges. The fixture: 20 BSpline spheres of radius 1
+    // centred on x = 0, 3, ..., 57, a free edge (-2,-6,1)-(4,-3,9) and a
+    // free vertex (-5,4,-3). The expected bits are BRepBndLib::AddOptimal of
+    // the admitted shape itself, captured by the W2-BOUNDS probe (memo and
+    // direct bit-equal); the edge sets min y and max z, the vertex min x,
+    // max y and min z.
+    let min = [-5.0_f64, -6.0, -3.0].map(f64::to_bits);
+    let max = [
+        0x404d_0000_00d6_bf96,
+        4.0_f64.to_bits(),
+        0x4022_0000_0000_0021,
+    ];
+    let bytes = fixture("bounds-free-edges.step");
+    let document = Document::from_step(&bytes).unwrap();
+    let whole = document
+        .reported_shape_parts(ShapeParts::BOUNDS)
+        .unwrap()
+        .bounds;
+    assert_eq!(whole.min.map(f64::to_bits), min);
+    assert_eq!(whole.max.map(f64::to_bits), max);
+
+    // Occurrences first: the edge and vertex occurrences take the same fold,
+    // and the roots cover the document.
+    let document = Document::from_step(&bytes).unwrap();
+    let occurrences = document.source_occurrences().unwrap();
+    let roots = occurrences.iter().filter(|row| row.parent.is_none());
+    let (union_min, union_max) = union(roots.map(|row| row.bounds));
+    assert_eq!(union_min.map(f64::to_bits), min);
+    assert_eq!(union_max.map(f64::to_bits), max);
+    let whole = document
+        .reported_shape_parts(ShapeParts::BOUNDS)
+        .unwrap()
+        .bounds;
+    assert_eq!(whole.min.map(f64::to_bits), min);
+    assert_eq!(whole.max.map(f64::to_bits), max);
 }

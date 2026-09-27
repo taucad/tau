@@ -8,7 +8,8 @@ use crate::{
     },
     backend::{
         brep::{
-            Bounds, BrepEntity, BrepSubject, DocumentFacts, LocatedFace, PointState, ShapeFacts,
+            Bounds, BrepEntity, BrepSubject, Charge, ClosureFacts, ClosureGroup, DocumentRows,
+            LocatedFace, OccurrenceFacts, PointState, ReportedFaces, ShapeFacts,
             TessellationProfile, TopologyCounts, ValidityFacts,
         },
         AnalysisRetentionLimits, BackendError, TriangleMesh,
@@ -18,27 +19,35 @@ use crate::{
     subject::{EvaluationContext, Subject, SubjectFormat},
 };
 
-struct FactsOnlyBrep(Rc<DocumentFacts>);
+/// Whole-shape facts of an occurrence-free document; its empty mesh is unused
+/// by these fact-only predicate/early-selection controls.
+struct FactsOnlyBrep(ShapeFacts);
 
 impl BrepSubject for FactsOnlyBrep {
-    fn reported_facts_and_mesh(
-        &self,
-    ) -> Result<crate::backend::brep::ReportedBrepBundle, BackendError> {
-        // This test double supplies the explicit coherent report seam. Its empty
-        // mesh is unused by these fact-only predicate/early-selection controls.
-        let facts = Rc::clone(&self.0);
-        let occurrence_faces = (0..facts.occurrences.len())
-            .map(|_| Rc::from(Vec::<LocatedFace>::new()))
-            .collect();
-        Ok(crate::backend::brep::ReportedBrepBundle {
-            facts,
-            whole_faces: Rc::from(Vec::<LocatedFace>::new()),
-            occurrence_faces,
-            mesh: Rc::new(TriangleMesh {
-                positions: Vec::new(),
-                triangles: Vec::new(),
-            }),
+    fn reported_shape(&self) -> Result<ShapeFacts, BackendError> {
+        Ok(self.0.clone())
+    }
+
+    fn reported_mesh(&self) -> Result<TriangleMesh, BackendError> {
+        Ok(TriangleMesh {
+            positions: Vec::new(),
+            triangles: Vec::new(),
         })
+    }
+
+    fn reported_faces(&self, _: bool) -> Result<ReportedFaces, BackendError> {
+        Ok(ReportedFaces {
+            whole_faces: Rc::from(Vec::<LocatedFace>::new()),
+            occurrence_faces: Vec::new(),
+        })
+    }
+
+    fn source_occurrences(&self) -> Result<Rc<[OccurrenceFacts]>, BackendError> {
+        Ok(Rc::from(Vec::new()))
+    }
+
+    fn document_rows(&self) -> Result<DocumentRows, BackendError> {
+        Ok(DocumentRows::default())
     }
 
     fn faces(&self) -> Result<Rc<[LocatedFace]>, BackendError> {
@@ -47,6 +56,23 @@ impl BrepSubject for FactsOnlyBrep {
 
     fn validity(&self) -> Result<Rc<ValidityFacts>, BackendError> {
         unreachable!()
+    }
+
+    /// One open shell: the exact watertight and integrity routes fail.
+    fn closure(&self, _: &mut Charge<'_>) -> Result<Option<Rc<ClosureFacts>>, BackendError> {
+        Ok(Some(Rc::new(ClosureFacts {
+            shells: 1,
+            free_faces: 0,
+            open_edges: 1,
+            nonmanifold_edges: 0,
+            failing: vec![ClosureGroup {
+                free_faces: false,
+                open_edges: 1,
+                nonmanifold_edges: 0,
+                occurrences: Vec::new(),
+                samples: Vec::new(),
+            }],
+        })))
     }
 
     fn classify_face_points(
@@ -125,32 +151,24 @@ fn subject_with_brep(record: MeshAnalysisRecord) -> Rc<Subject> {
         "mm".into(),
     );
     subject.mesh_record.set(Rc::new(record)).unwrap();
-    subject.brep = Some(Box::new(FactsOnlyBrep(Rc::new(DocumentFacts {
-        source_length_unit: "millimetre".into(),
-        source_unit_to_millimeters: 1.0,
-        occurrences: Vec::new(),
-        shape: ShapeFacts {
-            bounds: Bounds {
-                min: [-3.0, -2.0, -1.0],
-                max: [7.0, 8.0, 9.0],
-            },
-            volume: 50.0,
-            surface_area: 100.0,
-            center_of_mass: [2.0, 3.0, 4.0],
-            topology: TopologyCounts {
-                compounds: 1,
-                solids: 1,
-                shells: 1,
-                faces: 6,
-                wires: 6,
-                edges: 12,
-                vertices: 8,
-            },
+    subject.brep = Some(Box::new(FactsOnlyBrep(ShapeFacts {
+        bounds: Bounds {
+            min: [-3.0, -2.0, -1.0],
+            max: [7.0, 8.0, 9.0],
         },
-        subshapes: Vec::new(),
-        datum_placements: Vec::new(),
-        semantic_datums: Vec::new(),
-    }))));
+        volume: 50.0,
+        surface_area: 100.0,
+        center_of_mass: [2.0, 3.0, 4.0],
+        topology: TopologyCounts {
+            compounds: 1,
+            solids: 1,
+            shells: 1,
+            faces: 6,
+            wires: 6,
+            edges: 12,
+            vertices: 8,
+        },
+    })));
     Rc::new(subject)
 }
 
@@ -740,4 +758,112 @@ fn projected_mesh_family_results_keep_their_bytes() {
             "3b4421ea05f1226057d5f86a734ab2035d0a5cca6bd9bfd398b808df9ca00e68",
         ]
     );
+}
+
+#[test]
+fn negated_claims_skip_the_failure_diagnostics_that_finish_drops() {
+    // H9: finish() keeps no error diagnostic of a negated geometric result, so
+    // the family no longer builds one; the result bytes are those it had when
+    // it built the diagnostic for either polarity.
+    let mut open = box_record(0.0);
+    open.positions
+        .extend([[9.0, 0.0, 0.0], [10.0, 0.0, 0.0], [9.0, 1.0, 0.5]]);
+    open.triangles.push([8, 9, 10]);
+    open.triangle_primitives.push(1);
+    open.primitives.push(Primitive {
+        name: "fin#0".into(),
+        vertex_start: 8,
+        vertex_count: 3,
+    });
+    let origin = Json::Array(vec![Json::Number(0.0); 3]);
+    let unit = Json::object([
+        ("x", Json::Number(1.0)),
+        ("y", Json::Number(1.0)),
+        ("z", Json::Number(1.0)),
+    ]);
+    // The exact rows read the BRep's closure facet (MESH-ON-BREP-01).
+    let exact = [Capability::ToBeWatertight, Capability::ToHaveMeshIntegrity];
+    for (capability, payload) in [
+        (
+            Capability::ToBeWatertight,
+            payload("watertight", Json::Bool(true)),
+        ),
+        (
+            Capability::ToHaveBoundingBox,
+            payload("boundingBox", Json::object([("size", unit)])),
+        ),
+        (
+            Capability::ToHaveVolume,
+            payload("volume", Json::object([("value", Json::Number(3.0))])),
+        ),
+        (
+            Capability::ToHaveCenterOfMass,
+            payload("centerOfMass", Json::object([("point", origin.clone())])),
+        ),
+        (
+            Capability::ToHaveConnectedComponents,
+            payload(
+                "connectedComponents",
+                Json::object([
+                    ("count", Json::Number(1.0)),
+                    ("toleranceMm", Json::Number(0.0)),
+                ]),
+            ),
+        ),
+        (
+            Capability::ToHaveMeshIntegrity,
+            payload(
+                "meshIntegrity",
+                Json::object([("watertight", Json::Bool(true))]),
+            ),
+        ),
+    ] {
+        let prepared = prepare(capability, &payload).unwrap();
+        let normalized = prepared.normalized_payload();
+        let negated = |subjects: &[Rc<Subject>], context_polarity| {
+            let batch = BatchAnalysis::new(
+                prepared
+                    .demand()
+                    .connected_components_tolerance_bits
+                    .map(|bits| (subjects[0].cache_identity().unwrap(), bits)),
+                AnalysisRetentionLimits {
+                    max_mesh_bytes: 1_000_000,
+                    max_mesh_entries: 1,
+                    max_solid_entries: 0,
+                },
+            )
+            .unwrap();
+            let budget = Budget::new(10_000);
+            let mut context =
+                EvaluationContext::new(subjects, capability, "not", &normalized, &budget, None)
+                    .with_batch(&batch)
+                    .with_polarity(context_polarity);
+            let before = MISMATCH_BUILDS.with(std::cell::Cell::get);
+            let evaluation = evaluate(&prepared, &mut context);
+            let builds = MISMATCH_BUILDS.with(std::cell::Cell::get) - before;
+            let result = crate::result::finish(
+                "not",
+                capability,
+                crate::result::Polarity::Negative,
+                evaluation,
+            )
+            .unwrap();
+            (crate::codec::encode(&result).unwrap(), builds)
+        };
+        let mut rows = vec![[subject(open.clone())]];
+        if exact.contains(&capability) {
+            rows.push([subject_with_brep(open.clone())]);
+        }
+        for subjects in rows {
+            let route = if subjects[0].brep.is_some() {
+                "exact"
+            } else {
+                "mesh"
+            };
+            let (before, built) = negated(&subjects, crate::result::Polarity::Positive);
+            let (after, skipped) = negated(&subjects, crate::result::Polarity::Negative);
+            assert_eq!((built, skipped), (1, 0), "{} {route}", capability.name());
+            assert_eq!(after, before, "{} {route}", capability.name());
+        }
+    }
 }

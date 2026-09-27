@@ -1,13 +1,19 @@
 //! Source-backed scalar, bounds, topology and integrity mesh matchers.
 
 use crate::{
-    analysis::mesh::{
-        Aabb, BoundingBox, ClusterGap, ClusterReport, ConnectedComponents, DegenerateTriangle,
-        DuplicateFace, IrregularEdgeCluster, IrregularEdgeKind, IrregularEdgeSample, MeshAnalysis,
-        MeshQuality, NonFiniteVertex, PrimitiveRecord, Watertight, WatertightPrimitiveBreakdown,
+    analysis::{
+        batch::ExactClusters,
+        interference::ComponentIdentity,
+        mesh::{
+            exact::{ask, exact_clusters, ExactError},
+            nearest_cluster_gaps, Aabb, BoundingBox, ClusterGap, ClusterReport,
+            ConnectedComponents, DegenerateTriangle, DuplicateFace, IrregularEdgeCluster,
+            IrregularEdgeKind, IrregularEdgeSample, MeshAnalysis, MeshQuality, NonFiniteVertex,
+            PrimitiveRecord, Watertight, WatertightPrimitiveBreakdown,
+        },
     },
     backend::{
-        brep::{DocumentRows, OccurrenceFacts, SubshapeType},
+        brep::{ComponentBody, DocumentRows, OccurrenceFacts, SubshapeType},
         BackendError, BackendErrorKind,
     },
     codec::Json,
@@ -18,6 +24,7 @@ use crate::{
     subject::{backend_refusal, EvaluationContext, Subject, SubjectFormat},
     ProtocolError,
 };
+use std::{collections::HashMap, rc::Rc};
 
 const AXES: [&str; 3] = ["x", "y", "z"];
 const BOUNDS_FIELDS: [&str; 4] = ["min", "max", "size", "center"];
@@ -400,6 +407,18 @@ fn count_rule_json(rule: CountRule, area: bool) -> Json {
 }
 
 pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>) -> Evaluation {
+    // MESH-ON-BREP-01 (ruling 2): a BRep subject answers closure from exact
+    // topology, and its integrity claims never tessellate.
+    if context.subject().brep.is_some() {
+        match prepared {
+            Prepared::Watertight => return evaluate_exact_watertight(context),
+            Prepared::MeshIntegrity(expected) => {
+                return evaluate_exact_integrity(expected, context)
+            }
+            _ => {}
+        }
+    }
+    let bounded = context.bounded_evidence();
     let evaluation = evaluate_family(prepared, context);
     if matches!(prepared, Prepared::BoundingBox { .. })
         && context.subject().format == crate::subject::SubjectFormat::MeshBufferV1
@@ -426,16 +445,25 @@ pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>)
                 &["source", "primitives", "axisFailures", "tolerance"],
             ),
         ),
-        Prepared::ConnectedComponents { .. } => (
-            selected_fields(&mut raw_measured, &["count"]),
-            Json::object([
-                ("toleranceMm", take_field(&mut evidence, "toleranceMm")),
-                ("clusters", take_field(&mut raw_measured, "clusters")),
-                ("gaps", take_field(&mut raw_measured, "gaps")),
-            ]),
-        ),
-        Prepared::Watertight => (
-            selected_fields(
+        Prepared::ConnectedComponents { .. } => {
+            let mut witnesses = vec![
+                (
+                    "toleranceMm".into(),
+                    take_field(&mut evidence, "toleranceMm"),
+                ),
+                ("clusters".into(), take_field(&mut raw_measured, "clusters")),
+            ];
+            // Absent only on a bounded-profile success.
+            if let Some(gaps) = take_optional(&mut raw_measured, "gaps") {
+                witnesses.push(("gaps".into(), gaps));
+            }
+            (
+                selected_fields(&mut raw_measured, &["count"]),
+                Json::Object(witnesses),
+            )
+        }
+        Prepared::Watertight => {
+            let measured = selected_fields(
                 &mut raw_measured,
                 &[
                     "watertight",
@@ -445,20 +473,26 @@ pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>)
                     "totalEdges",
                     "irregularEdgeFraction",
                 ],
-            ),
-            selected_fields(
+            );
+            let mut witnesses = selected_fields(
                 &mut raw_measured,
                 &[
                     "irregularEdgeKindCounts",
                     "irregularEdgeClusters",
                     "perPrimitive",
                 ],
-            ),
-        ),
+            );
+            // PERF-OUTPUT-01: a closed mesh's per-primitive rows are all zero.
+            if bounded && positive_satisfied {
+                take_optional(&mut witnesses, "perPrimitive");
+            }
+            (measured, witnesses)
+        }
         Prepared::MeshIntegrity(_) => {
             let nonfinite = take_field(&mut raw_measured, "nonFiniteVertices");
             let degenerate = take_field(&mut raw_measured, "degenerateTriangles");
-            let duplicate = take_field(&mut raw_measured, "duplicateFaces");
+            // Absent only under the bounded profile without a declared rule.
+            let duplicate = take_optional(&mut raw_measured, "duplicateFaces");
             let count = |value: &Json| match value {
                 Json::Array(values) => Json::Number(values.len() as f64),
                 _ => unreachable!("owned list"),
@@ -470,20 +504,20 @@ pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>)
                 ),
                 ("nonFiniteVertexCount".into(), count(&nonfinite)),
                 ("degenerateTriangleCount".into(), count(&degenerate)),
-                ("duplicateFaceCount".into(), count(&duplicate)),
             ];
+            let mut witnesses = vec![
+                ("failures".into(), take_field(&mut evidence, "failures")),
+                ("nonFiniteVertices".into(), nonfinite),
+                ("degenerateTriangles".into(), degenerate),
+            ];
+            if let Some(duplicate) = duplicate {
+                measured.push(("duplicateFaceCount".into(), count(&duplicate)));
+                witnesses.push(("duplicateFaces".into(), duplicate));
+            }
             if let Some(mut value) = take_optional(&mut evidence, "watertight") {
                 measured.push(("watertight".into(), take_field(&mut value, "watertight")));
             }
-            (
-                Json::Object(measured),
-                Json::object([
-                    ("failures", take_field(&mut evidence, "failures")),
-                    ("nonFiniteVertices", nonfinite),
-                    ("degenerateTriangles", degenerate),
-                    ("duplicateFaces", duplicate),
-                ]),
-            )
+            (Json::Object(measured), Json::Object(witnesses))
         }
         Prepared::SurfaceArea(_) | Prepared::Volume(_) | Prepared::Mass(_) => {
             let mut witnesses = match selected_fields(&mut evidence, &["source", "tolerance"]) {
@@ -581,6 +615,12 @@ fn geometric(satisfied: bool, diagnostics: Vec<Diagnostic>, evidence: Json) -> E
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Entries into `mismatch`, the failure-diagnostic builder (H9 test hook).
+    static MISMATCH_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 fn mismatch(
     diagnostics: &mut Vec<Diagnostic>,
     code: &str,
@@ -589,6 +629,8 @@ fn mismatch(
     details: Json,
     spatial: Option<Json>,
 ) {
+    #[cfg(test)]
+    MISMATCH_BUILDS.with(|builds| builds.set(builds.get() + 1));
     let mut diagnostic = Diagnostic::error(code, message);
     diagnostic.suggestion = Some(suggestion.into());
     diagnostic.details = Some(details);
@@ -701,7 +743,7 @@ fn evaluate_bounds(
         }
     }
     let measured = bounds_json(bounds);
-    if !failures.is_empty() {
+    if !failures.is_empty() && context.wants_failure_detail() {
         mismatch(
             &mut diagnostics,
             "GEOSPEC_BOUNDING_BOX_MISMATCH",
@@ -788,12 +830,33 @@ fn evaluate_components(
     context: &mut EvaluationContext<'_>,
 ) -> Evaluation {
     let (hash, mut diagnostics) = subject_meta(context);
-    let analysis = match context.connected_components(tolerance_mm) {
+    let bounded = context.bounded_evidence();
+    let brep = context.subject().brep.is_some();
+    let analysis = if brep {
+        let exact = step_component_clusters(tolerance_mm, context);
+        // The complete profile's C(C-1)/2 STEP gaps take the mesh route's
+        // floor and retained-byte accounting in the batch.
+        exact.and_then(|exact| {
+            if bounded {
+                bounded_components(exact.clusters.clone(), expected_count, context)
+            } else {
+                context.step_components(tolerance_mm, &exact)
+            }
+        })
+    } else if bounded {
+        context
+            .mesh_analysis()
+            .map(|analysis| analysis.component_clusters(tolerance_mm))
+            .and_then(|clusters| bounded_components(clusters, expected_count, context))
+    } else {
+        context.connected_components(tolerance_mm)
+    };
+    let analysis = match analysis {
         Ok(value) => value,
         Err(result) => return result,
     };
     let satisfied = u64::from(analysis.count) == expected_count;
-    if !satisfied {
+    if !satisfied && context.wants_failure_detail() {
         mismatch(
             &mut diagnostics,
             "GEOSPEC_CONNECTED_COMPONENTS_MISMATCH",
@@ -820,13 +883,130 @@ fn evaluate_components(
         diagnostics,
         Json::object([
             ("profile", Json::string("mesh-components-v1")),
-            ("source", Json::string("mesh")),
+            ("source", Json::string(if brep { "brep" } else { "mesh" })),
             ("subjectContentHash", Json::string(&hash)),
             ("expected", Json::Number(expected_count as f64)),
             ("toleranceMm", Json::Number(tolerance_mm)),
-            ("measured", connected_json(&analysis)),
+            (
+                "measured",
+                connected_json(&analysis, !bounded || !satisfied),
+            ),
         ]),
     )
+}
+
+/// PERF-OUTPUT-01: no pairwise gaps on success, nearest ones on failure.
+fn bounded_components(
+    clusters: Vec<ClusterReport>,
+    expected_count: u64,
+    context: &EvaluationContext<'_>,
+) -> Result<Rc<ConnectedComponents>, Evaluation> {
+    let count = clusters.len() as u32;
+    let gaps = if u64::from(count) == expected_count {
+        Vec::new()
+    } else {
+        nearest_cluster_gaps(&clusters, context.budget()).map_err(|error| {
+            Evaluation::budget_exceeded(Capability::ToHaveConnectedComponents, error)
+        })?
+    };
+    Ok(Rc::new(ConnectedComponents {
+        count,
+        clusters,
+        gaps,
+    }))
+}
+
+/// M2: STEP clusters from the retained BRep's bodies, never a tessellation.
+/// Bodies belong to the component partition's leaves (C2: leaves that own a
+/// face, rulings 6 and 32), labelled through it, or to the whole shape of an
+/// occurrence-free document. The plan's batch retains them per subject.
+fn step_component_clusters(
+    tolerance_mm: f64,
+    context: &mut EvaluationContext<'_>,
+) -> Result<Rc<ExactClusters>, Evaluation> {
+    let brep = context.brep_gate()?.ok_or_else(|| {
+        backend_refusal(BackendError {
+            kind: BackendErrorKind::Unsupported,
+            message: "Exact connected components require a retained BRep.".into(),
+        })
+    })?;
+    let subject = context.subject();
+    let budget = context.budget;
+    context.exact_clusters(tolerance_mm, || {
+        let occurrences = subject
+            .source_occurrence_structure()
+            .map_err(backend_refusal)?
+            .unwrap_or_default();
+        let leaves = crate::analysis::interference::leaf_components(&occurrences);
+        if leaves.is_empty() && !occurrences.is_empty() {
+            // Every leaf is faceless: no body and no component (ruling 32).
+            return Ok(Vec::new());
+        }
+        let identities =
+            crate::analysis::interference::component_labels(subject).map_err(backend_refusal)?;
+        let refusal = |error: ExactError, labels: &[String]| match error {
+            ExactError::Backend(error) => backend_refusal(error),
+            ExactError::Budget { exceeded, pair } => {
+                let mut refusal =
+                    Evaluation::budget_exceeded(Capability::ToHaveConnectedComponents, exceeded);
+                // Ruling 28: a narrow-phase refusal names the pair whose charge crossed.
+                if let (Some((left, right)), Evaluation::Refused { diagnostics }) =
+                    (pair, &mut refusal)
+                {
+                    if let Some(Json::Object(fields)) = &mut diagnostics[0].details {
+                        fields.push((
+                            "pair".into(),
+                            Json::Array(vec![
+                                Json::string(&labels[left]),
+                                Json::string(&labels[right]),
+                            ]),
+                        ));
+                    }
+                }
+                refusal
+            }
+        };
+        let bodies = ask(budget, None, |charge| {
+            brep.component_bodies(&leaves, charge)
+        })
+        .map_err(|error| refusal(error, &[]))?;
+        let labels = body_labels(bodies.bodies(), &identities);
+        exact_clusters(bodies.as_ref(), &labels, tolerance_mm, budget)
+            .map_err(|error| refusal(error, &labels))
+    })
+}
+
+/// A body is named by its component label, or `step` for a whole-shape
+/// body; several bodies of one owner take `#<ordinal>` in body order.
+fn body_labels(bodies: &[ComponentBody], identities: &[ComponentIdentity]) -> Vec<String> {
+    let names: HashMap<u32, &str> = identities
+        .iter()
+        .map(|identity| (identity.id, identity.label.as_str()))
+        .collect();
+    let mut totals: HashMap<Option<u32>, u32> = HashMap::new();
+    for body in bodies {
+        *totals.entry(body.occurrence).or_insert(0) += 1;
+    }
+    let mut ordinals: HashMap<Option<u32>, u32> = HashMap::new();
+    bodies
+        .iter()
+        .map(|body| {
+            let base = match body.occurrence {
+                Some(index) => names.get(&index).map_or_else(
+                    || format!("step-occurrence-{index}"),
+                    |label| (*label).to_owned(),
+                ),
+                None => "step".to_owned(),
+            };
+            if totals[&body.occurrence] < 2 {
+                return base;
+            }
+            let ordinal = ordinals.entry(body.occurrence).or_insert(0);
+            let label = format!("{base}#{ordinal}");
+            *ordinal += 1;
+            label
+        })
+        .collect()
 }
 
 fn evaluate_watertight(context: &mut EvaluationContext<'_>) -> Evaluation {
@@ -836,7 +1016,7 @@ fn evaluate_watertight(context: &mut EvaluationContext<'_>) -> Evaluation {
         Err(result) => return result,
     };
     let measured = analysis.watertight();
-    if !measured.watertight {
+    if !measured.watertight && context.wants_failure_detail() {
         mismatch(
             &mut diagnostics,
             "GEOSPEC_WATERTIGHT_MISMATCH",
@@ -869,6 +1049,8 @@ fn evaluate_integrity(
     context: &mut EvaluationContext<'_>,
 ) -> Evaluation {
     let mut diagnostics = context.subject().diagnostics.clone();
+    // PERF-OUTPUT-01: the bounded profile finds duplicate faces only when declared.
+    let duplicates = !context.bounded_evidence() || expected.duplicate_faces.is_some();
     let analysis = match context.mesh_analysis() {
         Ok(value) => value,
         Err(result) => return result,
@@ -920,7 +1102,7 @@ fn evaluate_integrity(
             ));
         }
     }
-    if !failures.is_empty() {
+    if !failures.is_empty() && context.wants_failure_detail() {
         mismatch(
             &mut diagnostics,
             "GEOSPEC_MESH_INTEGRITY_MISMATCH",
@@ -929,25 +1111,25 @@ fn evaluate_integrity(
                 failures.join("; ")
             ),
             "Re-tessellate the model (or repair it) until the mesh evidence is clean.",
-            integrity_details(&quality, &failures),
+            integrity_details(&quality, &failures, duplicates),
             None,
         );
     }
     // Only the fields `evaluate` projects: no per-triangle rows, and the
     // watertight verdict without its edge detail.
-    let mut evidence = vec![
+    let mut measured = vec![
         (
-            "measured",
-            Json::object([
-                (
-                    "triangleCount",
-                    Json::Number(f64::from(quality.triangle_count)),
-                ),
-                ("nonFiniteVertices", nonfinite_list(&quality)),
-                ("degenerateTriangles", degenerate_list(&quality)),
-                ("duplicateFaces", duplicate_list(&quality)),
-            ]),
+            "triangleCount".into(),
+            Json::Number(f64::from(quality.triangle_count)),
         ),
+        ("nonFiniteVertices".into(), nonfinite_list(&quality)),
+        ("degenerateTriangles".into(), degenerate_list(&quality)),
+    ];
+    if duplicates {
+        measured.push(("duplicateFaces".into(), duplicate_list(&quality)));
+    }
+    let mut evidence = vec![
+        ("measured", Json::Object(measured)),
         (
             "failures",
             Json::Array(failures.iter().map(|value| Json::string(value)).collect()),
@@ -983,6 +1165,276 @@ fn count_failures(failures: &mut Vec<String>, count: u64, rule: CountRule, label
                 "{count} {label}, above the declared maximum {maximum}"
             ));
         }
+    }
+}
+
+/// V1: the exact shell-closure facet (the single BRep unit, no tessellation):
+/// the verdict, its measured fields and each failing shell with the paths of
+/// the leaf occurrences that hold it.
+struct ExactClosure {
+    watertight: bool,
+    open_edges: u32,
+    nonmanifold_edges: u32,
+    /// No shell and no free face: nothing is enclosed.
+    faceless: bool,
+    /// Failing groups with no open or non-manifold edge: their faces have no
+    /// counted edge use, so nothing proves them closed.
+    edgeless: usize,
+    measured: Json,
+    failing_shells: Vec<Json>,
+}
+
+impl ExactClosure {
+    fn mismatch_message(&self) -> String {
+        if self.faceless {
+            return "The exact BRep topology has no face, so it encloses no closed manifold surface."
+                .into();
+        }
+        let edgeless = if self.edgeless == 0 {
+            String::new()
+        } else {
+            format!(" ({} with no counted edge use)", self.edgeless)
+        };
+        format!(
+            "The exact BRep topology has {} open-boundary and {} non-manifold edges in {} failing shells{edgeless}, so it is not a closed manifold surface.",
+            self.open_edges,
+            self.nonmanifold_edges,
+            self.failing_shells.len()
+        )
+    }
+}
+
+fn exact_closure(context: &mut EvaluationContext<'_>) -> Result<ExactClosure, Evaluation> {
+    let brep = context
+        .brep_gate()?
+        .expect("the exact closure route serves BRep subjects only");
+    let capability = context.capability;
+    let closure =
+        ask(context.budget, None, |charge| brep.closure(charge)).map_err(|error| match error {
+            ExactError::Backend(error) => backend_refusal(error),
+            ExactError::Budget { exceeded, .. } => {
+                Evaluation::budget_exceeded(capability, exceeded)
+            }
+        })?;
+    let occurrences = if closure
+        .failing
+        .iter()
+        .any(|group| !group.occurrences.is_empty())
+    {
+        context.source_occurrence_structure()?
+    } else {
+        None
+    };
+    let path = |ordinal: &u32| {
+        occurrences
+            .as_deref()
+            .and_then(|all| all.get(*ordinal as usize))
+            .map_or(Json::Null, |occurrence| Json::string(&occurrence.path))
+    };
+    let failing_shells = closure
+        .failing
+        .iter()
+        .map(|group| {
+            let samples = group.samples.iter().map(|sample| {
+                Json::object([
+                    (
+                        "kind",
+                        Json::string(if sample.face_uses >= 3 {
+                            "non-manifold"
+                        } else {
+                            "open-boundary"
+                        }),
+                    ),
+                    ("faceUses", Json::Number(f64::from(sample.face_uses))),
+                    ("start", point_json(sample.start)),
+                    ("end", point_json(sample.end)),
+                    ("center", point_json(sample.center)),
+                ])
+            });
+            Json::object([
+                (
+                    "kind",
+                    Json::string(if group.free_faces {
+                        "free-faces"
+                    } else {
+                        "shell"
+                    }),
+                ),
+                (
+                    "occurrences",
+                    Json::Array(group.occurrences.iter().map(path).collect()),
+                ),
+                (
+                    "openBoundaryEdges",
+                    Json::Number(f64::from(group.open_edges)),
+                ),
+                (
+                    "nonManifoldEdges",
+                    Json::Number(f64::from(group.nonmanifold_edges)),
+                ),
+                ("samples", Json::Array(samples.collect())),
+            ])
+        })
+        .collect();
+    // A subject with no face encloses nothing; a group that bounds no counted
+    // edge fails without an open or non-manifold edge (the facet's rule).
+    let faceless = closure.shells == 0 && closure.free_faces == 0;
+    let watertight = !faceless && closure.failing.is_empty();
+    Ok(ExactClosure {
+        watertight,
+        open_edges: closure.open_edges,
+        nonmanifold_edges: closure.nonmanifold_edges,
+        faceless,
+        edgeless: closure
+            .failing
+            .iter()
+            .filter(|group| group.open_edges == 0 && group.nonmanifold_edges == 0)
+            .count(),
+        measured: Json::object([
+            ("watertight", Json::Bool(watertight)),
+            (
+                "openBoundaryEdges",
+                Json::Number(f64::from(closure.open_edges)),
+            ),
+            (
+                "nonManifoldEdges",
+                Json::Number(f64::from(closure.nonmanifold_edges)),
+            ),
+            ("shells", Json::Number(f64::from(closure.shells))),
+            ("freeFaces", Json::Number(f64::from(closure.free_faces))),
+        ]),
+        failing_shells,
+    })
+}
+
+fn evaluate_exact_watertight(context: &mut EvaluationContext<'_>) -> Evaluation {
+    let (hash, mut diagnostics) = subject_meta(context);
+    let closure = match exact_closure(context) {
+        Ok(value) => value,
+        Err(result) => return result,
+    };
+    if !closure.watertight && context.wants_failure_detail() {
+        let Json::Object(mut details) = closure.measured.clone() else {
+            unreachable!("owned closure evidence")
+        };
+        details.push((
+            "failingShells".into(),
+            Json::Array(closure.failing_shells.clone()),
+        ));
+        details.push(("matcher".into(), Json::string("toBeWatertight")));
+        mismatch(
+            &mut diagnostics,
+            "GEOSPEC_WATERTIGHT_MISMATCH",
+            closure.mismatch_message(),
+            if closure.faceless {
+                "Export the model's solid or surface geometry; a subject without a face has no closed surface."
+            } else {
+                "Close the open shells and remove the over-shared edges at the reported samples in the named occurrences, then re-export."
+            },
+            Json::Object(details),
+            None,
+        );
+    }
+    Evaluation::Geometric {
+        positive_satisfied: closure.watertight,
+        diagnostics,
+        negated_diagnostic: None,
+        evidence: crate::result::family_evidence(
+            &hash,
+            Prepared::Watertight.expected(),
+            closure.measured,
+            Json::object([("failingShells", Json::Array(closure.failing_shells))]),
+        ),
+    }
+}
+
+/// M1 (ruling 2): STEP integrity answers only `watertight`, from the exact
+/// closure; the mesh-only options would measure GeoSpec's own tessellation.
+fn evaluate_exact_integrity(
+    expected: &IntegrityExpectation,
+    context: &mut EvaluationContext<'_>,
+) -> Evaluation {
+    let mesh_only = [
+        (expected.finite_positions.is_some(), "finitePositions"),
+        (
+            expected.degenerate_triangles.is_some(),
+            "degenerateTriangles",
+        ),
+        (expected.duplicate_faces.is_some(), "duplicateFaces"),
+        (expected.triangle_count.is_some(), "triangleCount"),
+    ]
+    .into_iter()
+    .filter_map(|(declared, name)| declared.then_some(name))
+    .collect::<Vec<_>>();
+    if !mesh_only.is_empty() {
+        let mut diagnostic = Diagnostic::error(
+            "GEOSPEC_UNSUPPORTED_EVIDENCE",
+            format!(
+                "Exact BRep integrity answers only `watertight`; {} would measure GeoSpec's own tessellation, not the subject.",
+                mesh_only.join(", ")
+            ),
+        );
+        diagnostic.suggestion = Some(
+            "Assert `watertight` on the STEP subject, and assert mesh-only integrity on a rendered mesh subject such as GLB."
+                .into(),
+        );
+        diagnostic.details = Some(Json::object([
+            ("matcher", Json::string("toHaveMeshIntegrity")),
+            (
+                "unsupported",
+                Json::Array(mesh_only.iter().map(|name| Json::string(name)).collect()),
+            ),
+        ]));
+        return Evaluation::Refused {
+            diagnostics: vec![diagnostic],
+        };
+    }
+    let (hash, mut diagnostics) = subject_meta(context);
+    let mut measured = Vec::new();
+    let mut witnesses = Vec::new();
+    let mut failures = Vec::new();
+    if let Some(declared) = expected.watertight {
+        let closure = match exact_closure(context) {
+            Ok(value) => value,
+            Err(result) => return result,
+        };
+        if closure.watertight != declared {
+            failures.push(format!(
+                "watertight is {}, not the declared {declared}",
+                closure.watertight
+            ));
+        }
+        measured.push(("watertight".into(), Json::Bool(closure.watertight)));
+        witnesses.push(("failingShells".into(), Json::Array(closure.failing_shells)));
+    }
+    let failure_list = Json::Array(failures.iter().map(|value| Json::string(value)).collect());
+    if !failures.is_empty() && context.wants_failure_detail() {
+        let mut details = witnesses.clone();
+        details.push(("failures".into(), failure_list.clone()));
+        details.push(("matcher".into(), Json::string("toHaveMeshIntegrity")));
+        mismatch(
+            &mut diagnostics,
+            "GEOSPEC_MESH_INTEGRITY_MISMATCH",
+            format!(
+                "Exact BRep evidence does not satisfy the declared integrity: {}.",
+                failures.join("; ")
+            ),
+            "Close the open shells and remove the over-shared edges at the reported samples, then re-export.",
+            Json::Object(details),
+            None,
+        );
+    }
+    witnesses.push(("failures".into(), failure_list));
+    Evaluation::Geometric {
+        positive_satisfied: failures.is_empty(),
+        diagnostics,
+        negated_diagnostic: None,
+        evidence: crate::result::family_evidence(
+            &hash,
+            integrity_json(expected),
+            Json::Object(measured),
+            Json::Object(witnesses),
+        ),
     }
 }
 
@@ -1053,7 +1505,7 @@ fn evaluate_scalar(
         return Evaluation::Refused { diagnostics };
     };
     let satisfied = expected.value.holds(measured, expected.tolerance);
-    if !satisfied {
+    if !satisfied && context.wants_failure_detail() {
         mismatch(
             &mut diagnostics,
             "GEOSPEC_MEASUREMENT_MISMATCH",
@@ -1127,7 +1579,12 @@ fn evaluate_center(
     let (hash, mut diagnostics) = subject_meta(context);
     let (measured, source) = match context.brep_shape() {
         Err(result) => return result,
-        Ok(Some(shape)) => (Some(shape.center_of_mass), "brep"),
+        // As a zero signed mesh volume has none: the bridge measures no centre
+        // of mass for a massless shape (|volume| <= epsilon).
+        Ok(Some(shape)) => (
+            (shape.volume.abs() > f64::EPSILON).then_some(shape.center_of_mass),
+            "brep",
+        ),
         Ok(None) => {
             let analysis = match context.mesh_analysis() {
                 Ok(value) => value,
@@ -1149,7 +1606,7 @@ fn evaluate_center(
         return Evaluation::Refused { diagnostics };
     };
     let failures = point_failures(measured, expected, tolerance);
-    if !failures.is_empty() {
+    if !failures.is_empty() && context.wants_failure_detail() {
         mismatch(
             &mut diagnostics,
             "GEOSPEC_MEASUREMENT_MISMATCH",
@@ -1631,12 +2088,15 @@ fn primitive_json(value: &PrimitiveRecord) -> Json {
     Json::Object(fields)
 }
 
-fn connected_json(value: &ConnectedComponents) -> Json {
-    Json::object([
-        ("count", Json::Number(f64::from(value.count))),
-        ("clusters", clusters_json(value)),
-        ("gaps", gaps_json(value)),
-    ])
+fn connected_json(value: &ConnectedComponents, gaps: bool) -> Json {
+    let mut fields = vec![
+        ("count".into(), Json::Number(f64::from(value.count))),
+        ("clusters".into(), clusters_json(value)),
+    ];
+    if gaps {
+        fields.push(("gaps".into(), gaps_json(value)));
+    }
+    Json::Object(fields)
 }
 
 fn clusters_json(value: &ConnectedComponents) -> Json {
@@ -1913,20 +2373,19 @@ fn duplicate_json(value: &DuplicateFace) -> Json {
     ])
 }
 
-fn integrity_details(quality: &MeshQuality, failures: &[String]) -> Json {
-    let duplicate_faces = quality.duplicate_faces();
-    Json::object([
-        ("matcher", Json::string("toHaveMeshIntegrity")),
+fn integrity_details(quality: &MeshQuality, failures: &[String], duplicates: bool) -> Json {
+    let mut details = vec![
+        ("matcher".into(), Json::string("toHaveMeshIntegrity")),
         (
-            "failures",
+            "failures".into(),
             Json::Array(failures.iter().map(|value| Json::string(value)).collect()),
         ),
         (
-            "triangleCount",
+            "triangleCount".into(),
             Json::Number(f64::from(quality.triangle_count)),
         ),
         (
-            "nonFiniteVertices",
+            "nonFiniteVertices".into(),
             Json::Array(
                 quality
                     .non_finite_vertices
@@ -1937,7 +2396,7 @@ fn integrity_details(quality: &MeshQuality, failures: &[String]) -> Json {
             ),
         ),
         (
-            "degenerateTriangles",
+            "degenerateTriangles".into(),
             Json::Array(
                 quality
                     .degenerate_triangles
@@ -1947,10 +2406,13 @@ fn integrity_details(quality: &MeshQuality, failures: &[String]) -> Json {
                     .collect(),
             ),
         ),
-        (
-            "duplicateFaces",
+    ];
+    if duplicates {
+        details.push((
+            "duplicateFaces".into(),
             Json::Array(
-                duplicate_faces
+                quality
+                    .duplicate_faces()
                     .iter()
                     .take(4)
                     .map(|face| {
@@ -1965,8 +2427,9 @@ fn integrity_details(quality: &MeshQuality, failures: &[String]) -> Json {
                     })
                     .collect(),
             ),
-        ),
-    ])
+        ));
+    }
+    Json::Object(details)
 }
 
 fn analysis_json(value: &MeshAnalysis) -> Json {
@@ -2106,6 +2569,10 @@ mod preparation_tests {
 #[cfg(test)]
 #[path = "../../tests/matcher_mesh.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "../../tests/matcher_components.rs"]
+mod components_tests;
 
 #[cfg(test)]
 #[path = "../../tests/current_bounds.rs"]

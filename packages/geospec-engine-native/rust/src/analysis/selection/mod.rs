@@ -726,6 +726,8 @@ pub(crate) struct OccurrenceRow {
     pub occurrence: u32,
     pub ordinal_path: Vec<u32>,
     pub bounds: Option<Bounds>,
+    /// The enclosing assembly occurrence; `of` and `within` scope descendants.
+    pub parent: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -757,12 +759,14 @@ pub(crate) struct SelectorIndex {
 
 #[cfg(test)]
 pub(crate) fn build_index(
-    facts: &crate::backend::brep::DocumentFacts,
+    source_occurrences: &[OccurrenceFacts],
+    whole_bounds: Bounds,
+    rows: &DocumentRows,
     brep: &dyn BrepSubject,
 ) -> Result<SelectorIndex, BackendError> {
     let whole = brep.faces()?;
     // Each occurrence re-addresses the probe's whole faces.
-    let occurrences = (0..facts.occurrences.len() as u32)
+    let occurrences = (0..source_occurrences.len() as u32)
         .map(|occurrence| {
             whole
                 .iter()
@@ -778,15 +782,10 @@ pub(crate) fn build_index(
                 .into()
         })
         .collect::<Vec<_>>();
-    let rows = DocumentRows {
-        subshapes: facts.subshapes.clone(),
-        datum_placements: facts.datum_placements.clone(),
-        semantic_datums: facts.semantic_datums.clone(),
-    };
     build_report_index(
-        &facts.occurrences,
-        Some(facts.shape.bounds),
-        &rows,
+        source_occurrences,
+        Some(whole_bounds),
+        rows,
         &whole,
         &occurrences,
     )
@@ -819,8 +818,19 @@ pub(crate) fn build_report_index(
             occurrence: occurrence as u32,
             ordinal_path: row.ordinal_path.clone(),
             bounds: Some(row.bounds),
+            parent: row.parent,
         })
         .collect();
+    // C2 (ruling 6): a parent is structure, not a body; its leaves own the faces.
+    let mut parents = vec![false; occurrences.len()];
+    for row in &occurrences {
+        if let Some(slot) = row
+            .parent
+            .and_then(|parent| parents.get_mut(parent as usize))
+        {
+            *slot = true;
+        }
+    }
     let mut faces = Vec::new();
     let mut bodies = Vec::new();
     if occurrences.is_empty() {
@@ -854,6 +864,9 @@ pub(crate) fn build_report_index(
         });
     }
     for row in &occurrences {
+        if parents[row.occurrence as usize] {
+            continue;
+        }
         let mut located = occurrence_faces[row.occurrence as usize].to_vec();
         located.sort_by_key(|face| face.facts.index);
         let start = faces.len();
@@ -1837,7 +1850,7 @@ pub(crate) fn resolve_budgeted_with_brep(
                     .filter_map(|entity| entity.occurrence_path)
                     .collect()
             });
-            let occurrences: HashMap<_, _> = if of.is_some() {
+            let occurrences: HashMap<_, _> = if of.is_some() || allowed.is_some() {
                 // The former linear find selected the first row for duplicate paths.
                 index
                     .occurrences
@@ -1848,27 +1861,42 @@ pub(crate) fn resolve_budgeted_with_brep(
             } else {
                 HashMap::new()
             };
+            // Ruling 6: parents own no faces or bodies, so `of` and `within`
+            // also scope an entity through each enclosing assembly occurrence.
+            let lineage = |path: &str| {
+                std::iter::successors(occurrences.get(path).copied(), |row| {
+                    row.parent
+                        .and_then(|parent| index.occurrences.get(parent as usize))
+                })
+            };
+            let mut scoped = HashMap::<u32, bool>::new();
             let mut evaluated = Vec::new();
             for entity in query_pool(*kind, index) {
-                let in_scope = match of {
-                    Some(scope) => match entity
-                        .occurrence_path
-                        .as_ref()
-                        .and_then(|path| occurrences.get(path.as_str()))
-                    {
-                        Some(row) => match occurrence_matches(row, scope, regex) {
-                            Ok(value) => value,
-                            Err(error) => return regex_unsupported(expect.clone(), error),
-                        },
-                        None => false,
-                    },
-                    None => true,
+                let in_scope = match (of, entity.occurrence_path.as_deref()) {
+                    (Some(scope), Some(path)) => {
+                        let mut matched = false;
+                        for row in lineage(path) {
+                            let value = match scoped.get(&row.occurrence) {
+                                Some(value) => *value,
+                                None => match occurrence_matches(row, scope, regex) {
+                                    Ok(value) => *scoped.entry(row.occurrence).or_insert(value),
+                                    Err(error) => return regex_unsupported(expect.clone(), error),
+                                },
+                            };
+                            if value {
+                                matched = true;
+                                break;
+                            }
+                        }
+                        matched
+                    }
+                    (Some(_), None) => false,
+                    (None, _) => true,
                 };
                 let in_within = allowed.as_ref().is_none_or(|paths| {
-                    entity
-                        .occurrence_path
-                        .as_ref()
-                        .is_some_and(|path| paths.contains(path))
+                    entity.occurrence_path.as_deref().is_some_and(|path| {
+                        paths.contains(path) || lineage(path).any(|row| paths.contains(&row.path))
+                    })
                 });
                 if in_scope && in_within {
                     let failure = match predicate_failure(query, entity, brep, budget) {
@@ -1990,17 +2018,29 @@ pub(crate) fn resolve_budgeted_with_brep(
             let mut matched_rows = Vec::new();
             for row in rows {
                 let scoped = match of {
-                    Some(scope) => match index
-                        .occurrences
-                        .iter()
-                        .find(|occurrence| occurrence.path == row.occurrence_path)
-                    {
-                        Some(occurrence) => match occurrence_matches(occurrence, scope, regex) {
-                            Ok(value) => value && row.name == *name,
-                            Err(error) => return regex_unsupported(expect.clone(), error),
-                        },
-                        None => false,
-                    },
+                    Some(scope) => {
+                        // Ruling 6: `of` names the row's occurrence or an
+                        // enclosing assembly occurrence (parents own no faces).
+                        let mut current = index
+                            .occurrences
+                            .iter()
+                            .find(|occurrence| occurrence.path == row.occurrence_path);
+                        let mut matched = false;
+                        while let Some(occurrence) = current {
+                            match occurrence_matches(occurrence, scope, regex) {
+                                Ok(true) => {
+                                    matched = true;
+                                    break;
+                                }
+                                Ok(false) => {}
+                                Err(error) => return regex_unsupported(expect.clone(), error),
+                            }
+                            current = occurrence
+                                .parent
+                                .and_then(|parent| index.occurrences.get(parent as usize));
+                        }
+                        matched && row.name == *name
+                    }
                     None => row.full_name == *name,
                 };
                 if scoped {
@@ -2345,10 +2385,7 @@ mod tests {
 
     use super::*;
     use crate::backend::{
-        brep::{
-            DocumentFacts, FaceFacts, PointState, ShapeFacts, TessellationProfile, TopologyCounts,
-            ValidityFacts,
-        },
+        brep::{FaceFacts, PointState, TessellationProfile, ValidityFacts},
         TriangleMesh,
     };
 
@@ -2542,6 +2579,7 @@ mod tests {
                 occurrence: number,
                 ordinal_path: vec![number],
                 bounds: None,
+                parent: None,
             });
             for face in 0..4 {
                 let mut entity = plane(&format!("face:{path}#{face}"), face, [0.0; 3]);
@@ -2612,6 +2650,98 @@ mod tests {
             assert_eq!(current, former);
         }
         assert_eq!(visits, 4_224);
+    }
+
+    #[test]
+    fn of_and_within_reach_leaf_faces_through_assembly_ancestors() {
+        // Ruling 6: the assembly `asm` owns no faces; its leaves own them.
+        let mut index = SelectorIndex::default();
+        for (number, path, parent) in [
+            (0, "asm", None),
+            (1, "asm/a", Some(0)),
+            (2, "asm/b", Some(0)),
+            (3, "loose", None),
+        ] {
+            index.occurrences.push(OccurrenceRow {
+                path: path.into(),
+                product_name: path.into(),
+                instance_name: None,
+                transform: [0.0; 12],
+                occurrence: number,
+                ordinal_path: vec![number],
+                bounds: None,
+                parent,
+            });
+            for face in (number != 0).then_some(0..2).into_iter().flatten() {
+                let mut entity = plane(&format!("face:{path}#{face}"), face, [0.0; 3]);
+                entity.occurrence_path = Some(path.into());
+                index.faces.push(entity);
+            }
+        }
+        let ids = |of: Option<&str>, within: Option<&str>| -> Vec<String> {
+            let selector = Selector::Query {
+                kind: EntityType::Face,
+                of: of.map(|value| TextPattern::Exact(value.into())),
+                query: Query {
+                    within: within.map(|value| {
+                        Box::new(Selector::Occurrence {
+                            name: None,
+                            path: Some(TextPattern::Exact(value.into())),
+                            expect: Cardinality::One,
+                        })
+                    }),
+                    ..Query::default()
+                },
+                expect: Cardinality::Many,
+            };
+            resolve(&selector, &index, &TestRegex)
+                .entities
+                .into_iter()
+                .map(|entity| entity.id)
+                .collect()
+        };
+        let assembly = [
+            "face:asm/a#0",
+            "face:asm/a#1",
+            "face:asm/b#0",
+            "face:asm/b#1",
+        ];
+        assert_eq!(ids(Some("asm"), None), assembly);
+        assert_eq!(ids(None, Some("asm")), assembly);
+        // A leaf scope is unchanged: its own faces only.
+        assert_eq!(ids(Some("asm/a"), None), ["face:asm/a#0", "face:asm/a#1"]);
+        assert_eq!(ids(None, Some("asm/b")), ["face:asm/b#0", "face:asm/b#1"]);
+        assert_eq!(ids(Some("loose"), Some("asm")), Vec::<String>::new());
+
+        // A named datum on a leaf resolves through its assembly scope too.
+        index.datums.push(named_datum(
+            "asm/a.A".into(),
+            "A".into(),
+            "asm/a".into(),
+            Some(1),
+            [0.0; 3],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ));
+        let datum = |of: &str| {
+            resolve(
+                &Selector::Named {
+                    kind: EntityType::Datum,
+                    name: "A".into(),
+                    of: Some(TextPattern::Exact(of.into())),
+                    expect: Cardinality::One,
+                },
+                &index,
+                &TestRegex,
+            )
+            .entities
+            .into_iter()
+            .map(|entity| entity.id)
+            .collect::<Vec<_>>()
+        };
+        assert_eq!(datum("asm"), ["datum:asm/a.A"]);
+        assert_eq!(datum("asm/a"), ["datum:asm/a.A"]);
+        assert_eq!(datum("loose"), Vec::<String>::new());
     }
 
     struct ProbeBrep;
@@ -2706,32 +2836,21 @@ mod tests {
         }
     }
 
-    fn flat_facts() -> DocumentFacts {
-        DocumentFacts {
-            source_length_unit: "millimetre".into(),
-            source_unit_to_millimeters: 1.0,
+    /// A flat (occurrence-free) STEP document's selector-index inputs.
+    struct FlatFacts {
+        occurrences: Vec<OccurrenceFacts>,
+        bounds: Bounds,
+        rows: DocumentRows,
+    }
+
+    fn flat_facts() -> FlatFacts {
+        FlatFacts {
             occurrences: Vec::new(),
-            shape: ShapeFacts {
-                bounds: Bounds {
-                    min: [-1.0, -1.0, 0.0],
-                    max: [1.0, 1.0, 0.0],
-                },
-                volume: 0.0,
-                surface_area: 4.0,
-                center_of_mass: [0.0, 0.0, 0.0],
-                topology: TopologyCounts {
-                    compounds: 0,
-                    solids: 0,
-                    shells: 0,
-                    faces: 1,
-                    wires: 1,
-                    edges: 4,
-                    vertices: 4,
-                },
+            bounds: Bounds {
+                min: [-1.0, -1.0, 0.0],
+                max: [1.0, 1.0, 0.0],
             },
-            subshapes: Vec::new(),
-            datum_placements: Vec::new(),
-            semantic_datums: Vec::new(),
+            rows: DocumentRows::default(),
         }
     }
     #[test]
@@ -3012,28 +3131,30 @@ mod tests {
     fn authored_interface_keeps_its_name_and_original_face_query_address() {
         let mut facts = flat_facts();
         // This ordinary occurrence uses ProbeBrep's located face fixture.
-        facts
-            .occurrences
-            .push(crate::backend::brep::OccurrenceFacts {
-                name: "part".into(),
-                placement: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
-                bounds: facts.shape.bounds,
-                path: "part".into(),
-                parent: None,
-                product: 0,
-                product_name: "part".into(),
-                instance_name: None,
-                ordinal_path: vec![0],
-            });
-        facts.subshapes.push(crate::backend::brep::SubshapeFacts {
-            occurrence: Some(0),
-            occurrence_path: "part".into(),
-            name: "seat".into(),
-            shape_type: SubshapeType::Face,
-            face_index: Some(1),
-            shape_label: None,
+        facts.occurrences.push(OccurrenceFacts {
+            name: "part".into(),
+            placement: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+            bounds: facts.bounds,
+            path: "part".into(),
+            parent: None,
+            product: 0,
+            product_name: "part".into(),
+            instance_name: None,
+            ordinal_path: vec![0],
+            face_count: 1,
         });
-        let index = build_index(&facts, &ProbeBrep).unwrap();
+        facts
+            .rows
+            .subshapes
+            .push(crate::backend::brep::SubshapeFacts {
+                occurrence: Some(0),
+                occurrence_path: "part".into(),
+                name: "seat".into(),
+                shape_type: SubshapeType::Face,
+                face_index: Some(1),
+                shape_label: None,
+            });
+        let index = build_index(&facts.occurrences, facts.bounds, &facts.rows, &ProbeBrep).unwrap();
         let row = &index.interfaces[0];
         assert!(!row.dangling);
         assert_eq!(row.entity.id, "interface:part.seat");
@@ -3045,7 +3166,8 @@ mod tests {
 
     #[test]
     fn flat_step_index_uses_whole_shape_faces_without_occurrence_zero() {
-        let index = build_index(&flat_facts(), &ProbeBrep).unwrap();
+        let facts = flat_facts();
+        let index = build_index(&facts.occurrences, facts.bounds, &facts.rows, &ProbeBrep).unwrap();
         assert_eq!(index.faces.len(), 1);
         assert_eq!(index.faces[0].id, "face:whole#1");
         assert_eq!(index.faces[0].occurrence, None);

@@ -4,6 +4,7 @@ fn completed() -> CompletedOverlap {
     // Ordinary B48 two-cube observation; no geometric expectation is changed.
     CompletedOverlap {
         evidence: Evidence {
+            exact: false,
             component_count: 2,
             components: ["A#0", "B#0"]
                 .into_iter()

@@ -164,24 +164,25 @@ pub(crate) fn finish(
                 fields.push(("positiveSatisfied".into(), Json::Bool(positive_satisfied)));
             }
             let passed = positive_satisfied == (polarity == Polarity::Positive);
-            let informational: Vec<_> = diagnostics
-                .iter()
-                .filter(|diagnostic| diagnostic.severity != Severity::Error)
-                .cloned()
-                .collect();
-            let selected = if passed {
-                informational
-            } else if polarity == Polarity::Positive {
+            let selected = if !passed && polarity == Polarity::Positive {
                 diagnostics
             } else {
-                let mut selected = vec![negated_diagnostic.map(|value| *value).unwrap_or_else(|| {
-                    let mut diagnostic = Diagnostic::error("GEOSPEC_NEGATED_MATCH", format!("GeoSpec matcher '{}' satisfies the declared requirement, but the claim requires it not to.", capability.name()));
-                    diagnostic.suggestion = Some("Correct the model, or revise the negated requirement.".into());
-                    diagnostic.details = Some(Json::object([("matcher", Json::string(capability.name())), ("polarity", Json::string("negative"))]));
-                    diagnostic
-                })];
-                selected.extend(informational);
-                selected
+                // H9: the informational diagnostics are moved, not cloned.
+                let informational = diagnostics
+                    .into_iter()
+                    .filter(|diagnostic| diagnostic.severity != Severity::Error);
+                if passed {
+                    informational.collect()
+                } else {
+                    let mut selected = vec![negated_diagnostic.map(|value| *value).unwrap_or_else(|| {
+                        let mut diagnostic = Diagnostic::error("GEOSPEC_NEGATED_MATCH", format!("GeoSpec matcher '{}' satisfies the declared requirement, but the claim requires it not to.", capability.name()));
+                        diagnostic.suggestion = Some("Correct the model, or revise the negated requirement.".into());
+                        diagnostic.details = Some(Json::object([("matcher", Json::string(capability.name())), ("polarity", Json::string("negative"))]));
+                        diagnostic
+                    })];
+                    selected.extend(informational);
+                    selected
+                }
             };
             (
                 if passed { "passed" } else { "failed" },

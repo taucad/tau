@@ -162,6 +162,8 @@ type FakeRegistry = {
   chatReferences: Record<string, Record<string, ChatSessionActorRef>>;
   /** What the session recorded about a region that did not come up (R4). */
   failures: Record<string, Record<string, string>>;
+  /** The chats the store says are unread (PV-S8). */
+  unread: Set<string>;
   registryListeners: Set<(snapshot?: unknown) => void>;
   sessionListeners: Set<(snapshot?: unknown) => void>;
 };
@@ -175,6 +177,7 @@ const fakeRegistry: FakeRegistry = {
   closed: {},
   chatReferences: {},
   failures: {},
+  unread: new Set(),
   registryListeners: new Set(),
   sessionListeners: new Set(),
 };
@@ -202,6 +205,8 @@ const sessionRefFor = (projectId: string): ProjectSessionActorRef =>
 const fakeChats = {
   chatRootsOf: (projectId: string) => new Map(Object.entries(fakeRegistry.chatReferences[projectId] ?? {})),
   subscribeMembership: () => () => undefined,
+  isUnread: (chatId: string) => fakeRegistry.unread.has(chatId),
+  subscribeUnread: () => () => undefined,
 } as unknown as ChatSessionStore;
 
 const resetRegistry = (): void => {
@@ -210,6 +215,7 @@ const resetRegistry = (): void => {
   fakeRegistry.closed = {};
   fakeRegistry.chatReferences = {};
   fakeRegistry.failures = {};
+  fakeRegistry.unread.clear();
   fakeRegistry.registryListeners.clear();
   fakeRegistry.sessionListeners.clear();
   fakeRegistry.revisionClients.clear();
@@ -307,6 +313,8 @@ beforeEach(() => {
     get: () => undefined,
     subscribeMembership: fakeChats.subscribeMembership,
     chatRootsOf: fakeChats.chatRootsOf,
+    isUnread: fakeChats.isUnread,
+    subscribeUnread: fakeChats.subscribeUnread,
   } as unknown as ReturnType<typeof useChatSessionStore>);
   vi.mocked(useSessions).mockImplementation(() => fakeRegistry.actor);
   vi.mocked(peekRevisionClient).mockImplementation(
@@ -329,6 +337,8 @@ const agentStateRows: ReadonlyArray<{
   readonly revision?: RevisionOverrides;
   readonly conflictedChats?: number;
   readonly attention?: number;
+  /** The store's unread answer for the chat (PV-S8). */
+  readonly unread?: boolean;
 }> = [
   {
     signal: 'no session, no run',
@@ -415,6 +425,7 @@ const agentStateRows: ReadonlyArray<{
       { type: 'runLifecycle', phase: 'completed' },
       { type: 'turnFinalizedObserved', branch: 'main' },
     ],
+    unread: true,
     state: 'done',
     label: 'Done',
     mark: 'unread',
@@ -425,7 +436,6 @@ const agentStateRows: ReadonlyArray<{
     target: 'chat',
     events: [
       { type: 'runLifecycle', phase: 'completed' },
-      { type: 'viewed' },
       { type: 'turnFinalizedObserved', branch: 'main' },
     ],
     state: 'done',
@@ -434,11 +444,12 @@ const agentStateRows: ReadonlyArray<{
     sentence: undefined,
   },
   {
-    /* W8 (D9): after a reload the run is idle, and the unread record is what
-     * says a turn finished unseen; the store restores it into the machine. */
-    signal: 'unreadRestored after a reload, chat not focused',
+    /* D9, PV-S8: after a reload the run is idle, and the store's unread answer
+     * (a receipt behind the log, or a legacy mark) says a turn finished unseen. */
+    signal: 'unread after a reload, chat not focused',
     target: 'chat',
-    events: [{ type: 'unreadRestored' }],
+    events: [],
+    unread: true,
     state: 'idle',
     label: undefined,
     mark: 'unread',
@@ -517,11 +528,14 @@ const agentStateRows: ReadonlyArray<{
 describe('use-sidebar-status — pin (a): every agent-state row renders from a driven machine (V22)', () => {
   it.each(agentStateRows)(
     '$signal',
-    ({ target, events, state, label, mark, sentence, revision, conflictedChats, attention }) => {
+    ({ target, events, state, label, mark, sentence, revision, conflictedChats, attention, unread }) => {
       liveProject(sidebarProject.id);
       if (target === 'chat') {
         const actor = driveChat(sidebarProject.id, sidebarChat.id, events);
-        const status = selectChatStatus(actor.getSnapshot());
+        if (unread === true) {
+          fakeRegistry.unread.add(sidebarChat.id);
+        }
+        const status = selectChatStatus(actor.getSnapshot(), unread === true);
         expect(status.state).toBe(state);
         expect(chatStatusLabel(status)).toBe(label);
         render(<ProjectChatList project={sidebarProject} isProjectActive={false} />);
@@ -568,7 +582,7 @@ describe('use-sidebar-status — pin (a): every agent-state row renders from a d
     const actor = driveChat('bracket', 'arm', [
       { type: 'runLifecycle', phase: 'failed', reason: 'kernel crashed while meshing' },
     ]);
-    expect(chatStatusLabel(selectChatStatus(actor.getSnapshot()))).toBe('Failed · kernel crashed while meshing');
+    expect(chatStatusLabel(selectChatStatus(actor.getSnapshot(), false))).toBe('Failed · kernel crashed while meshing');
   });
 
   /* D16: the count hangs off the disc; the disc keeps the slot's centre. */
@@ -675,10 +689,12 @@ describe('use-sidebar-status — pin (d): the project row rolls up its chats (A3
       { type: 'runLifecycle', phase: 'completed' },
       { type: 'turnFinalizedObserved', branch: 'main' },
     ]);
+    fakeRegistry.unread.add('done');
     expect(collapsed('bracket').mark).toBe('unread');
     driveChat('bracket', 'running', [{ type: 'runLifecycle', phase: 'running' }]);
     expect(collapsed('bracket').mark).toBe('running');
     driveChat('bracket', 'failed', [{ type: 'runLifecycle', phase: 'failed', reason: 'kernel crashed' }]);
+    fakeRegistry.unread.add('failed');
     expect(collapsed('bracket').mark).toBe('failed');
     driveChat('bracket', 'asking', [{ type: 'runLifecycle', phase: 'paused' }]);
     expect(collapsed('bracket').mark).toBe('attention');
@@ -688,12 +704,13 @@ describe('use-sidebar-status — pin (d): the project row rolls up its chats (A3
    * session does, and that shows whether or not it is expanded. */
   it('never turns a failed chat into a failed session', () => {
     liveProject('bracket');
-    const actor = driveChat('bracket', 'arm', [{ type: 'runLifecycle', phase: 'failed', reason: 'kernel crashed' }]);
+    driveChat('bracket', 'arm', [{ type: 'runLifecycle', phase: 'failed', reason: 'kernel crashed' }]);
+    fakeRegistry.unread.add('arm');
     expect(rowOf('bracket').glyph).toBe('idle');
     expect(collapsed('bracket')).toEqual({ mark: 'failed', sentence: 'Live · 1 chat failed' });
     expect(expanded('bracket')).toEqual({ mark: 'none', sentence: 'Live' });
     /* P57: looking at the chat quiets the rollup. */
-    actor.send({ type: 'viewed' });
+    fakeRegistry.unread.delete('arm');
     expect(collapsed('bracket')).toEqual({ mark: 'none', sentence: 'Live' });
 
     liveProject('gearbox', { state: 'failed' });
@@ -729,7 +746,7 @@ describe('use-sidebar-status — pin (d): the project row rolls up its chats (A3
 
   it('names the chat facts the row draws', () => {
     const facts = (events: readonly ChatSessionMachineEvent[]) =>
-      selectChatFacts(selectChatStatus(driveChat('bracket', 'probe', events).getSnapshot()));
+      selectChatFacts(selectChatStatus(driveChat('bracket', 'probe', events).getSnapshot(), false));
     expect(facts([{ type: 'runLifecycle', phase: 'paused' }])).toEqual({
       mark: 'attention',
       sentence: 'Waiting for you',
@@ -891,7 +908,7 @@ describe('use-sidebar-status — pin (P64): sync remains a project fact', () => 
       { type: 'syncState', state: 'conflicted' },
       { type: 'runLifecycle', phase: 'running' },
     ]);
-    expect(chatStatusLabel(selectChatStatus(actor.getSnapshot()))).toBe('Working…');
+    expect(chatStatusLabel(selectChatStatus(actor.getSnapshot(), false))).toBe('Working…');
   });
 });
 

@@ -160,6 +160,8 @@ const {
           this.membership.delete(listener);
         };
       },
+      isUnread: () => false,
+      subscribeUnread: () => () => undefined,
     },
     revision: {
       reset: () => {

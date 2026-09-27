@@ -794,7 +794,6 @@ describe('ChatSessionStore — run phase from the log (PV-S7, G02)', () => {
     publishLogRows('chat_history', [...runningRows('run_old'), lifecycleRow(2, 'completed', 'run_old')]);
 
     expect(actor.getSnapshot().matches({ run: 'idle' })).toBe(true);
-    expect(actor.getSnapshot().matches({ read: 'read' })).toBe(true);
     expect(project.heard).toEqual([]);
     store.release('chat_history');
     store.setProjectSession('proj_history', undefined);
@@ -1077,7 +1076,6 @@ describe('ChatSessionStore — host-attested settlement (P71)', () => {
     store.setProjectSession('project-persisted-settlement', sessionProjectRef());
 
     expect(chat.getSnapshot().matches({ run: 'done' })).toBe(true);
-    expect(chat.getSnapshot().matches({ read: 'unread' })).toBe(true);
 
     store.release(chatId);
     store.setProjectSession('project-persisted-settlement', undefined);
@@ -1116,7 +1114,6 @@ describe('ChatSessionStore — host-attested settlement (P71)', () => {
 
     await vi.waitFor(() => {
       expect(chat.getSnapshot().matches({ run: 'done' })).toBe(true);
-      expect(chat.getSnapshot().matches({ read: 'unread' })).toBe(true);
     });
 
     store.release(chatId);
@@ -1243,7 +1240,10 @@ describe('ChatSessionStore', () => {
   /* Rewritten for W7: the store's unread decision is written to the project's
    * unread record (D9) instead of `setChatUnreadState`, which is gone. Each row
    * keeps its original trigger and asserts the record on disk. */
-  describe('unread lifecycle', () => {
+  /* PV-S8: unread is derived. A chat is unread while its log's newest attention row (a run that completed or failed, or
+   * an interrupt it opened) is not the row its read receipt names; the store writes a receipt only when the person
+   * sees the chat. Nothing is written to say a chat is unread. */
+  describe('unread lifecycle (PV-S8)', () => {
     const projectId = 'proj_unread';
     const unreadPath = `/.tau/composers/chats/${projectId}/unread.json`;
     const storeInProject = (): { store: StoreType; deps: StubDeps } => {
@@ -1253,139 +1253,118 @@ describe('ChatSessionStore', () => {
       store.setDependencies(deps);
       return { store, deps };
     };
-    const unreadWrites = (deps: StubDeps): number =>
-      vi.mocked(deps.client.writeFile).mock.calls.filter(([path]) => path === unreadPath).length;
+    const ended = (chatId: string, state: string): void => {
+      publishLogRows(chatId, [...runningRows(), lifecycleRow(2, state)]);
+    };
+    const requested = logRow(2, {
+      type: 'interrupt.recorded',
+      interruptId: 'i1',
+      phase: 'requested',
+      reason: 'approval',
+    });
 
-    it('marks unattended terminal success and error, but not abort or disconnect', async () => {
+    it('marks an unattended run that completed or failed, and never one the person cancelled', async () => {
       const { store, deps } = storeInProject();
-
-      store.retainDurableRun({ projectId, chatId: 'chat_success', runId: 'run_chat_success' });
-      finishRun(harness.created.at(-1)!);
-      for (const [chatId, options] of [
-        ['chat_error', { isError: true }],
-        ['chat_abort', { isAbort: true }],
-        ['chat_disconnect', { isDisconnect: true }],
-      ] as const) {
-        store.retainDurableRun({ projectId, chatId, runId: `run_${chatId}` });
-        harness.created.at(-1)!.finish(options);
+      for (const chatId of ['chat_success', 'chat_error', 'chat_cancelled']) {
+        store.acquire(chatId, projectId);
       }
 
-      await vi.waitFor(() => {
-        expect(deps.client.json(unreadPath)).toEqual({
-          version: 1,
-          unread: { chat_success: true, chat_error: true },
-        });
-      });
+      ended('chat_success', 'completed');
+      ended('chat_error', 'failed');
+      ended('chat_cancelled', 'cancelled');
+
+      expect(store.isUnread('chat_success')).toBe(true);
+      expect(store.isUnread('chat_error')).toBe(true);
+      expect(store.isUnread('chat_cancelled')).toBe(false);
       await settle();
-      expect(deps.client.json(unreadPath)).toEqual({ version: 1, unread: { chat_success: true, chat_error: true } });
-    });
-
-    it('marks a new unattended approval once while it remains pending', async () => {
-      const { store, deps } = storeInProject();
-      vi.spyOn(deps.client, 'writeFile');
-      store.retainDurableRun({ projectId, chatId: 'chat_approval', runId: 'run_approval' });
-      const requested = logRow(2, {
-        type: 'interrupt.recorded',
-        interruptId: 'i1',
-        phase: 'requested',
-        reason: 'approval',
-      });
-
-      publishLogRows('chat_approval', [...runningRows(), requested]);
-      /* A second stream replays the same rows: the projection already holds them. */
-      publishLogRows('chat_approval', [...runningRows(), requested]);
-
-      await vi.waitFor(() => {
-        expect(deps.client.json(unreadPath)).toEqual({ version: 1, unread: { chat_approval: true } });
-      });
-      await settle();
-      expect(unreadWrites(deps)).toBe(1);
-    });
-
-    it('does not mark terminal or approval events viewed in an active document', async () => {
-      const { store, deps } = storeInProject();
-      store.acquire('chat_active', projectId);
-      store.focusChat('chat_active');
-      const chat = harness.created[0]!;
-      publishLogRows('chat_active', [
-        ...runningRows(),
-        logRow(2, { type: 'interrupt.recorded', interruptId: 'i1', phase: 'requested', reason: 'approval' }),
-      ]);
-      expect(store.acquire('chat_active', projectId).stateActorRef.getSnapshot().context.pendingApprovalCount).toBe(1);
-      store.release('chat_active');
-      chat.finish();
-
-      await vi.waitFor(() => {
-        expect(deps.getChat).toHaveBeenCalledWith('chat_active');
-      });
-      await settle();
+      /* Unread is an answer, not a record: nothing is written until the person sees a chat. */
       expect(deps.client.json(unreadPath)).toBeUndefined();
-      expect(store.isUnread('chat_active')).toBe(false);
     });
 
-    /* An opened chat resumes, and a host holding no run for it closes the stream without a chunk. Its
-     * `onFinish` lands after focus has moved on, and marking it left a chat nothing ran in unread. */
-    it('should not mark a chat unread when its resume ends without output after focus moved away', async () => {
-      const { store, deps } = storeInProject();
+    it('marks an interrupt opened while the person is away', () => {
+      const { store } = storeInProject();
+      store.acquire('chat_approval', projectId);
+
+      publishLogRows('chat_approval', [...runningRows(), requested]);
+
+      expect(store.isUnread('chat_approval')).toBe(true);
+    });
+
+    /* L3 D1: an empty resume appends no row. With W0.2's guard reverted the SDK finishes that request, and a store
+     * that marked unread on the request's finish marked a chat nothing ran in. */
+    it('never marks unread for an empty resume, even when the SDK finishes its request', async () => {
+      const { store } = storeInProject();
       store.acquire('chat_opened', projectId);
       store.focusChat('chat_opened');
+      ended('chat_opened', 'completed');
+      expect(store.isUnread('chat_opened')).toBe(false);
       store.focusChat('chat_next');
       store.blurChat('chat_opened');
-      const chat = harness.created[0]!;
 
-      for (const status of ['submitted', 'ready'] as const) {
-        chat.status = status;
-        chat.emitStatusChange();
-      }
-      chat.finish();
-
-      await vi.waitFor(() => {
-        expect(deps.getChat).toHaveBeenCalledWith('chat_opened');
-      });
+      /* The resume replays the rows the projection already holds, then the SDK walks submitted → ready. */
+      ended('chat_opened', 'completed');
+      finishRun(harness.created[0]!);
       await settle();
-      expect(deps.client.json(unreadPath)).toBeUndefined();
+
       expect(store.isUnread('chat_opened')).toBe(false);
     });
 
-    /* R3: every sidebar row holds a view of its chat, so a view alone is not the person reading it. */
-    it('should mark a chat that finishes while another chat is focused in an active document', async () => {
+    it('reads a chat the person is looking at through each new attention row, writing that row as its receipt', async () => {
       const { store, deps } = storeInProject();
+      store.acquire('chat_active', projectId);
+      store.focusChat('chat_active');
+
+      publishLogRows('chat_active', [...runningRows(), requested]);
+      publishLogRows('chat_active', [lifecycleRow(3, 'completed')], 3);
+
+      expect(store.isUnread('chat_active')).toBe(false);
+      await vi.waitFor(() => {
+        expect(deps.client.json(unreadPath)).toEqual({
+          version: 1,
+          readThrough: { chat_active: { leaderEpoch: 'g1', sequence: 3 } },
+        });
+      });
+    });
+
+    /* R3: every sidebar row holds a view of its chat, so a view alone is not the person reading it. */
+    it('should mark a chat that finishes while another chat is focused in an active document', () => {
+      const { store } = storeInProject();
       store.acquire('chat_listed', projectId);
       store.acquire('chat_focused', projectId);
       store.focusChat('chat_focused');
 
-      finishRun(harness.created[0]!);
+      ended('chat_listed', 'completed');
 
-      await vi.waitFor(() => {
-        expect(deps.client.json(unreadPath)).toEqual({ version: 1, unread: { chat_listed: true } });
-      });
       expect(store.isUnread('chat_listed')).toBe(true);
     });
 
-    it('should mark the focused chat once focus has moved away from it', async () => {
-      const { store, deps } = storeInProject();
-      store.acquire('chat_left', projectId);
-      store.focusChat('chat_left');
-      store.focusChat('chat_next');
-      store.blurChat('chat_left');
-
-      finishRun(harness.created[0]!);
-
-      await vi.waitFor(() => {
-        expect(deps.client.json(unreadPath)).toEqual({ version: 1, unread: { chat_left: true } });
-      });
-    });
-
-    it('marks a terminal event when its mounted view is hidden', async () => {
+    it('marks a run that ends while its focused view is hidden, and clears it when the person looks', async () => {
       vi.stubGlobal('document', { visibilityState: 'hidden', hasFocus: () => false });
       const { store, deps } = storeInProject();
       store.acquire('chat_hidden', projectId);
+      store.focusChat('chat_hidden');
 
-      finishRun(harness.created[0]!);
+      ended('chat_hidden', 'completed');
+      expect(store.isUnread('chat_hidden')).toBe(true);
 
+      store.markViewed('chat_hidden');
+      expect(store.isUnread('chat_hidden')).toBe(false);
       await vi.waitFor(() => {
-        expect(deps.client.json(unreadPath)).toEqual({ version: 1, unread: { chat_hidden: true } });
+        expect(deps.client.json(unreadPath)).toEqual({
+          version: 1,
+          readThrough: { chat_hidden: { leaderEpoch: 'g1', sequence: 2 } },
+        });
       });
+      /* A newer attention row is unread again: the receipt names the row the person saw. */
+      publishLogRows(
+        'chat_hidden',
+        [
+          lifecycleRow(3, 'admitted', 'run_2'),
+          lifecycleRow(4, 'running', 'run_2'),
+          lifecycleRow(5, 'completed', 'run_2'),
+        ],
+        3,
+      );
       expect(store.isUnread('chat_hidden')).toBe(true);
     });
   });
@@ -4407,27 +4386,38 @@ describe('ChatSessionStore — composer records (W7)', () => {
     second.store.release(chatId);
   });
 
-  it('keeps unread across a fresh store and clears it when the chat is viewed', async () => {
+  it('keeps a read receipt across a fresh store, and reads a legacy unread mark as a receipt that matches no row', async () => {
     vi.stubGlobal('document', { visibilityState: 'hidden', hasFocus: () => false });
     const client = createMemoryClient();
+    const log = [...runningRows(), lifecycleRow(2, 'completed')];
+    await client.writeFile(
+      unreadPath,
+      new TextEncoder().encode(JSON.stringify({ version: 1, unread: { [chatId]: true } })),
+    );
     const first = openStore(client);
     first.store.acquire(chatId, projectId);
-    finishRun(harness.created.at(-1)!);
+    /* Before this page reads the chat's log, the legacy mark answers (D9). */
     await vi.waitFor(() => {
-      expect(client.json(unreadPath)).toEqual({ version: 1, unread: { [chatId]: true } });
+      expect(first.store.isUnread(chatId)).toBe(true);
+    });
+    publishLogRows(chatId, log);
+    expect(first.store.isUnread(chatId)).toBe(true);
+
+    first.store.markViewed(chatId);
+    expect(first.store.isUnread(chatId)).toBe(false);
+    await vi.waitFor(() => {
+      expect(client.json(unreadPath)).toEqual({
+        version: 1,
+        readThrough: { [chatId]: { leaderEpoch: 'g1', sequence: 2 } },
+      });
     });
     first.store.release(chatId);
 
     const second = openStore(client);
     second.store.acquire(chatId, projectId);
+    publishLogRows(chatId, log);
     await vi.waitFor(() => {
-      expect(second.store.isUnread(chatId)).toBe(true);
-    });
-
-    second.store.markViewed(chatId);
-
-    await vi.waitFor(() => {
-      expect(client.json(unreadPath)).toEqual({ version: 1 });
+      expect(second.store.unreadRecordRef(projectId).getSnapshot().matches({ lifecycle: 'usable' })).toBe(true);
     });
     expect(second.store.isUnread(chatId)).toBe(false);
     second.store.release(chatId);
@@ -4707,7 +4697,8 @@ describe('ChatSessionStore — composer records (W7)', () => {
     store.unreadRecordRef(projectId).on('writeFailed', failed);
     vi.spyOn(client, 'writeFile').mockRejectedValueOnce(Object.assign(new Error('EACCES'), { code: 'EACCES' }));
 
-    finishRun(harness.created.at(-1)!);
+    publishLogRows(chatId, [...runningRows(), lifecycleRow(2, 'completed')]);
+    store.markViewed(chatId);
 
     await vi.waitFor(() => {
       expect(failed).toHaveBeenCalledOnce();
@@ -4791,24 +4782,23 @@ describe('ChatSessionStore — unread restore and live-record deletion (W8)', ()
     vi.unstubAllGlobals();
   });
 
-  it('restores unread into the chat machine of a fresh store (unreadRestored)', async () => {
+  it('answers unread for a fresh store from the chat’s log and the receipt on disk', async () => {
     vi.stubGlobal('document', { visibilityState: 'hidden', hasFocus: () => false });
     const client = createMemoryClient();
     const first = openStore(client);
     first.store.acquire(chatId, projectId);
-    finishRun(harness.created.at(-1)!);
-    await vi.waitFor(() => {
-      expect(client.json(unreadPath)).toEqual({ version: 1, unread: { [chatId]: true } });
-    });
+    publishLogRows(chatId, [...runningRows(), lifecycleRow(2, 'completed')]);
+    expect(first.store.isUnread(chatId)).toBe(true);
     first.store.release(chatId);
 
     const second = openStore(client);
-    const chat = second.store.acquire(chatId, projectId).stateActorRef;
+    second.store.acquire(chatId, projectId);
+    const woke = vi.fn();
+    second.store.subscribeUnread(woke);
+    publishLogRows(chatId, [...runningRows(), lifecycleRow(2, 'completed')]);
 
-    await vi.waitFor(() => {
-      expect(chat.getSnapshot().matches({ read: 'unread' })).toBe(true);
-    });
     expect(second.store.isUnread(chatId)).toBe(true);
+    expect(woke).toHaveBeenCalled();
     second.store.release(chatId);
   });
 

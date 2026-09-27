@@ -4,9 +4,9 @@
  * Every glyph the sidebar shows is derived here, from the `sessions`,
  * `project-session`, `chat-session` and `project-revisions` snapshots at read
  * time. Nothing about a row is persisted: the only durable status in the whole
- * surface is the project's per-device unread record, and even that is read off
- * the chat's own `read` region, which `ChatSessionStore` restores from it (D9).
- * The store is its one writer; this module never writes it.
+ * surface is the project's per-device read receipts, which `ChatSessionStore`
+ * compares with each chat's log to answer unread (D9, PV-S8). The store is
+ * their one writer; this module never writes them.
  *
  * Two shapes, on purpose:
  *
@@ -178,15 +178,16 @@ const chatRunState = (snapshot: ChatSnapshot): ChatSidebarState => {
 };
 
 /**
- * One chat row, from one snapshot.
+ * One chat row, from its machine's snapshot and the store's unread answer.
  *
  * @param snapshot - That chat's `chat-session` snapshot.
+ * @param unread - Whether the store says the chat is unread (PV-S8).
  * @returns What the row draws.
  * @public
  */
-export const selectChatStatus = (snapshot: ChatSnapshot): ChatSidebarStatus => ({
+export const selectChatStatus = (snapshot: ChatSnapshot, unread: boolean): ChatSidebarStatus => ({
   state: chatRunState(snapshot),
-  unread: snapshot.matches({ read: 'unread' }),
+  unread,
   toolName: snapshot.context.toolName,
   pendingApprovalCount: snapshot.context.pendingApprovalCount,
   failureReason: snapshot.context.failureReason,
@@ -528,7 +529,12 @@ export const readProjectStatus = (
     chats:
       chatReferences.length === 0
         ? emptyChats
-        : new Map(chatReferences.map(([chatId, ref]) => [chatId, selectChatStatus(ref.getSnapshot())])),
+        : new Map(
+            chatReferences.map(([chatId, ref]) => [
+              chatId,
+              selectChatStatus(ref.getSnapshot(), chats.isUnread(chatId)),
+            ]),
+          ),
     revisions: peekRevisionClient(projectId)?.status(),
   };
 };
@@ -646,10 +652,12 @@ const bindProject = ({
     rebind();
     listener();
   });
+  const unsubscribeUnread = chats.subscribeUnread(listener);
   return () => {
     registry.unsubscribe();
     sessionScan?.unsubscribe();
     unsubscribeMembership();
+    unsubscribeUnread();
     for (const off of bound) {
       off();
     }
@@ -702,7 +710,7 @@ export const useChatSidebarStatus = (projectId: string, chatId: string): ChatSid
   const cache = useRef<{ key: string; value: ChatSidebarStatus | undefined } | undefined>(undefined);
   const getSnapshot = useCallback((): ChatSidebarStatus | undefined => {
     const ref = chatReferencesOf(sessions, chats, projectId).get(chatId);
-    const status = ref === undefined ? undefined : selectChatStatus(ref.getSnapshot());
+    const status = ref === undefined ? undefined : selectChatStatus(ref.getSnapshot(), chats.isUnread(chatId));
     return keep(cache, `${projectId}${keySeparator}${chatId}${keySeparator}${chatKey(status)}`, status);
   }, [chatId, chats, projectId, sessions]);
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Topic } from '@taucad/events';
+import { ZodError } from 'zod';
 
 import {
   createMachineDirectory,
@@ -191,6 +192,39 @@ describe('host-owned machine directory', () => {
     expect(() => parseMachineDirectorySnapshot({ ...value, secret: true })).toThrow();
     // Machines have no workspace scope: a cursor that names one is refused.
     expect(() => parseMachineDirectoryCursor({ ...value.cursor, workspaceId: 'workspace' })).toThrow();
+  });
+
+  it('should admit readable alerts and refuse unbounded or unsafe alert text', async () => {
+    const { directory, attach } = fixture();
+    await attach();
+    const value = await directory.snapshot();
+    const withAlerts = (alerts: readonly unknown[]) => ({
+      ...value,
+      entries: value.entries.map((entry) => ({ ...entry, snapshot: { ...entry.snapshot, alerts } })),
+    });
+    const readable = withAlerts([
+      {
+        code: '0C00-0300-0003-000B',
+        severity: 'serious',
+        message: 'The first layer is not sticking to the plate.',
+        reference: 'https://support.example.com/codes/0C00-0300-0003-000B',
+      },
+      { code: '0300-400C' },
+    ]);
+    expect(parseMachineDirectorySnapshot(readable)).toEqual(readable);
+    for (const alert of [
+      { code: '0300-400C', severity: 'critical' },
+      { code: '0300-400C', message: '' },
+      { code: '0300-400C', message: 'x'.repeat(513) },
+      { code: '0300-400C', reference: 'http://support.example.com/codes/0300-400C' },
+      // oxlint-disable-next-line eslint/no-script-url -- the row exists to prove a script URL is refused
+      { code: '0300-400C', reference: 'javascript:alert(1)' },
+      { code: '0300-400C', reference: 'https://192.0.2.10/codes/0300-400C' },
+      { code: '0300-400C', reference: `https://support.example.com/${'x'.repeat(2048)}` },
+      { code: '0300-400C', detail: 'raw provider payload' },
+    ]) {
+      expect(() => parseMachineDirectorySnapshot(withAlerts([alert])), JSON.stringify(alert)).toThrow(ZodError);
+    }
   });
 
   it('should keep an idle machine current past its 15 s budget while it repeats itself, without store writes', async () => {

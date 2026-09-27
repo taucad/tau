@@ -96,7 +96,10 @@ export type ToolpathProgram = Readonly<{
   extrusion: Float32Array<ArrayBuffer>;
   /** Millimetres per second per segment. */
   feedrates: Float32Array<ArrayBuffer>;
-  /** Active tool index per segment. */
+  /**
+   * Active tool per segment: `n` from the last `T<n>` below 64, which selects filament `n + 1`, and 0 before
+   * any. A larger `T<n>` is a machine command and leaves it.
+   */
   tools: Uint8Array<ArrayBuffer>;
   layerTable: readonly ToolpathLayer[];
   events: readonly ToolpathEvent[];
@@ -152,9 +155,9 @@ export type ParseGcodeOptions = Readonly<{
   acceleration?: Readonly<{ print?: number; travel?: number; extruder?: number }>;
   /** Millimetres per second; commanded feedrates above this are clamped. */
   maximumFeedrate?: number;
-  /** Bytes; larger sources are refused. */
+  /** Bytes; larger sources are refused. Defaults to 64 MiB, about 1.9 million segments of Bambu Studio output. */
   maximumBytes?: number;
-  /** Source lines; longer sources are refused. */
+  /** Source lines; longer sources are refused. No limit by default: the byte limit already bounds them. */
   maximumRecords?: number;
 }>;
 
@@ -183,18 +186,25 @@ export class ToolpathParseError extends Error {
   }
 }
 
-const parserIdentity = Object.freeze({ id: 'tau.slicer.toolpath', version: '2' });
+const parserIdentity = Object.freeze({ id: 'tau.slicer.toolpath', version: '4' });
 const defaultAcceleration = Object.freeze({ print: 10_000, travel: 20_000, extruder: 5000 });
 const defaultMaximumFeedrate = 500;
+// The two ceilings that stay bound memory: a 64 MiB Bambu Studio plate holds about 1.9 million segments, and each
+// costs 46 bytes of columns here and about 80 more in the viewer. A line costs a byte at least, so no line limit.
+// ponytail: larger plates are refused, not previewed; a decimated preview (far layers, travel) if they must show.
 const defaultMaximumBytes = 64 * 1024 * 1024;
-const defaultMaximumRecords = 1_100_000;
 const maximumSegments = 2_000_000;
+const tooLargeToPreview =
+  'This G-code is too large to preview. The printer can still print it as it is; to preview it, slice a smaller ' +
+  'model or with a larger layer height.';
 const maximumCoordinate = 10_000;
 const maximumVendorRecordLength = 256;
 const arcChordTolerance = 0.02;
 const maximumArcSteps = 256;
 const fanFullScale = 255;
-const toolIndexModulus = 256;
+// A selection names one of at most 64 filaments, as many as a container records colours for. Bambu Studio's
+// start and end sequences also write T255, T1000 and T1100, which are machine commands, not selections.
+const maximumFilaments = 64;
 const axisLetters = ['X', 'Y', 'Z'] as const;
 
 const kindIndex = Object.fromEntries(toolpathSegmentKinds.map((kind, index) => [kind, index])) as Record<
@@ -230,7 +240,8 @@ const typeKind = (label: string): ToolpathSegmentKind => {
   if (value === 'outer wall') {
     return 'outer-wall';
   }
-  if (value === 'inner wall' || value === 'overhang wall') {
+  // Bambu Studio lays its floating vertical shell behind the inner wall, never on the part's surface.
+  if (value === 'inner wall' || value === 'overhang wall' || value === 'floating vertical shell') {
     return 'inner-wall';
   }
   if (value.includes('infill') || value.includes('surface') || value === 'bridge' || value === 'ironing') {
@@ -334,7 +345,7 @@ const readWords = (tail: string, record: number): Words => {
 
 const resolveParseOptions = (options: ParseGcodeOptions) => ({
   maximumBytes: options.maximumBytes ?? defaultMaximumBytes,
-  maximumRecords: options.maximumRecords ?? defaultMaximumRecords,
+  maximumRecords: options.maximumRecords ?? Number.POSITIVE_INFINITY,
   maximumFeedrate: options.maximumFeedrate ?? defaultMaximumFeedrate,
   acceleration: {
     print: options.acceleration?.print ?? defaultAcceleration.print,
@@ -352,7 +363,8 @@ const inert = (): void => {
  *
  * Closed subset: `G0`–`G4`, `G17`, `G21`, `G28`, `G29`, `G90`–`G92`, `M82`–`M84`,
  * `M104`, `M106`, `M107`, `M109`, `M140`, `M141`, `M190`, `M191`, `M201`,
- * `M203`–`M205`, `M220`, `M221`, `M500`, `M73` and `T<n>`. Bambu vendor families are
+ * `M203`–`M205`, `M220`, `M221`, `M500`, `M73` and `T<n>` below 64, which selects a
+ * filament. Bambu vendor families and a larger `T<n>`, a machine command, are
  * retained as `vendor` events; every other executable record counts as
  * `unknown` and never as a comment. A valueless word is a flag: `G28 X` homes only
  * X, and a flag where a value belongs (`G1 X`) carries no target. Arcs are
@@ -383,10 +395,7 @@ export const parseGcode = (
   const { maximumBytes, maximumRecords, maximumFeedrate, acceleration } = resolveParseOptions(options);
   const bytes = typeof source === 'string' ? new TextEncoder().encode(source) : source;
   if (bytes.byteLength > maximumBytes) {
-    throw new ToolpathParseError(
-      'TOOLPATH_SOURCE_TOO_LARGE',
-      `G-code source is ${bytes.byteLength} bytes; the parser accepts at most ${maximumBytes}.`,
-    );
+    throw new ToolpathParseError('TOOLPATH_SOURCE_TOO_LARGE', tooLargeToPreview);
   }
   const text = typeof source === 'string' ? source : new TextDecoder().decode(bytes);
   const digest = `sha256:${sha256Hex(bytes)}`;
@@ -491,11 +500,7 @@ export const parseGcode = (
       );
     }
     if (segmentCount >= maximumSegments) {
-      throw new ToolpathParseError(
-        'TOOLPATH_SEGMENT_LIMIT',
-        `Record ${record} exceeds the ${maximumSegments} segment limit.`,
-        record,
-      );
+      throw new ToolpathParseError('TOOLPATH_SEGMENT_LIMIT', tooLargeToPreview, record);
     }
     if (segmentCount * 6 >= columns.positions.length) {
       columns = growColumns(columns, segmentCount * 2);
@@ -871,11 +876,11 @@ export const parseGcode = (
     coverage.records += 1;
     const match = commandPattern.exec(executable);
     const command = match === null ? undefined : `${match[1]}${match[2]}`;
-    if (match?.[1] === 'T') {
+    if (match?.[1] === 'T' && Number(match[2]) < maximumFilaments) {
       coverage.known += 1;
-      tool = Number(match[2]) % toolIndexModulus;
+      tool = Number(match[2]);
       events.push({ time: clock, kind: 'tool-change', value: tool });
-    } else if (command !== undefined && vendorPattern.test(command)) {
+    } else if (command !== undefined && (command.startsWith('T') || vendorPattern.test(command))) {
       coverage.vendor += 1;
       events.push({ time: clock, kind: 'vendor', record: executable.slice(0, maximumVendorRecordLength) });
       if (command === 'M400' && /\bU1\b/u.test(executable)) {

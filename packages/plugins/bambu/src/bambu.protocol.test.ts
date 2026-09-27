@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   bambuRemoteName,
+  bambuStage,
   bambuTopic,
   mergeBambuStatus,
   parseBambuCommandPayload,
@@ -12,6 +13,10 @@ import {
 } from '#bambu.protocol.js';
 
 const bytes = (value: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(value);
+/** Parse one status report whose `print` object carries only the given fields. */
+const report = (print: Readonly<Record<string, unknown>>) =>
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Bambu wire field name.
+  parseBambuStatusPayload(bytes(JSON.stringify({ print: { sequence_id: '1', ...print } })));
 
 describe('Bambu protocol admission', () => {
   it('should normalize bounded discovery and reject malformed or oversized datagrams', () => {
@@ -260,5 +265,130 @@ describe('Bambu protocol admission', () => {
     expect(parseBambuStill(Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]), '2026-09-14T00:00:00.000Z')).toMatchObject({
       expiresAt: '2026-09-14T00:00:15.000Z',
     });
+  });
+});
+
+describe('Bambu printer diagnostics', () => {
+  const helpPage = 'https://wiki.bambulab.com/en/x1/troubleshooting/hmscode/';
+
+  it('should decode an HMS row into its display code, severity, readable message and help page', () => {
+    expect(report({ hms: [{ attr: 201_327_360, code: 196_619 }] }).alerts).toEqual([
+      {
+        code: '0C00-0300-0003-000B',
+        severity: 'warning',
+        message: "The printer's camera and AI inspection raised a warning.",
+        reference: `${helpPage}0C00_0300_0003_000B`,
+      },
+    ]);
+  });
+
+  it.each([
+    [1, 'fatal', 'reported a fatal error'],
+    [2, 'serious', 'reported a serious error'],
+    [3, 'warning', 'raised a warning'],
+    [4, 'info', 'sent a notice'],
+  ] as const)('should read severity level %i as %s', (level, severity, outcome) => {
+    expect(report({ hms: [{ attr: 0x08_00_01_00, code: level * 2 ** 16 + 1 }] }).alerts).toEqual([
+      {
+        code: `0800-0100-000${level}-0001`,
+        severity,
+        message: `The printer's toolhead ${outcome}.`,
+        reference: `${helpPage}0800_0100_000${level}_0001`,
+      },
+    ]);
+  });
+
+  it('should name neither a module nor a severity it does not know', () => {
+    expect(report({ hms: [{ attr: 0x10_00_01_00, code: 0x00_05_00_01 }] }).alerts).toEqual([
+      {
+        code: '1000-0100-0005-0001',
+        message: 'The printer reported a problem.',
+        reference: `${helpPage}1000_0100_0005_0001`,
+      },
+    ]);
+  });
+
+  it('should link an AMS diagnostic to the help page written for its first unit and slot', () => {
+    // AMS unit 4 (low bits of the first word), slot 4 (bits 8–10 of the second): the help centre folds both.
+    expect(report({ hms: [{ attr: 0x07_03_23_00, code: 0x00_02_00_01 }] }).alerts).toEqual([
+      {
+        code: '0703-2300-0002-0001',
+        severity: 'serious',
+        message: "The printer's AMS reported a serious error.",
+        reference: `${helpPage}0700_2000_0002_0001`,
+      },
+    ]);
+  });
+
+  it('should decode a print error into its two-word code without inventing a severity or a help page', () => {
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Bambu wire field name.
+    expect(report({ print_error: 50_348_044 }).alerts).toEqual([
+      { code: '0300-400C', message: "The printer's motion controller reported a print error." },
+    ]);
+  });
+
+  it('should accept the integers as decimal strings', () => {
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Bambu wire field name.
+    expect(report({ print_error: '50348044', hms: [{ attr: '201327360', code: '196619' }] }).alerts).toMatchObject([
+      { code: '0300-400C' },
+      { code: '0C00-0300-0003-000B', severity: 'warning' },
+    ]);
+  });
+
+  it('should ignore malformed and repeated rows instead of failing the report', () => {
+    const status = report({
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Bambu wire field name.
+      print_error: 'not-a-number',
+      hms: [
+        null,
+        'row',
+        [201_327_360, 196_619],
+        { attr: 201_327_360 },
+        { attr: '0C000300', code: 196_619 },
+        { attr: -1, code: 196_619 },
+        { attr: 201_327_360.5, code: 196_619 },
+        { attr: 2 ** 32, code: 196_619 },
+        { attr: 0, code: 196_619 },
+        { attr: 201_327_360, code: 196_619 },
+        { attr: '201327360', code: 196_619 },
+      ],
+    });
+    expect(status.alerts).toEqual([expect.objectContaining({ code: '0C00-0300-0003-000B' })]);
+  });
+
+  it('should clear earlier alerts when a report carries none', () => {
+    const raised = report({ hms: [{ attr: 201_327_360, code: 196_619 }] });
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Bambu wire field name.
+    expect(mergeBambuStatus(raised, report({ print_error: 0, hms: [] })).alerts).toEqual([]);
+  });
+});
+
+describe('Bambu printer stage', () => {
+  it('should read a known stage id as a phrase, from a number or a decimal string', () => {
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Bambu wire field name.
+    expect(bambuStage(report({ stg_cur: 2 }).stageId)).toBe('Heating the bed');
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Bambu wire field name.
+    expect(bambuStage(report({ stg_cur: '1' }).stageId)).toBe('Levelling the bed');
+  });
+
+  it.each([
+    ['normal printing', 0],
+    ['idle on the X1', -1],
+    ['idle on the P1', 255],
+    ['an id this table does not know', 78],
+  ])('should give no phrase for %s', (_name, id) => {
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Bambu wire field name.
+    expect(bambuStage(report({ stg_cur: id }).stageId)).toBeUndefined();
+  });
+
+  it('should replace an earlier stage and never read the bare print stage number or a malformed id', () => {
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Bambu wire field name.
+    const heating = report({ stg_cur: 2 });
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Bambu wire field names.
+    expect(bambuStage(mergeBambuStatus(heating, report({ stg_cur: -1, mc_print_stage: '2' })).stageId)).toBeUndefined();
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Bambu wire field names.
+    expect(report({ mc_print_stage: '2', gcode_state: 'RUNNING' })).not.toHaveProperty('stageId');
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Bambu wire field names.
+    expect(report({ stg_cur: 'heating', gcode_state: 'RUNNING' })).not.toHaveProperty('stageId');
   });
 });

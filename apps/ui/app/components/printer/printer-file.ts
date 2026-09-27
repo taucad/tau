@@ -39,8 +39,12 @@ export type PrinterFileContents = Readonly<{
    * else the G-code's `curr_bed_type`; `undefined` when neither does.
    */
   slicedPlate: PrinterPlateModel | undefined;
-  /** `#RRGGBB` of the first filament the file was sliced with; `undefined` when it records none. */
-  filamentColor: string | undefined;
+  /**
+   * `#RRGGBB` per filament the file was sliced with, in filament order: entry *i* is the colour tool `T<i>`
+   * prints. The container's own list, else the G-code's `filament_colour` setting read by the same rules;
+   * empty when it records none or an entry is not a colour.
+   */
+  filamentColors: readonly string[];
 }>;
 
 /** Bytes at each end of the G-code searched for a setting: Bambu Studio writes its config block first, Orca last. */
@@ -62,19 +66,25 @@ export const readGcodeSetting = (gcode: Uint8Array<ArrayBuffer>, name: string): 
   return (setting.exec(head) ?? setting.exec(tail))?.[1];
 };
 
-/** The first colour of a `filament_colour` list such as `#F5A623;#FFFFFF`, as `#RRGGBB`. */
-const firstFilamentColor = (value: string | undefined): string | undefined => {
-  const hex = value && /#([\da-f]{6})/iu.exec(value)?.[1];
-  return hex ? `#${hex.toUpperCase()}` : undefined;
+// As `readBambuContainer` reads the setting: an alpha byte some slicers append is dropped, and at most 64 entries.
+const filamentColorEntry = /^#([\da-f]{6})(?:[\da-f]{2})?$/iu;
+const maximumFilamentColors = 64;
+
+/** Each colour of a `filament_colour` list such as `#F5A623;#FFFFFF`, as `#RRGGBB`; none when one is not a colour. */
+const filamentColorsOf = (value: string | undefined): readonly string[] => {
+  const hexes = value?.split(';').map((entry) => filamentColorEntry.exec(entry.trim())?.[1]) ?? [];
+  return hexes.length <= maximumFilamentColors && hexes.every((hex): hex is string => hex !== undefined)
+    ? hexes.map((hex) => `#${hex.toUpperCase()}`)
+    : [];
 };
 
-/** The G-code bytes of a printer file, the plate it was sliced for and its filament colour. */
+/** The G-code bytes of a printer file, the plate it was sliced for and its filament colours. */
 export const readPrinterFile = (bytes: Uint8Array<ArrayBuffer>, kind: PrinterFileKind): PrinterFileContents => {
   const container = kind === 'container' ? readBambuContainer(bytes) : undefined;
   const gcode = container?.gcode ?? bytes;
   return {
     gcode,
     slicedPlate: plateForBedType(container?.bedType) ?? plateForBedType(readGcodeSetting(gcode, 'curr_bed_type')),
-    filamentColor: firstFilamentColor(readGcodeSetting(gcode, 'filament_colour')),
+    filamentColors: container?.filamentColors ?? filamentColorsOf(readGcodeSetting(gcode, 'filament_colour')),
   };
 };

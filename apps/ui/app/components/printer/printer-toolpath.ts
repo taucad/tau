@@ -6,9 +6,9 @@
  * and every group shares it and one colour buffer; a group owns only an index
  * buffer of its segments in program order, so hiding a group is one
  * `visible` flag and revealing it is one binary search per frame. Colours are
- * baked once per segment kind and height, and only the active layer's range is
- * recoloured when the layer changes. Nothing here allocates inside the frame
- * loop.
+ * baked once per segment from its tool's filament, its kind and its height,
+ * and only the active layer's range is recoloured when the layer changes.
+ * Nothing here allocates inside the frame loop.
  *
  * @module
  */
@@ -111,6 +111,25 @@ export const groupToolpath = (
   return { groupOf, counts };
 };
 
+/**
+ * The tools that lay down filament, ascending: the filaments the program prints with, its preparation included.
+ *
+ * @param program - Segment count, extrusion and tool per segment.
+ * @returns Each extruding tool once.
+ */
+export const extrudingTools = (
+  program: Pick<ToolpathProgram, 'segmentCount' | 'extrusion' | 'tools'>,
+): readonly number[] => {
+  // One flag per value the tools column can hold.
+  const extruding = new Uint8Array(256);
+  for (let segment = 0; segment < program.segmentCount; segment += 1) {
+    if (program.extrusion[segment]! > 0) {
+      extruding[program.tools[segment]!] = 1;
+    }
+  }
+  return [...extruding.keys()].filter((tool) => extruding[tool] === 1);
+};
+
 /** Tint per segment kind. */
 export type ToolpathPalette = Readonly<Record<ToolpathSegmentKind, THREE.Color>> &
   Readonly<{ muted: THREE.Color; trail: THREE.Color }>;
@@ -135,7 +154,7 @@ export const createToolpathPalette = (filament: string, theme: 'light' | 'dark')
     support: new THREE.Color(printerToolpath.support),
     skirt: new THREE.Color(printerToolpath.skirt),
     brim: new THREE.Color(printerToolpath.brim),
-    purge: new THREE.Color(printerToolpath.purge),
+    purge: new THREE.Color(printerToolpath.preparation),
     travel,
     retract: travel,
     wipe: travel,
@@ -153,6 +172,8 @@ export type ToolpathReveal = {
   readonly groupLines: ReadonlyArray<THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial> | undefined>;
   readonly groupOf: Uint8Array<ArrayBuffer>;
   readonly trail: THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial>;
+  /** The trail's tint per tool, from each palette. */
+  readonly trailColors: readonly THREE.Color[];
   readonly baseColors: Float32Array;
   readonly colors: THREE.BufferAttribute;
   readonly trailPositions: THREE.BufferAttribute;
@@ -163,10 +184,13 @@ export type ToolpathReveal = {
 const kindOf = (program: Pick<ToolpathProgram, 'kinds'>, segment: number): ToolpathSegmentKind =>
   toolpathSegmentKinds[program.kinds[segment]!] ?? 'unknown';
 
-/** Allocate the toolpath objects for one program. */
+/**
+ * Allocate the toolpath objects for one program. `palettes` holds one per tool: entry *i* tints the
+ * segments tool `T<i>` prints, and a tool past its end takes the first.
+ */
 export const createToolpathReveal = (
   program: ToolpathProgram,
-  palette: ToolpathPalette,
+  palettes: readonly ToolpathPalette[],
   { groupOf, counts }: ToolpathGrouping = groupToolpath(program),
 ): ToolpathReveal => {
   const vertexCount = program.segmentCount * 2;
@@ -175,9 +199,14 @@ export const createToolpathReveal = (
   const topLayer = Math.max(1, program.layerTable.length - 1);
   const color = new THREE.Color();
   for (let segment = 0; segment < program.segmentCount; segment += 1) {
-    const height = Math.min(1, program.layers[segment]! / topLayer);
-    const tint = groupOf[segment] === preparationGroup ? palette.purge : palette[kindOf(program, segment)];
-    color.copy(tint).lerp(palette.muted, depthFade * (1 - height));
+    const palette = palettes[program.tools[segment]!] ?? palettes[0]!;
+    if (groupOf[segment] === preparationGroup) {
+      // Preparation keeps its one tint: faded toward the muted shade, it sinks into the plate.
+      color.copy(palette.purge);
+    } else {
+      const height = Math.min(1, program.layers[segment]! / topLayer);
+      color.copy(palette[kindOf(program, segment)]).lerp(palette.muted, depthFade * (1 - height));
+    }
     color.toArray(baseColors, segment * 6);
     color.toArray(baseColors, segment * 6 + 3);
   }
@@ -214,9 +243,10 @@ export const createToolpathReveal = (
   const trailGeometry = new THREE.BufferGeometry();
   trailGeometry.setAttribute('position', trailPositions);
   trailGeometry.setDrawRange(0, 0);
+  const trailColors = palettes.map((palette) => palette.trail);
   const trail = new THREE.LineSegments(
     trailGeometry,
-    new THREE.LineBasicMaterial({ color: palette.trail, transparent: true, opacity: 0.95, depthWrite: false }),
+    new THREE.LineBasicMaterial({ color: trailColors[0], transparent: true, opacity: 0.95, depthWrite: false }),
   );
   trail.frustumCulled = false;
   trail.renderOrder = 1;
@@ -226,6 +256,7 @@ export const createToolpathReveal = (
     groupLines,
     groupOf,
     trail,
+    trailColors,
     baseColors,
     colors,
     trailPositions,
@@ -284,7 +315,8 @@ const recolorLayer = (
   const highlight = new THREE.Color(printerToolpath.highlight);
   for (let offset = start; offset < start + length; offset += 3) {
     color.fromArray(reveal.baseColors, offset);
-    if (brighten > 0) {
+    // Preparation shares layer 0 but stays its tint: brightened, it fades into the lifted plate.
+    if (brighten > 0 && reveal.groupOf[Math.floor(offset / 6)] !== preparationGroup) {
       color.lerp(highlight, brighten);
     }
     color.toArray(target, offset);
@@ -356,6 +388,10 @@ export const updateToolpathReveal = ({
     reveal.activeLayer = layer;
   }
 
+  // ponytail: the trail takes the filament at the head; just after a tool change its tail over the last
+  // filament's segments takes it too, until they scroll out. Per-vertex trail colours if that ever shows.
+  const headTool = program.tools[Math.min(Math.max(segment, 0), program.segmentCount - 1)] ?? 0;
+  reveal.trail.material.color.copy(reveal.trailColors[headTool] ?? reveal.trailColors[0]!);
   const trail = reveal.trailPositions.array as Float32Array;
   let count = 0;
   if (segment >= 0 && segment < program.segmentCount && program.extrusion[segment]! > 0 && isShown(reveal, segment)) {

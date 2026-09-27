@@ -63,7 +63,9 @@
     "zod": "^4.0.0"
   },
   "devDependencies": {
+    "@taucad/host": "workspace:*",
     "@taucad/runtime": "workspace:*",
+    "@taucad/slicer": "workspace:*",
     "zod": "catalog:"
   },
   "taucad": {

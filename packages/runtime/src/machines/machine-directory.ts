@@ -163,7 +163,23 @@ const snapshotSchema = z.strictObject({
   lights: z.strictObject({ chamber: z.enum(['off', 'on', 'unknown']).optional() }).optional(),
   removableStorage: z.enum(['absent', 'present']).optional(),
   alerts: z
-    .array(z.strictObject({ code: identity }))
+    .array(
+      z.strictObject({
+        code: identity,
+        severity: z.enum(['fatal', 'serious', 'warning', 'info']).optional(),
+        message: z
+          .string()
+          .min(1)
+          .max(512)
+          .refine((value) => value.isWellFormed())
+          .optional(),
+        // A public help page: https to a named host, never a device address or another scheme.
+        reference: z
+          .url({ protocol: /^https$/u, hostname: z.regexes.domain })
+          .max(2048)
+          .optional(),
+      }),
+    )
     .max(128)
     .optional(),
 });

@@ -137,6 +137,13 @@ const project = (pose: PrinterCameraPose, box: PrinterBounds, aspect: number): A
   });
 };
 
+/** How far the projected corners sit off the viewport's centre on one axis, as a share of the viewport. */
+const offCentre = (corners: ReadonlyArray<readonly [number, number]>, axis: 0 | 1): number => {
+  const values = corners.map((corner) => corner[axis]);
+  // Normalised device coordinates span two units across the viewport.
+  return Math.abs(Math.max(...values) + Math.min(...values)) / 4;
+};
+
 const isOutside = (geometry: PrinterGeometry, point: readonly number[]): boolean =>
   point.some(
     (value, axis) => Math.abs(value - geometry.enclosure.center[axis]!) > geometry.enclosure.size[axis]! / 2 + 19.999,
@@ -169,9 +176,9 @@ describe('framing the print', () => {
       expect(isOutside(x1c, pose.position)).toBe(true);
       const corners = project(pose, box, aspect);
       expect(Math.max(...corners.flat().map((value) => Math.abs(value)))).toBeLessThanOrEqual(0.88 + 1e-9);
-      // Centred across: the left and right extremes balance.
-      const across = corners.map(([x]) => x);
-      expect(Math.abs(Math.max(...across) + Math.min(...across))).toBeLessThan(0.1);
+      // Centred on both axes: the left and right extremes balance, and so do the top and bottom.
+      expect(offCentre(corners, 0), `across at ${aspect}`).toBeLessThan(0.005);
+      expect(offCentre(corners, 1), `down at ${aspect}`).toBeLessThan(0.005);
     }
   });
 
@@ -183,13 +190,11 @@ describe('framing the print', () => {
     const tiny: PrinterBounds = { min: [126, 126, 0], max: [130, 130, 2] };
     const pose = framePrinterCamera(x1c, tiny, 2.4);
     expect(isOutside(x1c, pose.position)).toBe(true);
-    expect(
-      Math.max(
-        ...project(pose, tiny, 2.4)
-          .flat()
-          .map((value) => Math.abs(value)),
-      ),
-    ).toBeLessThan(0.88);
+    const corners = project(pose, tiny, 2.4);
+    expect(Math.max(...corners.flat().map((value) => Math.abs(value)))).toBeLessThan(0.88);
+    // Backed out, the box stays centred at the new distance.
+    expect(offCentre(corners, 0)).toBeLessThan(0.005);
+    expect(offCentre(corners, 1)).toBeLessThan(0.005);
   });
 });
 
@@ -217,18 +222,22 @@ describe('framing the plate', () => {
     expect(framedPartBox(x1c, undefined)).toEqual({ min: [0, 0, -4], max: [256, 256, 12] });
   });
 
-  it('should centre the part and fill the pane as the CAD viewer does, from the front right', () => {
-    const box = framedPartBox(x1c, { min: [108, 108, 0], max: [133, 133, 25] });
-    for (const aspect of [0.59, 1.78]) {
-      const pose = framePrinterCamera(undefined, box, aspect);
-      expect(pose.position[0]).toBeGreaterThan(pose.target[0]);
-      expect(pose.position[1]).toBeLessThan(pose.target[1]);
-      const corners = project(pose, box, aspect);
-      expect(Math.max(...corners.flat().map((value) => Math.abs(value)))).toBeCloseTo(partFramingFill, 6);
-      for (const axis of [0, 1] as const) {
-        const values = corners.map((corner) => corner[axis]);
-        // Perspective leaves the free axis a hair off centre; within 5 % of the view reads as centred.
-        expect(Math.abs((Math.max(...values) + Math.min(...values)) / 2)).toBeLessThan(0.05);
+  it('should centre the part on both screen axes and fill the pane as the CAD viewer does, from the front right', () => {
+    const boxes = {
+      part: framedPartBox(x1c, { min: [108, 108, 0], max: [133, 133, 25] }),
+      plate: framedPartBox(x1c, undefined),
+      tall: framedPartBox(x1c, { min: [120, 120, 0], max: [136, 136, 180] }),
+    };
+    for (const [name, box] of Object.entries(boxes)) {
+      for (const aspect of [0.5, 0.59, 1, 16 / 9, 3]) {
+        const pose = framePrinterCamera(undefined, box, aspect);
+        expect(pose.position[0]).toBeGreaterThan(pose.target[0]);
+        expect(pose.position[1]).toBeLessThan(pose.target[1]);
+        const corners = project(pose, box, aspect);
+        // The binding axis meets the fill margin on both sides; the free axis keeps even slack under perspective.
+        expect(Math.max(...corners.flat().map((value) => Math.abs(value)))).toBeCloseTo(partFramingFill, 6);
+        expect(offCentre(corners, 0), `${name} across at ${aspect}`).toBeLessThan(0.005);
+        expect(offCentre(corners, 1), `${name} down at ${aspect}`).toBeLessThan(0.005);
       }
     }
   });

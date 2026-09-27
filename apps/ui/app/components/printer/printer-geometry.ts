@@ -329,9 +329,33 @@ export const framedPrintBox = (
 };
 
 /**
+ * Where the eye sits along one screen axis so the box projects centred on that axis: the furthest any
+ * corner reaches each way from the view axis, as a slope from the eye, is the same.
+ *
+ * @param points - Each corner's offset from the box centre along the screen axis and along the view.
+ * @param eyeDepth - The eye's offset from the box centre along the view; negative, behind the box.
+ * @returns The eye's offset along the screen axis.
+ */
+const centredOffset = (points: ReadonlyArray<readonly [number, number]>, eyeDepth: number): number =>
+  // Moving the eye toward one side shrinks the reach past it and grows the reach past the other, so the
+  // two meet once. Corners i and j reach equally, one each way, at (x_i w_j + x_j w_i) / (w_i + w_j), with
+  // w a corner's depth in front of the eye; the sides meet at the largest over i of the smallest over j.
+  Math.max(
+    ...points.map(([along, depth]) =>
+      Math.min(
+        ...points.map(([otherAlong, otherDepth]) => {
+          const [reach, otherReach] = [depth - eyeDepth, otherDepth - eyeDepth];
+          return (along * otherReach + otherAlong * reach) / (reach + otherReach);
+        }),
+      ),
+    ),
+  );
+
+/**
  * Place the camera so a box fills the view from the front right for one
- * canvas aspect: the binding axis meets the fill margin exactly, the other
- * axis is centred, and the eye stays outside the enclosure.
+ * canvas aspect: the binding axis meets the fill margin exactly, the box is
+ * centred on both screen axes under perspective, and the eye stays outside
+ * the enclosure.
  *
  * @param geometry - The machine whose enclosure the eye keeps clear of; `undefined` when only the plate is drawn.
  * @param box - The world-space box to frame, from {@link framedPrintBox}.
@@ -360,31 +384,40 @@ export const framePrinterCamera = (
   const center = [0, 1, 2].map((axis) => (box.min[axis]! + box.max[axis]!) / 2);
   const tanVertical = Math.tan((printerCameraFov * Math.PI) / 360) * fill;
   const tanHorizontal = tanVertical * Math.max(0.05, aspect);
+  // Each corner's offset from the centre along the screen's right and up and along the view.
+  const local = corners(box).map((corner) => {
+    const offset = corner.map((value, axis) => value - center[axis]!);
+    return [dot(offset, right), dot(offset, up), dot(offset, forward)] as const;
+  });
   // For each frustum side, the furthest a corner reaches past it; opposite sides meet at the tightest eye.
   let pastRight = -Infinity;
   let pastLeft = -Infinity;
   let pastTop = -Infinity;
   let pastBottom = -Infinity;
-  for (const corner of corners(box)) {
-    const offset = corner.map((value, axis) => value - center[axis]!);
-    const [x, y, z] = [dot(offset, right), dot(offset, up), dot(offset, forward)];
+  for (const [x, y, z] of local) {
     pastRight = Math.max(pastRight, x - z * tanHorizontal);
     pastLeft = Math.max(pastLeft, -x - z * tanHorizontal);
     pastTop = Math.max(pastTop, y - z * tanVertical);
     pastBottom = Math.max(pastBottom, -y - z * tanVertical);
   }
-  // The binding axis sets the depth; standing further back leaves the other axis centred with even slack.
+  // The binding axis sets the depth, meeting the fill margin on both sides; the other axis stands further
+  // back than it needs, and is centred as the eye sees it, since near corners project wider than far ones.
   const depth = Math.min(-(pastRight + pastLeft) / (2 * tanHorizontal), -(pastTop + pastBottom) / (2 * tanVertical));
-  const across = (pastRight - pastLeft) / 2;
-  const lift = (pastTop - pastBottom) / 2;
-  const fitted = [0, 1, 2].map(
-    (axis) => center[axis]! + right[axis]! * across + up[axis]! * lift + forward[axis]! * depth,
-  );
+  const acrossPoints = local.map(([x, , z]) => [x, z] as const);
+  const upPoints = local.map(([, y, z]) => [y, z] as const);
+  const place = (eyeDepth: number): number[] => {
+    const across = centredOffset(acrossPoints, eyeDepth);
+    const lift = centredOffset(upPoints, eyeDepth);
+    return [0, 1, 2].map(
+      (axis) => center[axis]! + right[axis]! * across + up[axis]! * lift + forward[axis]! * eyeDepth,
+    );
+  };
+  const fitted = place(depth);
   const { center: middle, size } = geometry?.enclosure ?? { center: [0, 0, 0], size: [0, 0, 0] };
   const half = size.map((value) => value / 2 + enclosureClearance);
   const isInside =
     geometry !== undefined && fitted.every((value, axis) => Math.abs(value - middle[axis]!) < half[axis]!);
-  // Back straight out along the view axis: the framing stays centred and only grows smaller.
+  // Back straight out along the view axis, then centre again at that distance: the framing only grows smaller.
   const backOut = isInside
     ? Math.min(
         ...forward.map((component, axis) =>
@@ -394,7 +427,9 @@ export const framePrinterCamera = (
         ),
       )
     : 0;
-  const eye = fitted.map((value, axis) => value - forward[axis]! * backOut);
+  // ponytail: centring again moves the backed-out eye sideways a few millimetres, which the 20 mm clearance
+  // absorbs; iterate back-out and centring if an enclosure ever needs the clearance exact.
+  const eye = backOut > 0 ? place(depth - backOut) : fitted;
   const reach = dot(
     center.map((value, axis) => value - eye[axis]!),
     forward,

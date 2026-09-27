@@ -46,7 +46,7 @@ function FieldOfView({ label }: Readonly<{ label: string }>): React.JSX.Element 
 /** A viewer frame with a bar holding a button and a text field, as the bar mounts the shortcuts. */
 function Viewer({ label }: Readonly<{ label: string }>): React.JSX.Element {
   const barRef = useRef<HTMLDivElement>(null);
-  useViewerShortcuts(barRef);
+  useViewerShortcuts(barRef, () => undefined);
   return (
     <section data-viewer-frame aria-label={label}>
       <FieldOfView label={label} />

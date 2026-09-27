@@ -38,7 +38,8 @@ export type ViewerShortcutKeys = Readonly<{ fitView: string; section: string; me
 /**
  * The viewer's shortcuts: F fits the view, S and M toggle Section and Measure, G the grid, and P switches between
  * orthographic and the last perspective field of view. Escape cancels a half-placed measurement, then stops Measure,
- * then stops Section; Delete and Backspace remove the selected cut. S, M and P are off for 2D geometry.
+ * then stops Section; Delete and Backspace remove the cut of the chip holding focus, else the selected cut. S, M and
+ * P are off for 2D geometry. Each shortcut passes a short phrase for its result to `announce`, which the bar speaks.
  *
  * Keys typed into a field never reach these bindings, and every viewer registers its own set, gated by
  * {@link isViewerKeyTarget} on `barRef`. The bindings keep the default priority, below a drag's Escape.
@@ -46,6 +47,7 @@ export type ViewerShortcutKeys = Readonly<{ fitView: string; section: string; me
 export const useViewerShortcuts = (
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- required by React
   barRef: RefObject<HTMLElement | null>,
+  announce: (phrase: string) => void,
 ): ViewerShortcutKeys => {
   const graphicsRef = useGraphics();
   const cameraRig = useCameraRig();
@@ -53,7 +55,14 @@ export const useViewerShortcuts = (
   const options = useMemo(() => {
     const isTarget = (): boolean => isViewerKeyTarget(barRef.current ?? undefined);
     const context = () => graphicsRef.getSnapshot().context;
+    // The cut of the chip in this bar holding focus, which focus previews in the scene, else the selected cut.
+    const resolveCutToRemove = (): string | undefined => {
+      const chip = document.activeElement?.closest<HTMLElement>('[data-section-chip]');
+      const focusedCutId = chip && barRef.current?.contains(chip) ? chip.dataset['sectionChip'] : undefined;
+      return focusedCutId ?? context().selectedSectionCutId;
+    };
     return {
+      resolveCutToRemove,
       always: { ignoreInputs: true, enabled: isTarget },
       in3d: { ignoreInputs: true, enabled: () => isTarget() && context().geometry?.format !== 'svg' },
       escape: {
@@ -62,7 +71,7 @@ export const useViewerShortcuts = (
       },
       remove: {
         ignoreInputs: true,
-        enabled: () => isTarget() && context().isSectionViewActive && context().selectedSectionCutId !== undefined,
+        enabled: () => isTarget() && context().isSectionViewActive && resolveCutToRemove() !== undefined,
       },
     };
   }, [barRef, graphicsRef]);
@@ -71,31 +80,38 @@ export const useViewerShortcuts = (
     fitViewKey,
     () => {
       graphicsRef.send({ type: 'fitView' });
+      announce('Fitted to view');
     },
     options.always,
   );
   const { formattedKeyCombination: section } = useKeybinding(
     sectionKey,
     () => {
+      const isActive = !graphicsRef.getSnapshot().context.isSectionViewActive;
       graphicsRef.send({
         type: 'setSectionViewActive',
-        payload: !graphicsRef.getSnapshot().context.isSectionViewActive,
+        payload: isActive,
         viewDirection: cameraRig.actorRef.getSnapshot().context.view.direction,
       });
+      announce(isActive ? 'Section on' : 'Section off');
     },
     options.in3d,
   );
   const { formattedKeyCombination: measure } = useKeybinding(
     measureKey,
     () => {
-      graphicsRef.send({ type: 'setMeasureActive', payload: !graphicsRef.getSnapshot().context.isMeasureActive });
+      const isActive = !graphicsRef.getSnapshot().context.isMeasureActive;
+      graphicsRef.send({ type: 'setMeasureActive', payload: isActive });
+      announce(isActive ? 'Measure on' : 'Measure off');
     },
     options.in3d,
   );
   useKeybinding(
     gridKey,
     () => {
-      graphicsRef.send({ type: 'setGridVisibility', payload: !graphicsRef.getSnapshot().context.enableGrid });
+      const isShown = !graphicsRef.getSnapshot().context.enableGrid;
+      graphicsRef.send({ type: 'setGridVisibility', payload: isShown });
+      announce(isShown ? 'Grid shown' : 'Grid hidden');
     },
     options.always,
   );
@@ -103,10 +119,12 @@ export const useViewerShortcuts = (
     projectionKey,
     () => {
       const { view, lastPerspectiveVerticalFieldOfView } = cameraRig.actorRef.getSnapshot().context;
+      const isOrthographic = view.requestedVerticalFieldOfView === 0;
       cameraRig.actorRef.send({
         type: 'setVerticalFieldOfView',
-        verticalFieldOfView: view.requestedVerticalFieldOfView === 0 ? lastPerspectiveVerticalFieldOfView : 0,
+        verticalFieldOfView: isOrthographic ? lastPerspectiveVerticalFieldOfView : 0,
       });
+      announce(isOrthographic ? 'Perspective' : 'Orthographic');
     },
     options.in3d,
   );
@@ -116,22 +134,26 @@ export const useViewerShortcuts = (
       const { currentMeasurementStart, isMeasureActive } = graphicsRef.getSnapshot().context;
       if (currentMeasurementStart) {
         graphicsRef.send({ type: 'cancelCurrentMeasurement' });
+        announce('Point cancelled');
       } else if (isMeasureActive) {
         graphicsRef.send({ type: 'setMeasureActive', payload: false });
+        announce('Measure off');
       } else {
         graphicsRef.send({ type: 'setSectionViewActive', payload: false });
+        announce('Section off');
       }
     },
     options.escape,
   );
-  const removeSelectedCut = (): void => {
-    const { selectedSectionCutId } = graphicsRef.getSnapshot().context;
-    if (selectedSectionCutId !== undefined) {
-      graphicsRef.send({ type: 'removeSectionCut', payload: selectedSectionCutId });
+  const removeCut = (): void => {
+    const cutId = options.resolveCutToRemove();
+    if (cutId !== undefined) {
+      graphicsRef.send({ type: 'removeSectionCut', payload: cutId });
+      announce('Cut removed');
     }
   };
-  useKeybinding(deleteKey, removeSelectedCut, options.remove);
-  useKeybinding(backspaceKey, removeSelectedCut, options.remove);
+  useKeybinding(deleteKey, removeCut, options.remove);
+  useKeybinding(backspaceKey, removeCut, options.remove);
 
   return useMemo(() => ({ fitView, section, measure }), [fitView, measure, section]);
 };

@@ -196,16 +196,74 @@ describe('ChatViewerControls', () => {
     it('should say, politely, when the section is refused and the view keeps the last one', () => {
       const actor = startGraphics();
       actor.send({ type: 'setSectionViewActive', payload: true });
+      const { sectionCuts } = actor.getSnapshot().context;
+      actor.send({ type: 'setSectionCertification', payload: { status: 'certified', cuts: sectionCuts } });
       renderBar(actor);
       // Present, and empty, before there is anything to say, so that the words are announced when they come.
       const status = within(sectionRow()).getByRole('status');
       expect(status).toBeEmptyDOMElement();
 
       act(() => {
-        actor.send({ type: 'setSectionCertification', payload: { status: 'rejected', cuts: [] } });
+        actor.send({ type: 'setSectionCertification', payload: { status: 'rejected', cuts: sectionCuts } });
       });
 
       expect(status).toHaveTextContent('Section unavailable for this model; showing the last section');
+    });
+
+    it('should claim no last section when the caps refuse before they ever drew one', () => {
+      const actor = startGraphics();
+      actor.send({ type: 'setSectionViewActive', payload: true });
+      renderBar(actor);
+
+      act(() => {
+        actor.send({ type: 'setSectionCertification', payload: { status: 'rejected', cuts: [] } });
+      });
+
+      expect(within(sectionRow()).getByRole('status')).toHaveTextContent(/^Section unavailable for this model$/);
+    });
+  });
+
+  describe('announcements', () => {
+    it('should say, politely, what each shortcut did', async () => {
+      const actor = startGraphics();
+      const user = userEvent.setup();
+      renderBar(actor);
+      const fitView = screen.getByRole('button', { name: 'Fit view' });
+      act(() => {
+        fitView.focus();
+      });
+      // The bar's own live region, the only one at rest.
+      const status = screen.getByRole('status');
+      const phrases: string[] = [];
+      const press = async (keys: string): Promise<void> => {
+        await user.keyboard(keys);
+        phrases.push(status.textContent);
+      };
+
+      await press('s');
+      // A second cut, open, so Delete leaves Section on.
+      act(() => {
+        actor.send({ type: 'addSectionCut', payload: { kind: 'plane', plane: 'xy' } });
+      });
+      for (const keys of ['m', 'g', 'g', 'p', 'p', 'f', 'f', '{Escape}', '{Delete}', '{Escape}']) {
+        // oxlint-disable-next-line no-await-in-loop -- each key is pressed in turn.
+        await press(keys);
+      }
+
+      expect(phrases).toEqual([
+        'Section on',
+        'Measure on',
+        'Grid hidden',
+        'Grid shown',
+        'Orthographic',
+        'Perspective',
+        'Fitted to view',
+        'Fitted to view',
+        'Measure off',
+        'Cut removed',
+        'Section off',
+      ]);
+      expect(fitView).toHaveFocus();
     });
   });
 
@@ -309,6 +367,25 @@ describe('ChatViewerControls', () => {
 
       expect(screen.queryByRole('group', { name: 'Section view options' })).not.toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Section view', pressed: false })).toHaveFocus();
+    });
+
+    it('should remove the cut of the chip holding focus with Delete, rather than the open cut', async () => {
+      const actor = startGraphics();
+      actor.send({ type: 'setSectionViewActive', payload: true });
+      actor.send({ type: 'addSectionCut', payload: { kind: 'plane', plane: 'xy' } });
+      const user = userEvent.setup();
+      renderBar(actor);
+      expect(within(sectionRow()).getByRole('button', { name: 'Plane XY 0 mm' })).toHaveAttribute(
+        'aria-expanded',
+        'true',
+      );
+      act(() => {
+        within(sectionRow()).getByRole('button', { name: 'Plane XZ 0 mm' }).focus();
+      });
+
+      await user.keyboard('{Delete}');
+
+      expect(actor.getSnapshot().context.sectionCuts.map((cut) => cut.kind === 'plane' && cut.plane)).toEqual(['xy']);
     });
 
     it('should move focus to the next chip when Delete removes the open cut from inside its editor', async () => {

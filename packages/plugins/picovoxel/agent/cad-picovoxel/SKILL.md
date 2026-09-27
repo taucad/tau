@@ -47,7 +47,7 @@ Check a missing default export, a wrong return type and a non-positive `voxelSiz
 
 ## API reference
 
-All 705 symbols are listed in `api-index.md`. Grep it for a name, then read only the file its heading names.
+All 715 symbols are listed in `api-index.md`. Grep it for a name, then read only the file its heading names.
 
 - `api-interfaces.md` — Interfaces
 - `api-types.md` — Types

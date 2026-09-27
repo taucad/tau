@@ -4095,6 +4095,9 @@ importers:
       '@taucad/esbuild':
         specifier: workspace:*
         version: link:../esbuild
+      '@taucad/middleware':
+        specifier: workspace:*
+        version: link:../middleware
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../../runtime
@@ -22818,7 +22821,7 @@ packages:
     engines: {node: '>=18.0.0'}
 
   picovoxel@file:packages/plugins/picovoxel/vendor/picovoxel-0.1.0.tgz:
-    resolution: {integrity: sha512-OeU3Lrfg+BdwVmlBbgGRRLBGd7kNRJYAI29yuU8fh98j1A6WV/NJYRYZwyXaMkbC2XARtIyvO/i+Odt9Pc6Vfg==, tarball: file:packages/plugins/picovoxel/vendor/picovoxel-0.1.0.tgz}
+    resolution: {integrity: sha512-LTwo10Gw9vlcLPoFnxBsLCMreK48CEfBxAo1k4pBuZKM/EEi9ZzwGm18WpqYi68xuPpuJSIaJbUrNr9OKt8cgw==, tarball: file:packages/plugins/picovoxel/vendor/picovoxel-0.1.0.tgz}
     version: 0.1.0
     engines: {node: '>=20'}
     peerDependencies:

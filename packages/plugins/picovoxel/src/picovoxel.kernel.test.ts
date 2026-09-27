@@ -2,20 +2,33 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as IsolationModule from '@taucad/runtime/cross-origin-isolation';
 import type { IsolationStatus } from '@taucad/runtime/cross-origin-isolation';
+import type * as KernelModule from '@taucad/runtime/kernel';
 import type { KernelIssue } from '@taucad/runtime/types';
+import { RenderAbortedError } from '@taucad/runtime';
 import { createMockKernelRuntime, glbToDocument } from '@taucad/runtime-testing';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
-import type { CreatePicoOptions, Mesh, Pico, Voxels } from 'picovoxel';
+import type { CreatePicoOptions, Mesh, Pico, PicoRuntime, Voxels } from 'picovoxel';
 import type * as PicovoxelModule from 'picovoxel';
 
 import type { PicovoxelNativeHandle } from '#picovoxel.geometry.js';
 import { picovoxelBuiltinModuleNames, picovoxelDetectPattern, picovoxelKernel } from '#picovoxel.kernel.js';
 import type { PicovoxelOptionsInput } from '#picovoxel.schemas.js';
 
+type Artifact = 'serial' | 'multi';
+
 const isolation = vi.hoisted(() => ({ status: undefined as IsolationStatus | undefined }));
+const abort = vi.hoisted(() => ({ after: Infinity, checks: 0 }));
+const registered = vi.hoisted(() => new Map<string, unknown>());
 const sessions = vi.hoisted(() => ({
   created: [] as Array<{ artifact: 'serial' | 'multi'; options: CreatePicoOptions; pico: Pico }>,
+  runtimes: [] as Array<{ artifact: 'serial' | 'multi'; runtime: PicoRuntime }>,
+  author: [] as Array<{ options: CreatePicoOptions; pico: Pico }>,
   memoryTotal: undefined as number | undefined,
+  heapBytes: undefined as number | undefined,
+  disposeThrows: false,
+  runtimeDisposeThrows: false,
+  failStart: undefined as 'serial' | 'multi' | undefined,
+  failStartCode: 'PICO_WASM_INIT_FAILED' as 'PICO_WASM_INIT_FAILED' | 'PICO_OUT_OF_MEMORY',
 }));
 
 vi.mock('@taucad/runtime/cross-origin-isolation', async (importOriginal) => {
@@ -23,26 +36,83 @@ vi.mock('@taucad/runtime/cross-origin-isolation', async (importOriginal) => {
   return { ...actual, getIsolationStatus: () => isolation.status ?? actual.getIsolationStatus() };
 });
 
-const recordSessions = (artifact: 'serial' | 'multi', actual: typeof PicovoxelModule): typeof PicovoxelModule => ({
+// Cooperative cancellation: the framework's abort context is worker-internal, so the test counts the
+// kernel's checks and aborts after `abort.after` of them.
+vi.mock('@taucad/runtime/kernel', async (importOriginal) => {
+  const actual = await importOriginal<typeof KernelModule>();
+  return {
+    ...actual,
+    registerKernelModule(...arguments_: Parameters<typeof actual.registerKernelModule>) {
+      registered.set(arguments_[1].name, arguments_[1].exports);
+      actual.registerKernelModule(...arguments_);
+    },
+    checkAbort() {
+      abort.checks++;
+      if (abort.checks > abort.after) {
+        throw new RenderAbortedError();
+      }
+    },
+  };
+});
+
+/** A session whose memory, heap size or dispose the test overrides; the real one otherwise. */
+const recordSession = (artifact: Artifact, pico: Pico, options: CreatePicoOptions): Pico => {
+  const recorded = new Proxy(pico, {
+    get(target, property) {
+      if (property === 'memory' && sessions.memoryTotal !== undefined) {
+        return { ...target.memory, total: sessions.memoryTotal };
+      }
+      if (property === 'module' && sessions.heapBytes !== undefined) {
+        const heap = { byteLength: sessions.heapBytes };
+        return new Proxy(target.module, {
+          get: (module, key) => (key === 'HEAPU8' ? heap : (Reflect.get(module, key) as unknown)),
+        });
+      }
+      if (property === 'dispose' && sessions.disposeThrows) {
+        return () => {
+          target.dispose();
+          throw new Error('dispose failed');
+        };
+      }
+      return Reflect.get(target, property) as unknown;
+    },
+  });
+  sessions.created.push({ artifact, options, pico: recorded });
+  return recorded;
+};
+
+const recordArtifact = (artifact: Artifact, actual: typeof PicovoxelModule): typeof PicovoxelModule => ({
   ...actual,
   async createPico(options?: CreatePicoOptions) {
     const pico = await actual.createPico(options);
-    const recorded =
-      sessions.memoryTotal === undefined
-        ? pico
-        : new Proxy(pico, {
-            get: (target, property) =>
-              property === 'memory'
-                ? { ...target.memory, total: sessions.memoryTotal }
-                : (Reflect.get(target, property) as unknown),
-          });
-    sessions.created.push({ artifact, options: options ?? {}, pico: recorded });
+    sessions.author.push({ options: options ?? {}, pico });
+    return pico;
+  },
+  async createPicoRuntime(options) {
+    if (sessions.failStart === artifact) {
+      throw new actual.PicoError(sessions.failStartCode, 'The shared memory could not be allocated.');
+    }
+    const runtime = await actual.createPicoRuntime(options);
+    const createSession = runtime.createPico.bind(runtime);
+    const dispose = runtime.dispose.bind(runtime);
+    const recorded = Object.assign(runtime, {
+      async createPico(sessionOptions: CreatePicoOptions = {}) {
+        return recordSession(artifact, await createSession(sessionOptions), sessionOptions);
+      },
+      dispose() {
+        dispose();
+        if (sessions.runtimeDisposeThrows) {
+          throw new Error('teardown failed');
+        }
+      },
+    });
+    sessions.runtimes.push({ artifact, runtime: recorded });
     return recorded;
   },
 });
 
-vi.mock('picovoxel', async (importOriginal) => recordSessions('serial', await importOriginal()));
-vi.mock('picovoxel/multi', async (importOriginal) => recordSessions('multi', await importOriginal()));
+vi.mock('picovoxel', async (importOriginal) => recordArtifact('serial', await importOriginal()));
+vi.mock('picovoxel/multi', async (importOriginal) => recordArtifact('multi', await importOriginal()));
 
 type MainModule = Record<string, unknown>;
 
@@ -108,6 +178,12 @@ const buildIssues = async (promise: Promise<unknown>): Promise<readonly KernelIs
   throw new Error('Expected the build to fail.');
 };
 
+/** The context's serial runtime, started if a failed render recycled it. */
+const loadRuntimeFor = async (context: Awaited<ReturnType<typeof initialize>>): Promise<PicoRuntime> => {
+  const { createPicoRuntime } = await import('picovoxel');
+  return context.runtimes.get('serial') ?? createPicoRuntime();
+};
+
 const sphere = (radius = 3) => ({
   defaultParams: { voxelSize: 1 },
   default: (pico: Pico): Voxels => pico.createVoxels({ shape: 'sphere', radius }),
@@ -131,8 +207,17 @@ const stlHeader = (bytes: Uint8Array<ArrayBuffer>): string => new TextDecoder().
 
 beforeEach(() => {
   isolation.status = undefined;
+  abort.after = Infinity;
+  abort.checks = 0;
   sessions.created.length = 0;
+  sessions.runtimes.length = 0;
+  sessions.author.length = 0;
   sessions.memoryTotal = undefined;
+  sessions.heapBytes = undefined;
+  sessions.disposeThrows = false;
+  sessions.runtimeDisposeThrows = false;
+  sessions.failStart = undefined;
+  sessions.failStartCode = 'PICO_WASM_INIT_FAILED';
 });
 
 describe('picovoxel kernel', () => {
@@ -205,15 +290,21 @@ describe('picovoxel kernel', () => {
       expect(result.nativeHandle.shapes[0]!.lane).toBe('exact');
     });
 
-    it('should run the fast lane on the multi-threaded artifact in an isolated worker and stop its pool', async () => {
-      const { runtime } = await createGeometry({ module: sphere(), wasm: 'multi' });
+    it('should run the fast lane on the multi-threaded artifact and keep its pool warm until cleanup', async () => {
+      const { runtime, context } = await createGeometry({ module: sphere(), wasm: 'multi' });
       const [session] = sessions.created;
+      const pthread = session!.pico.module.PThread;
 
       expect(session!.artifact).toBe('multi');
       expect(runtime.logger.debug).toHaveBeenCalledWith(
         expect.stringMatching(/^PicoVoxel session variant=multi pthreads=[1-9]\d* lane=fast$/),
       );
-      expect(session!.pico.module.PThread!.runningWorkers).toHaveLength(0);
+      expect(pthread!.runningWorkers.length).toBeGreaterThan(0);
+
+      // DP10: cleanup terminates the pool; no pthread keeps running.
+      await definition.cleanup!(context);
+      expect(pthread!.runningWorkers).toHaveLength(0);
+      expect(context.runtimes.size).toBe(0);
     }, 60_000);
 
     it('should report zero pthreads on the serial artifact', async () => {
@@ -250,21 +341,27 @@ describe('picovoxel kernel', () => {
       expect(exact.nativeHandle.shapes).toHaveLength(1);
     });
 
-    it('should load each artifact once per worker', async () => {
+    it('should start one warm runtime per artifact and open a fresh session per render', async () => {
       const runtime = createRuntime(sphere());
       const context = await initialize({ wasm: 'multi' }, runtime);
       const render = async (lane: 'fast' | 'exact') =>
         definition.createGeometry({ entryPath: 'main.ts', parameters: {}, options: { lane } }, runtime, context);
 
       await render('exact');
-      const serial = context.artifacts.get('serial');
+      const serial = context.runtimes.get('serial');
       await render('fast');
       await render('exact');
       await render('fast');
 
-      expect([...context.artifacts.keys()].sort()).toEqual(['multi', 'serial']);
-      expect(context.artifacts.get('serial')).toBe(serial);
+      expect([...context.runtimes.keys()].sort()).toEqual(['multi', 'serial']);
+      expect(context.runtimes.get('serial')).toBe(serial);
+      expect(sessions.runtimes.map(({ artifact }) => artifact)).toEqual(['serial', 'multi']);
       expect(sessions.created.map(({ artifact }) => artifact)).toEqual(['serial', 'multi', 'serial', 'multi']);
+      const handles = (artifact: 'serial' | 'multi') =>
+        new Set(sessions.created.filter((session) => session.artifact === artifact).map(({ pico }) => pico.handle));
+      // Each render opens its own Library instance on the shared module; handles are never reused.
+      expect([handles('serial').size, handles('multi').size]).toEqual([2, 2]);
+      await definition.cleanup!(context);
     }, 60_000);
   });
 
@@ -276,6 +373,20 @@ describe('picovoxel kernel', () => {
 
       expect(result.nativeHandle.shapes.map(({ name }) => name)).toEqual(['Shape 1', 'Shape 2']);
       expect([...result.nativeHandle.shapes[0]!.triangles.subarray(0, 3)]).toEqual([0, 2, 1]);
+    });
+
+    it('should drop exactly-zero-area triangles once, for the viewer and every export (D36)', async () => {
+      const { result } = await createGeometry({
+        module: {
+          default: (pico: Pico) => {
+            const cube = helloCube(pico);
+            // Cube triangles plus one with a repeated index: 13 in, 12 out.
+            return pico.createMesh({ vertices: cube.vertices, triangles: [...cube.triangles, 0, 0, 1] });
+          },
+        },
+      });
+
+      expect(result.nativeHandle.shapes[0]!.triangles).toHaveLength(36);
     });
 
     it('should treat an empty array as an empty scene', async () => {
@@ -406,7 +517,7 @@ describe('picovoxel kernel', () => {
       });
     });
 
-    it('should keep any other PicoVoxel code in the details of a runtime issue', async () => {
+    it('should refuse fast-lane data in an exact build with a typed issue and the Tau remedy', async () => {
       const issues = await buildIssues(
         createGeometry({
           module: {
@@ -417,7 +528,49 @@ describe('picovoxel kernel', () => {
         }).then(({ result }) => result),
       );
 
-      expect(issues[0]).toMatchObject({ code: 'RUNTIME', details: { picoCode: 'PICO_LANE_LOOSENED', lane: 'exact' } });
+      expect(issues[0]).toMatchObject({
+        code: 'REPRESENTATION_UNSUPPORTED',
+        message: expect.stringContaining("Regenerate the input with an exact export (lane: 'exact', the default)"),
+        details: {
+          picoCode: 'PICO_LANE_LOOSENED',
+          refusal: 'PICOVOXEL_LANE_LOOSENED',
+          picoMessage: expect.stringContaining('fastRenorm'),
+          lane: 'exact',
+        },
+      });
+    });
+
+    it('should refuse a LANE=fast STL read by an exact build', async () => {
+      const picovoxelModule = await import('picovoxel');
+      const fastStl = picovoxelModule.meshToStlBytes(
+        new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1]),
+        new Uint32Array([0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3]),
+        { acceptLane: 'fast' },
+        'fast',
+      );
+      const issues = await buildIssues(
+        createGeometry({ module: { default: (pico: Pico) => pico.meshFromStl(fastStl) }, lane: 'exact' }).then(
+          ({ result }) => result,
+        ),
+      );
+
+      expect(issues[0]).toMatchObject({
+        code: 'REPRESENTATION_UNSUPPORTED',
+        details: { picoCode: 'PICO_LANE_LOOSENED', refusal: 'PICOVOXEL_LANE_LOOSENED' },
+      });
+    });
+
+    it('should accept the same LANE=fast STL in a fast build', async () => {
+      const picovoxelModule = await import('picovoxel');
+      const fastStl = picovoxelModule.meshToStlBytes(
+        new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1]),
+        new Uint32Array([0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3]),
+        { acceptLane: 'fast' },
+        'fast',
+      );
+      const { result } = await createGeometry({ module: { default: (pico: Pico) => pico.meshFromStl(fastStl) } });
+
+      expect(result.nativeHandle.shapes[0]!.lane).toBe('fast');
     });
 
     it.each([
@@ -476,6 +629,386 @@ describe('picovoxel kernel', () => {
       const { runtime } = await createGeometry({ module: sphere() });
 
       expect(runtime.logger.warn).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('runtime lifetime', () => {
+    const renderTwice = async (module: MainModule) => {
+      const runtime = createRuntime(module);
+      const context = await initialize({ wasm: 'serial' }, runtime);
+      const render = async () =>
+        definition.createGeometry(
+          { entryPath: 'main.ts', parameters: {}, options: { lane: 'exact' } },
+          runtime,
+          context,
+        );
+      return { runtime, context, render };
+    };
+
+    it('should compile and instantiate the WebAssembly module once for two renders (DP9)', async () => {
+      const instantiate = vi.spyOn(WebAssembly, 'instantiate');
+      const instantiateStreaming = vi.spyOn(WebAssembly, 'instantiateStreaming');
+      try {
+        const { context, render } = await renderTwice(sphere());
+        await render();
+        await render();
+
+        expect(instantiate.mock.calls.length + instantiateStreaming.mock.calls.length).toBe(1);
+        expect(sessions.runtimes).toHaveLength(1);
+        expect(sessions.created).toHaveLength(2);
+        await definition.cleanup!(context);
+      } finally {
+        instantiate.mockRestore();
+        instantiateStreaming.mockRestore();
+      }
+    });
+
+    it('should recycle a runtime whose heap passed the threshold and start a fresh one next render', async () => {
+      const { runtime, context, render } = await renderTwice(sphere());
+      sessions.heapBytes = 2 ** 31;
+      await render();
+      const [first] = sessions.runtimes;
+
+      expect(context.runtimes.size).toBe(0);
+      expect(runtime.logger.debug).toHaveBeenCalledWith(
+        'PicoVoxel recycled the serial runtime: its heap reached 2147483648 bytes',
+      );
+      await expect(first!.runtime.createPico()).rejects.toMatchObject({ code: 'PICO_DISPOSED' });
+
+      sessions.heapBytes = undefined;
+      await render();
+      expect(sessions.runtimes).toHaveLength(2);
+      expect(context.runtimes.size).toBe(1);
+      await definition.cleanup!(context);
+    });
+
+    it.each([
+      ['a WebAssembly trap', () => new WebAssembly.RuntimeError('unreachable')],
+      ['an error caused by a trap', () => new Error('failed', { cause: new WebAssembly.RuntimeError('unreachable') })],
+    ])('should recycle the runtime after %s and build cleanly on the next render', async (_name, trap) => {
+      let trapped = false;
+      const { runtime, context, render } = await renderTwice({
+        default: (pico: Pico) => {
+          if (!trapped) {
+            trapped = true;
+            throw trap();
+          }
+          return pico.createVoxels({ shape: 'sphere', radius: 2 });
+        },
+      });
+
+      const issues = await buildIssues(render());
+      expect(issues[0]!.code).toBe('RUNTIME');
+      expect(runtime.logger.debug).toHaveBeenCalledWith('PicoVoxel recycled the serial runtime: the build trapped');
+
+      const next = await render();
+      expect(next.nativeHandle.shapes).toHaveLength(1);
+      expect(sessions.runtimes).toHaveLength(2);
+      await definition.cleanup!(context);
+    });
+
+    it('should recycle the runtime when a session cannot be disposed', async () => {
+      const { runtime, context, render } = await renderTwice(sphere());
+      sessions.disposeThrows = true;
+      const result = await render();
+
+      expect(result.nativeHandle.shapes).toHaveLength(1);
+      expect(runtime.logger.debug).toHaveBeenCalledWith(
+        'PicoVoxel recycled the serial runtime: a session could not be disposed',
+      );
+      expect(context.runtimes.size).toBe(0);
+    });
+
+    it('should drop a recycled runtime even when its teardown throws', async () => {
+      const { runtime, context, render } = await renderTwice(sphere());
+      sessions.heapBytes = 2 ** 31;
+      sessions.runtimeDisposeThrows = true;
+      await render();
+
+      expect(runtime.logger.debug).toHaveBeenCalledWith('PicoVoxel runtime teardown failed: Error: teardown failed');
+      expect(context.runtimes.size).toBe(0);
+    });
+
+    it('should not keep a runtime that failed to start', async () => {
+      const { context, render } = await renderTwice(sphere());
+      sessions.failStart = 'serial';
+      const issues = await buildIssues(render());
+
+      expect(issues[0]).toMatchObject({ details: { picoCode: 'PICO_WASM_INIT_FAILED', artifact: 'serial' } });
+      expect(context.runtimes.size).toBe(0);
+
+      sessions.failStart = undefined;
+      const recovered = await render();
+      expect(recovered.nativeHandle.shapes).toHaveLength(1);
+      await definition.cleanup!(context);
+    });
+
+    it('should have nothing to recycle when a runtime runs out of memory while starting', async () => {
+      const { runtime, render } = await renderTwice(sphere());
+      sessions.failStart = 'serial';
+      sessions.failStartCode = 'PICO_OUT_OF_MEMORY';
+      const issues = await buildIssues(render());
+
+      expect(issues[0]).toMatchObject({ code: 'RESOURCE_LIMIT', details: { picoCode: 'PICO_OUT_OF_MEMORY' } });
+      expect(runtime.logger.debug).not.toHaveBeenCalledWith(expect.stringContaining('recycled'));
+    });
+
+    it('should dispose every runtime on cleanup and skip one that never started', async () => {
+      const runtime = createRuntime(sphere());
+      const context = await initialize({ wasm: 'multi' }, runtime);
+      await definition.createGeometry(
+        { entryPath: 'main.ts', parameters: {}, options: { lane: 'exact' } },
+        runtime,
+        context,
+      );
+      const failed = Promise.reject(new Error('never started'));
+      // Observed here so the rejection is handled; cleanup must still skip it.
+      await expect(failed).rejects.toThrow('never started');
+      context.runtimes.set('multi', failed);
+
+      await definition.cleanup!(context);
+
+      expect(context.runtimes.size).toBe(0);
+      await expect(sessions.runtimes[0]!.runtime.createPico()).rejects.toMatchObject({ code: 'PICO_DISPOSED' });
+    });
+  });
+
+  describe('serial retry (D21)', () => {
+    const outOfMemoryOnMulti = async (always = false) => {
+      const picovoxelModule = await import('picovoxel');
+      return {
+        default: (pico: Pico) => {
+          if (always || pico.module.PThread) {
+            throw new picovoxelModule.PicoError(
+              'PICO_OUT_OF_MEMORY',
+              'Voxels_hCreateSphere aborted inside WebAssembly.',
+            );
+          }
+          return pico.createVoxels({ shape: 'sphere', radius: 2 });
+        },
+      };
+    };
+
+    it('should rebuild a fast multi render that ran out of memory on the serial build, with a visible warning', async () => {
+      const { runtime, context, result } = await createGeometry({ module: await outOfMemoryOnMulti(), wasm: 'multi' });
+
+      expect(sessions.created.map(({ artifact, options }) => [artifact, options.lane])).toEqual([
+        ['multi', 'fast'],
+        ['serial', 'fast'],
+      ]);
+      expect(result.nativeHandle.shapes).toHaveLength(1);
+      expect(result.issues).toEqual([
+        expect.objectContaining({
+          code: 'RESOURCE_LIMIT',
+          severity: 'warning',
+          message: expect.stringContaining(
+            'ran out of WebAssembly memory, so this render was rebuilt on the single-threaded build. Increase voxelSize',
+          ),
+          details: expect.objectContaining({ picoCode: 'PICO_OUT_OF_MEMORY', retry: 'PICOVOXEL_SERIAL_RETRY' }),
+        }),
+      ]);
+      expect(runtime.logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('rebuilt on the single-threaded build'),
+        {
+          data: { picoCode: 'PICO_OUT_OF_MEMORY' },
+        },
+      );
+      // The trap recycled the multi runtime.
+      expect([...context.runtimes.keys()]).toEqual(['serial']);
+      await definition.cleanup!(context);
+    }, 60_000);
+
+    it('should rebuild on the serial build when the multi build cannot start', async () => {
+      sessions.failStart = 'multi';
+      const { context, result } = await createGeometry({ module: sphere(), wasm: 'multi' });
+
+      expect(sessions.created.map(({ artifact }) => artifact)).toEqual(['serial']);
+      expect(result.issues).toEqual([
+        expect.objectContaining({
+          severity: 'warning',
+          message: expect.stringContaining('could not start'),
+          details: expect.objectContaining({ picoCode: 'PICO_WASM_INIT_FAILED' }),
+        }),
+      ]);
+      await definition.cleanup!(context);
+    });
+
+    it('should report both the serial failure and the warning when the rebuild fails too', async () => {
+      const issues = await buildIssues(createGeometry({ module: await outOfMemoryOnMulti(true), wasm: 'multi' }));
+
+      expect(issues).toEqual([
+        expect.objectContaining({ severity: 'error', details: expect.objectContaining({ artifact: 'serial' }) }),
+        expect.objectContaining({
+          severity: 'warning',
+          details: expect.objectContaining({ retry: 'PICOVOXEL_SERIAL_RETRY' }),
+        }),
+      ]);
+    }, 60_000);
+
+    it.each([
+      ['an author error on the multi build', 'multi', () => new Error('author bug')],
+      ['a serial out-of-memory', 'serial', undefined],
+    ] as const)(
+      'should not retry %s',
+      async (_name, wasm, thrown) => {
+        const picovoxelModule = await import('picovoxel');
+        const error = thrown?.() ?? new picovoxelModule.PicoError('PICO_OUT_OF_MEMORY', 'aborted');
+        const issues = await buildIssues(
+          createGeometry({
+            module: {
+              default: () => {
+                throw error;
+              },
+            },
+            wasm,
+          }),
+        );
+
+        expect(issues).toHaveLength(1);
+        expect(sessions.created.map(({ artifact }) => artifact)).toEqual([wasm]);
+      },
+      60_000,
+    );
+  });
+
+  describe('cooperative cancellation (D21)', () => {
+    const sphereMinusBeam = {
+      default: (pico: Pico): Voxels => {
+        const sphere = pico.createVoxels({ shape: 'sphere', radius: 4 });
+        const beam = pico.createVoxels({ shape: 'beam', start: [-5, 0, 0], end: [5, 0, 0], radius: 1 });
+        // `equals` returns a primitive; `subtract` takes an operand that must keep its identity.
+        expect(sphere.equals(beam)).toBe(false);
+        return sphere.subtract(beam);
+      },
+    };
+
+    it('should check for cancellation before every PicoVoxel call and keep operand identity', async () => {
+      const { result } = await createGeometry({ module: sphereMinusBeam });
+
+      expect(result.nativeHandle.shapes).toHaveLength(1);
+      // Two createVoxels calls, equals, subtract, then the kernel's toMesh.
+      expect(abort.checks).toBe(5);
+    });
+
+    it('should stop a superseded build at its next call, free the session, and build cleanly next time', async () => {
+      const runtime = createRuntime(sphereMinusBeam);
+      const context = await initialize({ wasm: 'serial' }, runtime);
+      const render = async () =>
+        definition.createGeometry(
+          { entryPath: 'main.ts', parameters: {}, options: { lane: 'fast' } },
+          runtime,
+          context,
+        );
+      abort.after = 1;
+
+      const aborted = await render().catch((error: unknown) => error);
+
+      expect(aborted).toBeInstanceOf(RenderAbortedError);
+      expect(abort.checks).toBe(2);
+      expect(() => sessions.created[0]!.pico.allocated).toThrow(expect.objectContaining({ code: 'PICO_DISPOSED' }));
+
+      abort.after = Infinity;
+      const next = await render();
+      expect(next.nativeHandle.shapes).toHaveLength(1);
+      expect(sessions.runtimes).toHaveLength(1);
+      await definition.cleanup!(context);
+    });
+  });
+
+  describe('author sessions (D21)', () => {
+    const authorExports = () => registered.get('picovoxel') as typeof PicovoxelModule;
+
+    it('should track, check and dispose sessions author code creates through the picovoxel builtin', async () => {
+      const runtime = createRuntime({});
+      const context = await initialize({ wasm: 'serial' }, runtime);
+      const { createPico } = authorExports();
+      let own: Pico | undefined;
+      runtime.execute.mockResolvedValue({
+        success: true,
+        value: {
+          default: async () => {
+            own = await createPico({ voxelSize: 1 });
+            return own.createVoxels({ shape: 'sphere', radius: 2 });
+          },
+        },
+      });
+
+      const result = await definition.createGeometry(
+        { entryPath: 'main.ts', parameters: {}, options: { lane: 'fast' } },
+        runtime,
+        context,
+      );
+
+      expect(result.nativeHandle.shapes).toHaveLength(1);
+      expect(sessions.author[0]!.options).toEqual({ memoryWarningBytes: 0, voxelSize: 1 });
+      expect(abort.checks).toBe(2);
+      expect(() => own!.allocated).toThrow(expect.objectContaining({ code: 'PICO_DISPOSED' }));
+      expect(context.authorResources.size).toBe(0);
+    });
+
+    it('should track author runtimes and check the sessions they open', async () => {
+      const runtime = createRuntime({});
+      const context = await initialize({ wasm: 'serial' }, runtime);
+      const { createPicoRuntime } = authorExports();
+      let ownRuntime: PicoRuntime | undefined;
+      runtime.execute.mockResolvedValue({
+        success: true,
+        value: {
+          default: async () => {
+            ownRuntime = await createPicoRuntime();
+            const own = await ownRuntime.createPico({ voxelSize: 1 });
+            return own.createVoxels({ shape: 'sphere', radius: 2 });
+          },
+        },
+      });
+
+      await definition.createGeometry(
+        { entryPath: 'main.ts', parameters: {}, options: { lane: 'fast' } },
+        runtime,
+        context,
+      );
+
+      expect(abort.checks).toBe(2);
+      await expect(ownRuntime!.createPico()).rejects.toMatchObject({ code: 'PICO_DISPOSED' });
+    });
+  });
+
+  describe('leak oracle (DP12)', () => {
+    it.each([
+      ['success', sphere()],
+      [
+        'an author throw',
+        {
+          default: () => {
+            throw new Error('author bug');
+          },
+        },
+      ],
+      ['an invalid result', { default: () => 42 }],
+      [
+        'an out-of-memory failure',
+        {
+          default: (pico: Pico) => {
+            pico.createVoxels({ shape: 'sphere', radius: 2 });
+            throw new WebAssembly.RuntimeError('unreachable');
+          },
+        },
+      ],
+    ])('should free every native object after %s', async (_name, module) => {
+      const runtime = createRuntime(module);
+      const context = await initialize({ wasm: 'serial' }, runtime);
+      await definition
+        .createGeometry({ entryPath: 'main.ts', parameters: {}, options: { lane: 'fast' } }, runtime, context)
+        .catch(() => undefined);
+
+      // The session is gone, so everything it allocated is freed with its Library instance.
+      expect(() => sessions.created[0]!.pico.allocated).toThrow(expect.objectContaining({ code: 'PICO_DISPOSED' }));
+      // A fresh session on the same runtime starts from zero native objects.
+      const serialRuntime = await loadRuntimeFor(context);
+      const fresh = await serialRuntime.createPico();
+      expect(Object.values(fresh.allocated).every((count) => count === 0)).toBe(true);
+      fresh.dispose();
+      await definition.cleanup!(context);
     });
   });
 

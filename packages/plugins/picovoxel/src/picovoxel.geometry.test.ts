@@ -3,7 +3,7 @@ import { transformNormalArray, transformVertexArray } from '@taucad/geometry-cor
 import type { GeometryOutputTransformOptions } from '@taucad/geometry-core';
 import { glbToDocument, readGltfNamingSummary } from '@taucad/runtime-testing';
 
-import { picovoxelToGlb } from '#picovoxel.geometry.js';
+import { dropZeroAreaTriangles, picovoxelToGlb } from '#picovoxel.geometry.js';
 import type { PicovoxelNativeHandle, PicovoxelShapeSnapshot } from '#picovoxel.geometry.js';
 
 /**
@@ -204,4 +204,47 @@ describe('picovoxelToGlb', () => {
     expect(triangleCount).toBeGreaterThan(1_000_000);
     expect(glb.byteLength / triangleCount).toBeLessThan(26);
   }, 60_000);
+});
+
+describe('dropZeroAreaTriangles (D36)', () => {
+  // A unit square (two triangles) plus the three shapes of a zero-area triangle PicoVoxel's mesher
+  // and author meshes produce: a vertex duplicated at one position (the mesher's pair), a repeated
+  // index, and three distinct collinear points.
+  const vertices = new Float32Array([0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0, 0.5, 0, 0]);
+  const square = [0, 1, 2, 0, 2, 3];
+  const zeroArea = [1, 4, 2, 0, 0, 3, 0, 5, 1];
+
+  it('should drop exactly the zero-area triangles and keep the survivors in order', () => {
+    const triangles = new Uint32Array([
+      zeroArea[0]!,
+      zeroArea[1]!,
+      zeroArea[2]!,
+      ...square.slice(0, 3),
+      ...zeroArea.slice(3),
+      ...square.slice(3),
+    ]);
+
+    expect([...dropZeroAreaTriangles(vertices, triangles)]).toEqual(square);
+  });
+
+  it('should return the same array when nothing is dropped', () => {
+    const triangles = new Uint32Array(square);
+
+    expect(dropZeroAreaTriangles(vertices, triangles)).toBe(triangles);
+  });
+
+  it('should leave every normal byte-identical, since a dropped triangle contributes nothing', async () => {
+    const shape = (triangles: number[]): PicovoxelShapeSnapshot => ({
+      name: 'Shape 1',
+      vertices,
+      triangles: new Uint32Array(triangles),
+      lane: 'exact',
+    });
+    const normalsOf = async (triangles: number[]) => {
+      const document = await glbToDocument(picovoxelToGlb({ shapes: [shape(triangles)] }));
+      return document.getRoot().listMeshes()[0]!.listPrimitives()[0]!.getAttribute('NORMAL')!.getArray();
+    };
+
+    expect(await normalsOf([...square, ...zeroArea])).toEqual(await normalsOf(square));
+  });
 });

@@ -70,6 +70,45 @@ const computeVertexNormals = (
 };
 
 /**
+ * Drop the triangles whose area is exactly zero (D36).
+ *
+ * PicoVoxel's exact lane stays byte-identical to C# PicoGK, whose mesher emits a zero-area pair
+ * wherever it places two vertices at one position; the Tau snapshot removes them instead. The test
+ * is the cross product {@link computeVertexNormals} accumulates, in the same arithmetic, so a dropped
+ * triangle contributed exactly nothing to any normal and zero to area and volume; a repeated index
+ * always yields a zero cross product. Survivors keep their order and their bytes.
+ *
+ * @param vertices - Welded vertex positions.
+ * @param triangles - Triangle indices, already range-checked.
+ * @returns `triangles` itself when nothing is dropped, otherwise the surviving triangles.
+ * @public
+ */
+export const dropZeroAreaTriangles = (
+  vertices: Float32Array<ArrayBuffer>,
+  triangles: Uint32Array<ArrayBuffer>,
+): Uint32Array<ArrayBuffer> => {
+  const kept = new Uint32Array(triangles.length);
+  let length = 0;
+  for (let offset = 0; offset < triangles.length; offset += 3) {
+    const a = triangles[offset]! * 3;
+    const b = triangles[offset + 1]! * 3;
+    const c = triangles[offset + 2]! * 3;
+    const abX = vertices[b]! - vertices[a]!;
+    const abY = vertices[b + 1]! - vertices[a + 1]!;
+    const abZ = vertices[b + 2]! - vertices[a + 2]!;
+    const acX = vertices[c]! - vertices[a]!;
+    const acY = vertices[c + 1]! - vertices[a + 1]!;
+    const acZ = vertices[c + 2]! - vertices[a + 2]!;
+    if (abY * acZ - abZ * acY !== 0 || abZ * acX - abX * acZ !== 0 || abX * acY - abY * acX !== 0) {
+      kept[length++] = triangles[offset]!;
+      kept[length++] = triangles[offset + 1]!;
+      kept[length++] = triangles[offset + 2]!;
+    }
+  }
+  return length === triangles.length ? triangles : kept.slice(0, length);
+};
+
+/**
  * One indexed triangle node per shape. Voxel meshes carry no B-rep edges, so no LINES primitive is
  * written; the kernel still claims `includeEdges` natively so the string-keyed fallback detector
  * never runs over a voxel mesh.

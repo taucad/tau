@@ -754,6 +754,15 @@ int geospec_occt_component_faces_within(
     const uint32_t* right_faces, size_t right_count, double tolerance,
     geospec_occt_charge charge, void* context, int* out_within,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+// Where `inner` lies in the solid `outer`: one vertex per vertex-connected
+// face set of `inner`, classified as the whole-body distance's solid treatment
+// classifies every vertex (0.001 mm), charged before the classifier is built.
+// *out_state is 0 when every point is OUT, 1 when one is IN, and 2 when none
+// is IN and one is ON or unclassified.
+int geospec_occt_component_body_inside(
+    const geospec_occt_component_bodies* bodies, size_t outer, size_t inner,
+    geospec_occt_charge charge, void* context, int* out_state,
+    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 // Whole-body exact distance (a solid's interior counts as distance zero),
 // parallel within a grant of two or more; a verdict only, never a point.
 int geospec_occt_component_bodies_within_dedicated(

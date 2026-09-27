@@ -2,10 +2,12 @@
 //! the retained BRep and exact boxes plus tolerance are only the broad phase.
 //! The O3-07 narrow phase decides each candidate pair: face-box separation,
 //! then the vertex, edge and face pairs of the faces in near face pairs,
-//! nearest first with an early exit on contact, then a whole-body distance
-//! only where one solid's box holds the other's, since a nested body is at
-//! distance zero with no face near it. Union-find skips joined pairs, and
-//! pairs run in cost order (face pairs first, whole bodies after), so a
+//! nearest first with an early exit on contact. Bodies whose boundaries stay
+//! apart meet only when one lies inside the other solid; one classified
+//! vertex per vertex-connected face set decides that as the whole-body
+//! distance's solid treatment does, and the whole-body distance runs only
+//! where a vertex classifies on a boundary. Union-find skips joined pairs,
+//! and pairs run in cost order (face pairs first, nested bodies after), so a
 //! costly near miss inside an already joined component never runs. Every
 //! step is charged before it runs (ruling 28): face-box tests by the 4,096,
 //! the native steps as the bridge prices them, and faces x faces per
@@ -17,7 +19,7 @@ use super::{
 };
 use crate::{
     backend::{
-        brep::{Bounds, Charge, ComponentBodies, ComponentBody},
+        brep::{Bounds, Charge, ComponentBodies, ComponentBody, PointState},
         BackendError, BackendErrorKind,
     },
     budget::{Budget, BudgetExceeded},
@@ -113,15 +115,49 @@ pub(crate) fn exact_clusters(
         if find(&mut parent, left) == find(&mut parent, right) {
             continue;
         }
-        charge(budget, units).map_err(|exceeded| ExactError::Budget {
-            exceeded,
-            pair: Some((left, right)),
-        })?;
-        if bodies.bodies_within(left, right, tolerance)? {
+        if nested_within(bodies, left, right, tolerance, units, budget)? {
             union(&mut parent, left, right);
         }
     }
     Ok(clusters(list, labels, &mut parent))
+}
+
+/// Boundaries farther apart than `tolerance` meet only where one body lies
+/// inside the other solid. Each vertex-connected face set then lies wholly
+/// inside or wholly outside, so one vertex per set classifies all of its
+/// vertices exactly as the whole-body distance classifies each; that
+/// distance, charged faces x faces, runs only where a vertex classifies on
+/// a boundary.
+fn nested_within(
+    bodies: &dyn ComponentBodies,
+    left: usize,
+    right: usize,
+    tolerance: f64,
+    units: u64,
+    budget: &Budget,
+) -> Result<bool, ExactError> {
+    let list = bodies.bodies();
+    let mut unsure = false;
+    for (outer, inner) in [(left, right), (right, left)] {
+        if !list[outer].solid {
+            continue;
+        }
+        match ask(budget, Some((left, right)), |charge| {
+            bodies.body_inside(outer, inner, charge)
+        })? {
+            PointState::In => return Ok(true),
+            PointState::On => unsure = true,
+            PointState::Out => {}
+        }
+    }
+    if !unsure {
+        return Ok(false);
+    }
+    charge(budget, units).map_err(|exceeded| ExactError::Budget {
+        exceeded,
+        pair: Some((left, right)),
+    })?;
+    Ok(bodies.bodies_within(left, right, tolerance)?)
 }
 
 fn union(parent: &mut [usize], left: usize, right: usize) {
@@ -326,7 +362,10 @@ fn clusters(list: &[ComponentBody], labels: &[String], parent: &mut [usize]) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{cell::RefCell, collections::HashSet};
+    use std::{
+        cell::RefCell,
+        collections::{HashMap, HashSet},
+    };
 
     fn slab(min: [f64; 3], max: [f64; 3]) -> Bounds {
         Bounds { min, max }
@@ -350,11 +389,12 @@ mod tests {
     }
 
     /// Verdicts by body pair; every evaluation is recorded. A face query
-    /// charges one unit per listed face pair.
+    /// charges one unit per listed face pair and a classification one unit.
     #[derive(Default)]
     struct Fake {
         bodies: Vec<ComponentBody>,
         touching: HashSet<(usize, usize)>,
+        inside: HashMap<(usize, usize), PointState>,
         nested: HashSet<(usize, usize)>,
         calls: RefCell<Vec<(&'static str, usize, usize)>>,
     }
@@ -378,6 +418,23 @@ mod tests {
             }
             Ok(Some(self.touching.contains(&(left, right))))
         }
+        fn body_inside(
+            &self,
+            outer: usize,
+            inner: usize,
+            charge: &mut Charge<'_>,
+        ) -> Result<Option<PointState>, BackendError> {
+            self.calls.borrow_mut().push(("inside", outer, inner));
+            if !charge(1) {
+                return Ok(None);
+            }
+            Ok(Some(
+                self.inside
+                    .get(&(outer, inner))
+                    .copied()
+                    .unwrap_or(PointState::Out),
+            ))
+        }
         fn bodies_within(&self, left: usize, right: usize, _: f64) -> Result<bool, BackendError> {
             self.calls.borrow_mut().push(("bodies", left, right));
             Ok(self.nested.contains(&(left, right)))
@@ -397,7 +454,7 @@ mod tests {
             bodies: vec![
                 body(vec![unit(0.0), unit(0.0)], true, 8),
                 body(vec![unit(1.0)], true, 4),
-                // A shell, so its box holding body 1 asks for no whole-body distance.
+                // A shell, so its box holding body 1 asks for no classification.
                 body(vec![slab([0.5, 0.0, 0.0], [2.5, 1.0, 1.0]); 3], false, 8),
             ],
             touching: touching.iter().copied().collect(),
@@ -458,7 +515,7 @@ mod tests {
     }
 
     #[test]
-    fn only_a_solid_holding_the_other_box_runs_the_whole_body_distance() {
+    fn a_nested_pair_is_decided_by_classification_before_any_whole_body_distance() {
         let cube = |min: f64, max: f64| {
             let (lo, hi) = ([min; 3], [max; 3]);
             (0..3)
@@ -472,14 +529,56 @@ mod tests {
                 })
                 .collect::<Vec<_>>()
         };
-        for (solid, nested, count, calls) in
-            [(true, true, 1, 1), (true, false, 2, 1), (false, true, 2, 0)]
-        {
+        let inside = |states: &[((usize, usize), PointState)]| -> HashMap<_, _> {
+            states.iter().copied().collect()
+        };
+        let cases: [(bool, HashMap<_, _>, bool, usize, &[_], u64); 5] = [
+            // A point of the inner body inside: joined, no distance.
+            (
+                true,
+                inside(&[((0, 1), PointState::In)]),
+                false,
+                1,
+                &[("inside", 0, 1)],
+                1 + 1,
+            ),
+            // Every point outside, both ways: apart, no distance.
+            (
+                true,
+                HashMap::new(),
+                false,
+                2,
+                &[("inside", 0, 1), ("inside", 1, 0)],
+                1 + 2,
+            ),
+            // A point on a boundary: the whole-body distance decides, charged
+            // faces x faces.
+            (
+                true,
+                inside(&[((0, 1), PointState::On)]),
+                true,
+                1,
+                &[("inside", 0, 1), ("inside", 1, 0), ("bodies", 0, 1)],
+                1 + 2 + 36,
+            ),
+            (
+                true,
+                inside(&[((0, 1), PointState::On)]),
+                false,
+                2,
+                &[("inside", 0, 1), ("inside", 1, 0), ("bodies", 0, 1)],
+                1 + 2 + 36,
+            ),
+            // No solid holds the other's box: nothing is asked.
+            (false, HashMap::new(), false, 2, &[], 1),
+        ];
+        for (solid, states, nested, count, calls, units) in cases {
             let fake = Fake {
                 bodies: vec![
                     body(cube(0.0, 10.0), solid, 8),
                     body(cube(4.0, 6.0), true, 8),
                 ],
+                inside: states,
                 nested: if nested {
                     HashSet::from([(0, 1)])
                 } else {
@@ -491,8 +590,8 @@ mod tests {
             let clusters = exact_clusters(&fake, &labels(2), 0.001, &budget).unwrap();
             assert_eq!(clusters.len(), count);
             // Face boxes 4 mm apart prove the boundaries apart without a call.
-            assert_eq!(fake.calls.borrow().len(), calls);
-            assert_eq!(budget.used(), 1 + 36 * calls as u64);
+            assert_eq!(*fake.calls.borrow(), calls);
+            assert_eq!(budget.used(), units);
         }
     }
 

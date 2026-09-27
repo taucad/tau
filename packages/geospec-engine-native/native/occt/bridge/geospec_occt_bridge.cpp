@@ -6704,6 +6704,12 @@ struct geospec_occt_component_bodies {
     TopoDS_Shape shape;
     std::vector<TopoDS_Face> faces;
     std::vector<geospec_occt_bounds> boxes;
+    // One vertex per vertex-connected set of faces: a set whose faces all lie
+    // beyond the tolerance of another solid's boundary is wholly inside or
+    // wholly outside that solid, so one vertex classifies all of its vertices.
+    std::vector<gp_Pnt> points;
+    // A solid classifier's construction, in work units.
+    uint64_t classifier_units = 0;
     geospec_occt_component_body facts{};
   };
   const geospec_occt_document* document = nullptr;
@@ -6752,6 +6758,22 @@ uint64_t component_box_units(const TopoDS_Face& face) {
       return 1024;
     default:
       return 256;
+  }
+}
+
+// A solid classifier builds one intersector per face (UV bounds over its
+// edges, a sampled polyhedron on free-form surfaces).
+uint64_t component_classifier_units(const TopoDS_Face& face) {
+  const uint64_t edges = component_edge_count(face);
+  switch (BRepAdaptor_Surface(face, false).GetType()) {
+    case GeomAbs_Plane:
+    case GeomAbs_Cylinder:
+    case GeomAbs_Cone:
+    case GeomAbs_Sphere:
+    case GeomAbs_Torus:
+      return 1 + edges / 8;
+    default:
+      return 17 + edges / 8;
   }
 }
 
@@ -6855,6 +6877,46 @@ uint64_t component_pair_units(const ComponentPiece& left,
          (left.edge_poles + right.edge_poles) / 4;
 }
 
+std::vector<gp_Pnt> component_points(const TopoDS_Shape& shape) {
+  NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faces;
+  TopExp::MapShapes(shape, TopAbs_FACE, faces);
+  NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>,
+                             TopTools_ShapeMapHasher>
+      vertex_faces;
+  TopExp::MapShapesAndAncestors(shape, TopAbs_VERTEX, TopAbs_FACE, vertex_faces);
+  std::vector<int> parent(static_cast<size_t>(faces.Extent()));
+  for (size_t index = 0; index < parent.size(); ++index) {
+    parent[index] = static_cast<int>(index);
+  }
+  auto root = [&](int face) {
+    while (parent[face] != face) face = parent[face] = parent[parent[face]];
+    return face;
+  };
+  for (int vertex = 1; vertex <= vertex_faces.Extent(); ++vertex) {
+    int first = -1;
+    for (const TopoDS_Shape& face : vertex_faces(vertex)) {
+      const int index = faces.FindIndex(face) - 1;
+      if (index < 0) continue;
+      if (first < 0) {
+        first = root(index);
+      } else {
+        parent[root(index)] = first;
+      }
+    }
+  }
+  std::vector<bool> taken(parent.size(), false);
+  std::vector<gp_Pnt> points;
+  for (int vertex = 1; vertex <= vertex_faces.Extent(); ++vertex) {
+    const NCollection_List<TopoDS_Shape>& owners = vertex_faces(vertex);
+    if (owners.IsEmpty()) continue;
+    const int index = faces.FindIndex(owners.First()) - 1;
+    if (index < 0 || taken[root(index)]) continue;
+    taken[root(index)] = true;
+    points.push_back(BRep_Tool::Pnt(TopoDS::Vertex(vertex_faces.FindKey(vertex))));
+  }
+  return points;
+}
+
 }  // namespace
 
 int geospec_occt_component_bodies_new(
@@ -6923,10 +6985,12 @@ int geospec_occt_component_bodies_new(
                    bounds.max[1], bounds.max[2]);
         body.faces.push_back(TopoDS::Face(face.Current()));
         body.boxes.push_back(bounds);
+        body.classifier_units += component_classifier_units(TopoDS::Face(face.Current()));
       }
       if (body.faces.empty()) continue;
       NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> vertices;
       TopExp::MapShapes(candidate.shape, TopAbs_VERTEX, vertices);
+      body.points = component_points(candidate.shape);
       body.shape = candidate.shape;
       body.facts.occurrence = candidate.occurrence;
       body.facts.solid = candidate.solid ? 1 : 0;
@@ -7071,6 +7135,41 @@ int geospec_occt_component_faces_within(
         *out_within = 1;
         break;
       }
+    }
+    return GEOSPEC_OCCT_OK;
+  });
+}
+
+int geospec_occt_component_body_inside(
+    const geospec_occt_component_bodies* bodies, size_t outer, size_t inner,
+    geospec_occt_charge charge, void* context, int* out_state,
+    geospec_occt_string* error) noexcept {
+  if (bodies == nullptr || charge == nullptr || out_state == nullptr ||
+      outer >= bodies->bodies.size() || inner >= bodies->bodies.size() ||
+      !bodies->bodies[outer].facts.solid) {
+    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
+                "Component classification needs a solid and a body.", error);
+  }
+  return guarded(error, [&]() -> int {
+    const auto& solid = bodies->bodies[outer];
+    const auto& points = bodies->bodies[inner].points;
+    // Building the classifier prepares every face; each point's ray may
+    // meet any of them.
+    if (charge(context, (1 + points.size()) * solid.classifier_units) != 0) {
+      return GEOSPEC_OCCT_STOPPED;
+    }
+    // ponytail: one classifier per call; cache it per outer body if many
+    // nested pairs share one outer solid.
+    BRepClass3d_SolidClassifier classifier(solid.shape);
+    *out_state = 0;
+    for (const gp_Pnt& point : points) {
+      classifier.Perform(point, 0.001);
+      const TopAbs_State state = classifier.State();
+      if (state == TopAbs_IN) {
+        *out_state = 1;
+        break;
+      }
+      if (state != TopAbs_OUT) *out_state = 2;
     }
     return GEOSPEC_OCCT_OK;
   });

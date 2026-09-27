@@ -584,10 +584,12 @@ SourceValidity whole_shape_validity(const TopoDS_Shape& shape) {
 
 // V3 (ruling 8): scaled and mirrored placements change the located geometry
 // an analyzer checks, so only scale 1 with a positive determinant is rigid.
+// An instance that is not FORWARD turns its shells against its solid, so its
+// definition's analysis does not answer for it either.
 bool rigid_placements(const std::vector<TopoDS_Shape>& solids) {
   for (const TopoDS_Shape& solid : solids) {
     const gp_Trsf transform = solid.Location().Transformation();
-    if (transform.ScaleFactor() != 1.0 ||
+    if (solid.Orientation() != TopAbs_FORWARD || transform.ScaleFactor() != 1.0 ||
         transform.VectorialPart().Determinant() <= 0.0) {
       return false;
     }
@@ -595,10 +597,16 @@ bool rigid_placements(const std::vector<TopoDS_Shape>& solids) {
   return true;
 }
 
-SourceValidity shape_is_valid(const TopoDS_Shape& shape) {
+// `analyses`, when given, counts the located-solid analyzer runs (the
+// qualification controls read it).
+SourceValidity shape_is_valid(const TopoDS_Shape& shape, uint32_t* analyses = nullptr) {
   if (shape.IsNull() || shape.ShapeType() != TopAbs_COMPOUND) {
     return whole_shape_validity(shape);
   }
+  const auto solid_valid = [analyses](const TopoDS_Shape& solid) {
+    if (analyses != nullptr) ++*analyses;
+    return BRepCheck_Analyzer(solid, true, false, false).IsValid();
+  };
   std::vector<TopoDS_Shape> solids;
   if (collect_validation_solids(shape, solids) && solids.size() > 1 &&
       disjoint_validation_solids(solids)) {
@@ -612,7 +620,7 @@ SourceValidity shape_is_valid(const TopoDS_Shape& shape) {
             solid.Located(TopLoc_Location()).Oriented(TopAbs_FORWARD);
         if (definitions.Contains(definition)) continue;
         definitions.Add(definition);
-        if (!BRepCheck_Analyzer(solid, true, false, false).IsValid()) {
+        if (!solid_valid(solid)) {
           valid = false;
           break;
         }
@@ -623,8 +631,7 @@ SourceValidity shape_is_valid(const TopoDS_Shape& shape) {
     // oriented solid, with the same geometric/ST/non-exact settings as before.
     bool valid = true;
     for (const TopoDS_Shape& solid : solids) {
-      const bool leaf_valid = BRepCheck_Analyzer(solid, true, false, false).IsValid();
-      if (!leaf_valid) {
+      if (!solid_valid(solid)) {
         valid = false;
         break;
       }
@@ -639,18 +646,23 @@ SourceValidity shape_is_valid(const TopoDS_Shape& shape) {
 // V1 (rulings 2 and 3): shell closure from exact topology. Per unique shell
 // definition, face uses per edge, skipping degenerated and INTERNAL/EXTERNAL
 // uses: an odd count is open, three or more is non-manifold, and sharing
-// across shells counts as closed. Faces outside any shell form one group.
+// across shells counts as closed. Faces outside any shell form one group. A
+// group with no counted use (faces with no edge, as surfaceless faces have)
+// proves nothing closed, so it fails too.
 struct ClosureGroup {
   TopoDS_Shape key;          // the shell definition; null for the free faces
   TopLoc_Location instance;  // the first located instance, placing samples
+  uint32_t edges = 0;        // edges with a counted use
   uint32_t open = 0, nonmanifold = 0, sample_count = 0;
   TopoDS_Edge samples[4];    // in the group's frame, in first-use order
   uint32_t sample_uses[4] = {};
+  std::vector<uint32_t> occurrences;  // leaf ordinals, once `attributed`
 };
 
 struct ClosureFacet {
   uint32_t shells = 0, free_faces = 0, open_edges = 0, nonmanifold_edges = 0;
   bool shells_closed = true;
+  bool attributed = false;
   // Only failing groups: shells in explorer order, then the free faces.
   std::vector<ClosureGroup> failing;
 };
@@ -675,6 +687,7 @@ void count_face_uses(const TopoDS_Shape& group, ClosureGroup& result) {
       }
     }
   }
+  result.edges = static_cast<uint32_t>(uses.Extent());
   for (int index = 1; index <= uses.Extent(); ++index) {
     const uint32_t count = uses.FindFromIndex(index);
     const bool open = count % 2 == 1, nonmanifold = count >= 3;
@@ -687,14 +700,16 @@ void count_face_uses(const TopoDS_Shape& group, ClosureGroup& result) {
   }
 }
 
+bool closed(const ClosureGroup& group) {
+  return group.edges != 0 && group.open == 0 && group.nonmanifold == 0;
+}
+
 ClosureFacet closure_facet(const TopoDS_Shape& shape) {
   ClosureFacet facet;
   const auto add = [&facet](ClosureGroup&& group) {
     facet.open_edges += group.open;
     facet.nonmanifold_edges += group.nonmanifold;
-    if (group.open != 0 || group.nonmanifold != 0) {
-      facet.failing.push_back(std::move(group));
-    }
+    if (!closed(group)) facet.failing.push_back(std::move(group));
   };
   NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> definitions;
   for (TopExp_Explorer shell(shape, TopAbs_SHELL); shell.More(); shell.Next()) {
@@ -706,7 +721,7 @@ ClosureFacet closure_facet(const TopoDS_Shape& shape) {
     group.key = key;
     group.instance = shell.Current().Location();
     count_face_uses(key, group);
-    if (group.open != 0 || group.nonmanifold != 0) facet.shells_closed = false;
+    if (!closed(group)) facet.shells_closed = false;
     add(std::move(group));
   }
   facet.shells = static_cast<uint32_t>(definitions.Extent());
@@ -1739,6 +1754,9 @@ struct geospec_occt_document {
   std::string schema;
   size_t source_byte_length = 0;
   size_t free_shape_count = 0;
+  // Ruling 32: located faces admitted without a surface, i.e. tessellated-only
+  // products that the OnNoBRep read profile keeps; exact claims refuse them.
+  size_t surfaceless_face_count = 0;
   std::string source_length_unit;
   double source_unit_to_millimeters = 1.0;
   std::vector<ProductFacts> products;
@@ -1822,6 +1840,58 @@ const SourceValidity& source_validity(const geospec_occt_document& document) {
 const ClosureFacet& source_closure(const geospec_occt_document& document) {
   if (!document.closure) document.closure = closure_facet(document.shape);
   return *document.closure;
+}
+
+// V1 evidence: each failing group's leaf occurrences (no occurrence names
+// them as parent), in ordinal order, from one pass that looks every leaf
+// shell up by its definition; a leaf with faces outside any shell names the
+// free-face group. A leaf is named at most once per group, so the lists hold
+// at most the leaf shell instances plus the leaves.
+const ClosureFacet& attributed_closure(const geospec_occt_document& document) {
+  source_closure(document);
+  ClosureFacet& facet = *document.closure;
+  if (facet.attributed) return facet;
+  NCollection_DataMap<TopoDS_Shape, size_t, TopTools_ShapeMapHasher> groups;
+  size_t free_group = facet.failing.size();
+  for (size_t index = 0; index < facet.failing.size(); ++index) {
+    if (facet.failing[index].key.IsNull()) {
+      free_group = index;
+    } else {
+      groups.Bind(facet.failing[index].key, index);
+    }
+  }
+  std::vector<bool> parents(document.occurrences.size(), false);
+  for (const OccurrenceFacts& occurrence : document.occurrences) {
+    if (occurrence.parent >= 0 &&
+        static_cast<size_t>(occurrence.parent) < parents.size()) {
+      parents[static_cast<size_t>(occurrence.parent)] = true;
+    }
+  }
+  std::vector<std::vector<uint32_t>> named(facet.failing.size());
+  for (size_t ordinal = 0; ordinal < document.occurrences.size(); ++ordinal) {
+    if (parents[ordinal]) continue;
+    const uint32_t leaf = static_cast<uint32_t>(ordinal);
+    const auto name = [&named, leaf](size_t group) {
+      if (named[group].empty() || named[group].back() != leaf) {
+        named[group].push_back(leaf);
+      }
+    };
+    const TopoDS_Shape& shape = document.occurrences[ordinal].shape;
+    for (TopExp_Explorer shell(shape, TopAbs_SHELL); shell.More(); shell.Next()) {
+      const size_t* group = groups.Seek(
+          shell.Current().Located(TopLoc_Location()).Oriented(TopAbs_FORWARD));
+      if (group != nullptr) name(*group);
+    }
+    if (free_group != facet.failing.size() &&
+        TopExp_Explorer(shape, TopAbs_FACE, TopAbs_SHELL).More()) {
+      name(free_group);
+    }
+  }
+  for (size_t index = 0; index < named.size(); ++index) {
+    facet.failing[index].occurrences = std::move(named[index]);
+  }
+  facet.attributed = true;
+  return facet;
 }
 
 const Bnd_Box& memo_face_box(const geospec_occt_document& document,
@@ -6238,6 +6308,10 @@ int geospec_occt_open_step(const uint8_t* bytes, size_t length,
     for (int index = 1; index <= faces.Extent(); ++index) {
       FaceFacts face;
       face.shape = TopoDS::Face(faces(index));
+      TopLoc_Location location;
+      if (BRep_Tool::Surface(face.shape, location).IsNull()) {
+        ++result->surfaceless_face_count;
+      }
       result->faces.push_back(std::move(face));
     }
     result->public_faces.reserve(static_cast<size_t>(faces.Extent()));
@@ -6343,15 +6417,16 @@ int geospec_occt_selected_continuous_domain(
 int geospec_occt_admission_facts(
     const geospec_occt_document* document,
     double* unit_to_millimeters, size_t* occurrence_count,
-    geospec_occt_string* source_unit,
+    size_t* surfaceless_face_count, geospec_occt_string* source_unit,
     geospec_occt_string* error) noexcept {
   if (document == nullptr || unit_to_millimeters == nullptr ||
-      occurrence_count == nullptr) {
+      occurrence_count == nullptr || surfaceless_face_count == nullptr) {
     return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
                 "Document/admission output is null.", error);
   }
   *unit_to_millimeters = document->source_unit_to_millimeters;
   *occurrence_count = document->occurrences.size();
+  *surfaceless_face_count = document->surfaceless_face_count;
   return write_string(document->source_length_unit, source_unit);
 }
 
@@ -7046,12 +7121,16 @@ int geospec_occt_validity_closure_group(
                 "Document/closure group output is invalid.", error);
   }
   return guarded(error, [&]() -> int {
-    const ClosureFacet& facet = source_closure(*document);
+    const ClosureFacet& facet = attributed_closure(*document);
     if (index >= facet.failing.size()) {
       return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
                   "Closure group index is out of range.", error);
     }
     const ClosureGroup& failing = facet.failing[index];
+    if (failing.occurrences.size() > capacity) {
+      return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
+                  "Closure group occurrence capacity is exhausted.", error);
+    }
     *group = {};
     group->free_faces = failing.key.IsNull() ? 1 : 0;
     group->open_edge_count = failing.open;
@@ -7067,36 +7146,9 @@ int geospec_occt_validity_closure_group(
       point(output.end, curve.Value(last));
       point(output.center, curve.Value((first + last) / 2.0));
     }
-    // Leaf occurrences (no occurrence names them as parent) holding the
-    // shell definition, or faces outside any shell for the free-face group.
-    std::vector<bool> parents(document->occurrences.size(), false);
-    for (const OccurrenceFacts& occurrence : document->occurrences) {
-      if (occurrence.parent >= 0 &&
-          static_cast<size_t>(occurrence.parent) < parents.size()) {
-        parents[static_cast<size_t>(occurrence.parent)] = true;
-      }
-    }
-    size_t count = 0;
-    for (size_t ordinal = 0; ordinal < document->occurrences.size(); ++ordinal) {
-      if (parents[ordinal]) continue;
-      const TopoDS_Shape& shape = document->occurrences[ordinal].shape;
-      bool contains = false;
-      if (failing.key.IsNull()) {
-        contains = TopExp_Explorer(shape, TopAbs_FACE, TopAbs_SHELL).More();
-      } else {
-        for (TopExp_Explorer shell(shape, TopAbs_SHELL); shell.More() && !contains;
-             shell.Next()) {
-          contains = shell.Current().Located(TopLoc_Location()).IsSame(failing.key);
-        }
-      }
-      if (!contains) continue;
-      if (count == capacity) {
-        return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
-                    "Closure group occurrence capacity is exhausted.", error);
-      }
-      occurrences[count++] = static_cast<uint32_t>(ordinal);
-    }
-    group->occurrence_count = count;
+    std::copy(failing.occurrences.begin(), failing.occurrences.end(),
+              occurrences);
+    group->occurrence_count = failing.occurrences.size();
     return GEOSPEC_OCCT_OK;
   });
 }
@@ -7158,6 +7210,21 @@ uint64_t component_box_units(const TopoDS_Face& face) {
     default:
       return 256;
   }
+}
+
+// The largest tolerance of a face, its edges and its vertices. The exact
+// distances measure vertex points and edge curves, which may lie that far off
+// the face's surface, and so outside its memo box.
+double component_face_tolerance(const TopoDS_Face& face) {
+  double tolerance = BRep_Tool::Tolerance(face);
+  for (TopExp_Explorer edge(face, TopAbs_EDGE); edge.More(); edge.Next()) {
+    tolerance = std::max(tolerance, BRep_Tool::Tolerance(TopoDS::Edge(edge.Current())));
+  }
+  for (TopExp_Explorer vertex(face, TopAbs_VERTEX); vertex.More(); vertex.Next()) {
+    tolerance =
+        std::max(tolerance, BRep_Tool::Tolerance(TopoDS::Vertex(vertex.Current())));
+  }
+  return tolerance;
 }
 
 // A solid classifier builds one intersector per face (UV bounds over its
@@ -7385,6 +7452,14 @@ int geospec_occt_component_bodies_new(
                   bounds.max[1], bounds.max[2]);
         box.Update(bounds.min[0], bounds.min[1], bounds.min[2], bounds.max[0],
                    bounds.max[1], bounds.max[2]);
+        // The filters read the face boxes, grown by the face's tolerances so
+        // they enclose what the exact distances measure; the body bounds fold
+        // them ungrown, bit-equal to bounds().
+        const double grow = component_face_tolerance(TopoDS::Face(face.Current()));
+        for (int axis = 0; axis < 3; ++axis) {
+          bounds.min[axis] -= grow;
+          bounds.max[axis] += grow;
+        }
         body.faces.push_back(TopoDS::Face(face.Current()));
         body.boxes.push_back(bounds);
       }

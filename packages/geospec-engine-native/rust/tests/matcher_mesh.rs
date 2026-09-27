@@ -8,9 +8,9 @@ use crate::{
     },
     backend::{
         brep::{
-            Bounds, BrepEntity, BrepSubject, DocumentRows, LocatedFace, OccurrenceFacts,
-            PointState, ReportedFaces, ShapeFacts, TessellationProfile, TopologyCounts,
-            ValidityFacts,
+            Bounds, BrepEntity, BrepSubject, Charge, ClosureFacts, ClosureGroup, DocumentRows,
+            LocatedFace, OccurrenceFacts, PointState, ReportedFaces, ShapeFacts,
+            TessellationProfile, TopologyCounts, ValidityFacts,
         },
         AnalysisRetentionLimits, BackendError, TriangleMesh,
     },
@@ -56,6 +56,23 @@ impl BrepSubject for FactsOnlyBrep {
 
     fn validity(&self) -> Result<Rc<ValidityFacts>, BackendError> {
         unreachable!()
+    }
+
+    /// One open shell: the exact watertight and integrity routes fail.
+    fn closure(&self, _: &mut Charge<'_>) -> Result<Option<Rc<ClosureFacts>>, BackendError> {
+        Ok(Some(Rc::new(ClosureFacts {
+            shells: 1,
+            free_faces: 0,
+            open_edges: 1,
+            nonmanifold_edges: 0,
+            failing: vec![ClosureGroup {
+                free_faces: false,
+                open_edges: 1,
+                nonmanifold_edges: 0,
+                occurrences: Vec::new(),
+                samples: Vec::new(),
+            }],
+        })))
     }
 
     fn classify_face_points(
@@ -759,10 +776,21 @@ fn negated_claims_skip_the_failure_diagnostics_that_finish_drops() {
         vertex_count: 3,
     });
     let origin = Json::Array(vec![Json::Number(0.0); 3]);
+    let unit = Json::object([
+        ("x", Json::Number(1.0)),
+        ("y", Json::Number(1.0)),
+        ("z", Json::Number(1.0)),
+    ]);
+    // The exact rows read the BRep's closure facet (MESH-ON-BREP-01).
+    let exact = [Capability::ToBeWatertight, Capability::ToHaveMeshIntegrity];
     for (capability, payload) in [
         (
             Capability::ToBeWatertight,
             payload("watertight", Json::Bool(true)),
+        ),
+        (
+            Capability::ToHaveBoundingBox,
+            payload("boundingBox", Json::object([("size", unit)])),
         ),
         (
             Capability::ToHaveVolume,
@@ -791,9 +819,8 @@ fn negated_claims_skip_the_failure_diagnostics_that_finish_drops() {
         ),
     ] {
         let prepared = prepare(capability, &payload).unwrap();
-        let subjects = [subject(open.clone())];
         let normalized = prepared.normalized_payload();
-        let negated = |context_polarity| {
+        let negated = |subjects: &[Rc<Subject>], context_polarity| {
             let batch = BatchAnalysis::new(
                 prepared
                     .demand()
@@ -808,7 +835,7 @@ fn negated_claims_skip_the_failure_diagnostics_that_finish_drops() {
             .unwrap();
             let budget = Budget::new(10_000);
             let mut context =
-                EvaluationContext::new(&subjects, capability, "not", &normalized, &budget, None)
+                EvaluationContext::new(subjects, capability, "not", &normalized, &budget, None)
                     .with_batch(&batch)
                     .with_polarity(context_polarity);
             let before = MISMATCH_BUILDS.with(std::cell::Cell::get);
@@ -823,9 +850,20 @@ fn negated_claims_skip_the_failure_diagnostics_that_finish_drops() {
             .unwrap();
             (crate::codec::encode(&result).unwrap(), builds)
         };
-        let (before, built) = negated(crate::result::Polarity::Positive);
-        let (after, skipped) = negated(crate::result::Polarity::Negative);
-        assert_eq!((built, skipped), (1, 0), "{}", capability.name());
-        assert_eq!(after, before, "{}", capability.name());
+        let mut rows = vec![[subject(open.clone())]];
+        if exact.contains(&capability) {
+            rows.push([subject_with_brep(open.clone())]);
+        }
+        for subjects in rows {
+            let route = if subjects[0].brep.is_some() {
+                "exact"
+            } else {
+                "mesh"
+            };
+            let (before, built) = negated(&subjects, crate::result::Polarity::Positive);
+            let (after, skipped) = negated(&subjects, crate::result::Polarity::Negative);
+            assert_eq!((built, skipped), (1, 0), "{} {route}", capability.name());
+            assert_eq!(after, before, "{} {route}", capability.name());
+        }
     }
 }

@@ -151,6 +151,9 @@ pub struct BrepAdmissionFacts {
     pub source_length_unit: String,
     pub source_unit_to_millimeters: f64,
     pub occurrence_count: usize,
+    /// Located faces admitted without a surface: tessellated-only products
+    /// under the `OnNoBRep` read profile, whose exact claims refuse (ruling 32).
+    pub surfaceless_faces: usize,
 }
 
 /// Bounded public-subject metadata captured by the same successful STEP read.
@@ -451,7 +454,8 @@ pub struct ClosureFacts {
     pub free_faces: u32,
     pub open_edges: u32,
     pub nonmanifold_edges: u32,
-    /// Groups with an open or non-manifold edge: shells, then the free faces.
+    /// Groups that are not closed (an open or non-manifold edge, or no counted
+    /// edge use): shells, then the free faces.
     pub failing: Vec<ClosureGroup>,
 }
 
@@ -483,9 +487,12 @@ pub struct ComponentBody {
     /// A solid, so a body inside its material is at distance zero.
     pub solid: bool,
     pub vertices: u32,
-    /// The fold of `faces`, bit-equal to the shape's exact bounds.
+    /// The fold of the faces' memo boxes before they grow, bit-equal to the
+    /// shape's exact bounds.
     pub bounds: Bounds,
-    /// Each face's box from the per-located-face memo, in explorer order.
+    /// Each face's box from the per-located-face memo, grown by the largest
+    /// tolerance of the face, its edges and its vertices so it encloses what
+    /// the exact distances measure, in explorer order.
     pub faces: Vec<Bounds>,
 }
 
@@ -1292,7 +1299,10 @@ pub trait BrepSubject {
     fn faces(&self) -> Result<Rc<[LocatedFace]>, BackendError>;
     fn validity(&self) -> Result<Rc<ValidityFacts>, BackendError>;
     /// Exact shell closure alone: no validity analyzer and no tessellation.
-    fn closure(&self) -> Result<Rc<ClosureFacts>, BackendError> {
+    /// Naming the failing groups' leaf occurrences is charged before it runs,
+    /// warm or cold, a unit per failing group and per occurrence (rulings 23
+    /// and 28); `None` when `charge` stops it.
+    fn closure(&self, _charge: &mut Charge<'_>) -> Result<Option<Rc<ClosureFacts>>, BackendError> {
         Err(BackendError {
             kind: super::BackendErrorKind::Unsupported,
             message: "The BRep connector has no exact shell-closure facet.".into(),

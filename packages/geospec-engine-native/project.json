@@ -236,7 +236,7 @@
       "executor": "nx:run-commands",
       "cache": false,
       "options": {
-        "command": "GEOSPEC_OCCT_PREFIX=\"$PWD/node_modules/.cache/geospec-engine-native/occt/install\" PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path packages/geospec-engine-native/native/occt/rust/Cargo.toml --locked --tests --target-dir node_modules/.cache/geospec-engine-native/occt/cargo-target",
+        "command": "GEOSPEC_OCCT_PREFIX=\"$PWD/node_modules/.cache/geospec-engine-native/occt/install\" PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo test --manifest-path packages/geospec-engine-native/native/occt/rust/Cargo.toml --locked --tests --features qualification --target-dir node_modules/.cache/geospec-engine-native/occt/cargo-target",
         "forwardAllArgs": false
       }
     },
@@ -244,7 +244,7 @@
       "executor": "nx:run-commands",
       "cache": false,
       "options": {
-        "command": "GEOSPEC_OCCT_PREFIX=\"$PWD/node_modules/.cache/geospec-engine-native/occt/install\" PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo clippy --manifest-path packages/geospec-engine-native/native/occt/rust/Cargo.toml --locked --all-targets --target-dir node_modules/.cache/geospec-engine-native/occt/cargo-target -- -D warnings",
+        "command": "GEOSPEC_OCCT_PREFIX=\"$PWD/node_modules/.cache/geospec-engine-native/occt/install\" PATH=\"$(dirname \"$(rustup which --toolchain 1.88 rustc)\"):$PATH\" rustup run 1.88 cargo clippy --manifest-path packages/geospec-engine-native/native/occt/rust/Cargo.toml --locked --all-targets --features qualification --target-dir node_modules/.cache/geospec-engine-native/occt/cargo-target -- -D warnings",
         "forwardAllArgs": false
       }
     },

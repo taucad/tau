@@ -45,6 +45,34 @@
       "bytes": 15425,
       "description": "../ap242-box.step without GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT and with LINE #27's point moved 5e-4 mm in x off its edge's vertices. Within ReadPrecisionVal 1e-3 the vertices absorb the offset; at the DESTEP_Parameters default 1e-4 the reader shifts the line, so the admitted tolerances differ.",
       "provenance": "Derived for GeoSpec native close-out lane W1-ADM (run 2026-09-26-implementation): sed on ap242-box.step (#28 (-5,-10,-15) -> (-4.9995,-10,-15); uncertainty context removed). The M0 probe rows (prod == pinned profile, default profile differs) are in lanes/w1-adm-a2/evidence/read-profile-controls.m0-probe.jsonl."
+    },
+    {
+      "file": "tess-only-open.step",
+      "sha256": "0efe33e999421f13c4b496d2485ad6598107e39ca917dac36ca4e9510dfc676f",
+      "bytes": 2747,
+      "description": "box-brep-plus-tessellation.step reduced to its TESSELLATED_SOLID (a TESSELLATED_SHAPE_REPRESENTATION, no BRep) minus the top face: five TRIANGULATED_FACEs with no surface and no edge, an open box. OnNoBRep admits it as a tessellated-only product (ruling 32).",
+      "provenance": "Wave 2 review R4 (run 2026-09-26-implementation, $IMPL/lanes/review-r4/fixtures/tess-only-open.step, written by make_tess.py from box-brep-plus-tessellation.step)."
+    },
+    {
+      "file": "tess-only-closed.step",
+      "sha256": "075b313c8a441408b2f834b1377d04baee5d10f796a02ad7fd8bbe5dd56d5a68",
+      "bytes": 2987,
+      "description": "The same reduction keeping all six TRIANGULATED_FACEs: a closed tessellated box with no BRep.",
+      "provenance": "Wave 2 review R4 (run 2026-09-26-implementation, $IMPL/lanes/review-r4/fixtures/tess-only-closed.step, written by make_tess.py)."
+    },
+    {
+      "file": "wireframe-only.step",
+      "sha256": "32085297ebc919e9f254f42f4dd9bff4883fc023d611a692383b6c07b34c61ab",
+      "bytes": 1879,
+      "description": "A GEOMETRICALLY_BOUNDED_WIREFRAME_SHAPE_REPRESENTATION holding one POLYLINE: a product with an edge and no face.",
+      "provenance": "Wave 2 review R4 (run 2026-09-26-implementation, $IMPL/lanes/review-r4/fixtures/wireframe-only.step, hand-authored from the box-brep-plus-tessellation.step header and context)."
+    },
+    {
+      "file": "box-tessellated-only.step",
+      "sha256": "5dcfa62c46500b5ce2bf027d84474dd9e854e0754c8f88a93f92938226be9e69",
+      "bytes": 3714,
+      "description": "box-brep-plus-tessellation.step with a SHAPE_REPRESENTATION listing only the TESSELLATED_SOLID of six TRIANGULATED_FACEs: a closed 10 x 20 x 30 tessellated-only box.",
+      "provenance": "Wave 2 review R6 (run 2026-09-26-implementation, $IMPL/lanes/review-r6/probe/box-tessellated-only.step, derived from box-brep-plus-tessellation.step)."
     }
   ]
 }

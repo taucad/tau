@@ -91,7 +91,8 @@ pub(crate) struct Subject {
     /// Report facts facet: whole-shape facts on the source (F1), one cell per
     /// demanded `ShapeParts` set, indexed by its bits.
     report_shape: [OnceCell<ShapeFacts>; 16],
-    /// C8: the last claim phase that hit or built each `report_shape` cell.
+    /// C8: the last claim phase that demanded each `ShapeParts` set, indexed
+    /// by its bits; never stamped reads `u64::MAX`.
     shape_demands: [Cell<u64>; 16],
     /// Report face tables (F5); a measured transfer replaces an address one.
     report_faces: RefCell<Option<RetainedReportFaces>>,
@@ -202,7 +203,7 @@ impl Subject {
             exact_components: OnceCell::new(),
             report_mesh_bytes: OnceCell::new(),
             report_shape: std::array::from_fn(|_| OnceCell::new()),
-            shape_demands: std::array::from_fn(|_| Cell::new(0)),
+            shape_demands: std::array::from_fn(|_| Cell::new(u64::MAX)),
             report_faces: RefCell::new(None),
             source_occurrences: RefCell::new(None),
             circular_bores: OnceCell::new(),
@@ -236,8 +237,9 @@ impl Subject {
     }
 
     /// The report facets this phase demanded: the mesh and face tables when
-    /// demanded, and each facts cell this phase hit or built (not every
-    /// retained cell, which would count earlier claims' part sets).
+    /// demanded, and one facts cell per part set the phase demanded that no
+    /// earlier set of the phase covers, whichever retained cell answered it
+    /// (never what earlier claims' part sets left retained).
     fn demanded_report_bytes(&self) -> u64 {
         let mesh = self.report_mesh_bytes.get().copied().unwrap_or(0);
         let faces = self
@@ -247,10 +249,9 @@ impl Subject {
             .map_or(0, |value| value.bytes);
         let phase = self.demand_phase.get();
         let shape = self
-            .report_shape
+            .shape_demands
             .iter()
-            .zip(&self.shape_demands)
-            .filter(|(cell, demand)| cell.get().is_some() && demand.get() == phase)
+            .filter(|demand| demand.get() == phase)
             .count() as u64
             * size_of::<ShapeFacts>() as u64;
         [(Facet::ReportMesh, mesh), (Facet::ReportFaces, faces)]
@@ -495,7 +496,14 @@ impl Subject {
         if let Some(bits) = (wanted..self.report_shape.len())
             .find(|bits| bits & wanted == wanted && self.report_shape[*bits].get().is_some())
         {
-            self.shape_demands[bits].set(phase);
+            // C8 (ruling 12): the phase accounts the set it demanded, so an
+            // earlier claim's retained cell never changes its bytes.
+            let covered = (wanted..self.shape_demands.len())
+                .any(|bits| bits & wanted == wanted && self.shape_demands[bits].get() == phase);
+            if !covered {
+                self.check_f2_pending(size_of::<ShapeFacts>() as u64)?;
+                self.shape_demands[wanted].set(phase);
+            }
             self.observations.add(WorkCounter::DerivedHits, 1);
             return Ok(self.report_shape[bits].get());
         }
@@ -777,6 +785,38 @@ impl Subject {
                 .owned_bytes()
                 .saturating_add((2 * size_of::<usize>()) as u64)
         }))
+    }
+
+    /// Ruling 32: the refusal of an exact claim on a STEP subject whose
+    /// admission counted faces with no surface (tessellated-only products
+    /// under the `OnNoBRep` read profile). One named refusal for every exact
+    /// claim, decided from the admission count, never per facet.
+    /// ponytail: subject-wide; scope it to the claim's occurrences if a
+    /// mixed BRep and tessellated document becomes a live case.
+    pub(crate) fn tessellated_only_refusal(&self, capability: Capability) -> Option<Evaluation> {
+        let faces = self.step_admission_facts.as_ref()?.surfaceless_faces;
+        if faces == 0 || !capability.is_exact() {
+            return None;
+        }
+        let mut diagnostic = Diagnostic::error(
+            "GEOSPEC_EVIDENCE_UNSUPPORTED",
+            format!(
+                "GeoSpec matcher '{}' needs exact BRep geometry, but the loaded subject does not provide it: {faces} of its faces have no surface (tessellated-only product geometry).",
+                capability.name()
+            ),
+        );
+        diagnostic.suggestion = Some(
+            "Export the model with exact BRep faces, or load its tessellation as a mesh subject such as GLB for mesh-grade claims."
+                .into(),
+        );
+        diagnostic.details = Some(Json::object([
+            ("matcher", Json::string(capability.name())),
+            ("missing", Json::string("exact BRep geometry")),
+            ("surfacelessFaces", Json::Number(faces as f64)),
+        ]));
+        Some(Evaluation::Refused {
+            diagnostics: vec![diagnostic],
+        })
     }
 
     pub(crate) fn step_subject_metadata(

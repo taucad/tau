@@ -396,6 +396,15 @@ const pendingSettlementFor = (
     ? context.pendingSettlement
     : undefined;
 
+/* A tool part in flight is what "running a tool" means; deltas never get here,
+ * so `running` with nothing in flight is generating (the table). */
+const runningRow = (context: ChatSessionMachineContext): 'approval' | 'tool' | 'generating' => {
+  if (context.pendingApprovalCount > 0) {
+    return 'approval';
+  }
+  return context.toolsInFlight > 0 ? 'tool' : 'generating';
+};
+
 const runLifecycle = ({ context, event }: ChatSessionArgs<EventOf<'runLifecycle'>>, enq: ChatSessionEnqueue) => {
   const identity = captureRunIdentity(context, event);
   announce(context, enq);
@@ -409,7 +418,11 @@ const runLifecycle = ({ context, event }: ChatSessionArgs<EventOf<'runLifecycle'
     return { target: '.running', context: identity };
   }
   if (event.phase === 'paused') {
-    return { target: '.running.waiting.input', context: identity };
+    /* A run pauses on an approval the log recorded just before the pause, or on a question. */
+    return {
+      target: runningRow(context) === 'approval' ? '.running.waiting.approval' : '.running.waiting.input',
+      context: identity,
+    };
   }
   /* V4: every turn that took a lease passes through `finishing`. A failed or
    * cancelled run used to reach its terminal state directly, which is why a
@@ -467,15 +480,6 @@ const settledTarget = (context: ChatSessionMachineContext): string => {
 const settleOnDone = ({ context }: ChatSessionArgs<unknown>, enq: ChatSessionEnqueue) => {
   announce(context, enq);
   return { target: settledTarget(context), context: { ...clearTurn, pendingSettlement: undefined } };
-};
-
-/* A tool part in flight is what "running a tool" means; deltas never get here,
- * so `running` with nothing in flight is generating (the table). */
-const runningRow = (context: ChatSessionMachineContext): 'approval' | 'tool' | 'generating' => {
-  if (context.pendingApprovalCount > 0) {
-    return 'approval';
-  }
-  return context.toolsInFlight > 0 ? 'tool' : 'generating';
 };
 
 const runStates = {

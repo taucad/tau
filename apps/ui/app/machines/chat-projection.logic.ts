@@ -15,6 +15,7 @@
 import { createLogic } from 'xstate';
 import { emptyChatLedger, foldReadAnswer } from '@taucad/agent-host';
 import type { ChatLedger, RowKey } from '@taucad/agent-host';
+import { runFailureText } from '#services/agent-host-event-projection.js';
 
 /** One read's answer, as the host's `read` and `attach` return it (W3 CL-R13). @public */
 export type ChatProjectionReadAnswer = Parameters<typeof foldReadAnswer>[1];
@@ -27,6 +28,10 @@ export type ChatProjection = Readonly<{
   ledger: ChatLedger;
   /** Open tool calls by call id, in the order they opened. */
   openTools: Readonly<Record<string, OpenToolCall>>;
+  /** The log's end as the last answer stated it; the projection holds the whole log once its cursor reaches it. */
+  endCursor: number;
+  /** What the last `failed` row said, for the run it failed; cleared by that run's next lifecycle row. */
+  failure?: Readonly<{ runId: string; text: string }>;
   /** Why the log could not be read (`unreadable`); the chat reads and runs nothing. */
   fault?: string;
 }>;
@@ -45,7 +50,11 @@ export type ChatProjectionEmitted =
   | Readonly<{ type: 'stale' }>;
 
 /** @public */
-export const initialChatProjection: ChatProjection = Object.freeze({ ledger: emptyChatLedger, openTools: {} });
+export const initialChatProjection: ChatProjection = Object.freeze({
+  ledger: emptyChatLedger,
+  openTools: {},
+  endCursor: 0,
+});
 
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -90,6 +99,23 @@ const applyToolRow = (open: Record<string, OpenToolCall>, row: unknown): Record<
   return open;
 };
 
+/**
+ * Keep what a `failed` row said about its run until that run's next lifecycle row.
+ *
+ * @param failure - The failure held before the row.
+ * @param row - One row, unparsed.
+ * @returns The failure held after it.
+ */
+const applyFailureRow = (failure: ChatProjection['failure'], row: unknown): ChatProjection['failure'] => {
+  if (!isRecord(row) || row['type'] !== 'run.lifecycle' || typeof row['runId'] !== 'string') {
+    return failure;
+  }
+  if (row['state'] === 'failed') {
+    return { runId: row['runId'], text: runFailureText(row['detail']) };
+  }
+  return failure?.runId === row['runId'] ? undefined : failure;
+};
+
 type ProjectionStep = Readonly<{ state: ChatProjection; emit?: ChatProjectionEmitted }>;
 
 /**
@@ -122,31 +148,45 @@ export const reduceChatProjection = (state: ChatProjection, event: ChatProjectio
   if (event.type === 'reset') {
     return { state: initialChatProjection };
   }
+  /* Any batch states where the log ends, even one this projection already holds or cannot fold yet. */
+  const endCursor =
+    event.answer.status === 'batch' ? Math.max(state.endCursor, event.answer.endCursor) : state.endCursor;
+  const held = endCursor === state.endCursor ? state : { ...state, endCursor };
   const answer = fromCursor(event.answer, state.ledger.position.cursor);
   if (answer === undefined) {
-    return { state };
+    return { state: held };
   }
   const fold = foldReadAnswer(state.ledger, answer);
   switch (fold.kind) {
     case 'folded': {
       if (fold.ledger === state.ledger || answer.status !== 'batch') {
-        return { state };
+        return { state: held };
       }
       let open: Record<string, OpenToolCall> | undefined;
+      let { failure } = state;
       for (const row of answer.events) {
         open = applyToolRow(open ?? { ...state.openTools }, row);
+        failure = applyFailureRow(failure, row);
       }
-      return { state: { ...state, ledger: fold.ledger, openTools: open ?? state.openTools } };
+      return {
+        state: {
+          ledger: fold.ledger,
+          openTools: open ?? state.openTools,
+          endCursor,
+          ...(failure === undefined ? {} : { failure }),
+          ...(state.fault === undefined ? {} : { fault: state.fault }),
+        },
+      };
     }
     case 'stale': {
-      return { state, emit: { type: 'stale' } };
+      return { state: held, emit: { type: 'stale' } };
     }
     case 'reset': {
       return { state: initialChatProjection, emit: { type: 'reread' } };
     }
     case 'refused': {
       /* `owner-fenced` keeps the state: the reader reconnects to the newer owner (§5.5). */
-      return fold.reason === 'unreadable' ? { state: { ...state, fault: 'unreadable' } } : { state };
+      return fold.reason === 'unreadable' ? { state: { ...held, fault: 'unreadable' } } : { state: held };
     }
   }
 };
@@ -225,6 +265,28 @@ export const selectToolsInFlight = (projection: ChatProjection): Readonly<{ coun
   const last = calls.at(-1);
   return last === undefined ? { count: 0 } : { count: calls.length, toolName: last.toolName };
 };
+
+/**
+ * Whether the projection holds the log to the end its last answer stated. A replay's earlier pages hold history, so
+ * the page reports a run's phase only once this holds.
+ *
+ * @param projection - The chat's projection.
+ * @returns Whether the reader has caught up.
+ * @public
+ */
+export const selectCaughtUp = (projection: ChatProjection): boolean =>
+  projection.ledger.position.cursor >= projection.endCursor;
+
+/**
+ * Why a run failed, as its `failed` row said.
+ *
+ * @param projection - The chat's projection.
+ * @param runId - The run.
+ * @returns The failure's text, while that run's last lifecycle row is `failed`.
+ * @public
+ */
+export const selectRunFailure = (projection: ChatProjection, runId: string): string | undefined =>
+  projection.failure?.runId === runId ? projection.failure.text : undefined;
 
 /**
  * Where a reader of this chat's log resumes: exactly what a `read` sends.

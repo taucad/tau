@@ -11,7 +11,7 @@ import { resolveKernel } from '@taucad/types/constants';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import type { DraftAttachmentModel } from '#hooks/draft.machine.js';
 import { spyOnSend } from '#lib/xstate-test.utils.js';
-import { logRow, publishLogRows, runningRows } from '#machines/chat-projection.fixture.js';
+import { lifecycleRow, logRow, publishLogRows, runningRows } from '#machines/chat-projection.fixture.js';
 
 // ---------------------------------------------------------------------------
 // Hoisted harness — mocks the project-manager surface (chat row persistence),
@@ -960,7 +960,23 @@ describe('ActiveChatProvider', () => {
     });
 
     expect(result.current.status).toBe('streaming');
+  });
+
+  it('names the agent working from its log’s run, not the SDK request (PV-S7, D12)', () => {
+    const { result } = renderHook(() => useChatComposer(), {
+      wrapper: createSessionWrapper('chat_working'),
+    });
+
+    act(() => {
+      publishLogRows('chat_working', runningRows());
+    });
+    expect(result.current.status).toBe('ready');
     expect(result.current.agentActivity).toBe('working');
+
+    act(() => {
+      publishLogRows('chat_working', [lifecycleRow(2, 'completed')], 2);
+    });
+    expect(result.current.agentActivity).toBe('ready');
   });
 
   it('should surface approval and cancellation activity independently from the execution provider', () => {

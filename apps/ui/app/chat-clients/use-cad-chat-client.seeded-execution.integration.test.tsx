@@ -126,6 +126,7 @@ vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', () => ({
   // Read when the loaded row rebinds the chat to its project; no settlement was recorded.
   getHostTurnSettlement: () => undefined,
   subscribeHostTurnSettlements: () => () => undefined,
+  subscribeChatLogAnswers: () => () => undefined,
 }));
 vi.mock('#machines/inspector.js', () => ({ inspect: undefined }));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({ useChatSessionStore: () => harness.store }));

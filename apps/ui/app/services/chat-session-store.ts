@@ -94,7 +94,16 @@ import {
 } from '#chat-clients/_internal/chat-host-binding.js';
 import type { CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
 import { ENV } from '#environment.config.js';
-import { chatProjectionLogic, selectOpenInterrupts, selectToolsInFlight } from '#machines/chat-projection.logic.js';
+import {
+  chatProjectionLogic,
+  selectCaughtUp,
+  selectCurrentRun,
+  selectOpenInterrupts,
+  selectRunFailure,
+  selectRunPhase,
+  selectToolsInFlight,
+} from '#machines/chat-projection.logic.js';
+import type { ChatProjection, ChatRunPhase as ProjectedRunPhase } from '#machines/chat-projection.logic.js';
 
 /** Run states a browser-placed run never leaves. */
 const terminalBrowserRunStates = new Set(['completed', 'failed', 'cancelled']);
@@ -280,9 +289,8 @@ type InternalSession = ChatSession & {
   placement: string | undefined;
   /** The chat machine's turn emits, subscribed once when its root is created. */
   turnSubscriptions: Array<{ unsubscribe: () => void }>;
-  /** What was last handed to `stateActorRef`, so nothing is sent twice. */
+  /** The request facts last handed to `stateActorRef`, so nothing is sent twice; PV-S10 and PV-S12 retire them. */
   lastState: {
-    phase?: ChatRunPhase;
     durable?: string;
     lifecycle?: string;
   };
@@ -297,9 +305,6 @@ type InternalSession = ChatSession & {
   dispose: () => void;
 };
 
-/** The run phases the store reports, the SDK's plus the person's own stop. */
-type ChatRunPhase = 'admitted' | 'running' | 'completed' | 'failed' | 'cancelled';
-
 export type ChatSessionLivenessSnapshot = Readonly<{
   projects: Readonly<Record<string, readonly string[]>>;
   chats: Readonly<
@@ -308,7 +313,7 @@ export type ChatSessionLivenessSnapshot = Readonly<{
       Readonly<{
         projectId: string | undefined;
         status: ChatStatus;
-        phase: ChatRunPhase | undefined;
+        phase: ProjectedRunPhase;
         machineState: unknown;
         activeRunId: string | undefined;
         pendingSettlement: unknown;
@@ -330,8 +335,24 @@ type ChatSessionLivenessDebugGlobal = typeof globalThis & {
  */
 const composedText = (message: MyUIMessage): string => message.parts.find((part) => part.type === 'text')?.text ?? '';
 
-/** The two phases that OPEN a run; every other phase settles one. */
-const opensRun = (phase: ChatRunPhase): boolean => phase === 'admitted' || phase === 'running';
+/** A chat machine still showing a run as live: queued, running, or stopped with its turn not yet settled. */
+const isLive = (snapshot: ReturnType<ChatSessionActorRef['getSnapshot']>): boolean =>
+  snapshot.matches({ run: 'queued' }) ||
+  snapshot.matches({ run: 'running' }) ||
+  (snapshot.matches({ run: 'stopped' }) && snapshot.context.turn !== undefined);
+
+/**
+ * Whether a run's end is this chat's to show: the machine is still showing it live, as the run its turn placed or the
+ * run it presents. An idle chat is shown no history, a turn is never ended by an earlier run's row (W0.2), and an end
+ * is never shown twice, which would settle a turn twice.
+ */
+const endsHere = (snapshot: ReturnType<ChatSessionActorRef['getSnapshot']>, runId: string): boolean => {
+  const { turn, activeRunId } = snapshot.context;
+  return isLive(snapshot) && (turn?.runId === runId || (activeRunId === runId && snapshot.matches({ run: 'running' })));
+};
+
+/** The two phases that OPEN a run and keep its project busy (I24); every other phase settles one. */
+const opensRun = (phase: ProjectedRunPhase): boolean => phase === 'admitted' || phase === 'running';
 
 /* The `revision` region's three facts, as the project's route last reported them. */
 const sendRevisionFacts = (ref: ChatSessionActorRef, facts: ChatRevisionFacts): void => {
@@ -339,23 +360,6 @@ const sendRevisionFacts = (ref: ChatSessionActorRef, facts: ChatRevisionFacts): 
   ref.send({ type: 'syncState', state: facts.sync });
   if (facts.branch !== undefined) {
     ref.send({ type: 'turnFinalized', branch: facts.branch });
-  }
-};
-
-const runPhaseOf = (status: ChatStatus): Exclude<ChatRunPhase, 'cancelled'> | undefined => {
-  switch (status) {
-    case 'submitted': {
-      return 'admitted';
-    }
-    case 'streaming': {
-      return 'running';
-    }
-    case 'error': {
-      return 'failed';
-    }
-    default: {
-      return undefined;
-    }
   }
 };
 
@@ -476,12 +480,13 @@ export class ChatSessionStore {
       chats: Object.fromEntries(
         [...this.#sessions].map(([chatId, session]) => {
           const state = session.stateActorRef.getSnapshot();
+          const projection = this.#projectionContext(chatId);
           return [
             chatId,
             {
               projectId: session.projectId,
               status: session.status,
-              phase: session.lastState.phase,
+              phase: projection === undefined ? 'none' : selectRunPhase(projection),
               machineState: state.value,
               activeRunId: state.context.activeRunId,
               pendingSettlement: state.context.pendingSettlement,
@@ -846,9 +851,8 @@ export class ChatSessionStore {
         this.#observeHostTurnSettlement(event);
       });
       for (const session of this.#sessions.values()) {
-        const { phase } = session.lastState;
-        if (session.projectId === projectId && phase !== undefined && opensRun(phase)) {
-          ref.send({ type: 'runStarted', chatId: session.chatId });
+        if (session.projectId === projectId) {
+          this.#countRun(session);
         }
       }
     }
@@ -1308,7 +1312,7 @@ export class ChatSessionStore {
     }
     /* A chat whose log this page already read shows how its last turn ended from the start. */
     this.#replayPersistedSettlement(session);
-    this.#syncProjection(session.chatId);
+    this.#syncProjection(session.chatId, 'open');
   }
 
   /** The chat's projection, created and started on its first answer. */
@@ -1319,26 +1323,50 @@ export class ChatSessionStore {
     }
     const projection = createActor(chatProjectionLogic, this.#rootOptions);
     this.#projections.set(chatId, projection);
-    projection.subscribe(() => {
-      this.#syncProjection(chatId);
+    /* The run and phase last presented, compared per snapshot: a replay's earlier pages are history and present
+     * nothing, so a phase moves only once the projection holds the log to its end. */
+    let presented: string | undefined;
+    projection.subscribe(({ context }) => {
+      const run = selectCaughtUp(context) ? selectCurrentRun(context) : undefined;
+      const key = run === undefined ? presented : `${run.runId}:${run.lifecycle}`;
+      const moved = key !== presented;
+      presented = key;
+      this.#syncProjection(chatId, moved ? 'moved' : 'none');
     });
     projection.start();
     return projection;
   }
 
+  #projectionContext(chatId: string): ChatProjection | undefined {
+    return this.#projections.get(chatId)?.getSnapshot().context;
+  }
+
   /**
-   * Hand the chat's machine what its projection says about tools and approvals (G03, G04): counted per row as the
-   * log is folded, never by scanning the transcript. The machine's own counts are the comparison, so nothing is sent
-   * twice.
+   * Hand the chat's machine and its project what the chat's projection says (G02–G04): tools and approvals counted
+   * per row, and the run's phase from its lifecycle rows. Nothing here reads the SDK's status or the transcript.
    *
    * @param chatId - The chat whose projection moved, or whose machine was just created.
+   * @param present - `moved`: the current run or its phase changed; `open`: a new machine, shown a run still open;
+   * `none`: the run did not move.
    */
-  #syncProjection(chatId: string): void {
+  #syncProjection(chatId: string, present: 'moved' | 'open' | 'none'): void {
     const session = this.#sessions.get(chatId);
-    const projection = this.#projections.get(chatId)?.getSnapshot().context;
+    const projection = this.#projectionContext(chatId);
     if (session === undefined || projection === undefined) {
       return;
     }
+    this.#syncTools(session, projection);
+    this.#countRun(session);
+    const run = selectCaughtUp(projection) ? selectCurrentRun(projection) : undefined;
+    const phase = selectRunPhase(projection);
+    if (run === undefined || present === 'none' || (present === 'open' && !opensRun(phase) && phase !== 'paused')) {
+      return;
+    }
+    this.#presentRun(session, { runId: run.runId, phase, reason: selectRunFailure(projection, run.runId) });
+  }
+
+  /** The machine's tool and approval counts, compared with its own so nothing is sent twice (G03, G04). */
+  #syncTools(session: InternalSession, projection: ChatProjection): void {
     const tools = selectToolsInFlight(projection);
     const approvals = Object.keys(selectOpenInterrupts(projection)).length;
     const { context } = session.stateActorRef.getSnapshot();
@@ -1351,13 +1379,98 @@ export class ChatSessionStore {
     }
     /* The store's unread trigger for an approval that was not pending a moment ago (D9). */
     if (approvals > 0 && context.pendingApprovalCount === 0) {
-      this.#markUnreadIfUnattended(session.projectId, chatId);
+      this.#markUnreadIfUnattended(session.projectId, session.chatId);
     }
     session.stateActorRef.send({
       type: 'toolParts',
       inFlight: tools.count,
       approvals,
       ...(tools.toolName === undefined ? {} : { toolName: tools.toolName }),
+    });
+  }
+
+  /**
+   * Keep the chat's project counting its run exactly while the log says the run is open (I24, A35). The project
+   * session's own `runs` is the comparison, so the page keeps no copy of what it told it. It reports to the chat's own
+   * project, wherever the person is now.
+   *
+   * @param session - The chat.
+   */
+  #countRun(session: InternalSession): void {
+    const owner = this.#sessionOwner(session);
+    const projection = this.#projectionContext(session.chatId);
+    if (owner === undefined || projection === undefined || !selectCaughtUp(projection)) {
+      return;
+    }
+    const open = opensRun(selectRunPhase(projection));
+    if (open !== owner.getSnapshot().context.runs.includes(session.chatId)) {
+      owner.send({ type: open ? 'runStarted' : 'runSettled', chatId: session.chatId });
+    }
+  }
+
+  /**
+   * Show the chat's machine one run's phase, as its log states it.
+   *
+   * A run's end reaches the machine only for the run it is presenting or the turn it placed: an idle chat that
+   * replays its log is shown no history, and a turn is never ended by an earlier run's row (W0.2). A `continue` names no
+   * run, so its run's replayed failure waits until the machine has seen that run open again.
+   *
+   * @param session - The chat.
+   * @param run - The run the log names, its lifecycle, and why it failed when it did.
+   */
+  #presentRun(
+    session: InternalSession,
+    { runId, phase, reason }: Readonly<{ runId: string; phase: ProjectedRunPhase; reason: string | undefined }>,
+  ): void {
+    if (phase === 'none') {
+      return;
+    }
+    const snapshot = session.stateActorRef.getSnapshot();
+    const { turn } = snapshot.context;
+    if (turn?.runId !== undefined && turn.runId !== runId) {
+      return;
+    }
+    if (!opensRun(phase) && phase !== 'paused' && !endsHere(snapshot, runId)) {
+      return;
+    }
+    session.stateActorRef.send({
+      type: 'runLifecycle',
+      phase,
+      runId,
+      ...(phase === 'failed' && reason !== undefined ? { reason } : {}),
+    });
+  }
+
+  /**
+   * A request that ended before its run's log did: an admission the host never answered, a reattach to a host that is
+   * not there (R1-F1), a stream that broke, a Stop that never reached the host. The log's own terminal row is
+   * presented from the projection and has already ended the run, so this speaks only where the log has not.
+   *
+   * ponytail: the request half of the old SDK status fold; PV-S10's command outcomes replace it.
+   *
+   * @param session - The chat whose SDK request just ended.
+   * @param outcome - How the request ended.
+   */
+  #reportRequestEnd(session: InternalSession, outcome: 'failed' | 'cancelled' | 'completed'): void {
+    const snapshot = session.stateActorRef.getSnapshot();
+    const { turn, activeRunId } = snapshot.context;
+    const runId = turn?.runId ?? activeRunId;
+    const live = runId === undefined ? isLive(snapshot) : endsHere(snapshot, runId);
+    const { error } = session.chat;
+    if (outcome === 'failed') {
+      /* A reattach that fails outright fails the idle chat it was for (R1-F1). */
+      if (error === undefined || !(live || snapshot.matches({ run: 'idle' }))) {
+        return;
+      }
+    } else if (turn === undefined || !live) {
+      /* Only a turn this page placed ends with its request; a watched run ends when its log says so. */
+      return;
+    }
+    session.stateActorRef.send({
+      type: 'runLifecycle',
+      phase: outcome,
+      ...(runId === undefined ? {} : { runId }),
+      ...(outcome === 'failed' && error !== undefined ? { reason: error.message } : {}),
     });
   }
 
@@ -1984,6 +2097,10 @@ export class ChatSessionStore {
     const unregisterStatus = chat['~registerStatusCallback'](() => {
       const next = chat.status;
       if (session.status !== next) {
+        if (next === 'ready' && (session.status === 'submitted' || session.status === 'streaming')) {
+          /* The request is over; `stopping` is the last lifecycle it reported when the person stopped it (P63). */
+          this.#reportRequestEnd(session, session.lastState.lifecycle === 'stopping' ? 'cancelled' : 'completed');
+        }
         session.status = next;
         if (next === 'submitted') {
           requestWroteOutput = false;
@@ -2001,6 +2118,9 @@ export class ChatSessionStore {
       this.#chatTopics.get(chatId)?.emit();
     });
     const unregisterError = chat['~registerErrorCallback'](() => {
+      if (chat.error !== undefined) {
+        this.#reportRequestEnd(session, 'failed');
+      }
       this.#syncChatState(session);
       this.#chatTopics.get(chatId)?.emit();
     });
@@ -2119,10 +2239,6 @@ export class ChatSessionStore {
 
   #syncChatState(session: InternalSession): void {
     const { lastState, stateActorRef } = session;
-    /* Run accounting is not gated on the chat machine: the project session has
-     * to know a run started even where no `chat-session` exists yet, because
-     * `busy` is what stops a policy closing a project mid-run (I24). */
-    this.#syncRunPhase(session);
     if (session.durableRunState !== lastState.durable) {
       lastState.durable = session.durableRunState;
       if (session.durableRunState !== undefined) {
@@ -2273,66 +2389,7 @@ export class ChatSessionStore {
     if (failure === undefined) {
       return;
     }
-    session.lastState.phase = 'failed';
     session.stateActorRef.send({ type: 'runLifecycle', phase: 'failed', reason: failure.message });
-  }
-
-  /**
-   * Move the chat's run phase forward once, telling both owners.
-   *
-   * @param session - The chat whose run moved.
-   */
-  #syncRunPhase(session: InternalSession): void {
-    const { lastState } = session;
-    const settled = session.status === 'ready' && (lastState.phase === 'admitted' || lastState.phase === 'running');
-    /* A run the person stopped is cancelled, not completed (P63): the last
-     * lifecycle this session saw is `stopping` exactly when *Stop* or the
-     * sidebar's *Close* asked for it, and a `completed` here would move the row
-     * to `Done` and mark it unread for work nobody finished. */
-    const next = settled
-      ? lastState.lifecycle === 'stopping'
-        ? 'cancelled'
-        : 'completed'
-      : runPhaseOf(session.status);
-    if (next === undefined || next === lastState.phase) {
-      return;
-    }
-    /* The AI SDK sets `status` before `error`, so the `error` status arrives with no error yet.
-     * Reporting it then lost the reason for good ("Failed · the run failed"); the error callback
-     * that follows reports it with one. */
-    if (next === 'failed' && session.chat.error === undefined) {
-      return;
-    }
-    const admission = admissionEnvelopeSchema.safeParse(session.activeRunBody?.['admission']);
-    const runId = admission.success
-      ? admission.data.idempotencyKey
-      : (getBoundDurableChatRunId(session.chatId) ?? session.durableRunId);
-    /* A reattach that found nothing to resume still drives the SDK through
-     * `submitted → ready`. OPENING a run on that left the chat's machine in
-     * `run.finishing` waiting for a settlement no run can send — the sidebar's
-     * permanent "Finishing…" (F4b). A run phase has to name a run, so a chat
-     * that reattached with no run identity opens none and stays idle. Only the
-     * opening: a settlement always reports, because the run it settles was
-     * already reported open and its identity is gone by then — `startRun`
-     * stamps an admission key the release clears before the SDK's `ready`
-     * arrives (R3-F2) — and because a reattach that refuses outright settles
-     * as `failed` about a chat that cannot stream (R1-F1). */
-    if (runId === undefined && session.reattachedHostId !== undefined && opensRun(next)) {
-      return;
-    }
-    lastState.phase = next;
-    /* The session counts runs so *Close* knows to ask (A35, I24). The run
-     * reports to the chat's OWN project, wherever the person is now. */
-    this.#sessionOwner(session)?.send({
-      type: opensRun(next) ? 'runStarted' : 'runSettled',
-      chatId: session.chatId,
-    });
-    session.stateActorRef.send({
-      type: 'runLifecycle',
-      phase: next,
-      ...(runId === undefined ? {} : { runId }),
-      ...(next === 'failed' && session.chat.error ? { reason: session.chat.error.message } : {}),
-    });
   }
 
   #withAdmission(body: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
@@ -2399,9 +2456,9 @@ export class ChatSessionStore {
     this.#composerDrains.set(session.chatId, drained.promise);
     void this.#drainComposer(session, drained);
     /* The store owns the chat's root. A run it was still counting stops counting with it. */
-    const { phase } = session.lastState;
-    if (phase !== undefined && opensRun(phase)) {
-      this.#sessionOwner(session)?.send({ type: 'runSettled', chatId: session.chatId });
+    const owner = this.#sessionOwner(session);
+    if (owner?.getSnapshot().context.runs.includes(session.chatId) === true) {
+      owner.send({ type: 'runSettled', chatId: session.chatId });
     }
     session.chatRoot.stop();
     this.#sessions.delete(session.chatId);

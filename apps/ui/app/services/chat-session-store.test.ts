@@ -22,7 +22,13 @@ import {
   publishChatTurnAdmission,
   resetChatTurnServices,
 } from '#chat-clients/_internal/chat-host-binding.js';
-import { logRow, publishLogRows, runningRows } from '#machines/chat-projection.fixture.js';
+import {
+  lifecycleRow,
+  logRow,
+  publishLogPage,
+  publishLogRows,
+  runningRows,
+} from '#machines/chat-projection.fixture.js';
 
 // ---------------------------------------------------------------------------
 // Hoisted test harness
@@ -425,14 +431,20 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
    */
   const fakeSession = (projectId: string) => {
     const heard: Array<{ type: string; chatId?: string }> = [];
+    const runs = new Set<string>();
     return {
       projectId,
       heard,
       ref: {
         send: (event: { type: string; chatId?: string }) => {
           heard.push(event);
+          if (event.type === 'runStarted' && event.chatId !== undefined) {
+            runs.add(event.chatId);
+          } else if (event.type === 'runSettled' && event.chatId !== undefined) {
+            runs.delete(event.chatId);
+          }
         },
-        getSnapshot: () => ({ context: { runs: [] } }),
+        getSnapshot: () => ({ context: { runs: [...runs] } }),
       } as unknown as Parameters<StoreType['setProjectSession']>[1],
     };
   };
@@ -445,15 +457,13 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     store.setProjectSession('proj_a', projectA.ref);
     store.setFocusedProject('proj_a');
     store.acquire('chat-a', 'proj_a');
-    const fake = harness.created.find((entry) => entry.id === 'chat-a')!;
-    fake.status = 'streaming';
-    fake.emitStatusChange();
+    publishLogRows('chat-a', runningRows());
+    expect(projectA.heard).toEqual([{ type: 'runStarted', chatId: 'chat-a' }]);
 
     /* The person navigates to B while A's run is still going. */
     store.setProjectSession('proj_b', projectB.ref);
     store.setFocusedProject('proj_b');
-    fake.status = 'ready';
-    fake.emitStatusChange();
+    publishLogRows('chat-a', [lifecycleRow(2, 'completed')], 2);
 
     expect(projectA.heard.filter((event) => event.type === 'runSettled')).toEqual([
       { type: 'runSettled', chatId: 'chat-a' },
@@ -521,9 +531,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     await vi.waitFor(() => {
       expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
     });
-    const fake = harness.created.find((entry) => entry.id === 'chat_a')!;
-    fake.status = 'streaming';
-    fake.emitStatusChange();
+    publishLogRows('chat_a', runningRows());
 
     expect(projectB.heard).toEqual([]);
     expect(projectA.heard).toContainEqual({ type: 'runStarted', chatId: 'chat_a' });
@@ -715,9 +723,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
         projectId: 'proj_a',
         admission: { version: 1, idempotencyKey: runId },
       });
-      const fake = harness.created.find((entry) => entry.id === 'chat_early_settlement')!;
-      fake.status = 'streaming';
-      fake.emitStatusChange();
+      publishLogRows('chat_early_settlement', runningRows(runId));
       recordHostFinalizedTurn({
         type: 'turn.finalized',
         turnId: 'turn_early_settlement',
@@ -741,8 +747,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
       await vi.waitFor(() => {
         expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
       });
-      fake.status = 'ready';
-      fake.emitStatusChange();
+      publishLogRows('chat_early_settlement', [lifecycleRow(2, 'completed', runId)], 2);
 
       const chatA = session.stateActorRef;
       expect(chatA.getSnapshot().matches({ run: 'done' })).toBe(true);
@@ -759,6 +764,92 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
       store.setProjectSession('proj_a', undefined);
       store.setProjectSession('proj_b', undefined);
     }
+  });
+});
+
+describe('ChatSessionStore — run phase from the log (PV-S7, G02)', () => {
+  const countingProject = () => {
+    const heard: string[] = [];
+    const runs = new Set<string>();
+    const ref = {
+      send: (event: { type: string; chatId: string }) => {
+        heard.push(event.type);
+        if (event.type === 'runStarted') {
+          runs.add(event.chatId);
+        } else if (event.type === 'runSettled') {
+          runs.delete(event.chatId);
+        }
+      },
+      getSnapshot: () => ({ context: { runs: [...runs] } }),
+    } as unknown as ProjectSessionActorRef;
+    return { heard, ref };
+  };
+
+  it('shows an idle chat none of the history its log replays, and counts no run (W0.2)', () => {
+    const store = createStore();
+    const project = countingProject();
+    store.setProjectSession('proj_history', project.ref);
+    const actor = store.acquire('chat_history', 'proj_history').stateActorRef;
+
+    publishLogRows('chat_history', [...runningRows('run_old'), lifecycleRow(2, 'completed', 'run_old')]);
+
+    expect(actor.getSnapshot().matches({ run: 'idle' })).toBe(true);
+    expect(actor.getSnapshot().matches({ read: 'read' })).toBe(true);
+    expect(project.heard).toEqual([]);
+    store.release('chat_history');
+    store.setProjectSession('proj_history', undefined);
+  });
+
+  it('reports a replayed run only once the replay holds the log to its end', () => {
+    const store = createStore();
+    const project = countingProject();
+    store.setProjectSession('proj_pages', project.ref);
+    const actor = store.acquire('chat_pages', 'proj_pages').stateActorRef;
+
+    /* The first page of a three-row log: the run it shows running may have ended in the next. */
+    publishLogPage('chat_pages', runningRows(), { cursor: 0, endCursor: 3 });
+    expect(actor.getSnapshot().matches({ run: 'idle' })).toBe(true);
+    expect(project.heard).toEqual([]);
+
+    publishLogRows(
+      'chat_pages',
+      [logRow(2, { type: 'message.appended', message: { id: 'm2', role: 'assistant', content: 'Hi.' } })],
+      2,
+    );
+    expect(actor.getSnapshot().matches({ run: 'running' })).toBe(true);
+    expect(project.heard).toEqual(['runStarted']);
+    store.release('chat_pages');
+    store.setProjectSession('proj_pages', undefined);
+  });
+
+  it('never ends a turn with an earlier run’s row, and ends it with its own', async () => {
+    const store = createStore();
+    const chatId = 'chat_turn_history';
+    const actor = store.acquire(chatId, 'proj_turn_history').stateActorRef;
+    publishAdmission(chatId, () => ({ kind: 'regenerate' }));
+    void store.requestTurn(chatId, { kind: 'regenerate' });
+    await vi.waitFor(() => {
+      expect(actor.getSnapshot().matches({ run: { queued: 'dispatched' } })).toBe(true);
+    });
+
+    /* The turn's stream replays the chat's log before its own run starts: an earlier run that ended, and one whose
+     * host died with it still `running`. */
+    publishLogRows(chatId, [...runningRows('run_old'), lifecycleRow(2, 'completed', 'run_old')]);
+    expect(actor.getSnapshot().matches({ run: { queued: 'dispatched' } })).toBe(true);
+    publishLogRows(chatId, [lifecycleRow(3, 'admitted', 'run_dead'), lifecycleRow(4, 'running', 'run_dead')], 3);
+    expect(actor.getSnapshot().matches({ run: { queued: 'dispatched' } })).toBe(true);
+
+    publishLogRows(
+      chatId,
+      [lifecycleRow(5, 'admitted', `run_${chatId}`), lifecycleRow(6, 'running', `run_${chatId}`)],
+      5,
+    );
+    expect(actor.getSnapshot().matches({ run: 'running' })).toBe(true);
+    expect(actor.getSnapshot().context.activeRunId).toBe(`run_${chatId}`);
+    publishLogRows(chatId, [lifecycleRow(7, 'failed', `run_${chatId}`)], 7);
+    expect(actor.getSnapshot().matches({ run: 'finishing' })).toBe(true);
+    expect(actor.getSnapshot().context.outcome).toBe('failed');
+    store.release(chatId);
   });
 });
 
@@ -786,8 +877,7 @@ describe('ChatSessionStore — host-attested settlement (P71)', () => {
       if (fake === undefined) {
         return;
       }
-      fake.status = 'streaming';
-      fake.emitStatusChange();
+      publishLogRows(chatId, runningRows(runId));
 
       recordHostFinalizedTurn({
         type: 'turn.finalized',
@@ -802,8 +892,7 @@ describe('ChatSessionStore — host-attested settlement (P71)', () => {
       });
       expect(actor.getSnapshot().matches({ run: 'running' })).toBe(true);
 
-      fake.status = 'ready';
-      fake.emitStatusChange();
+      publishLogRows(chatId, [lifecycleRow(2, 'completed', runId)], 2);
       expect(actor.getSnapshot().matches({ run: 'done' })).toBe(true);
     } finally {
       store.release(chatId);
@@ -829,10 +918,8 @@ describe('ChatSessionStore — host-attested settlement (P71)', () => {
       if (fake === undefined) {
         return;
       }
-      fake.status = 'streaming';
-      fake.emitStatusChange();
-      fake.status = 'ready';
-      fake.emitStatusChange();
+      publishLogRows(chatId, runningRows(currentRunId));
+      publishLogRows(chatId, [lifecycleRow(2, 'completed', currentRunId)], 2);
       expect(actor.getSnapshot().matches({ run: 'finishing' })).toBe(true);
 
       recordHostFinalizedTurn({
@@ -1803,11 +1890,17 @@ describe('ChatSessionStore', () => {
       deps.getChat.mockResolvedValue(chatRow(chatId, 'project_reattach', { name: 'Empty chat' }));
       store.setDependencies(deps);
       const heard: string[] = [];
+      const runs = new Set<string>();
       const projectRef = {
-        send: (event: { type: string }) => {
+        send: (event: { type: string; chatId: string }) => {
           heard.push(event.type);
+          if (event.type === 'runStarted') {
+            runs.add(event.chatId);
+          } else if (event.type === 'runSettled') {
+            runs.delete(event.chatId);
+          }
         },
-        getSnapshot: () => ({ context: { runs: [] } }),
+        getSnapshot: () => ({ context: { runs: [...runs] } }),
       } as unknown as ProjectSessionActorRef;
 
       try {
@@ -1839,10 +1932,8 @@ describe('ChatSessionStore', () => {
 
     /*
      * The same reattach, refused. An unreachable host drives the SDK
-     * `submitted → error` before any run binds, so the "no run identity"
-     * suppression above was still armed on the error tick: the row stayed idle
-     * about a reattach that failed outright and the project session never heard
-     * the run settle.
+     * `submitted → error` before any run binds. The row says the reattach
+     * failed; the log named no run, so the project never counted one (PV-S7).
      */
     it('should surface a host reattach that fails before a run binds', async () => {
       const store = new ChatSessionStore({ chatSession });
@@ -1851,11 +1942,17 @@ describe('ChatSessionStore', () => {
       deps.getChat.mockResolvedValue(chatRow(chatId, 'project_reattach', { name: 'Unreachable host chat' }));
       store.setDependencies(deps);
       const heard: string[] = [];
+      const runs = new Set<string>();
       const projectRef = {
-        send: (event: { type: string }) => {
+        send: (event: { type: string; chatId: string }) => {
           heard.push(event.type);
+          if (event.type === 'runStarted') {
+            runs.add(event.chatId);
+          } else if (event.type === 'runSettled') {
+            runs.delete(event.chatId);
+          }
         },
-        getSnapshot: () => ({ context: { runs: [] } }),
+        getSnapshot: () => ({ context: { runs: [...runs] } }),
       } as unknown as ProjectSessionActorRef;
 
       try {
@@ -1877,7 +1974,7 @@ describe('ChatSessionStore', () => {
         fake.error = new Error('host unreachable');
         fake.emitErrorChange();
 
-        expect(heard).toContain('runSettled');
+        expect(heard).not.toContain('runStarted');
         expect(actor.getSnapshot().matches({ run: 'failed' })).toBe(true);
         expect(actor.getSnapshot().context.failureReason).toBe('host unreachable');
       } finally {
@@ -1888,12 +1985,10 @@ describe('ChatSessionStore', () => {
 
     /*
      * The same reattached chat, now running a turn of its own. The run's hold
-     * is released the instant persistence reports idle — before the SDK's
-     * `ready` reaches the store — so the *settlement* names no run either. The
-     * "no run identity" suppression is about a run nobody can ever settle
-     * being OPENED; applied to a run already reported open it dropped the
-     * `completed`, leaving the sidebar row running and *Close* still asking
-     * (R3-F2).
+     * is released the instant persistence reports idle, before the run ends.
+     * The run's identity comes from its log rows, so the release cannot drop
+     * its `completed`, which left the sidebar row running and *Close* still
+     * asking (R3-F2).
      */
     it("should settle a reattached chat's run whose identity cleared before the final status", async () => {
       const store = new ChatSessionStore({ chatSession });
@@ -1902,11 +1997,17 @@ describe('ChatSessionStore', () => {
       deps.getChat.mockResolvedValue(chatRow(chatId, 'project_reattach', { name: 'Reattached chat' }));
       store.setDependencies(deps);
       const heard: string[] = [];
+      const runs = new Set<string>();
       const projectRef = {
-        send: (event: { type: string }) => {
+        send: (event: { type: string; chatId: string }) => {
           heard.push(event.type);
+          if (event.type === 'runStarted') {
+            runs.add(event.chatId);
+          } else if (event.type === 'runSettled') {
+            runs.delete(event.chatId);
+          }
         },
-        getSnapshot: () => ({ context: { runs: [] } }),
+        getSnapshot: () => ({ context: { runs: [...runs] } }),
       } as unknown as ProjectSessionActorRef;
 
       try {
@@ -1919,16 +2020,13 @@ describe('ChatSessionStore', () => {
         });
 
         store.reattachHostChat({ chatId, hostId: 'origin' });
-        const fake = harness.created.findLast((entry) => entry.id === chatId)!;
         store.startRun(chatId, { chatId, projectId: 'project_reattach' });
-        fake.status = 'streaming';
-        fake.emitStatusChange();
+        publishLogRows(chatId, runningRows());
         expect(heard).toContain('runStarted');
 
-        // The release clears the active body before the SDK reports `ready`.
+        // The release clears the active body before the run ends.
         store.endRun(chatId);
-        fake.status = 'ready';
-        fake.emitStatusChange();
+        publishLogRows(chatId, [lifecycleRow(2, 'completed')], 2);
 
         expect(heard).toContain('runSettled');
         expect(actor.getSnapshot().matches({ run: 'finishing' })).toBe(true);

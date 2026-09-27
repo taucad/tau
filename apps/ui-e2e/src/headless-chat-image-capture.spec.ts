@@ -60,32 +60,26 @@ type ViewerCamera = Readonly<{
   rollRadians?: number;
 }>;
 
+type SectionCut =
+  | Readonly<{ kind: 'plane'; plane: 'xy' | 'xz' | 'yz'; offset?: number; isFlipped?: boolean }>
+  | Readonly<{ kind: 'revolution'; axis: 'x' | 'y' | 'z'; start?: number; sweep?: number }>;
+
+type SectionState = Readonly<{
+  isActive: boolean;
+  cuts: ReadonlyArray<Readonly<Record<string, unknown>>>;
+  certification: string;
+  isCommitted: boolean;
+}>;
+
 type PresentationBridge = Readonly<{
-  clearSectionView(): void;
   getModelComponents(): ReadonlyArray<Readonly<{ id: string; name: string }>>;
   getModelVisibility(): Readonly<{ hiddenComponentIds: readonly string[]; isolatedComponentIds: readonly string[] }>;
-  getPresentation(): Readonly<{
-    isSectionViewActive: boolean;
-    selectedSectionViewId: string | undefined;
-    sectionViewDirection: 1 | -1;
-    sectionViewPivot: readonly [number, number, number];
-    sectionViewRotation: readonly [number, number, number];
-    enableClippingLines: boolean;
-    enableClippingMesh: boolean;
-  }>;
+  getSectionState(): SectionState;
   hideModelComponent(componentId: string): void;
   isolateModelComponent(componentId: string): void;
   resetModelVisibility(): void;
   setPresentation(presentation: Readonly<{ surfaces: boolean; lines: boolean }>): void;
-  setSectionView(
-    state: Readonly<{
-      plane: 'xy' | 'xz' | 'yz';
-      direction?: 1 | -1;
-      rotationRadians?: readonly [number, number, number];
-      pivot?: readonly [number, number, number];
-      translation?: number;
-    }>,
-  ): void;
+  setSectionCuts(cuts: readonly SectionCut[]): string[];
 }>;
 
 const captureFailurePatterns = [
@@ -194,12 +188,7 @@ const readViewerEvidence = async (): Promise<CaptureEvidence> => {
 const withPresentationBridge = async (
   action: keyof Pick<
     PresentationBridge,
-    | 'clearSectionView'
-    | 'hideModelComponent'
-    | 'isolateModelComponent'
-    | 'resetModelVisibility'
-    | 'setPresentation'
-    | 'setSectionView'
+    'hideModelComponent' | 'isolateModelComponent' | 'resetModelVisibility' | 'setPresentation'
   >,
   value?: unknown,
 ): Promise<void> => {
@@ -212,10 +201,6 @@ const withPresentationBridge = async (
       switch (method) {
         case 'setPresentation': {
           bridge.setPresentation(argument as { surfaces: boolean; lines: boolean });
-          break;
-        }
-        case 'setSectionView': {
-          bridge.setSectionView(argument as Parameters<PresentationBridge['setSectionView']>[0]);
           break;
         }
         case 'hideModelComponent': {
@@ -264,14 +249,35 @@ const modelVisibility = async (): Promise<ReturnType<PresentationBridge['getMode
     return bridge.getModelVisibility();
   });
 
-const presentation = async (): Promise<ReturnType<PresentationBridge['getPresentation']>> =>
+const sectionState = async (): Promise<SectionState> =>
   target.evaluate(() => {
     const bridge = (globalThis as { __TAU_SECTION_VIEW_TEST__?: PresentationBridge }).__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       throw new Error('Presentation test bridge is unavailable');
     }
-    return bridge.getPresentation();
+    return bridge.getSectionState();
   });
+
+/** Replaces the viewer's cuts and waits until the caps commit them, since a capture draws the committed cuts. */
+const setSectionCuts = async (cuts: readonly SectionCut[]): Promise<string[]> => {
+  const ids = await target.evaluate((nextCuts) => {
+    const bridge = (globalThis as { __TAU_SECTION_VIEW_TEST__?: PresentationBridge }).__TAU_SECTION_VIEW_TEST__;
+    if (!bridge) {
+      throw new Error('Presentation test bridge is unavailable');
+    }
+    return bridge.setSectionCuts(nextCuts);
+  }, cuts);
+  await expect
+    .poll(
+      async () => {
+        const { isActive, isCommitted } = await sectionState();
+        return cuts.length === 0 ? !isActive : isActive && isCommitted;
+      },
+      { timeout: 30_000 },
+    )
+    .toBe(true);
+  return ids;
+};
 
 const requireColorCentroid = (
   evidence: CaptureEvidence,
@@ -501,18 +507,14 @@ test('GLTF toolbar and @ actions use one annotated headless camera path', async 
   await withPresentationBridge('resetModelVisibility');
   expect(await modelVisibility()).toEqual({ hiddenComponentIds: [], isolatedComponentIds: [] });
   await withPresentationBridge('setPresentation', { surfaces: true, lines: false });
-  await withPresentationBridge('setSectionView', {
-    plane: 'yz',
-    direction: 1,
-    rotationRadians: [0.35, -0.25, 0.2],
-    pivot: [0.004, -0.003, 0.008],
-    translation: 0.006,
-  });
+  // An unflipped plane removes its +X side: the Z tower, and the arms past x = -5 mm.
+  await setSectionCuts([{ kind: 'plane', plane: 'yz', offset: -0.005, isFlipped: false }]);
   await target.click(selectors.getByRole('button', { name: 'Capture view to chat' }));
   await waitForCaptureAttachments(1);
   const toolbarSection = await readCaptureEvidence(attachment(0));
   expectAnnotated(toolbarSection, 'image/webp', desktopCaptureSize);
-  expect(toolbarSection.digest).not.toBe(second.digest);
+  expect(toolbarSection.digest).not.toBe(toolbarSurfacesOnly.digest);
+  expect(toolbarSection.modelColorCentroids.blue).toBeUndefined();
 
   await clearAttachments();
   await openScreenshotMenu();
@@ -523,19 +525,14 @@ test('GLTF toolbar and @ actions use one annotated headless camera path', async 
   expect(atSection.digest).toBe(toolbarSection.digest);
 
   await clearAttachments();
-  await withPresentationBridge('setSectionView', {
-    plane: 'yz',
-    direction: -1,
-    rotationRadians: [0.35, -0.25, 0.2],
-    pivot: [0.004, -0.003, 0.008],
-    translation: 0.006,
-  });
+  await setSectionCuts([{ kind: 'plane', plane: 'yz', offset: -0.005, isFlipped: true }]);
   await target.click(selectors.getByRole('button', { name: 'Capture view to chat' }));
   await waitForCaptureAttachments(1);
   const flippedSection = await readCaptureEvidence(attachment(0));
   expectAnnotated(flippedSection, 'image/webp', desktopCaptureSize);
   expect(flippedSection.digest).not.toBe(toolbarSection.digest);
   expect(flippedSection.modelPixels).not.toBe(toolbarSection.modelPixels);
+  requireColorCentroid(flippedSection, 'blue');
 
   await clearAttachments();
   await openScreenshotMenu();
@@ -544,8 +541,25 @@ test('GLTF toolbar and @ actions use one annotated headless camera path', async 
   const atFlippedSection = await readCaptureEvidence(attachment(0));
   expect(atFlippedSection.digest).toBe(flippedSection.digest);
 
+  // A cutaway narrower than 180° removes an intersection a capture cannot draw: it is left out, with a diagnostic.
   await clearAttachments();
-  await withPresentationBridge('clearSectionView');
+  await target.evaluate(() => {
+    (
+      globalThis as typeof globalThis & { __TAU_HEADLESS_IMAGE_DEBUG__?: { reset(): void } }
+    ).__TAU_HEADLESS_IMAGE_DEBUG__?.reset();
+  });
+  const [cutawayId] = await setSectionCuts([{ kind: 'revolution', axis: 'z', sweep: 90 }]);
+  await target.click(selectors.getByRole('button', { name: 'Capture view to chat' }));
+  await waitForCaptureAttachments(1);
+  const omittedCutaway = await readCaptureEvidence(attachment(0));
+  expectAnnotated(omittedCutaway, 'image/webp', desktopCaptureSize);
+  requireColorCentroid(omittedCutaway, 'blue');
+  const records = await imageDebugRecords();
+  const omitted = records.find(({ name }) => name === 'capture.section-omitted');
+  expect(omitted?.detail).toEqual({ cutIds: [cutawayId] });
+
+  await clearAttachments();
+  await setSectionCuts([]);
 
   await openScreenshotMenu();
   await target.click(selectors.getByRole('button', { name: 'Orthographic views x 6' }));
@@ -592,14 +606,11 @@ test('GLTF toolbar and @ actions use one annotated headless camera path', async 
 
   await clearAttachments();
   await target.setViewport({ width: 320, height: 844 });
-  await target.click(
-    selectors.getByTestId('chat-viewer-bottom-controls-overlay').getByCss('button:has(svg.lucide-settings)'),
-  );
-  await target.click(selectors.getByRole('menuitem', { name: 'Capture view to chat' }));
+  // The phone layout's open drawer hides the workbench from the accessibility tree, so find the button by its label.
+  await target.click(selectors.getByCss('[data-slot="viewer-controls"] button[aria-label="Capture view to chat"]'));
   await waitForCaptureAttachments(1);
   const mobileCaptureSize = await currentCaptureSize();
   expectAnnotated(await readCaptureEvidence(attachment(0)), 'image/webp', mobileCaptureSize);
-  await target.expectHidden(selectors.getByRole('menuitem', { name: 'Capture view to chat' }));
 
   await clearAttachments();
   await openScreenshotMenu();
@@ -654,14 +665,14 @@ test('section captures preserve complete caps and positive-area overlap evidence
   await waitForRenderedGeometry('gltf');
   await setViewerCamera({ position: [0.14, -0.1, 0.075], target: [0, 0.006, 0.012], fov: 42, zoom: 1 });
   await withPresentationBridge('setPresentation', { surfaces: true, lines: true });
-  await withPresentationBridge('setSectionView', { plane: 'yz', direction: 1, pivot: [0, 0, 0] });
-  expect(await presentation()).toMatchObject({
-    isSectionViewActive: true,
-    selectedSectionViewId: 'yz',
-    sectionViewDirection: 1,
-    enableClippingLines: true,
-    enableClippingMesh: true,
+  await setSectionCuts([{ kind: 'plane', plane: 'yz', offset: 0, isFlipped: false }]);
+  const section = await sectionState();
+  expect(section).toMatchObject({
+    isActive: true,
+    cuts: [{ kind: 'plane', plane: 'yz', offset: 0, isFlipped: false }],
+    isCommitted: true,
   });
+  expect(section.certification).not.toBe('rejected');
 
   await target.click(selectors.getByRole('button', { name: 'Capture view to chat' }));
   await waitForCaptureAttachments(1);
@@ -682,21 +693,16 @@ test('section captures preserve complete caps and positive-area overlap evidence
   expect(fromAt.digest).toBe(toolbar.digest);
 
   await clearAttachments();
-  await withPresentationBridge('setSectionView', {
-    plane: 'yz',
-    direction: 1,
-    rotationRadians: [0.2, -0.1, 0.15],
-    pivot: [0, 0, 0],
-    translation: 0.003,
-  });
+  // A half-turn cutaway about X from +Y removes everything above the bounds centre: a level cut through every box.
+  await setSectionCuts([{ kind: 'revolution', axis: 'x', start: 0, sweep: 180 }]);
   await target.click(selectors.getByRole('button', { name: 'Capture view to chat' }));
   await waitForCaptureAttachments(1);
-  const oblique = await readCaptureEvidence(attachment(0));
-  const obliqueColors = await readSectionColorEvidence(attachment(0));
-  expectAnnotated(oblique, 'image/webp', captureSize);
-  expect(oblique.digest).not.toBe(toolbar.digest);
-  expect(obliqueColors.darkRed).toBeGreaterThan(100);
-  expect(obliqueColors.yellow).toBeGreaterThan(20);
+  const cutaway = await readCaptureEvidence(attachment(0));
+  const cutawayColors = await readSectionColorEvidence(attachment(0));
+  expectAnnotated(cutaway, 'image/webp', captureSize);
+  expect(cutaway.digest).not.toBe(toolbar.digest);
+  expect(cutawayColors.darkRed).toBeGreaterThan(100);
+  expect(cutawayColors.yellow).toBeGreaterThan(20);
 
   await clearAttachments();
   const overlapCyan = await componentId('Overlap cyan');

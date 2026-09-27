@@ -281,9 +281,6 @@
 /* Dark variant is provided by fumadocs-ui/css/preset.css: @variant dark (&:where(.dark, .dark *)) */
 
 @theme inline {
-  --color-blue: oklch(63.82% 0.1949 265.76);
-  --color-purple: oklch(60.29% 0.1875 289.06);
-  --color-yellow: oklch(86.76% 0.6 93.18);
   --color-viewer-tool-active: var(--viewer-tool-active);
 
   --animate-pulse-subtle: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;

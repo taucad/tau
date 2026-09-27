@@ -60,7 +60,7 @@ const featuredPlugins: StoreItem[] = [
     name: 'Chrome',
     description: 'Control Chrome with Tau',
     icon: Globe,
-    accent: 'bg-blue/10 text-blue',
+    accent: 'bg-information/10 text-information',
   },
   {
     name: 'Slack',
@@ -91,9 +91,9 @@ const featuredPlugins: StoreItem[] = [
 
 const skillAccentClasses = [
   'bg-warning/10 text-warning',
-  'bg-yellow/10 text-yellow',
-  'bg-purple/10 text-purple',
-  'bg-blue/10 text-blue',
+  'bg-warning/10 text-warning',
+  'bg-feature/10 text-feature',
+  'bg-information/10 text-information',
 ];
 
 type InstalledPluginManifest = {
@@ -324,7 +324,7 @@ export default function PluginsRoute(): React.JSX.Element {
         </div>
       </header>
 
-      <section className='flex h-40 items-center justify-center overflow-hidden rounded-md border bg-[linear-gradient(135deg,color-mix(in_oklab,var(--color-blue)_18%,var(--background)),color-mix(in_oklab,var(--color-purple)_14%,var(--background)),color-mix(in_oklab,var(--color-yellow)_12%,var(--background)))]'>
+      <section className='flex h-40 items-center justify-center overflow-hidden rounded-md border bg-[linear-gradient(135deg,color-mix(in_oklab,var(--information)_18%,var(--background)),color-mix(in_oklab,var(--feature)_14%,var(--background)),color-mix(in_oklab,var(--warning)_12%,var(--background)))]'>
         <div className='flex flex-col items-center gap-4'>
           <Badge
             variant='secondary'

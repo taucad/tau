@@ -20,6 +20,7 @@ import {
   net,
   protocol,
   safeStorage,
+  screen,
   session,
   shell,
   utilityProcess,
@@ -941,9 +942,15 @@ const bootstrapElectronApp = async (): Promise<void> => {
     new URL(path, isDevelopment ? environment.ELECTRON_RENDERER_URL! : `${appOrigin}/`).href;
 
   const createMainWindow = async (): Promise<BrowserWindow> => {
+    /* Open filling the work area (display minus menu bar and dock) of the
+     * display the user launched from, as native apps do. A fixed size leaves
+     * most of a large display unused. */
+    const { x, y, width, height } = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
     const window = new BrowserWindow({
-      width: 1440,
-      height: 900,
+      x,
+      y,
+      width,
+      height,
       show: false,
       icon: applicationIcon,
       title: 'Tau',

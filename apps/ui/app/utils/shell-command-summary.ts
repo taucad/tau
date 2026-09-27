@@ -26,7 +26,11 @@ export type CommandAction =
   | { readonly type: 'list'; readonly path?: string }
   | { readonly type: 'search'; readonly query?: string; readonly path?: string }
   /** A read-only inspection with no file to name, such as `git status`. */
-  | { readonly type: 'check'; readonly command: string };
+  | { readonly type: 'check'; readonly command: string }
+  /** Whether a program is installed: `command -v`, `which`, `type`. */
+  | { readonly type: 'probe'; readonly tool: string }
+  | { readonly type: 'hash'; readonly path: string }
+  | { readonly type: 'count'; readonly path: string };
 
 /* Bounds that keep a hostile command from costing more than a normal one. */
 const maxCommandLength = 4096;
@@ -342,6 +346,28 @@ const findActions = (args: readonly string[]): CommandAction[] | undefined => {
     : [{ type: 'search', query, ...(paths[0] === undefined ? {} : { path: paths[0] }) }];
 };
 
+/* Checksums read a file and print a digest; `-a`/`-c` take a value. */
+const hashers = wordSet('shasum sha1sum sha256sum sha512sum md5 md5sum b3sum');
+
+const perPath = <Type extends 'hash' | 'count'>(type: Type, paths: readonly string[]): CommandAction[] | undefined =>
+  paths.length === 0 || paths.includes('-') ? undefined : paths.map((path) => ({ type, path }) as CommandAction);
+
+/**
+ * A lookup of installed programs. `command` without `-v`/`-V` runs its
+ * argument, so only the lookup forms qualify.
+ *
+ * @param program - `command`, `which` or `type`.
+ * @param args - Its arguments.
+ * @returns One probe per program named, or `undefined`.
+ */
+const probeActions = (program: string, args: readonly string[]): CommandAction[] | undefined => {
+  if (program === 'command' && args[0] !== '-v' && args[0] !== '-V') {
+    return undefined;
+  }
+  const tools = operandsOf(args, new Set());
+  return tools.length === 0 ? undefined : tools.map((tool) => ({ type: 'probe', tool }));
+};
+
 /* Subcommands that only report repository state. */
 const gitInspections = wordSet('status diff log show');
 
@@ -426,8 +452,20 @@ const stageActions = (words: readonly string[]): CommandAction[] | undefined => 
     case 'git': {
       return gitActions(args);
     }
+    case 'command':
+    case 'which':
+    case 'type': {
+      return probeActions(program, args);
+    }
+    case 'wc': {
+      return perPath('count', operandsOf(args, wordSet('--files0-from')));
+    }
     default: {
-      return inert.has(program) ? [] : undefined;
+      return hashers.has(program)
+        ? perPath('hash', operandsOf(args, wordSet('-a --algorithm -c --check')))
+        : inert.has(program)
+          ? []
+          : undefined;
     }
   }
 };
@@ -437,10 +475,15 @@ const joinPath = (base: string, path: string): string =>
     ? path
     : `${base.endsWith('/') ? base.slice(0, -1) : base}/${path}`;
 
-const withBase = (action: CommandAction, base: string | undefined): CommandAction =>
-  base === undefined || action.type === 'check' || action.path === undefined
+/** The file an action names, if it names one. */
+const pathOf = (action: CommandAction): string | undefined => ('path' in action ? action.path : undefined);
+
+const withBase = (action: CommandAction, base: string | undefined): CommandAction => {
+  const path = pathOf(action);
+  return base === undefined || path === undefined
     ? action
-    : { ...action, path: joinPath(base, action.path) };
+    : ({ ...action, path: joinPath(base, path) } as CommandAction);
+};
 
 /** `bash -lc '<script>'` and friends: the script they run, or `undefined`. */
 const wrappedScript = (words: readonly string[]): string | undefined => {
@@ -576,9 +619,9 @@ const targetLabel = (target: CommandTarget): string =>
 /** How a summarised call is presented. */
 export type CommandSummary = {
   /** ACP kind whose icon the card borrows. */
-  readonly kind: 'read' | 'search' | 'execute';
+  readonly kind: 'read' | 'search' | 'execute' | 'fetch' | 'other' | 'think';
   /** Activity family the group summary counts it under. */
-  readonly family: 'skill' | 'read' | 'search' | 'execute';
+  readonly family: 'skill' | 'read' | 'search' | 'execute' | 'web-search' | 'web-read' | 'other';
   readonly verb: string;
   readonly activeVerb: string;
   readonly detail: string;
@@ -592,12 +635,22 @@ const verbs = {
   list: ['Listed', 'Listing'],
   search: ['Searched', 'Searching'],
   check: ['Checked', 'Checking'],
+  probe: ['Checked for', 'Checking for'],
+  hash: ['Hashed', 'Hashing'],
+  count: ['Counted', 'Counting'],
 } as const;
 
 const phraseOf = (actions: readonly CommandAction[]): string => {
   const { type } = actions[0]!;
-  if (type === 'check') {
-    return [...new Set(actions.map((action) => (action.type === 'check' ? action.command : '')))].join(', ');
+  if (type === 'check' || type === 'probe') {
+    const names = actions.map((action) =>
+      action.type === 'check' ? action.command : action.type === 'probe' ? action.tool : '',
+    );
+    return [...new Set(names)].join(', ');
+  }
+  if (type === 'hash' || type === 'count') {
+    const names = actions.map((action) => targetLabel(describeCommandTarget(pathOf(action) ?? '')));
+    return [...new Set(names)].join(', ');
   }
   if (type === 'read') {
     const targets = actions.flatMap((action) => (action.type === 'read' ? [describeCommandTarget(action.path)] : []));
@@ -616,7 +669,7 @@ const phraseOf = (actions: readonly CommandAction[]): string => {
   return actions
     .map((action) => {
       const query = action.type === 'search' ? action.query : undefined;
-      const path = action.type === 'check' ? undefined : action.path;
+      const path = pathOf(action);
       const where = path === undefined ? '' : `in ${targetLabel(describeCommandTarget(path))}`;
       return query === undefined ? where || 'files' : `for ${query}${where === '' ? '' : ` ${where}`}`;
     })
@@ -644,7 +697,7 @@ export const describeCommandActions = (actions: readonly CommandAction[]): Comma
   const detailOf = (active: 0 | 1): string =>
     [head!.phrase, ...tail.map((run) => `${run.verbs[active].toLowerCase()} ${run.phrase}`)].join(', ');
   const { type } = actions[0]!;
-  const kind = type === 'search' ? 'search' : type === 'check' ? 'execute' : 'read';
+  const kind = type === 'search' ? 'search' : type === 'read' || type === 'list' ? 'read' : 'execute';
   const allSkills = actions.every(
     (action) => action.type === 'read' && describeCommandTarget(action.path).type === 'skill',
   );
@@ -668,34 +721,4 @@ export const describeCommandActions = (actions: readonly CommandAction[]): Comma
 export const externalCommandOf = (input: unknown): string | undefined => {
   const command = isRecord(input) ? input['command'] : undefined;
   return typeof command === 'string' ? command : undefined;
-};
-
-/**
- * Summarise an external tool call from its ACP facts, when it only explored.
- *
- * An `execute` call is parsed from the command its `rawInput` carries (Codex
- * and Claude adapters both name it `command`), falling back to the title. A
- * `read` call is renamed only when it read a skill: its adapter title is the
- * absolute path, and a plain file's own title is already fine.
- *
- * @param call - The call's ACP kind, title, locations and raw input.
- * @returns The presentation, or `undefined` to render the call as reported.
- */
-export const summarizeExternalCall = (call: {
-  readonly kind?: string | undefined;
-  readonly title?: string | undefined;
-  readonly locations: readonly string[];
-  readonly input: unknown;
-}): CommandSummary | undefined => {
-  if (call.kind === 'read') {
-    return call.locations.some((path) => describeCommandTarget(path).type !== 'file')
-      ? describeCommandActions(call.locations.map((path) => ({ type: 'read', path })))
-      : undefined;
-  }
-  if (call.kind !== 'execute') {
-    return undefined;
-  }
-  const command = externalCommandOf(call.input) ?? call.title;
-  const actions = command === undefined ? undefined : summarizeShellCommand(command);
-  return actions === undefined ? undefined : describeCommandActions(actions);
 };

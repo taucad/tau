@@ -146,6 +146,17 @@ describe('assistant message activity', () => {
       describeActivity([dynamic({ kind: 'execute', input: { command: "sed -n '1,9p' a.ts && git status" } })]),
     ).toBe('Read files');
     expect(describeActivity([dynamic({ kind: 'execute', input: { command: 'git push' } })])).toBe('Ran commands');
+    // A web call is not a file search, and an agent action reads as the card does.
+    expect(describeActivity([dynamic({ kind: 'search', title: 'Open page: https://pdas.com/a' })])).toBe(
+      'Read web pages',
+    );
+    expect(describeActivity([dynamic({ kind: 'search', title: 'Web search: gears' })])).toBe('Searched the web');
+    expect(describeActivity([dynamic({ kind: 'other', title: 'Interact with subagent airframe' })])).toBe(
+      'Messaged subagent airframe',
+    );
+    expect(
+      describeActivity([dynamic({ kind: 'other', title: 'Start subagent gimbal', state: 'input-available' })]),
+    ).toBe('Starting subagent gimbal');
   });
 
   it('keeps approvals, mixed failures, and denials truthful', () => {

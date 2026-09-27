@@ -38,7 +38,8 @@ import { CodeBlockContent, Pre } from '#components/code/code-block.js';
 import { FileLink } from '#components/files/file-link.js';
 import { ChatMessageMedia } from '#routes/w.$workspace.$project/chat-message-media.js';
 import type { ChatMedia } from '#routes/w.$workspace.$project/chat-message-media.js';
-import { externalCommandOf, summarizeExternalCall } from '#utils/shell-command-summary.js';
+import { summarizeExternalCall, summaryNoun } from '#utils/external-call-summary.js';
+import { externalCommandOf } from '#utils/shell-command-summary.js';
 
 /** ACP's whole `ToolKind` taxonomy, in the order the protocol declares it. @see https://agentclientprotocol.com */
 export const externalToolKinds = [
@@ -283,6 +284,10 @@ type ExternalHeading = {
   readonly bodyPrefix: string;
   /** Files the call read, linked in its body. */
   readonly locations: readonly string[];
+  /** What a failed call attempted, for the error card whose code owns the verb. */
+  readonly noun: string;
+  /** Alternative text for media the call produced: the agent's own name for the action. */
+  readonly mediaAlt: string;
 };
 
 /**
@@ -308,6 +313,8 @@ const headingOf = (part: DynamicToolUIPart, facts: AcpFacts, label: string): Ext
       icon: externalToolPresentation(summary.kind).icon,
       isCommand: false,
       bodyPrefix: command === undefined ? '' : `$ ${command}\n`,
+      noun: summaryNoun(summary),
+      mediaAlt: label,
     };
   }
   const { icon, verb, activeVerb, body } = presentation;
@@ -327,6 +334,8 @@ const headingOf = (part: DynamicToolUIPart, facts: AcpFacts, label: string): Ext
     isCommand: body === 'command',
     bodyPrefix: '',
     locations: facts.locations,
+    noun: label,
+    mediaAlt: detail === '' ? label : detail,
   };
 };
 
@@ -348,7 +357,13 @@ export function ChatMessageToolExternal({ part }: { readonly part: DynamicToolUI
   const { icon } = heading;
 
   if (part.state === 'output-error') {
-    return <ChatToolError errorText={sanitizeAgentText(part.errorText, 400)} icon={icon} noun={label} />;
+    return (
+      <ChatToolError
+        errorText={sanitizeAgentText(part.errorText, 400)}
+        icon={icon}
+        noun={sanitizeAgentText(heading.noun)}
+      />
+    );
   }
 
   const displayVerb = isLoading ? heading.activeVerb : heading.verb;
@@ -390,7 +405,7 @@ export function ChatMessageToolExternal({ part }: { readonly part: DynamicToolUI
     media.length === 0 ? null : (
       <div className='mt-1 flex flex-col gap-2'>
         {media.map((item) => (
-          <ChatMessageMedia key={item.url} media={item} alt={detail === '' ? label : detail} />
+          <ChatMessageMedia key={item.url} media={item} alt={heading.mediaAlt} />
         ))}
       </div>
     );

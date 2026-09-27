@@ -1,8 +1,10 @@
 // @vitest-environment node
 
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { esbuild } from '@taucad/esbuild';
 import { picovoxel } from '@taucad/picovoxel';
@@ -20,6 +22,11 @@ const createRuntime = (wasm?: PicovoxelOptionsInput['wasm']) =>
   defineRuntime({ plugins: [picovoxel(wasm ? { kernels: { default: { wasm } } } : undefined), esbuild()] });
 
 const temporaryDirectories: string[] = [];
+
+const picovoxelExamples = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  '../../../libs/tau-examples/src/kernels/picovoxel',
+);
 
 /** The worker entry is TypeScript in this workspace, so the thread needs tsx's loader. */
 class TsxWorker extends NodeWorker {
@@ -165,26 +172,39 @@ describe('PicoVoxel packaged runtime', () => {
     try {
       const render = async (steps: number) =>
         client.render({ source: { path: 'main.ts' }, parameters: { steps }, renderOptions: { lane: 'exact' } });
+      const logs: string[] = [];
+      const stopLogs = client.on('log', ({ message }) => logs.push(message));
 
-      // Baseline: how long the heavy build takes when nothing supersedes it.
-      let started = performance.now();
-      const baseline = await render(40);
-      const full = performance.now() - started;
-      expect(!baseline.superseded && baseline.geometry.success).toBe(true);
+      // Warm the worker (bundle, module, runtime) so the heavy build reaches its loop quickly.
+      const warm = await render(1);
+      expect(!warm.superseded && warm.geometry.success).toBe(true);
 
-      started = performance.now();
-      const heavy = render(41);
-      await new Promise((resolve) => {
-        setTimeout(resolve, full * 0.2);
+      // Supersede only once the heavy build is computing: ordered by the worker's own progress
+      // event, never by a wall clock (invariant I5).
+      const heavySteps = 41;
+      const computing = new Promise<void>((resolve) => {
+        const stop = client.on('progress', (phase) => {
+          if (phase === 'computingGeometry') {
+            stop();
+            resolve();
+          }
+        });
       });
+      const heavy = render(heavySteps);
+      await computing;
       const light = await render(1);
-      const lightDone = performance.now() - started;
 
       const superseded = await heavy;
       expect(superseded.superseded).toBe(true);
       expect(!light.superseded && light.geometry.success).toBe(true);
-      // Cooperative: the newer render finished well before the heavy build could have.
-      expect(lightDone).toBeLessThan(full * 0.8);
+      // Cooperative, in work units: the kernel's own check caught the heavy build before its loop
+      // finished (1 sphere + 41 offsets), rather than the runtime discarding a completed build.
+      const stopped = logs
+        .map((message) => /^PicoVoxel stopped a superseded build after (\d+) PicoVoxel calls$/u.exec(message)?.[1])
+        .filter((calls) => calls !== undefined);
+      expect(stopped).toHaveLength(1);
+      expect(Number(stopped[0])).toBeLessThan(1 + heavySteps);
+      stopLogs();
 
       // Worker recovery: the next export replays cleanly on the same worker.
       const stl = await client.export('stl');
@@ -192,6 +212,34 @@ describe('PicoVoxel packaged runtime', () => {
     } finally {
       client.terminate();
     }
+  }, 300_000);
+
+  it('should export the pinned exact STL of sphere-minus-beams on both wasm builds (DP18)', async () => {
+    // The same pin the browser leg asserts (apps/ui-e2e picovoxel-multi.spec.ts).
+    const pin = (
+      JSON.parse(await readFile(join(picovoxelExamples, 'exact-pins.json'), 'utf8')) as {
+        readonly 'sphere-minus-beams': { readonly stl: { readonly sha256: string; readonly bytes: number } };
+      }
+    )['sphere-minus-beams'].stl;
+    const exportExact = async (wasm: PicovoxelOptionsInput['wasm']) => {
+      const client = await createNodeClient({
+        runtime: createRuntime(wasm),
+        projectPath: join(picovoxelExamples, 'sphere-minus-beams'),
+      });
+      try {
+        const stl = await client.export('stl', { source: { path: 'main.ts' } });
+        if (!stl.success) {
+          throw new Error(stl.issues.map(({ message }) => message).join('; '));
+        }
+        const { bytes } = stl.data[0]!;
+        return { sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.byteLength };
+      } finally {
+        client.terminate();
+      }
+    };
+
+    expect(await exportExact('serial')).toEqual(pin);
+    expect(await exportExact('auto')).toEqual(pin);
   }, 300_000);
 
   it('should render a multi-file ShapeKernel model and export exact GLB and STL through the Node client', async () => {

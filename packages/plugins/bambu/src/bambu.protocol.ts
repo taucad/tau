@@ -1,6 +1,6 @@
 import { createQuantity, quantityKinds } from '@taucad/units/quantity';
 import type { Quantity } from '@taucad/units/quantity';
-import type { MachineCandidate, MachineDatagram, MachineStill } from '@taucad/runtime/machine';
+import type { MachineAlertSnapshot, MachineCandidate, MachineDatagram, MachineStill } from '@taucad/runtime/machine';
 
 const textDecoder = new TextDecoder('utf-8', { fatal: true });
 const maximumDiscoveryBytes = 8192;
@@ -58,7 +58,8 @@ export type BambuStatus = Readonly<{
   runFile?: string;
   currentLayer?: number;
   totalLayers?: number;
-  stage?: string;
+  /** The printer's current stage id (`stg_cur`); `bambuStage` reads it as a phrase. */
+  stageId?: number;
   printType?: string;
   speedProfile?: 'silent' | 'standard' | 'sport' | 'ludicrous' | 'unknown';
   speedPercent?: number;
@@ -68,7 +69,7 @@ export type BambuStatus = Readonly<{
   wifiSignalDbm?: number;
   chamberLight?: 'off' | 'on' | 'unknown';
   removableStorage?: 'absent' | 'present';
-  alerts?: ReadonlyArray<Readonly<{ code: string }>>;
+  alerts?: readonly MachineAlertSnapshot[];
 }>;
 
 /** Identity-qualified printer firmware facts returned by `info.get_version`. @internal */
@@ -192,31 +193,208 @@ const lightState = (value: unknown): BambuStatus['chamberLight'] => {
   return undefined;
 };
 
-const alertCodes = (
-  print: Readonly<Record<string, unknown>>,
-): ReadonlyArray<Readonly<{ code: string }>> | undefined => {
-  const codes = new Set<string>();
-  const printError = integer(print['print_error'], Number.MAX_SAFE_INTEGER);
-  if (printError !== undefined && printError !== 0) {
-    codes.add(String(printError));
-  }
-  for (const row of boundedArray(print['hms'], 128)) {
-    if (row === null || typeof row !== 'object' || Array.isArray(row)) {
-      continue;
-    }
-    const diagnostic = row as Readonly<Record<string, unknown>>;
-    const code =
-      boundedString(diagnostic['code'], 128) ?? String(integer(diagnostic['code'], Number.MAX_SAFE_INTEGER) ?? '');
-    const attribute =
-      boundedString(diagnostic['attr'], 128) ?? String(integer(diagnostic['attr'], Number.MAX_SAFE_INTEGER) ?? '');
-    if (code) {
-      codes.add(attribute ? `${attribute}:${code}` : code);
-    }
-  }
-  return print['print_error'] === undefined && print['hms'] === undefined
-    ? undefined
-    : Object.freeze([...codes].map((code) => Object.freeze({ code })));
+/** Keep only the fields that carry a value, so bounded JSON clones admit the result. @internal
+ * @param fields - Candidate fields, some of them undefined.
+ * @returns The frozen fields that carry a value.
+ */
+export const definedFields = <Fields extends Readonly<Record<string, unknown>>>(
+  fields: Fields,
+): Readonly<Partial<Fields>> =>
+  Object.freeze(
+    Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined)),
+  ) as Partial<Fields>;
+
+const storagePresence = (value: unknown): BambuStatus['removableStorage'] =>
+  typeof value === 'boolean' ? (value ? 'present' : 'absent') : undefined;
+
+const word = 2 ** 16;
+
+/**
+ * Print a code the way the vendor's screens and help pages do.
+ *
+ * @param words - The code's 16-bit words.
+ * @param separator - What goes between two words.
+ * @returns Each word as four upper-case hex digits, joined by `separator`.
+ */
+const displayCode = (words: readonly number[], separator: string): string =>
+  words.map((value) => value.toString(16).toUpperCase().padStart(4, '0')).join(separator);
+
+/**
+ * Read one diagnostic word: a positive 32-bit integer, as a number or a decimal string.
+ *
+ * @param value - The untrusted field.
+ * @returns The word, or `undefined` for zero, which means no diagnostic, and for anything malformed.
+ */
+const diagnosticWord = (value: unknown): number | undefined => {
+  const parsed = integer(value, 2 ** 32 - 1);
+  return parsed === 0 ? undefined : parsed;
 };
+
+/**
+ * Printer modules by the top byte of an HMS `attr` or a print error, from public community protocol notes, named
+ * in Tau's words.
+ */
+const printerModules: ReadonlyMap<number, string> = new Map([
+  [0x03, 'motion controller'],
+  [0x05, 'main board'],
+  [0x07, 'AMS'],
+  [0x08, 'toolhead'],
+  [0x0c, 'camera and AI inspection'],
+]);
+
+/** HMS severity levels 1–4, from the high word of `code`, each with how the message says it. */
+const hmsSeverities = [
+  ['fatal', 'reported a fatal error'],
+  ['serious', 'reported a serious error'],
+  ['warning', 'raised a warning'],
+  ['info', 'sent a notice'],
+] as const;
+
+/** The vendor's public help page for one HMS code, as `AAAA_BBBB_CCCC_DDDD`. */
+const hmsHelpPage = 'https://wiki.bambulab.com/en/x1/troubleshooting/hmscode/';
+
+/**
+ * One sentence naming the module that raised a diagnostic.
+ *
+ * @param value - The diagnostic word whose top byte names the module.
+ * @param outcome - What the module did, such as "raised a warning".
+ * @returns The sentence.
+ */
+const diagnosticMessage = (value: number, outcome: string): string => {
+  const printerModule = printerModules.get(Math.floor(value / 2 ** 24));
+  return `${printerModule === undefined ? 'The printer' : `The printer's ${printerModule}`} ${outcome}.`;
+};
+
+/**
+ * The words of an HMS code's help page. An AMS code carries its unit in the low three bits of its first word and
+ * its slot in bits 8–10 of its second; the help centre has one page per code, written for the first unit and slot.
+ *
+ * @param words - The code's four words.
+ * @returns The help page's four words.
+ */
+const helpPageWords = (words: readonly [number, number, number, number]): readonly number[] => {
+  const [attributeHigh, attributeLow, ...codeWords] = words;
+  const unit = attributeHigh % 8;
+  const slot = Math.floor(attributeLow / 256) % 8;
+  return attributeHigh - unit === 0x07_00 ? [0x07_00, attributeLow - slot * 256, ...codeWords] : words;
+};
+
+/**
+ * Decode one HMS row: `attr` carries the module (top byte) and part, `code` the severity level (high word) and the
+ * error. A row that is not two positive 32-bit integers is ignored.
+ *
+ * @param row - One untrusted `hms` entry.
+ * @returns The alert, or `undefined` for a malformed row.
+ */
+const hmsAlert = (row: unknown): MachineAlertSnapshot | undefined => {
+  if (row === null || typeof row !== 'object' || Array.isArray(row)) {
+    return undefined;
+  }
+  const diagnostic = row as Readonly<Record<string, unknown>>;
+  const attribute = diagnosticWord(diagnostic['attr']);
+  const code = diagnosticWord(diagnostic['code']);
+  if (attribute === undefined || code === undefined) {
+    return undefined;
+  }
+  const words = [Math.floor(attribute / word), attribute % word, Math.floor(code / word), code % word] as const;
+  const [severity, outcome = 'reported a problem'] = hmsSeverities[words[2] - 1] ?? [];
+  return Object.freeze({
+    code: displayCode(words, '-'),
+    ...definedFields({ severity }),
+    message: diagnosticMessage(attribute, outcome),
+    reference: `${hmsHelpPage}${displayCode(helpPageWords(words), '_')}`,
+  });
+};
+
+/**
+ * Decode `print_error` into its two-word display code. It carries no severity, and the vendor publishes no
+ * per-code help page for it, so the alert has neither.
+ *
+ * @param value - The untrusted `print_error` value.
+ * @returns The alert, or `undefined` when there is no error.
+ */
+const printErrorAlert = (value: unknown): MachineAlertSnapshot | undefined => {
+  const printError = diagnosticWord(value);
+  return printError === undefined
+    ? undefined
+    : Object.freeze({
+        code: displayCode([Math.floor(printError / word), printError % word], '-'),
+        message: diagnosticMessage(printError, 'reported a print error'),
+      });
+};
+
+/**
+ * The report's active diagnostics, each once, print error first.
+ *
+ * @param print - The report's `print` object.
+ * @returns The alerts, or `undefined` when the report carries neither field.
+ */
+const printerAlerts = (print: Readonly<Record<string, unknown>>): readonly MachineAlertSnapshot[] | undefined => {
+  if (print['print_error'] === undefined && print['hms'] === undefined) {
+    return undefined;
+  }
+  const alerts = new Map<string, MachineAlertSnapshot>();
+  for (const alert of [
+    printErrorAlert(print['print_error']),
+    ...boundedArray(print['hms'], 128).map((row) => hmsAlert(row)),
+  ]) {
+    if (alert) {
+      alerts.set(alert.code, alert);
+    }
+  }
+  return Object.freeze([...alerts.values()]);
+};
+
+/**
+ * Readable phrases for the printer's current stage (`stg_cur`), from public community protocol notes, in Tau's
+ * words. Normal printing (0) and idle (-1 on the X1, 255 on the P1) have none: the run state says those.
+ *
+ * ponytail: ids 1–35, the ones independent notes agree on, less 31 whose meaning none explains; later ids are newer
+ * printers' steps. Add an id when an X1C is seen reporting it.
+ */
+const stagePhrases: ReadonlyMap<number, string> = new Map([
+  [1, 'Levelling the bed'],
+  [2, 'Heating the bed'],
+  [3, 'Calibrating vibration compensation'],
+  [4, 'Changing filament'],
+  [5, 'Paused by the print file'],
+  [6, 'Paused because the filament ran out'],
+  [7, 'Heating the nozzle'],
+  [8, 'Calibrating extrusion'],
+  [9, 'Scanning the bed surface'],
+  [10, 'Inspecting the first layer'],
+  [11, 'Identifying the build plate'],
+  [12, 'Calibrating the lidar'],
+  [13, 'Homing the toolhead'],
+  [14, 'Cleaning the nozzle tip'],
+  [15, 'Checking the extruder temperature'],
+  [16, 'Paused on request'],
+  [17, 'Paused because the toolhead front cover came off'],
+  [18, 'Calibrating the lidar'],
+  [19, 'Calibrating the extrusion flow'],
+  [20, 'Paused by a nozzle temperature fault'],
+  [21, 'Paused by a bed temperature fault'],
+  [22, 'Unloading filament'],
+  [23, 'Paused because the motors skipped steps'],
+  [24, 'Loading filament'],
+  [25, 'Calibrating motor noise'],
+  [26, 'Paused because the AMS disconnected'],
+  [27, 'Paused because the hotend fan is too slow'],
+  [28, 'Paused by a chamber temperature fault'],
+  [29, 'Cooling the chamber'],
+  [30, 'Paused by the print file'],
+  [32, 'Paused because filament built up on the nozzle'],
+  [33, 'Paused by a filament cutter fault'],
+  [34, 'Paused because the first layer has a defect'],
+  [35, 'Paused because the nozzle is clogged'],
+]);
+
+/** Read the printer's current stage id as a phrase. @internal
+ * @param id - The report's `stg_cur`, if it carried one.
+ * @returns The phrase, or `undefined` for normal printing, idle and ids the table does not know.
+ */
+export const bambuStage = (id: number | undefined): string | undefined =>
+  id === undefined ? undefined : stagePhrases.get(id);
 
 /** Build one declared-only physical quantity without undefined fields, so bounded JSON clones admit it. @internal
  * @param input - Native value, unit, quantity kind and space.
@@ -351,33 +529,13 @@ const runState = (value: unknown): BambuRunState => {
   }
 };
 
-/** Normalize a bounded status report without retaining the provider payload.
- * @param bytes - Untrusted MQTT payload bytes.
- * @returns Redacted normalized status.
+/**
+ * The loaded materials and tray routing: AMS trays when the report has an AMS, else its flat `materials` list.
+ *
+ * @param print - The report's `print` object.
+ * @returns The material fields the report carries.
  */
-export const parseBambuStatusPayload = (bytes: Uint8Array<ArrayBuffer>): BambuStatus => {
-  const print = record(parseJson(bytes)['print'], 'BAMBU_STATUS_INVALID');
-  const nozzleDiameter = finite({
-    value: print['nozzle_diameter'],
-    minimum: 0.1,
-    maximum: 2,
-  });
-  const nozzleTemperature = temperature(print['nozzle_temper'], 500);
-  const nozzleTargetTemperature = temperature(print['nozzle_target_temper'], 500);
-  const bedTemperature = temperature(print['bed_temper'], 200);
-  const bedTargetTemperature = temperature(print['bed_target_temper'], 200);
-  const chamberTemperature = temperature(print['chamber_temper'], 150);
-  const progress = finite({
-    value: print['mc_percent'],
-    minimum: 0,
-    maximum: 100,
-  });
-  const remainingMinutes = finite({
-    value: print['mc_remaining_time'],
-    minimum: 0,
-    maximum: 100_000,
-  });
-  const providerRunId = boundedString(print['subtask_id'], 128);
+const materialSetup = (print: Readonly<Record<string, unknown>>) => {
   const { ams } = print;
   const amsRecord =
     ams !== null && typeof ams === 'object' && !Array.isArray(ams)
@@ -418,15 +576,7 @@ export const parseBambuStatusPayload = (bytes: Uint8Array<ArrayBuffer>): BambuSt
       maximum: 100,
     });
     const state = materialId ? 'loaded' : amsRecord ? 'empty' : 'unknown';
-    return Object.freeze({
-      slot,
-      state,
-      ...(materialId ? { materialId } : {}),
-      ...(profileId ? { profileId } : {}),
-      ...(brand ? { brand } : {}),
-      ...(color ? { color } : {}),
-      ...(remainingPercent === undefined ? {} : { remainingPercent }),
-    });
+    return Object.freeze({ slot, state, ...definedFields({ materialId, profileId, brand, color, remainingPercent }) });
   });
   const materialUnits = Array.isArray(amsUnits)
     ? boundedArray(amsUnits, 4).flatMap((unit, index) => {
@@ -434,84 +584,67 @@ export const parseBambuStatusPayload = (bytes: Uint8Array<ArrayBuffer>): BambuSt
           return [];
         }
         const candidate = unit as Readonly<Record<string, unknown>>;
-        const humidityIndex = integer(candidate['humidity'], 100);
-        const unitTemperature = temperature(candidate['temp'], 100);
         return [
           Object.freeze({
             unit: index,
-            ...(humidityIndex === undefined ? {} : { humidityIndex }),
-            ...(unitTemperature ? { temperature: unitTemperature } : {}),
+            ...definedFields({
+              humidityIndex: integer(candidate['humidity'], 100),
+              temperature: temperature(candidate['temp'], 100),
+            }),
           }),
         ];
       })
     : undefined;
-  const currentMaterialSlot = integer(amsRecord?.['tray_now'], 15);
-  const targetMaterialSlot = integer(amsRecord?.['tray_tar'], 15);
-  const currentLayer = integer(print['layer_num'], 1_000_000);
-  const totalLayers = integer(print['total_layer_num'], 1_000_000);
-  const speedPercent = finite({
-    value: print['spd_mag'],
-    minimum: 0,
-    maximum: 1000,
+  return definedFields({
+    materials: amsRecord !== undefined || Array.isArray(print['materials']) ? Object.freeze(materials) : undefined,
+    materialUnits: materialUnits ? Object.freeze(materialUnits) : undefined,
+    currentMaterialSlot: integer(amsRecord?.['tray_now'], 15),
+    targetMaterialSlot: integer(amsRecord?.['tray_tar'], 15),
   });
-  const partFanPercent = fanPercent(print['cooling_fan_speed']);
-  const auxiliaryFanPercent = fanPercent(print['big_fan1_speed']);
-  const chamberFanPercent = fanPercent(print['big_fan2_speed']);
-  const alerts = alertCodes(print);
-  const sequence = boundedString(print['sequence_id'], 128);
-  const model = normalizeX1cModel(boundedString(print['printer_type'], 64));
-  const firmware = boundedString(print['firmware'], 64);
-  const bedType = boundedString(print['plate_type'], 64);
-  const runName = boundedString(print['subtask_name'], 256);
-  const runFile = boundedString(print['gcode_file'], 256);
-  const stage = boundedString(print['mc_print_stage'], 128);
-  const printType = boundedString(print['print_type'], 128);
-  const wifiSignalDbm = wifiSignal(print['wifi_signal']);
-  const chamberLight = lightState(print['lights_report']);
-  const profile = speedProfile(print['spd_lvl']);
-  const parsed = Object.freeze({
-    ...(sequence ? { sequence } : {}),
-    ...(model ? { model } : {}),
-    ...(firmware ? { firmware } : {}),
-    ...(nozzleDiameter === undefined
-      ? {}
-      : {
-          nozzleDiameter: bambuQuantity({
-            value: nozzleDiameter,
-            unit: 'mm',
-            kind: quantityKinds.diameter,
-            space: 'linear',
-          }),
-        }),
-    ...(nozzleTemperature ? { nozzleTemperature } : {}),
-    ...(nozzleTargetTemperature ? { nozzleTargetTemperature } : {}),
-    ...(bedTemperature ? { bedTemperature } : {}),
-    ...(bedTargetTemperature ? { bedTargetTemperature } : {}),
-    ...(chamberTemperature ? { chamberTemperature } : {}),
-    ...(bedType ? { bedType } : {}),
-    ...((amsRecord ?? Array.isArray(print['materials'])) ? { materials: Object.freeze(materials) } : {}),
-    ...(materialUnits ? { materialUnits: Object.freeze(materialUnits) } : {}),
-    ...(currentMaterialSlot === undefined ? {} : { currentMaterialSlot }),
-    ...(targetMaterialSlot === undefined ? {} : { targetMaterialSlot }),
-    ...(providerRunId ? { providerRunId } : {}),
-    ...(progress === undefined ? {} : { progress }),
-    ...(remainingMinutes === undefined ? {} : { remainingSeconds: remainingMinutes * 60 }),
-    ...(print['gcode_state'] === undefined ? {} : { runState: runState(print['gcode_state']) }),
-    ...(runName ? { runName } : {}),
-    ...(runFile ? { runFile } : {}),
-    ...(currentLayer === undefined ? {} : { currentLayer }),
-    ...(totalLayers === undefined ? {} : { totalLayers }),
-    ...(stage ? { stage } : {}),
-    ...(printType ? { printType } : {}),
-    ...(profile ? { speedProfile: profile } : {}),
-    ...(speedPercent === undefined ? {} : { speedPercent }),
-    ...(partFanPercent === undefined ? {} : { partFanPercent }),
-    ...(auxiliaryFanPercent === undefined ? {} : { auxiliaryFanPercent }),
-    ...(chamberFanPercent === undefined ? {} : { chamberFanPercent }),
-    ...(wifiSignalDbm === undefined ? {} : { wifiSignalDbm }),
-    ...(chamberLight ? { chamberLight } : {}),
-    ...(typeof print['sdcard'] === 'boolean' ? { removableStorage: print['sdcard'] ? 'present' : 'absent' } : {}),
-    ...(alerts ? { alerts } : {}),
+};
+
+/** Normalize a bounded status report without retaining the provider payload.
+ * @param bytes - Untrusted MQTT payload bytes.
+ * @returns Redacted normalized status.
+ */
+export const parseBambuStatusPayload = (bytes: Uint8Array<ArrayBuffer>): BambuStatus => {
+  const print = record(parseJson(bytes)['print'], 'BAMBU_STATUS_INVALID');
+  const nozzleDiameter = finite({ value: print['nozzle_diameter'], minimum: 0.1, maximum: 2 });
+  const remainingMinutes = finite({ value: print['mc_remaining_time'], minimum: 0, maximum: 100_000 });
+  const parsed: BambuStatus = definedFields({
+    sequence: boundedString(print['sequence_id'], 128),
+    model: normalizeX1cModel(boundedString(print['printer_type'], 64)),
+    firmware: boundedString(print['firmware'], 64),
+    nozzleDiameter:
+      nozzleDiameter === undefined
+        ? undefined
+        : bambuQuantity({ value: nozzleDiameter, unit: 'mm', kind: quantityKinds.diameter, space: 'linear' }),
+    nozzleTemperature: temperature(print['nozzle_temper'], 500),
+    nozzleTargetTemperature: temperature(print['nozzle_target_temper'], 500),
+    bedTemperature: temperature(print['bed_temper'], 200),
+    bedTargetTemperature: temperature(print['bed_target_temper'], 200),
+    chamberTemperature: temperature(print['chamber_temper'], 150),
+    bedType: boundedString(print['plate_type'], 64),
+    ...materialSetup(print),
+    providerRunId: boundedString(print['subtask_id'], 128),
+    progress: finite({ value: print['mc_percent'], minimum: 0, maximum: 100 }),
+    remainingSeconds: remainingMinutes === undefined ? undefined : remainingMinutes * 60,
+    runState: print['gcode_state'] === undefined ? undefined : runState(print['gcode_state']),
+    runName: boundedString(print['subtask_name'], 256),
+    runFile: boundedString(print['gcode_file'], 256),
+    currentLayer: integer(print['layer_num'], 1_000_000),
+    totalLayers: integer(print['total_layer_num'], 1_000_000),
+    stageId: finite({ value: print['stg_cur'], minimum: -1, maximum: 65_535 }),
+    printType: boundedString(print['print_type'], 128),
+    speedProfile: speedProfile(print['spd_lvl']),
+    speedPercent: finite({ value: print['spd_mag'], minimum: 0, maximum: 1000 }),
+    partFanPercent: fanPercent(print['cooling_fan_speed']),
+    auxiliaryFanPercent: fanPercent(print['big_fan1_speed']),
+    chamberFanPercent: fanPercent(print['big_fan2_speed']),
+    wifiSignalDbm: wifiSignal(print['wifi_signal']),
+    chamberLight: lightState(print['lights_report']),
+    removableStorage: storagePresence(print['sdcard']),
+    alerts: printerAlerts(print),
   });
   if (Object.keys(parsed).every((key) => key === 'sequence')) {
     return protocolError('BAMBU_STATUS_INVALID');

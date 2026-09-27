@@ -98,13 +98,11 @@ RUN chmod 0755 /usr/local/bin/tau-host-entrypoint && \
     mkdir -p /workspace /config && chown tau:tau /workspace /config && chmod 0700 /config
 USER tau
 
-# `TAU_HOST_AGENT_PORT` is what turns the agent capability on (`tau serve`
-# offers it only when a port — or a UI directory — is configured); `0` asks for
-# an ephemeral loopback port, which is all a relayed host ever needs.
+# The agent port and every other `tau serve` flag live in the entrypoint, so the
+# script alone is the recipe for a cloud host.
 ENV NODE_ENV="production" \
     TAU_CONFIG_DIR="/config" \
-    TAU_HOST_WORKSPACE="/workspace" \
-    TAU_HOST_AGENT_PORT="0"
+    TAU_HOST_WORKSPACE="/workspace"
 VOLUME ["/workspace"]
 
 ENTRYPOINT ["/usr/local/bin/tau-host-entrypoint"]

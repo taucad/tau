@@ -199,6 +199,63 @@ describe.runIf(gitToolchainOnPath)('a Node host records the person it runs for',
   }, 60_000);
 });
 
+/*
+ * FX7 D2: a cloud host runs as the container's user, but it acts for the
+ * project's owner, whose identity the provisioner hands it (rule 15). An agent
+ * turn records the agent on behalf of that owner — the browser's shape — and
+ * stock `git log` names the owner under the no-reply address, never a machine
+ * account and never the account email.
+ */
+describe.runIf(gitToolchainOnPath)('a cloud host records the owner it runs for', () => {
+  const ownerEnvironment = { TAU_HOST_OWNER_ID: 'usr_owner1', TAU_HOST_OWNER_NAME: 'Ada Owner' } as const;
+
+  afterEach(() => {
+    delete process.env['TAU_HOST_OWNER_ID'];
+    delete process.env['TAU_HOST_OWNER_NAME'];
+  });
+
+  it('authors an agent turn as the owner, with the agent run in the actor trailer', async () => {
+    Object.assign(process.env, ownerEnvironment);
+    const person = hostRevisionActor();
+    const turnActor = person({ runId: 'run-1', trigger: 'turn' });
+    const owner = { kind: 'user', id: 'usr_owner1', name: 'Ada Owner' } as const;
+    expect(turnActor).toStrictEqual({ kind: 'agent', id: 'agent', runId: 'run-1', onBehalfOf: owner });
+    /* A save outside any run is the owner's own. */
+    expect(person({ runId: undefined, trigger: 'save' })).toStrictEqual(owner);
+
+    const workspaceRoot = await workspace();
+    const port = createNativeGitRevisionPort({
+      repositoryPath: workspaceRoot,
+      checkouts: { projectId: 'project-cloud-owner', directory: join(workspaceRoot, '..', 'checkouts') },
+    });
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const receipt = await port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['main.ts', new TextEncoder().encode('export const size = 1;\n')]]),
+      provenance: {
+        source: 'agent',
+        actorId: turnActor?.id ?? '',
+        runId: 'run-1',
+        ...(turnActor === undefined ? {} : { actor: turnActor }),
+        trigger: 'turn',
+        createdAt: Date.UTC(2026, 8, 27, 12, 0, 0),
+      },
+      summary: { generated: 'Agent turn' },
+    });
+
+    const line = execFileSync('git', ['log', '-1', '--format=%an|%ae|%cn|%ce', receipt.commitId], {
+      cwd: workspaceRoot,
+      encoding: 'utf8',
+    }).trim();
+    expect(line).toBe('Ada Owner|usr_owner1@users.noreply.tau.new|Tau|noreply@tau.new');
+    const body = execFileSync('git', ['log', '-1', '--format=%B', receipt.commitId], {
+      cwd: workspaceRoot,
+      encoding: 'utf8',
+    });
+    expect(body).toContain('Tau-Actor: agent agent run run-1 for Ada Owner');
+  }, 60_000);
+});
+
 describe('the Node host observes its own workspace', () => {
   it('raises one content-change event for a write nothing else reported', async () => {
     const workspaceRoot = await workspace();

@@ -282,17 +282,19 @@ export function ChatTurnHost(): ReactNode {
 
   const placement = placementOf(agent.execution);
   /* The binding actor calls `compose` when it binds and never again on its own.
-   * The revision root connects after this component's first render, so the
-   * first composition would be the one that cannot prepare — re-publishing on
-   * the flip is what makes the actor compose a working registration. */
-  const authorityReady = workspaceAuthority?.ready ?? false;
+   * The revision root connects after this component's first render, and a
+   * browser-placed registration cannot prepare before it does — so the services
+   * are re-published when they become composable, which is what makes the actor
+   * compose a working registration. A daemon placement claims no workspace
+   * authority and is composable at once. */
+  const composable = daemonPlacementOf(agent.execution) !== undefined || (workspaceAuthority?.ready ?? false);
   useEffect(
     () =>
       publishChatHostServices(activeChatId, {
         placement,
-        compose: () => composeRef.current(boundExecutionRef.current),
+        compose: () => (composable ? composeRef.current(boundExecutionRef.current) : undefined),
       }),
-    [activeChatId, authorityReady, placement],
+    [activeChatId, composable, placement],
   );
   /* The chat session actor holds the binding; it re-invokes it when — and only
    * when — the placement it was given moves. */

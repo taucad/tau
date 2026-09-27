@@ -445,15 +445,14 @@ describe('TypeAcquisitionService', () => {
       );
     });
 
+    /* `startWatching` scans existing models at once, so the model starts without imports and gains
+     * one through an edit: only the edit's scan is debounced. */
     it('should debounce content changes at 500ms', () => {
-      const { model, fireContentChange } = createMockModel({
-        content: "import lodash from 'lodash';",
-      });
+      const { model, fireContentChange } = createMockModel({ content: '' });
       mockMonaco.monaco._addModel(model);
 
       service.startWatching();
-
-      // Fire content change
+      model._setContent("import lodash from 'lodash';");
       fireContentChange();
 
       // Fetch should not be called yet (within debounce window)
@@ -461,17 +460,16 @@ describe('TypeAcquisitionService', () => {
       expect(vi.mocked(globalThis.fetch)).not.toHaveBeenCalled();
 
       // After 500ms debounce, scan should trigger
-      vi.advanceTimersByTime(400);
-      // Note: scan is async but fetch should be called
+      vi.advanceTimersByTime(300);
+      expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledOnce();
     });
 
     it('should reset debounce on rapid changes', () => {
-      const { model, fireContentChange } = createMockModel({
-        content: "import lodash from 'lodash';",
-      });
+      const { model, fireContentChange } = createMockModel({ content: '' });
       mockMonaco.monaco._addModel(model);
 
       service.startWatching();
+      model._setContent("import lodash from 'lodash';");
 
       // Rapid changes
       fireContentChange();
@@ -482,6 +480,9 @@ describe('TypeAcquisitionService', () => {
 
       // Only 300ms after last change, should not have triggered scan
       expect(vi.mocked(globalThis.fetch)).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(500);
+      expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledOnce();
     });
   });
 

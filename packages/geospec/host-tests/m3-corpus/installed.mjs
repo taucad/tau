@@ -8,8 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createGeoSpecAssertionClient, GeoSpecAssertionError } from 'geospec/assertion-client';
 import { createGeoSpecVitestAdapter } from 'geospec/vitest';
 import { loadM3CorpusProfileV3 } from './profile-v3.mjs';
-import { loadCurrentM3CampaignProfileV4 } from './profile-v4.mjs';
-import { requireEvaluationEnvelope } from './corpus.mjs';
+import { loadCurrentM3Campaign, requireEvaluationEnvelope } from './corpus.mjs';
 import { fixturePath, readFixture } from '../fixtures/read-fixture.mjs';
 
 const backend = process.env.GEOSPEC_INSTALLED_BACKEND ?? 'native';
@@ -22,7 +21,7 @@ if (backend === 'mixed') {
 }
 const { canonicalize, Engine, ProtocolError } = nativeModule;
 
-const PROFILE = 'geospec-st-prototypes-v4';
+const PROFILE = 'geospec-demand-v5';
 const CANONICAL_PROFILE = 'geospec-jcs-v1';
 const CONTINUOUS_INPUT_SHA256 = '6ccb5bd597728f65748244334c16a663c6469d18887545b7c173060e657187a6';
 const CONTINUOUS_BUDGET_SHA256 = '4709e8dda424943db7f202f2e40bbdb8e394b4ee86ef4998efdf00a955ee98c4';
@@ -265,10 +264,13 @@ const materializeCampaignRow = (campaignPath, row) => {
 };
 
 const loadDefaultInstalledCampaign = () => {
-  const campaign = loadCurrentM3CampaignProfileV4(backend, requiredEnvironment('GEOSPEC_WORKSPACE_ROOT'));
+  const campaign = loadCurrentM3Campaign(backend, requiredEnvironment('GEOSPEC_WORKSPACE_ROOT'));
+  // The 18 held controls stay out of the installed campaign, as in the v4 selection.
+  const ordinary = campaign.rows.filter((row) => row.authority.scope === 'ordinary');
+  assert.equal(ordinary.length, 334);
   return {
     ...campaign,
-    rows: campaign.rows.map((row) => materializeCampaignRow(campaign.sourcePath, row)),
+    rows: ordinary.map((row) => materializeCampaignRow(campaign.sourcePath, row)),
   };
 };
 

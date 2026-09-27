@@ -550,6 +550,16 @@
       "path": "packages/geospec/host-tests/fixtures/data/fb0920d448648cf1ea82c1305f8701c7992156a72f5a592cc569b3b3bec0bd51",
       "byteLength": 1620319,
       "sha256": "fb0920d448648cf1ea82c1305f8701c7992156a72f5a592cc569b3b3bec0bd51"
+    },
+    "packages/geospec/host-tests/m3-corpus/current-authority-v5.json": {
+      "path": "packages/geospec/host-tests/fixtures/data/ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
+      "byteLength": 1624763,
+      "sha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86"
+    },
+    "packages/geospec/host-tests/m3-corpus/authored-v5-identity-amendment.json": {
+      "path": "packages/geospec/host-tests/fixtures/data/7cfc8f6a2236d680b497c690e3f4084f0a9384d8d5bc84c6672525e5c1490c99",
+      "byteLength": 649270,
+      "sha256": "7cfc8f6a2236d680b497c690e3f4084f0a9384d8d5bc84c6672525e5c1490c99"
     }
   }
 }

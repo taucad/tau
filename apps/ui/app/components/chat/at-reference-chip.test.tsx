@@ -1,10 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render as renderBare, screen, waitFor } from '@testing-library/react';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { FileEntry } from '@taucad/types';
 import type { Chat } from '@taucad/chat';
 import { AtReferenceChip } from '#components/chat/at-reference-chip.js';
 import { AtReferenceProvider } from '#components/chat/at-reference-context.js';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
+
+/** The app mounts one TooltipProvider at its root; file chips carry a path tooltip. */
+const render = (ui: React.ReactElement) => renderBare(ui, { wrapper: TooltipProvider });
 
 type FileFileEntry = Extract<FileEntry, { type: 'file' }>;
 type DirectoryFileEntry = Extract<FileEntry, { type: 'dir' }>;

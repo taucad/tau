@@ -77,7 +77,12 @@ function ResolvedChip({ path }: { readonly path: string }): React.JSX.Element {
 
   return (
     <FileLink path={path} asChild>
-      <ContextChip label={resolved.displayName} chipType={resolved.chipType} isInteractive />
+      <ContextChip
+        label={resolved.displayName}
+        chipType={resolved.chipType}
+        isInteractive
+        tooltip={resolved.type === 'chat' ? undefined : path}
+      />
     </FileLink>
   );
 }

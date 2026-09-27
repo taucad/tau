@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { ContextChip } from '#components/chat/context-chip.js';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
+import { ContextChip, middleTruncate } from '#components/chat/context-chip.js';
 
 describe('ContextChip', () => {
   it('should render label text', () => {
@@ -116,7 +117,7 @@ describe('ContextChip', () => {
       const { container } = render(<ContextChip label='main.scad' chipType='file' isInteractive />);
 
       const chip = container.firstElementChild!;
-      expect(chip).toHaveClass('hover:bg-purple/15');
+      expect(chip).toHaveClass('hover:bg-foreground/20');
     });
 
     it('should have cursor-default class when isInteractive is false', () => {
@@ -151,5 +152,68 @@ describe('ContextChip', () => {
       expect(chip.className).toContain('custom-class');
       expect(chip.className).toContain('inline-flex');
     });
+  });
+
+  describe('neutral finish (composer chip audit, finish A)', () => {
+    it('keeps the label in the foreground and tints nothing by kind', () => {
+      const { container } = render(<ContextChip label='$imagegen' chipType='skill' />);
+
+      const chip = container.firstElementChild!;
+      expect(chip).toHaveClass('bg-foreground/10', 'text-foreground');
+      expect(chip.className).not.toMatch(/yellow|purple|primary/);
+      expect(screen.getByText('$imagegen')).toBeInTheDocument();
+    });
+
+    it('shows the node selection Backspace would delete', () => {
+      const { container } = render(<ContextChip label='main.scad' chipType='file' isSelected />);
+
+      expect(container.firstElementChild).toHaveClass('ring-1', 'ring-ring');
+      expect(container.firstElementChild).toHaveAttribute('data-selected', 'true');
+    });
+
+    it('marks a missing file with its own glyph and a struck-through label', () => {
+      const { container } = render(<ContextChip label='old.scad' chipType='file' isMissing />);
+
+      expect(container.querySelector('[class*="lucide-file-x"]')).toBeInTheDocument();
+      expect(screen.getByText('old.scad')).toHaveClass('line-through');
+    });
+
+    it('adds the parent folder as a muted hint', () => {
+      render(<ContextChip label='index.ts' chipType='file' detail='parts' />);
+
+      expect(screen.getByText('parts/')).toHaveClass('text-muted-foreground');
+    });
+
+    it('shows the full path on hover', async () => {
+      const user = userEvent.setup();
+      render(
+        <TooltipProvider delayDuration={0}>
+          <ContextChip label='index.ts' chipType='file' tooltip='src/parts/index.ts' />
+        </TooltipProvider>,
+      );
+
+      await user.hover(screen.getByText('index.ts'));
+
+      expect(await screen.findByRole('tooltip')).toHaveTextContent('src/parts/index.ts');
+    });
+
+    it('shortens long file names in the middle so the extension survives', () => {
+      render(<ContextChip label='turbofan-housing-assembly-rev-c.step' chipType='file' />);
+
+      expect(screen.getByText(middleTruncate('turbofan-housing-assembly-rev-c.step'))).toBeInTheDocument();
+    });
+  });
+});
+
+describe('middleTruncate', () => {
+  it('keeps short names and the extension of long ones', () => {
+    expect(middleTruncate('main.scad')).toBe('main.scad');
+    const shortened = middleTruncate('turbofan-housing-assembly-rev-c.step');
+    expect(shortened).toHaveLength(24);
+    expect(shortened).toMatch(/^turbofan-h.*….*\.step$/);
+  });
+
+  it('shortens names without an extension', () => {
+    expect(middleTruncate('a'.repeat(40))).toHaveLength(24);
   });
 });

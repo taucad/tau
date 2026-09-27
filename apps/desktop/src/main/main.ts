@@ -67,7 +67,7 @@ import {
   kernelForkEnvAllowlist,
   sanitizeServicesContext,
 } from '#main/project-roots.js';
-import { createServicesBroker, rendererServicesConcerns } from '#main/services-broker.js';
+import { createServicesBroker, rendererServicesConcerns, ServicesQuiescingError } from '#main/services-broker.js';
 import type { ServicesConcern } from '#main/services-broker.js';
 import {
   bundledGitEnvironment,
@@ -929,6 +929,13 @@ const bootstrapElectronApp = async (): Promise<void> => {
       const port = services.connect(concern as ServicesConcern, resolved);
       event.senderFrame?.postMessage(servicesPortRelayTag, { requestId }, [port]);
     } catch (error) {
+      /* Quit and reload refuse new concerns by design: an expected answer the
+       * requester settles, not a connection failure or a capture defect. */
+      if (error instanceof ServicesQuiescingError) {
+        log.log('info', 'services.connect-refused-quiescing', { concern });
+        refuse('services.quiescing');
+        return;
+      }
       log.log('error', 'services.connect-failed', error);
       refuse('services.connect-failed');
     }

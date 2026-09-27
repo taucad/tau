@@ -9,11 +9,13 @@ import {
   maxSectionCuts,
   maxSectionPieces,
   resolveSectionFaceBasis,
+  resolveSectionFaceGroups,
   resolveSectionFaceRegion,
   resolveSectionFaces,
   resolveSectionFootprint,
   resolveSectionPieces,
   resolveSectionPlaneFlip,
+  resolveSectionTrimmingPieces,
   sectionCutKey,
   sectionPiecesKey,
   toRenderSectionPieces,
@@ -260,24 +262,13 @@ describe('section cut footprints', () => {
     ).toBeCloseTo(4);
   });
 
-  it('should leave a coplanar face facing the same way to the earlier cut', () => {
+  it('should cover nothing for a coplanar piece that removes the same side', () => {
     const [same] = resolveSectionPieces([plane('b', 'xy', 0)]);
+    // The cutaway's start face is the +X half of the XZ plane and removes +Y, as an unflipped XZ plane does.
+    const [wedge] = resolveSectionPieces([revolution('b', 'z', { start: 0, sweep: 90 })]);
 
     expect(resolveSectionFootprint({ face: floor, piece: same!, rect: unitRect })).toEqual([]);
-    expect(
-      polygonArea(resolveSectionFootprint({ face: floor, piece: same!, rect: unitRect, shouldClaimCoplanar: true })),
-    ).toBeCloseTo(4);
-  });
-
-  it('should claim only the half-plane a coplanar cutaway face covers', () => {
-    // The cutaway's start face is the +X half of the XZ plane and removes +Y, as an unflipped XZ plane does.
-    const xzFace = onlyFace(plane('a', 'xz', 0));
-    const [wedge] = resolveSectionPieces([revolution('b', 'z', { start: 0, sweep: 90 })]);
-    const claimed = resolveSectionFootprint({ face: xzFace, piece: wedge!, rect: unitRect, shouldClaimCoplanar: true });
-
-    expect(resolveSectionFootprint({ face: xzFace, piece: wedge!, rect: unitRect })).toEqual([]);
-    expect(polygonArea(claimed)).toBeCloseTo(2);
-    expect(facePoint(xzFace, polygonCentroid(claimed))[0]).toBeGreaterThan(0);
+    expect(resolveSectionFootprint({ face: onlyFace(plane('a', 'xz', 0)), piece: wedge!, rect: unitRect })).toEqual([]);
   });
 
   it('should share the cap basis: a kept-side normal with u and v as the cap plane basis builds them', () => {
@@ -287,6 +278,51 @@ describe('section cut footprints', () => {
     expect(basis.u).toEqual([-1, 0, 0]);
     expect(basis.v).toEqual([0, 1, 0]);
     expect(resolveSectionFaceBasis(onlyFace(plane('a', 'xz', 0.3))).origin).toEqual([0, 0.3, 0]);
+  });
+});
+
+describe('section cut face groups', () => {
+  /** Each group's faces, as `cutId:plane normal`. */
+  const describeGroups = (cuts: readonly SectionCut[]): string[][] =>
+    resolveSectionFaceGroups(resolveSectionPieces(cuts)).map(({ faces }) =>
+      faces.map(({ cutId, plane: { normal } }) => `${cutId}:${normal.map((value) => Math.round(value) + 0).join(',')}`),
+    );
+
+  it.each([
+    ['the plane first', [plane('a', 'xz', 0), revolution('b', 'z', { start: 0, sweep: 90 })]],
+    ['the cutaway first', [revolution('b', 'z', { start: 0, sweep: 90 }), plane('a', 'xz', 0)]],
+  ] as const)('should group faces that remove the same side of one plane, %s', (_order, cuts) => {
+    const groups = describeGroups(cuts);
+
+    // The plane and the cutaway's start face both remove +Y from the XZ plane; the end face stands alone.
+    expect(groups).toHaveLength(2);
+    expect(groups.find((faces) => faces.length === 2)?.toSorted()).toEqual(['a:0,1,0', 'b:0,1,0']);
+    expect(groups.find((faces) => faces.length === 1)).toEqual(['b:1,0,0']);
+  });
+
+  it("should put a half-turn cutaway's two faces in one group", () => {
+    expect(describeGroups([revolution('a', 'z', { start: 0, sweep: 180 })])).toEqual([['a:0,1,0', 'a:0,1,0']]);
+  });
+
+  it('should keep faces that remove opposite sides of one plane apart', () => {
+    expect(describeGroups([plane('a', 'xy', 0), flippedPlane('b', 'xy', 0)])).toEqual([['a:0,0,1'], ['b:0,0,-1']]);
+  });
+
+  it("should trim a group by every piece but its own cut's and those holding its side of the plane", () => {
+    const trimmingCutIds = (cuts: readonly SectionCut[], groupIndex: number): string[] => {
+      const pieces = resolveSectionPieces(cuts);
+      const group = resolveSectionFaceGroups(pieces)[groupIndex]!;
+      return resolveSectionTrimmingPieces(group, pieces).map(({ cutId }) => cutId);
+    };
+
+    // A lone cutaway face: the plane trims it, its own cut never does.
+    expect(trimmingCutIds([plane('a', 'xy', 0), revolution('b', 'z', { start: 0, sweep: 90 })], 1)).toEqual(['a']);
+    // A plane merged with a cutaway's face: both pieces hold its side, so neither trims it.
+    expect(trimmingCutIds([plane('a', 'xz', 0), revolution('b', 'z', { start: 0, sweep: 90 })], 0)).toEqual([]);
+    // A plane merged with the first half of a split cutaway: the second half does not hold its side, so it trims.
+    expect(trimmingCutIds([flippedPlane('a', 'xz', 0), revolution('c', 'z', { start: 180, sweep: 270 })], 0)).toEqual([
+      'c',
+    ]);
   });
 });
 

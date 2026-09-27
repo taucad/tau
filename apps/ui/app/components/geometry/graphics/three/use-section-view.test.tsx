@@ -75,7 +75,7 @@ describe('resolveSectionViewRaycastClip', () => {
     // Nothing is clipped until the caps certify the list.
     expect(keepsHeight(context(), 0.02)).toBe(true);
 
-    actor.send({ type: 'setSectionCertification', payload: { status: 'exact', cuts: sectionCuts } });
+    actor.send({ type: 'setSectionCertification', payload: { status: 'certified', cuts: sectionCuts } });
     expect(keepsHeight(context(), 0.02)).toBe(false);
 
     // A drag step lifts the live cut over the point; raycasts keep the committed cut until the caps certify it.
@@ -84,7 +84,7 @@ describe('resolveSectionViewRaycastClip', () => {
 
     actor.send({
       type: 'setSectionCertification',
-      payload: { status: 'exact', cuts: actor.getSnapshot().context.sectionCuts },
+      payload: { status: 'certified', cuts: actor.getSnapshot().context.sectionCuts },
     });
     expect(keepsHeight(context(), 0.02)).toBe(true);
   });
@@ -200,7 +200,7 @@ describe('useSectionPieces', () => {
     expect(seen.at(-1)).toBe(off);
 
     act(() => {
-      actor!.send({ type: 'setSectionCertification', payload: { status: 'exact', cuts: sectionCuts } });
+      actor!.send({ type: 'setSectionCertification', payload: { status: 'certified', cuts: sectionCuts } });
     });
     const on = seen.at(-1);
     expect(on).toEqual(pieces);
@@ -210,7 +210,7 @@ describe('useSectionPieces', () => {
     const live = seenLive.at(-1);
     const certified = actor.getSnapshot();
     act(() => {
-      actor!.send({ type: 'setSectionCertification', payload: { status: 'exact', cuts: sectionCuts } });
+      actor!.send({ type: 'setSectionCertification', payload: { status: 'certified', cuts: sectionCuts } });
       actor!.send({ type: 'hoverSectionCut', payload: sectionCuts[0]!.id });
     });
     expect(seen.length).toBeGreaterThan(renders);
@@ -229,7 +229,7 @@ describe('useSectionPieces', () => {
     act(() => {
       actor!.send({
         type: 'setSectionCertification',
-        payload: { status: 'exact', cuts: actor!.getSnapshot().context.sectionCuts },
+        payload: { status: 'certified', cuts: actor!.getSnapshot().context.sectionCuts },
       });
     });
     expect(seen.at(-1)).toEqual(toRenderSectionPieces(resolveSectionPieces([sectionCuts[0]!]), scaledFrame));
@@ -249,12 +249,12 @@ describe('useSectionPieces', () => {
     actor.send({ type: 'sceneRadiusUpdated', radius: 0.1, centerMeters: [0, 0, 0] });
     actor.send({ type: 'addSectionCut', payload: { kind: 'plane' } });
     const { sectionCuts } = actor.getSnapshot().context;
-    actor.send({ type: 'setSectionCertification', payload: { status: 'exact', cuts: sectionCuts } });
+    actor.send({ type: 'setSectionCertification', payload: { status: 'certified', cuts: sectionCuts } });
     const certified = actor.getSnapshot();
 
-    actor.send({ type: 'setSectionCertification', payload: { status: 'exact', cuts: sectionCuts } });
+    actor.send({ type: 'setSectionCertification', payload: { status: 'certified', cuts: sectionCuts } });
 
     expect(actor.getSnapshot()).toBe(certified);
-    expect(certified.context).toMatchObject({ committedSectionCuts: sectionCuts, sectionCertification: 'exact' });
+    expect(certified.context).toMatchObject({ committedSectionCuts: sectionCuts, sectionCertification: 'certified' });
   });
 });

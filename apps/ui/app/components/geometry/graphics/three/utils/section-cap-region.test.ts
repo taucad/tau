@@ -2,8 +2,8 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { createSeededRandom } from '#components/geometry/loader/metal-morph-sequence.js';
-import { resolveSectionFaces, resolveSectionPieces } from '#components/geometry/graphics/section-cuts.js';
-import type { SectionCut, SectionFace, SectionPiece } from '#components/geometry/graphics/section-cuts.js';
+import { resolveSectionFaceGroups, resolveSectionPieces } from '#components/geometry/graphics/section-cuts.js';
+import type { SectionCut, SectionFaceGroup, SectionPiece } from '#components/geometry/graphics/section-cuts.js';
 import { defaultSectionCapBooleanOperations } from '#components/geometry/graphics/three/utils/section-cap-polygon-boolean.js';
 import {
   buildSectionCapPolygon,
@@ -11,6 +11,7 @@ import {
   capPointToWorld,
   createSectionCutPlaneBasis,
   measureCapMultiPolygonArea,
+  resolveSectionCapTrim,
   sanitizeCapRing,
   sectionFaceWorldPlane,
   trimSectionCapPolygon,
@@ -325,6 +326,14 @@ const xPlaneSection = [
   new THREE.Vector3(0, -1, 1),
 ];
 
+/** A strip of the plane y = 0 between `minX` and `maxX`, across the cube's height. */
+const stripOnY0 = (minX: number, maxX: number): THREE.Vector3[] => [
+  new THREE.Vector3(minX, 0, -1),
+  new THREE.Vector3(maxX, 0, -1),
+  new THREE.Vector3(maxX, 0, 1),
+  new THREE.Vector3(minX, 0, 1),
+];
+
 const planeCut = (id: string, plane: 'xz' | 'yz', isFlipped = false): SectionCut => ({
   id,
   kind: 'plane',
@@ -333,10 +342,23 @@ const planeCut = (id: string, plane: 'xz' | 'yz', isFlipped = false): SectionCut
   isFlipped,
 });
 
-/** A face's cap on the cube, trimmed among the cuts, with its rings in world space and its world area. */
-const trimCubeCap = (face: SectionFace, pieces: readonly SectionPiece[], section: readonly THREE.Vector3[]) => {
+/** A cutaway about the z axis through the origin. */
+const cutawayAboutZ = (id: string, start: number, sweep: number): SectionCut => ({
+  id,
+  kind: 'revolution',
+  axis: 'z',
+  origin: [0, 0, 0],
+  start,
+  sweep,
+});
+
+/**
+ * A group's cap on the cube, trimmed among the cuts, with its rings in world space, its world area and the Clipper
+ * calls the trim made.
+ */
+const trimCubeCap = (group: SectionFaceGroup, pieces: readonly SectionPiece[], section: readonly THREE.Vector3[]) => {
   const basis = createSectionCutPlaneBasis({
-    worldPlane: sectionFaceWorldPlane(face),
+    worldPlane: sectionFaceWorldPlane(group),
     sources: [{ closedContours: [section], meshWorldMatrix: identity }],
   });
   const { polygon } = buildSectionCapPolygon({
@@ -348,12 +370,17 @@ const trimCubeCap = (face: SectionFace, pieces: readonly SectionPiece[], section
     planeBasis: basis,
     trueCut: true,
   });
+  let clipperCallCount = 0;
   const trimmed = trimSectionCapPolygon({
     multiPolygon: polygon.multiPolygon,
-    basis,
-    face,
-    pieces,
+    bbox: polygon.bbox,
+    trim: resolveSectionCapTrim({ basis, group, pieces }),
     booleanOperations: defaultSectionCapBooleanOperations,
+    debugSink: {
+      recordBooleanOperation() {
+        clipperCallCount++;
+      },
+    },
   });
   expect(trimmed.diagnostics).toEqual([]);
   return {
@@ -364,6 +391,7 @@ const trimCubeCap = (face: SectionFace, pieces: readonly SectionPiece[], section
       rings.map((ring) => ring.map((point) => capPointToWorld(point, basis))),
     ),
     area: measureCapMultiPolygonArea(trimmed.multiPolygon) / basis.normalizationScale ** 2,
+    clipperCallCount,
   };
 };
 
@@ -382,21 +410,26 @@ const lengthOnAxis = (rings: ReadonlyArray<readonly THREE.Vector3[]>): number =>
   return length;
 };
 
+/** The cube's section on a group's plane, for groups on y = 0 or x = 0. */
+const cubeSectionOn = (group: SectionFaceGroup): THREE.Vector3[] =>
+  Math.abs(group.plane.normal[1]) > 0.5 ? sectionThroughZ(0) : xPlaneSection;
+
 describe('section cap faces among several cuts', () => {
   it('should leave the cap of a lone plane cut as it is', () => {
     const pieces = resolveSectionPieces([planeCut('cut-a', 'xz')]);
-    const cap = trimCubeCap(resolveSectionFaces(pieces)[0]!, pieces, sectionThroughZ(0));
+    const cap = trimCubeCap(resolveSectionFaceGroups(pieces)[0]!, pieces, sectionThroughZ(0));
 
     expect(cap.trimmed).toBe(cap.untrimmed);
     expect(cap.area).toBeCloseTo(4, 6);
+    expect(cap.clipperCallCount).toBe(0);
   });
 
   it('should cap two crossing planes once each over what the kept quadrant shows, meeting along the fold', () => {
     // Removes y > 0 and x > 0, keeping the quadrant x < 0, y < 0.
     const pieces = resolveSectionPieces([planeCut('cut-a', 'xz'), planeCut('cut-b', 'yz')]);
-    const [faceA, faceB] = resolveSectionFaces(pieces);
-    const capA = trimCubeCap(faceA!, pieces, sectionThroughZ(0));
-    const capB = trimCubeCap(faceB!, pieces, xPlaneSection);
+    const [groupA, groupB] = resolveSectionFaceGroups(pieces);
+    const capA = trimCubeCap(groupA!, pieces, sectionThroughZ(0));
+    const capB = trimCubeCap(groupB!, pieces, xPlaneSection);
 
     // Each whole section is 2 × 2; the quadrant's cut surface is half of each, 4 in all.
     expect(capA.area).toBeCloseTo(2, 6);
@@ -411,12 +444,10 @@ describe('section cap faces among several cuts', () => {
   });
 
   it('should bound each face of a narrow cutaway at its axis', () => {
-    const pieces = resolveSectionPieces([
-      { id: 'cut-a', kind: 'revolution', axis: 'z', origin: [0, 0, 0], start: 0, sweep: 30 },
-    ]);
-    const [startFace, endFace] = resolveSectionFaces(pieces);
-    const start = trimCubeCap(startFace!, pieces, sectionThroughZ(0));
-    const end = trimCubeCap(endFace!, pieces, sectionThroughZ(30));
+    const pieces = resolveSectionPieces([cutawayAboutZ('cut-a', 0, 30)]);
+    const [startGroup, endGroup] = resolveSectionFaceGroups(pieces);
+    const start = trimCubeCap(startGroup!, pieces, sectionThroughZ(0));
+    const end = trimCubeCap(endGroup!, pieces, sectionThroughZ(30));
     const endDirection = new THREE.Vector3(Math.cos(Math.PI / 6), Math.sin(Math.PI / 6), 0);
 
     // Half of each section: the half-plane from the axis out along the face's own direction.
@@ -430,44 +461,111 @@ describe('section cap faces among several cuts', () => {
 
   it('should cancel coincident faces that remove opposite sides', () => {
     const pieces = resolveSectionPieces([planeCut('cut-a', 'xz'), planeCut('cut-b', 'xz', true)]);
-    const [faceA, faceB] = resolveSectionFaces(pieces);
+    const [groupA, groupB] = resolveSectionFaceGroups(pieces);
 
-    expect(trimCubeCap(faceA!, pieces, sectionThroughZ(0)).trimmed).toEqual([]);
-    expect(trimCubeCap(faceB!, pieces, sectionThroughZ(0)).trimmed).toEqual([]);
+    expect(trimCubeCap(groupA!, pieces, sectionThroughZ(0)).trimmed).toEqual([]);
+    expect(trimCubeCap(groupB!, pieces, sectionThroughZ(0)).trimmed).toEqual([]);
   });
 
-  it('should draw coincident faces that remove the same side once, from the earlier cut', () => {
+  it('should draw coincident faces that remove the same side as one cap', () => {
     const pieces = resolveSectionPieces([planeCut('cut-a', 'xz'), planeCut('cut-b', 'xz')]);
-    const [faceA, faceB] = resolveSectionFaces(pieces);
+    const groups = resolveSectionFaceGroups(pieces);
 
-    expect(trimCubeCap(faceA!, pieces, sectionThroughZ(0)).area).toBeCloseTo(4, 6);
-    expect(trimCubeCap(faceB!, pieces, sectionThroughZ(0)).trimmed).toEqual([]);
+    expect(groups.map(({ faces }) => faces.map(({ cutId }) => cutId))).toEqual([['cut-a', 'cut-b']]);
+    const cap = trimCubeCap(groups[0]!, pieces, sectionThroughZ(0));
+    expect(cap.trimmed).toBe(cap.untrimmed);
+    expect(cap.area).toBeCloseTo(4, 6);
   });
 
-  it('should keep the slice edges a face shows and drop those another cut removes', () => {
+  it.each([
+    ['the cutaway first', [cutawayAboutZ('cut-c', 270, 90), planeCut('cut-a', 'xz', true)]],
+    ['the plane first', [planeCut('cut-a', 'xz', true), cutawayAboutZ('cut-c', 270, 90)]],
+  ] as const)(
+    'should draw a plane and a cutaway face on one plane as one cap with no edge on the axis, %s',
+    (_order, cuts) => {
+      // Together they remove y < 0; the cutaway's face on x = 0 lies inside what the plane removes.
+      const pieces = resolveSectionPieces(cuts);
+      const caps = resolveSectionFaceGroups(pieces)
+        .map((group) => trimCubeCap(group, pieces, cubeSectionOn(group)))
+        .filter(({ trimmed }) => trimmed.length > 0);
+
+      expect(caps).toHaveLength(1);
+      expect(caps[0]!.rings).toHaveLength(1);
+      expect(caps[0]!.area).toBeCloseTo(4, 6);
+      expect(lengthOnAxis(caps[0]!.rings)).toBe(0);
+    },
+  );
+
+  it('should draw a half-turn cutaway as one cap with no edge on its axis', () => {
+    const pieces = resolveSectionPieces([cutawayAboutZ('cut-h', 0, 180)]);
+    const groups = resolveSectionFaceGroups(pieces);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.faces).toHaveLength(2);
+    const cap = trimCubeCap(groups[0]!, pieces, sectionThroughZ(0));
+    expect(cap.rings).toHaveLength(1);
+    expect(cap.area).toBeCloseTo(4, 6);
+    expect(lengthOnAxis(cap.rings)).toBe(0);
+  });
+
+  it("should trim a merged cap by another piece of a cut that shares it, not by that cut's coplanar piece", () => {
+    // The plane removes y < 0. The cutaway's first half ends on y = 0 beside it; its second half, x > 0 and
+    // x + y > 0, removes the kept side above y = 0 wherever x > 0, so no cap stands there.
+    const pieces = resolveSectionPieces([planeCut('cut-a', 'xz', true), cutawayAboutZ('cut-c', 180, 270)]);
+    const [merged] = resolveSectionFaceGroups(pieces);
+
+    expect(merged!.faces.map(({ cutId }) => cutId)).toEqual(['cut-a', 'cut-c']);
+    const cap = trimCubeCap(merged!, pieces, sectionThroughZ(0));
+    expect(cap.area).toBeCloseTo(2, 6);
+    expect(Math.max(...cap.rings.flat().map((point) => point.x))).toBeLessThan(1e-6);
+  });
+
+  it.each([
+    ['wholly outside the footprint', { section: stripOnY0(-0.9, -0.1), area: 0.8 * 2, calls: 0 }],
+    ['wholly inside the footprint', { section: stripOnY0(0.1, 0.9), area: 0, calls: 0 }],
+    ['across the footprint', { section: stripOnY0(-0.5, 0.5), area: 0.5 * 2, calls: 1 }],
+  ] as const)('should trim a cap %s, calling Clipper only where it crosses', (_placement, { section, area, calls }) => {
+    // The second plane removes x > 0 from the first plane's face.
+    const pieces = resolveSectionPieces([planeCut('cut-a', 'xz'), planeCut('cut-b', 'yz')]);
+    const cap = trimCubeCap(resolveSectionFaceGroups(pieces)[0]!, pieces, section);
+
+    expect(cap.area).toBeCloseTo(area, 6);
+    expect(cap.clipperCallCount).toBe(calls);
+  });
+
+  it('should keep a cap wholly inside its face without Clipper', () => {
+    const pieces = resolveSectionPieces([cutawayAboutZ('cut-a', 0, 30)]);
+    const cap = trimCubeCap(resolveSectionFaceGroups(pieces)[0]!, pieces, stripOnY0(0.1, 0.9));
+
+    expect(cap.trimmed).toBe(cap.untrimmed);
+    expect(cap.clipperCallCount).toBe(0);
+  });
+
+  it('should keep the slice edges a group shows and drop those another cut removes', () => {
     const edge = [new THREE.Vector3(-1, 0, 0), new THREE.Vector3(1, 0, 0)];
     const rounded = (positions: Float32Array): number[] =>
       [...positions].map((value) => Math.round(value * 1e6) / 1e6 + 0);
-    const evidenceOnFirstFace = (cuts: readonly SectionCut[]): number[] => {
+    const evidenceOnFirstGroup = (cuts: readonly SectionCut[]): number[] => {
       const pieces = resolveSectionPieces(cuts);
-      const face = resolveSectionFaces(pieces)[0]!;
+      const group = resolveSectionFaceGroups(pieces)[0]!;
+      const basis = createSectionCutPlaneBasis({
+        worldPlane: sectionFaceWorldPlane(group),
+        sources: [{ closedContours: [sectionThroughZ(0)], meshWorldMatrix: identity }],
+      });
       return rounded(
         buildSectionFaceEvidencePositions({
           openPolylines: [edge],
           meshWorldMatrix: identity,
           meshWorldInverse: identity,
-          face,
-          pieces,
-          basis: createSectionCutPlaneBasis({
-            worldPlane: sectionFaceWorldPlane(face),
-            sources: [{ closedContours: [sectionThroughZ(0)], meshWorldMatrix: identity }],
-          }),
+          trim: resolveSectionCapTrim({ basis, group, pieces }),
         }),
       );
     };
 
-    expect(evidenceOnFirstFace([planeCut('cut-a', 'xz')])).toEqual([-1, 0, 0, 1, 0, 0]);
+    expect(evidenceOnFirstGroup([planeCut('cut-a', 'xz')])).toEqual([-1, 0, 0, 1, 0, 0]);
     // The second cut removes x > 0, so the face shows the edge only up to the fold.
-    expect(evidenceOnFirstFace([planeCut('cut-a', 'xz'), planeCut('cut-b', 'yz')])).toEqual([-1, 0, 0, 0, 0, 0]);
+    expect(evidenceOnFirstGroup([planeCut('cut-a', 'xz'), planeCut('cut-b', 'yz')])).toEqual([-1, 0, 0, 0, 0, 0]);
+    // A half-turn cutaway's two faces show the whole edge between them, once.
+    expect(evidenceOnFirstGroup([cutawayAboutZ('cut-h', 0, 180)])).toEqual([-1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0]);
   });
 });

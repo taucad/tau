@@ -50,7 +50,7 @@ describe('MeasureTool with section cuts', () => {
   const certify = (): void => {
     actor.send({
       type: 'setSectionCertification',
-      payload: { status: 'exact', cuts: actor.getSnapshot().context.sectionCuts },
+      payload: { status: 'certified', cuts: actor.getSnapshot().context.sectionCuts },
     });
   };
 

@@ -76,7 +76,7 @@ type SectionViewSceneProperties = {
  * from their frame callback, which runs before the clip's; flushing it here re-renders the clip with the committed
  * pieces within that frame, so the clip and the caps never draw different cut lists.
  */
-function SectionViewScene({ innerRef, snapshotRef, children }: SectionViewSceneProperties): React.JSX.Element {
+export function SectionViewScene({ innerRef, snapshotRef, children }: SectionViewSceneProperties): React.JSX.Element {
   const graphicsActor = useGraphics();
   const isSectionViewActive = useGraphicsSelector((state) => state.context.isSectionViewActive);
   const liveCutSet = useLiveSectionCutSet();

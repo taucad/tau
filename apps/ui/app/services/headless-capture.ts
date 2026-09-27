@@ -17,7 +17,8 @@ import {
   listReachableGltfPrimitiveReferences,
 } from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
 import { filterVisibleGltfPrimitives } from '#components/geometry/graphics/metadata/gltf-component-visibility.js';
-import { resolveSectionViewPlane } from '#components/geometry/graphics/section-view-plane.js';
+import { resolveSectionFaces, resolveSectionPieces } from '#components/geometry/graphics/section-cuts.js';
+import type { SectionCut, SectionVector } from '#components/geometry/graphics/section-cuts.js';
 
 /* The canonical views live with the agent capture recipe so a browser-placed
  * and a daemon-placed `screenshot` cannot drift. Re-exported rather than
@@ -50,12 +51,45 @@ export type CapturePresentationIntent = {
   readonly enableLines: boolean;
   readonly hiddenComponentIds: readonly string[];
   readonly isolatedComponentIds: readonly string[];
-  readonly section?: {
-    readonly point: readonly [number, number, number];
-    readonly normal: readonly [number, number, number];
-    readonly clipSurfaces: boolean;
-    readonly clipLines: boolean;
-  };
+  /** The cuts the viewer draws: its committed cut list while Section is on. */
+  readonly sectionCuts?: readonly SectionCut[];
+};
+
+type RetainedHalfSpace = { point: [number, number, number]; normal: [number, number, number] };
+
+// Adding zero turns a negative zero into zero.
+const scaled = (vector: SectionVector, factor: number): [number, number, number] => [
+  vector[0] * factor + 0,
+  vector[1] * factor + 0,
+  vector[2] * factor + 0,
+];
+
+/**
+ * The image's section options for the cuts, as retained half-spaces in metres in the Tau root frame. The image keeps
+ * only the points inside every one, so it removes a union of half-spaces: a plane removes its face's half-space, and a
+ * cutaway of 180° or more the union of its two faces' half-spaces, each kept as its complement. A narrower cutaway
+ * removes an intersection, which the image cannot draw, so it is left out with a diagnostic naming it. Four cuts need
+ * at most eight half-spaces, the image's limit.
+ */
+const toSectionExportOptions = (
+  cuts: readonly SectionCut[] = [],
+): { readonly sections?: { planes: RetainedHalfSpace[]; clipSurfaces: boolean; clipLines: boolean } } => {
+  const planes: RetainedHalfSpace[] = [];
+  const omittedCutIds: string[] = [];
+  for (const cut of cuts) {
+    if (cut.kind === 'revolution' && cut.sweep < 180) {
+      omittedCutIds.push(cut.id);
+      continue;
+    }
+    for (const { plane } of resolveSectionFaces(resolveSectionPieces([cut]))) {
+      planes.push({ point: scaled(plane.normal, plane.constant), normal: scaled(plane.normal, -1) });
+    }
+  }
+  if (omittedCutIds.length > 0) {
+    recordHeadlessImageTiming('capture.section-omitted', performance.now(), { cutIds: omittedCutIds });
+  }
+  // The viewer's cuts clip surfaces and lines alike.
+  return planes.length > 0 ? { sections: { planes, clipSurfaces: true, clipLines: true } } : {};
 };
 
 const copyCameraState = (cameraState: CameraState | undefined): CameraState | undefined =>
@@ -81,27 +115,13 @@ const snapshotPresentationIntent = (
   const unit = context.modelInteractionUnitId
     ? getModelInteractionUnitState(modelContext, context.modelInteractionUnitId)
     : undefined;
-  const selectedPlane = context.availableSectionViews.find(({ id }) => id === context.selectedSectionViewId);
-  const section =
-    context.isSectionViewActive && selectedPlane
-      ? {
-          ...resolveSectionViewPlane({
-            baseNormal: selectedPlane.normal,
-            pivot: context.sectionViewPivot,
-            rotation: context.sectionViewRotation,
-            direction: context.sectionViewDirection,
-          }),
-          clipSurfaces: context.enableClippingMesh,
-          clipLines: context.enableClippingLines,
-        }
-      : undefined;
   return {
     upDirection: context.upDirection,
     enableSurfaces: context.enableSurfaces,
     enableLines: context.enableLines,
     hiddenComponentIds: [...(unit?.hiddenComponentIds ?? [])],
     isolatedComponentIds: [...(unit?.isolatedComponentIds ?? [])],
-    section,
+    sectionCuts: context.isSectionViewActive ? context.committedSectionCuts : [],
   };
 };
 
@@ -211,20 +231,7 @@ export const captureSettledCadImages = async (options: CaptureSettledCadImagesOp
     ...(!includeEdges || presentation?.enableLines === false ? { lines: false } : {}),
     world: tauWorld,
     ...(visiblePrimitives ? { visiblePrimitives } : {}),
-    ...(presentation?.section
-      ? {
-          sections: {
-            planes: [
-              {
-                point: presentation.section.point,
-                normal: presentation.section.normal,
-              },
-            ] as const,
-            clipSurfaces: presentation.section.clipSurfaces,
-            clipLines: presentation.section.clipLines,
-          },
-        }
-      : {}),
+    ...toSectionExportOptions(presentation?.sectionCuts),
     ...(annotated ? { axes: true, scaleBar: true } : {}),
   } as const;
   let exportOptions;

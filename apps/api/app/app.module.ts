@@ -11,6 +11,7 @@ import { ApiModule } from '#api/api.module.js';
 import { LoggerModule } from '#logger/logger.module.js';
 import { RedisModule } from '#redis/redis.module.js';
 import { TelemetryModule } from '#telemetry/telemetry.module.js';
+import { LifecycleModule } from '#lifecycle/lifecycle.module.js';
 import { RequestIdMiddleware } from '#middlewares/request-id.middleware.js';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 
@@ -40,6 +41,7 @@ export class AppModule implements NestModule {
         ConfigModule.forRoot({ validate: () => environment, isGlobal: true }),
         DatabaseModule,
         TelemetryModule,
+        LifecycleModule,
         RedisModule,
         AuthModule.forRootAsync(mode),
         ApiModule.forRoot(mode),

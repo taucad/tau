@@ -75,11 +75,9 @@ catalog:
   '@nestjs/common': ^11.1.27
   '@nestjs/core': ^11.1.27
   '@nestjs/platform-fastify': ^11.1.27
-  '@nestjs/platform-socket.io': ^11.1.27
   '@nestjs/platform-ws': ^11.1.27
   '@nestjs/terminus': ^11.1.1
   '@nestjs/testing': ^11.1.27
-  '@nestjs/websockets': ^11.1.27
   '@nx/devkit': 22.7.1
   '@nx/eslint': 22.7.1
   '@nx/eslint-plugin': 22.7.1
@@ -96,7 +94,6 @@ catalog:
   '@opentelemetry/exporter-prometheus': ^0.213.0
   '@opentelemetry/exporter-trace-otlp-http': ^0.213.0
   '@opentelemetry/instrumentation-pino': ^0.59.0
-  '@opentelemetry/instrumentation-socket.io': ^0.60.0
   '@opentelemetry/resources': ^2.8.0
   '@opentelemetry/sdk-logs': ^0.213.0
   '@opentelemetry/sdk-metrics': ^2.8.0
@@ -110,7 +107,6 @@ catalog:
   '@react-router/fs-routes': 7.14.2
   '@react-router/node': 7.14.2
   '@size-limit/file': ^12.1.0
-  '@socket.io/redis-streams-adapter': ^0.3.1
   '@tanstack/react-pacer': ^0.22.1
   '@tanstack/react-query': ^5.101.0
   '@taucad/kcl-wasm-lib': 0.1.184
@@ -236,7 +232,6 @@ catalog:
   rolldown: 1.2.3
   semver: ^7.8.5
   size-limit: ^12.1.0
-  socket.io-prometheus-metrics: ^1.0.6
   sonner: ^2.0.7
   source-map-explorer: ^2.5.3
   source-map-js: ^1.2.1

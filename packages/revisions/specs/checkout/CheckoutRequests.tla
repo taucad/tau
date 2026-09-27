@@ -18,6 +18,7 @@ CONSTANTS
   RegistryHeads,   \* "adopt" (today: announcements re-head the actor) | "ignore" (RM-R5)
   MoveDuringMint,  \* "abortSilent" (today) | "abortAnswer" (W0.9 as written) | "defer" (RM-R6)
   HeadFacts,       \* "adoptHead" (today: head only, branch kept) | "reread" (RM-R5)
+                   \* | "adoptFact" (geospec 3be494514: adopt the fact's line and head)
   CasChecksBranch, \* FALSE (today) | TRUE (RM-R6)
   Cancellable,     \* FALSE (today) | TRUE (`cancelCut`, RM-R4)
   MaxExternal,     \* head moves by other writers (sync fast-forward, another tab)
@@ -78,9 +79,12 @@ Answer(S, a) ==
   /\ nAns' = [r \in Reqs |-> IF r \in S THEN nAns[r] + 1 ELSE nAns[r]]
   /\ last' = [r \in Reqs |-> IF r \in S THEN a ELSE last[r]]
 
+(* Whether `readHead` names the branch: the target's re-read, and geospec's. *)
+ReadsBranch == HeadFacts \in {"reread", "adoptFact"}
+
 (* What a re-read of the head returns: today `readHead` has no branch. *)
 Reread(r) ==
-  IF HeadFacts = "reread" THEN [branch |-> disk, head |-> r[disk]]
+  IF ReadsBranch THEN [branch |-> disk, head |-> r[disk]]
   ELSE [branch |-> actor.branch, head |-> r[disk]]
 
 (* The page's view: today the root's record for the branch and the actor's *)
@@ -235,7 +239,7 @@ OtherWriter(b) ==
                  cancelled, ghost, foreign, ann, switched>>
 
 (* The actor told that its head moved to `h`. *)
-Moved(h) ==
+MovedHead(h) ==
   IF mint.phase = "idle"
     THEN IF HeadFacts = "reread"
            THEN /\ mint' = Reading
@@ -254,12 +258,34 @@ Moved(h) ==
        /\ IF MoveDuringMint = "abortAnswer" THEN Answer(mint.reqs, "superseded") ELSE UNCHANGED <<nAns, last>>
        /\ UNCHANGED deferred
 
+(* Two views of one revision: the same line and head, or both still the shared first revision. *)
+SameRev(a, b) == (a.branch = b.branch /\ a.head = b.head) \/ (a.head = 1 /\ b.head = 1)
+
+(* Geospec 3be494514 (GM.r1 M3): adopt the fact's line and head (`headChanged` + `lineChanged`); mid-mint, a fact *)
+(* naming another revision aborts the mint and answers `casLost` (L2-F5), and one naming the same revision only   *)
+(* moves the line (RV-W2b #3). The merge keeps RM-R5's re-read instead; `witness-adopt-fact` is why.             *)
+MovedFact(f) ==
+  IF mint.phase = "idle"
+    THEN /\ actor' = [branch |-> f.branch, head |-> IF SameRev(f, actor) THEN actor.head ELSE f.head]
+         /\ UNCHANGED <<mint, queue, orphan, deferred, unseen, nAns, last>>
+  ELSE IF SameRev(f, actor)
+    THEN /\ actor' = [actor EXCEPT !.branch = f.branch]
+         /\ UNCHANGED <<mint, queue, orphan, deferred, unseen, nAns, last>>
+  ELSE /\ orphan' = IF mint.phase = "publishing" THEN [branch |-> mint.branch, expected |-> mint.expected] ELSE orphan
+       /\ actor' = [branch |-> f.branch, head |-> f.head]
+       /\ Promote
+       /\ Answer(mint.reqs, "casLost")
+       /\ UNCHANGED <<deferred, unseen>>
+
+(* The actor told that its head moved, by a fact that names the line and the head. *)
+Moved(f) == IF HeadFacts = "adoptFact" THEN MovedFact(f) ELSE MovedHead(f.head)
+
 (* The root receives a producer's fact (`checkoutChanged`). *)
 DeliverFact ==
   /\ facts # <<>>
   /\ act' = <<"DeliverFact">>
   /\ LET f == Head(facts)
-     IN /\ Moved(f.head)
+     IN /\ Moved(f)
         /\ rootRec' = IF RegistryHeads = "adopt" THEN f ELSE rootRec
   /\ facts' = Tail(facts)
   /\ UNCHANGED <<ref, disk, sent, cancelled, ghost, foreign, ext, ann, switched>>
@@ -274,7 +300,7 @@ RegistryAnnounce ==
   /\ IF RegistryHeads = "adopt"
        THEN /\ rootRec' = Registry
             /\ IF rootRec.head # Registry.head
-                 THEN Moved(Registry.head)
+                 THEN Moved(Registry)
                  ELSE UNCHANGED <<actor, mint, queue, orphan, deferred, unseen, nAns, last>>
        ELSE UNCHANGED <<rootRec, actor, mint, queue, orphan, deferred, unseen, nAns, last>>
   /\ UNCHANGED <<ref, disk, facts, sent, cancelled, ghost, foreign, ext, switched>>

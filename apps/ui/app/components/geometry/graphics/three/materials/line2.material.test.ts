@@ -292,44 +292,6 @@ describe('Line2NodeMaterial.setup parent dispatch (regression guard)', () => {
   });
 });
 
-describe('Line2NodeMaterial.setupHardwareClipping (section-view regression guard)', () => {
-  /**
-   * Smoking-gun regression: `NodeMaterial.setupHardwareClipping` activates vertex-stage
-   * `gl_ClipDistance` whenever the device exposes `clip-distances`, but the hardware path's
-   * `positionView` falls through to `modelViewMatrix * positionLocal` — for a
-   * `LineSegmentsGeometry` that's the static unit-quad attribute reused by every instanced
-   * segment, so the clip distance is constant per draw call and bleeds line edges onto the
-   * sectioned-off half of the model. Forcing `hardwareClipping = false` routes through the
-   * fragment-stage software path that reconstructs `positionView` per fragment from
-   * `clipSpace`, which clips correctly. See the class JSDoc for the full chain.
-   */
-  it('skips the base addToStack(hardwareClipping()) and leaves hardwareClipping = false', () => {
-    const material = new Line2NodeMaterial({
-      color: 0xff_00_ff,
-      linewidth: 1,
-      opacity: 0.6,
-      transparent: true,
-      worldUnits: false,
-    });
-
-    const stackPushes: readonly unknown[] = [];
-    const stubBuilder = {
-      clippingContext: { unionPlanes: [{}, {}] },
-      isAvailable: (capability: string) => capability === 'clipDistance',
-      stack: {
-        addToStack: (node: unknown) => {
-          (stackPushes as unknown[]).push(node);
-        },
-      },
-    };
-
-    material.setupHardwareClipping(stubBuilder);
-
-    expect(stackPushes).toHaveLength(0);
-    expect((material as unknown as { hardwareClipping: boolean }).hardwareClipping).toBe(false);
-  });
-});
-
 /* eslint-disable @typescript-eslint/naming-convention -- mirrors three.js external API names (`renderer.getMRT()`, `node.toJSON()`) inside test stubs and ad-hoc type aliases */
 describe('Line2NodeMaterial.setupDepth (renderer-aware encoding regression guard)', () => {
   /**

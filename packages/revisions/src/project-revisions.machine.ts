@@ -1088,6 +1088,18 @@ const projectRevisionsMachineDefinition = setup({
           }
           const id = attemptIdOf(event.key);
           const patched = { ...context, ...patch };
+          /* A dropped admission is answered like any other (RM-R1): its caller may still be listening. */
+          for (const { key } of context.pendingAdmissions.filter((admission) => attemptIdOf(admission.key) === id)) {
+            enq.emit({
+              type: 'turnRefused',
+              key,
+              turnId: key.turnId,
+              chatId: key.chatId,
+              runId: key.runId,
+              code: undefined,
+              reason: 'The turn was abandoned before it was placed.',
+            });
+          }
           return {
             context: {
               ...patch,

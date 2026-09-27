@@ -9,6 +9,8 @@ import type { ListedDirectoryEntry } from '@taucad/fs-client/directory-listing';
 import { FileNotFoundError } from '@taucad/fs-client/file-content-errors';
 import { rpcName } from '@taucad/chat/constants';
 import type { RpcHandlerDependencies, RpcCallInput } from '#hooks/rpc-handlers.js';
+import { omittedSectionCutsNotice } from '#services/headless-capture.js';
+import type { SectionCut } from '#components/geometry/graphics/section-cuts.js';
 
 type RpcDependencies = ChatRpc.RpcDependencies;
 type RpcFileSystem = ChatRpc.RpcFileSystem;
@@ -1083,7 +1085,8 @@ describe('rpc-handlers', () => {
         });
       });
 
-      it('should reuse matching viewer presentation state for agent capture', async () => {
+      /** Capture `src/pen.ts` for the agent from a viewer that shows it with Section on and `cuts` committed. */
+      const captureWithCuts = async (cuts: readonly SectionCut[]) => {
         const entryPath = 'src/pen.ts';
         const cadUnit = createMockCadUnit({ entryPath, geometry: presentationGltfGeometry });
         const modelRef = {
@@ -1104,13 +1107,7 @@ describe('rpc-handlers', () => {
               enableSurfaces: false,
               enableLines: true,
               isSectionViewActive: true,
-              availableSectionViews: [{ id: 'yz', normal: [1, 0, 0] }],
-              selectedSectionViewId: 'yz',
-              sectionViewPivot: [1, 0, 0],
-              sectionViewRotation: [0, 0, 0],
-              sectionViewDirection: -1,
-              enableClippingMesh: true,
-              enableClippingLines: false,
+              committedSectionCuts: cuts,
               modelInteractionUnitId: 'file:src/pen.ts',
               modelInteractionRef: modelRef,
             },
@@ -1125,20 +1122,40 @@ describe('rpc-handlers', () => {
           .fn<NonNullable<RpcHandlerDependencies['headlessImageService']>['export']>()
           .mockResolvedValue([{ name: 'render.webp', mimeType: 'image/webp', bytes: captureWebp() }]);
         const deps = buildDeps({ projectRef, headlessImageService: { export: exportImage } });
+        const result = await deps.images!.captureImages({ mode: 'single', targetFile: entryPath });
+        return { result, job: exportImage.mock.calls[0]![0] };
+      };
 
-        await expect(deps.images!.captureImages({ mode: 'single', targetFile: entryPath })).resolves.toMatchObject({
-          success: true,
-        });
-        expect(exportImage.mock.calls[0]![0]).toMatchObject({
+      it('should reuse matching viewer presentation state for agent capture', async () => {
+        const { result, job } = await captureWithCuts([
+          { id: 'yz', kind: 'plane', plane: 'yz', offset: 1, isFlipped: true },
+        ]);
+
+        expect(result).toMatchObject({ success: true });
+        // The images show every cut, so the agent is told nothing more.
+        expect(result).not.toHaveProperty('message');
+        expect(job).toMatchObject({
           exportOptions: {
             surfaces: false,
             visiblePrimitives: [{ nodeIndex: 1, meshIndex: 1, primitiveIndex: 0 }],
             sections: {
               planes: [{ point: [1, 0, 0], normal: [1, 0, 0] }],
               clipSurfaces: true,
-              clipLines: false,
+              clipLines: true,
             },
           },
+        });
+      });
+
+      it('should tell the agent in one line when the images leave a section cut out', async () => {
+        const { result } = await captureWithCuts([
+          { id: 'cutaway', kind: 'revolution', axis: 'z', origin: [0, 0, 0], start: 0, sweep: 90 },
+        ]);
+
+        expect(result).toEqual({
+          success: true,
+          images: [{ view: 'isometric', dataUrl: captureDataUrl() }],
+          message: omittedSectionCutsNotice,
         });
       });
 

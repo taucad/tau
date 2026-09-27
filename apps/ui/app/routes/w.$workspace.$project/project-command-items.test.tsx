@@ -6,6 +6,7 @@ import type { RevisionRow } from '@taucad/revisions';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ExportFile } from '@taucad/types';
 import type { CommandPaletteItem } from '#components/layout/command-palette.js';
+import { toast } from '#components/ui/sonner.js';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 
 let registeredItems: CommandPaletteItem[] = [];
@@ -15,7 +16,9 @@ let cameraState: Record<string, unknown> | undefined;
 let cameraRegistryVersion = 0;
 let hasProjectContext = true;
 const openPanel = vi.fn();
-const captureCadImages = vi.fn<(options: unknown) => Promise<ExportFile[]>>();
+const captureCadImages =
+  vi.fn<(options: unknown) => Promise<{ files: ExportFile[]; omittedSectionCutIds: readonly string[] }>>();
+const omittedSectionCutsNotice = 'Section cutaways narrower than 180° are not shown in captures.';
 const downloadBlob = vi.fn<(blob: Blob, filename: string) => void>();
 const getZippedDirectory = vi.fn<(path: string, options?: { versionedOnly?: boolean }) => Promise<Blob>>();
 const runtimeFileSystem = {};
@@ -61,7 +64,7 @@ vi.mock('#hooks/use-project.js', () => ({
   useMainGraphics: () => graphicsActor,
 }));
 
-vi.mock('#services/headless-capture.js', () => ({ captureCadImages }));
+vi.mock('#services/headless-capture.js', () => ({ captureCadImages, omittedSectionCutsNotice }));
 
 vi.mock('#hooks/use-graphics.js', () => ({
   useGraphicsCameraRigQuery: () => {
@@ -92,6 +95,7 @@ vi.mock('#components/ui/sonner.js', () => ({
       },
     ),
     success: vi.fn(),
+    warning: vi.fn(),
   },
 }));
 
@@ -192,6 +196,7 @@ describe('ProjectCommandPaletteItems', () => {
     saveRequest.mockReset();
     getZippedDirectory.mockReset();
     toastFailures.length = 0;
+    vi.mocked(toast.warning).mockClear();
     revisionStatusHarness.reset();
   });
 
@@ -397,9 +402,10 @@ describe('ProjectCommandPaletteItems', () => {
   ] as const)('downloads settled %s PNG bytes through the shared headless capture path', async (format, state) => {
     geometryFormat = format;
     cameraState = state;
-    captureCadImages.mockResolvedValue([
-      { name: 'render.png', mimeType: 'image/png', bytes: new Uint8Array([1, 2, 3]) },
-    ]);
+    captureCadImages.mockResolvedValue({
+      files: [{ name: 'render.png', mimeType: 'image/png', bytes: new Uint8Array([1, 2, 3]) }],
+      omittedSectionCutIds: [],
+    });
     render(<ProjectCommandPaletteItems match={match} />, { wrapper });
 
     const download = registeredItems.find((item) => item.id === 'download-png');
@@ -420,6 +426,24 @@ describe('ProjectCommandPaletteItems', () => {
     expect(blob).toBeInstanceOf(Blob);
     expect(blob.type).toBe('image/png');
     expect(filename).toBe('test-project.png');
+    expect(toast.warning).not.toHaveBeenCalled();
+  });
+
+  it('should say when the downloaded PNG leaves a cut out', async () => {
+    geometryFormat = 'gltf';
+    cameraState = { position: [1, 2, 3] };
+    captureCadImages.mockResolvedValue({
+      files: [{ name: 'render.png', mimeType: 'image/png', bytes: new Uint8Array([1, 2, 3]) }],
+      omittedSectionCutIds: ['cutaway'],
+    });
+    render(<ProjectCommandPaletteItems match={match} />);
+
+    registeredItems.find((item) => item.id === 'download-png')?.action?.();
+    await vi.waitFor(() => {
+      expect(downloadBlob).toHaveBeenCalledOnce();
+    });
+
+    expect(toast.warning).toHaveBeenCalledWith(omittedSectionCutsNotice);
   });
 
   it('should archive the file manager root, not an absolute project path', async () => {

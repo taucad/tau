@@ -25,9 +25,11 @@ import {
 
 type KernelCase = Readonly<{
   extension: 'scad' | 'ts';
-  kernel: 'OpenRSCAD' | 'JSCAD' | 'Manifold' | 'Replicad';
+  kernel: 'OpenRSCAD' | 'JSCAD' | 'Manifold' | 'Replicad' | 'PicoVoxel';
   source: string;
   size: readonly [number, number, number];
+  /** Decimal digits the GLB size must match; defaults to exact B-rep precision. */
+  digits?: number;
 }>;
 
 const cases: readonly KernelCase[] = [
@@ -55,6 +57,19 @@ export default function main() { return Manifold.cube([16, 10, 7], true); }
 export default function main() { return makeBox([0, 0, 0], [18, 11, 8]); }
 `,
     size: [0.018, 0.008, 0.011],
+  },
+  {
+    // A Z-up beam, so the Y-up GLB size also pins the up axis. The iso-surface lands within a voxel.
+    kernel: 'PicoVoxel',
+    extension: 'ts',
+    source: `import type { Pico } from 'picovoxel';
+export const defaultParams = { voxelSize: 0.5 };
+export default function main(pico: Pico) {
+  return pico.createVoxels({ shape: 'beam', start: [0, 0, 0], end: [0, 0, 20], radius: 3 });
+}
+`,
+    size: [0.006, 0.026, 0.006],
+    digits: 3,
   },
 ];
 
@@ -191,7 +206,7 @@ test.for(cases)(
       const size = getBoundingBoxFromInspect(await getInspectReport(bytes))?.size;
       expect(size).toBeDefined();
       for (const [index, expected] of kernelCase.size.entries()) {
-        expect(size![index]).toBeCloseTo(expected, 6);
+        expect(size![index]).toBeCloseTo(expected, kernelCase.digits ?? 6);
       }
       if (kernelCase.kernel === 'OpenRSCAD') {
         await expectNativeOpenRscadEngine(session.logPath);

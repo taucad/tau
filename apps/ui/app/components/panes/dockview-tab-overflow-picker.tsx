@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { IDockviewHeaderActionsProps, IDockviewPanel } from 'dockview-react';
 import { Check, ChevronDown } from 'lucide-react';
-import { DockviewPaneAction } from '#components/panes/dockview-pane-action.js';
 import { DockviewTabIcon } from '#components/panes/dockview-tab.js';
 import type { DockviewTabIconRenderer, DockviewTabProps } from '#components/panes/dockview-tab.js';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
+import { PaneButton } from '#components/ui/pane-button.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 
 export type DockviewTabOverflowPickerProperties = IDockviewHeaderActionsProps & {
@@ -118,9 +118,10 @@ export function DockviewTabOverflowPicker(
         }}
       >
         <TooltipTrigger asChild>
-          <DockviewPaneAction aria-label='Open tabs'>
+          {/* Not a hover-revealed pane action: while tabs overflow, this is their visible route. */}
+          <PaneButton aria-label='Open tabs'>
             <ChevronDown aria-hidden className='size-3.5' />
-          </DockviewPaneAction>
+          </PaneButton>
         </TooltipTrigger>
       </ComboBoxResponsive>
       <TooltipContent>Open tabs</TooltipContent>

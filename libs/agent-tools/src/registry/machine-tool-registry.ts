@@ -471,8 +471,10 @@ const requestPrint = async (
   if (prior !== undefined && typeof priorRequestId === 'string') {
     const request = await findRequest(client, priorRequestId, signal);
     if (request.state !== 'awaiting-approval') {
-      /* The hand-over already settled it; the call still reports the answer it recalled. */
-      return asJson({ request, machineName, approval: prior.resolution.outcome, ...nextStepOf(request) });
+      /* Settled already, by the hand-over or by the Print pane: the ledger's answer is the effective one. */
+      const approval =
+        request.state === 'denied' ? 'denied' : request.state === 'withdrawn' ? 'cancelled' : prior.resolution.outcome;
+      return asJson({ request, machineName, approval, ...nextStepOf(request) });
     }
     const settled = await settleApproval(client, { requestId: priorRequestId, resolution: prior.resolution, signal });
     return asJson({ request: settled, machineName, approval: prior.resolution.outcome, ...nextStepOf(settled) });

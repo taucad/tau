@@ -1937,6 +1937,9 @@ importers:
       '@taucad/picogk':
         specifier: workspace:*
         version: link:../../packages/plugins/picogk
+      '@taucad/picovoxel':
+        specifier: workspace:*
+        version: link:../../packages/plugins/picovoxel
       '@taucad/replicad':
         specifier: workspace:*
         version: link:../../packages/plugins/replicad

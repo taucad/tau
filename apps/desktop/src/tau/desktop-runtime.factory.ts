@@ -18,6 +18,7 @@ import {
 import { opencascade } from '@taucad/opencascade';
 import { openrscadKernel } from '@taucad/openrscad';
 import { picogk } from '@taucad/picogk';
+import { picovoxel } from '@taucad/picovoxel';
 import { replicad } from '@taucad/replicad';
 import { rhino } from '@taucad/rhino';
 import { slicer } from '@taucad/slicer';
@@ -47,6 +48,9 @@ const createDesktopRuntimeImplementation = (options: DesktopRuntimeOptions = {})
         opencascade(),
         jscad(),
         manifold(),
+        // Kernels run in Node utility processes, where shared WebAssembly memory is available, so 'auto'
+        // serves the fast lane multi-threaded.
+        picovoxel(),
         gltf(),
         brep(),
         rhino(),

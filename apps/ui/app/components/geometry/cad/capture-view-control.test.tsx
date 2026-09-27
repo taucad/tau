@@ -47,22 +47,7 @@ vi.mock('@taucad/ui/components/button', () => ({
     </button>
   ),
 }));
-vi.mock('@taucad/ui/components/dropdown-menu', () => ({
-  DropdownMenuItem: ({
-    children,
-    onSelect,
-  }: {
-    readonly children: React.ReactNode;
-    readonly onSelect?: () => void;
-  }) => (
-    <button type='button' onClick={onSelect} data-testid='capture-overflow-button'>
-      {children}
-    </button>
-  ),
-}));
-
-const { CaptureViewControl, CaptureViewOverflowControl } =
-  await import('#components/geometry/cad/capture-view-control.js');
+const { CaptureViewControl } = await import('#components/geometry/cad/capture-view-control.js');
 
 describe('CaptureViewControl', () => {
   beforeEach(() => {
@@ -74,7 +59,7 @@ describe('CaptureViewControl', () => {
     ]);
   });
 
-  it('captures the local CAD unit losslessly through the headless service', async () => {
+  it('should capture the local CAD unit losslessly through the headless service', async () => {
     const user = userEvent.setup();
     render(<CaptureViewControl />);
     await user.click(screen.getByTestId('capture-button'));
@@ -110,20 +95,4 @@ describe('CaptureViewControl', () => {
     });
   });
 
-  it('completes the overflow capture after its dropdown item unmounts', async () => {
-    const capture = Promise.withResolvers<Awaited<ReturnType<typeof captureCadImagesType>>>();
-    mockCaptureCadImages.mockReturnValueOnce(capture.promise);
-    const user = userEvent.setup();
-    const { unmount } = render(<CaptureViewOverflowControl />);
-    await user.click(screen.getByTestId('capture-overflow-button'));
-    unmount();
-    capture.resolve([{ name: 'capture.webp', mimeType: 'image/webp', bytes: new Uint8Array([1, 2, 3]) }]);
-
-    await waitFor(() => {
-      expect(mockAddDraftAttachment).toHaveBeenCalledWith('data:image/webp;base64,AQID', {
-        preserveOriginal: true,
-        model: { name: 'Vision Model', support: selectedModel.model.support },
-      });
-    });
-  });
 });

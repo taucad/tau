@@ -111,7 +111,16 @@ const returnToRowAfterField = (event: React.KeyboardEvent<HTMLDivElement>): void
  * `SliderInput`: the row skips Radix's hover highlight, which would pull focus out of a field being typed in.
  */
 const MenuSliderRow = ({ item: Item, ...properties }: MenuSliderRowProperties): React.JSX.Element => {
-  const { value, min = 0, max = 100, step = 1, onValueChange, onStep, 'aria-label': ariaLabel } = properties;
+  const {
+    value,
+    min = 0,
+    max = 100,
+    step = 1,
+    trailingAdornment = '',
+    onValueChange,
+    onStep,
+    'aria-label': ariaLabel,
+  } = properties;
 
   const handleKeyDown = React.useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -159,7 +168,8 @@ const MenuSliderRow = ({ item: Item, ...properties }: MenuSliderRowProperties): 
 
   return (
     <Item
-      aria-label={ariaLabel}
+      // The focused row reads its value, so a step is heard; typeahead still matches the label alone.
+      aria-label={`${ariaLabel}, ${value}${trailingAdornment}`}
       textValue={ariaLabel}
       className={cn(menuItemVariants(), 'p-0')}
       onSelect={preventDefault}

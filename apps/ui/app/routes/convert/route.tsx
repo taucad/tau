@@ -39,13 +39,7 @@ import {
   isConfiguredConverterFormat,
 } from '#components/geometry/converter/converter-utils.js';
 import { Converter } from '#components/geometry/converter/converter.js';
-import { FovControl } from '#components/geometry/cad/fov-control.js';
-import { GridSizeIndicator } from '#components/geometry/cad/grid-control.js';
-import { SectionViewControl } from '#components/geometry/cad/section-view-control.js';
-import { MeasureControl } from '#components/geometry/cad/measure-control.js';
-import { FitViewControl } from '#components/geometry/cad/fit-view-control.js';
-import { ViewerSettings } from '#components/geometry/cad/viewer-settings.js';
-import { ChatInterfaceGraphics } from '#routes/w.$workspace.$project/chat-interface-graphics.js';
+import { ChatViewerControls } from '#routes/w.$workspace.$project/chat-viewer-controls.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { cn } from '@taucad/ui/utils/cn';
@@ -101,12 +95,17 @@ function ConverterContent(): React.JSX.Element {
 }
 
 /**
- * Isolated viewer component that owns all graphics-machine selectors and the
- * CadViewer.  Memoised so that UI-only state changes in the parent
- * (format selection, cookie updates, etc.) never cause the WebGL canvas to
- * re-render.
+ * Isolated viewer that owns all graphics-machine selectors, the CadViewer, the file card and the viewer bar.
+ * Memoised so that UI-only state changes in the parent (format selection, cookie updates, etc.) never cause the
+ * WebGL canvas to re-render.
  */
-const ConverterViewer = memo(function ({ glbData }: { readonly glbData: Uint8Array<ArrayBuffer> }): React.JSX.Element {
+export const ConverterViewer = memo(function ({
+  glbData,
+  uploadedFile,
+}: {
+  readonly glbData: Uint8Array<ArrayBuffer>;
+  readonly uploadedFile: UploadedFileInfo | undefined;
+}): React.JSX.Element {
   const enableSurfaces = useGraphicsSelector((state) => state.context.enableSurfaces);
   const enableLines = useGraphicsSelector((state) => state.context.enableLines);
   const enableGizmo = useGraphicsSelector((state) => state.context.enableGizmo);
@@ -118,18 +117,38 @@ const ConverterViewer = memo(function ({ glbData }: { readonly glbData: Uint8Arr
   const geometry = useMemo<Geometry>(() => ({ format: 'gltf', content: glbData, hash: 'converter' }), [glbData]);
 
   return (
-    <CadViewer
-      enableZoom
-      enablePan
-      upDirection={upDirection}
-      enableMatcap={enableMatcap}
-      enableLines={enableLines}
-      enableAxes={enableAxes}
-      enableGrid={enableGrid}
-      enableGizmo={enableGizmo}
-      enableSurfaces={enableSurfaces}
-      geometry={geometry}
-    />
+    <div data-viewer-frame className='absolute inset-0'>
+      <CadViewer
+        enableZoom
+        enablePan
+        upDirection={upDirection}
+        enableMatcap={enableMatcap}
+        enableLines={enableLines}
+        enableAxes={enableAxes}
+        enableGrid={enableGrid}
+        enableGizmo={enableGizmo}
+        enableSurfaces={enableSurfaces}
+        geometry={geometry}
+      />
+
+      {/* The export panel always covers the right 21rem, so the bar centres in, and sizes its labels to, the viewer
+          left of it. Where that is narrower than the bar, the bar starts at the left edge rather than centring off
+          it, so the grid readout and Section stay on screen. The file card sits on the line above the bar. */}
+      <div className='@container/viewer pointer-events-none absolute right-84 bottom-2 left-2 z-10 flex flex-col items-center-safe gap-2'>
+        {uploadedFile ? (
+          <div className='pointer-events-auto w-100 max-w-full self-start rounded-md border bg-sidebar p-3'>
+            <div className='flex items-center gap-1'>
+              <div className='text-sm font-medium'>{uploadedFile.name}</div>
+              <InfoTooltip>{formatConfigurations[uploadedFile.format].description}</InfoTooltip>
+            </div>
+            <div className='text-xs text-muted-foreground'>
+              {formatDisplayName(uploadedFile.format)} · {formatFileSize(uploadedFile.size)}
+            </div>
+          </div>
+        ) : undefined}
+        <ChatViewerControls shouldEnableCapture={false} />
+      </div>
+    </div>
   );
 });
 
@@ -341,34 +360,7 @@ function ConverterContentInner(): React.JSX.Element {
         <>
           {/* Main viewer area */}
           <div className='relative flex-1'>
-            <div className='absolute inset-0'>
-              <ConverterViewer glbData={glbData} />
-            </div>
-
-            {/* Bottom-left viewer controls */}
-            <div className='pointer-events-none absolute bottom-2 left-2 z-10 flex w-90 shrink-0 flex-col gap-2'>
-              {/* File info overlay */}
-              {uploadedFile ? (
-                <div className='pointer-events-auto w-100 rounded-md border bg-sidebar p-3'>
-                  <div className='flex items-center gap-1'>
-                    <div className='text-sm font-medium'>{uploadedFile.name}</div>
-                    <InfoTooltip>{formatConfigurations[uploadedFile.format].description}</InfoTooltip>
-                  </div>
-                  <div className='text-xs text-muted-foreground'>
-                    {formatDisplayName(uploadedFile.format)} · {formatFileSize(uploadedFile.size)}
-                  </div>
-                </div>
-              ) : undefined}
-              <ChatInterfaceGraphics className='w-100' />
-              <div className='pointer-events-auto flex items-center gap-2'>
-                <FovControl className='w-60' />
-                <GridSizeIndicator />
-                <SectionViewControl />
-                <MeasureControl />
-                <FitViewControl />
-                <ViewerSettings />
-              </div>
-            </div>
+            <ConverterViewer glbData={glbData} uploadedFile={uploadedFile} />
 
             {/* Export panel trigger */}
             <div className='absolute top-(--header-height) right-2 z-10 flex h-full gap-2 pb-[calc(var(--header-height)+var(--spacing)*2)]'>

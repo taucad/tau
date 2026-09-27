@@ -93,7 +93,7 @@ const highlightDropdownSliderRow = async (user: ReturnType<typeof userEvent.setu
   await user.keyboard('{Enter}');
   expect(screen.getByRole('menuitem', { name: 'Previous action' })).toHaveFocus();
   await user.keyboard('{ArrowDown}');
-  const row = screen.getByRole('menuitem', { name: 'Opacity' });
+  const row = screen.getByRole('menuitem', { name: 'Opacity, 50%' });
   expect(row).toHaveFocus();
   return row;
 };
@@ -217,6 +217,17 @@ describe('MenuSliderItem', () => {
       expect(row).toHaveFocus();
     });
 
+    it('should read the stepped value in the highlighted row’s name', async () => {
+      const user = userEvent.setup();
+      render(<DropdownHarness onValueChange={vi.fn()} />);
+      const row = await highlightDropdownSliderRow(user);
+
+      await user.keyboard('{ArrowRight}');
+
+      expect(row).toHaveAccessibleName('Opacity, 51%');
+      expect(row).toHaveFocus();
+    });
+
     it('should step the highlighted row with ArrowRight and ArrowLeft', async () => {
       const user = userEvent.setup();
       const onValueChange = vi.fn();
@@ -305,7 +316,7 @@ describe('MenuSliderItem', () => {
       await user.keyboard('{ArrowDown}');
       expect(screen.getByRole('menuitem', { name: 'Previous action' })).toHaveFocus();
       await user.keyboard('{ArrowDown}');
-      expect(screen.getByRole('menuitem', { name: 'Opacity' })).toHaveFocus();
+      expect(screen.getByRole('menuitem', { name: 'Opacity, 50%' })).toHaveFocus();
 
       await user.keyboard('{ArrowRight}');
       expect(onValueChange).toHaveBeenLastCalledWith(51);

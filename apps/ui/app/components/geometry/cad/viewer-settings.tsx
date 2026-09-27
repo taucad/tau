@@ -1,4 +1,4 @@
-import React, { useCallback, useState, useMemo } from 'react';
+import React, { useCallback, useRef, useState, useMemo } from 'react';
 import type { ClassValue } from 'clsx';
 import {
   Aperture,
@@ -25,13 +25,13 @@ import {
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
 import { cn } from '@taucad/ui/utils/cn';
+import { AxisLabel } from '#components/geometry/cad/section-tool-row.js';
 import { InfoTooltip } from '#components/ui/info-tooltip.js';
 import {
   DropdownMenuSelectItem,
   DropdownMenuSliderItem,
   preventMenuSliderEscapeDismissal,
 } from '#components/ui/menu-slider-item.js';
-import { axesColors } from '#constants/color.constants.js';
 import { defaultRenderTimeout } from '#constants/editor.constants.js';
 import { useCameraRig, useCameraSelector, useGraphics, useGraphicsSelector } from '#hooks/use-graphics.js';
 import { useCad, useCadSelector } from '#hooks/use-cad.js';
@@ -61,9 +61,9 @@ const defaultTimeoutOption =
   timeoutOptions.find((option) => option.value === defaultRenderTimeout) ?? timeoutOptions[0]!;
 
 const upDirectionOptions: Array<{ value: UpDirection; label: React.ReactNode; ariaLabel: string }> = [
-  { value: 'x', label: <span style={{ color: axesColors.x }}>X</span>, ariaLabel: 'X-up' },
-  { value: 'y', label: <span style={{ color: axesColors.y }}>Y</span>, ariaLabel: 'Y-up' },
-  { value: 'z', label: <span style={{ color: axesColors.z }}>Z</span>, ariaLabel: 'Z-up' },
+  { value: 'x', label: <AxisLabel axis='x' />, ariaLabel: 'X-up' },
+  { value: 'y', label: <AxisLabel axis='y' />, ariaLabel: 'Y-up' },
+  { value: 'z', label: <AxisLabel axis='z' />, ariaLabel: 'Z-up' },
 ];
 
 /** The widest field of view in degrees; 0° is orthographic. */
@@ -78,11 +78,6 @@ type ViewerSettingsProps = {
    * Optional className for styling
    */
   readonly className?: ClassValue;
-  /**
-   * Controls that have overflowed from the toolbar, rendered at the top of the dropdown.
-   * When undefined or empty, the dropdown renders exactly as usual.
-   */
-  readonly overflowControls?: React.ReactNode;
   /** The side of the trigger the menu opens on. A centred bar opens it upward. */
   readonly side?: DropdownMenuContentProps['side'];
   /** How the menu aligns against the trigger. */
@@ -162,15 +157,12 @@ function FieldOfViewRow(): React.JSX.Element {
  * All settings are per-view, read from the per-view GraphicsMachine state via GraphicsProvider
  * and the per-view CadMachine state via CadProvider.
  */
-export function ViewerSettings({
-  className,
-  overflowControls,
-  side = 'right',
-  align = 'end',
-}: ViewerSettingsProps): React.ReactNode {
+export function ViewerSettings({ className, side = 'right', align = 'end' }: ViewerSettingsProps): React.ReactNode {
   const graphicsRef = useGraphics();
 
   const [isOpen, setIsOpen] = useState(false);
+  // A press outside leaves focus with the pointer; a keyboard close returns it to the trigger.
+  const isClosingFromPointerRef = useRef(false);
 
   // Read all settings from per-view graphicsMachine state via context
   const enableSurfaces = useGraphicsSelector((state) => state.context.enableSurfaces);
@@ -274,8 +266,14 @@ export function ViewerSettings({
         side={side}
         className='w-72'
         onEscapeKeyDown={preventMenuSliderEscapeDismissal}
+        onPointerDownOutside={() => {
+          isClosingFromPointerRef.current = true;
+        }}
         onCloseAutoFocus={(event) => {
-          event.preventDefault();
+          if (isClosingFromPointerRef.current) {
+            event.preventDefault();
+          }
+          isClosingFromPointerRef.current = false;
         }}
       >
         {!is2dGeometry && (
@@ -373,13 +371,6 @@ export function ViewerSettings({
           <Timer />
           Timeout
         </DropdownMenuSelectItem>
-        {overflowControls !== undefined && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel>Controls</DropdownMenuLabel>
-            {overflowControls}
-          </>
-        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

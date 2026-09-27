@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { FlipHorizontal, Ruler } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { Separator } from '@taucad/ui/components/separator';
@@ -82,7 +82,8 @@ type ChatViewerControlsProps = Readonly<{
  * Section and Measure toggles, Fit view and Capture, and Viewer settings. Below 520 px of viewer width
  * (`@container/viewer`) the toggles and the grid readout drop to their glyphs. The bar never shrinks below its rows,
  * so a host strip narrower than the bar must start it at its left edge (`items-center-safe`), keeping the grid readout
- * and Section in view. The bar also owns the viewer's keyboard shortcuts.
+ * and Section in view. The bar also owns the viewer's keyboard shortcuts, and speaks each one's result in a polite
+ * live region.
  */
 export function ChatViewerControls({ shouldEnableCapture = true }: ChatViewerControlsProps): React.JSX.Element {
   const graphicsRef = useGraphics();
@@ -90,7 +91,12 @@ export function ChatViewerControls({ shouldEnableCapture = true }: ChatViewerCon
   const is2dGeometry = useGraphicsSelector((state) => state.context.geometry?.format === 'svg');
   const isSectionViewActive = useGraphicsSelector((state) => state.context.isSectionViewActive);
   const isMeasureActive = useGraphicsSelector((state) => state.context.isMeasureActive);
-  const keys = useViewerShortcuts(barRef);
+  // Counted, so a phrase said twice in a row is a new node and is announced again.
+  const [announcement, setAnnouncement] = useState({ phrase: '', count: 0 });
+  const announce = useCallback((phrase: string) => {
+    setAnnouncement(({ count }) => ({ phrase, count: count + 1 }));
+  }, []);
+  const keys = useViewerShortcuts(barRef, announce);
 
   const stopSection = useCallback(() => {
     graphicsRef.send({ type: 'setSectionViewActive', payload: false });
@@ -156,6 +162,9 @@ export function ChatViewerControls({ shouldEnableCapture = true }: ChatViewerCon
           className='size-7 border-0 bg-transparent shadow-none hover:bg-accent/50 dark:hover:bg-accent/80'
         />
       </div>
+      <span role='status' className='sr-only'>
+        <span key={announcement.count}>{announcement.phrase}</span>
+      </span>
     </div>
   );
 }

@@ -1,13 +1,15 @@
 //! Exact STEP connected components (M2; rulings 5 and 28). Bodies come from
 //! the retained BRep and exact boxes plus tolerance are only the broad phase.
 //! The O3-07 narrow phase decides each candidate pair: face-box separation,
-//! then face pairs nearest first with an early exit on contact, then a
-//! whole-body distance only where one solid's box holds the other's, since
-//! a nested body is at distance zero with no face near it. Union-find skips
-//! joined pairs, and pairs run in cost order (face pairs first, whole bodies
-//! after), so a costly near miss inside an already joined component never
-//! runs. Every evaluation is charged before it runs: one unit per face pair
-//! and faces x faces per whole-body distance.
+//! then the vertex, edge and face pairs of the faces in near face pairs,
+//! nearest first with an early exit on contact, then a whole-body distance
+//! only where one solid's box holds the other's, since a nested body is at
+//! distance zero with no face near it. Union-find skips joined pairs, and
+//! pairs run in cost order (face pairs first, whole bodies after), so a
+//! costly near miss inside an already joined component never runs. Every
+//! step is charged before it runs (ruling 28): face-box tests by the 4,096,
+//! the native steps as the bridge prices them, and faces x faces per
+//! whole-body distance.
 
 use super::{
     center, compare_utf16, empty_aabb, expand, find, overlaps_within, partial_cmp, sweep_axis,
@@ -15,20 +17,23 @@ use super::{
 };
 use crate::{
     backend::{
-        brep::{Bounds, ComponentBodies, ComponentBody},
-        BackendError,
+        brep::{Bounds, Charge, ComponentBodies, ComponentBody},
+        BackendError, BackendErrorKind,
     },
     budget::{Budget, BudgetExceeded},
 };
 
+/// Face-box tests per work unit.
+const BOX_TESTS_PER_UNIT: u64 = 4096;
+
 /// Why exact components stopped: a charge that would pass the budget, with
-/// the body pair it was for, or a kernel failure.
+/// the body pair it was for (none while measuring the bodies), or a kernel
+/// failure.
 #[derive(Debug)]
 pub(crate) enum ExactError {
     Budget {
         exceeded: BudgetExceeded,
-        left: usize,
-        right: usize,
+        pair: Option<(usize, usize)>,
     },
     Backend(BackendError),
 }
@@ -36,6 +41,31 @@ pub(crate) enum ExactError {
 impl From<BackendError> for ExactError {
     fn from(error: BackendError) -> Self {
         Self::Backend(error)
+    }
+}
+
+/// Runs a native step whose charges refuse past the budget; a stopped step
+/// becomes the refusal for `pair`.
+pub(crate) fn ask<T>(
+    budget: &Budget,
+    pair: Option<(usize, usize)>,
+    step: impl FnOnce(&mut Charge<'_>) -> Result<Option<T>, BackendError>,
+) -> Result<T, ExactError> {
+    let mut refused = None;
+    let answer = step(&mut |units| match charge(budget, units) {
+        Ok(()) => true,
+        Err(exceeded) => {
+            refused = Some(exceeded);
+            false
+        }
+    })?;
+    match (answer, refused) {
+        (_, Some(exceeded)) => Err(ExactError::Budget { exceeded, pair }),
+        (Some(answer), None) => Ok(answer),
+        (None, None) => Err(ExactError::Backend(BackendError {
+            kind: BackendErrorKind::ComputationFailed,
+            message: "A native step stopped without a refused charge.".into(),
+        })),
     }
 }
 
@@ -49,14 +79,26 @@ pub(crate) fn exact_clusters(
 ) -> Result<Vec<ClusterReport>, ExactError> {
     let list = bodies.bodies();
     let mut parent: Vec<usize> = (0..list.len()).collect();
-    let mut pairs = candidate_pairs(list, tolerance);
-    pairs.sort_unstable();
+    let mut pairs = candidate_pairs(list, tolerance, budget)?;
+    pairs.sort_unstable_by_key(|pair| (pair.count, pair.left, pair.right));
     let mut nested = Vec::new();
-    for (_, left, right) in pairs {
+    for pair in pairs {
+        let (left, right) = (pair.left, pair.right);
         if find(&mut parent, left) == find(&mut parent, right) {
             continue;
         }
-        if faces_touch(bodies, left, right, tolerance, budget)? {
+        let touching = pair.count > 0
+            && ask(budget, Some((left, right)), |charge| {
+                bodies.faces_within(
+                    left,
+                    &pair.left_faces,
+                    right,
+                    &pair.right_faces,
+                    tolerance,
+                    charge,
+                )
+            })?;
+        if touching {
             union(&mut parent, left, right);
         } else if holds(&list[left], &list[right], tolerance)
             || holds(&list[right], &list[left], tolerance)
@@ -71,7 +113,10 @@ pub(crate) fn exact_clusters(
         if find(&mut parent, left) == find(&mut parent, right) {
             continue;
         }
-        charge(budget, units, left, right)?;
+        charge(budget, units).map_err(|exceeded| ExactError::Budget {
+            exceeded,
+            pair: Some((left, right)),
+        })?;
         if bodies.bodies_within(left, right, tolerance)? {
             union(&mut parent, left, right);
         }
@@ -85,22 +130,17 @@ fn union(parent: &mut [usize], left: usize, right: usize) {
     parent[left] = right;
 }
 
-/// Checked before charging, so a refused pair never leaves the budget
-/// spent past its limit, where the plan would refuse without the pair.
-fn charge(budget: &Budget, units: u64, left: usize, right: usize) -> Result<(), ExactError> {
-    let refused = |exceeded| ExactError::Budget {
-        exceeded,
-        left,
-        right,
-    };
+/// Checked before charging, so a refused step never leaves the budget spent
+/// past its limit, where the plan would refuse without the pair.
+fn charge(budget: &Budget, units: u64) -> Result<(), BudgetExceeded> {
     let used = budget.used().saturating_add(units);
     if used > budget.limit() {
-        return Err(refused(BudgetExceeded {
+        return Err(BudgetExceeded {
             limit: budget.limit(),
             used,
-        }));
+        });
     }
-    budget.charge(units).map_err(refused)
+    budget.charge(units)
 }
 
 fn aabb(bounds: Bounds) -> Aabb {
@@ -110,9 +150,23 @@ fn aabb(bounds: Bounds) -> Aabb {
     }
 }
 
-/// Broad-phase pairs whose boxes overlap within `tolerance`, each with the
-/// count of its face pairs, which orders the narrow phase cheapest first.
-fn candidate_pairs(list: &[ComponentBody], tolerance: f64) -> Vec<(usize, usize, usize)> {
+/// A broad-phase pair: its near face pairs' count, which orders the narrow
+/// phase cheapest first, and the faces those pairs use on each side.
+struct Candidate {
+    count: usize,
+    left: usize,
+    right: usize,
+    left_faces: Vec<u32>,
+    right_faces: Vec<u32>,
+}
+
+/// Broad-phase pairs whose boxes overlap within `tolerance`. Each pair's
+/// face-box tests are charged (by their faces x faces bound) before they run.
+fn candidate_pairs(
+    list: &[ComponentBody],
+    tolerance: f64,
+    budget: &Budget,
+) -> Result<Vec<Candidate>, ExactError> {
     let axis = sweep_axis(list.iter().map(|body| aabb(body.bounds)));
     let mut order: Vec<usize> = (0..list.len()).collect();
     order.sort_by(|&left, &right| {
@@ -129,12 +183,25 @@ fn candidate_pairs(list: &[ComponentBody], tolerance: f64) -> Vec<(usize, usize,
             }
             if overlaps_within(bounds, other, tolerance) {
                 let (left, right) = (current.min(candidate), current.max(candidate));
-                let count = face_pairs(&list[left], &list[right], tolerance).len();
-                pairs.push((count, left, right));
+                let tests =
+                    (list[left].faces.len() as u64).saturating_mul(list[right].faces.len() as u64);
+                charge(budget, 1 + tests / BOX_TESTS_PER_UNIT).map_err(|exceeded| {
+                    ExactError::Budget {
+                        exceeded,
+                        pair: Some((left, right)),
+                    }
+                })?;
+                pairs.push(face_pairs(
+                    &list[left],
+                    &list[right],
+                    left,
+                    right,
+                    tolerance,
+                ));
             }
         }
     }
-    pairs
+    Ok(pairs)
 }
 
 /// Euclidean distance between two boxes, zero when they meet.
@@ -150,52 +217,45 @@ fn box_distance(left: Bounds, right: Bounds) -> f64 {
     squares.sqrt()
 }
 
-/// Face pairs whose memo boxes lie within `tolerance`, nearest first. The
-/// boxes enclose their faces, so any other pair is proven apart.
+/// The face pairs whose memo boxes lie within `tolerance`. The boxes enclose
+/// their faces, so any other face pair is proven apart.
 fn face_pairs(
     left: &ComponentBody,
     right: &ComponentBody,
+    left_index: usize,
+    right_index: usize,
     tolerance: f64,
-) -> Vec<(f64, usize, usize)> {
+) -> Candidate {
     let near = |faces: &[Bounds], other: Bounds| -> Vec<usize> {
         (0..faces.len())
             .filter(|&face| box_distance(faces[face], other) <= tolerance)
             .collect()
     };
-    let left_faces = near(&left.faces, right.bounds);
-    let right_faces = near(&right.faces, left.bounds);
-    let mut pairs = Vec::new();
-    for &left_face in &left_faces {
-        for &right_face in &right_faces {
-            let distance = box_distance(left.faces[left_face], right.faces[right_face]);
-            if distance <= tolerance {
-                pairs.push((distance, left_face, right_face));
+    let mut left_used = vec![false; left.faces.len()];
+    let mut right_used = vec![false; right.faces.len()];
+    let mut count = 0;
+    let right_near = near(&right.faces, left.bounds);
+    for left_face in near(&left.faces, right.bounds) {
+        for &right_face in &right_near {
+            if box_distance(left.faces[left_face], right.faces[right_face]) <= tolerance {
+                count += 1;
+                left_used[left_face] = true;
+                right_used[right_face] = true;
             }
         }
     }
-    pairs.sort_by(|a, b| {
-        partial_cmp(a.0, b.0)
-            .then_with(|| a.1.cmp(&b.1))
-            .then_with(|| a.2.cmp(&b.2))
-    });
-    pairs
-}
-
-fn faces_touch(
-    bodies: &dyn ComponentBodies,
-    left: usize,
-    right: usize,
-    tolerance: f64,
-    budget: &Budget,
-) -> Result<bool, ExactError> {
-    let list = bodies.bodies();
-    for (_, left_face, right_face) in face_pairs(&list[left], &list[right], tolerance) {
-        charge(budget, 1, left, right)?;
-        if bodies.faces_within(left, left_face, right, right_face, tolerance)? {
-            return Ok(true);
-        }
+    let used = |flags: Vec<bool>| -> Vec<u32> {
+        (0..flags.len() as u32)
+            .filter(|&face| flags[face as usize])
+            .collect()
+    };
+    Candidate {
+        count,
+        left: left_index,
+        right: right_index,
+        left_faces: used(left_used),
+        right_faces: used(right_used),
     }
-    Ok(false)
 }
 
 /// Whether `inner` can lie inside the solid `outer`'s material.
@@ -289,7 +349,9 @@ mod tests {
         }
     }
 
-    /// Verdicts by body pair; every evaluation is recorded.
+    /// Verdicts by body pair; every evaluation is recorded. A face query
+    /// charges one unit per listed face pair.
+    #[derive(Default)]
     struct Fake {
         bodies: Vec<ComponentBody>,
         touching: HashSet<(usize, usize)>,
@@ -304,13 +366,17 @@ mod tests {
         fn faces_within(
             &self,
             left: usize,
-            _: usize,
+            left_faces: &[u32],
             right: usize,
-            _: usize,
+            right_faces: &[u32],
             _: f64,
-        ) -> Result<bool, BackendError> {
+            charge: &mut Charge<'_>,
+        ) -> Result<Option<bool>, BackendError> {
             self.calls.borrow_mut().push(("faces", left, right));
-            Ok(self.touching.contains(&(left, right)))
+            if !charge((left_faces.len() * right_faces.len()) as u64) {
+                return Ok(None);
+            }
+            Ok(Some(self.touching.contains(&(left, right))))
         }
         fn bodies_within(&self, left: usize, right: usize, _: f64) -> Result<bool, BackendError> {
             self.calls.borrow_mut().push(("bodies", left, right));
@@ -323,7 +389,8 @@ mod tests {
     }
 
     /// Three bodies on x: 0-1 (2 face pairs) and 1-2 (3) touch, 0-2 (6) is
-    /// a near miss that a joined component never evaluates.
+    /// a near miss that a joined component never evaluates. Each broad-phase
+    /// pair costs one unit.
     fn chain(touching: &[(usize, usize)]) -> Fake {
         let unit = |x: f64| slab([x, 0.0, 0.0], [x + 1.0, 1.0, 1.0]);
         Fake {
@@ -334,8 +401,7 @@ mod tests {
                 body(vec![slab([0.5, 0.0, 0.0], [2.5, 1.0, 1.0]); 3], false, 8),
             ],
             touching: touching.iter().copied().collect(),
-            nested: HashSet::new(),
-            calls: RefCell::new(Vec::new()),
+            ..Fake::default()
         }
     }
 
@@ -346,20 +412,23 @@ mod tests {
         let clusters = exact_clusters(&fake, &labels(3), 0.001, &budget).unwrap();
         assert_eq!(clusters.len(), 1);
         assert_eq!(*fake.calls.borrow(), [("faces", 0, 1), ("faces", 1, 2)]);
-        assert_eq!(budget.used(), 2);
+        assert_eq!(budget.used(), 3 + 2 + 3);
         // Heaviest body names the cluster; ties keep the first body.
         assert_eq!(clusters[0].label, "b0");
         assert_eq!(clusters[0].total_vertices, 20);
     }
 
     #[test]
-    fn a_near_miss_evaluates_every_face_pair_and_stays_apart() {
+    fn a_near_miss_evaluates_its_faces_and_stays_apart() {
         let fake = chain(&[(0, 1)]);
         let budget = Budget::new(100);
         let clusters = exact_clusters(&fake, &labels(3), 0.001, &budget).unwrap();
-        // 1-2 (3 pairs) runs before 0-2 (6 pairs); both miss every face pair.
-        assert_eq!(fake.calls.borrow().len(), 1 + 3 + 6);
-        assert_eq!(budget.used(), 10);
+        // 1-2 (3 face pairs) runs before 0-2 (6); both miss.
+        assert_eq!(
+            *fake.calls.borrow(),
+            [("faces", 0, 1), ("faces", 1, 2), ("faces", 0, 2)]
+        );
+        assert_eq!(budget.used(), 3 + 2 + 3 + 6);
         assert_eq!(
             clusters
                 .iter()
@@ -371,20 +440,21 @@ mod tests {
 
     #[test]
     fn the_refusal_names_the_pair_whose_charge_would_pass_the_budget() {
-        let fake = chain(&[(0, 1), (1, 2)]);
-        let budget = Budget::new(1);
-        let Err(ExactError::Budget {
-            exceeded,
-            left,
-            right,
-        }) = exact_clusters(&fake, &labels(3), 0.001, &budget)
-        else {
-            panic!("expected a budget refusal");
-        };
-        assert_eq!((left, right), (1, 2));
-        assert_eq!((exceeded.limit, exceeded.used), (1, 2));
-        // Nothing is spent past the limit, so the plan keeps this refusal.
-        assert_eq!(budget.used(), 1);
+        for (limit, pair, used) in [(1, (0, 1), 2), (5, (1, 2), 8)] {
+            let fake = chain(&[(0, 1), (1, 2)]);
+            let budget = Budget::new(limit);
+            let Err(ExactError::Budget { exceeded, pair: at }) =
+                exact_clusters(&fake, &labels(3), 0.001, &budget)
+            else {
+                panic!("expected a budget refusal");
+            };
+            // The broad phase refuses its second pair at 1 unit; the narrow
+            // phase refuses 1-2's faces after 0-1 joined at 5.
+            assert_eq!(at, Some(pair));
+            assert_eq!((exceeded.limit, exceeded.used), (limit, used));
+            // Nothing is spent past the limit, so the plan keeps this refusal.
+            assert_eq!(budget.used(), limit);
+        }
     }
 
     #[test]
@@ -410,20 +480,19 @@ mod tests {
                     body(cube(0.0, 10.0), solid, 8),
                     body(cube(4.0, 6.0), true, 8),
                 ],
-                touching: HashSet::new(),
                 nested: if nested {
                     HashSet::from([(0, 1)])
                 } else {
                     HashSet::new()
                 },
-                calls: RefCell::new(Vec::new()),
+                ..Fake::default()
             };
             let budget = Budget::new(100);
             let clusters = exact_clusters(&fake, &labels(2), 0.001, &budget).unwrap();
             assert_eq!(clusters.len(), count);
             // Face boxes 4 mm apart prove the boundaries apart without a call.
             assert_eq!(fake.calls.borrow().len(), calls);
-            assert_eq!(budget.used(), 36 * calls as u64);
+            assert_eq!(budget.used(), 1 + 36 * calls as u64);
         }
     }
 
@@ -437,9 +506,7 @@ mod tests {
             .collect();
         let fake = Fake {
             bodies,
-            touching: HashSet::new(),
-            nested: HashSet::new(),
-            calls: RefCell::new(Vec::new()),
+            ..Fake::default()
         };
         let budget = Budget::new(1);
         let clusters = exact_clusters(&fake, &labels(64), 0.001, &budget).unwrap();

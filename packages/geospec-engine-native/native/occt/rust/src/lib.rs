@@ -7,10 +7,10 @@ extern crate self as geospec_engine_native_occt;
 mod finite_contact_engagement_tests;
 
 pub use geospec_engine_native_core::backend::brep::{
-    Bounds, BrepAdmissionFacts, BrepConnector, BrepEntity, BrepSubject, CircularBoreCandidate,
-    CircularBoreDisposition, CircularBoreEnd, CircularBoreInventory, CircularBoreNonMember,
-    CircularBoreTermination, CircularBoreTopology, CircularBoreUnqualified, ComponentBodies,
-    ComponentBody, ContinuousWallDomain, ContinuousWallShape, CurveFacts,
+    Bounds, BrepAdmissionFacts, BrepConnector, BrepEntity, BrepSubject, Charge,
+    CircularBoreCandidate, CircularBoreDisposition, CircularBoreEnd, CircularBoreInventory,
+    CircularBoreNonMember, CircularBoreTermination, CircularBoreTopology, CircularBoreUnqualified,
+    ComponentBodies, ComponentBody, ContinuousWallDomain, ContinuousWallShape, CurveFacts,
     CylinderAttachmentProfile, CylinderAxialExtent, CylinderBoundaryOrientation,
     CylinderBoundarySide, CylinderBoundaryUse, CylinderPeriodicAttachment, CylinderVertex,
     CylindricalBandBoundaryResidual, CylindricalBandProfile, CylindricalBandRim,
@@ -29,7 +29,12 @@ pub use geospec_engine_native_core::backend::brep::{
 };
 use geospec_engine_native_core::backend::pmi::{PmiFaceAssociation, PmiField, PmiFieldStatus};
 use geospec_engine_native_core::backend::{BackendError, BackendErrorKind, TriangleMesh};
-use std::{cell::OnceCell, ffi::c_char, ptr::NonNull, rc::Rc};
+use std::{
+    cell::OnceCell,
+    ffi::{c_char, c_void},
+    ptr::NonNull,
+    rc::Rc,
+};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct OcctConnector;
@@ -838,24 +843,29 @@ impl BrepSubject for Document {
     fn component_bodies(
         &self,
         occurrences: &[u32],
-    ) -> Result<Box<dyn ComponentBodies + '_>, BackendError> {
+        charge: &mut Charge<'_>,
+    ) -> Result<Option<Box<dyn ComponentBodies + '_>>, BackendError> {
         let mut raw = std::ptr::null_mut();
         let (mut body_count, mut face_count) = (0, 0);
         let mut error = ErrorBuffer::new();
-        unsafe {
-            check(
-                ffi::geospec_occt_component_bodies_new(
-                    self.raw.as_ptr(),
-                    occurrences.as_ptr(),
-                    occurrences.len(),
-                    &mut raw,
-                    &mut body_count,
-                    &mut face_count,
-                    error.raw(),
-                ),
-                &error,
-            )?;
+        let mut charge = charge;
+        let status = unsafe {
+            ffi::geospec_occt_component_bodies_new(
+                self.raw.as_ptr(),
+                occurrences.as_ptr(),
+                occurrences.len(),
+                charge_units,
+                charge_context(&mut charge),
+                &mut raw,
+                &mut body_count,
+                &mut face_count,
+                error.raw(),
+            )
+        };
+        if status == ffi::STOPPED {
+            return Ok(None);
         }
+        check(status, &error)?;
         let raw = NonNull::new(raw).ok_or_else(|| backend_error("OCCT returned no bodies."))?;
         // Owned from here, so an error below still releases the set.
         let mut owned = OcctComponentBodies {
@@ -889,7 +899,7 @@ impl BrepSubject for Document {
                 faces: faces.by_ref().take(body.face_count as usize).collect(),
             })
             .collect();
-        Ok(Box::new(owned))
+        Ok(Some(Box::new(owned)))
     }
 
     fn classify_face_points(
@@ -996,32 +1006,36 @@ impl ComponentBodies for OcctComponentBodies<'_> {
     fn faces_within(
         &self,
         left: usize,
-        left_face: usize,
+        left_faces: &[u32],
         right: usize,
-        right_face: usize,
+        right_faces: &[u32],
         tolerance: f64,
-    ) -> Result<bool, BackendError> {
-        let face = |value: usize| {
-            u32::try_from(value).map_err(|_| invalid_input("Component face index overflows."))
-        };
+        charge: &mut Charge<'_>,
+    ) -> Result<Option<bool>, BackendError> {
         let mut within = 0;
         let mut error = ErrorBuffer::new();
-        unsafe {
-            check(
-                ffi::geospec_occt_component_faces_within(
-                    self.raw.as_ptr(),
-                    left,
-                    face(left_face)?,
-                    right,
-                    face(right_face)?,
-                    tolerance,
-                    &mut within,
-                    error.raw(),
-                ),
-                &error,
-            )?;
+        let mut charge = charge;
+        let status = unsafe {
+            ffi::geospec_occt_component_faces_within(
+                self.raw.as_ptr(),
+                left,
+                left_faces.as_ptr(),
+                left_faces.len(),
+                right,
+                right_faces.as_ptr(),
+                right_faces.len(),
+                tolerance,
+                charge_units,
+                charge_context(&mut charge),
+                &mut within,
+                error.raw(),
+            )
+        };
+        if status == ffi::STOPPED {
+            return Ok(None);
         }
-        Ok(within != 0)
+        check(status, &error)?;
+        Ok(Some(within != 0))
     }
 
     fn bodies_within(
@@ -1267,6 +1281,18 @@ impl ErrorBuffer {
         let length = self.raw.length.min(self.bytes.len());
         String::from_utf8_lossy(&self.bytes[..length]).into_owned()
     }
+}
+
+/// The bridge's charge callback over a `&mut Charge` context; nonzero stops
+/// the step before the work it prices.
+unsafe extern "C" fn charge_units(context: *mut c_void, units: u64) -> i32 {
+    // SAFETY: `context` comes from `charge_context` for the call in progress.
+    let charge = unsafe { &mut *context.cast::<&mut Charge<'_>>() };
+    i32::from(!charge(units))
+}
+
+fn charge_context(charge: &mut &mut Charge<'_>) -> *mut c_void {
+    (charge as *mut &mut Charge<'_>).cast()
 }
 
 fn check(status: i32, error: &ErrorBuffer) -> Result<(), BackendError> {
@@ -3543,7 +3569,9 @@ impl TryFrom<ffi::FaceFacts> for FaceFacts {
 }
 
 mod ffi {
-    use super::c_char;
+    use super::{c_char, c_void};
+
+    pub type Charge = unsafe extern "C" fn(context: *mut c_void, units: u64) -> i32;
 
     pub const OK: i32 = 0;
     pub const INVALID_ARGUMENT: i32 = 1;
@@ -3552,6 +3580,7 @@ mod ffi {
     pub const NO_SHAPE: i32 = 4;
     pub const BUFFER_TOO_SMALL: i32 = 6;
     pub const UNSUPPORTED: i32 = 7;
+    pub const STOPPED: i32 = 8;
     pub const REPORT_MESH: u32 = 1;
     pub const REPORT_FACTS: u32 = 2;
     pub const REPORT_FACES: u32 = 4;
@@ -4241,6 +4270,8 @@ mod ffi {
             document: *const Document,
             occurrences: *const u32,
             occurrence_count: usize,
+            charge: Charge,
+            context: *mut c_void,
             bodies: *mut *mut ComponentBodies,
             body_count: *mut usize,
             face_count: *mut usize,
@@ -4258,10 +4289,14 @@ mod ffi {
         pub fn geospec_occt_component_faces_within(
             bodies: *const ComponentBodies,
             left: usize,
-            left_face: u32,
+            left_faces: *const u32,
+            left_count: usize,
             right: usize,
-            right_face: u32,
+            right_faces: *const u32,
+            right_count: usize,
             tolerance: f64,
+            charge: Charge,
+            context: *mut c_void,
             within: *mut i32,
             error: *mut StringBuffer,
         ) -> i32;

@@ -23,8 +23,14 @@ enum geospec_occt_status {
   GEOSPEC_OCCT_NO_SHAPE = 4,
   GEOSPEC_OCCT_NATIVE_ERROR = 5,
   GEOSPEC_OCCT_BUFFER_TOO_SMALL = 6,
-  GEOSPEC_OCCT_UNSUPPORTED = 7
+  GEOSPEC_OCCT_UNSUPPORTED = 7,
+  GEOSPEC_OCCT_STOPPED = 8
 };
+
+// Ruling 28: a step asks for the work units of its next piece of work before
+// running it. A nonzero return refuses them: the step then returns
+// GEOSPEC_OCCT_STOPPED without doing that work.
+typedef int (*geospec_occt_charge)(void* context, uint64_t units);
 
 enum geospec_occt_surface_type {
   GEOSPEC_OCCT_SURFACE_PLANE = 0,
@@ -721,13 +727,14 @@ int geospec_occt_validity_dedicated(
 // M2 narrow phase. The bodies of the listed occurrences (the whole shape when
 // the count is zero) are their top-level solids, then free shells, then free
 // faces, each with its faces' boxes from the per-located-face memo; bodies
-// without a finite face box are omitted. The caller releases the set before
-// the document. `facts` writes every body, then every face box in body order.
+// without a finite face box are omitted. The boxes are charged before any is
+// measured. The caller releases the set before the document. `facts` writes
+// every body, then every face box in body order.
 int geospec_occt_component_bodies_new(
     const geospec_occt_document* document, const uint32_t* occurrences,
-    size_t occurrence_count, geospec_occt_component_bodies** out_bodies,
-    size_t* out_body_count, size_t* out_face_count,
-    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+    size_t occurrence_count, geospec_occt_charge charge, void* context,
+    geospec_occt_component_bodies** out_bodies, size_t* out_body_count,
+    size_t* out_face_count, geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 void geospec_occt_component_bodies_release(
     geospec_occt_component_bodies* bodies) GEOSPEC_OCCT_NOEXCEPT;
 int geospec_occt_component_bodies_facts(
@@ -735,11 +742,18 @@ int geospec_occt_component_bodies_facts(
     geospec_occt_component_body* out_bodies, size_t body_capacity,
     geospec_occt_bounds* out_face_bounds, size_t face_capacity,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
-// Serial exact distance of two faces: *out_within = distance <= tolerance.
+// Whether any listed face of `left` lies within `tolerance` of any listed face
+// of `right`. The vertices, edges and faces of the listed faces pair up as the
+// exact shape distance decomposes them; the pairs whose boxes lie within
+// reach of the tolerance run that distance's per-pair extrema, serially,
+// nearest box first, each charged before it runs, until one lies within the
+// tolerance. A verdict only, never a point.
 int geospec_occt_component_faces_within(
     const geospec_occt_component_bodies* bodies, size_t left,
-    uint32_t left_face, size_t right, uint32_t right_face, double tolerance,
-    int* out_within, geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
+    const uint32_t* left_faces, size_t left_count, size_t right,
+    const uint32_t* right_faces, size_t right_count, double tolerance,
+    geospec_occt_charge charge, void* context, int* out_within,
+    geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 // Whole-body exact distance (a solid's interior counts as distance zero),
 // parallel within a grant of two or more; a verdict only, never a point.
 int geospec_occt_component_bodies_within_dedicated(

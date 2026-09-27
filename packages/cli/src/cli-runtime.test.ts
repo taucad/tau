@@ -22,6 +22,7 @@ const builtInKernelIds = [
   'gltf',
   'brep',
   'rhino',
+  'tscircuit',
   'assimp',
 ];
 

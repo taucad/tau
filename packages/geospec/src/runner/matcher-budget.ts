@@ -90,9 +90,12 @@ let activeBudget: ActiveBudget | undefined;
  * charge each native step before it runs, priced by kind: face boxes by
  * surface kind and edge count, the near-pair decomposition, sweep box tests,
  * and a calibrated class price per vertex, edge or face pair, about 20 µs per
- * unit on the calibration host. The in-process proofs that call
- * {@link chargeBudget} charge one unit per classification point, extrema
- * solve or pair volume.
+ * unit on the calibration host. Exact STEP overlap charges its leaf boxes
+ * and box tests the same way, then each candidate pair's face-box tests,
+ * each operand's first qualification by edge count, and the Common by faces
+ * and meeting face pairs, dearer for free-form or near-coincident surfaces
+ * and B-spline edges. The in-process proofs that call {@link chargeBudget}
+ * charge one unit per classification point, extrema solve or pair volume.
  */
 /** Default unit budget for matcher families without a dedicated entry. */
 const defaultUnitBudget = 8_000_000;

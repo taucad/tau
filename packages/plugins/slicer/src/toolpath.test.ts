@@ -90,7 +90,7 @@ describe('parseGcode', () => {
     it('should record the source digest and parser identity', () => {
       expect(program.source).toEqual({
         digest: 'sha256:0967e63c5dab107b89d9d0ce4215de99b65b731c962bbced32b1bb8986e4ac50',
-        parser: { id: 'tau.slicer.toolpath', version: '2' },
+        parser: { id: 'tau.slicer.toolpath', version: '3' },
       });
       expect(program.version).toBe(1);
       expect(program.units).toBe('mm');
@@ -298,6 +298,38 @@ describe('parseGcode', () => {
       );
       expect(program.layerTable.map((layer) => layer.z)).toEqual([0.2, 0.4]);
       expect([...program.kinds].map((kind) => toolpathSegmentKinds[kind])).toEqual(['travel', 'outer-wall', 'infill']);
+    });
+
+    it('should classify every feature label a Bambu Studio 02.08.02.61 slice writes', () => {
+      // Every `; FEATURE:` label of one local slice with supports, brim, skirt and ironing on.
+      const labels = [
+        ['Outer wall', 'outer-wall'],
+        ['Inner wall', 'inner-wall'],
+        ['Overhang wall', 'inner-wall'],
+        ['Floating vertical shell', 'inner-wall'],
+        ['Sparse infill', 'infill'],
+        ['Internal solid infill', 'infill'],
+        ['Top surface', 'infill'],
+        ['Bottom surface', 'infill'],
+        ['Bridge', 'infill'],
+        ['Ironing', 'infill'],
+        ['Support', 'support'],
+        ['Support interface', 'support'],
+        ['Skirt', 'skirt'],
+        ['Brim', 'brim'],
+        ['Custom', 'purge'],
+      ] as const;
+      const program = parseGcode(
+        [
+          'G90',
+          'M83',
+          'G28',
+          'M104 S220',
+          'G1 X0 F3000',
+          ...labels.flatMap(([label], index) => [`; FEATURE: ${label}`, `G1 X${index + 1} E0.1`]),
+        ].join('\n'),
+      );
+      expect([...program.kinds].map((kind) => toolpathSegmentKinds[kind])).toEqual(labels.map(([, kind]) => kind));
     });
 
     it('should sweep clockwise arcs the long way when the words demand it and honour R arcs', () => {

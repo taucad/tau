@@ -1,8 +1,10 @@
 import { expect, it, vi } from 'vitest';
 import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
 import type { FsLike } from '@taucad/runtime/filesystem';
+import type * as RuntimeFileSystemModule from '@taucad/runtime/filesystem';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import { handleAgentHostWorkerRequest } from '#workers/agent-host.impl.js';
+import type * as GeoSpecClientModule from '#workers/geospec-runner.client.js';
 
 /**
  * What the agent-host worker hands the executors of project code (G0-2, W14).
@@ -23,8 +25,7 @@ const executorSeams = vi.hoisted(() => ({
 }));
 
 vi.mock('@taucad/runtime/filesystem', async (importOriginal) => {
-  type RuntimeFileSystemModule = typeof import('@taucad/runtime/filesystem');
-  const original = await importOriginal<RuntimeFileSystemModule>();
+  const original = await importOriginal<typeof RuntimeFileSystemModule>();
   return {
     ...original,
     fromFsLike: (fsLike: FsLike) => {
@@ -35,11 +36,12 @@ vi.mock('@taucad/runtime/filesystem', async (importOriginal) => {
 });
 
 vi.mock('#workers/geospec-runner.client.js', async (importOriginal) => {
-  type GeoSpecClientModule = typeof import('#workers/geospec-runner.client.js');
-  const original = await importOriginal<GeoSpecClientModule>();
+  const original = await importOriginal<typeof GeoSpecClientModule>();
   return {
     ...original,
-    createGeoSpecWorkerRpcClient: (options: Parameters<GeoSpecClientModule['createGeoSpecWorkerRpcClient']>[0]) => {
+    createGeoSpecWorkerRpcClient: (
+      options: Parameters<(typeof GeoSpecClientModule)['createGeoSpecWorkerRpcClient']>[0],
+    ) => {
       executorSeams.geoSpecBridges.push(options.openFileSystemBridge);
       return original.createGeoSpecWorkerRpcClient(options);
     },

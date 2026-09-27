@@ -23,6 +23,8 @@ type UpDirection = 'x' | 'y' | 'z';
 /** Environment cubemap resolution (px). Higher = sharper specular reflections. */
 const envResolution = 512;
 
+type PmremGenerator = PMREMGenerator | WebGpuPmremGenerator;
+
 /** Broad, low-energy panels keep metallic and back-facing surfaces readable. */
 const studioLeftFillIntensity = 1.2;
 const studioTopIntensity = 0.25;
@@ -92,23 +94,43 @@ export function Lights({
 
   const showEnvironment = useDeferredValue(!enableMatcap);
 
-  // Drei captures when its children identity changes. Only the environment's own
-  // geometry and radiance controls should recapture and filter all six faces.
-  const roomEnvironment = useMemo(() => <RoomLightingEnvironment />, []);
+  const generator = useMemo(() => (isViewportWebGpu(gl) ? new WebGpuPmremGenerator(gl) : new PMREMGenerator(gl)), [gl]);
+  useLayoutEffect(
+    () => () => {
+      generator.dispose();
+    },
+    [generator],
+  );
+
+  // Drei recaptures whenever its children change, so each environment is memoised on exactly
+  // what it draws. The studio is also keyed on those values: new radiance remounts the capture
+  // and its filter together. Only the environment's own geometry and radiance controls recapture.
+  const roomEnvironment = useMemo(() => <RoomLightingEnvironment generator={generator} />, [generator]);
   const whiteEnvironment = useMemo(
     () => (
-      <OwnedLightingEnvironment near={0.01} far={20}>
+      <OwnedLightingEnvironment generator={generator} near={0.01} far={20}>
         <mesh>
           <sphereGeometry args={[10, 32, 16]} />
           <meshBasicMaterial color='white' side={BackSide} toneMapped={false} />
         </mesh>
       </OwnedLightingEnvironment>
     ),
-    [],
+    [generator],
   );
   const studioEnvironment = useMemo(
     () => (
-      <OwnedLightingEnvironment near={clampedSceneRadius * 0.01} far={clampedSceneRadius * 20}>
+      <OwnedLightingEnvironment
+        key={[
+          clampedSceneRadius,
+          lighting.backgroundIntensity,
+          lighting.fillIntensity,
+          lighting.keyIntensity,
+          lighting.keySize,
+        ].join(':')}
+        generator={generator}
+        near={clampedSceneRadius * 0.01}
+        far={clampedSceneRadius * 20}
+      >
         <>
           <color attach='background' args={[0, 0, 0]} />
           {lighting.backgroundIntensity > 0 ? (
@@ -159,7 +181,14 @@ export function Lights({
         </>
       </OwnedLightingEnvironment>
     ),
-    [clampedSceneRadius, lighting.backgroundIntensity, lighting.fillIntensity, lighting.keyIntensity, lighting.keySize],
+    [
+      clampedSceneRadius,
+      generator,
+      lighting.backgroundIntensity,
+      lighting.fillIntensity,
+      lighting.keyIntensity,
+      lighting.keySize,
+    ],
   );
 
   return (
@@ -178,7 +207,7 @@ export function Lights({
 }
 
 /** Three.js's neutral room is a reproducible reference environment, owned by this mount. */
-function RoomLightingEnvironment(): React.JSX.Element {
+function RoomLightingEnvironment({ generator }: { readonly generator: PmremGenerator }): React.JSX.Element {
   const room = useMemo(() => new RoomEnvironment(), []);
   useLayoutEffect(
     () => () => {
@@ -187,7 +216,7 @@ function RoomLightingEnvironment(): React.JSX.Element {
     [room],
   );
   return (
-    <OwnedLightingEnvironment near={0.01} far={100}>
+    <OwnedLightingEnvironment generator={generator} near={0.01} far={100}>
       <primitive object={room} />
     </OwnedLightingEnvironment>
   );
@@ -196,21 +225,16 @@ function RoomLightingEnvironment(): React.JSX.Element {
 /** Own the filtered target while Drei owns the unchanged source cubemap capture. */
 function OwnedLightingEnvironment({
   children,
+  generator,
   near,
   far,
 }: {
   readonly children: React.ReactNode;
+  readonly generator: PmremGenerator;
   readonly near: number;
   readonly far: number;
 }): React.JSX.Element {
-  const { gl, scene, invalidate } = useThree();
-  const generator = useMemo(() => (isViewportWebGpu(gl) ? new WebGpuPmremGenerator(gl) : new PMREMGenerator(gl)), [gl]);
-  useLayoutEffect(
-    () => () => {
-      generator.dispose();
-    },
-    [generator],
-  );
+  const { scene, invalidate } = useThree();
   useLayoutEffect(() => {
     // The child Environment's layout effect has captured and installed its cubemap.
     // Supplying the finished PMREM bypasses Three's implicit, unowned texture cache.
@@ -228,7 +252,7 @@ function OwnedLightingEnvironment({
       }
       filtered.dispose();
     };
-  }, [children, generator, invalidate, scene]);
+  }, [generator, invalidate, scene]);
 
   return (
     <Environment resolution={envResolution} near={near} far={far}>

@@ -236,6 +236,7 @@ function ProjectChatItem({
                   descriptionId={`chat-status-${chat.id}`}
                   isActive={isActive}
                   isPending={isPending}
+                  state={{ openChat: true }}
                 />
               ) : (
                 <span className='fade-label flex-1 text-muted-foreground'>{chat.name}</span>

@@ -2,7 +2,14 @@ import { act, fireEvent, render } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as KeyboardModule from '#hooks/use-keyboard.js';
 
-const state = vi.hoisted(() => ({ isMobile: false }));
+const state = vi.hoisted(() => ({ isMobile: false, isEditorReady: true }));
+const route = vi.hoisted<{
+  key: string;
+  state: { openChat?: boolean; focusChatComposer?: boolean } | undefined;
+}>(() => ({
+  key: 'initial',
+  state: undefined,
+}));
 const send = vi.fn();
 type EditorOutputEvent = {
   readonly type: string;
@@ -28,6 +35,11 @@ vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ editorRef, mainEntryPath: 'main.ts' }),
 }));
 vi.mock('@taucad/ui/hooks/use-mobile', () => ({ useIsMobile: () => state.isMobile }));
+vi.mock('react-router', () => ({ useLocation: () => route }));
+vi.mock('@xstate/react', () => ({
+  useSelector: (_actor: unknown, selector: (snapshot: { matches: () => boolean }) => unknown) =>
+    selector({ matches: () => state.isEditorReady }),
+}));
 const stubKeybinding = (): ReturnType<typeof KeyboardModule.useKeybinding> => ({ formattedKeyCombination: '' });
 const keyboard = vi.hoisted(() => ({ useKeybinding: vi.fn<typeof KeyboardModule.useKeybinding>() }));
 vi.mock('#hooks/use-keyboard.js', async (importOriginal) => ({
@@ -50,6 +62,9 @@ function Probe(): React.JSX.Element {
 describe('ProjectWorkspaceProvider', () => {
   beforeEach(() => {
     state.isMobile = false;
+    state.isEditorReady = true;
+    route.key = 'initial';
+    route.state = undefined;
     send.mockClear();
     listeners.clear();
     keyboard.useKeybinding.mockImplementation(stubKeybinding);
@@ -80,6 +95,51 @@ describe('ProjectWorkspaceProvider', () => {
       workspace.connectWorkbench(opener);
     });
     expect(opener).toHaveBeenCalledExactlyOnceWith('files');
+  });
+
+  it('should reopen the chat pane on a sidebar chat navigation, including the selected chat', () => {
+    const rendered = render(
+      <ProjectWorkspaceProvider>
+        <Probe />
+      </ProjectWorkspaceProvider>,
+    );
+    expect(send).not.toHaveBeenCalled();
+
+    route.key = 'clicked-chat';
+    route.state = { openChat: true };
+    rendered.rerender(
+      <ProjectWorkspaceProvider>
+        <Probe />
+      </ProjectWorkspaceProvider>,
+    );
+
+    expect(send).toHaveBeenCalledExactlyOnceWith({
+      type: 'setPanelState',
+      panelState: { desktopLayout: { chatOpen: true, compactAuxiliary: 'chat' } },
+    });
+  });
+
+  it('should wait for the destination project editor before opening its chat pane', () => {
+    state.isEditorReady = false;
+    route.state = { openChat: true };
+    const rendered = render(
+      <ProjectWorkspaceProvider>
+        <Probe />
+      </ProjectWorkspaceProvider>,
+    );
+    expect(send).not.toHaveBeenCalled();
+
+    state.isEditorReady = true;
+    rendered.rerender(
+      <ProjectWorkspaceProvider>
+        <Probe />
+      </ProjectWorkspaceProvider>,
+    );
+
+    expect(send).toHaveBeenCalledExactlyOnceWith({
+      type: 'setPanelState',
+      panelState: { desktopLayout: { chatOpen: true, compactAuxiliary: 'chat' } },
+    });
   });
 
   it('opens Share in the desktop Workbench', () => {

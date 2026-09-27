@@ -10,6 +10,7 @@ import type { PicovoxelOptionsInput } from '@taucad/picovoxel';
 import { createNodeClient } from '@taucad/runtime/node';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { extractGltfFromExportResult, validateGlbData } from '@taucad/runtime-testing';
+import { kernelConfigurations } from '@taucad/types/constants';
 
 const createRuntime = (wasm?: PicovoxelOptionsInput['wasm']) =>
   defineRuntime({ plugins: [picovoxel(wasm ? { kernels: { default: { wasm } } } : undefined), esbuild()] });
@@ -75,6 +76,26 @@ describe('PicoVoxel packaged runtime', () => {
       expect(fast.success && stlHeader(fast.data[0]!.bytes)).toBe('PicoGK UNITS=mm LANE=fast');
     } finally {
       await client.shutdown({ drain: true });
+      client.terminate();
+    }
+  }, 180_000);
+
+  it('should render the catalog starter as an empty scene and refuse an empty STL export', async () => {
+    const starter = kernelConfigurations.find(({ id }) => id === 'picovoxel')!;
+    const directory = await mkdtemp(join(tmpdir(), 'tau-picovoxel-starter-'));
+    temporaryDirectories.push(directory);
+    await writeFile(join(directory, starter.mainFile), starter.emptyCode);
+    const client = await createNodeClient({ runtime: createRuntime(), projectPath: directory });
+    try {
+      const rendered = await client.render({ source: { path: starter.mainFile } });
+      expect(rendered.superseded || rendered.geometry.success).toBe(true);
+
+      const stl = await client.export('stl');
+      expect(stl.success).toBe(false);
+      expect(stl.success ? [] : stl.issues.map(({ message }) => message)).toEqual([
+        expect.stringContaining('no shapes to export'),
+      ]);
+    } finally {
       client.terminate();
     }
   }, 180_000);

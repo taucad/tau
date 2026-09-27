@@ -60,11 +60,13 @@ export const requireGitToolchain = async (): Promise<void> => {
  * Open the project's revisions, refusing a directory that has none.
  *
  * @param project - The `--project` argument, if any.
+ * @param session - The Tau Cloud API and session token a push travels with, when this verb pushes.
  * @returns The verbs, and the resolved project directory.
  * @throws CliError When no revision history exists there.
  */
 const open = async (
   project: string | undefined,
+  session: Readonly<{ apiBaseUrl?: string; apiToken?: string }> = {},
 ): Promise<Readonly<{ revisions: ProjectRevisionVerbs; workspaceRoot: string }>> => {
   const workspaceRoot = resolve(project ?? process.cwd());
   /* The binaries first, so "git-lfs is not installed" never reaches a person as
@@ -75,7 +77,7 @@ const open = async (
   if (!existsSync(workspaceRoot)) {
     throw cliError('NO_PROJECT', `${workspaceRoot} does not exist.`, exitCodes.refused);
   }
-  const revisions = openProjectRevisions({ workspaceRoot });
+  const revisions = openProjectRevisions({ workspaceRoot, ...session });
   try {
     await revisions.describeEngine();
   } catch {
@@ -311,13 +313,90 @@ const discardCommand = defineCommand({
   },
 });
 
+/**
+ * The session a save backs up to Tau Cloud with, when this terminal was given one.
+ *
+ * The same two values `tau publish` and `tau open` are told (P40), but optional:
+ * a save is recorded either way, and without them only a Git remote, or none,
+ * is backed up to.
+ *
+ * @returns The API origin and token, or nothing when either is unset.
+ */
+const optionalSession = (): Readonly<{ apiBaseUrl?: string; apiToken?: string }> => {
+  const apiBaseUrl = process.env['TAU_API_URL'];
+  const apiToken = process.env['TAU_API_TOKEN'];
+  return apiBaseUrl === undefined || apiBaseUrl === '' || apiToken === undefined || apiToken === ''
+    ? {}
+    : { apiBaseUrl, apiToken };
+};
+
+/** How a save's backup reads, after `Saved main · Rev 3.` */
+const backupSentences = {
+  backedUp: ' Backed up.',
+  noRemote: ' Saved on this device.',
+} as const;
+
+const saveCommand = defineCommand({
+  meta: {
+    name: 'save',
+    description:
+      'Record this project’s files as a revision and back it up (set TAU_API_URL and TAU_API_TOKEN to back up to Tau Cloud)',
+  },
+  args: projectArguments,
+  async run({ args }) {
+    const { revisions } = await open(args.project, optionalSession());
+    try {
+      const outcome = await revisions.save();
+      if (args.json) {
+        await emit({
+          kind: 'revision-save',
+          ok: outcome.status === 'saved' || outcome.status === 'unchanged',
+          ...outcome,
+        });
+      }
+      if (outcome.status === 'refused') {
+        throw cliError('SAVE_REFUSED', outcome.reason, exitCodes.refused);
+      }
+      /* Neither is a refusal: the save may still land, so a script is told
+       * the outcome is unknown rather than that it failed. */
+      if (outcome.status === 'timedOut') {
+        throw cliError('SAVE_TIMED_OUT', outcome.reason, exitCodes.unknown);
+      }
+      if (outcome.status === 'saved' && outcome.backup === 'timedOut') {
+        throw cliError(
+          'BACKUP_TIMED_OUT',
+          `Saved ${outcome.line}. ${outcome.reason ?? 'The backup did not answer in time.'}`,
+          exitCodes.unknown,
+        );
+      }
+      if (args.json) {
+        return;
+      }
+      /* A revision that is saved and not yet backed up is still saved: D28's
+       * queue carries the push, so this exits 0 and says what is owed. */
+      await writeStdout(
+        outcome.status === 'unchanged'
+          ? `Nothing new to save. ${outcome.line}\n`
+          : `Saved ${outcome.line}.${
+              outcome.backup === 'backedUp' || outcome.backup === 'noRemote'
+                ? backupSentences[outcome.backup]
+                : ` Not backed up: ${outcome.reason ?? 'the backup did not finish.'}`
+            }\n`,
+      );
+    } finally {
+      await revisions.close();
+    }
+  },
+});
+
 /** `tau revisions` command family. */
 export const revisionsCommand = defineCommand({
   meta: {
     name: 'revisions',
-    description: 'Read and move between a project’s revisions',
+    description: 'Record, read and move between a project’s revisions',
   },
   subCommands: {
+    save: saveCommand,
     log: logCommand,
     describe: describeCommand,
     diff: diffCommand,

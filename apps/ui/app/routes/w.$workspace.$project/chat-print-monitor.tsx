@@ -1,6 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
-import { Camera, Fan, Lightbulb, LoaderCircle, Pause, Play, ShieldAlert, Square, Wifi } from 'lucide-react';
+import {
+  Camera,
+  Fan,
+  Info,
+  Lightbulb,
+  LoaderCircle,
+  OctagonAlert,
+  Pause,
+  Play,
+  ShieldAlert,
+  Square,
+  TriangleAlert,
+  Wifi,
+} from 'lucide-react';
 import type {
+  MachineAlertSnapshot,
   MachineClient,
   MachineControlRunInput,
   MachineDirectoryEntry,
@@ -14,6 +28,8 @@ import { Button } from '@taucad/ui/components/button';
 import { Progress } from '@taucad/ui/components/progress';
 import { cn } from '@taucad/ui/utils/cn';
 import { randomUuid } from '@taucad/utils/id';
+import { isRecord } from '@taucad/utils/schema';
+import { ExternalLink } from '#components/external-link.js';
 import {
   PrintDisclosure,
   PrintNotice,
@@ -110,6 +126,87 @@ const temperature = (
       ? formatQuantity(current)
       : `${formatQuantity(current)} → ${formatQuantity(target)}`;
 
+const rebind = 'bind it again in Settings under Printers with the access code shown on its screen';
+
+/**
+ * What a person reads when a still capture fails, by the fixed code it rejects with: the camera
+ * leg (`@taucad/host`), its pinned connection and saved access code, and the host's own checks.
+ */
+const stillFailures: ReadonlyMap<string, string> = new Map([
+  [
+    'MACHINE_STILL_FFMPEG_MISSING',
+    'Tau could not find ffmpeg, which capturing a still needs; install it (with Homebrew on macOS: brew install ffmpeg; on Windows: winget install ffmpeg), then capture again.',
+  ],
+  [
+    'MACHINE_STILL_FFMPEG_FAILED',
+    'Tau could not start ffmpeg; reinstall it (with Homebrew on macOS: brew reinstall ffmpeg), then capture again.',
+  ],
+  ['MACHINE_STILL_AUTH_REJECTED', `The camera refused the printer's saved access code; ${rebind}.`],
+  ['MACHINE_SECRET_UNKNOWN', `Tau no longer has this printer's access code; ${rebind}.`],
+  [
+    'MACHINE_TLS_PIN_MISMATCH',
+    'The camera presented a different certificate from the one saved when the printer was bound, so Tau did not connect; if the printer was reset or replaced, bind it again in Settings under Printers.',
+  ],
+  [
+    'MACHINE_CONNECT_FAILED',
+    'Tau could not connect to the camera; check that the printer is on and on this network, then capture again.',
+  ],
+  [
+    'MACHINE_CONNECT_TIMEOUT',
+    'The camera did not answer in time; check that the printer is on and on this network, then capture again.',
+  ],
+  [
+    'MACHINE_STILL_TIMEOUT',
+    'The camera sent no picture in time; check that the printer is on and connected, then capture again.',
+  ],
+  [
+    'MACHINE_STILL_STREAM_FAILED',
+    "The camera's video stream broke off before a picture arrived; capture again in a moment.",
+  ],
+  [
+    'MACHINE_STILL_CAPTURE_FAILED',
+    "The camera's stream ended without a picture, which can happen while the camera wakes up; capture again in a moment.",
+  ],
+  ['MACHINE_STILL_TOO_LARGE', 'The camera sent a picture larger than Tau accepts, so it was discarded; capture again.'],
+  ['MACHINE_STILL_INVALID', 'The camera sent a picture Tau could not accept; capture again.'],
+  [
+    'MACHINE_STILL_PROXY_FAILED',
+    'Tau could not open its local connection to the camera on this computer; capture again, and restart Tau if it keeps failing.',
+  ],
+  [
+    'MACHINE_STILL_REQUEST_INVALID',
+    "Tau built an invalid request for this printer's camera, so nothing was sent; report this as a bug.",
+  ],
+  ['MACHINE_STILL_UNAVAILABLE', 'Tau is not connected to this printer right now; capture again once it reconnects.'],
+  ['MACHINE_STILL_RATE_LIMITED', 'Stills are limited to one every 5 seconds; wait a moment, then capture again.'],
+]);
+
+const unknownStillFailure = 'The camera could not capture a still; capture again in a moment.';
+
+/**
+ * A failed still capture in the person's words. The machine channel carries the code as the
+ * message and a desktop shell may wrap it in its own words, so the code is looked for anywhere in
+ * the message, after the error's own `code`. A failure that names no known code keeps a generic
+ * sentence plus the code, or the message when it names none.
+ *
+ * @param error - What `captureStill` rejected with.
+ * @returns One sentence saying what happened and what to do.
+ * @public
+ */
+export const describeStillFailure = (error: unknown): string => {
+  const message = error instanceof Error ? error.message : String(error);
+  const codes = [
+    ...(isRecord(error) && typeof error['code'] === 'string' ? [error['code']] : []),
+    ...(message.match(/\b[A-Z][\dA-Z]*(?:_[\dA-Z]+)+\b/gu) ?? []),
+  ];
+  const sentence = codes.map((code) => stillFailures.get(code)).find((candidate) => candidate !== undefined);
+  if (sentence !== undefined) {
+    return sentence;
+  }
+  const detail = codes[0] ?? message.trim();
+  return detail === '' ? unknownStillFailure : `${unknownStillFailure} (${detail})`;
+};
+
 function StillCapture({
   client,
   entry,
@@ -162,7 +259,7 @@ function StillCapture({
       });
     } catch (error) {
       if (!abort.signal.aborted) {
-        setError(error instanceof Error ? error.message : String(error));
+        setError(describeStillFailure(error));
       }
     } finally {
       if (captureAbort.current === abort) {
@@ -204,19 +301,56 @@ function StillCapture({
   );
 }
 
+/** A member of the archive the printer runs, such as `/data/Metadata/plate_1.gcode`: an internal path, not a name. */
+const archiveMemberPath = /(?:^|\/)Metadata\/plate_\d+\.gcode$/u;
+
 /**
- * The active run's file as the person approved it, else as the printer names it.
+ * Whether the printer names a run after the file this request uploaded: the upload's own name, or
+ * that name without its extensions, which is how a Bambu printer names a Tau start (`tau-<preparedId>`).
+ *
+ * @param request - Any request; only a prepared one has an upload name.
+ * @param runName - The run's name or file as the printer reports it.
+ * @returns True when the run is this request's upload.
+ */
+const namesUpload = (request: PrintRequest, runName: string | undefined): boolean => {
+  const remoteName = request.prepared?.remoteName;
+  return (
+    remoteName !== undefined &&
+    runName !== undefined &&
+    (remoteName === runName || remoteName.startsWith(`${runName}.`))
+  );
+};
+
+/**
+ * The run's file as the person approved it, else as the printer names it. A Tau print matches its
+ * request in any state, by the start's provider run id or by the upload name the printer reports,
+ * so an unconfirmed start still shows its file; the printer's archive member path never shows.
  *
  * @param entry - The observed machine.
  * @param requests - Its print requests.
- * @returns The file name, or `undefined` without a run.
+ * @returns The file name, or `undefined` without a run or a showable name.
  */
 const runFileName = (entry: MachineDirectoryEntry, requests: readonly PrintRequest[]): string | undefined => {
   const { activeRunId, run } = entry.snapshot;
-  const started =
-    activeRunId === undefined ? undefined : requests.find((request) => startedRunIdOf(request) === activeRunId);
-  return started?.summary.fileName ?? run?.file ?? run?.name;
+  if (!run) {
+    return undefined;
+  }
+  const request = requests.find(
+    (candidate) =>
+      (activeRunId !== undefined && startedRunIdOf(candidate) === activeRunId) ||
+      namesUpload(candidate, run.name) ||
+      namesUpload(candidate, run.file),
+  );
+  return (
+    request?.summary.fileName ??
+    run.name ??
+    (run.file === undefined || archiveMemberPath.test(run.file) ? undefined : run.file)
+  );
 };
+
+/** A stage phrase to show; a bare number, as a snapshot saved before stages were phrases may hold, is not one. */
+const readableStage = (stage: string | undefined): string | undefined =>
+  stage === undefined || /^\d+$/u.test(stage) ? undefined : stage;
 
 function RunGroup({
   entry,
@@ -233,6 +367,7 @@ function RunGroup({
         .filter((part) => part !== undefined)
         .join(' · ')
     : '';
+  const stage = readableStage(run?.stage);
   return (
     <div className='flex min-w-0 flex-col gap-1.5'>
       <GroupHeading label='Run' isStale={isStale} />
@@ -249,7 +384,7 @@ function RunGroup({
           )}
           <dl className='flex flex-col gap-0.5'>
             {fileName === undefined ? null : <PrintRow label='File'>{fileName}</PrintRow>}
-            {run.stage === undefined ? null : <PrintRow label='Stage'>{run.stage}</PrintRow>}
+            {stage === undefined ? null : <PrintRow label='Stage'>{stage}</PrintRow>}
             {speed === '' ? null : <PrintRow label='Speed'>{speed}</PrintRow>}
           </dl>
         </>
@@ -383,6 +518,83 @@ function MaterialGroup({
   );
 }
 
+type AlertTone = 'destructive' | 'warning' | 'neutral';
+
+/** An alert without a severity reads as a warning, as every alert did before severities. */
+const toneOf = ({ severity }: MachineAlertSnapshot): AlertTone =>
+  severity === 'fatal' || severity === 'serious' ? 'destructive' : severity === 'info' ? 'neutral' : 'warning';
+
+/** Each tone keeps its own glyph shape, so severity never rests on colour alone. */
+const alertGlyph = { destructive: OctagonAlert, warning: TriangleAlert, neutral: Info } as const;
+
+const severityLabel: Readonly<Record<NonNullable<MachineAlertSnapshot['severity']>, string>> = {
+  fatal: 'Fatal',
+  serious: 'Serious',
+  warning: 'Warning',
+  info: 'Notice',
+};
+
+/**
+ * The printer's active alerts, one line each in one notice: the provider's sentence, the vendor's
+ * code and a link to its help page. The notice takes the most severe alert's tone.
+ *
+ * @param properties - The alerts, at least one.
+ * @returns The notice.
+ */
+function AlertNotice({ alerts }: { readonly alerts: readonly MachineAlertSnapshot[] }): React.JSX.Element {
+  const tones = new Set(alerts.map((alert) => toneOf(alert)));
+  const tone: AlertTone = tones.has('destructive') ? 'destructive' : tones.has('warning') ? 'warning' : 'neutral';
+  return (
+    <div
+      role='alert'
+      aria-label={alerts.length === 1 ? 'Printer alert' : 'Printer alerts'}
+      className={cn(
+        'min-w-0 rounded-lg border p-2 text-xs',
+        tone === 'destructive' && 'border-destructive/30 bg-destructive/10',
+        tone === 'warning' && 'border-warning/30 bg-warning/10',
+        tone === 'neutral' && 'border-border/70 bg-muted/30',
+      )}
+    >
+      <ul className='flex flex-col gap-2'>
+        {alerts.map((alert) => {
+          const alertTone = toneOf(alert);
+          const Glyph = alertGlyph[alertTone];
+          return (
+            <li key={alert.code} className='flex min-w-0 items-start gap-2'>
+              <Glyph
+                aria-hidden
+                className={cn(
+                  'mt-0.5 size-3.5 shrink-0',
+                  alertTone === 'destructive' && 'text-destructive',
+                  alertTone === 'warning' && 'text-warning',
+                  alertTone === 'neutral' && 'text-muted-foreground',
+                )}
+              />
+              <div className='min-w-0 flex-1 break-words'>
+                <p>
+                  {alert.severity === undefined ? null : (
+                    <span className='sr-only'>{severityLabel[alert.severity]}: </span>
+                  )}
+                  {alert.message ?? 'The printer reported an alert.'}
+                </p>
+                <p className='flex flex-wrap items-baseline gap-x-2 text-muted-foreground'>
+                  <span className='font-mono'>{alert.code}</span>
+                  {/* The directory admits only https help pages; anything else is not a link. */}
+                  {alert.reference?.startsWith('https://') ? (
+                    <ExternalLink href={alert.reference} className='text-foreground' arrowSize='xs'>
+                      Look up<span className='sr-only'> {alert.code}</span>
+                    </ExternalLink>
+                  ) : null}
+                </p>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 /**
  * Monitor: the run, temperatures, environment, material slots and the camera,
  * each group wearing a stale badge past its manifest budget.
@@ -408,12 +620,7 @@ export function MonitorSection({
 
   return (
     <PrintSection title='Monitor'>
-      {alerts && alerts.length > 0 ? (
-        <PrintNotice tone='warning'>
-          {alerts.length === 1 ? 'Active alert: ' : 'Active alerts: '}
-          <span className='font-mono'>{alerts.map(({ code }) => code).join(', ')}</span>
-        </PrintNotice>
-      ) : null}
+      {alerts && alerts.length > 0 ? <AlertNotice alerts={alerts} /> : null}
       <RunGroup entry={entry} fileName={runFileName(entry, requests)} isStale={stale('run')} />
       <TemperatureGroup entry={entry} manifest={manifest} isStale={stale('thermal')} />
       <EnvironmentGroup

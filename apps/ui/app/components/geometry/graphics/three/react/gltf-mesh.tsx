@@ -68,12 +68,14 @@ import {
   useCameraRig,
   useGraphics,
   useGraphicsSelector,
+  useKinematicsSelector,
   useModelInteractionSelector,
   useRenderFrame,
   useRenderFrameRetarget,
 } from '#hooks/use-graphics.js';
 import type { RenderFrame } from '@taucad/spatial';
 import { deriveModelInteractionUnitId, getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
+import { getKinematicsUnitState } from '#machines/kinematics.machine.js';
 import type { ModelInteractionUnitState } from '#machines/model-interaction.machine.js';
 import {
   resolveSectionViewRaycastClip,
@@ -957,7 +959,10 @@ export type ApplyModelComponentVisualStateToSceneOptions = Readonly<{
     | 'opacityByComponentId'
     | 'hoveredComponentId'
     | 'selectedComponentIds'
-  >;
+  > & {
+    /** Parts the Kinematics pane points at; they light as a hovered part does. */
+    readonly kinematicsHoveredComponentIds?: readonly string[];
+  };
   enableSurfaces: boolean;
   enableLines: boolean;
 }>;
@@ -980,7 +985,10 @@ export function applyModelComponentVisualStateToScene({
   const emphasisComponents = {
     focused: new Set(modelVisualState.focusedComponentId ? [modelVisualState.focusedComponentId] : []),
     selected: new Set(modelVisualState.selectedComponentIds),
-    hovered: new Set(modelVisualState.hoveredComponentId ? [modelVisualState.hoveredComponentId] : []),
+    hovered: new Set([
+      ...(modelVisualState.hoveredComponentId ? [modelVisualState.hoveredComponentId] : []),
+      ...(modelVisualState.kinematicsHoveredComponentIds ?? []),
+    ]),
   };
   const opacityByComponentId =
     Object.keys(modelVisualState.opacityByComponentId).length > 0 ? modelVisualState.opacityByComponentId : undefined;
@@ -1112,9 +1120,12 @@ export function GltfMesh({
   const isViewerHoverSuppressed = useGraphicsSelector(
     (state) => state.context.viewerHoverSuppressionReasons.length > 0,
   );
+  const kinematicsHoveredComponentIds = useKinematicsSelector(
+    (state) => getKinematicsUnitState(state.context, unitId).hoveredComponentIds,
+  );
   const modelVisualState = useMemo(
-    () => ({ ...modelUnitState, isViewerHoverSuppressed }),
-    [isViewerHoverSuppressed, modelUnitState],
+    () => ({ ...modelUnitState, isViewerHoverSuppressed, kinematicsHoveredComponentIds }),
+    [isViewerHoverSuppressed, kinematicsHoveredComponentIds, modelUnitState],
   );
   const getModelPickableMeshes = useCallback((): readonly Mesh[] => {
     if (!scene) {

@@ -23,8 +23,9 @@ import { flattenBambuSettings } from '#bambu-studio/options/index.js';
 import { resolveBambuStudioSelection } from '#bambu-studio/selection.js';
 import { sliceWithBambuStudio } from '#bambu-studio/slice.js';
 import type { BambuStudioSelection, BambuStudioSliceResult } from '#bambu-studio/types.js';
-import { readBambuContainerProducer } from '#container.js';
+import { readBambuContainer, readBambuContainerProducer } from '#container.js';
 import { readTriangleMesh, writeBinaryStl } from '#glb-mesh.js';
+import { parseGcode, toolpathSegmentKinds } from '#toolpath.js';
 
 /* eslint-disable @typescript-eslint/naming-convention -- Bambu Studio preset and result keys are fixed snake_case names. */
 
@@ -32,6 +33,8 @@ const install = await findBambuStudio();
 const golden = process.env['TAU_BAMBU_PARITY_GOLDEN'];
 const plateMember = 'Metadata/plate_1.gcode';
 const decoder = new TextDecoder();
+const readFixture = (name: string): Uint8Array<ArrayBuffer> =>
+  Uint8Array.from(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '__fixtures__', name)));
 
 /** Lines from the first marker through the second, inclusive. */
 const section = (gcode: string, from: string, to: string): string => {
@@ -43,15 +46,12 @@ const section = (gcode: string, from: string, to: string): string => {
 describe.runIf(install !== undefined)('Bambu Studio parity (installed app)', { timeout: 120_000 }, () => {
   const found = install!;
   let selection: BambuStudioSelection;
-  let stl: Uint8Array<ArrayBuffer>;
+  let parts: Array<{ stl: Uint8Array<ArrayBuffer> }>;
   let first: BambuStudioSliceResult;
   let second: BambuStudioSliceResult;
 
   beforeAll(async () => {
-    const cube = Uint8Array.from(
-      readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '__fixtures__', 'cube.glb')),
-    );
-    stl = writeBinaryStl(await readTriangleMesh(cube));
+    parts = [{ stl: writeBinaryStl(await readTriangleMesh(readFixture('cube.glb'))) }];
     const catalog = await loadBambuStudioCatalog(found, { model: 'X1C', nozzleDiameter: 0.4 });
     selection = resolveBambuStudioSelection(catalog, {
       model: 'X1C',
@@ -67,8 +67,8 @@ describe.runIf(install !== undefined)('Bambu Studio parity (installed app)', { t
       plate: 'high-temperature',
     });
     const signal = AbortSignal.timeout(600_000);
-    first = await sliceWithBambuStudio({ install: found, selection, stl, signal });
-    second = await sliceWithBambuStudio({ install: found, selection, stl, signal });
+    first = await sliceWithBambuStudio({ install: found, selection, parts, signal });
+    second = await sliceWithBambuStudio({ install: found, selection, parts, signal });
   }, 600_000);
 
   it('should slice with the resolved PETG filament, plate and machine templates', () => {
@@ -91,7 +91,11 @@ describe.runIf(install !== undefined)('Bambu Studio parity (installed app)', { t
   });
 
   it('should produce byte-identical plate G-code across runs', () => {
-    expect(unzipSync(second.archive)[plateMember]).toEqual(unzipSync(first.archive)[plateMember]);
+    const ours = unzipSync(first.archive)[plateMember]!;
+    const again = unzipSync(second.archive)[plateMember]!;
+    // A native byte comparison: `toEqual` walks the G-code element by element and takes seconds under load.
+    expect(again.byteLength).toBeGreaterThan(0);
+    expect(Buffer.compare(again, ours)).toBe(0);
   });
 
   it('should describe the selection’s settings as a schema whose defaults are the preset values', async () => {
@@ -110,7 +114,7 @@ describe.runIf(install !== undefined)('Bambu Studio parity (installed app)', { t
     const edited = await sliceWithBambuStudio({
       install: found,
       selection: { ...selection, settings: { wall_loops: 3, sparse_infill_density: 20, nozzle_temperature: 250 } },
-      stl,
+      parts,
       signal: AbortSignal.timeout(300_000),
     });
     const config = section(
@@ -127,8 +131,7 @@ describe.runIf(install !== undefined)('Bambu Studio parity (installed app)', { t
     const coloured = await sliceWithBambuStudio({
       install: found,
       selection,
-      stl,
-      filamentColor: '#F5A623',
+      parts: [{ ...parts[0]!, color: '#F5A623' }],
       signal: AbortSignal.timeout(300_000),
     });
     const members = unzipSync(coloured.archive);
@@ -138,6 +141,42 @@ describe.runIf(install !== undefined)('Bambu Studio parity (installed app)', { t
       filament_colour: string[];
     };
     expect(project.filament_colour[0]).toBe('#F5A623');
+  }, 300_000);
+
+  it('should slice two parts as one assembly, part i with filament i in its colour, keeping their placement', async () => {
+    const model = await readTriangleMesh(readFixture('two-colour-cubes.glb'));
+    const assembled = await sliceWithBambuStudio({
+      install: found,
+      selection,
+      parts: model.parts.map((part) => ({ stl: writeBinaryStl(part), color: part.color! })),
+      signal: AbortSignal.timeout(300_000),
+    });
+    const { gcode, filamentColors } = readBambuContainer(assembled.archive);
+    const text = decoder.decode(gcode);
+
+    // The selection names one filament; the second part prints with it too.
+    expect(assembled.presets.filaments).toEqual([selection.filaments[0], selection.filaments[0]]);
+    expect(filamentColors).toEqual(['#FF0000', '#0000FF']);
+    expect(section(text, '; CONFIG_BLOCK_START', '; CONFIG_BLOCK_END')).toContain(
+      '\n; filament_colour = #FF0000;#0000FF\n',
+    );
+    expect(text.match(/^M620 S1A/gmu)?.length ?? 0).toBeGreaterThan(10);
+    // Outer walls per filament: the blue cube sits 20 mm right of the red one, as modelled.
+    const program = parseGcode(gcode);
+    const outerWall = toolpathSegmentKinds.indexOf('outer-wall');
+    const walls = [0, 1].map((tool) => {
+      const xs: number[] = [];
+      const ys: number[] = [];
+      for (let index = 0; index < program.segmentCount; index += 1) {
+        if (program.tools[index] === tool && program.kinds[index] === outerWall && program.extrusion[index]! > 0) {
+          xs.push(program.positions[index * 6 + 3]!);
+          ys.push(program.positions[index * 6 + 4]!);
+        }
+      }
+      return { x: Math.min(...xs), y: Math.min(...ys) };
+    });
+    expect(walls[1]!.x - walls[0]!.x).toBeCloseTo(20, 2);
+    expect(walls[1]!.y).toBeCloseTo(walls[0]!.y, 2);
   }, 300_000);
 
   it.runIf(golden !== undefined)('should match the app’s start, end and project settings', async () => {

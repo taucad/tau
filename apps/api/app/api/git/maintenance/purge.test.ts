@@ -63,7 +63,7 @@ describe.skipIf(!(await databaseReachable(databaseUrl)))('tenant purge', () => {
       });
     }
 
-    const manifest = succeedManifest(undefined, { refs: {}, packs: [], retired: [], committedBy: 'seed' });
+    const manifest = succeedManifest(undefined, { refs: {}, packs: [], committedBy: 'seed' });
     await store.commitManifest(locator, encodeManifest(manifest), 'absent');
 
     const lfs = new Uint8Array(new ArrayBuffer(8));

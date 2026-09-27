@@ -1,6 +1,8 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { buffer } from 'node:stream/consumers';
+import { writeSpilledPushLog } from '#api/git/store/commit.js';
 import { RepositoryStoreError } from '#api/git/store/errors.js';
+import { markRetired } from '#api/git/store/sweep.js';
 import {
   decodeManifest,
   encodeManifest,
@@ -24,9 +26,10 @@ import { assertSingletonProcessGroup } from '#api/git/maintenance/singleton.js';
  * Three properties make a restore safe to run against a live primary:
  *
  * - **It never deletes.** The primary's own packs and its previous manifest
- *   stay exactly where they are; they age out under the ordinary retention
- *   rules (NI4). A restore that turns out to be wrong is undone by restoring
- *   again, not by recovering deleted bytes.
+ *   stay exactly where they are; the packs that manifest listed are marked
+ *   retired, so they age out under the ordinary retention rules (NI4) rather
+ *   than as orphans. A restore that turns out to be wrong is undone by
+ *   restoring again, not by recovering deleted bytes.
  * - **It rolls forward.** The new manifest carries a generation above both
  *   stores' and a fresh incarnation nonce, so a lease that was open across the
  *   restore loses its conditional write and is told the repository was
@@ -174,15 +177,26 @@ export const restoreRepository = async (args: RestoreArguments): Promise<Restore
    * generations.
    */
   const base: Manifest = { ...(current ?? source), generation: Math.max(current?.generation ?? 0, source.generation) };
-  const next = succeedManifest(base, {
-    refs: source.refs,
-    packs,
-    retired: [],
-    committedBy: `restore:${args.operator}`,
-    incarnation: newIncarnation(),
-    tombstone: null,
-  });
+  const at = new Date();
+  const next = succeedManifest(
+    base,
+    {
+      refs: source.refs,
+      packs,
+      committedBy: `restore:${args.operator}`,
+      incarnation: newIncarnation(),
+      tombstone: null,
+    },
+    at,
+  );
 
+  await markRetired({
+    store: args.primary,
+    locator: args.locator,
+    packKeys: (current?.packs ?? []).map((pack) => pack.key),
+    at,
+  });
+  await writeSpilledPushLog({ store: args.primary, locator: args.locator, base, next });
   const token = await args.primary.commitManifest(args.locator, encodeManifest(next), read?.token ?? 'absent');
   if (token === 'lost') {
     throw new RepositoryStoreError(

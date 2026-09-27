@@ -32,7 +32,7 @@ import { syncFailureReason } from '#sync.machine.js';
 import type { SyncFailureReason } from '#sync.types.js';
 import type { RemoteKind, RemoteReauthorizationCode } from '#remotes.js';
 import type { RemoteStorageRefusal } from '#revision-port.js';
-import type { RemoteFacet, RemoteMachineEvent } from '#remote.types.js';
+import type { RemoteFacet, RemoteMachineEvent, RemoteStorage, RevisionChildToast } from '#remote.types.js';
 
 /** One remote as this machine records it. @public */
 export type RemoteRecord = Readonly<{
@@ -53,14 +53,14 @@ export type RemoteMachineInput = Readonly<{
   parentRef?: AnyActorRef;
 }>;
 
-/** Serializable state owned by remoteMachine. @public */
-export type RemoteMachineContext = Readonly<{
+/* The fields of {@link RemoteMachineContext}, named by the interface below. */
+type RemoteMachineContextFields = Readonly<{
   projectId: string;
   parentRef: AnyActorRef | undefined;
   branch: string;
   kind: RemoteKind | 'none';
   remote: RemoteRecord | undefined;
-  storage: Readonly<{ used: number; quota: number }> | undefined;
+  storage: RemoteStorage | undefined;
   quota: RemoteStorageRefusal | undefined;
   overQuota: readonly string[];
   error: string | undefined;
@@ -80,6 +80,10 @@ export type RemoteMachineContext = Readonly<{
    */
   attemptWroteRemote: boolean;
 }>;
+
+/** Serializable state owned by remoteMachine. @public */
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type, typescript/consistent-type-definitions -- an interface, not a type alias: declarations reference it by name, where an alias is expanded into every transition of this machine and of any machine that holds it (K-17, TS7056)
+export interface RemoteMachineContext extends RemoteMachineContextFields {}
 
 /** Facts remoteMachine emits for a host that holds only the root. @public */
 export type RemoteMachineEmitted =
@@ -111,7 +115,10 @@ export type RemoteAuthorizeActorInput = Readonly<{ kind: RemoteKind; url: string
 export type RemoteValidateActorInput = Readonly<{ remote: string; url: string }>;
 
 /** What `validate` answers: the remote answered, and what it costs. @public */
-export type RemoteValidateActorOutput = Readonly<{ storage?: Readonly<{ used: number; quota: number }> }>;
+export type RemoteValidateActorOutput = Readonly<{ storage?: RemoteStorage }>;
+
+/** Which connected remote `readStorage` asks about. @public */
+export type RemoteReadStorageActorInput = Readonly<{ remote: string; kind: RemoteKind | 'none' }>;
 
 /** What the initial sync is asked to do. @public */
 export type RemoteInitialSyncActorInput = Readonly<{ remote: string; branch: string }>;
@@ -167,13 +174,19 @@ const failWith = (error: unknown): Partial<RemoteMachineContext> => ({
   reason: syncFailureReason(error),
 });
 
+/* Everything a previous destination said about room (L2-F10): a replaced
+ * remote must not render the refused files of the one it replaced. */
+const forgetQuota = {
+  storage: undefined,
+  quota: undefined,
+  overQuota: [],
+} satisfies Partial<RemoteMachineContext>;
+
 /** Everything this abandoned attempt wrote, forgotten; the reason stays. */
 const forgetAttempt = {
   remote: undefined,
   kind: 'none',
-  storage: undefined,
-  quota: undefined,
-  overQuota: [],
+  ...forgetQuota,
   attemptWroteRemote: false,
 } satisfies Partial<RemoteMachineContext>;
 
@@ -182,6 +195,19 @@ const reconnect = (event: Extract<RemoteMachineEvent, { type: 'connect' }>) =>
   event.kind === 'none'
     ? { target: 'disconnecting' }
     : { target: 'choosing', context: { kind: event.kind, error: undefined } };
+
+/* A refused push's file list and figures: the root's handler and `connected`'s share it. */
+const quotaRefusedContext = (
+  context: RemoteMachineContext,
+  event: Extract<RemoteMachineEvent, { type: 'quotaRefused' }>,
+): Partial<RemoteMachineContext> => ({
+  overQuota: event.paths,
+  quota: event.storage ?? context.quota,
+  storage:
+    event.used === undefined || event.quota === undefined
+      ? context.storage
+      : { ...context.storage, used: event.used, quota: event.quota },
+});
 
 /* A connect gesture before any remote is recorded: *No remote* is already the answer. */
 const firstConnect = (event: Extract<RemoteMachineEvent, { type: 'connect' }>) =>
@@ -194,6 +220,24 @@ const connectionFailed = (context: RemoteMachineContext, error: unknown) => {
     return { target: 'reconnectRequired', context: failWith(error) };
   }
   return { target: context.attemptWroteRemote ? 'abandoning' : 'failed', context: failWith(error) };
+};
+
+/* Emitted for a host that holds this child, and sent to the root for every
+ * host that holds only the root (L2-F8). */
+const toast = (
+  context: RemoteMachineContext,
+  enq: RemoteEnqueue,
+  { tone, message }: Pick<RevisionChildToast, 'tone' | 'message'>,
+): void => {
+  enq.emit(tone === 'info' ? { type: 'toast.info', message } : { type: 'toast.error', message });
+  if (context.parentRef !== undefined) {
+    enq.sendTo(context.parentRef, {
+      type: 'childToast',
+      subject: 'remote',
+      tone,
+      message,
+    } satisfies RevisionChildToast);
+  }
 };
 
 const announceConnected = (context: RemoteMachineContext, enq: RemoteEnqueue): void => {
@@ -231,6 +275,8 @@ const remoteMachineDefinition = setup({
     /** Resolves the *reference* the host will authenticate with, never a secret (I8). */
     authorize: createAsyncLogic<void, RemoteAuthorizeActorInput>({ run: unsupported }),
     validate: createAsyncLogic<RemoteValidateActorOutput, RemoteValidateActorInput>({ run: unsupported }),
+    /** What a connected remote says this project costs (D18); `undefined` when it cannot say. */
+    readStorage: createAsyncLogic<RemoteStorage | undefined, RemoteReadStorageActorInput>({ run: unsupported }),
     initialSync: createAsyncLogic<RemoteInitialSyncActorOutput, RemoteInitialSyncActorInput>({ run: unsupported }),
   },
 }).createMachine({
@@ -248,6 +294,14 @@ const remoteMachineDefinition = setup({
     reason: undefined,
     attemptWroteRemote: false,
   }),
+  /* A fact about the remote, not about where the connect sequence is (L2-F10):
+   * `sync` forwards a refusal from whichever push it was making, and one that
+   * arrived while this machine was reading, reconnecting or failed used to be
+   * dropped with the only copy of its file list. `choosing` clears it for a new
+   * destination. */
+  on: {
+    quotaRefused: { context: ({ context, event }) => quotaRefusedContext(context, event) },
+  },
   initial: 'reading',
   states: {
     /**
@@ -289,6 +343,7 @@ const remoteMachineDefinition = setup({
 
     /** The choice, recorded in git's remotes list before anything is asked of it. */
     choosing: {
+      entry: () => ({ context: forgetQuota }),
       invoke: {
         src: 'writeRemote',
         input: ({ context, event }) => ({
@@ -361,10 +416,10 @@ const remoteMachineDefinition = setup({
             /* The history landed and some files did not fit. The connection is
              * real, so this is `connected` with the list — and it arrives the
              * one way `overQuota` is ever written: as `quotaRefused`, raised
-             * here and handled in `connected`, which is also the event W13's
+             * here and handled at the root, which is also the event W13's
              * `sync.machine` forwards for every later push (P19). */
-            enq.emit({
-              type: 'toast.error',
+            toast(context, enq, {
+              tone: 'error',
               message: event.output.message ?? 'Some files are over this project’s storage plan.',
             });
             enq.raise({
@@ -374,8 +429,8 @@ const remoteMachineDefinition = setup({
             });
             return { target: 'connected' };
           }
-          enq.emit({
-            type: 'toast.info',
+          toast(context, enq, {
+            tone: 'info',
             message:
               context.remote?.fetchOnly === true ? 'This project is linked read-only.' : 'This project is backed up.',
           });
@@ -383,7 +438,7 @@ const remoteMachineDefinition = setup({
         },
         onError: ({ context, event }, enq) => {
           if (!isReauthorizationRequired(event.error)) {
-            enq.emit({ type: 'toast.error', message: reason(event.error) });
+            toast(context, enq, { tone: 'error', message: reason(event.error) });
           }
           return connectionFailed(context, event.error);
         },
@@ -415,21 +470,38 @@ const remoteMachineDefinition = setup({
 
     connected: {
       entry: () => ({ context: { attemptWroteRemote: false } }),
+      /*
+       * D18: the figure the Sync region renders, read on every arrival here —
+       * a reopened project included, which reaches `connected` from `reading`
+       * without ever validating. A host that cannot say leaves the row out, and
+       * a failed read is no reason to doubt a connection that already stands.
+       */
+      initial: 'reading',
+      states: {
+        reading: {
+          invoke: {
+            src: 'readStorage',
+            input: ({ context }) => ({ remote: context.remote?.name ?? '', kind: context.kind }),
+            onDone: ({ context, event }) => ({
+              target: 'settled',
+              context: { storage: event.output ?? context.storage },
+            }),
+            onError: { target: 'settled' },
+          },
+        },
+        settled: {},
+      },
       on: {
         disconnect: { target: 'disconnecting' },
         connect: ({ event }) => reconnect(event),
-        /* A refused push is the one thing that makes a connected remote say
-         * something: which files would not fit (D16, AC16). */
-        quotaRefused: {
-          context: ({ context, event }) => ({
-            overQuota: event.paths,
-            quota: event.storage ?? context.quota,
-            storage:
-              event.used === undefined || event.quota === undefined
-                ? context.storage
-                : { used: event.used, quota: event.quota },
-          }),
-        },
+        /* F9: a push changed what is stored; read it again, dropping any read in flight. */
+        pushed: { target: '.reading', reenter: true },
+        /* F9: a refusal's own figures are newer than a read still in flight, so
+           leaving `reading` stops that read before its answer can overwrite them. */
+        quotaRefused: ({ context, event }) =>
+          event.used === undefined || event.quota === undefined
+            ? { context: quotaRefusedContext(context, event) }
+            : { target: '.settled', context: quotaRefusedContext(context, event) },
       },
     },
 
@@ -445,14 +517,7 @@ const remoteMachineDefinition = setup({
           }
           return {
             target: 'none',
-            context: {
-              remote: undefined,
-              kind: 'none',
-              storage: undefined,
-              quota: undefined,
-              overQuota: [],
-              error: undefined,
-            },
+            context: { remote: undefined, kind: 'none', ...forgetQuota, error: undefined },
           };
         },
         onError: {
@@ -560,7 +625,8 @@ const phaseOf = (value: string): RemoteFacet['phase'] => {
 export const selectRemoteFacet = (snapshot: SnapshotFrom<typeof remoteMachine>): RemoteFacet => ({
   kind: snapshot.context.kind,
   url: snapshot.context.remote?.url,
-  phase: phaseOf(String(snapshot.value)),
+  /* `connected` has children (F9); the phase is the top-level state either way. */
+  phase: phaseOf(typeof snapshot.value === 'string' ? snapshot.value : (Object.keys(snapshot.value)[0] ?? '')),
   storage: snapshot.context.storage,
   overQuota: snapshot.context.overQuota,
   quota: snapshot.context.quota,

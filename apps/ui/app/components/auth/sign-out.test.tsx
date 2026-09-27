@@ -7,7 +7,7 @@ const signOut = vi.fn();
 const navigate = vi.fn();
 
 vi.mock('#providers/financial-session-provider.js', () => ({
-  useFinancialSession: () => ({ purge, bind: vi.fn(), capture: vi.fn() }),
+  useOptionalFinancialSession: () => ({ purge, bind: vi.fn(), capture: vi.fn() }),
 }));
 vi.mock('@better-auth-ui/react', () => ({
   useAuth: () => ({

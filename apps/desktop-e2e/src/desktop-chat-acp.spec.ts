@@ -15,6 +15,7 @@ import type { DesktopSession } from '#support/desktop-app.js';
 import { durableMessages, latestCompletedRun, toolResult } from '#support/acp-evidence.js';
 import { gatewayFixtureFinalText, gatewayFixtureModelName, installGatewayFixture } from '#support/gateway-fixture.js';
 import type { GatewayFixture } from '#support/gateway-fixture.js';
+import { historyRows, restoreFromHistory } from '#support/revisions-pane.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
 import {
   activeChatId,
@@ -662,8 +663,9 @@ test.skipIf(!codexAvailable)(
       await authenticatePackagedDesktop(session, token);
     }
     const { page } = session;
-    /* The shell opens at 1440×900 (`apps/desktop/src/main/main.ts`), and at that
-     * width the project route's composer is narrow enough that its right-hand
+    /* The shell opens filling the display work area
+     * (`apps/desktop/src/main/main.ts`); on a 1440 px wide area the project
+     * route's composer is narrow enough that its right-hand
      * action group sits *over* the left group's last controls — the revision
      * selector included, which is the one control this spec has to click.
      * Maximizing does not clear it (the chat pane still opens at its Allotment
@@ -822,11 +824,13 @@ test.skipIf(!codexAvailable)(
        * tree over the other. */
       // Selecting a chat checkout does not move the independently browsed workbench.
       await expectCurrentBranch(page, 'main');
+      /* The chat's card opens in place and reaches the same verbs History does: View revision and its More. */
       await openRevisionCard(page, candidateRevisionNumber);
       await expectVisible(
-        page.getByRole('button', { name: `Restore to Revision ${String(candidateRevisionNumber)}`, exact: true }),
+        page.getByRole('button', { name: `More actions for Rev ${String(candidateRevisionNumber)}`, exact: true }),
         60_000,
       );
+      await expectVisible(page.getByRole('button', { name: 'View revision', exact: true }), 60_000);
       expect(liveSource()).toBe(seededSource);
 
       await branchRow(page, candidateBranch)
@@ -899,8 +903,20 @@ test.skipIf(!codexAvailable)(
       expect(finalizedRevisions(logOf(candidateChatId)).at(-1)?.branch).toBe('main');
 
       /* Restore to the direct turn's revision through the Revisions pane's history
-       * (the candidate chat holds no Rev 2 card): the live folder is the seed again. */
-      await page.getByRole('button', { name: 'Restore to Revision 2', exact: true }).first().click();
+       * (the candidate chat holds no Rev 2 card): its row opens, *Restore Rev 2*
+       * restores it, and the live folder is the seed again. */
+      await openRevisionHistory(page);
+      await restoreFromHistory(
+        page,
+        page
+          .getByRole('list', { name: 'Revision history' })
+          .first()
+          .getByRole('button', { name: /^Rev 2 · /u }),
+        (n) =>
+          historyRows(page)
+            .filter({ hasText: 'Current' })
+            .filter({ hasText: `Restored Rev ${n}` }),
+      );
       await expect.poll(liveSource, { timeout: 120_000 }).toBe(seededSource);
       await session.capture('rev-branches-after-restore');
 

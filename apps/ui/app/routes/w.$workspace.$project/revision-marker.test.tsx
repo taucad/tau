@@ -1,21 +1,37 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+// @vitest-environment jsdom
+/**
+ * One History row and a revision's More (charter D7; canvas rounds 3–21).
+ *
+ * The row is scripted through the one revision harness, so what is asserted is
+ * what a person sees and what the row sends back — never a worker.
+ */
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { RevisionMarker } from '#routes/w.$workspace.$project/revision-marker.js';
-import type { RevisionMarkerProps } from '#routes/w.$workspace.$project/revision-marker.js';
-import type { RevisionDiffEntry } from '@taucad/revisions';
+import { render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { useState } from 'react';
+import { RevisionMenu, RevisionRow } from '#routes/w.$workspace.$project/revision-marker.js';
+import { revisionTitle } from '#routes/w.$workspace.$project/revision-vocabulary.js';
+import type { RevisionRowProps } from '#routes/w.$workspace.$project/revision-marker.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 
-const editorSend = vi.hoisted(() => vi.fn());
-
-vi.mock('#hooks/use-project.js', () => ({
-  useProject: () => ({ projectId: 'p', editorRef: { send: editorSend } }),
-}));
+/* The project actor as `useSelector` reads it: Publish names the version after the project. */
+const projectSnapshot = { context: { project: { name: 'Bracket', assets: { main: { entryPath: 'main.scad' } } } } };
+const projectRef = {
+  subscribe: () => ({ unsubscribe: () => undefined }),
+  getSnapshot: () => projectSnapshot,
+};
+vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'p', projectRef }) }));
 vi.mock('#hooks/use-revision-status.js', async () => {
   const harness = await import('#hooks/use-revision-status.test-harness.js');
   return harness.revisionStatusMock();
 });
+vi.mock('#environment.config.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  requireClientEnvironmentUrl: () => 'https://api.test',
+}));
 vi.mock('#components/code/diff-viewer.js', () => ({
   DiffViewer: ({
     originalContent,
@@ -29,203 +45,468 @@ vi.mock('#components/code/diff-viewer.js', () => ({
 }));
 
 beforeEach(() => {
-  editorSend.mockReset();
   revisionStatusHarness.reset();
+  revisionStatusHarness.diff = [
+    { path: 'main.geospec.ts', kind: 'modified' },
+    { path: 'bracket.scad', kind: 'added' },
+  ];
 });
 
-const anchor = new Date('2026-07-09T14:14:00').getTime();
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
-const revision = (over: Partial<RevisionCard> = {}): RevisionCard => ({
+const card = (over: Partial<RevisionCard> = {}): RevisionCard => ({
   revisionId: 'rev-2',
   n: 2,
-  createdAt: anchor,
-  summary: 'Agent turn u1',
-  actor: 'tau-browser-agent-host',
+  createdAt: new Date('2026-07-09T14:14:00').getTime(),
+  summary: 'Thicker base',
+  actor: 'Tau agent',
   turnId: 'u1',
   conflicted: false,
   trigger: 'turn',
   ...over,
 });
 
-const changes: readonly RevisionDiffEntry[] = [
-  { path: 'main.geospec.ts', kind: 'modified' },
-  { path: 'bracket.scad', kind: 'added' },
-];
+const onRestore = vi.fn();
+const onUndoRestore = vi.fn();
 
-const renderMarker = (
-  props: Partial<RevisionMarkerProps> = {},
-): { onRestore: ReturnType<typeof vi.fn>; onDiscard: ReturnType<typeof vi.fn> } => {
-  const onRestore = vi.fn();
-  const onDiscard = vi.fn();
-  render(
-    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-      <RevisionMarker
-        revision={revision()}
-        changes={changes}
-        isActive={false}
-        isModified={false}
+/** The row, owning its own open state as History does. */
+function Row(props: Partial<RevisionRowProps>): React.JSX.Element {
+  const [isOpen, setIsOpen] = useState(props.isOpen ?? false);
+  const revision = props.revision ?? card();
+  return (
+    <ol>
+      <RevisionRow
+        revision={revision}
+        title={revisionTitle(revision, [revision])}
+        isCurrent={false}
+        isDirty={false}
+        branch='main'
         isBusy={false}
         onRestore={onRestore}
-        onDiscard={onDiscard}
+        onUndoRestore={onUndoRestore}
         {...props}
+        isOpen={isOpen}
+        onOpenChange={setIsOpen}
       />
+    </ol>
+  );
+}
+
+const renderRow = (props: Partial<RevisionRowProps> = {}): void => {
+  render(
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <Row {...props} />
     </QueryClientProvider>,
   );
-  return { onRestore, onDiscard };
 };
 
-describe('RevisionMarker', () => {
-  it('T-RM-FILES: lists each changed path with how it changed', () => {
-    renderMarker();
-    expect(screen.getByText('main.geospec.ts')).not.toBeNull();
-    expect(screen.getByText('bracket.scad')).not.toBeNull();
-    expect(screen.getByText('Changed')).not.toBeNull();
-    expect(screen.getByText('Added')).not.toBeNull();
+const openRow = async (user: ReturnType<typeof userEvent.setup>, name = 'Rev 2 · Thicker base'): Promise<void> => {
+  await user.click(screen.getByRole('button', { name }));
+};
+
+describe('RevisionRow', () => {
+  it('is one button at rest, naming the revision by Rev N and its title (canvas round 8)', () => {
+    renderRow();
+    const item = screen.getByRole('listitem');
+    expect(within(item).getAllByRole('button')).toHaveLength(1);
+    expect(within(item).getByRole('button', { name: 'Rev 2 · Thicker base' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+    expect(item).toHaveTextContent('Tau agent');
   });
 
-  it('T-RM-COMPARE: a file row opens the shared diff viewer over the revision and its parent (S38)', async () => {
-    revisionStatusHarness.comparison = { original: 'before', modified: 'after' };
-    renderMarker();
-    fireEvent.click(screen.getByRole('button', { name: 'Compare main.geospec.ts' }));
-    const diff = await screen.findByTestId('diff');
-    expect(diff.textContent).toBe('before|after');
+  it('never shows who made your own revision, nor a raw actor id (HQ4)', () => {
+    renderRow({ revision: card({ actor: 'You' }) });
+    const item = screen.getByRole('listitem');
+    expect(item).not.toHaveTextContent('You');
+    expect(item.textContent).not.toMatch(/user_|anon:|^agent$/u);
   });
 
-  it('T-RM-COMPARE-LANGUAGE: should highlight a comparison in the language its path names', async () => {
+  it('says so instead of inventing a number for a revision off this line', () => {
+    renderRow({ revision: card({ n: undefined }) });
+    expect(screen.getByRole('button', { name: 'Revision · Thicker base' })).toBeInTheDocument();
+    expect(screen.queryByText(/Rev \d/u)).toBeNull();
+  });
+
+  it('opens to its files, each row opening the shared comparison in its path’s language (S38)', async () => {
+    const user = userEvent.setup();
     revisionStatusHarness.comparison = { original: 'cube(1);', modified: 'cube(2);' };
-    renderMarker();
-    fireEvent.click(screen.getByRole('button', { name: 'Compare bracket.scad' }));
+    renderRow();
+    await openRow(user);
+
+    expect(screen.getByText('main.geospec.ts')).toBeInTheDocument();
+    expect(screen.getByText('Added')).toHaveClass('text-muted-foreground/90', 'group-hover/file:text-muted-foreground');
+    await user.click(screen.getByRole('button', { name: 'Compare bracket.scad' }));
     expect(await screen.findByTestId('diff')).toHaveAttribute('data-language', 'openscad');
+    expect(screen.getByTestId('diff')).toHaveTextContent('cube(1);|cube(2);');
   });
 
-  it('T-RM-COMPARE-RETRY: distinguishes a failed comparison from an empty file', async () => {
+  it('tells a failed comparison from an empty file, and retries it', async () => {
+    const user = userEvent.setup();
     revisionStatusHarness.comparisonError = new Error('Tree is unavailable');
-    renderMarker();
-    fireEvent.click(screen.getByRole('button', { name: 'Compare main.geospec.ts' }));
+    renderRow();
+    await openRow(user);
+    await user.click(screen.getByRole('button', { name: 'Compare main.geospec.ts' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Could not compare main.geospec.ts. Tree is unavailable',
     );
     revisionStatusHarness.comparisonError = undefined;
-    revisionStatusHarness.comparison = { original: '', modified: '' };
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
-
-    expect(await screen.findByTestId('diff')).toHaveTextContent('|');
+    revisionStatusHarness.comparison = { original: 'a', modified: 'b' };
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByTestId('diff')).toHaveTextContent('a|b');
   });
 
-  it('T-RM-UNNUMBERED: a revision this branch does not number says so instead of inventing one', () => {
-    renderMarker({ revision: revision({ n: undefined }) });
-    expect(screen.getAllByText('Revision').length).toBeGreaterThan(0);
-    expect(screen.queryByText(/Rev \d/)).toBeNull();
+  it('restores a revision it is not on, naming it in the button’s accessible name', async () => {
+    const user = userEvent.setup();
+    onRestore.mockClear();
+    renderRow();
+    await openRow(user);
+    await user.click(screen.getByRole('button', { name: 'Restore Rev 2' }));
+    expect(onRestore).toHaveBeenCalledWith('rev-2');
   });
 
-  it('names a revision and removes an existing version name', async () => {
-    const onTag = vi.fn(async () => undefined);
-    const onDeleteTag = vi.fn(async () => undefined);
-    renderMarker({ revision: revision({ tags: ['v1'] }), onTag, onDeleteTag });
+  it('offers no Restore on the revision you are on, and reads Current', async () => {
+    const user = userEvent.setup();
+    renderRow({ isCurrent: true });
+    expect(screen.getByRole('listitem')).toHaveTextContent('Current');
+    await openRow(user);
+    expect(screen.queryByRole('button', { name: /^Restore/u })).not.toBeInTheDocument();
+  });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Name version' }));
-    fireEvent.change(screen.getByRole('textbox', { name: 'Name Revision 2' }), { target: { value: 'release' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save name' }));
+  /* A9, RV-D1: a restore is a new row named by what it restored, never a Rewind. */
+  it('names a restore row by its provenance, with the Restored glyph', () => {
+    const restored = card({ revisionId: 'rev-5', n: 5, summary: 'Restore', trigger: 'restore', restoredFrom: 'rev-3' });
+    const target = card({ revisionId: 'rev-3', n: 3 });
+    expect(revisionTitle(restored, [restored, target])).toBe('Restored Rev 3');
+    renderRow({ revision: restored, title: 'Restored Rev 3' });
+    expect(screen.getByRole('button', { name: 'Rev 5 · Restored Rev 3' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Restored')).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Rewind/u)).toBeNull();
+  });
+
+  it('offers Undo restore on the restore row you are on while nothing landed after it (D2)', async () => {
+    const user = userEvent.setup();
+    onUndoRestore.mockClear();
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      restore: { ...revisionStatusHarness.status.restore, undoable: true },
+    };
+    renderRow({
+      revision: card({ restoredFrom: 'rev-1', trigger: 'restore' }),
+      title: 'Restored Rev 1',
+      isCurrent: true,
+    });
+    await openRow(user, 'Rev 2 · Restored Rev 1');
+    await user.click(screen.getByRole('button', { name: 'Undo restore' }));
+    expect(onUndoRestore).toHaveBeenCalledOnce();
+  });
+
+  /* M1: after a reload, or a restore from another device, the machine holds no undo target. */
+  it('offers no Undo restore on a restore row this device’s restore did not mint', async () => {
+    const user = userEvent.setup();
+    renderRow({
+      revision: card({ restoredFrom: 'rev-1', trigger: 'restore' }),
+      title: 'Restored Rev 1',
+      isCurrent: true,
+    });
+    await openRow(user, 'Rev 2 · Restored Rev 1');
+    expect(screen.queryByRole('button', { name: 'Undo restore' })).not.toBeInTheDocument();
+  });
+
+  it('ends its actions with More and Details, which wrap as one pair (rounds 14–18)', async () => {
+    const user = userEvent.setup();
+    renderRow();
+    await openRow(user);
+    const row = document.querySelector('[data-slot="row-actions"]');
+    expect(row).toHaveClass('@container/actions', 'flex-wrap', 'justify-between');
+    const end = row?.querySelector('[data-slot="actions-end"]');
+    expect(within(end as HTMLElement).getByRole('button', { name: 'More actions for Rev 2' })).toBeInTheDocument();
+    await user.click(within(end as HTMLElement).getByRole('button', { name: 'Details' }));
+    const details = document.querySelector('dl[aria-label="Details for Rev 2"]');
+    expect(details).toHaveTextContent('rev-2');
+    expect(details).toHaveTextContent('Agent turn');
+  });
+
+  /* W1 Details: the revision a row follows, and a first revision that follows none. */
+  it('names the parent it follows in Details, and says a first revision has none', async () => {
+    const user = userEvent.setup();
+    renderRow({ revision: card({ parent: 'rev-1' }) });
+    await openRow(user);
+    await user.click(screen.getByRole('button', { name: 'Details' }));
+    expect(document.querySelector('dl[aria-label="Details for Rev 2"]')).toHaveTextContent(/Parent\s*rev-1/u);
+  });
+
+  /* Canvas DetailsList: the tree the revision carries, from the log row itself. */
+  it('names the tree it carries in Details', async () => {
+    const user = userEvent.setup();
+    renderRow({ revision: card({ treeId: 'a'.repeat(40) }) });
+    await openRow(user);
+    await user.click(screen.getByRole('button', { name: 'Details' }));
+    expect(document.querySelector('dl[aria-label="Details for Rev 2"]')).toHaveTextContent(
+      new RegExp(`Tree\\s*${'a'.repeat(40)}`, 'u'),
+    );
+  });
+
+  it('says a branch’s first revision follows none', async () => {
+    const user = userEvent.setup();
+    renderRow({ revision: card({ revisionId: 'rev-1', n: 1 }) });
+    await openRow(user, 'Rev 1 · Thicker base');
+    await user.click(screen.getByRole('button', { name: 'Details' }));
+    expect(document.querySelector('dl[aria-label="Details for Rev 1"]')).toHaveTextContent(
+      /Parent\s*None \(first revision\)/u,
+    );
+  });
+
+  /* Canvas round 4b: the whole revision against the current files, from the row's More. */
+  it('compares the whole revision with the current files from More, and returns to its own changes', async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-5' };
+    revisionStatusHarness.comparison = { original: 'cube(1);', modified: 'cube(5);' };
+    renderRow();
+    await openRow(user);
+    await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Compare with current' }));
+
+    const since = await screen.findByRole('list', { name: 'Changed since Rev 2' });
+    expect(revisionStatusHarness.diffRequests).toContain('rev-2..rev-5');
+    await user.click(within(since).getByRole('button', { name: 'Compare bracket.scad with the current file' }));
+    expect(await screen.findByTestId('diff')).toHaveTextContent('cube(1);|cube(5);');
+
+    await user.click(screen.getByRole('button', { name: 'Stop comparing' }));
+    expect(screen.getByRole('list', { name: 'Changed files' })).toBeInTheDocument();
+    expect(screen.queryByRole('list', { name: 'Changed since Rev 2' })).not.toBeInTheDocument();
+  });
+
+  it('says so when nothing changed since the revision', async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-5' };
+    renderRow();
+    await openRow(user);
+    revisionStatusHarness.diff = [];
+    await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Compare with current' }));
+    expect(await screen.findByRole('note')).toHaveTextContent('No changes since Rev 2.');
+  });
+
+  it('offers no Compare with current on the revision you are on, which already compares with your edits', async () => {
+    const user = userEvent.setup();
+    renderRow({ isCurrent: true, isDirty: true });
+    await openRow(user);
+    await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
+    expect(screen.queryByRole('menuitem', { name: 'Compare with current' })).not.toBeInTheDocument();
+  });
+
+  it('gives every target at least 24 × 24 CSS px', async () => {
+    const user = userEvent.setup();
+    renderRow({ revision: card({ tags: ['v1'] }) });
+    await openRow(user, 'Rev 2 · v1');
+    await user.click(screen.getByRole('button', { name: 'Details' }));
+    for (const button of screen.getAllByRole('button')) {
+      expect(button.className).toMatch(/\b(h-6|size-6|min-h-6|h-8|h-9|size-8)\b/u);
+    }
+  });
+});
+
+const renderMenu = (revision: RevisionCard = card({ tags: ['v1'] })): void => {
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <RevisionMenu revision={revision} isCurrent={false} branch='main' />
+    </QueryClientProvider>,
+  );
+};
+
+describe('RevisionMenu', () => {
+  it('keeps the menu open on Copied, so the person sees the answer (round 14)', async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn(async () => undefined);
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+    renderMenu();
+    await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Copy revision id' }));
+
+    expect(writeText).toHaveBeenCalledWith('rev-2');
+    expect(await screen.findByRole('menuitem', { name: 'Copied' })).toBeInTheDocument();
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+  });
+
+  it('names a version in the one naming form, and Cancel or Escape return focus to More (round 16)', async () => {
+    const user = userEvent.setup();
+    renderMenu(card());
+    const more = screen.getByRole('button', { name: 'More actions for Rev 2' });
+    await user.click(more);
+    await user.click(screen.getByRole('menuitem', { name: 'Name version…' }));
+    const field = await screen.findByRole('textbox', { name: 'Name Rev 2' });
     await waitFor(() => {
-      expect(onTag).toHaveBeenCalledWith('release');
+      expect(field).toHaveFocus();
+    });
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => {
+      expect(more).toHaveFocus();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Remove version name v1' }));
-    expect(onDeleteTag).toHaveBeenCalledWith('v1');
+    await user.click(more);
+    await user.click(screen.getByRole('menuitem', { name: 'Name version…' }));
+    await user.type(await screen.findByRole('textbox', { name: 'Name Rev 2' }), 'Ready for print');
+    await user.keyboard('{Escape}');
+    await waitFor(() => {
+      expect(more).toHaveFocus();
+    });
+    expect(revisionStatusHarness.commands.tag).not.toHaveBeenCalled();
+
+    await user.click(more);
+    await user.click(screen.getByRole('menuitem', { name: 'Name version…' }));
+    await user.type(await screen.findByRole('textbox', { name: 'Name Rev 2' }), 'Ready for print');
+    await user.click(screen.getByRole('button', { name: 'Save name' }));
+    expect(revisionStatusHarness.commands.tag).toHaveBeenCalledWith({ name: 'Ready for print', revisionId: 'rev-2' });
   });
 
-  it('T-RM-DATE: switches from time-only to date + time at the component-width breakpoint', () => {
-    renderMarker();
-    const date = new Date(anchor);
-    const time = screen.getByText(date.toLocaleTimeString(undefined, { timeStyle: 'short' }));
-    const timestamp = screen.getByText(date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }));
-    expect(time.className).toContain('@[22rem]:hidden');
-    expect(timestamp.className).toContain('@[22rem]:inline');
+  it('starts a new branch from the revision, with Cancel (round 16)', async () => {
+    const user = userEvent.setup();
+    renderMenu();
+    await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
+    await user.click(screen.getByRole('menuitem', { name: 'New branch from Rev 2…' }));
+    expect(await screen.findByText('Starts from Rev 2. main stays as it is.')).toBeInTheDocument();
+    await user.type(screen.getByRole('textbox', { name: 'Name for the new branch' }), 'enclosure-v2');
+    await user.click(screen.getByRole('button', { name: 'Create branch' }));
+    expect(revisionStatusHarness.commands.createBranch).toHaveBeenCalledWith('enclosure-v2', 'rev-2');
   });
 
-  it('T-RM-LABEL: switches from Rev to Revision at the component-width breakpoint', () => {
-    renderMarker();
-    expect(screen.getByText('Rev 2').className).toContain('@[30rem]:hidden');
-    expect(screen.getByText('Revision 2').className).toContain('@[30rem]:inline');
+  it('removes a local version name after a named confirmation (L3-F5)', async () => {
+    const user = userEvent.setup();
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    renderMenu();
+    await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Remove version name…' }));
+    expect(await screen.findByRole('alertdialog', { name: 'Remove the name “v1” from Rev 2?' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Remove name' }));
+
+    await waitFor(() => {
+      expect(revisionStatusHarness.commands.deleteTag).toHaveBeenCalledWith('v1');
+    });
+    /* No Hosted Remote, so nothing to ask it. */
+    expect(fetch).not.toHaveBeenCalled();
   });
 
-  it('T-RM-INACTIVE: an inactive revision offers Restore (and fires it) with no Current/Modified', () => {
-    const { onRestore } = renderMarker({ isActive: false });
-    expect(screen.queryByText('Current')).toBeNull();
-    expect(screen.queryByText('Modified')).toBeNull();
-    const restoreButton = screen.getByRole('button', { name: 'Restore to Revision 2' });
-    fireEvent.click(restoreButton);
-    expect(onRestore).toHaveBeenCalledOnce();
-    // Restore sits in the header row, in Current's slot — not a separate footer.
-    expect(restoreButton.parentElement).toBe(screen.getByText('Revision 2').parentElement);
+  it('shows the publication a Tau Cloud name backs before removing it, then asks again with its id (D24)', async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.role = 'owner';
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      remote: { ...revisionStatusHarness.status.remote, kind: 'tau', phase: 'connected' },
+    };
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            code: 'GIT_REF_PUBLISHED',
+            publication: { id: 'pub-1', title: 'Bracket v1', visibility: 'public' },
+          }),
+          { status: 409 },
+        ),
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ref: 'refs/tags/v1', tip: 'rev-2' }), { status: 200 }));
+    vi.stubGlobal('fetch', fetch);
+    renderMenu();
+    await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Remove version name…' }));
+    await user.click(await screen.findByRole('button', { name: 'Remove name' }));
+
+    expect(await screen.findByText(/“Bracket v1” is published from this name/u)).toBeInTheDocument();
+    expect(revisionStatusHarness.commands.deleteTag).not.toHaveBeenCalled();
+    expect(String(fetch.mock.calls[0]?.[0])).toBe('https://api.test/v1/git/p/refs?name=refs%2Ftags%2Fv1');
+    expect(fetch.mock.calls[0]?.[1]).toMatchObject({ method: 'DELETE', credentials: 'include' });
+
+    await user.click(screen.getByRole('button', { name: 'Remove name' }));
+    await waitFor(() => {
+      expect(revisionStatusHarness.commands.deleteTag).toHaveBeenCalledWith('v1');
+    });
+    expect(String(fetch.mock.calls[1]?.[0])).toBe(
+      'https://api.test/v1/git/p/refs?name=refs%2Ftags%2Fv1&publication=pub-1',
+    );
   });
 
-  it('T-RM-ACTIVE: the active revision reads Current and offers no Restore', () => {
-    renderMarker({ isActive: true });
-    expect(screen.getByText('Current')).not.toBeNull();
-    expect(screen.queryByRole('button', { name: /Restore/ })).toBeNull();
-  });
+  /* W1b: the canvas offers Publish in every row's More; an older revision is named and published by id. */
+  it('publishes an older revision by its id, and shows the link it got', async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.role = 'owner';
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      remote: { ...revisionStatusHarness.status.remote, kind: 'tau', phase: 'connected' },
+    };
+    /* The app's root TooltipProvider, which the link's CopyButton needs. */
+    const queryClient = new QueryClient();
+    const menu = (): React.JSX.Element => (
+      <TooltipProvider>
+        <QueryClientProvider client={queryClient}>
+          <RevisionMenu revision={card()} isCurrent={false} branch='main' />
+        </QueryClientProvider>
+      </TooltipProvider>
+    );
+    const { rerender } = render(menu());
+    await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Publish as a named version…' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Publish Rev 2' });
+    await user.type(within(dialog).getByLabelText('Version name'), 'first print');
+    await user.click(within(dialog).getByRole('button', { name: 'Publish' }));
 
-  it('T-RM-MODIFIED: an active + modified revision reads Modified and offers Discard (firing it)', () => {
-    const { onDiscard } = renderMarker({ isActive: true, isModified: true, changes: [] });
-    expect(screen.getByText('Modified')).not.toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: /Discard changes/ }));
-    expect(onDiscard).toHaveBeenCalledOnce();
-  });
+    expect(revisionStatusHarness.commands.publishProject).toHaveBeenCalledWith('first print', 'rev-2');
+    expect(revisionStatusHarness.commands.confirmPublish).toHaveBeenCalledWith({
+      tag: 'first print',
+      projectName: 'Bracket',
+      entryPath: 'main.scad',
+      visibility: 'public',
+      title: 'Bracket',
+    });
 
-  it('T-RM-BUSY: disables the Restore action while a restore is in flight', () => {
-    renderMarker({ isActive: false, isBusy: true });
-    expect(screen.getByRole('button', { name: 'Restore to Revision 2' }).hasAttribute('disabled')).toBe(true);
-  });
-
-  it('T-RM-RESTORING: swaps the Restore icon for the design-system spinner when clicked', () => {
-    renderMarker({ isActive: false });
-    const restoreButton = screen.getByRole('button', { name: 'Restore to Revision 2' });
-    fireEvent.click(restoreButton);
-    expect(screen.getByRole('status', { name: 'Loading' })).not.toBeNull();
-  });
-
-  it('T-RM-DISCARDING: swaps the Discard icon for the design-system spinner when clicked', () => {
-    renderMarker({ isActive: true, isModified: true });
-    fireEvent.click(screen.getByRole('button', { name: /Discard changes/ }));
-    expect(screen.getByRole('status', { name: 'Loading' })).not.toBeNull();
-  });
-
-  it('T-RM-FILE-OPEN: clicking a file row opens it in the editor', () => {
-    renderMarker();
-    fireEvent.click(screen.getByRole('button', { name: 'main.geospec.ts' }));
-    expect(editorSend).toHaveBeenCalledWith({
-      type: 'openFile',
-      path: 'main.geospec.ts',
-      source: 'user',
-      lineNumber: 1,
-      column: 1,
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      publish: { ...revisionStatusHarness.status.publish, phase: 'success', shareUrl: 'https://tau.new/p/pub-1' },
+    };
+    rerender(menu());
+    expect(await within(dialog).findByLabelText('Published link')).toHaveValue('https://tau.new/p/pub-1');
+    await user.click(within(dialog).getByRole('button', { name: 'Done' }));
+    expect(revisionStatusHarness.commands.resetPublish).toHaveBeenCalledOnce();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'More actions for Rev 2' })).toHaveFocus();
     });
   });
 
-  const manyFiles = (count: number): readonly RevisionDiffEntry[] =>
-    Array.from({ length: count }, (_unused, index) => ({ path: `file-${index}.ts`, kind: 'modified' }) as const);
+  it('says why Tau Cloud refused a removal, and removes nothing (I12)', async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.role = 'owner';
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      remote: { ...revisionStatusHarness.status.remote, kind: 'tau', phase: 'connected' },
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ code: 'GIT_RATE_LIMITED' }), { status: 429 })),
+    );
+    renderMenu();
+    await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Remove version name…' }));
+    await user.click(await screen.findByRole('button', { name: 'Remove name' }));
 
-  it('T-RM-FILES-LIMIT: shows only the first 3 files by default, with a trigger for the rest', () => {
-    renderMarker({ changes: manyFiles(5) });
-    expect(screen.getByText('file-0.ts')).not.toBeNull();
-    expect(screen.getByText('file-2.ts')).not.toBeNull();
-    expect(screen.queryByText('file-3.ts')).toBeNull();
-    expect(screen.queryByText('file-4.ts')).toBeNull();
-    expect(screen.getByRole('button', { name: 'Show 2 more files' })).not.toBeNull();
+    expect(await screen.findByRole('alert')).toHaveTextContent('Tau Cloud is getting too many requests');
+    expect(revisionStatusHarness.commands.deleteTag).not.toHaveBeenCalled();
   });
 
-  it('T-RM-FILES-NO-TRIGGER: no expand trigger when 3 or fewer files changed', () => {
-    renderMarker({ changes: manyFiles(3) });
-    expect(screen.queryByRole('button', { name: /Show .* more file/ })).toBeNull();
-  });
-
-  it('T-RM-FILES-EXPAND: expands to reveal the rest, then collapses back', () => {
-    renderMarker({ changes: manyFiles(4) });
-    fireEvent.click(screen.getByRole('button', { name: 'Show 1 more file' }));
-    expect(screen.getByText('file-3.ts')).not.toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Collapse files' }));
-    expect(screen.queryByText('file-3.ts')).toBeNull();
+  it('offers no removal a Tau Cloud collaborator who is not the owner would be refused', async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.role = 'write';
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      remote: { ...revisionStatusHarness.status.remote, kind: 'tau', phase: 'connected' },
+    };
+    renderMenu();
+    await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
+    expect(screen.getByRole('menuitem', { name: 'Rename version…' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Remove version name…' })).not.toBeInTheDocument();
   });
 });

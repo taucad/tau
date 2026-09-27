@@ -1,4 +1,5 @@
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { relative, resolve } from 'node:path';
 
@@ -111,4 +112,190 @@ describe('canvas Vite config', () => {
       'Canvas aliases require # imports and repository-relative fixture paths',
     );
   });
+
+  it(
+    'should let a reviewer pin a comment, keep it across reloads and commit it on Finish',
+    { timeout: 60_000 },
+    async () => {
+      const repository = realpathSync(mkdtempSync(resolve(tmpdir(), 'tau-canvas-review-')));
+      temporaryPaths.push(repository);
+      const artifacts = resolve(repository, 'artifacts');
+      const canvas = resolve(artifacts, 'demo');
+      mkdirSync(canvas, { recursive: true });
+      writeFileSync(
+        resolve(canvas, 'index.html'),
+        '<div id="root"></div><script type="module" src="/main.tsx"></script>',
+      );
+      writeFileSync(
+        resolve(canvas, 'main.tsx'),
+        "document.getElementById('root')!.innerHTML = `<section data-review-scenario='s1'><h1>Board</h1><button onclick='document.title=\"clicked\"'>Save</button></section>`;",
+      );
+      const git = (...arguments_: string[]): string =>
+        execFileSync('git', arguments_, { cwd: repository, encoding: 'utf8' }).trim();
+      git('init', '--quiet');
+      git('config', 'user.name', 'Reviewer');
+      git('config', 'user.email', 'reviewer@example.com');
+      git('config', 'commit.gpgsign', 'false');
+      git('add', '.');
+      git('commit', '--quiet', '-m', 'init');
+
+      const output = mkdtempSync(resolve(tmpdir(), 'tau-canvas-output-'));
+      temporaryPaths.push(output);
+      const server = await createServer({
+        ...createCanvasConfig(resolveCanvasRoot(canvas, artifacts), output, artifacts),
+        configFile: false,
+        logLevel: 'silent',
+        server: { host: '127.0.0.1', port: 0, fs: { allow: [repository, resolve(import.meta.dirname, '../..')] } },
+      });
+      try {
+        await server.listen();
+        const browser = await chromium.launch({ headless: true });
+        try {
+          const page = await browser.newPage();
+          await page.goto(server.resolvedUrls!.local[0]!);
+          await page.getByRole('button', { name: 'Feedback · 0 open' }).waitFor();
+
+          await page.keyboard.press('c');
+          await page.getByRole('button', { name: 'Save', exact: true }).click();
+          expect(await page.title()).not.toBe('clicked');
+          await page.getByRole('textbox', { name: 'Comment' }).fill('Say what is saved.');
+          // The canvas reloads when its source changes mid-review; the unsent draft survives.
+          await page.reload();
+          await expect
+            .poll(async () => page.getByRole('textbox', { name: 'Comment' }).inputValue())
+            .toBe('Say what is saved.');
+          await page.getByRole('textbox', { name: 'Comment' }).press('Control+Enter');
+          await page.getByRole('button', { name: 'Comment 1: Save' }).waitFor();
+
+          const [file] = readdirSync(resolve(canvas, 'review'));
+          const event: unknown = JSON.parse(readFileSync(resolve(canvas, 'review', file!), 'utf8'));
+          expect(event).toMatchObject({
+            type: 'comment',
+            author: { kind: 'person', name: 'Reviewer' },
+            body: 'Say what is saved.',
+            anchor: { target: { kind: 'role', role: 'button', name: 'Save' }, excerpt: 'Save' },
+            context: { canvas: 'demo', scenario: 's1' },
+          });
+          expect(JSON.stringify(event)).toMatch(/"source":"sha256:[\da-f]{64}"/);
+
+          await page.reload();
+          await page.getByRole('button', { name: 'Comment 1: Save' }).click();
+          await page.getByRole('dialog', { name: 'Comment 1' }).getByText('Say what is saved.').waitFor();
+          await page.keyboard.press('Escape');
+          await page.getByRole('button', { name: 'Feedback · 1 open' }).click();
+          await page.getByRole('button', { name: 'Finish review' }).click();
+          await page.getByText(/^Committed 1 events as /).waitFor();
+          expect(git('log', '-1', '--format=%s')).toBe('docs(research): Record review feedback on demo');
+          expect(git('status', '--porcelain')).toBe('');
+        } finally {
+          await browser.close();
+        }
+      } finally {
+        await server.close();
+      }
+    },
+  );
+
+  it(
+    'should let a reviewer decide API guide questions by keyboard and commit the decisions on Finish',
+    { timeout: 90_000 },
+    async () => {
+      const repository = realpathSync(mkdtempSync(resolve(tmpdir(), 'tau-canvas-guide-')));
+      temporaryPaths.push(repository);
+      const artifacts = resolve(repository, 'artifacts');
+      const canvas = resolve(artifacts, 'guide');
+      mkdirSync(canvas, { recursive: true });
+      writeFileSync(
+        resolve(canvas, 'index.html'),
+        '<div id="root"></div><script type="module" src="/main.tsx"></script>',
+      );
+      const question = (id: string, [recommended, other]: readonly [string, string]): Record<string, unknown> => ({
+        id,
+        question: `Which ${id}?`,
+        context: 'What hangs on it.',
+        options: [
+          { label: `\`${recommended}\``, consequence: 'The first.', recommended: true },
+          { label: other, consequence: 'The second.' },
+        ],
+        recommendation: 'Because it is simpler.',
+      });
+      const guide = {
+        title: 'Demo',
+        status: 'in-review',
+        revision: 1,
+        owner: 'demo',
+        oneLine: 'Demo.',
+        problem: { summary: 'None.', today: [], pains: [] },
+        contract: [],
+        options: [],
+        shared: [],
+        failures: [],
+        questions: [question('q1', ['alpha', 'beta']), question('q2', ['gamma', 'delta'])],
+        blastRadius: [],
+        decisions: [],
+        evidence: { typescript: '5.9', project: 'demo', files: {} },
+      };
+      writeFileSync(
+        resolve(canvas, 'main.tsx'),
+        `import { mountApiGuide } from '@tau/api-guide'; mountApiGuide(${JSON.stringify(guide)});`,
+      );
+      const git = (...arguments_: string[]): string =>
+        execFileSync('git', arguments_, { cwd: repository, encoding: 'utf8' }).trim();
+      git('init', '--quiet');
+      git('config', 'user.name', 'Reviewer');
+      git('config', 'user.email', 'reviewer@example.com');
+      git('config', 'commit.gpgsign', 'false');
+      git('add', '.');
+      git('commit', '--quiet', '-m', 'init');
+
+      const output = mkdtempSync(resolve(tmpdir(), 'tau-canvas-output-'));
+      temporaryPaths.push(output);
+      const server = await createServer({
+        ...createCanvasConfig(resolveCanvasRoot(canvas, artifacts), output, artifacts),
+        configFile: false,
+        logLevel: 'silent',
+        server: { host: '127.0.0.1', port: 0, fs: { allow: [repository, resolve(import.meta.dirname, '../..')] } },
+      });
+      try {
+        await server.listen();
+        const browser = await chromium.launch({ headless: true });
+        try {
+          const page = await browser.newPage();
+          await page.goto(server.resolvedUrls!.local[0]!);
+          const alpha = page.getByRole('radio', { name: 'alpha Recommended' });
+          await expect.poll(async () => alpha.getAttribute('aria-checked')).toBe('true');
+
+          // Enter confirms the preselected recommendation and moves to the next open question.
+          await alpha.focus();
+          await page.keyboard.press('Enter');
+          const focused = async (): Promise<string | undefined> => page.evaluate(() => document.activeElement?.id);
+          await expect.poll(focused).toBe('question-q2-option-1');
+          // A digit picks another choice; after the last question, focus lands on Finish review.
+          await page.keyboard.press('2');
+          await page.keyboard.press('Enter');
+          await expect.poll(focused).toBe('finish-review');
+          await page.getByRole('status').getByText('2 of 2 decided').waitFor();
+
+          const bodies = readdirSync(resolve(canvas, 'review')).map(
+            (file) => (JSON.parse(readFileSync(resolve(canvas, 'review', file), 'utf8')) as { body: string }).body,
+          );
+          expect(bodies.toSorted()).toEqual(['Decision q1: `alpha` (recommended)', 'Decision q2: delta']);
+          // The cards show the decisions, so the review layer draws no pins for them.
+          const pins = await page
+            .locator('tau-review-layer')
+            .evaluate((host) => host.shadowRoot?.querySelectorAll('.pin').length);
+          expect(pins).toBe(0);
+
+          await page.keyboard.press('Enter');
+          await page.getByText(/^Committed 2 events as /).waitFor();
+          expect(git('log', '-1', '--format=%s')).toBe('docs(research): Record review feedback on guide');
+          expect(git('status', '--porcelain')).toBe('');
+        } finally {
+          await browser.close();
+        }
+      } finally {
+        await server.close();
+      }
+    },
+  );
 });

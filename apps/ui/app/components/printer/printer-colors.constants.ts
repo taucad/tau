@@ -43,7 +43,11 @@ export const printerToolpath = {
   support: '#8a8f98',
   skirt: '#9aa3ad',
   brim: '#9aa3ad',
-  purge: '#e0a15a',
+  /**
+   * The start sequence and purge extrusion, at every height and on the active layer alike: a dark umber
+   * that keeps WCAG's 3:1 non-text contrast against every plate's lifted print surface, grey or gold.
+   */
+  preparation: '#472a0d',
   travel: { light: '#c9ced6', dark: '#3a3f47' },
   unknown: '#b45fc9',
   /**

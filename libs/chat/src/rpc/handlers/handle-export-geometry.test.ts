@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { mock } from 'vitest-mock-extended';
+import type { KernelIssue } from '@taucad/runtime';
 import type { RpcFileSystem, RpcGraphicsClient } from '#rpc/rpc-dependencies.js';
 import { rpcSchemasRegistry, rpcClientErrorCode } from '#schemas/rpc.schema.js';
 import { rpcName } from '#constants/rpc.constants.js';
@@ -99,6 +100,35 @@ describe('handleExportGeometry', () => {
       ]);
       expect(result.format).toBe('stl');
     }
+  });
+
+  it('should hand the warnings of a successful export to the tool output', async () => {
+    const warning: KernelIssue = {
+      message: 'Sliced in one colour: the printer profile has one filament for three model colours.',
+      code: 'REPRESENTATION_UNSUPPORTED',
+      severity: 'warning',
+      details: { colors: ['#ff0000', '#00ff00', '#0000ff'] },
+    };
+    const graphics = mock<RpcGraphicsClient>();
+    graphics.exportGeometry.mockResolvedValue({
+      success: true,
+      files: [{ name: 'model.gcode.3mf', bytes: new Uint8Array([7]), mimeType: 'application/vnd.bambulab.gcode-3mf' }],
+      issues: [warning, { message: 'Sliced with Bambu Studio 2.0.', code: 'UNKNOWN', severity: 'info' }],
+    });
+    const fileSystem = mock<RpcFileSystem>();
+    fileSystem.writeBinaryFile.mockResolvedValue(undefined);
+
+    const result = await handleExportGeometry(
+      { toolCallId: 'tc-1', targetFile: 'main.ts', format: 'gcode.3mf' },
+      { graphics, fileSystem },
+    );
+
+    /* Only warnings reach the agent, and the wire schema keeps them. */
+    expect(rpcSchemasRegistry[rpcName.exportGeometry].resultSchema.parse(result)).toMatchObject({
+      success: true,
+      warnings: [warning],
+    });
+    expect(result.success && result.warnings).toEqual([warning]);
   });
 
   it('should return IO_ERROR when write fails', async () => {

@@ -1,0 +1,1 @@
+ALTER TABLE "project_git" ADD COLUMN "retained_bytes" bigint DEFAULT 0 NOT NULL;

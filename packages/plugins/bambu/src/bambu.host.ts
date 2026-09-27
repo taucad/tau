@@ -14,7 +14,6 @@ import type {
   MachineQuantityDeclaration,
   MachineSession,
   MachineSnapshot,
-  MachineStill,
   MachineSubmissionReceipt,
   MachineTransferReceipt,
   MachineTransportTrust,
@@ -24,15 +23,16 @@ import type { Quantity } from '@taucad/units/quantity';
 import type { Client as FtpClientConstructor } from 'basic-ftp';
 import type { MqttClient as MqttClientConstructor } from 'mqtt';
 
-import type { BambuCommandResult } from '#bambu.protocol.js';
+import type { BambuCommandResult, BambuStatus } from '#bambu.protocol.js';
 import {
   bambuRemoteName,
+  bambuStage,
   bambuTopic,
+  definedFields,
   mergeBambuStatus,
   parseBambuCommandPayload,
   parseBambuDiscoveryDatagram,
   parseBambuStatusPayload,
-  parseBambuStill,
   parseBambuVersionPayload,
 } from '#bambu.protocol.js';
 import { prepareBambuArtifact } from '#bambu.archive.js';
@@ -267,72 +267,104 @@ const mapRunState = (
 };
 
 const maximumCameraBytes = 4 * 1024 * 1024;
-const cameraAccessCode = /^[\u0021-\u007E]{1,32}$/u;
 
-/** Capture one encoded Bambu camera frame through a short-lived pinned stream.
- * @internal
- * @param input - Protected camera endpoint, credential, trust, runtime and cancellation.
- * @returns One bounded JPEG that expires quickly and owns no live stream.
+/**
+ * Resolve the printer's access code from the host vault. It stays in the session and never reaches a log or error.
+ *
+ * @param input - Admitted connection input naming the secret.
+ * @param runtime - Host secret resolution.
+ * @returns The access code.
  */
-export const captureBambuStill = async (
-  input: Readonly<{
-    address: string;
-    accessCode: string;
-    trust: MachineTransportTrust;
-    runtime: MachineConnectionRuntime;
-    signal: AbortSignal;
-  }>,
-): Promise<MachineStill> => {
-  if (!cameraAccessCode.test(input.accessCode) || input.trust.type !== 'pinned') {
-    throw new Error('BAMBU_CAMERA_AUTH_INVALID');
-  }
-  const stream = await input.runtime.connectStream({
-    endpoint: { address: input.address, port: 6000 },
-    transport: 'tls',
-    trust: input.trust,
-    connectTimeout: 5000,
-    idleTimeout: 5000,
-    maximumReadBytes: maximumCameraBytes + 16,
-    maximumWriteBytes: 80,
-    signal: input.signal,
-  });
+const resolveAccessCode = async (
+  input: MachineConnectInput<Binding>,
+  runtime: MachineConnectionRuntime,
+): Promise<string> => {
+  let accessCode: string;
   try {
-    const authentication = new Uint8Array(80);
-    const header = new DataView(authentication.buffer);
-    header.setUint32(0, 0x40, true);
-    header.setUint32(4, 0x30_00, true);
-    authentication.set(new TextEncoder().encode('bblp'), 16);
-    authentication.set(new TextEncoder().encode(input.accessCode), 48);
-    await stream.write(authentication);
-
-    const frame = new Uint8Array(maximumCameraBytes + 16);
-    let length = 0;
-    let total: number | undefined;
-    for await (const chunk of stream.readable) {
-      input.signal.throwIfAborted();
-      if (chunk.byteLength === 0) {
-        continue;
-      }
-      if (length + chunk.byteLength > frame.byteLength) {
-        throw new Error('BAMBU_CAMERA_FRAME_OVERSIZE');
-      }
-      frame.set(chunk, length);
-      length += chunk.byteLength;
-      if (total === undefined && length >= 16) {
-        const payloadLength = new DataView(frame.buffer, 0, 16).getUint32(0, true);
-        if (payloadLength < 4 || payloadLength > maximumCameraBytes) {
-          throw new Error('BAMBU_CAMERA_FRAME_INVALID');
-        }
-        total = payloadLength + 16;
-      }
-      if (total !== undefined && length >= total) {
-        return parseBambuStill(frame.slice(16, total), input.runtime.clock.now());
-      }
-    }
-    throw new Error('BAMBU_CAMERA_FRAME_INCOMPLETE');
-  } finally {
-    await stream.close().catch(() => undefined);
+    accessCode = await runtime.resolveSecret({
+      reference: input.connection.secretRef,
+      signal: input.signal,
+    });
+  } catch {
+    throw new Error('BAMBU_SECRET_RESOLUTION_FAILED');
   }
+  if (accessCode.length === 0 || accessCode.length > 256 || !accessCode.isWellFormed()) {
+    throw new Error('BAMBU_ACCESS_CODE_INVALID');
+  }
+  return accessCode;
+};
+
+/**
+ * Open the pinned TLS stream that MQTT runs over.
+ *
+ * @param input - Admitted connection input naming the printer.
+ * @param runtime - Host network authority.
+ * @param trust - The MQTT service's pinned trust.
+ * @returns The open stream.
+ */
+const openMqttStream = async (
+  input: MachineConnectInput<Binding>,
+  runtime: MachineConnectionRuntime,
+  trust: MachineTransportTrust,
+): Promise<MachineNetworkStream> => {
+  try {
+    return await runtime.connectStream({
+      endpoint: { address: input.candidate.endpoint.address, port: 8883 },
+      transport: 'tls',
+      trust,
+      connectTimeout: 10_000,
+      idleTimeout: 90_000,
+      maximumReadBytes: 4 * 1024 * 1024,
+      maximumWriteBytes: 256 * 1024,
+      signal: input.signal,
+    });
+  } catch (error) {
+    // A certificate that no longer matches its pin needs a new binding, so the host stops retrying it.
+    throw new Error(
+      error instanceof Error && error.message === 'MACHINE_TLS_PIN_MISMATCH'
+        ? 'BAMBU_CERTIFICATE_CHANGED'
+        : 'BAMBU_MQTT_TRANSPORT_FAILED',
+    );
+  }
+};
+
+/**
+ * An X1C's still: the host captures one frame from the pinned RTSPS camera. Another model's camera needs its own
+ * manifest and pin, so it offers none here.
+ *
+ * @param input - Admitted connection input with the camera trust and secret.
+ * @param runtime - Host capture authority.
+ * @param model - The printer's model, from its status or its discovery.
+ * @returns The session's still capability.
+ */
+const bambuStillCapture = (
+  input: MachineConnectInput<Binding>,
+  runtime: MachineConnectionRuntime,
+  model: string | undefined,
+): MachineSession<Submission>['stillCapture'] => {
+  const trust = input.connection.serviceTrust['camera'];
+  const { captureNetworkStill } = runtime;
+  if (trust?.type !== 'pinned' || model !== 'X1C' || !captureNetworkStill) {
+    return Object.freeze({ type: 'unsupported' });
+  }
+  return Object.freeze({
+    type: 'supported',
+    async capture(captureInput: Readonly<{ signal: AbortSignal }>) {
+      return captureNetworkStill({
+        endpoint: {
+          address: input.candidate.endpoint.address,
+          port: 322,
+        },
+        trust,
+        secretRef: input.connection.secretRef,
+        username: 'bblp',
+        path: '/streaming/live/1',
+        connectTimeout: 60_000,
+        maximumBytes: maximumCameraBytes,
+        signal: captureInput.signal,
+      });
+    },
+  });
 };
 
 /** Connect one host-owned, pinned MQTTS observation session.
@@ -353,38 +385,8 @@ export const connectBambuMachine = async (
     if (trust?.type !== 'pinned') {
       throw new Error('BAMBU_MQTT_PIN_REQUIRED');
     }
-    let accessCode: string;
-    try {
-      accessCode = await runtime.resolveSecret({
-        reference: input.connection.secretRef,
-        signal: input.signal,
-      });
-    } catch {
-      throw new Error('BAMBU_SECRET_RESOLUTION_FAILED');
-    }
-    if (accessCode.length === 0 || accessCode.length > 256 || !accessCode.isWellFormed()) {
-      throw new Error('BAMBU_ACCESS_CODE_INVALID');
-    }
-    let network: MachineNetworkStream;
-    try {
-      network = await runtime.connectStream({
-        endpoint: { address: input.candidate.endpoint.address, port: 8883 },
-        transport: 'tls',
-        trust,
-        connectTimeout: 10_000,
-        idleTimeout: 90_000,
-        maximumReadBytes: 4 * 1024 * 1024,
-        maximumWriteBytes: 256 * 1024,
-        signal: input.signal,
-      });
-    } catch (error) {
-      // A certificate that no longer matches its pin needs a new binding, so the host stops retrying it.
-      throw new Error(
-        error instanceof Error && error.message === 'MACHINE_TLS_PIN_MISMATCH'
-          ? 'BAMBU_CERTIFICATE_CHANGED'
-          : 'BAMBU_MQTT_TRANSPORT_FAILED',
-      );
-    }
+    const accessCode = await resolveAccessCode(input, runtime);
+    const network = await openMqttStream(input, runtime, trust);
     let client: MqttClientConstructor;
     try {
       const { mqttClient: mqttClientConstructor } = await loadBambuHostLibraries();
@@ -421,50 +423,51 @@ export const connectBambuMachine = async (
     const snapshot = (): MachineSnapshot => {
       const state = status ? mapRunState(status.runState) : 'unknown';
       const active = state === 'paused' || state === 'preparing' || state === 'printing' || state === 'finishing';
+      const facts: BambuStatus = status ?? {};
       return Object.freeze({
         connection: client.connected ? 'connected' : 'disconnected',
         readiness: active ? 'busy' : state === 'idle' || state === 'succeeded' ? 'idle' : 'unknown',
-        ...(active && status?.providerRunId ? { activeRunId: status.providerRunId } : {}),
+        ...definedFields({ activeRunId: active ? facts.providerRunId : undefined }),
         observedAt: statusObservedAt ?? runtime.clock.now(),
         setup: Object.freeze({
           toolId: 'tool-0',
-          ...(status?.bedType ? { bedType: status.bedType } : {}),
-          materials: status?.materials ?? [],
+          ...definedFields({ bedType: facts.bedType }),
+          materials: facts.materials ?? [],
         }),
         run: Object.freeze({
           state,
-          ...(status?.progress === undefined ? {} : { progress: status.progress }),
-          ...(status?.remainingSeconds === undefined ? {} : { remainingSeconds: status.remainingSeconds }),
-          ...(status?.runName ? { name: status.runName } : {}),
-          ...(status?.runFile ? { file: status.runFile } : {}),
-          ...(status?.currentLayer === undefined ? {} : { currentLayer: status.currentLayer }),
-          ...(status?.totalLayers === undefined ? {} : { totalLayers: status.totalLayers }),
-          ...(status?.stage ? { stage: status.stage } : {}),
-          ...(status?.printType ? { printType: status.printType } : {}),
-          ...(status?.speedProfile ? { speedProfile: status.speedProfile } : {}),
-          ...(status?.speedPercent === undefined ? {} : { speedPercent: status.speedPercent }),
+          ...definedFields({
+            progress: facts.progress,
+            remainingSeconds: facts.remainingSeconds,
+            name: facts.runName,
+            file: facts.runFile,
+            currentLayer: facts.currentLayer,
+            totalLayers: facts.totalLayers,
+            stage: active ? bambuStage(facts.stageId) : undefined,
+            printType: facts.printType,
+            speedProfile: facts.speedProfile,
+            speedPercent: facts.speedPercent,
+          }),
         }),
-        temperatures: Object.freeze({
-          ...(status?.nozzleTemperature ? { nozzle: status.nozzleTemperature } : {}),
-          ...(status?.nozzleTargetTemperature ? { nozzleTarget: status.nozzleTargetTemperature } : {}),
-          ...(status?.bedTemperature ? { bed: status.bedTemperature } : {}),
-          ...(status?.bedTargetTemperature ? { bedTarget: status.bedTargetTemperature } : {}),
-          ...(status?.chamberTemperature ? { chamber: status.chamberTemperature } : {}),
+        temperatures: definedFields({
+          nozzle: facts.nozzleTemperature,
+          nozzleTarget: facts.nozzleTargetTemperature,
+          bed: facts.bedTemperature,
+          bedTarget: facts.bedTargetTemperature,
+          chamber: facts.chamberTemperature,
         }),
-        fans: Object.freeze({
-          ...(status?.partFanPercent === undefined ? {} : { part: status.partFanPercent }),
-          ...(status?.auxiliaryFanPercent === undefined ? {} : { auxiliary: status.auxiliaryFanPercent }),
-          ...(status?.chamberFanPercent === undefined ? {} : { chamber: status.chamberFanPercent }),
+        fans: definedFields({
+          part: facts.partFanPercent,
+          auxiliary: facts.auxiliaryFanPercent,
+          chamber: facts.chamberFanPercent,
         }),
         materialSystem: Object.freeze({
-          ...(status?.currentMaterialSlot === undefined ? {} : { currentSlot: status.currentMaterialSlot }),
-          ...(status?.targetMaterialSlot === undefined ? {} : { targetSlot: status.targetMaterialSlot }),
-          units: status?.materialUnits ?? [],
+          ...definedFields({ currentSlot: facts.currentMaterialSlot, targetSlot: facts.targetMaterialSlot }),
+          units: facts.materialUnits ?? [],
         }),
-        network: Object.freeze(status?.wifiSignalDbm === undefined ? {} : { wifiSignalDbm: status.wifiSignalDbm }),
-        lights: Object.freeze(status?.chamberLight ? { chamber: status.chamberLight } : {}),
-        ...(status?.removableStorage ? { removableStorage: status.removableStorage } : {}),
-        ...(status?.alerts ? { alerts: status.alerts } : {}),
+        network: definedFields({ wifiSignalDbm: facts.wifiSignalDbm }),
+        lights: definedFields({ chamber: facts.chamberLight }),
+        ...definedFields({ removableStorage: facts.removableStorage, alerts: facts.alerts }),
       });
     };
     client.on('message', (topic, message) => {
@@ -696,43 +699,7 @@ export const connectBambuMachine = async (
       }
       return commandReceipt(commandInput.operationId, commandInput.command);
     };
-    const cameraTrust = input.connection.serviceTrust['camera'];
-    const cameraModel = status.model ?? input.candidate.claimedIdentity.model;
-    const { captureNetworkStill } = runtime;
-    const stillCapture: MachineSession<Submission>['stillCapture'] =
-      cameraTrust?.type === 'pinned' && cameraModel === 'X1C' && captureNetworkStill
-        ? Object.freeze({
-            type: 'supported',
-            async capture(captureInput: Readonly<{ signal: AbortSignal }>) {
-              return captureNetworkStill({
-                endpoint: {
-                  address: input.candidate.endpoint.address,
-                  port: 322,
-                },
-                trust: cameraTrust,
-                secretRef: input.connection.secretRef,
-                username: 'bblp',
-                path: '/streaming/live/1',
-                connectTimeout: 60_000,
-                maximumBytes: maximumCameraBytes,
-                signal: captureInput.signal,
-              });
-            },
-          })
-        : cameraTrust?.type === 'pinned' && cameraModel !== 'X1C'
-          ? Object.freeze({
-              type: 'supported',
-              async capture(captureInput: Readonly<{ signal: AbortSignal }>) {
-                return captureBambuStill({
-                  address: input.candidate.endpoint.address,
-                  accessCode,
-                  trust: cameraTrust,
-                  runtime,
-                  signal: captureInput.signal,
-                });
-              },
-            })
-          : Object.freeze({ type: 'unsupported' });
+    const stillCapture = bambuStillCapture(input, runtime, status.model ?? input.candidate.claimedIdentity.model);
     const session: MachineSession<Submission> = {
       stillCapture,
       async getDescriptor(descriptorInput): Promise<MachineDescriptor> {

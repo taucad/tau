@@ -365,7 +365,7 @@ export const createRuntimeAgentClients = (
         });
         context?.signal?.throwIfAborted();
         return result.success
-          ? { success: true, files: [...result.data] }
+          ? { success: true, files: [...result.data], issues: [...result.issues] }
           : {
               success: false,
               errorCode: rpcClientErrorCode.unknown,

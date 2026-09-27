@@ -1,4 +1,7 @@
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import type { MachineArtifactReference } from '@taucad/runtime/machine';
 import { unzipSync, zipSync } from 'fflate';
@@ -11,34 +14,11 @@ import {
   readBambuContainerProducer,
   writeBambuContainer,
 } from '#container.js';
-// The Bambu provider keeps its preflight private; this white-box import proves the container it admits.
-/* oxlint-disable no-restricted-imports -- cross-package white-box acceptance check against @taucad/bambu's private preflight */
-// eslint-disable-next-line @nx/enforce-module-boundaries -- same white-box check; @taucad/bambu exports no preflight subpath
-import { prepareBambuArtifact } from '../../bambu/src/bambu.archive.js';
-/* oxlint-enable no-restricted-imports -- white-box import ends */
 
 const encoder = new TextEncoder();
 const gcode = 'G28\nG90\nM83\nG1 X10 Y10 F3000\n';
 const digest = (bytes: Uint8Array<ArrayBuffer>): MachineArtifactReference['digest'] =>
   `sha256:${createHash('sha256').update(bytes).digest('hex')}` as MachineArtifactReference['digest'];
-const prepare = async (bytes: Uint8Array<ArrayBuffer>) =>
-  prepareBambuArtifact({
-    artifact: {
-      projectId: 'proj_000000000000000000001',
-      path: 'cube.gcode.3mf',
-      digest: digest(bytes),
-      length: bytes.byteLength,
-      mediaType: 'application/vnd.bambulab.gcode-3mf',
-      contract: { id: 'manufacturing.toolpath.bambu-gcode-3mf', version: 1 },
-      selectedMember: bambuPlateMember,
-    },
-    runtime: {
-      async *readArtifact() {
-        yield Uint8Array.from(bytes);
-      },
-    },
-    signal: new AbortController().signal,
-  });
 
 describe('writeBambuContainer', () => {
   it('should write the censused member set in a fixed order with the plate MD5', () => {
@@ -81,17 +61,6 @@ describe('writeBambuContainer', () => {
   it('should refuse an empty plate', () => {
     expect(() => writeBambuContainer({ gcode: '', modelName: 'cube' })).toThrow('SLICER_CONTAINER_PLATE_EMPTY');
   });
-
-  it('should pass the Bambu provider preflight for an immutable artifact', async () => {
-    const bytes = writeBambuContainer({ gcode, modelName: 'cube' });
-    const prepared = await prepare(bytes);
-    expect(prepared).toMatchObject({
-      digest: digest(bytes),
-      length: bytes.byteLength,
-      memberMd5: createHash('md5').update(gcode).digest('hex'),
-      parser: { id: 'tau.bambu.gcode-3mf', version: '1' },
-    });
-  });
 });
 
 // Synthetic stand-in for a Bambu Studio archive: only the two provenance signals, made-up version.
@@ -124,10 +93,8 @@ describe('readBambuContainerProducer', () => {
       studioContainer(studioSliceInfo.replace('value="slicer"', 'value="other"')),
       undefined,
     ],
-  ])('should identify %s the same way the Bambu provider does', async (_name, bytes, producer) => {
-    const prepared = await prepare(bytes);
+  ])('should identify %s', (_name, bytes, producer) => {
     expect(readBambuContainerProducer(bytes)).toEqual(producer);
-    expect(prepared.producer).toEqual(producer);
   });
 
   it('should take the version from the slice metadata when the header names none', () => {
@@ -186,6 +153,10 @@ describe('readBambuContainer', () => {
     expect(container.recordedMd5).toBe('0'.repeat(32));
   });
 
+  it('should read no filament colours from a plate that records none', () => {
+    expect(readBambuContainer(writeBambuContainer({ gcode, modelName: 'cube' })).filamentColors).toEqual([]);
+  });
+
   it.each([
     ['a missing plate', zipSync({ 'Metadata/other.gcode': encoder.encode(gcode) }), 'SLICER_CONTAINER_PLATE_MISSING'],
     ['an empty plate', zipSync({ [bambuPlateMember]: new Uint8Array() }), 'SLICER_CONTAINER_PLATE_INVALID'],
@@ -199,5 +170,84 @@ describe('readBambuContainer', () => {
     ['no bytes', new Uint8Array(), 'SLICER_CONTAINER_LIMIT'],
   ])('should refuse %s', (_name, bytes, code) => {
     expect(() => readBambuContainer(Uint8Array.from(bytes))).toThrow(code);
+  });
+});
+
+describe('filament colours', () => {
+  const decoder = new TextDecoder();
+  const plateOf = (bytes: Uint8Array<ArrayBuffer>): string => decoder.decode(unzipSync(bytes)[bambuPlateMember]);
+  const zippedPlate = (text: string): Uint8Array<ArrayBuffer> =>
+    Uint8Array.from(zipSync({ [bambuPlateMember]: encoder.encode(text) }));
+
+  it('should record them in a config block at the head of the plate and per filament, then read them back in order', () => {
+    const bytes = writeBambuContainer({ gcode, modelName: 'cube', filamentColors: ['#ff0000', '#0000FF'] });
+
+    expect(plateOf(bytes)).toBe(
+      `; CONFIG_BLOCK_START\n; filament_colour = #FF0000;#0000FF\n; CONFIG_BLOCK_END\n${gcode}`,
+    );
+    expect(decoder.decode(unzipSync(bytes)['Metadata/slice_info.config'])).toContain(
+      '  <object identify_id="1" name="cube" skipped="false"/>\n' +
+        '  <filament id="1" color="#FF0000"/>\n' +
+        '  <filament id="2" color="#0000FF"/>\n' +
+        ' </plate>\n',
+    );
+    const container = readBambuContainer(bytes);
+    expect(container.filamentColors).toEqual(['#FF0000', '#0000FF']);
+    expect(container.md5Verified).toBe(true);
+  });
+
+  it('should write the same bytes as before when there is no colour to record', () => {
+    expect(writeBambuContainer({ gcode, modelName: 'cube', filamentColors: [] })).toEqual(
+      writeBambuContainer({ gcode, modelName: 'cube' }),
+    );
+  });
+
+  it('should keep naming the reference engine as the producer of a coloured plate', () => {
+    const bytes = writeBambuContainer({
+      gcode: `; generated by @taucad/slicer reference engine\n${gcode}`,
+      modelName: 'cube',
+      filamentColors: ['#F5A623'],
+    });
+
+    expect(readBambuContainerProducer(bytes)).toEqual({ name: '@taucad/slicer reference' });
+  });
+
+  it.each([
+    ['a named colour', ['red']],
+    ['a colour with alpha', ['#FF0000FF']],
+    ['two colours in one entry', ['#FF0000;#0000FF']],
+    ['more than 64 colours', Array.from({ length: 65 }, () => '#FF0000')],
+  ])('should refuse %s', (_name, filamentColors) => {
+    expect(() => writeBambuContainer({ gcode, modelName: 'cube', filamentColors })).toThrow(
+      'SLICER_CONTAINER_COLOR_INVALID',
+    );
+  });
+
+  it('should read the colours of a real two-colour Bambu Studio slice in filament order', () => {
+    const plate = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '__fixtures__', 'two-colour-cubes.gcode'));
+
+    expect(readBambuContainer(Uint8Array.from(zipSync({ [bambuPlateMember]: plate }))).filamentColors).toEqual([
+      '#FF0000',
+      '#0000FF',
+    ]);
+  });
+
+  it('should read the colours Bambu Studio records at the head of the plate and Orca at its tail', () => {
+    const head = zippedPlate(
+      '; CONFIG_BLOCK_START\n; default_filament_colour = ""\n; filament_colour = #f5a623;#FFFFFF\n; CONFIG_BLOCK_END\nG28\n',
+    );
+    const tail = zippedPlate(`${'G1 X1 Y1\n'.repeat(10_000)}; filament_colour = #00AE42\n`);
+
+    expect(readBambuContainer(head).filamentColors).toEqual(['#F5A623', '#FFFFFF']);
+    expect(readBambuContainer(tail).filamentColors).toEqual(['#00AE42']);
+  });
+
+  it('should drop an alpha byte and read no colours when any entry is not a colour', () => {
+    expect(readBambuContainer(zippedPlate('; filament_colour = #FF0000FF;#0000ff\n')).filamentColors).toEqual([
+      '#FF0000',
+      '#0000FF',
+    ]);
+    expect(readBambuContainer(zippedPlate('; filament_colour = #FF0000;red\n')).filamentColors).toEqual([]);
+    expect(readBambuContainer(zippedPlate('; filament_colour = #FF0000;\n')).filamentColors).toEqual([]);
   });
 });

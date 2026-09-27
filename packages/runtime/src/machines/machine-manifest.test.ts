@@ -13,7 +13,8 @@ describe('parseMachineManifest', () => {
 
   it.each([
     ['an unknown top-level key', { ...machineManifestFixture, colour: 'red' }],
-    ['an unknown nested key', { ...machineManifestFixture, camera: { stills: false, stream: false, zoom: 2 } }],
+    ['an unknown nested key', { ...machineManifestFixture, camera: { stills: false, zoom: 2 } }],
+    ['a live-stream claim', { ...machineManifestFixture, camera: { stills: true, stream: true } }],
     [
       'a zero build volume',
       {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ImmutableRevisionTree } from '#algorithms/revision-tree.js';
-import { mergeRevisionTrees, renderConflictMarkers } from '#algorithms/revision-merge.js';
+import { mergeFilePreferring, mergeRevisionTrees, renderConflictMarkers } from '#algorithms/revision-merge.js';
+import type { ParameterRecordCodec } from '#algorithms/revision-merge.js';
 
 const tree = (files: Readonly<Record<string, string | Uint8Array<ArrayBuffer>>>): ImmutableRevisionTree =>
   new ImmutableRevisionTree(Object.entries(files));
@@ -24,6 +25,31 @@ const modifyDeleteCases: ReadonlyArray<{
     theirs: tree({ 'part.scad': 'changed' }),
   },
 ];
+
+describe('mergeFilePreferring', () => {
+  const encode = (value: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(value);
+  const sides = {
+    base: encode('one\ntwo\nthree\nfour\nfive\n'),
+    ours: encode('one\nTWO mine\nthree\nfour\nfive\n'),
+    theirs: encode('one\nTWO theirs\nthree\nfour\nFIVE\n'),
+  };
+
+  it('keeps the other side’s clean hunks and settles the collision on the chosen side (RV-W5b2 R2-4)', () => {
+    expect(new TextDecoder().decode(mergeFilePreferring('part.scad', sides, { prefer: 'ours' }))).toBe(
+      'one\nTWO mine\nthree\nfour\nFIVE\n',
+    );
+    expect(new TextDecoder().decode(mergeFilePreferring('part.scad', sides, { prefer: 'theirs' }))).toBe(
+      'one\nTWO theirs\nthree\nfour\nFIVE\n',
+    );
+  });
+
+  it('answers undefined for a binary file, which only a whole side can settle', () => {
+    const binary = new Uint8Array([0, 1, 2, 3]);
+    expect(
+      mergeFilePreferring('mesh.bin', { base: binary, ours: binary, theirs: encode('x') }, { prefer: 'ours' }),
+    ).toBeUndefined();
+  });
+});
 
 describe('mergeRevisionTrees', () => {
   it('deterministically composes non-overlapping UTF-8 line edits', () => {
@@ -296,5 +322,241 @@ describe('renderConflictMarkers', () => {
         labels,
       }),
     ).toBeUndefined();
+  });
+});
+
+describe('mergeRevisionTrees on a parameter record (D12)', () => {
+  const recordPath = '.tau/parameters/x.json';
+  type Group = {
+    values: Record<string, unknown>;
+    units?: Record<string, string>;
+    sourceUnits?: Record<string, string>;
+  };
+  type StoredRecord = { activeGroup: string; groups: Record<string, Group> };
+
+  const sorted = (map: Readonly<Record<string, unknown>>): Record<string, unknown> =>
+    Object.fromEntries(
+      Object.keys(map)
+        .toSorted()
+        .map((key) => [key, map[key]]),
+    );
+  /**
+   * The record policy's rules and `serializeParameterRecord`'s bytes, restated
+   * without `@taucad/parameters`: at least one group, `activeGroup` names one,
+   * every source unit equals its chosen unit; sorted `values`, `units` and
+   * `sourceUnits`, an empty claim map dropped, group order kept.
+   */
+  const validated = (value: unknown): StoredRecord => {
+    const record = value as Partial<StoredRecord>;
+    const groups = Object.entries(record.groups ?? {});
+    if (groups.length === 0 || record.activeGroup === undefined || !Object.hasOwn(record.groups!, record.activeGroup)) {
+      throw new Error('INVALID_RECORD');
+    }
+    for (const [, group] of groups) {
+      for (const [pointer, unit] of Object.entries(group.sourceUnits ?? {})) {
+        if (group.units?.[pointer] !== unit) {
+          throw new Error('INVALID_RECORD');
+        }
+      }
+    }
+    return record as StoredRecord;
+  };
+  const codec: ParameterRecordCodec = {
+    read: (bytes) => validated(JSON.parse(new TextDecoder().decode(bytes)) as unknown),
+    serialize(value) {
+      const record = validated(value);
+      const groups = Object.fromEntries(
+        Object.entries(record.groups).map(([name, group]) => [
+          name,
+          {
+            values: sorted(group.values),
+            ...(Object.keys(group.units ?? {}).length === 0 ? {} : { units: sorted(group.units!) }),
+            ...(Object.keys(group.sourceUnits ?? {}).length === 0 ? {} : { sourceUnits: sorted(group.sourceUnits!) }),
+          },
+        ]),
+      );
+      return new TextEncoder().encode(`${JSON.stringify({ activeGroup: record.activeGroup, groups }, undefined, 2)}\n`);
+    },
+  };
+  const bytesOf = (record: StoredRecord): string => `${JSON.stringify(record, undefined, 2)}\n`;
+  const at = (record: StoredRecord): ImmutableRevisionTree => tree({ [recordPath]: bytesOf(record) });
+  const merge = (base: StoredRecord, ours: StoredRecord, theirs: StoredRecord) =>
+    mergeRevisionTrees(at(base), at(ours), at(theirs), { parameters: codec });
+  const single = (values: Record<string, unknown>, extra: Omit<Group, 'values'> = {}): StoredRecord => ({
+    activeGroup: 'default',
+    groups: { default: { values, ...extra } },
+  });
+
+  it('should merge disjoint key edits clean, keeping the canonical serialization', () => {
+    /* Adding the last key rewrites `width`'s line (its comma), which a line merge reads as an overlap. */
+    const result = merge(
+      single({ height: 10, width: 20 }),
+      single({ height: 10, width: 20, zeta: 5 }),
+      single({ height: 10, width: 25 }),
+    );
+
+    expect(result.status).toBe('merged');
+    if (result.status === 'merged') {
+      expect(text(result.tree, recordPath)).toBe(bytesOf(single({ height: 10, width: 25, zeta: 5 })));
+    }
+  });
+
+  it('should write keys each side added in canonical order, not the order the sides met', () => {
+    /* Review finding 3: a key-order merge gave [a, c, b, z]. */
+    const result = merge(single({ a: 1, z: 2 }), single({ a: 1, b: 3, z: 2 }), single({ a: 1, c: 4, z: 2 }));
+
+    expect(result.status).toBe('merged');
+    if (result.status === 'merged') {
+      expect(text(result.tree, recordPath)).toBe(bytesOf(single({ a: 1, b: 3, c: 4, z: 2 })));
+    }
+  });
+
+  it('should drop a claim map both sides emptied between them, as the writer does', () => {
+    const result = merge(
+      single({ a: 1, b: 2 }, { units: { '/a': 'in', '/b': 'mm' } }),
+      single({ a: 1, b: 2 }, { units: { '/b': 'mm' } }),
+      single({ a: 1, b: 2 }, { units: { '/a': 'in' } }),
+    );
+
+    expect(result.status).toBe('merged');
+    if (result.status === 'merged') {
+      expect(text(result.tree, recordPath)).toBe(bytesOf(single({ a: 1, b: 2 })));
+    }
+  });
+
+  it('should settle a key both sides changed on the chosen side, keeping the other side’s other keys (D14)', () => {
+    const bytes = (record: StoredRecord): Uint8Array<ArrayBuffer> => new TextEncoder().encode(bytesOf(record));
+    const sides = {
+      base: bytes(single({ depth: 5, height: 10, width: 20 })),
+      ours: bytes(single({ depth: 5, height: 12, width: 20 })),
+      theirs: bytes(single({ depth: 7, height: 14, width: 20 })),
+    };
+
+    const mine = mergeFilePreferring(recordPath, sides, { prefer: 'ours', parameters: codec });
+    const theirs = mergeFilePreferring(recordPath, sides, { prefer: 'theirs', parameters: codec });
+    expect(new TextDecoder().decode(mine)).toBe(bytesOf(single({ depth: 7, height: 12, width: 20 })));
+    expect(new TextDecoder().decode(theirs)).toBe(bytesOf(single({ depth: 7, height: 14, width: 20 })));
+    /* Without the codec nothing is validated, so only a whole side will do. */
+    expect(mergeFilePreferring(recordPath, sides, { prefer: 'ours' })).toBeUndefined();
+  });
+
+  it('should refuse a merge that activates a group the other side deleted', () => {
+    const both = { alpha: { values: { x: 1 } }, beta: { values: { x: 2 } } };
+    const result = merge(
+      { activeGroup: 'alpha', groups: both },
+      { activeGroup: 'alpha', groups: { alpha: { values: { x: 1 } } } },
+      { activeGroup: 'beta', groups: both },
+    );
+
+    expect(result.status).toBe('conflicted');
+    if (result.status === 'conflicted') {
+      expect(result.conflicts).toEqual([
+        expect.objectContaining({ type: 'parameters', path: recordPath, reason: 'invalid', pointers: [] }),
+      ]);
+    }
+  });
+
+  it('should refuse a merge in which each side deleted a different group, leaving none', () => {
+    const result = merge(
+      { activeGroup: 'alpha', groups: { alpha: { values: {} }, beta: { values: {} } } },
+      { activeGroup: 'beta', groups: { beta: { values: {} } } },
+      { activeGroup: 'alpha', groups: { alpha: { values: {} } } },
+    );
+
+    expect(result.status).toBe('conflicted');
+    if (result.status === 'conflicted') {
+      /* Every key settled (`activeGroup` moved on one side only), so only the record check catches it. */
+      expect(result.conflicts).toEqual([expect.objectContaining({ type: 'parameters', reason: 'invalid' })]);
+    }
+  });
+
+  it('should refuse a merge whose source unit no longer matches its chosen unit', () => {
+    const result = merge(
+      single({ w: 1 }, { units: { '/w': 'mm' } }),
+      single({ w: 1 }, { units: { '/w': 'mm' }, sourceUnits: { '/w': 'mm' } }),
+      single({ w: 1 }, { units: { '/w': 'in' } }),
+    );
+
+    expect(result.status).toBe('conflicted');
+    if (result.status === 'conflicted') {
+      expect(result.conflicts).toEqual([expect.objectContaining({ type: 'parameters', reason: 'invalid' })]);
+    }
+  });
+
+  it('should return a typed choose-one conflict naming the key both sides changed', () => {
+    const base = at(single({ height: 10, width: 20 }));
+    const ours = at(single({ height: 11, width: 30 }));
+    const theirs = at(single({ height: 10, width: 40 }));
+
+    const result = mergeRevisionTrees(base, ours, theirs, { parameters: codec });
+
+    expect(result.status).toBe('conflicted');
+    if (result.status === 'conflicted') {
+      expect(result.conflicts).toEqual([
+        {
+          type: 'parameters',
+          path: recordPath,
+          reason: 'overlap',
+          pointers: ['/groups/default/values/width'],
+          base: base.get(recordPath),
+          ours: ours.get(recordPath),
+          theirs: theirs.get(recordPath),
+        },
+      ]);
+    }
+  });
+
+  it('should conflict when one side deletes a key the other side changed', () => {
+    const result = merge(single({ height: 10, width: 20 }), single({ height: 10 }), single({ height: 10, width: 25 }));
+
+    expect(result.status).toBe('conflicted');
+    if (result.status === 'conflicted') {
+      expect(result.conflicts).toEqual([
+        expect.objectContaining({ type: 'parameters', reason: 'overlap', pointers: ['/groups/default/values/width'] }),
+      ]);
+    }
+  });
+
+  it('should conflict when one side is not a record any reader accepts', () => {
+    const result = mergeRevisionTrees(
+      at(single({ a: 1 })),
+      at(single({ a: 2 })),
+      tree({ [recordPath]: '{"activeGroup":"default",\n' }),
+      { parameters: codec },
+    );
+
+    expect(result.status).toBe('conflicted');
+    if (result.status === 'conflicted') {
+      expect(result.conflicts).toEqual([expect.objectContaining({ type: 'parameters', reason: 'invalid' })]);
+    }
+  });
+
+  it('should never merge a record both sides changed when no codec can prove the result valid', () => {
+    const result = mergeRevisionTrees(
+      at(single({ height: 10, width: 20 })),
+      at(single({ height: 11, width: 20 })),
+      at(single({ height: 10, width: 25 })),
+    );
+
+    expect(result.status).toBe('conflicted');
+    if (result.status === 'conflicted') {
+      expect(result.conflicts).toEqual([
+        expect.objectContaining({ type: 'parameters', reason: 'unvalidated', pointers: [] }),
+      ]);
+    }
+  });
+
+  it('should keep the line merge for JSON outside the parameter records', () => {
+    const result = mergeRevisionTrees(
+      tree({ 'config.json': bytesOf(single({ height: 10, width: 20 })) }),
+      tree({ 'config.json': bytesOf(single({ height: 10, width: 20, zeta: 5 })) }),
+      tree({ 'config.json': bytesOf(single({ height: 10, width: 25 })) }),
+      { parameters: codec },
+    );
+
+    expect(result.status).toBe('conflicted');
+    if (result.status === 'conflicted') {
+      expect(result.conflicts).toEqual([expect.objectContaining({ type: 'text', path: 'config.json' })]);
+    }
   });
 });

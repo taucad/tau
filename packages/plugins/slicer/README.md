@@ -72,7 +72,7 @@ console.log(program.layerTable.length, program.duration, md5Verified);
 | `loadBambuStudioCatalog`                  | `@taucad/slicer/bambu-studio` | printer, process and filament presets Bambu Studio offers, optionally per printer    |
 | `resolveBambuStudioSelection`             | `@taucad/slicer/bambu-studio` | complete a preset selection from printer hints (model, nozzle, trays, plate)         |
 | `describeBambuStudioSettings`             | `@taucad/slicer/bambu-studio` | grouped JSON Schema and current values of a selection's settings                     |
-| `sliceWithBambuStudio`                    | `@taucad/slicer/bambu-studio` | slice an STL with Bambu Studio and return its `.gcode.3mf` untouched                 |
+| `sliceWithBambuStudio`                    | `@taucad/slicer/bambu-studio` | slice parts with Bambu Studio, one filament each; return its `.gcode.3mf` untouched  |
 | `BambuStudioError`, `bambuPlates`         | `@taucad/slicer/bambu-studio` | typed refusal with a `BAMBU_STUDIO_*` code; plate ids and Bambu Studio's names       |
 
 ### Options
@@ -98,7 +98,7 @@ With `engine: 'bambu-studio'` the reference-only options are ignored. Presets no
 options). `settings` apply over the resolved presets: a filament setting reaches every used filament
 whose preset has that key. Bambu Studio is found through `TAU_BAMBU_STUDIO_PATH` or its default
 install location, runs in a temporary directory with its own data directory, one slice at a time,
-and is stopped by the operation signal or after five minutes.
+and is stopped by the operation signal or, with `BAMBU_STUDIO_TIMEOUT`, after two minutes plus one minute per MiB of STL.
 
 ### Toolpath parser
 

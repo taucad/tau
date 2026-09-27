@@ -16,6 +16,8 @@ import {
   repositoryByteCeiling,
   retentionWindowMilliseconds,
 } from '#api/git/store/limits.js';
+import { markRetired, sweepRepository } from '#api/git/store/sweep.js';
+import type { SweepOutcome } from '#api/git/store/sweep.js';
 import {
   ManifestError,
   assertGenerationSucceeds,
@@ -24,11 +26,11 @@ import {
   indexKeyFor,
   encodeManifest,
   isTombstoned,
+  spilledPushLog,
   succeedManifest,
   tombstoneManifest,
 } from '#api/git/store/manifest.js';
-import type { Manifest, ManifestPack, RetiredPack } from '#api/git/store/manifest.js';
-import { sweepRepository } from '#api/git/store/sweep.js';
+import type { Manifest, ManifestPack } from '#api/git/store/manifest.js';
 
 /**
  * The commit protocol: what happens after stock `receive-pack` exits and
@@ -63,7 +65,15 @@ export type CommitResult =
       readonly manifest: Manifest;
       readonly token: CommitToken;
       readonly compacted: boolean;
-      readonly swept: readonly string[];
+      /**
+       * The compacting holder's housekeeping (NI4), for the caller to run once
+       * its reply no longer waits on it (W13b): the sweep lists `packs/` and
+       * `retired/`, which grow with every push inside the retention window.
+       * Resolves to the keys it deleted and the retired bytes it kept, or
+       * `undefined` when this commit did not compact or the sweep failed, and
+       * never rejects.
+       */
+      readonly sweep: () => Promise<SweepOutcome | undefined>;
       /** The ref-map difference this commit recorded. */
       readonly moved: readonly MovedRef[];
     };
@@ -73,6 +83,8 @@ export type CommitLeaseArguments = {
   lease: RepositoryLease;
   /** The authenticated pusher, from the session and never from the request (NI16). */
   committedBy: string;
+  /** The cloud host the pusher's request came through (D21, EQ11); absent for the account's own push. */
+  viaDevice?: string;
   /** Live packs tolerated before this committer compacts. */
   packBound?: number;
   /** Per-repository ceiling on non-LFS bytes (D20). */
@@ -208,8 +220,9 @@ const uploadKeyFor = (packFile: string): string =>
  * Commits whatever the push left in the lease, or nothing.
  *
  * The caller withholds the entire HTTP response — headers included — until
- * this resolves (D4, NI2). A thrown `RepositoryStoreError` with code `lost` is
- * the 503 signal; every other code is a refusal the client should see.
+ * this resolves (D4, NI2), and starts the result's `sweep` only after that. A
+ * thrown `RepositoryStoreError` with code `lost` is the 503 signal; every
+ * other code is a refusal the client should see.
  */
 // oxlint-disable-next-line max-lines-per-function -- the write path is one sequence; splitting it hides the order that makes it safe
 export const commitLease = async (args: CommitLeaseArguments): Promise<CommitResult> => {
@@ -258,27 +271,27 @@ export const commitLease = async (args: CommitLeaseArguments): Promise<CommitRes
     const pack = await uploadPack(store, lease.locator, upload);
     uploaded.push(pack);
   }
-  await args.faults?.('after-pack-upload');
-
-  const retiredNow: RetiredPack[] = hydrated
-    .filter((pack) => compacted && pack.key !== keptPack?.key)
-    .map((pack) => ({ key: pack.key, retiredAt: at.toISOString() }));
-  const previouslyRetired = lease.manifest?.retired ?? [];
-  const keptRetired = previouslyRetired.filter(
-    (entry) => at.getTime() - Date.parse(entry.retiredAt) <= retentionWindowMilliseconds,
-  );
-  const droppedRetired = previouslyRetired.filter((entry) => !keptRetired.includes(entry)).map((entry) => entry.key);
+  // Retirement is recorded before the manifest that drops these packs, so no
+  // committed manifest ever leaves a live-until-now pack without its marker.
+  await markRetired({
+    store,
+    locator: lease.locator,
+    packKeys: hydrated.filter((pack) => compacted && pack.key !== keptPack?.key).map((pack) => pack.key),
+    at,
+  });
 
   const next = succeedManifest(
     lease.manifest,
     {
       refs: references,
       packs: [...retainedLive, ...uploaded],
-      retired: [...keptRetired, ...retiredNow],
       committedBy: args.committedBy,
+      ...(args.viaDevice === undefined ? {} : { viaDevice: args.viaDevice }),
     },
     at,
   );
+  await writeSpilledPushLog({ store, locator: lease.locator, base: lease.manifest, next });
+  await args.faults?.('after-pack-upload');
 
   if (lease.manifest !== undefined) {
     // A self-check on the succession this commit is about to write: the base a
@@ -297,40 +310,41 @@ export const commitLease = async (args: CommitLeaseArguments): Promise<CommitRes
   });
   await args.faults?.('after-manifest-commit');
 
-  /*
-   * Past this line the push is durable and the client is owed the truth about
-   * it (NI2). The sweep is housekeeping on garbage nothing reads: if it fails,
-   * or the worker dies inside it, the keys it would have removed simply wait
-   * for the next compacting committer. Rejecting here would tell a client its
-   * committed push failed, which is the one lie this protocol must not tell.
-   */
-  let swept: readonly string[] = [];
-  try {
-    swept = await sweepRepository({
-      store,
-      locator: lease.locator,
-      committed: next,
-      droppedRetired,
-      at,
-      // Orphan discovery rides the listing the compacting holder is already doing.
-      scanOrphans: compacted,
-      ...(args.faults === undefined ? {} : { faults: args.faults }),
-    });
-  } catch (error) {
-    logger.warn(
-      `sweep after generation ${String(next.generation)} of ${lease.locator.projectId} failed; ` +
-        `${String(droppedRetired.length)} retired keys and any orphans remain for the next committer: ${String(error)}`,
-    );
-  }
-
   return {
     committed: true,
     manifest: next,
     token,
     compacted,
-    swept,
+    sweep: async () =>
+      compacted
+        ? sweepQuietly({
+            store,
+            locator: lease.locator,
+            committed: next,
+            at,
+            ...(args.faults === undefined ? {} : { faults: args.faults }),
+          })
+        : undefined,
     moved: movedReferences(lease.manifest?.refs ?? {}, references),
   };
+};
+
+/**
+ * The sweep, after a durable commit. The push is owed the truth about it
+ * (NI2), and the sweep is housekeeping on garbage nothing reads: if it fails,
+ * or the worker dies inside it, the keys it would have removed wait for the
+ * next compacting committer. So it logs and never rejects.
+ */
+const sweepQuietly = async (args: Parameters<typeof sweepRepository>[0]): Promise<SweepOutcome | undefined> => {
+  try {
+    return await sweepRepository(args);
+  } catch (error) {
+    logger.warn(
+      `sweep after generation ${String(args.committed.generation)} of ${args.locator.projectId} failed; ` +
+        `expired and orphaned keys remain for the next compacting committer: ${String(error)}`,
+    );
+    return undefined;
+  }
 };
 
 /**
@@ -421,6 +435,28 @@ const putFile = async (args: {
   await store.putObject(locator, key, body, {
     contentLength: body.byteLength,
     sha256: createHash('sha256').update(body).digest('base64'),
+  });
+};
+
+/**
+ * Stores the push-log segment `next` spilled, if it spilled one (EQ11,
+ * W13b). Every writer of a successor calls this before its manifest write,
+ * so a committed `earlierPushes` always names a segment that exists.
+ */
+export const writeSpilledPushLog = async (args: {
+  store: RepositoryStore;
+  locator: RepositoryLocator;
+  base: Manifest | undefined;
+  next: Manifest;
+}): Promise<void> => {
+  const { store, locator } = args;
+  const segment = spilledPushLog(args.base, args.next);
+  if (segment === undefined) {
+    return;
+  }
+  await store.putObject(locator, segment.key, segment.bytes, {
+    contentLength: segment.bytes.byteLength,
+    sha256: createHash('sha256').update(segment.bytes).digest('base64'),
   });
 };
 
@@ -542,7 +578,6 @@ export const commitTombstone = async (args: {
           {
             refs: {},
             packs: [],
-            retired: [],
             committedBy: args.committedBy,
             tombstone: {
               tombstonedAt: at.toISOString(),
@@ -559,6 +594,7 @@ export const commitTombstone = async (args: {
           ...(args.erasureVerified === undefined ? {} : { erasureVerified: args.erasureVerified }),
         });
 
+  await writeSpilledPushLog({ store: args.store, locator: args.locator, base: current, next });
   const token = await args.store.commitManifest(args.locator, encodeManifest(next), read?.token ?? 'absent');
   if (token === 'lost') {
     throw new RepositoryStoreError('lost', `another writer changed ${args.locator.projectId} before the tombstone`);

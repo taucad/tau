@@ -1,6 +1,7 @@
+import { slicedFilamentColors } from '@taucad/agent-tools/registry';
 import { readBambuContainer, readBambuContainerProducer } from '@taucad/slicer/container';
 import type { BambuContainerProducer } from '@taucad/slicer/container';
-import { parseGcode } from '@taucad/slicer/toolpath';
+import { ToolpathParseError, parseGcode } from '@taucad/slicer/toolpath';
 import type { MachineManifest } from '@taucad/runtime/machine';
 import type { Quantity } from '@taucad/units/quantity';
 import { partBounds } from '#components/printer/printer-geometry.js';
@@ -24,9 +25,9 @@ export type SliceSummary = Readonly<{
   filamentLength: number;
   /**
    * Every move the nozzle makes, from home through the printer's start routine to the end lift; the plate-fit
-   * check reads these only when the G-code labels no part.
+   * check reads these only when the G-code labels no part. Absent when the toolpath is too large to preview.
    */
-  bounds: SliceBounds;
+  bounds: SliceBounds | undefined;
   /**
    * The part alone: wall, infill and support extrusions standing on the plate; absent when the G-code labels none.
    * The plate-fit check reads these.
@@ -34,10 +35,57 @@ export type SliceSummary = Readonly<{
   partBounds: SliceBounds | undefined;
   /** False when the parser met motion it could not time; the numbers are then a floor. */
   coverageComplete: boolean;
+  /**
+   * Why the toolpath is not previewed, when it is too large to: the numbers are then the slicer header's, and the
+   * printer still prints the file as it is.
+   */
+  previewRefusal: string | undefined;
+  /**
+   * `#RRGGBB` per filament the slice prints, in filament order: several when Bambu Studio printed each of the
+   * model's colours with its own filament, else at most one.
+   */
+  filamentColors: readonly string[];
 }>;
 
+/** Refusals of a plate too large to preview, which the printer still prints as it is. */
+const tooLargeToPreview: ReadonlySet<string> = new Set(['TOOLPATH_SOURCE_TOO_LARGE', 'TOOLPATH_SEGMENT_LIMIT']);
+/** Bambu Studio writes its header block first. */
+const headerBytes = 65_536;
+const durationSeconds: Readonly<Record<string, number>> = { d: 86_400, h: 3600, m: 60, s: 1 };
+
 /**
- * Read the plate G-code out of a `.gcode.3mf` container and time it.
+ * What a plate too large to preview says about itself: Bambu Studio's header states its layers, time and
+ * filament (`; total layer number: 50`, `; total estimated time: 1h 46m 51s`, `; total filament length [mm] :
+ * 5655.05,3717.45`); anything it does not state reads as zero.
+ */
+const summarizeHeader = (
+  container: ReturnType<typeof readBambuContainer>,
+  producer: BambuContainerProducer | undefined,
+  previewRefusal: string,
+): SliceSummary => {
+  const header = new TextDecoder().decode(container.gcode.subarray(0, headerBytes));
+  const time = /total estimated time:\s*((?:\d+[dhms]\s*)+)/u.exec(header)?.[1];
+  const lengths = /^;\s*total filament length \[mm\]\s*:\s*([\d.,\s]+)$/mu.exec(header)?.[1] ?? '';
+  return {
+    layers: Number(/^;\s*total layer number:\s*(\d+)/mu.exec(header)?.[1] ?? 0),
+    estimatedDuration: [...(time ?? '').matchAll(/(\d+)([dhms])/gu)].reduce(
+      (seconds, [, amount, unit]) => seconds + Number(amount) * (durationSeconds[unit ?? ''] ?? 0),
+      0,
+    ),
+    isSlicerEstimate: time !== undefined,
+    producer,
+    filamentLength: lengths.split(',').reduce((total, length) => total + (Number(length) || 0), 0),
+    bounds: undefined,
+    partBounds: undefined,
+    coverageComplete: false,
+    filamentColors: slicedFilamentColors(container),
+    previewRefusal,
+  };
+};
+
+/**
+ * Read the plate G-code out of a `.gcode.3mf` container and time it; a plate too large to preview is summarized
+ * from the slicer's header instead.
  *
  * @param bytes - The container the slicer produced.
  * @returns The summary the Prepare step shows before anything is sent.
@@ -45,7 +93,15 @@ export type SliceSummary = Readonly<{
  */
 export const summarizeGcodeContainer = (bytes: Uint8Array<ArrayBuffer>): SliceSummary => {
   const container = readBambuContainer(bytes);
-  const program = parseGcode(container.gcode);
+  let program: ReturnType<typeof parseGcode>;
+  try {
+    program = parseGcode(container.gcode);
+  } catch (error) {
+    if (!(error instanceof ToolpathParseError) || !tooLargeToPreview.has(error.code)) {
+      throw error;
+    }
+    return summarizeHeader(container, readBambuContainerProducer(bytes), error.message);
+  }
   return {
     layers: program.layerTable.length,
     estimatedDuration: program.headerEstimate?.seconds ?? program.duration,
@@ -55,6 +111,8 @@ export const summarizeGcodeContainer = (bytes: Uint8Array<ArrayBuffer>): SliceSu
     bounds: program.bounds,
     partBounds: partBounds(program),
     coverageComplete: program.coverage.complete,
+    filamentColors: slicedFilamentColors(container),
+    previewRefusal: undefined,
   };
 };
 
@@ -111,7 +169,7 @@ export type PlateFit = BuildVolumeFit & Readonly<{ message: string }>;
  * @public
  */
 export const fitsPlate = (
-  summary: Pick<SliceSummary, 'bounds' | 'partBounds'>,
+  summary: Readonly<{ bounds: SliceBounds; partBounds: SliceBounds | undefined }>,
   buildVolume: MachineManifest['geometry']['buildVolume'],
 ): PlateFit => {
   // ponytail: skirts and brims are not part extrusions, so a brim past the plate edge passes; add their kinds if a

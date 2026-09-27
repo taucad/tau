@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import { FileContentService } from '#file-content-service.js';
+import { EditorSaveConflictError, FileContentService } from '#file-content-service.js';
 import type { ContentChangeEvent, FileContentResult, OutcomeChangeEvent } from '#file-content-service.js';
 import { BinaryFileError, FileNotFoundError, FileTooLargeError } from '#file-content-errors.js';
 import { SharedPool } from '@taucad/memory';
@@ -28,6 +28,11 @@ function createMockProxy(overrides?: Partial<ComposedViewClient>): ComposedViewC
     unlink: vi.fn().mockResolvedValue(undefined),
     getZippedDirectory: vi.fn().mockResolvedValue(new Blob()),
     duplicateFile: vi.fn().mockResolvedValue(undefined),
+  });
+  /* A checked editor save (RV-W5b F4) on this fake filesystem is a write whose check passes. */
+  proxy.writeFileChecked.mockImplementation(async ({ path, data }) => {
+    await proxy.writeFile(path, data);
+    return { status: 'applied', content: typeof data === 'string' ? new TextEncoder().encode(data) : data };
   });
   if (overrides) {
     Object.assign(proxy, overrides);
@@ -356,6 +361,74 @@ describe('FileContentService', () => {
 
       expect(proxy.writeFile).toHaveBeenCalledOnce();
       expect(service.peekOutcome('main.ts')).toEqual({ kind: 'orphaned' });
+    });
+
+    it('should check each editor save against the bytes the editor was made from (RV-W5b F4)', async () => {
+      vi.mocked(proxy.readFile).mockResolvedValueOnce(new Uint8Array([1]));
+      await service.resolve('main.ts');
+
+      await service.saveEditor('main.ts', new Uint8Array([2]));
+      await service.saveEditor('main.ts', new Uint8Array([3]));
+
+      expect(vi.mocked(proxy.writeFileChecked).mock.calls.map(([write]) => write.preconditions)).toEqual([
+        [{ path: '/project/main.ts', expected: new Uint8Array([1]) }],
+        [{ path: '/project/main.ts', expected: new Uint8Array([2]) }],
+      ]);
+    });
+
+    it('should refuse an editor save over bytes it never loaded, and drop the value queued behind it (RV-W5b F4)', async () => {
+      vi.mocked(proxy.readFile).mockResolvedValueOnce(new Uint8Array([1]));
+      await service.resolve('main.ts');
+      const check = Promise.withResolvers<Awaited<ReturnType<ComposedViewClient['writeFileChecked']>>>();
+      vi.mocked(proxy.writeFileChecked).mockReturnValueOnce(check.promise);
+
+      const saving = service.saveEditor('main.ts', new Uint8Array([2]));
+      void service.saveEditor('main.ts', new Uint8Array([3]));
+      /* An applied revision wrote [9] underneath. */
+      check.resolve({ status: 'conflict', conflicts: [{ path: '/project/main.ts', actual: new Uint8Array([9]) }] });
+
+      const refusal = await saving.then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      expect(refusal).toBeInstanceOf(EditorSaveConflictError);
+      expect((refusal as EditorSaveConflictError).base).toEqual(new Uint8Array([1]));
+      expect(proxy.writeFileChecked).toHaveBeenCalledOnce();
+      expect(proxy.writeFile).not.toHaveBeenCalled();
+      expect(service.peekOutcome('main.ts')).toEqual({ kind: 'text', content: new Uint8Array([9]) });
+    });
+
+    it('should check a save against the bytes its model was made from, not the latest outcome (RV-W5b2 N3)', async () => {
+      vi.mocked(proxy.readFile).mockResolvedValueOnce(new Uint8Array([9]));
+      await service.resolve('main.ts');
+
+      await service.saveEditor('main.ts', new Uint8Array([2]), new Uint8Array([1]));
+
+      expect(vi.mocked(proxy.writeFileChecked).mock.calls[0]?.[0].preconditions).toEqual([
+        { path: '/project/main.ts', expected: new Uint8Array([1]) },
+      ]);
+    });
+
+    it('should check a save of a file it never read against its absence, never write it blind (RV-W5b2 N3)', async () => {
+      await service.saveEditor('fresh.ts', new Uint8Array([1]));
+
+      expect(vi.mocked(proxy.writeFileChecked).mock.calls[0]?.[0].preconditions).toEqual([
+        { path: '/project/fresh.ts', expected: null },
+      ]);
+    });
+
+    it('should refuse a save past the checked-write ceiling when the file changed since its model was made (RV-W5b2 N3)', async () => {
+      const large = (fill: number): Uint8Array<ArrayBuffer> => new Uint8Array(5 * 1024 * 1024).fill(fill);
+      vi.mocked(proxy.readFile).mockResolvedValueOnce(large(0x43));
+
+      const refusal = await service.saveEditor('big.stl', large(0x42), large(0x41)).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+
+      expect(refusal).toBeInstanceOf(EditorSaveConflictError);
+      expect(proxy.writeFile).not.toHaveBeenCalled();
+      expect(proxy.writeFileChecked).not.toHaveBeenCalled();
     });
 
     it('should replay only the latest deferred edit when deletion fails', async () => {
@@ -1279,7 +1352,12 @@ describe('FileContentService', () => {
       try {
         oldRec.kinds.length = 0;
         newRec.kinds.length = 0;
-        vi.mocked(proxy.readFile).mockResolvedValue(new Uint8Array([3]));
+        vi.mocked(proxy.readFile).mockImplementation(async (absolutePath: string) => {
+          if (absolutePath === '/project/old.ts') {
+            throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+          }
+          return new Uint8Array([3]);
+        });
         emitFileChanged({
           type: 'fileRenamed',
           oldPath: 'old.ts',
@@ -1552,7 +1630,12 @@ describe('FileContentService', () => {
       vi.mocked(proxy.readFile).mockResolvedValueOnce(new Uint8Array([2]));
       await service.resolve('new.ts');
 
-      vi.mocked(proxy.readFile).mockResolvedValue(new Uint8Array([3]));
+      vi.mocked(proxy.readFile).mockImplementation(async (absolutePath: string) => {
+        if (absolutePath === '/project/old.ts') {
+          throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+        }
+        return new Uint8Array([3]);
+      });
       emitFileChanged({
         type: 'fileRenamed',
         oldPath: 'old.ts',
@@ -1567,6 +1650,27 @@ describe('FileContentService', () => {
         expect(service.peekOutcome('new.ts').kind).toBe('text');
       });
       expectTextContent(service.peekOutcome('new.ts'), new Uint8Array([3]));
+    });
+
+    it('re-reads an open file an applied revision renames aside and back, never publishing orphaned (RV-W5b2 R2-2)', async () => {
+      vi.mocked(proxy.readFile).mockResolvedValueOnce(new Uint8Array([1]));
+      await service.resolve('main.ts');
+      const recorded = recordOutcomeKinds(service, 'main.ts');
+      try {
+        recorded.kinds.length = 0;
+        vi.mocked(proxy.readFile).mockResolvedValue(new Uint8Array([2]));
+        /* `applyTree`'s pair, delivered in one coalesced batch after both renames happened. */
+        emitFileChanged({ type: 'fileRenamed', oldPath: 'main.ts', newPath: 'main.ts.backup', backend: 'indexeddb' });
+        emitFileChanged({ type: 'fileRenamed', oldPath: 'main.ts.staged', newPath: 'main.ts', backend: 'indexeddb' });
+
+        await vi.waitFor(() => {
+          expectTextContent(service.peekOutcome('main.ts'), new Uint8Array([2]));
+        });
+        expect(recorded.kinds).not.toContain('orphaned');
+        expect(service.isOrphaned('main.ts')).toBe(false);
+      } finally {
+        recorded.unsubscribe();
+      }
     });
 
     it('should refresh every cached entry under a directoryChanged prefix without dropping main.ts', async () => {

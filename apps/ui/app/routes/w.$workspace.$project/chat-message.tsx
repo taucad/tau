@@ -19,7 +19,7 @@ import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import type { CombinedChatState } from '#hooks/use-chat.js';
 import { serializeMessage } from '#utils/chat.utils.js';
-import { parseInlineReferences } from '#utils/at-reference.utils.js';
+import { inlineSegmentText, parseInlineReferences } from '#utils/at-reference.utils.js';
 import type { ActivityFamily, ActivityGroup, AggregatedGroup } from '#utils/assistant-message-activity.js';
 import {
   groupAssistantParts,
@@ -27,15 +27,16 @@ import {
   isActivityPartActive,
 } from '#utils/assistant-message-activity.js';
 import { AtReferenceChip } from '#components/chat/at-reference-chip.js';
+import { useAtReferenceContext } from '#components/chat/at-reference-context.js';
 import { ContextChip } from '#components/chat/context-chip.js';
 import { ChatActivityGroup } from '#components/chat/chat-activity-group.js';
 import { agentApprovalToolName } from '#services/agent-host-event-projection.js';
-import { useSkillsCatalog } from '#hooks/use-skills-catalog.js';
 import { ChatMessageReasoning } from '#routes/w.$workspace.$project/chat-message-reasoning.js';
 import { ChatMessageDataUsage } from '#routes/w.$workspace.$project/chat-message-data-usage.js';
 import { ChatMessageContextCompaction } from '#routes/w.$workspace.$project/chat-message-context-compaction.js';
 import { ChatMessageToolUseSkill } from '#routes/w.$workspace.$project/chat-message-tool-use-skill.js';
 import { ChatMessageText } from '#routes/w.$workspace.$project/chat-message-text.js';
+import { ChatMessageMedia } from '#routes/w.$workspace.$project/chat-message-media.js';
 import { CopyButton } from '#components/copy-button.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { formatAbsoluteTime, formatRelativeTime } from '#utils/date.utils.js';
@@ -84,12 +85,7 @@ function splitLinePreservingReferences(line: string, maxLength: number, out: str
 
   for (const segment of segments) {
     const isAtomic = segment.type !== 'text';
-    const text =
-      segment.type === 'text'
-        ? segment.value
-        : segment.type === 'atReference'
-          ? `@${segment.path}`
-          : `/${segment.commandId}`;
+    const text = inlineSegmentText(segment);
 
     if (currentChunk.length + text.length <= maxLength) {
       currentChunk += text;
@@ -127,19 +123,14 @@ function segmentKey(segment: ReturnType<typeof parseInlineReferences>[number], i
   if (segment.type === 'atReference') {
     return `at-${segment.path}`;
   }
-  if (segment.type === 'slashCommand') {
-    return `slash-${segment.commandId}`;
+  if (segment.type === 'invocation') {
+    return `invocation-${segment.token}`;
   }
   return `text-${index}`;
 }
 
-function TextWithAtReferences({
-  text,
-  knownSkillIds,
-}: {
-  readonly text: string;
-  readonly knownSkillIds: ReadonlySet<string>;
-}): React.JSX.Element {
+function TextWithAtReferences({ text }: { readonly text: string }): React.JSX.Element {
+  const { knownTokens } = useAtReferenceContext();
   const segments = parseInlineReferences(text);
   const hasReferences = segments.some((s) => s.type !== 'text');
 
@@ -157,10 +148,10 @@ function TextWithAtReferences({
         if (segment.type === 'atReference') {
           return <AtReferenceChip key={key} data-at-reference={segment.path} />;
         }
-        if (knownSkillIds.has(segment.commandId)) {
-          return <ContextChip key={key} label={`/${segment.commandId}`} chipType='skill' />;
+        if (knownTokens.has(segment.token)) {
+          return <ContextChip key={key} label={segment.token} chipType='skill' />;
         }
-        return <span key={key}>{`/${segment.commandId}`}</span>;
+        return <span key={key}>{segment.token}</span>;
       })}
     </>
   );
@@ -290,8 +281,18 @@ function renderAssistantPart(
       );
     }
 
+    case 'file': {
+      // An agent's media reads in place, at reading size (a user's never reaches here).
+      return (
+        <ChatMessageMedia
+          key={`${messageId}-message-part-${index}`}
+          media={{ url: part.url, mediaType: part.mediaType, ...(part.filename ? { filename: part.filename } : {}) }}
+          className='my-2'
+        />
+      );
+    }
+
     case 'step-start':
-    case 'file':
     case 'data-usage':
     case 'data-context-usage': {
       return undefined;
@@ -688,14 +689,13 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
   const userMessageCollapseRowThreshold = 8;
   const userMessageCollapseCharacterThreshold = 900;
 
-  const skillsCatalog = useSkillsCatalog();
-  const knownSkillIds = useMemo(() => new Set(skillsCatalog.map((skill) => skill.name)), [skillsCatalog]);
   const message = useChatSelector((state) => state.messagesById.get(messageId));
   const displayMessage = useChatSelector((state) => state.messageEdits[messageId] ?? state.messagesById.get(messageId));
   const attachmentDirectories = useChatAttachmentDirectories();
-  const fileParts = useChatSelector(
-    (state) => state.messagesById.get(messageId)?.parts.filter((part) => part.type === 'file') ?? [],
-  );
+  const fileParts = useChatSelector((state) => {
+    const message_ = state.messagesById.get(messageId);
+    return message_?.role === 'user' ? message_.parts.filter((part) => part.type === 'file') : [];
+  });
   const usageParts = useChatSelector((state) => {
     const message_ = state.messageEdits[messageId] ?? state.messagesById.get(messageId);
     if (!message_) {
@@ -771,6 +771,12 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
     (collapsedUserRows.length > userMessageCollapseRowThreshold ||
       collapsedUserCharacterCount > userMessageCollapseCharacterThreshold);
   const shouldRenderCollapsedUserRows = shouldCollapseUserMessage && fileParts.length === 0;
+
+  /* A user's files are the strip above their words; an agent's read in place. */
+  const inlineParts = useMemo(
+    () => (isUser ? displayMessage?.parts.filter((part) => part.type !== 'file') : displayMessage?.parts) ?? [],
+    [isUser, displayMessage?.parts],
+  );
 
   const collapsedUserRowsWithStableKeys = useMemo(() => {
     if (!displayMessage) {
@@ -900,12 +906,12 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
                       key={`${keyPrefix}:${row.slice(0, 120)}`}
                       className='text-sm leading-relaxed wrap-break-word whitespace-pre-wrap text-foreground/90'
                     >
-                      <TextWithAtReferences text={row} knownSkillIds={knownSkillIds} />
+                      <TextWithAtReferences text={row} />
                     </p>
                   ))}
                 </div>
               ) : (
-                <AssistantParts parts={displayMessage.parts} messageId={displayMessage.id} />
+                <AssistantParts parts={inlineParts} messageId={displayMessage.id} />
               )}
               {/* Flush under the activity rows, so the indicator keeps their pitch. */}
               {isUser ? null : <ChatMessagePlanning messageId={messageId} />}

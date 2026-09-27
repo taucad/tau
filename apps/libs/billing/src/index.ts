@@ -2,7 +2,7 @@
 export type { BillingTier } from '#billing-tier.js';
 export { billingTiers, tierMeets } from '#billing-tier.js';
 export type { Entitlements, SubscriptionStatus } from '#entitlements.js';
-export { entitlementsFromTier } from '#entitlements.js';
+export { entitlementsFromTier, formatStorageLimit, storageLimitBytesByTier } from '#entitlements.js';
 export { getKernelRequiredTier, isKernelAllowed, kernelTierRequirements } from '#kernel-tier-requirements.js';
 export type { RationalCreditAtoms } from '#credit-atoms.js';
 export {

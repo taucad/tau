@@ -4,7 +4,7 @@ import type { ProjectManifest } from '@taucad/types';
 import type { ProjectLocator } from '@taucad/filesystem';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import type { CreatedProject } from '#hooks/use-project-manager.js';
-import { projectLibraryEntryToListItem } from '#types/project.types.js';
+import { projectLibraryEntryToListItem } from '#types/project-library.types.js';
 import { useSessions } from '#hooks/use-sessions.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 

@@ -75,7 +75,7 @@ describe('WorkbenchCheckoutRoot', () => {
       ...revisionStatusHarness.status,
       checkoutId: 'co-2',
       checkoutRoot: '/checkouts/co-2',
-      branch: 'bracket-fillet',
+      line: { kind: 'branch', name: 'bracket-fillet' },
       branches: [
         { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
         {

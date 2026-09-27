@@ -983,7 +983,12 @@ export const createNativeGitAdapter = (options: NativeGitAdapterOptions): Native
     });
 
   const mergeRevisions = async (input: MergeNativeGitRevisionsInput): Promise<NativeGitMergeResult> => {
-    const merged = mergeRevisionTrees(input.base.tree, input.ours.tree, input.theirs.tree);
+    const merged = mergeRevisionTrees(
+      input.base.tree,
+      input.ours.tree,
+      input.theirs.tree,
+      options.parameters === undefined ? {} : { parameters: options.parameters },
+    );
     if (merged.status === 'conflicted') {
       return merged;
     }

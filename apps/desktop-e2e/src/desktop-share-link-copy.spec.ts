@@ -3,6 +3,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { desktopE2EFrontendUrl } from '#support/config.js';
 import { deliverDesktopDeepLink, launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
+import { openBackupChooser } from '#support/revisions-pane.js';
 import { expectSignedIn, expectVisible } from '#support/scenario.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
 import { forgetSeededProjects, seedProPlan, tauCloudOwnerIds } from '#support/two-client/tau-cloud.js';
@@ -100,11 +101,7 @@ describe('desktop share links', () => {
       .getByRole('button', { name: /^Open Revisions\./u })
       .first()
       .click({ timeout: 120_000 });
-    const connect = page.getByRole('button', { name: 'Connect Tau Cloud', exact: true }).first();
-    if (await connect.isVisible()) {
-      await connect.click();
-    }
-    await expectVisible(page.getByRole('region', { name: 'Sync' }).first(), 60_000);
+    await openBackupChooser(page);
     /* Waited for rather than sampled: the region renders before its choices do,
      * and a sampled `isVisible()` skipped the connect entirely — leaving a
      * project with no remote, which renders no invitation card at all. */

@@ -3,9 +3,14 @@
  *
  * A document, not a person: the same browser profile keeps one id across
  * reloads, and two browsers — or two people on one machine — are two devices.
- * The chat refs spell it into `events/<deviceId>.jsonl` so two devices' logs
- * never collide (A39), and a signed-out revision is attributed to it rather
- * than to one shared `Anonymous` per workspace (P29).
+ * The page sends it to the file-manager worker (`setDeviceId`), and it does
+ * two things there. First, a worker that holds it records chat refs; one that
+ * does not writes none. Second, it counts as one of this host's own devices,
+ * so a chat segment written under it before record devices existed is never
+ * projected back as another device's. It names no pushed record: chat
+ * segments, conflict lines and the operation log use a random record device
+ * per actor form (`packages/revisions/src/ops-ref.ts`, EQ10). A signed-out
+ * pseudonym derives from a separate random salt (`revision-actor.ts`).
  *
  * It is a local identifier and nothing else: never sent anywhere on its own,
  * never derived from hardware, and regenerated the moment a person clears their

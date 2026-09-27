@@ -696,6 +696,21 @@ describe('GitProxyController', () => {
     ]);
   });
 
+  /* I11: the relay is a git route too, and a sealed handle is replayable until
+     it expires, so it spends a per-user budget of its own before opening one. */
+  it('refuses a caller past the per-minute LFS relay budget before opening the handle', async () => {
+    const counted = vi.fn(async (..._call: unknown[]) => 2001);
+    const get = vi.fn();
+    const redis = { client: { get, set: vi.fn(), eval: counted } } as unknown as RedisService;
+    const controller = proxyController(false, redis);
+
+    await expect(
+      controller.relayGet('user-1', relayHandle, request({ 'x-tau-lfs-key': 'A'.repeat(43) }), reply()),
+    ).rejects.toMatchObject({ status: 429, response: { code: 'GIT_PROXY_RATE_LIMITED' } });
+    expect(get).not.toHaveBeenCalled();
+    expect(counted.mock.calls[0]?.[2]).toMatch(/^git:lfs-relay:rl:user-1:/u);
+  });
+
   it('reaches a named host through the pinned socket fetch (D32)', async () => {
     // Node's connect asks the pinned lookup with `all: true`; answering with a
     // bare address failed every real upstream as ERR_INVALID_IP_ADDRESS.

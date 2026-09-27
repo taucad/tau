@@ -40,6 +40,7 @@ import { useProject } from '#hooks/use-project.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { getMonacoLanguageIdsForKernel } from '#lib/kernel-monaco-language.utils.js';
 import { useConfiguredMonaco } from '#hooks/use-monaco-configuration.js';
+import { getRevisionClient } from '#hooks/use-revision-status.js';
 
 type MonacoServicesContextType = {
   modelService: MonacoModelService | undefined;
@@ -90,6 +91,15 @@ export function MonacoModelServiceProvider({ children }: { readonly children: Re
       workspaceFs,
       contentService,
       markerService,
+      projectId,
+      /* D14: an unmergeable edit is recorded through the project's revision client, read when it is needed. */
+      recordEditorConflict: async (input) => {
+        const { worker } = fileManagerRef.getSnapshot().context;
+        if (worker === undefined) {
+          throw new Error('Revisions are still starting. Your edit is kept; type again to save it.');
+        }
+        return getRevisionClient({ projectId, worker }).recordEditorConflict(input);
+      },
     });
     const workspaceContentBinding = createWorkspaceContentBinding(modelService);
     workspaceFs.bindModelService(workspaceContentBinding);
@@ -159,7 +169,7 @@ export function MonacoModelServiceProvider({ children }: { readonly children: Re
 
       setServices(defaultContextValue);
     };
-  }, [monaco, contentService, treeService, fileManagerApi, fileManagerRef, editorRef]);
+  }, [monaco, contentService, treeService, fileManagerApi, fileManagerRef, editorRef, projectId]);
 
   useEffect(() => {
     const ms = services.modelService;

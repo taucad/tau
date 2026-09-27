@@ -82,7 +82,7 @@ describe('bambuX1cPlates', () => {
   });
 
   it('should return undefined for a plate it does not model', () => {
-    expect(bambuPlateForBedType('Cool Plate SuperTack')).toBeUndefined();
+    expect(bambuPlateForBedType('Supertack Plate')).toBeUndefined();
   });
 
   it('should give every bed-type name to one plate only', () => {

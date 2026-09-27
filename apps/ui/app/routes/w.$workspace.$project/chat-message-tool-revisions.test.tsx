@@ -141,12 +141,33 @@ describe('ChatMessageToolRevisions', () => {
 
     expect(verb()).toBe('Read');
     expect(description()).toBe('main · Rev 2 · 2 revisions');
-    expect(rows()).toEqual(['Rev 2Thickened the bracketada', 'Rev 1First revisionada']);
+    expect(rows()).toEqual(['Rev 2Thickened the bracketAnother account', 'Rev 1First revisionAnother account']);
     // Never a commit id, on any row (A18, I12).
     expect(screen.queryByText(/96b7f7e2/u)).toBeNull();
   });
 
-  it('gives a merged-in revision no number, and marks one that needs resolution', () => {
+  it('names who made a revision as History does, never by a model or account id (HQ4)', () => {
+    render(
+      <ChatMessageToolRevisions
+        part={answered(
+          { action: 'log' },
+          {
+            where: 'main · Rev 2',
+            revisions: [
+              revision({ actor: 'claude-opus-4', source: 'agent' }),
+              revision({ revisionNumber: 1, revisionId: '7cbef6c', actor: 'user_2abc', source: 'user' }),
+            ],
+          },
+        )}
+      />,
+    );
+
+    expect(rows()[0]).toContain('Tau agent');
+    expect(rows()[1]).toContain('Another account');
+    expect(screen.queryByText(/claude-opus-4|user_2abc|^agent$/u)).toBeNull();
+  });
+
+  it('gives a merged-in revision no number, and marks one that needs your decision', () => {
     render(
       <ChatMessageToolRevisions
         part={answered(
@@ -163,7 +184,7 @@ describe('ChatMessageToolRevisions', () => {
     );
 
     expect(rows()[0]).toContain('merged in');
-    expect(rows()[1]).toContain('(needs resolution)');
+    expect(rows()[1]).toContain('Needs your decision');
   });
 
   it('counts the files a diff changed and names each one with how it changed', () => {

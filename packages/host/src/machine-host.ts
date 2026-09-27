@@ -558,7 +558,9 @@ export type CreateNodeMachineRuntimeOptions = Readonly<{
   log?: (entry: MachineLogEntry) => void;
   /**
    * Locate the `ffmpeg` that decodes camera stills, or `undefined` when there
-   * is none; by default `PATH`, then `/opt/homebrew/bin` and `/usr/local/bin`.
+   * is none. By default `PATH`, then Homebrew (`/opt/homebrew/bin`,
+   * `/usr/local/bin`) and MacPorts (`/opt/local/bin`); on Windows, `PATH` and
+   * then the WinGet, Chocolatey and Scoop directories, for `ffmpeg.exe`.
    */
   findFfmpeg?: () => Promise<string | undefined>;
   /**
@@ -574,9 +576,10 @@ export type CreateNodeMachineRuntimeOptions = Readonly<{
  * The host-owned runtime a machine host discovers, binds and prints with.
  *
  * Its `captureNetworkStill` decodes one JPEG from a pinned RTSPS camera with
- * the system `ffmpeg`; without one, every capture rejects
- * `MACHINE_STILL_FFMPEG_MISSING` rather than the camera reporting stills
- * unsupported.
+ * the system `ffmpeg`, which plays a loopback proxy that answers the camera's
+ * authentication itself, so the access code never reaches ffmpeg. Without an
+ * ffmpeg, every capture rejects `MACHINE_STILL_FFMPEG_MISSING` rather than the
+ * camera reporting stills unsupported.
  *
  * @param options - Secret custody, artifact reader, log sink and `ffmpeg` lookup.
  * @returns The runtime for `createNodeMachineHost`, whose `credentials` answer

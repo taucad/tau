@@ -12,6 +12,7 @@ import { ChatToolDescription } from '#components/chat/chat-tool-text.js';
 import { ChatToolLabel } from '#components/chat/chat-tool-label.js';
 import { ChatToolError } from '#components/chat/chat-tool-error.js';
 import { ViewerLink } from '#components/files/viewer-link.js';
+import { ChatMessageMedia } from '#routes/w.$workspace.$project/chat-message-media.js';
 
 function FilenameLink({ targetFile }: { readonly targetFile: string }): React.JSX.Element {
   return <ViewerLink path={targetFile}>{targetFile}</ViewerLink>;
@@ -91,10 +92,9 @@ export function ChatMessageToolScreenshot({
               >
                 {renderableImages.map((image) => (
                   <div key={image.view} className='flex flex-col items-center gap-1'>
-                    <img
-                      src={image.dataUrl}
+                    <ChatMessageMedia
+                      media={{ url: image.dataUrl, mediaType: image.dataUrl.slice(5, image.dataUrl.indexOf(';')) }}
                       alt={`${image.view} view`}
-                      className='rounded-sm border bg-background object-contain'
                     />
                     <span className='text-xs text-muted-foreground'>{image.view}</span>
                   </div>

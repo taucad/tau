@@ -216,7 +216,8 @@ describe('sliceWithService', () => {
       options: { ...options(service.url), service: { url: service.url, token } },
       signal: new AbortController().signal,
     });
-    expect(result.gcode).toEqual(artifact);
+    // A native byte comparison: `toEqual` walks 1.5 MiB element by element and takes seconds.
+    expect(Buffer.compare(result.gcode, artifact)).toBe(0);
     expect(result.digest).toBe(`sha256:${artifactSha256}`);
     expect(result).toMatchObject({ sliceId: 'slice-1', generation: 'generation-1' });
     expect(result.requestId).toMatch(/^tau-[a-f0-9]{40}$/u);

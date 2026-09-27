@@ -17,7 +17,7 @@
  *   with no credential held and pushes with one.
  */
 
-import { execFile, execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -31,6 +31,7 @@ import type { TauApiCredential } from '#native-git-port.js';
 import type { RevisionPort, RevisionPushRef } from '#revision-port.js';
 import type { RevisionProvenance } from '#revision-authority.js';
 import { startGitHttpBackend } from '#test/git-http-backend.js';
+import { gitToolchainOnPath } from '#test/native-git-harness.js';
 
 /* Asynchronous, always: the P40 fixture's HTTP server shares this event loop,
  * and a synchronous `git` blocks the very server it is talking to. */
@@ -39,15 +40,6 @@ const runGit = promisify(execFile);
 const encoder = new TextEncoder();
 const author = { name: 'Tau', email: 'tau@example.com' };
 const tauSession = 'Bearer tau-session-w8';
-
-const gitOnPath = ((): boolean => {
-  try {
-    execFileSync('git', ['--version'], { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-})();
 
 const tree = (files: Readonly<Record<string, string>>): ImmutableRevisionTree =>
   new ImmutableRevisionTree(Object.entries(files).map(([path, content]) => [path, encoder.encode(content)]));
@@ -109,7 +101,7 @@ const publishPush = async (
   return result.refs.map((entry) => [entry.name, entry.status, entry.reason] as const);
 };
 
-describe.runIf(gitOnPath)('P38 — publishing a name again carries its lease', () => {
+describe.runIf(gitToolchainOnPath)('P38 — publishing a name again carries its lease', () => {
   let root: string;
   let repositoryPath: string;
   let bare: string;
@@ -200,7 +192,7 @@ describe.runIf(gitOnPath)('P38 — publishing a name again carries its lease', (
   }, 120_000);
 });
 
-describe.runIf(gitOnPath)('P40 — a native push to a Tau remote carries the session', () => {
+describe.runIf(gitToolchainOnPath)('P40 — a native push to a Tau remote carries the session', () => {
   let root: string;
   let repositoryPath: string;
   let remote: Awaited<ReturnType<typeof startGitHttpBackend>>;

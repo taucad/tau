@@ -4,6 +4,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import type { CadAgentExecution } from '@taucad/chat';
 import type { captureCadImages as captureCadImagesType } from '#services/headless-capture.js';
+import { toast } from '#components/ui/sonner.js';
 
 const mockAddDraftAttachment = vi.fn();
 const selectedModel = {
@@ -21,6 +22,7 @@ const mockCaptureCadImages = vi.fn<typeof captureCadImagesType>();
 vi.mock('#services/headless-capture.js', () => ({
   captureCadImages: mockCaptureCadImages,
   captureFilesToDataUrls: () => ['data:image/webp;base64,AQID'],
+  omittedSectionCutsNotice: 'Section cutaways narrower than 180° are not shown in captures.',
 }));
 vi.mock('#hooks/use-graphics.js', () => ({ useGraphics: () => mockGraphicsRef }));
 vi.mock('#hooks/use-cad.js', () => ({ useCad: () => mockCadRef }));
@@ -34,7 +36,7 @@ vi.mock('#hooks/use-tick-animation.js', () => ({
 vi.mock('#providers/headless-image-provider.js', () => ({
   useHeadlessImageService: () => mockImageService,
 }));
-vi.mock('#components/ui/sonner.js', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+vi.mock('#components/ui/sonner.js', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn() } }));
 vi.mock('@taucad/ui/components/tooltip', () => ({
   Tooltip: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
   TooltipTrigger: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
@@ -54,9 +56,10 @@ describe('CaptureViewControl', () => {
     vi.clearAllMocks();
     mockSelectedModel = selectedModel;
     mockExecution = { kind: 'tau', model: 'vision' };
-    mockCaptureCadImages.mockResolvedValue([
-      { name: 'capture.webp', mimeType: 'image/webp', bytes: new Uint8Array([1, 2, 3]) },
-    ]);
+    mockCaptureCadImages.mockResolvedValue({
+      files: [{ name: 'capture.webp', mimeType: 'image/webp', bytes: new Uint8Array([1, 2, 3]) }],
+      omittedSectionCutIds: [],
+    });
   });
 
   it('should capture the local CAD unit losslessly through the headless service', async () => {
@@ -78,6 +81,22 @@ describe('CaptureViewControl', () => {
       model: { name: 'Vision Model', support: selectedModel.model.support },
     });
     expect(mockTrigger).toHaveBeenCalledOnce();
+    expect(toast.warning).not.toHaveBeenCalled();
+  });
+
+  it('should say when the capture leaves a cut out', async () => {
+    mockCaptureCadImages.mockResolvedValue({
+      files: [{ name: 'capture.webp', mimeType: 'image/webp', bytes: new Uint8Array([1, 2, 3]) }],
+      omittedSectionCutIds: ['cutaway'],
+    });
+    const user = userEvent.setup();
+    render(<CaptureViewControl />);
+    await user.click(screen.getByTestId('capture-button'));
+
+    await waitFor(() => {
+      expect(toast.warning).toHaveBeenCalledWith('Section cutaways narrower than 180° are not shown in captures.');
+    });
+    expect(mockAddDraftAttachment).toHaveBeenCalledOnce();
   });
 
   it('should admit a viewer capture for a local ACP agent without a Tau model row', async () => {

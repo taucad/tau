@@ -481,20 +481,36 @@ describe('headless capture of section cuts', () => {
     sweep,
   });
 
-  /** The sections a current-view capture with `cuts` committed asks the image for. */
-  const captureSections = async (cuts: readonly SectionCut[]): Promise<Sections | undefined> => {
+  /** A viewer's graphics actor with `cuts` committed, and Section on unless `isSectionViewActive` says otherwise. */
+  const graphicsWith = (cuts: readonly SectionCut[], isSectionViewActive = true) =>
+    ({
+      getSnapshot: () => ({
+        context: {
+          enableSurfaces: true,
+          enableLines: true,
+          upDirection: 'z',
+          isSectionViewActive,
+          committedSectionCuts: cuts,
+          modelInteractionUnitId: undefined,
+          modelInteractionRef: { getSnapshot: () => ({ context: { unitsById: {} } }) },
+        },
+      }),
+    }) as unknown as Parameters<typeof captureCadImages>[0]['graphicsRef'];
+
+  /** A current-view capture of a viewer: the sections it asks the image for, and the cuts it reports it left out. */
+  const captureSections = async (
+    graphicsRef: Parameters<typeof captureCadImages>[0]['graphicsRef'],
+  ): Promise<{
+    exportOptions: { readonly sections?: Sections };
+    sections: Sections | undefined;
+    omittedSectionCutIds: readonly string[];
+  }> => {
+    vi.mocked(awaitFreshRender).mockResolvedValue(snapshot(gltf));
+    vi.mocked(getGraphicsCameraState).mockReturnValue(cameraState);
     const exportImage = vi.fn<ExportImage>(async (_job) => [webp(2400, 1350)]);
-    await captureSettledCadImages({
-      cadSnapshot: snapshot(gltf),
-      cameraState,
-      presentation: {
-        upDirection: 'z',
-        enableSurfaces: true,
-        enableLines: true,
-        hiddenComponentIds: [],
-        isolatedComponentIds: [],
-        sectionCuts: cuts,
-      },
+    const { omittedSectionCutIds } = await captureCadImages({
+      cadRef: {} as Parameters<typeof captureCadImages>[0]['cadRef'],
+      graphicsRef,
       imageService: { export: exportImage },
       recipe: { purpose: 'chat', mode: 'current' },
     });
@@ -502,7 +518,18 @@ describe('headless capture of section cuts', () => {
     if (job.sourceFormat !== 'glb') {
       throw new Error('Expected a GLB job');
     }
-    return (job.exportOptions as { readonly sections?: Sections }).sections;
+    const exportOptions = job.exportOptions as { readonly sections?: Sections };
+    return { exportOptions, sections: exportOptions.sections, omittedSectionCutIds };
+  };
+
+  /** Nothing was left out: the capture neither records an omission nor reports one. */
+  const expectNothingOmitted = (omittedSectionCutIds: readonly string[]): void => {
+    expect(omittedSectionCutIds).toEqual([]);
+    expect(recordHeadlessImageTiming).not.toHaveBeenCalledWith(
+      'capture.section-omitted',
+      expect.anything(),
+      expect.anything(),
+    );
   };
 
   /** Points around the origin, clear of every cut boundary used here. */
@@ -531,7 +558,7 @@ describe('headless capture of section cuts', () => {
   it('should keep the side a plane cut leaves, flipped or not', async () => {
     const cuts = [planeCut('xy', 0.1, false), planeCut('yz', -0.2, true), planeCut('xz', 0.3, false)];
 
-    const sections = await captureSections(cuts);
+    const { sections, omittedSectionCutIds } = await captureSections(graphicsWith(cuts));
 
     expect(sections).toEqual({
       planes: [
@@ -543,71 +570,52 @@ describe('headless capture of section cuts', () => {
       clipLines: true,
     });
     expectSameCut(sections!.planes, cuts);
-    expect(recordHeadlessImageTiming).not.toHaveBeenCalledWith(
-      'capture.section-omitted',
-      expect.anything(),
-      expect.anything(),
-    );
+    expectNothingOmitted(omittedSectionCutIds);
   });
 
   it.each([270, 180])('should keep a %s° cutaway as the complements of its two faces', async (sweep) => {
     const cuts = [cutaway('z', 30, sweep)];
 
-    const sections = await captureSections(cuts);
+    const { sections, omittedSectionCutIds } = await captureSections(graphicsWith(cuts));
 
     expect(sections?.planes).toHaveLength(2);
     expectSameCut(sections!.planes, cuts);
+    expectNothingOmitted(omittedSectionCutIds);
   });
 
-  it('should leave out a cutaway narrower than 180°, with a diagnostic', async () => {
+  it('should leave out a cutaway narrower than 180°, recording and reporting it', async () => {
     const plane = planeCut('xy', 0.1, false);
     const narrow = cutaway('x', 45, 90);
 
-    const sections = await captureSections([plane, narrow]);
+    const { sections, omittedSectionCutIds } = await captureSections(graphicsWith([plane, narrow]));
 
     expect(sections?.planes).toEqual([{ point: [0, 0, 0.1], normal: [0, 0, -1] }]);
+    expect(omittedSectionCutIds).toEqual([narrow.id]);
     expect(recordHeadlessImageTiming).toHaveBeenCalledWith('capture.section-omitted', expect.any(Number), {
       cutIds: [narrow.id],
     });
     // With nothing left to draw, the image is not cut at all.
-    expect(await captureSections([narrow])).toBeUndefined();
+    const alone = await captureSections(graphicsWith([narrow]));
+    expect(alone.sections).toBeUndefined();
   });
 
   it("should fit four wide cutaways in the image's eight half-spaces", async () => {
     // Each keeps a wedge about Z; together they keep 220° to 360°.
     const cuts = [0, 10, 20, 30].map((start) => cutaway('z', start, 190));
 
-    const sections = await captureSections(cuts);
+    const { sections, omittedSectionCutIds } = await captureSections(graphicsWith(cuts));
 
     expect(sections?.planes).toHaveLength(maxSectionPieces);
     expectSameCut(sections!.planes, cuts);
+    expectNothingOmitted(omittedSectionCutIds);
   });
 
-  it('should capture no cuts while Section is off', async () => {
-    vi.mocked(awaitFreshRender).mockResolvedValue(snapshot(gltf));
-    vi.mocked(getGraphicsCameraState).mockReturnValue(cameraState);
-    const exportImage = vi.fn<ExportImage>(async (_job) => [webp(2400, 1350)]);
-    const graphicsRef = {
-      getSnapshot: () => ({
-        context: {
-          enableSurfaces: true,
-          enableLines: true,
-          upDirection: 'z',
-          isSectionViewActive: false,
-          committedSectionCuts: [planeCut('xy', 0.1, false)],
-          modelInteractionUnitId: undefined,
-          modelInteractionRef: { getSnapshot: () => ({ context: { unitsById: {} } }) },
-        },
-      }),
-    } as unknown as Parameters<typeof captureCadImages>[0]['graphicsRef'];
+  it('should capture and report no cuts while Section is off', async () => {
+    const cuts = [planeCut('xy', 0.1, false), cutaway('x', 45, 90)];
 
-    await captureCadImages({
-      cadRef: {} as Parameters<typeof captureCadImages>[0]['cadRef'],
-      graphicsRef,
-      imageService: { export: exportImage },
-      recipe: { purpose: 'chat', mode: 'current' },
-    });
+    const { exportOptions, omittedSectionCutIds } = await captureSections(graphicsWith(cuts, false));
 
-    expect(exportImage.mock.calls[0]![0]).not.toHaveProperty('exportOptions.sections');
+    expect(exportOptions).not.toHaveProperty('sections');
+    expectNothingOmitted(omittedSectionCutIds);
   });
 });

@@ -55,6 +55,15 @@ export type CapturePresentationIntent = {
   readonly sectionCuts?: readonly SectionCut[];
 };
 
+/** A capture's images, and the ids of the committed cuts they leave out. */
+export type CadImageCapture = { readonly files: ExportFile[]; readonly omittedSectionCutIds: readonly string[] };
+
+/** The line a capture's caller shows the person, or gives the agent, when the capture leaves cuts out. */
+export const omittedSectionCutsNotice = 'Section cutaways narrower than 180° are not shown in captures.';
+
+/** A cutaway narrower than 180° removes an intersection of half-spaces, which the image cannot draw. */
+const isOmittedFromCapture = (cut: SectionCut): boolean => cut.kind === 'revolution' && cut.sweep < 180;
+
 type RetainedHalfSpace = { point: [number, number, number]; normal: [number, number, number] };
 
 // Adding zero turns a negative zero into zero.
@@ -77,7 +86,7 @@ const toSectionExportOptions = (
   const planes: RetainedHalfSpace[] = [];
   const omittedCutIds: string[] = [];
   for (const cut of cuts) {
-    if (cut.kind === 'revolution' && cut.sweep < 180) {
+    if (isOmittedFromCapture(cut)) {
       omittedCutIds.push(cut.id);
       continue;
     }
@@ -296,8 +305,11 @@ export const captureSettledCadImages = async (options: CaptureSettledCadImagesOp
   });
 };
 
-/** Capture current CAD intent, copying live camera state before awaiting render freshness. */
-export const captureCadImages = async (options: CaptureCadImagesOptions): Promise<ExportFile[]> => {
+/**
+ * Capture current CAD intent, copying live camera state before awaiting render freshness. The capture also names the
+ * committed cuts it leaves out, so its caller can say so.
+ */
+export const captureCadImages = async (options: CaptureCadImagesOptions): Promise<CadImageCapture> => {
   const graphicsSnapshot = options.graphicsRef?.getSnapshot();
   const cameraState =
     options.recipe.mode === 'current'
@@ -307,13 +319,17 @@ export const captureCadImages = async (options: CaptureCadImagesOptions): Promis
   const freshnessStartedAt = performance.now();
   const cadSnapshot = await awaitFreshRender(options.cadRef);
   recordHeadlessImageTiming('capture.freshness', freshnessStartedAt);
-  return captureSettledCadImages({
+  const files = await captureSettledCadImages({
     cadSnapshot,
     cameraState,
     presentation,
     imageService: options.imageService,
     recipe: options.recipe,
   });
+  const omittedSectionCutIds = (presentation?.sectionCuts ?? [])
+    .filter((cut) => isOmittedFromCapture(cut))
+    .map(({ id }) => id);
+  return { files, omittedSectionCutIds };
 };
 
 /**

@@ -9,7 +9,7 @@ import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useTickAnimation } from '#hooks/use-tick-animation.js';
 import { toast } from '#components/ui/sonner.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
-import { captureCadImages, captureFilesToDataUrls } from '#services/headless-capture.js';
+import { captureCadImages, captureFilesToDataUrls, omittedSectionCutsNotice } from '#services/headless-capture.js';
 import { recordHeadlessImageTiming } from '#services/headless-image-debug.js';
 import { attachmentModelForExecution } from '#utils/chat.utils.js';
 
@@ -30,7 +30,7 @@ const useCaptureCurrentViewToChat = (onSuccess?: () => void): (() => Promise<voi
       return;
     }
     try {
-      const files = await captureCadImages({
+      const { files, omittedSectionCutIds } = await captureCadImages({
         cadRef,
         graphicsRef,
         imageService,
@@ -42,6 +42,9 @@ const useCaptureCurrentViewToChat = (onSuccess?: () => void): (() => Promise<voi
         model: attachmentModelForExecution(execution, selectedModel),
       });
       recordHeadlessImageTiming('capture.publish-draft', publishStartedAt, { count: 1 });
+      if (omittedSectionCutIds.length > 0) {
+        toast.warning(omittedSectionCutsNotice);
+      }
       onSuccess?.();
       recordHeadlessImageTiming('capture.click-to-draft', clickStartedAt);
     } catch (error) {

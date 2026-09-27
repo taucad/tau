@@ -649,11 +649,13 @@ struct ClosureGroup {
   uint32_t open = 0, nonmanifold = 0, sample_count = 0;
   TopoDS_Edge samples[4];    // in the group's frame, in first-use order
   uint32_t sample_uses[4] = {};
+  std::vector<uint32_t> occurrences;  // leaf ordinals, once `attributed`
 };
 
 struct ClosureFacet {
   uint32_t shells = 0, free_faces = 0, open_edges = 0, nonmanifold_edges = 0;
   bool shells_closed = true;
+  bool attributed = false;
   // Only failing groups: shells in explorer order, then the free faces.
   std::vector<ClosureGroup> failing;
 };
@@ -1831,6 +1833,58 @@ const SourceValidity& source_validity(const geospec_occt_document& document) {
 const ClosureFacet& source_closure(const geospec_occt_document& document) {
   if (!document.closure) document.closure = closure_facet(document.shape);
   return *document.closure;
+}
+
+// V1 evidence: each failing group's leaf occurrences (no occurrence names
+// them as parent), in ordinal order, from one pass that looks every leaf
+// shell up by its definition; a leaf with faces outside any shell names the
+// free-face group. A leaf is named at most once per group, so the lists hold
+// at most the leaf shell instances plus the leaves.
+const ClosureFacet& attributed_closure(const geospec_occt_document& document) {
+  source_closure(document);
+  ClosureFacet& facet = *document.closure;
+  if (facet.attributed) return facet;
+  NCollection_DataMap<TopoDS_Shape, size_t, TopTools_ShapeMapHasher> groups;
+  size_t free_group = facet.failing.size();
+  for (size_t index = 0; index < facet.failing.size(); ++index) {
+    if (facet.failing[index].key.IsNull()) {
+      free_group = index;
+    } else {
+      groups.Bind(facet.failing[index].key, index);
+    }
+  }
+  std::vector<bool> parents(document.occurrences.size(), false);
+  for (const OccurrenceFacts& occurrence : document.occurrences) {
+    if (occurrence.parent >= 0 &&
+        static_cast<size_t>(occurrence.parent) < parents.size()) {
+      parents[static_cast<size_t>(occurrence.parent)] = true;
+    }
+  }
+  std::vector<std::vector<uint32_t>> named(facet.failing.size());
+  for (size_t ordinal = 0; ordinal < document.occurrences.size(); ++ordinal) {
+    if (parents[ordinal]) continue;
+    const uint32_t leaf = static_cast<uint32_t>(ordinal);
+    const auto name = [&named, leaf](size_t group) {
+      if (named[group].empty() || named[group].back() != leaf) {
+        named[group].push_back(leaf);
+      }
+    };
+    const TopoDS_Shape& shape = document.occurrences[ordinal].shape;
+    for (TopExp_Explorer shell(shape, TopAbs_SHELL); shell.More(); shell.Next()) {
+      const size_t* group = groups.Seek(
+          shell.Current().Located(TopLoc_Location()).Oriented(TopAbs_FORWARD));
+      if (group != nullptr) name(*group);
+    }
+    if (free_group != facet.failing.size() &&
+        TopExp_Explorer(shape, TopAbs_FACE, TopAbs_SHELL).More()) {
+      name(free_group);
+    }
+  }
+  for (size_t index = 0; index < named.size(); ++index) {
+    facet.failing[index].occurrences = std::move(named[index]);
+  }
+  facet.attributed = true;
+  return facet;
 }
 
 const Bnd_Box& memo_face_box(const geospec_occt_document& document,
@@ -7060,12 +7114,16 @@ int geospec_occt_validity_closure_group(
                 "Document/closure group output is invalid.", error);
   }
   return guarded(error, [&]() -> int {
-    const ClosureFacet& facet = source_closure(*document);
+    const ClosureFacet& facet = attributed_closure(*document);
     if (index >= facet.failing.size()) {
       return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
                   "Closure group index is out of range.", error);
     }
     const ClosureGroup& failing = facet.failing[index];
+    if (failing.occurrences.size() > capacity) {
+      return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
+                  "Closure group occurrence capacity is exhausted.", error);
+    }
     *group = {};
     group->free_faces = failing.key.IsNull() ? 1 : 0;
     group->open_edge_count = failing.open;
@@ -7081,36 +7139,9 @@ int geospec_occt_validity_closure_group(
       point(output.end, curve.Value(last));
       point(output.center, curve.Value((first + last) / 2.0));
     }
-    // Leaf occurrences (no occurrence names them as parent) holding the
-    // shell definition, or faces outside any shell for the free-face group.
-    std::vector<bool> parents(document->occurrences.size(), false);
-    for (const OccurrenceFacts& occurrence : document->occurrences) {
-      if (occurrence.parent >= 0 &&
-          static_cast<size_t>(occurrence.parent) < parents.size()) {
-        parents[static_cast<size_t>(occurrence.parent)] = true;
-      }
-    }
-    size_t count = 0;
-    for (size_t ordinal = 0; ordinal < document->occurrences.size(); ++ordinal) {
-      if (parents[ordinal]) continue;
-      const TopoDS_Shape& shape = document->occurrences[ordinal].shape;
-      bool contains = false;
-      if (failing.key.IsNull()) {
-        contains = TopExp_Explorer(shape, TopAbs_FACE, TopAbs_SHELL).More();
-      } else {
-        for (TopExp_Explorer shell(shape, TopAbs_SHELL); shell.More() && !contains;
-             shell.Next()) {
-          contains = shell.Current().Located(TopLoc_Location()).IsSame(failing.key);
-        }
-      }
-      if (!contains) continue;
-      if (count == capacity) {
-        return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
-                    "Closure group occurrence capacity is exhausted.", error);
-      }
-      occurrences[count++] = static_cast<uint32_t>(ordinal);
-    }
-    group->occurrence_count = count;
+    std::copy(failing.occurrences.begin(), failing.occurrences.end(),
+              occurrences);
+    group->occurrence_count = failing.occurrences.size();
     return GEOSPEC_OCCT_OK;
   });
 }

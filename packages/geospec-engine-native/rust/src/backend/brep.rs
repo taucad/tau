@@ -1295,7 +1295,10 @@ pub trait BrepSubject {
     fn faces(&self) -> Result<Rc<[LocatedFace]>, BackendError>;
     fn validity(&self) -> Result<Rc<ValidityFacts>, BackendError>;
     /// Exact shell closure alone: no validity analyzer and no tessellation.
-    fn closure(&self) -> Result<Rc<ClosureFacts>, BackendError> {
+    /// Naming the failing groups' leaf occurrences is charged before it runs,
+    /// warm or cold, a unit per failing group and per occurrence (rulings 23
+    /// and 28); `None` when `charge` stops it.
+    fn closure(&self, _charge: &mut Charge<'_>) -> Result<Option<Rc<ClosureFacts>>, BackendError> {
         Err(BackendError {
             kind: super::BackendErrorKind::Unsupported,
             message: "The BRep connector has no exact shell-closure facet.".into(),

@@ -455,6 +455,16 @@ describe('scroll fades', () => {
     });
   });
 
+  it('spells out the auto duration so minification cannot pin scroll fades', () => {
+    for (const utility of ['scroll-shadows-x', 'scroll-shadows-y', 'scroll-shadows']) {
+      const body = readRuleBody(globalStyles.indexOf(`@utility ${utility} {`));
+      const animations = /\banimation:([^;]+);/.exec(body)?.[1]?.split(',') ?? [];
+
+      expect(animations.length).toBeGreaterThan(0);
+      expect(animations.every((animation) => animation.trim().startsWith('auto '))).toBe(true);
+    }
+  });
+
   it('provides a static CSS-only inline-end fade', () => {
     const style = readRuleStyle(globalStyles.indexOf('@utility scroll-shadow-right'));
 

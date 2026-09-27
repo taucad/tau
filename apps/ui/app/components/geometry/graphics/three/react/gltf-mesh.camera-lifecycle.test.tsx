@@ -17,7 +17,6 @@ import {
   MeshBasicMaterial,
   MeshStandardMaterial,
   MeshPhysicalMaterial,
-  Plane,
   PerspectiveCamera,
   Points,
   PointsMaterial,
@@ -197,6 +196,15 @@ vi.mock('#components/geometry/graphics/metadata/gltf-component-manifest.js', () 
 }));
 
 const { GltfMesh } = await import('#components/geometry/graphics/three/react/gltf-mesh.js');
+
+/** A raycast clip that removes the points past the plane through `point`, along `normal`. */
+const clipBeyond = (normal: Vector3, point: Vector3): RaycastClipState => {
+  const halfSpace = { normal: [normal.x, normal.y, normal.z] as const, constant: normal.dot(point) };
+  return {
+    enabled: true,
+    pieces: [{ cutId: 'cut', halfSpaces: [halfSpace], faces: [{ cutId: 'cut', plane: halfSpace, bounds: [] }] }],
+  };
+};
 
 const createGltf = (): GLTF =>
   ({
@@ -673,7 +681,7 @@ describe('GltfMesh camera lifecycle', () => {
     raycaster.ray.origin.x = 10;
     expect(raycaster.intersectObject(gltf.scene, true)).toEqual([]);
     raycaster.ray.origin.x = 0;
-    mocks.raycastClipState = { enabled: true, planes: [new Plane(new Vector3(0, 0, -1), -3)] };
+    mocks.raycastClipState = clipBeyond(new Vector3(0, 0, 1), new Vector3(0, 0, -3));
     mocks.sectionView = { ...mocks.sectionView, isActive: true };
     view.rerender(<GltfMesh gltfFile={bytes} enableMatcap={false} />);
     expect(raycaster.intersectObject(gltf.scene, true).map((hit) => hit.object)).toEqual([far]);
@@ -704,7 +712,7 @@ describe('GltfMesh camera lifecycle', () => {
     expect(raycaster.intersectObject(gltf.scene, true).map((hit) => hit.object)).toEqual([near]);
 
     // A section drag step moves the cut without re-rendering the model; the next raycast still honours it.
-    mocks.raycastClipState = { enabled: true, planes: [new Plane(new Vector3(0, 0, -1), -3)] };
+    mocks.raycastClipState = clipBeyond(new Vector3(0, 0, 1), new Vector3(0, 0, -3));
     expect(raycaster.intersectObject(gltf.scene, true).map((hit) => hit.object)).toEqual([far]);
 
     view.unmount();
@@ -801,12 +809,10 @@ describe('GltfMesh camera lifecycle', () => {
       expect(raycast).toHaveBeenCalledTimes(1);
 
       near.layers.set(0);
-      mocks.raycastClipState = {
-        enabled: true,
-        planes: [
-          new Plane().setFromNormalAndCoplanarPoint(direction, nearCenter.clone().add(farCenter).multiplyScalar(0.5)),
-        ],
-      };
+      mocks.raycastClipState = clipBeyond(
+        direction.clone().negate(),
+        nearCenter.clone().add(farCenter).multiplyScalar(0.5),
+      );
       mocks.sectionView = { ...mocks.sectionView, isActive: true };
       await act(async () => {
         root.render(

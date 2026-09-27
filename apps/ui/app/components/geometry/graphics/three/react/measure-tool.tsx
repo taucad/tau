@@ -31,7 +31,10 @@ import {
 } from '#hooks/use-graphics.js';
 import { createRafCoalescer } from '#components/geometry/graphics/three/utils/raf-coalescer.js';
 import type { RafCoalescer } from '#components/geometry/graphics/three/utils/raf-coalescer.js';
-import { raycastFirstVisibleMeshHit } from '#components/geometry/graphics/three/utils/bvh-raycast.js';
+import {
+  createRaycastClipTest,
+  raycastFirstVisibleMeshHit,
+} from '#components/geometry/graphics/three/utils/bvh-raycast.js';
 import { resolveSectionViewRaycastClip } from '#components/geometry/graphics/three/use-section-view.js';
 import { measureInputMachine } from '#machines/measure-input.machine.js';
 import { selectPresentedGeometryKey } from '#machines/graphics.machine.js';
@@ -53,7 +56,7 @@ function calculateScaleFromCamera(position: THREE.Vector3, camera: THREE.Camera)
     factor = distanceToCamera * Math.min((1.9 * Math.tan((Math.PI * perspCamera.fov) / 360)) / perspCamera.zoom, 7);
   }
 
-  const size = 1; // Base size (equivalent to this.size in transform-controls)
+  const size = 1; // Base size
   return (factor * size) / 4000;
 }
 
@@ -222,11 +225,12 @@ export function MeasureTool(): React.JSX.Element {
 
       raycasterRef.current.setFromCamera(mouseRef.current, camera);
 
+      // Read here, not selected: a section drag step must not re-render the tool or reset its pointer coalescer.
+      const clipping = resolveSectionViewRaycastClip(graphicsActor.getSnapshot().context, renderFrame);
       const firstIntersection = raycastFirstVisibleMeshHit({
         raycaster: raycasterRef.current,
         meshes: getCachedMeshes(),
-        // Read here, not selected: a section drag step must not re-render the tool or reset its pointer coalescer.
-        clipping: resolveSectionViewRaycastClip(graphicsActor.getSnapshot().context, renderFrame),
+        clipping,
       });
 
       let allSnapPoints: SnapPoint[] = [];
@@ -241,6 +245,10 @@ export function MeasureTool(): React.JSX.Element {
           snapCacheRef.current.set(cacheKey, allSnapPoints);
         }
 
+        // A face's snaps are cached whole, and the cuts move without a new cache key: the raycast's own clip test
+        // drops the vertices, edge midpoints and face centres the section removes, every raycast.
+        const isKept = createRaycastClipTest(clipping);
+        allSnapPoints = isKept ? allSnapPoints.filter(({ position }) => isKept(position)) : allSnapPoints;
         lastSnapPointsRef.current = allSnapPoints;
       } else {
         lastSnapPointsRef.current = undefined;
@@ -614,7 +622,7 @@ function MeasurementLine({
   const isHovered = isLabelHovered || isExternallyHovered;
   const graphicsActor = useGraphics();
 
-  // Create matcap materials following transform-controls pattern.
+  // Matcap materials for the line, cones and label.
   // Split into base materials (created once) and hover color update (cheap, per-hover).
   const derivedMaterials = useMemo(() => {
     if (materials && 'backgroundMaterial' in materials && 'textMaterial' in materials && 'coneMaterial' in materials) {

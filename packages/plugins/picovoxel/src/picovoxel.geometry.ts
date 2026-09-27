@@ -23,8 +23,9 @@ export type PicovoxelNativeHandle = { readonly shapes: readonly PicovoxelShapeSn
 /**
  * Area-weighted smooth vertex normals on the source (Z-up) vertices.
  *
- * The arithmetic — the cross product, Float32 accumulation in triangle order, `Math.hypot`
- * normalization — is kept exactly, so the bytes match the de-indexed path this replaced.
+ * The arithmetic is fixed so every engine writes the same bytes (DP18): the cross product, Float32
+ * accumulation in triangle order, and normalization by `Math.sqrt` of the Float64 sum of squares.
+ * IEEE 754 rounds `sqrt` correctly, whereas ECMAScript leaves `Math.hypot` implementation-approximated.
  *
  * @param vertices - Welded vertex positions.
  * @param triangles - Triangle indices, already range-checked.
@@ -59,7 +60,11 @@ const computeVertexNormals = (
     normals[c + 2]! += normalZ;
   }
   for (let offset = 0; offset < normals.length; offset += 3) {
-    const length = Math.hypot(normals[offset]!, normals[offset + 1]!, normals[offset + 2]!);
+    const x = normals[offset]!;
+    const y = normals[offset + 1]!;
+    const z = normals[offset + 2]!;
+    // oxlint-disable-next-line unicorn/prefer-modern-math-apis -- DP18: Math.hypot is implementation-approximated, Math.sqrt is correctly rounded.
+    const length = Math.sqrt(x * x + y * y + z * z);
     if (length > 0) {
       normals[offset]! /= length;
       normals[offset + 1]! /= length;

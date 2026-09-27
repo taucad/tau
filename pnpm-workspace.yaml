@@ -266,7 +266,8 @@ catalog:
   zod: ^4.4.3
   nanoraster: ^0.5.4
   # Interim: the pkg.pr.new preview of taucad/picovoxel PR #9 head 09a1108, whose tree equals main
-  # dc966e0 (main pushes publish no preview). T5.4 replaces it with ^0.1.0 from npm.
+  # dc966e0 (main pushes publish no preview). T5.4 replaces it with the exact 0.1.0 from npm: never a
+  # range, since @taucad/picovoxel's kernel version carries this build's digests.
   picovoxel: https://pkg.pr.new/picovoxel@09a1108
   n8ao: 1.10.2
   postprocessing: 6.39.1

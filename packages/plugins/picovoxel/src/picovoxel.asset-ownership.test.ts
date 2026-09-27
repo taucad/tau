@@ -50,6 +50,20 @@ describe('PicoVoxel asset ownership', () => {
     expect(declared('scripts')).toBe(scriptsDigest());
   });
 
+  // S-4: the constants describe exactly one build, so a range would let a consumer resolve another
+  // PicoVoxel under this kernel version. Pin it exactly (as replicad-opencascadejs is) and bump the
+  // constants with it.
+  it('should depend on one exact PicoVoxel build, never a range', () => {
+    const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
+      dependencies: Record<string, string>;
+    };
+    const catalog = readFileSync(new URL('../../../../pnpm-workspace.yaml', import.meta.url), 'utf8');
+    const declaredSpec = manifest.dependencies['picovoxel'];
+    const spec = declaredSpec === 'catalog:' ? /^ {2}picovoxel: (\S+)$/mu.exec(catalog)?.[1] : declaredSpec;
+
+    expect(spec).toMatch(/^(?:\d+\.\d+\.\d+(?:-[\w.-]+)?|https:\/\/pkg\.pr\.new\/picovoxel@[\da-f]{7,40})$/u);
+  });
+
   it('should key the kernel version on all four', async () => {
     const { version } = await resolveRuntimePluginDefinition('kernel', picovoxelKernel());
 

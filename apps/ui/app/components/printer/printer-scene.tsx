@@ -7,7 +7,10 @@ import type CameraControlsImpl from 'camera-controls';
 import type { ToolpathProgram } from '@taucad/slicer/toolpath';
 import { createTauR3fGlProp } from '#components/geometry/graphics/three/canvas-three-gl.js';
 import { readGraphicsBackendQueryOverride } from '#components/geometry/graphics/graphics-backend.js';
-import { TauCameraControls } from '#components/geometry/graphics/three/controls/tau-camera-controls.js';
+import {
+  resolveCameraControlProps,
+  TauCameraControls,
+} from '#components/geometry/graphics/three/controls/tau-camera-controls.js';
 import { printerBackground, printerBody } from '#components/printer/printer-colors.constants.js';
 import {
   framedPlateBox,
@@ -92,6 +95,8 @@ const plateRoughness: Readonly<Record<PrinterPlateModel['finish'], number>> = {
 const plateSurfaceLift = 0.3;
 const plateSurfaceLiftTarget = new THREE.Color(printerBody.plateSurfaceLift);
 const gltfLoader = new GLTFLoader();
+/** The CAD viewer's own camera feel, without its easing. */
+const printerCameraControlProps = resolveCameraControlProps({ enablePan: true, enableZoom: true });
 
 /** The print surface's colour as the viewer draws it; `color` is changed in place. */
 const liftPlateSurface = (color: THREE.Color): THREE.Color => color.lerp(plateSurfaceLiftTarget, plateSurfaceLift);
@@ -715,7 +720,7 @@ function PrinterCamera({
     void controls.current.setLookAt(...position, ...target, isRequested && !isReducedMotion);
     invalidate();
   }, [aspect, box, frameRequest, geometry, invalidate, isReducedMotion]);
-  return <TauCameraControls ref={controls} makeDefault onControl={release} />;
+  return <TauCameraControls ref={controls} makeDefault onControl={release} {...printerCameraControlProps} />;
 }
 
 /** The printer or its plate alone, the toolpath and the camera for one program. */

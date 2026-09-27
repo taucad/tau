@@ -196,7 +196,9 @@ struct Candidate {
     right_faces: Vec<u32>,
 }
 
-/// Broad-phase pairs whose boxes overlap within `tolerance`. Every sweep
+/// Broad-phase pairs whose reaches overlap within `tolerance`: a body's
+/// reach is the fold of its face boxes, which grow by each face's
+/// tolerances, where `bounds` is the exact fold (review R5-4). Every sweep
 /// comparison is charged, a unit per `BOX_TESTS_PER_UNIT` before each batch
 /// runs, and each pair's face-box tests (by their faces x faces bound)
 /// before they run.
@@ -205,16 +207,27 @@ fn candidate_pairs(
     tolerance: f64,
     budget: &Budget,
 ) -> Result<Vec<Candidate>, ExactError> {
-    let axis = sweep_axis(list.iter().map(|body| aabb(body.bounds)));
+    let reaches: Vec<Aabb> = list
+        .iter()
+        .map(|body| {
+            let mut reach = empty_aabb();
+            for face in &body.faces {
+                expand(&mut reach, face.min);
+                expand(&mut reach, face.max);
+            }
+            reach
+        })
+        .collect();
+    let axis = sweep_axis(reaches.iter().copied());
     let mut order: Vec<usize> = (0..list.len()).collect();
     order.sort_by(|&left, &right| {
-        partial_cmp(list[left].bounds.min[axis], list[right].bounds.min[axis])
+        partial_cmp(reaches[left].min[axis], reaches[right].min[axis])
             .then_with(|| left.cmp(&right))
     });
     let mut pairs = Vec::new();
     let mut comparisons = 0_u64;
     for (position, &current) in order.iter().enumerate() {
-        let bounds = aabb(list[current].bounds);
+        let bounds = reaches[current];
         for &candidate in &order[position + 1..] {
             if comparisons % BOX_TESTS_PER_UNIT == 0 {
                 charge(budget, 1).map_err(|exceeded| ExactError::Budget {
@@ -223,7 +236,7 @@ fn candidate_pairs(
                 })?;
             }
             comparisons += 1;
-            let other = aabb(list[candidate].bounds);
+            let other = reaches[candidate];
             if other.min[axis] > bounds.max[axis] + tolerance {
                 break;
             }
@@ -661,5 +674,25 @@ mod tests {
         };
         assert_eq!((pair, exceeded.limit, exceeded.used), (None, 1, 2));
         assert_eq!(budget.used(), 1);
+    }
+
+    /// Review R5-4: the broad phase pairs bodies by their reach, the fold of
+    /// their face boxes, which grow by the faces' tolerances. Body 1's exact
+    /// bounds lie 0.5 beyond body 0, but its grown face meets it.
+    #[test]
+    fn the_broad_phase_pairs_bodies_by_their_reach() {
+        let bodies = vec![
+            body(vec![slab([0.0; 3], [1.0; 3])], true, 8),
+            ComponentBody {
+                bounds: slab([1.5, 0.0, 0.0], [2.5, 1.0, 1.0]),
+                ..body(vec![slab([0.9995, 0.0, 0.0], [2.5, 1.0, 1.0])], true, 8)
+            },
+        ];
+        let budget = Budget::new(2);
+        let pairs = candidate_pairs(&bodies, 0.001, &budget).unwrap();
+        assert_eq!(pairs.len(), 1);
+        assert_eq!((pairs[0].left, pairs[0].right), (0, 1));
+        // The sweep's batch, then the pair's face-box tests.
+        assert_eq!(budget.used(), 1 + 1);
     }
 }

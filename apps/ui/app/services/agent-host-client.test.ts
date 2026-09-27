@@ -501,9 +501,11 @@ describe('createBrowserAgentHostClient', () => {
     const openComputeStorePort = vi.fn();
     const client = createTestClient(workerOf(worker), { computeMode: 'off', openComputeStorePort });
     const events: unknown[] = [];
+    const positions: Array<number | undefined> = [];
     const liveEvents: unknown[] = [];
-    const unsubscribe = client.subscribe({ chatId: 'chat-1', cursor: 0 }, (_chatId, event) => {
+    const unsubscribe = client.subscribe({ chatId: 'chat-1', cursor: 0 }, (_chatId, event, position) => {
       events.push(event);
+      positions.push(position);
     });
     const unsubscribeLive = client.subscribeLive?.('chat-1', (_chatId, event) => {
       liveEvents.push(event);
@@ -548,6 +550,8 @@ describe('createBrowserAgentHostClient', () => {
     ]);
     expect(new Set(commands.map((request) => request.args['commandId'])).size).toBe(commands.length);
     await expect.poll(() => events).toHaveLength(4);
+    /* Each row carries its position in the log, which the page's projection folds at (PV-S7). */
+    expect(positions).toEqual([0, 1, 2, 3]);
     expect(liveEvents).toEqual([liveDelta('chat-1', 'run-1', 'live')]);
 
     unsubscribe();

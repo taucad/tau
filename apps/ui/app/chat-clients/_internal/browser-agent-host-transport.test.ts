@@ -21,8 +21,9 @@ import {
   resumableBrowserAgentHostRunId,
   resolveBrowserAgentHostInterrupt,
   subscribeHostTurnSettlements,
+  subscribeChatLogAnswers,
 } from '#chat-clients/_internal/browser-agent-host-transport.js';
-import type { HostTurnSettlement } from '#chat-clients/_internal/browser-agent-host-transport.js';
+import type { ChatLogAnswer, HostTurnSettlement } from '#chat-clients/_internal/browser-agent-host-transport.js';
 import { parseErrorForPersistence } from '#utils/error.utils.js';
 import hexagonalNutLog from '#services/__fixtures__/daemon-reattach-hexnut.jsonl?raw';
 import hexagonalNutFourRunLog from '#services/__fixtures__/daemon-reattach-hexnut-4runs.jsonl?raw';
@@ -1772,6 +1773,10 @@ describe('BrowserPlacementChatTransport', () => {
       createClient: async () => client,
     });
     const transport = new BrowserPlacementChatTransport();
+    const answers: ChatLogAnswer[] = [];
+    const unsubscribeAnswers = subscribeChatLogAnswers((event) => {
+      answers.push(event);
+    });
 
     const stream = await transport.reconnectToStream({ chatId, metadata: undefined });
     const reader = stream!.getReader();
@@ -1783,9 +1788,17 @@ describe('BrowserPlacementChatTransport', () => {
     expect(read).toHaveBeenCalledOnce();
     expect(client.subscribe).toHaveBeenCalledWith({ chatId, cursor: 2 }, expect.any(Function), expect.any(Function));
     expect(getBrowserAgentHostRun(chatId)).toMatchObject({ runId, state: 'running' });
-    listener!(chatId, completed);
+    listener!(chatId, completed, 2);
     await drain(reader);
 
+    // Every answer the stream read reaches the chat's projection, a followed row at its position (PV-S7).
+    expect(answers.map((event) => event.answer)).toMatchObject([
+      { status: 'batch', cursor: 0, nextCursor: 1, events: [running] },
+      { status: 'batch', cursor: 1, nextCursor: 2, events: [appended] },
+      { status: 'batch', cursor: 2, nextCursor: 3, endCursor: 3, events: [completed] },
+    ]);
+    expect(answers).toMatchObject([{ chatId }, { chatId }, { chatId }]);
+    unsubscribeAnswers();
     expect(attach).toHaveBeenCalledWith({ chatId, cursor: 0 });
     // The next page names the row it follows, so an owner on another history refuses it (SC-R11).
     expect(read).toHaveBeenCalledWith({

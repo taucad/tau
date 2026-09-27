@@ -11,6 +11,7 @@ import { resolveKernel } from '@taucad/types/constants';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import type { DraftAttachmentModel } from '#hooks/draft.machine.js';
 import { spyOnSend } from '#lib/xstate-test.utils.js';
+import { logRow, publishLogRows, runningRows } from '#machines/chat-projection.fixture.js';
 
 // ---------------------------------------------------------------------------
 // Hoisted harness — mocks the project-manager surface (chat row persistence),
@@ -968,31 +969,19 @@ describe('ActiveChatProvider', () => {
     });
 
     act(() => {
-      const live = harness.created[0]!;
-      live.messages = [
-        {
-          id: 'approval-message',
-          role: 'assistant',
-          metadata: { createdAt: 1, status: 'pending' },
-          parts: [
-            {
-              type: 'tool-delete_file',
-              toolCallId: 'tool-1',
-              state: 'approval-requested',
-              input: { targetFile: 'main.ts' },
-              approval: { id: 'approval-1' },
-            } as unknown as MyUIMessage['parts'][number],
-          ],
-        },
-      ];
-      live.emitMessagesChange();
+      publishLogRows('chat_activity', [
+        ...runningRows(),
+        logRow(2, { type: 'interrupt.recorded', interruptId: 'i1', phase: 'requested', reason: 'approval' }),
+      ]);
     });
     expect(result.current.composer.agentActivity).toBe('approval-required');
 
     act(() => {
-      const live = harness.created[0]!;
-      live.messages = [];
-      live.emitMessagesChange();
+      publishLogRows(
+        'chat_activity',
+        [logRow(3, { type: 'interrupt.recorded', interruptId: 'i1', phase: 'resolved', reason: 'approval' })],
+        3,
+      );
       result.current.session.persistenceActorRef.send({ type: 'startRequest', request: { kind: 'continue' } });
       result.current.composer.stop();
     });

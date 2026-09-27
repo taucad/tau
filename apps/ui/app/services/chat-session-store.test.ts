@@ -22,6 +22,7 @@ import {
   publishChatTurnAdmission,
   resetChatTurnServices,
 } from '#chat-clients/_internal/chat-host-binding.js';
+import { logRow, publishLogRows, runningRows } from '#machines/chat-projection.fixture.js';
 
 // ---------------------------------------------------------------------------
 // Hoisted test harness
@@ -1127,24 +1128,28 @@ describe('ChatSessionStore', () => {
     expect(deps.touchChatRecency).toHaveBeenCalledWith('chat_activity', 123);
   });
 
-  it('updates the active dynamic tool name when counts stay unchanged', () => {
+  it('updates the active tool name from the log when counts stay unchanged (PV-S7)', () => {
     const store = createStore();
     const session = store.acquire('chat_tool_name', 'project_1');
-    const fake = harness.created.find((entry) => entry.id === 'chat_tool_name')!;
     const actor = session.stateActorRef;
-    const activeToolMessage = (toolName: string): MyUIMessage => ({
-      id: 'assistant_1',
-      role: 'assistant',
-      parts: [{ type: 'dynamic-tool', toolName, toolCallId: 'tool_1', state: 'input-streaming', input: {} }],
-    });
+    const toolRow = (sequence: number, message: Readonly<{ role: string; toolCallId: string; toolName: string }>) =>
+      logRow(sequence, { type: 'message.appended', message: { id: `m${String(sequence)}`, ...message } });
 
-    fake.messages = [activeToolMessage('search')];
-    fake.emitMessagesChange();
-    expect(actor.getSnapshot().context.toolName).toBe('search');
+    publishLogRows('chat_tool_name', [
+      ...runningRows(),
+      toolRow(2, { role: 'tool-input', toolCallId: 'tool_1', toolName: 'search' }),
+    ]);
+    expect(actor.getSnapshot().context).toMatchObject({ toolsInFlight: 1, toolName: 'search' });
 
-    fake.messages = [activeToolMessage('edit_file')];
-    fake.emitMessagesChange();
-    expect(actor.getSnapshot().context.toolName).toBe('edit_file');
+    publishLogRows(
+      'chat_tool_name',
+      [
+        toolRow(3, { role: 'tool-output', toolCallId: 'tool_1', toolName: 'search' }),
+        toolRow(4, { role: 'tool-input', toolCallId: 'tool_2', toolName: 'edit_file' }),
+      ],
+      3,
+    );
+    expect(actor.getSnapshot().context).toMatchObject({ toolsInFlight: 1, toolName: 'edit_file' });
     store.release('chat_tool_name');
   });
 
@@ -1192,18 +1197,16 @@ describe('ChatSessionStore', () => {
       const { store, deps } = storeInProject();
       vi.spyOn(deps.client, 'writeFile');
       store.retainDurableRun({ projectId, chatId: 'chat_approval', runId: 'run_approval' });
-      const chat = harness.created[0]!;
-      const approval = {
-        type: 'tool-delete_file',
-        toolCallId: 'tool-1',
-        state: 'approval-requested',
-        input: { targetFile: 'main.ts' },
-        approval: { id: 'approval-1' },
-      } as unknown as MyUIMessage['parts'][number];
-      chat.messages = [{ id: 'assistant-1', role: 'assistant', parts: [approval] }];
+      const requested = logRow(2, {
+        type: 'interrupt.recorded',
+        interruptId: 'i1',
+        phase: 'requested',
+        reason: 'approval',
+      });
 
-      chat.emitMessagesChange();
-      chat.emitMessagesChange();
+      publishLogRows('chat_approval', [...runningRows(), requested]);
+      /* A second stream replays the same rows: the projection already holds them. */
+      publishLogRows('chat_approval', [...runningRows(), requested]);
 
       await vi.waitFor(() => {
         expect(deps.client.json(unreadPath)).toEqual({ version: 1, unread: { chat_approval: true } });
@@ -1217,23 +1220,12 @@ describe('ChatSessionStore', () => {
       store.acquire('chat_active', projectId);
       store.focusChat('chat_active');
       const chat = harness.created[0]!;
-      chat.messages = [
-        {
-          id: 'assistant-1',
-          role: 'assistant',
-          parts: [
-            {
-              type: 'tool-delete_file',
-              toolCallId: 'tool-1',
-              state: 'approval-requested',
-              input: { targetFile: 'main.ts' },
-              approval: { id: 'approval-1' },
-            } as unknown as MyUIMessage['parts'][number],
-          ],
-        },
-      ];
-
-      chat.emitMessagesChange();
+      publishLogRows('chat_active', [
+        ...runningRows(),
+        logRow(2, { type: 'interrupt.recorded', interruptId: 'i1', phase: 'requested', reason: 'approval' }),
+      ]);
+      expect(store.acquire('chat_active', projectId).stateActorRef.getSnapshot().context.pendingApprovalCount).toBe(1);
+      store.release('chat_active');
       chat.finish();
 
       await vi.waitFor(() => {

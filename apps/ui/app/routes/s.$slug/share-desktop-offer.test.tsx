@@ -59,6 +59,18 @@ describe('web /s/:slug desktop offer', () => {
     expect(await screen.findByRole('button', { name: 'Open in Tau Desktop' })).toBeInTheDocument();
   });
 
+  /* Below md the viewer fills the width and its centred controls own the bottom
+     edge; the card covered them at 640-767 px. From md it sits over the
+     workbench pane instead. */
+  it('should show the offer only from md, where the workbench pane holds the bottom-right corner', async () => {
+    mountAt('tau~pub_123', { publication: {}, viewerRole: 'public' });
+
+    const openInDesktop = await screen.findByRole('button', { name: 'Open in Tau Desktop' });
+    const offer = openInDesktop.closest('.fixed');
+    expect(offer).toHaveClass('hidden', 'md:flex');
+    expect(offer).not.toHaveClass('sm:flex');
+  });
+
   /* A dead "Open in Tau Desktop" button is worse than none: the shell's parser
      refuses a slug this long, so the page must not pretend it can hand it on. */
   it('offers nothing for a slug the shell would refuse', async () => {

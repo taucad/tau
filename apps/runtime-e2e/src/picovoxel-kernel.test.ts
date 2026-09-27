@@ -7,15 +7,26 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { esbuild } from '@taucad/esbuild';
 import { picovoxel } from '@taucad/picovoxel';
 import type { PicovoxelOptionsInput } from '@taucad/picovoxel';
+import { Worker as NodeWorker } from 'node:worker_threads';
+import { createRuntimeClient } from '@taucad/runtime';
+import { fromNodeFs } from '@taucad/runtime/filesystem/node';
 import { createNodeClient } from '@taucad/runtime/node';
+import { nodeWorkerTransport } from '@taucad/runtime/transport/node';
 import { defineRuntime } from '@taucad/runtime/worker';
-import { extractGltfFromExportResult, validateGlbData } from '@taucad/runtime-testing';
+import { extractGltfFromExportResult, glbToDocument, validateGlbData } from '@taucad/runtime-testing';
 import { kernelConfigurations } from '@taucad/types/constants';
 
 const createRuntime = (wasm?: PicovoxelOptionsInput['wasm']) =>
   defineRuntime({ plugins: [picovoxel(wasm ? { kernels: { default: { wasm } } } : undefined), esbuild()] });
 
 const temporaryDirectories: string[] = [];
+
+/** The worker entry is TypeScript in this workspace, so the thread needs tsx's loader. */
+class TsxWorker extends NodeWorker {
+  public constructor(url: string | URL) {
+    super(url, { execArgv: ['--import', 'tsx'] });
+  }
+}
 
 /** A multi-file ShapeKernel model with an offset, so the fast and exact lanes build different geometry. */
 const writeProject = async (): Promise<string> => {
@@ -47,11 +58,142 @@ const writeProject = async (): Promise<string> => {
 
 const stlHeader = (bytes: Uint8Array<ArrayBuffer>): string => new TextDecoder().decode(bytes.subarray(0, 80)).trimEnd();
 
+/** Write a one-file project and return its directory. */
+const writeModel = async (source: string): Promise<string> => {
+  const directory = await mkdtemp(join(tmpdir(), 'tau-picovoxel-e2e-'));
+  temporaryDirectories.push(directory);
+  await writeFile(join(directory, 'main.ts'), source);
+  return directory;
+};
+
+/** Signed volume and bounds of every triangle primitive in a GLB, in its own units. */
+const measureGlb = async (bytes: Uint8Array<ArrayBuffer>) => {
+  const document = await glbToDocument(bytes);
+  let volume = 0;
+  const minimum = [Infinity, Infinity, Infinity];
+  const maximum = [-Infinity, -Infinity, -Infinity];
+  for (const mesh of document.getRoot().listMeshes()) {
+    for (const primitive of mesh.listPrimitives()) {
+      const positions = primitive.getAttribute('POSITION')!.getArray()!;
+      const indices = primitive.getIndices()!.getArray()!;
+      for (let offset = 0; offset < positions.length; offset += 3) {
+        for (const axis of [0, 1, 2]) {
+          minimum[axis] = Math.min(minimum[axis]!, positions[offset + axis]!);
+          maximum[axis] = Math.max(maximum[axis]!, positions[offset + axis]!);
+        }
+      }
+      for (let offset = 0; offset < indices.length; offset += 3) {
+        const [a, b, c] = [indices[offset]! * 3, indices[offset + 1]! * 3, indices[offset + 2]! * 3];
+        volume +=
+          (positions[a]! * (positions[b + 1]! * positions[c + 2]! - positions[b + 2]! * positions[c + 1]!) -
+            positions[a + 1]! * (positions[b]! * positions[c + 2]! - positions[b + 2]! * positions[c]!) +
+            positions[a + 2]! * (positions[b]! * positions[c + 1]! - positions[b + 1]! * positions[c]!)) /
+          6;
+      }
+    }
+  }
+  return { volume, minimum, maximum };
+};
+
 afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map(async (directory) => rm(directory, { recursive: true })));
 });
 
 describe('PicoVoxel packaged runtime', () => {
+  it('should keep the fast viewer render within the lane tolerance of the exact export (DP1)', async () => {
+    const voxelSize = 0.5;
+    const projectPath = await writeModel(`
+      import type { Pico } from 'picovoxel';
+      export const defaultParams = { voxelSize: ${voxelSize} };
+      export default function main(pico: Pico) {
+        const sphere = pico.createVoxels({ shape: 'sphere', radius: 10 });
+        const bore = pico.createVoxels({ shape: 'beam', start: [-12, 0, 0], end: [12, 0, 0], radius: 3.5 });
+        return sphere.subtract(bore).fillet({ rounding: 1 }).offset({ distance: 0.5 });
+      }
+    `);
+    const client = await createNodeClient({ runtime: createRuntime('serial'), projectPath });
+    try {
+      const renderGlb = async (lane: 'fast' | 'exact'): Promise<Uint8Array<ArrayBuffer>> => {
+        const outcome = await client.render({ source: { path: 'main.ts' }, renderOptions: { lane } });
+        if (outcome.superseded || !outcome.geometry.success || outcome.geometry.data.format !== 'gltf') {
+          throw new Error(`PicoVoxel ${lane} render failed`);
+        }
+        return outcome.geometry.data.content;
+      };
+      const fast = await measureGlb(await renderGlb('fast'));
+      // The export replays the model exactly; canonical Z-up millimetres, so it measures in voxel units.
+      const exported = extractGltfFromExportResult(
+        await client.export('glb', { exportOptions: { coordinateSystem: 'z-up', unit: { length: 'millimeter' } } }),
+      );
+      const exact = await measureGlb(exported!);
+      const exactView = await measureGlb(await renderGlb('exact'));
+
+      // The exact viewer render is the exported model in the viewer's frame: one uniform scale apart.
+      const scale = (exactView.maximum[0]! - exactView.minimum[0]!) / (exact.maximum[0]! - exact.minimum[0]!);
+      expect(exactView.volume / (exact.volume * scale ** 3)).toBeCloseTo(1, 6);
+      expect(Math.abs(fast.volume - exactView.volume) / exactView.volume).toBeLessThanOrEqual(0.022);
+      for (const axis of [0, 1, 2]) {
+        expect(Math.abs(fast.minimum[axis]! - exactView.minimum[axis]!)).toBeLessThanOrEqual(voxelSize * scale);
+        expect(Math.abs(fast.maximum[axis]! - exactView.maximum[axis]!)).toBeLessThanOrEqual(voxelSize * scale);
+      }
+    } finally {
+      await client.shutdown({ drain: true });
+      client.terminate();
+    }
+  }, 300_000);
+
+  it('should abandon a superseded heavy build at its next PicoVoxel call and keep serving (DP15)', async () => {
+    const projectPath = await writeModel(`
+      import type { Pico } from 'picovoxel';
+      export const defaultParams = { voxelSize: 0.4, steps: 40 };
+      export default function main(pico: Pico, params = defaultParams) {
+        let body = pico.createVoxels({ shape: 'sphere', radius: 12 });
+        for (let step = 0; step < params.steps; step++) {
+          body = body.offset({ distance: step % 2 === 0 ? -0.3 : 0.3 });
+        }
+        return body;
+      }
+    `);
+    // A worker thread, so the newer render can supersede while the heavy build is still running.
+    const client = createRuntimeClient({
+      transport: nodeWorkerTransport({
+        url: new URL('fixtures/picovoxel-node-runtime.ts', import.meta.url),
+        fileSystem: fromNodeFs(projectPath),
+        workerCtor: TsxWorker,
+      }),
+    });
+    try {
+      const render = async (steps: number) =>
+        client.render({ source: { path: 'main.ts' }, parameters: { steps }, renderOptions: { lane: 'exact' } });
+
+      // Baseline: how long the heavy build takes when nothing supersedes it.
+      let started = performance.now();
+      const baseline = await render(40);
+      const full = performance.now() - started;
+      expect(!baseline.superseded && baseline.geometry.success).toBe(true);
+
+      started = performance.now();
+      const heavy = render(41);
+      await new Promise((resolve) => {
+        setTimeout(resolve, full * 0.2);
+      });
+      const light = await render(1);
+      const lightDone = performance.now() - started;
+
+      const superseded = await heavy;
+      expect(superseded.superseded).toBe(true);
+      expect(!light.superseded && light.geometry.success).toBe(true);
+      // Cooperative: the newer render finished well before the heavy build could have.
+      expect(lightDone).toBeLessThan(full * 0.8);
+
+      // Worker recovery: the next export replays cleanly on the same worker.
+      const stl = await client.export('stl');
+      expect(stl.success && stlHeader(stl.data[0]!.bytes)).toBe('PicoGK UNITS=mm');
+    } finally {
+      client.terminate();
+    }
+  }, 300_000);
+
   it('should render a multi-file ShapeKernel model and export exact GLB and STL through the Node client', async () => {
     const client = await createNodeClient({ runtime: createRuntime(), projectPath: await writeProject() });
     try {

@@ -407,7 +407,7 @@ const isFileRef = (block: unknown): boolean => zodUtility.isObject(block) && blo
 const isBlockList = (built: JsonValue | readonly JsonValue[]): built is readonly JsonValue[] => Array.isArray(built);
 
 /**
- * Replace every attachment reference in user messages with the bytes a model reads (D15).
+ * Replace every attachment reference in message content with the bytes a model reads (D15).
  *
  * Returns a transient copy: the input messages — the durable rows — are never
  * mutated. An image becomes an inline `image` block. A document becomes the
@@ -472,7 +472,9 @@ export const materializeAttachments = async (
   };
   const materialized = await Promise.all(
     messages.map(async (message): Promise<ProviderMessage> => {
-      if (message.role !== 'user' || !Array.isArray(message.content) || !message.content.some(isFileRef)) {
+      /* Any role: an external agent's image is recorded by reference on its own
+       * assistant and tool-output rows, and hydration refuses a reference left unread. */
+      if (message.role === 'tool-input' || !Array.isArray(message.content) || !message.content.some(isFileRef)) {
         return message;
       }
       const blocks = await Promise.all(message.content.map(materializeBlock));

@@ -115,12 +115,36 @@ const expectNoCaptureFailures = async (from: EventOffsets): Promise<void> => {
 
 const attachment = (index: number): Locator => selectors.getByAltText(`Uploaded ${index + 1}`);
 
+/**
+ * The attachment's bytes as a `data:` URL. The strip shows an `<img>` only once
+ * the stored bytes load, and revokes its object URL when the attachment is
+ * removed, so the bytes are copied while the image is still mounted.
+ */
 const attachmentSource = async (index: number): Promise<string> => {
-  const source = await target.getAttribute(attachment(index), 'src');
-  if (!source) {
-    throw new Error(`Uploaded image ${index + 1} has no source`);
-  }
-  return source;
+  let source = '';
+  await expect
+    .poll(
+      async () => {
+        source = (await target.getAttribute(attachment(index), 'src')) ?? '';
+        return source;
+      },
+      { timeout: 30_000 },
+    )
+    .not.toBe('');
+  return target.evaluate(async (url) => {
+    const response = await fetch(url);
+    const blob = await response.blob();
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.addEventListener('load', () => {
+        resolve(reader.result as string);
+      });
+      reader.addEventListener('error', () => {
+        reject(reader.error ?? new Error('Attachment bytes could not be read'));
+      });
+      reader.readAsDataURL(blob);
+    });
+  }, source);
 };
 
 const setViewerCamera = async (camera: ViewerCamera): Promise<void> => {

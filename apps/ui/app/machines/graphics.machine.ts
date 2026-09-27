@@ -185,8 +185,11 @@ export type GraphicsContext = {
   hoveredSectionCutId: string | undefined;
   /** The cut list the clip, caps and raycasts show: the latest one whose every cap face certified. */
   committedSectionCuts: readonly SectionCut[];
-  /** Whether the caps certified the latest cut list they drew, or refused it and still show `committedSectionCuts`. */
-  sectionCertification: 'exact' | 'rejected';
+  /**
+   * Whether the caps certified the latest cut list they drew, or refused it and still show `committedSectionCuts`.
+   * A certified list's caps are complete, though its exact overlap result may still be pending.
+   */
+  sectionCertification: 'certified' | 'rejected';
   // The single section plane, kept beside the cut list until its last reader moves to the cuts.
   availableSectionViews: Array<{
     id: 'xy' | 'xz' | 'yz';
@@ -282,7 +285,7 @@ export type GraphicsEvent =
   /** From the caps, in the frame they certify or refuse a cut list. A repeated value keeps the snapshot. */
   | {
       type: 'setSectionCertification';
-      payload: { status: 'exact' | 'rejected'; cuts: readonly SectionCut[] };
+      payload: { status: 'certified' | 'rejected'; cuts: readonly SectionCut[] };
     }
   | { type: 'selectSectionView'; payload: 'xy' | 'xz' | 'yz' | undefined }
   | { type: 'setSectionViewTranslation'; payload: number }
@@ -794,6 +797,12 @@ const withoutSectionCut = (
   };
 };
 
+/** Turning the section off: nothing is cut, so nothing is committed or refused until the caps draw again. */
+const sectionOffCertification: Pick<
+  GraphicsContext,
+  'isSectionViewActive' | 'committedSectionCuts' | 'sectionCertification'
+> = { isSectionViewActive: false, committedSectionCuts: [], sectionCertification: 'certified' };
+
 /** Selecting or hovering names a cut in the list, or none; naming the current one again changes nothing. */
 const isSectionCutReference = (context: GraphicsContext, current: string | undefined, next: string | undefined) =>
   next !== current && (next === undefined || context.sectionCuts.some((cut) => cut.id === next));
@@ -925,7 +934,7 @@ export const graphicsMachine = setup({
       // Section view state (the cuts are durable and entry-scoped)
       ...createSectionViewSeed(input.sectionView),
       committedSectionCuts: [],
-      sectionCertification: 'exact',
+      sectionCertification: 'certified',
       availableSectionViews: [
         { id: 'xy', normal: [0, 0, 1], constant: 0 },
         { id: 'xz', normal: [0, 1, 0], constant: 0 },
@@ -1465,7 +1474,7 @@ export const graphicsMachine = setup({
             on: {
               on: {
                 setSectionViewActive: ({ event }) =>
-                  event.payload ? undefined : { target: 'off', context: { isSectionViewActive: false } },
+                  event.payload ? undefined : { target: 'off', context: { ...sectionOffCertification } },
                 addSectionCut: ({ context, event }) =>
                   context.sectionCuts.length >= maxSectionCuts
                     ? {}
@@ -1476,7 +1485,7 @@ export const graphicsMachine = setup({
                     return {};
                   }
                   return patch.sectionCuts.length === 0
-                    ? { target: 'off', context: { ...patch, isSectionViewActive: false } }
+                    ? { target: 'off', context: { ...patch, ...sectionOffCertification } }
                     : { context: patch };
                 },
 

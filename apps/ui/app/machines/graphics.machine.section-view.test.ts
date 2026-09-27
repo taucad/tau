@@ -295,6 +295,38 @@ describe('graphics machine section cuts', () => {
     }
   });
 
+  it.each([
+    [
+      'turned off',
+      (actor: ReturnType<typeof startCentred>) => {
+        actor.send({ type: 'setSectionViewActive', payload: false });
+      },
+    ],
+    [
+      'left with no cut',
+      (actor: ReturnType<typeof startCentred>) => {
+        actor.send({ type: 'removeSectionCut', payload: actor.getSnapshot().context.sectionCuts[0]!.id });
+      },
+    ],
+  ] as const)('should forget the committed cuts and a refusal when the section is %s', (_label, turnOff) => {
+    const actor = startCentred();
+    try {
+      actor.send({ type: 'addSectionCut', payload: { kind: 'plane' } });
+      const { sectionCuts } = actor.getSnapshot().context;
+      actor.send({ type: 'setSectionCertification', payload: { status: 'rejected', cuts: sectionCuts } });
+
+      turnOff(actor);
+
+      expect(actor.getSnapshot().matches({ operational: { section: 'off' } })).toBe(true);
+      expect(actor.getSnapshot().context).toMatchObject({
+        committedSectionCuts: [],
+        sectionCertification: 'certified',
+      });
+    } finally {
+      actor.stop();
+    }
+  });
+
   it('should select and hover cuts by id, ignoring unknown ids and repeats', () => {
     const actor = startCentred();
     try {

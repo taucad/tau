@@ -202,6 +202,57 @@ export const resolveSectionPieces = (cuts: readonly SectionCut[]): SectionPiece[
 export const resolveSectionFaces = (pieces: readonly SectionPiece[]): SectionFace[] =>
   pieces.flatMap((piece) => piece.faces);
 
+// ponytail: an absolute tolerance, fixed before any cap is sliced. Two faces that remove the same side from planes
+// between 1e-6 and a footprint's shift apart (a millionth of the cap square) both draw a cap; only a cut placed within
+// micrometres of another's face reaches that. Derive it from the model's size if one ever does.
+/**
+ * Whether two half-spaces hold the same side of one plane: unit normals within 1e-9 of each other, and planes at most
+ * 1e-6 apart in the pieces' length unit.
+ */
+export const isSameSectionHalfSpace = (a: SectionHalfSpace, b: SectionHalfSpace): boolean =>
+  dot(a.normal, b.normal) >= 1 - 1e-9 && Math.abs(a.constant - b.constant) <= 1e-6;
+
+/** Faces on one plane that remove the same side of it: one cap, over the union of their extents. */
+export type SectionFaceGroup = Readonly<{
+  /** The first face's plane, the one the cap is sliced through. */
+  plane: SectionHalfSpace;
+  /** In piece order. */
+  faces: readonly SectionFace[];
+}>;
+
+/**
+ * The cut faces grouped into caps: faces that remove the same side of one plane share one cap, whichever cuts they
+ * come from and in whatever order, so no line crosses a flat cap and the plane is sliced once. Groups are in the order
+ * of their first faces.
+ */
+export const resolveSectionFaceGroups = (pieces: readonly SectionPiece[]): SectionFaceGroup[] => {
+  const groups: Array<{ plane: SectionHalfSpace; faces: SectionFace[] }> = [];
+  for (const face of resolveSectionFaces(pieces)) {
+    const group = groups.find(({ plane }) => isSameSectionHalfSpace(plane, face.plane));
+    if (group) {
+      group.faces.push(face);
+    } else {
+      groups.push({ plane: face.plane, faces: [face] });
+    }
+  }
+  return groups;
+};
+
+/**
+ * The pieces that can hide part of a group's cap. A piece that holds the group's side of its plane lies wholly on the
+ * removed side, so it covers nothing behind the cap; a cut never covers its own faces, so a group made only of one
+ * cut's faces leaves that cut out. A cut sharing a group with another cut still trims what the other cut's faces show.
+ */
+export const resolveSectionTrimmingPieces = (
+  group: SectionFaceGroup,
+  pieces: readonly SectionPiece[],
+): SectionPiece[] =>
+  pieces.filter(
+    (piece) =>
+      !group.faces.every((face) => face.cutId === piece.cutId) &&
+      !piece.halfSpaces.some((halfSpace) => isSameSectionHalfSpace(halfSpace, group.plane)),
+  );
+
 /** Whether some piece removes `point`: every half-space of that piece holds it by more than `eps`. */
 export const isSectionRemoved = (point: SectionVector, pieces: readonly SectionPiece[], eps = 0): boolean =>
   pieces.some((piece) => piece.halfSpaces.every(({ normal, constant }) => dot(normal, point) - constant > eps));
@@ -228,7 +279,7 @@ export type SectionFaceBasis = Readonly<{
   v: SectionVector;
 }>;
 
-export const resolveSectionFaceBasis = (face: SectionFace): SectionFaceBasis => {
+export const resolveSectionFaceBasis = (face: Pick<SectionFace, 'plane'>): SectionFaceBasis => {
   const normal = scale(face.plane.normal, -1);
   const reference = Math.abs(normal[2]) < 0.9 ? unitVectors.z : unitVectors.y;
   const u = normalize(cross(reference, normal));
@@ -285,17 +336,12 @@ export const resolveSectionFaceRegion = ({
   clipRect(rect, resolveSectionFaceBasis(face), face.bounds);
 
 type ResolveSectionFootprintOptions = Readonly<{
-  face: SectionFace;
-  /** A piece of another cut. */
+  /** The face, or the group of faces, whose plane the footprint lies on. */
+  face: Pick<SectionFace, 'plane'>;
+  /** A piece that can cover the face: see {@link resolveSectionTrimmingPieces}. */
   piece: SectionPiece;
   /** The bounds the footprint is clipped to, in the face basis. */
   rect: SectionRect;
-  /**
-   * Treat a half-space of `piece` that lies on the face's plane and faces the same way as holding the face, so the
-   * footprint is where that piece's own face covers this one. Pass it when the piece's cut comes first in the list:
-   * of two coincident faces, the earlier cut draws the cap.
-   */
-  shouldClaimCoplanar?: boolean;
   /** How far the face plane moves into its kept side, in the face's length unit. Defaults to 1e-6 of the rect. */
   eps?: number;
 }>;
@@ -303,26 +349,19 @@ type ResolveSectionFootprintOptions = Readonly<{
 /**
  * Where `piece` removes material just behind a face: the convex polygon (face basis, counter-clockwise; empty if
  * none) of `piece` on the face plane moved `eps` into the face's kept side, clipped to `rect`. A cap is drawn only
- * where the kept side is solid, so a caller subtracts every other cut's footprints from the face.
+ * where the kept side is solid, so a caller subtracts the footprints of the pieces that can cover the face.
  *
  * Parallel pieces cover the whole rectangle or nothing; a coplanar piece that removes the kept side covers it (the two
- * faces cancel); a coplanar piece facing the same way covers nothing unless `shouldClaimCoplanar`.
+ * faces cancel); a coplanar piece facing the same way covers nothing.
  */
 export const resolveSectionFootprint = ({
   face,
   piece,
   rect,
-  shouldClaimCoplanar = false,
   eps = 1e-6 * Math.max(rect.max[0] - rect.min[0], rect.max[1] - rect.min[1]),
 }: ResolveSectionFootprintOptions): SectionPoint2[] => {
   const basis = resolveSectionFaceBasis(face);
-  const halfSpaces = shouldClaimCoplanar
-    ? piece.halfSpaces.filter(
-        ({ normal, constant }) =>
-          dot(normal, face.plane.normal) < 1 - 1e-9 || Math.abs(constant - face.plane.constant) > eps,
-      )
-    : piece.halfSpaces;
-  return clipRect(rect, { ...basis, origin: addScaled(basis.origin, basis.normal, eps) }, halfSpaces);
+  return clipRect(rect, { ...basis, origin: addScaled(basis.origin, basis.normal, eps) }, piece.halfSpaces);
 };
 
 // ---------------------------------------------------------------------------

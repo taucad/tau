@@ -15,6 +15,7 @@ export const sectionCapPerformanceTimingPhaseNames = [
   'borderWrite',
   'worldPointBasis',
   'capPolygonBuild',
+  'capTrim',
   'overlapClassify',
   'renderPartSplit',
   'geometryPack',
@@ -49,6 +50,10 @@ export type SectionCapPerformanceCounters = {
   capPolygonCount: number;
   capRingCount: number;
   capPointCount: number;
+  /** Caps trimmed to their group this frame; the rest reused the trim they were drawn with. */
+  capTrimCount: number;
+  /** Clipper calls those trims made; a cap wholly inside or outside a region or footprint needs none for it. */
+  capTrimClipperCount: number;
   baseFillVertexCount: number;
   baseBoundarySegmentCount: number;
   rawOpenPolylineSegmentCount: number;
@@ -172,6 +177,7 @@ export const createSectionCapPerformanceTimings = (): SectionCapPerformanceTimin
   borderWrite: 0,
   worldPointBasis: 0,
   capPolygonBuild: 0,
+  capTrim: 0,
   overlapClassify: 0,
   renderPartSplit: 0,
   geometryPack: 0,
@@ -202,6 +208,8 @@ export const createSectionCapPerformanceCounters = (): SectionCapPerformanceCoun
   capPolygonCount: 0,
   capRingCount: 0,
   capPointCount: 0,
+  capTrimCount: 0,
+  capTrimClipperCount: 0,
   baseFillVertexCount: 0,
   baseBoundarySegmentCount: 0,
   rawOpenPolylineSegmentCount: 0,

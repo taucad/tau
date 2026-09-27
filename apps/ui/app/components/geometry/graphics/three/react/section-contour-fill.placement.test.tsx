@@ -141,7 +141,7 @@ describe('SectionContourFills placement (Architecture C)', () => {
   it('builds current base caps and sanitized cap-boundary outlines without stale exact-response gating', () => {
     expect(sectionContourFillSource.includes('buildCurrentSectionBaseCapGeometry')).toBe(true);
     expect(sectionContourFillSource.includes('buildSectionCapBoundaryPositions')).toBe(true);
-    expect(sectionContourFillSource.includes('const baseBuffers = exactBuffers')).toBe(true);
+    expect(sectionContourFillSource.includes('const baseBuffers = buildCurrentSectionBaseCapGeometry({')).toBe(true);
     expect(sectionContourFillSource.includes('if (!exactResponse) {')).toBe(false);
     expect(sectionContourFillSource.includes('helper.fillMesh.visible)')).toBe(false);
   });

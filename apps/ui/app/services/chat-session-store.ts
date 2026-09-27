@@ -60,7 +60,7 @@ import {
 } from '#hooks/composer-record.js';
 import type { ComposerRecordRef } from '#hooks/composer-record.js';
 import { composerRecordPaths, createComposerRecordStore } from '#db/composer-record-store.js';
-import type { ComposerRecordClient } from '#db/composer-record-store.js';
+import type { ComposerRecord, ComposerRecordClient } from '#db/composer-record-store.js';
 import { createChatAttachmentStore } from '#db/attachment-store.js';
 import { attachmentReferenceOf } from '#utils/attachment.utils.js';
 import type { StoredAttachmentRef } from '#utils/attachment.utils.js';
@@ -96,6 +96,7 @@ import type { CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
 import { ENV } from '#environment.config.js';
 import {
   chatProjectionLogic,
+  selectAttentionRow,
   selectCaughtUp,
   selectCurrentRun,
   selectOpenInterrupts,
@@ -104,6 +105,7 @@ import {
   selectToolsInFlight,
 } from '#machines/chat-projection.logic.js';
 import type { ChatProjection, ChatRunPhase as ProjectedRunPhase } from '#machines/chat-projection.logic.js';
+import type { RowKey } from '@taucad/agent-host';
 
 /** Run states a browser-placed run never leaves. */
 const terminalBrowserRunStates = new Set(['completed', 'failed', 'cancelled']);
@@ -335,6 +337,10 @@ type ChatSessionLivenessDebugGlobal = typeof globalThis & {
  */
 const composedText = (message: MyUIMessage): string => message.parts.find((part) => part.type === 'text')?.text ?? '';
 
+/** Two log rows are the same row (EQ3: no ordering across devices is needed). */
+const sameRowKey = (left: RowKey, right: RowKey): boolean =>
+  left.leaderEpoch === right.leaderEpoch && left.sequence === right.sequence;
+
 /** A chat machine still showing a run as live: queued, running, or stopped with its turn not yet settled. */
 const isLive = (snapshot: ReturnType<ChatSessionActorRef['getSnapshot']>): boolean =>
   snapshot.matches({ run: 'queued' }) ||
@@ -407,6 +413,8 @@ export class ChatSessionStore {
   /** The chat the person has in front of them (R3); only it counts as attended. */
   #focusedChatId: string | undefined;
   readonly #membershipTopic = new Topic<void>({ name: 'ChatSessionStore.membership' });
+  /** Any chat's unread answer may have moved (PV-S8). */
+  readonly #unreadTopic = new Topic<void>({ name: 'ChatSessionStore.unread' });
   readonly #chatTopics = new Map<string, Topic<void>>();
   #snapshot: readonly string[] = [];
   /**
@@ -918,12 +926,17 @@ export class ChatSessionStore {
     }
   }
 
-  /** Tell a chat the person is looking at it, so `unread` clears (S45) — in its machine and its record (D9). @public */
+  /**
+   * Tell the store the person is looking at a chat, so it is read through its newest attention row (S45, §5.8): the
+   * project's record takes that row as the chat's receipt, and a legacy unread mark is cleared (D9).
+   *
+   * @param chatId - The chat in front of the person.
+   * @public
+   */
   public markViewed(chatId: string): void {
     const session = this.#sessions.get(chatId);
-    session?.stateActorRef.send({ type: 'viewed' });
     if (session !== undefined) {
-      this.#setUnread(session.projectId, chatId, false);
+      this.#writeReceipt(session.projectId, chatId, this.#knownAttention(chatId));
     }
   }
 
@@ -943,16 +956,39 @@ export class ChatSessionStore {
   }
 
   /**
-   * Whether this chat is unread on this device, as its project's unread record
-   * says (D9). The restore source for the chat's machine.
+   * Whether this chat is unread on this device (§5.8, LT01): its log's newest attention row is not the one its read
+   * receipt names. A legacy unread mark is a receipt that matches no row. Until this page has read the chat's log,
+   * the legacy mark alone answers (D9).
    *
    * @param chatId - A chat with a live session.
-   * @returns `true` once the record, or this store, has marked it unread.
+   * @returns Whether the chat has something the person has not seen.
    * @public
    */
   public isUnread(chatId: string): boolean {
     const projectId = this.#sessions.get(chatId)?.projectId;
-    return projectId !== undefined && (this.#unreadRecords.get(projectId)?.chats.has(chatId) ?? false);
+    const record = projectId === undefined ? undefined : this.#unreadRecords.get(projectId);
+    if (record === undefined) {
+      return false;
+    }
+    const projection = this.#projectionContext(chatId);
+    if (projection === undefined || !selectCaughtUp(projection)) {
+      return record.legacy.has(chatId);
+    }
+    const attention = selectAttentionRow(projection);
+    const receipt = record.readThrough.get(chatId);
+    return attention !== undefined && (receipt === undefined || !sameRowKey(receipt, attention));
+  }
+
+  /**
+   * Wake a reader when any chat's unread answer may have moved: a record loaded, a receipt written, an attention row
+   * arrived.
+   *
+   * @param listener - Called on each change.
+   * @returns Unsubscribe.
+   * @public
+   */
+  public subscribeUnread(listener: () => void): () => void {
+    return this.#unreadTopic.subscribe(listener);
   }
 
   /**
@@ -974,7 +1010,7 @@ export class ChatSessionStore {
     if (session === undefined) {
       return;
     }
-    this.#setUnread(session.projectId, chatId, false);
+    this.#forgetReceipt(session.projectId, chatId);
     await removeRecord(session.composerRecordRef);
   }
 
@@ -1311,7 +1347,13 @@ export class ChatSessionStore {
     /* The run and phase last presented, compared per snapshot: a replay's earlier pages are history and present
      * nothing, so a phase moves only once the projection holds the log to its end. */
     let presented: string | undefined;
+    let attention: RowKey | undefined;
     projection.subscribe(({ context }) => {
+      const nextAttention = selectCaughtUp(context) ? selectAttentionRow(context) : attention;
+      if (nextAttention !== attention) {
+        attention = nextAttention;
+        this.#attentionMoved(chatId);
+      }
       const run = selectCaughtUp(context) ? selectCurrentRun(context) : undefined;
       const key = run === undefined ? presented : `${run.runId}:${run.lifecycle}`;
       const moved = key !== presented;
@@ -1361,10 +1403,6 @@ export class ChatSessionStore {
       (tools.toolName === undefined || tools.toolName === context.toolName)
     ) {
       return;
-    }
-    /* The store's unread trigger for an approval that was not pending a moment ago (D9). */
-    if (approvals > 0 && context.pendingApprovalCount === 0) {
-      this.#markUnreadIfUnattended(session.projectId, session.chatId);
     }
     session.stateActorRef.send({
       type: 'toolParts',
@@ -1459,12 +1497,64 @@ export class ChatSessionStore {
     });
   }
 
-  /** Record the chat unread unless the person is looking at it (R3). */
-  #markUnreadIfUnattended(projectId: string, chatId: string): void {
-    if (this.#focusedChatId === chatId && isDocumentActive()) {
+  /** The chat's newest attention row, once this page holds its whole log; `undefined` while it is unknown. */
+  #knownAttention(chatId: string): RowKey | undefined {
+    const projection = this.#projectionContext(chatId);
+    return projection === undefined || !selectCaughtUp(projection) ? undefined : selectAttentionRow(projection);
+  }
+
+  /**
+   * An attention row arrived. A chat the person is looking at is read through it at once (R3), so it never shows
+   * unread; any other chat's unread answer moved, so its readers wake.
+   */
+  #attentionMoved(chatId: string): void {
+    const session = this.#sessions.get(chatId);
+    if (session !== undefined && this.#focusedChatId === chatId && isDocumentActive()) {
+      this.#writeReceipt(session.projectId, chatId, this.#knownAttention(chatId));
       return;
     }
-    this.#setUnread(projectId, chatId, true);
+    this.#unreadTopic.emit();
+  }
+
+  /**
+   * Record that the person has seen a chat through `attention`, and clear its legacy mark (§5.8). Writes only what
+   * moved; before the record is read, the clear is always written so the read cannot bring the mark back.
+   */
+  #writeReceipt(projectId: string, chatId: string, attention: RowKey | undefined): void {
+    const record = this.#unreadRecord(projectId);
+    const receipt = record.readThrough.get(chatId);
+    const moves = attention !== undefined && (receipt === undefined || !sameRowKey(receipt, attention));
+    const clears = record.legacy.has(chatId) || !record.loaded;
+    if (!moves && !clears) {
+      return;
+    }
+    record.legacy.delete(chatId);
+    if (moves) {
+      record.readThrough.set(chatId, attention);
+    }
+    if (!record.loaded) {
+      record.changedBeforeLoad.add(chatId);
+    }
+    record.ref.send({
+      type: 'patch',
+      fields: {
+        ...(clears ? { unread: { [chatId]: false } } : {}),
+        ...(moves ? { readThrough: { [chatId]: attention } } : {}),
+      },
+    });
+    this.#unreadTopic.emit();
+  }
+
+  /** Drop a deleted chat's receipt and mark (D11). */
+  #forgetReceipt(projectId: string, chatId: string): void {
+    const record = this.#unreadRecord(projectId);
+    record.legacy.delete(chatId);
+    record.readThrough.delete(chatId);
+    if (!record.loaded) {
+      record.changedBeforeLoad.add(chatId);
+    }
+    record.ref.send({ type: 'patch', fields: { unread: { [chatId]: false }, readThrough: { [chatId]: false } } });
+    this.#unreadTopic.emit();
   }
 
   #unreadRecord(projectId: string): UnreadRecord {
@@ -1475,31 +1565,32 @@ export class ChatSessionStore {
     const ref = createComposerRecordActor(
       createComposerRecordStore(this.#deps.client, composerRecordPaths.unread(projectId)),
     );
-    const unread: UnreadRecord = { ref, chats: new Set(), clearedBeforeLoad: new Set(), loaded: false };
+    const unread: UnreadRecord = {
+      ref,
+      readThrough: new Map(),
+      legacy: new Set(),
+      changedBeforeLoad: new Set(),
+      loaded: false,
+    };
     ref.on('recordLoaded', ({ record }) => {
       unread.loaded = true;
-      for (const chatId of Object.keys(record === 'absent' ? {} : (record.unread ?? {}))) {
-        if (!unread.clearedBeforeLoad.has(chatId)) {
-          unread.chats.add(chatId);
+      const stored: Pick<ComposerRecord, 'unread' | 'readThrough'> = record === 'absent' ? {} : record;
+      for (const chatId of Object.keys(stored.unread ?? {})) {
+        if (!unread.changedBeforeLoad.has(chatId)) {
+          unread.legacy.add(chatId);
         }
       }
-      unread.clearedBeforeLoad.clear();
-      for (const session of this.#sessions.values()) {
-        if (session.projectId === projectId) {
-          this.#restoreUnread(session);
+      for (const [chatId, key] of Object.entries(stored.readThrough ?? {})) {
+        if (!unread.changedBeforeLoad.has(chatId)) {
+          unread.readThrough.set(chatId, key);
         }
       }
+      unread.changedBeforeLoad.clear();
+      this.#unreadTopic.emit();
     });
     this.#unreadRecords.set(projectId, unread);
     ref.start();
     return unread;
-  }
-
-  /** Tell a bound chat machine what the unread record says (D9); `read` is its default, so only unread is sent. */
-  #restoreUnread(session: InternalSession): void {
-    if (this.#unreadRecords.get(session.projectId)?.chats.has(session.chatId)) {
-      session.stateActorRef.send({ type: 'unreadRestored' });
-    }
   }
 
   /** Hand a binding over only after a released predecessor's writes have landed. */
@@ -1521,24 +1612,6 @@ export class ChatSessionStore {
     }
   }
 
-  /** The store's unread decision, written to the one record that holds it (D9). */
-  #setUnread(projectId: string, chatId: string, value: boolean): void {
-    const unread = this.#unreadRecord(projectId);
-    if (unread.chats.has(chatId) === value && (value || unread.loaded)) {
-      return;
-    }
-    if (value) {
-      unread.chats.add(chatId);
-      unread.clearedBeforeLoad.delete(chatId);
-    } else {
-      unread.chats.delete(chatId);
-      if (!unread.loaded) {
-        unread.clearedBeforeLoad.add(chatId);
-      }
-    }
-    unread.ref.send({ type: 'patch', fields: { unread: { [chatId]: value } } });
-  }
-
   /** The project session that owns this chat's run accounting (R2). */
   #sessionOwner(session: InternalSession): ProjectSessionActorRef | undefined {
     return this.#projectSessions.get(session.projectId);
@@ -1551,9 +1624,6 @@ export class ChatSessionStore {
 
     // oxlint-disable-next-line eslint/prefer-const -- initialised only after the actor/chat callbacks that close over it are constructed.
     let session: InternalSession;
-    /* Whether the current request wrote any assistant output. Opening a chat resumes it, and a host
-     * holding no run closes that stream without a chunk; its `onFinish` is not a run finishing. */
-    let requestWroteOutput = false;
 
     /* The project is the caller's (PV-S4), so the composer binds now; only a released predecessor's drain is awaited. */
     const { client } = depsRef();
@@ -1565,10 +1635,6 @@ export class ChatSessionStore {
     });
     const recordStore = deferredRecordStore(composer);
     const composerRecordRef = createComposerRecordActor(recordStore);
-
-    const markUnreadIfUnattended = (): void => {
-      this.#markUnreadIfUnattended(projectId, chatId);
-    };
 
     const readChatRow = async (id: string): Promise<ChatEntity | undefined> => depsRef().getChat(id);
 
@@ -1833,9 +1899,6 @@ export class ChatSessionStore {
           this.#reconcileUnsettledRun(session, { runId: durableRunId, isAbort, isError });
         }
         persistenceActorRef.send({ type: 'requestFinished', messages, isAbort, isError, isDisconnect });
-        if (!isAbort && !isDisconnect && (requestWroteOutput || isError)) {
-          markUnreadIfUnattended();
-        }
         this.#scheduleRunReleaseIfTerminal(session);
       },
       onError(error) {
@@ -2086,11 +2149,7 @@ export class ChatSessionStore {
           this.#reportRequestEnd(session, session.lastState.lifecycle === 'stopping' ? 'cancelled' : 'completed');
         }
         session.status = next;
-        if (next === 'submitted') {
-          requestWroteOutput = false;
-        }
         if (next === 'streaming') {
-          requestWroteOutput = true;
           persistenceActorRef.send({ type: 'streamResumed' });
         }
         if (session.durableRunId && (next === 'submitted' || next === 'streaming')) {
@@ -2190,7 +2249,6 @@ export class ChatSessionStore {
     // actor may dispatch a startup run, whose non-view hold must be able to
     // reference the fully initialised session.
     persistenceActorRef.send({ type: 'setActiveChatId', chatId });
-    this.#restoreUnread(session);
 
     return session;
   }

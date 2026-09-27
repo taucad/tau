@@ -324,6 +324,14 @@ describe('composer record store', () => {
         expected: { unread: { chatNine: true, chatTwo: true, chatThree: true } },
       },
       {
+        name: 'readThrough',
+        first: { readThrough: { chatTwo: { leaderEpoch: 'g1', sequence: 4 } } },
+        second: { readThrough: { chatTwo: { leaderEpoch: 'g1', sequence: 9 } } },
+        expected: {
+          readThrough: { chatNine: { leaderEpoch: 'g1', sequence: 1 }, chatTwo: { leaderEpoch: 'g1', sequence: 9 } },
+        },
+      },
+      {
         name: 'execution',
         first: { execution: tau },
         second: { execution: { ...tau, model: 'anthropic/claude-opus-5' } },
@@ -343,6 +351,7 @@ describe('composer record store', () => {
         toolChoice: 'auto',
         mode: 'agent',
         unread: { chatNine: true },
+        readThrough: { chatNine: { leaderEpoch: 'g1', sequence: 1 } },
         execution: tau,
       };
 
@@ -452,6 +461,24 @@ describe('composer record store', () => {
         status: 'valid',
         record: { version: 1, unread: { chatTwo: true } },
       });
+    });
+
+    it('should drop a read receipt set to false, and refuse one that is not a row key (PV-S8)', async () => {
+      const client = memoryClient();
+      const path = composerRecordPaths.unread('project-1');
+      const store = createComposerRecordStore(client, path);
+
+      await store.patch({
+        readThrough: { chatOne: { leaderEpoch: 'g1', sequence: 3 }, chatTwo: { leaderEpoch: 'g1', sequence: 5 } },
+      });
+      await store.patch({ readThrough: { chatOne: false } });
+
+      await expect(store.read()).resolves.toEqual({
+        status: 'valid',
+        record: { version: 1, readThrough: { chatTwo: { leaderEpoch: 'g1', sequence: 5 } } },
+      });
+      client.files.set(path, encode(JSON.stringify({ version: 1, readThrough: { chatOne: true } })));
+      await expect(store.read()).resolves.toMatchObject({ status: 'invalid' });
     });
 
     it('should lose no update across 100 concurrent interleavings of three fields', async () => {

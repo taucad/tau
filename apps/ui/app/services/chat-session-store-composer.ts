@@ -6,6 +6,7 @@
  */
 
 import type { MyUIMessage } from '@taucad/chat';
+import type { RowKey } from '@taucad/agent-host';
 import type { Actor } from 'xstate';
 import type { composerRecordMachine } from '#machines/composer-record.machine.js';
 import type { ComposerRecordStore } from '#db/composer-record-store.js';
@@ -31,12 +32,15 @@ export type ComposerBinding = {
   readonly chatAttachments: AttachmentStore;
 };
 
-/** One project's unread record (D9) and the live set the store keeps beside it. */
+/** One project's read receipts (D9, W9 PV-S8) and the live copy the store keeps beside them. */
 export type UnreadRecord = {
   readonly ref: ComposerRecordRef;
-  readonly chats: Set<string>;
-  /** Cleared before the record was read, so the read must not bring them back. */
-  readonly clearedBeforeLoad: Set<string>;
+  /** Each chat's read receipt: the attention row the person last saw. */
+  readonly readThrough: Map<string, RowKey>;
+  /** Legacy `unread: true` marks: receipts that match no row, cleared when the chat is viewed. */
+  readonly legacy: Set<string>;
+  /** Chats viewed or removed before the record was read, so the read must not bring their old entries back. */
+  readonly changedBeforeLoad: Set<string>;
   loaded: boolean;
 };
 

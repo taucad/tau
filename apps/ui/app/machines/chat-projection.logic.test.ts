@@ -14,6 +14,7 @@ import {
   chatProjectionLogic,
   initialChatProjection,
   reduceChatProjection,
+  selectAttentionRow,
   selectCaughtUp,
   selectOpenInterrupts,
   selectRunFailure,
@@ -184,6 +185,22 @@ describe('chatProjectionLogic (PV-S7)', () => {
     expect(selectRunFailure(atFailure, 'another-run')).toBeUndefined();
     const reopened = rows.findIndex((row, index) => index > failedAt && row.type === 'run.lifecycle');
     expect(selectRunFailure(project(rows.slice(0, reopened + 1), 1), failed.runId)).toBeUndefined();
+  });
+
+  it('keeps the newest row that asks for the person, and never a cancelled run (PV-S8)', () => {
+    const rows = readLog('seeded/cancel-after-settled-pause');
+    const requested = rows.findIndex((row) => row.type === 'interrupt.recorded' && row.phase === 'requested');
+    const key = (index: number) => ({ leaderEpoch: rows[index]!.leaderEpoch, sequence: rows[index]!.sequence });
+    expect(selectAttentionRow(project(rows.slice(0, requested), 1))).toBeUndefined();
+    expect(selectAttentionRow(project(rows.slice(0, requested + 1), 1))).toEqual(key(requested));
+    /* The run is cancelled after its pause: the interrupt it opened is still the newest attention row. */
+    expect(selectAttentionRow(project(rows, 1))).toEqual(key(requested));
+    const completed = readLog('recorded/in-project-ping-pong-turn');
+    const last = completed.findLastIndex((row) => row.type === 'run.lifecycle' && row.state === 'completed');
+    expect(selectAttentionRow(project(completed, 7))).toEqual({
+      leaderEpoch: completed[last]!.leaderEpoch,
+      sequence: completed[last]!.sequence,
+    });
   });
 
   it('discards a batch that does not start at its cursor, and asks for it again', () => {

@@ -32,6 +32,8 @@ export type ChatProjection = Readonly<{
   endCursor: number;
   /** What the last `failed` row said, for the run it failed; cleared by that run's next lifecycle row. */
   failure?: Readonly<{ runId: string; text: string }>;
+  /** The newest row that asks for the person: a run that completed or failed, or an interrupt it opened (PV-S8). */
+  attentionRow?: RowKey;
   /** Why the log could not be read (`unreadable`); the chat reads and runs nothing. */
   fault?: string;
 }>;
@@ -116,6 +118,23 @@ const applyFailureRow = (failure: ChatProjection['failure'], row: unknown): Chat
   return failure?.runId === row['runId'] ? undefined : failure;
 };
 
+/**
+ * The row's key when it asks for the person (§5.8): a run that completed or failed, or an interrupt it opened. A
+ * cancelled run is the person's own doing and asks for nothing.
+ *
+ * @param row - One row, unparsed.
+ * @returns Its key, or `undefined`.
+ */
+const attentionKeyOf = (row: unknown): RowKey | undefined => {
+  if (!isRecord(row) || typeof row['leaderEpoch'] !== 'string' || typeof row['sequence'] !== 'number') {
+    return undefined;
+  }
+  const asks =
+    (row['type'] === 'run.lifecycle' && (row['state'] === 'completed' || row['state'] === 'failed')) ||
+    (row['type'] === 'interrupt.recorded' && row['phase'] === 'requested');
+  return asks ? { leaderEpoch: row['leaderEpoch'], sequence: row['sequence'] } : undefined;
+};
+
 type ProjectionStep = Readonly<{ state: ChatProjection; emit?: ChatProjectionEmitted }>;
 
 /**
@@ -163,10 +182,11 @@ export const reduceChatProjection = (state: ChatProjection, event: ChatProjectio
         return { state: held };
       }
       let open: Record<string, OpenToolCall> | undefined;
-      let { failure } = state;
+      let { failure, attentionRow } = state;
       for (const row of answer.events) {
         open = applyToolRow(open ?? { ...state.openTools }, row);
         failure = applyFailureRow(failure, row);
+        attentionRow = attentionKeyOf(row) ?? attentionRow;
       }
       return {
         state: {
@@ -174,6 +194,7 @@ export const reduceChatProjection = (state: ChatProjection, event: ChatProjectio
           openTools: open ?? state.openTools,
           endCursor,
           ...(failure === undefined ? {} : { failure }),
+          ...(attentionRow === undefined ? {} : { attentionRow }),
           ...(state.fault === undefined ? {} : { fault: state.fault }),
         },
       };
@@ -287,6 +308,15 @@ export const selectCaughtUp = (projection: ChatProjection): boolean =>
  */
 export const selectRunFailure = (projection: ChatProjection, runId: string): string | undefined =>
   projection.failure?.runId === runId ? projection.failure.text : undefined;
+
+/**
+ * The row unread compares with the chat's read receipt (§5.8, LT01).
+ *
+ * @param projection - The chat's projection.
+ * @returns The newest attention row, or `undefined` while the log holds none.
+ * @public
+ */
+export const selectAttentionRow = (projection: ChatProjection): RowKey | undefined => projection.attentionRow;
 
 /**
  * Where a reader of this chat's log resumes: exactly what a `read` sends.

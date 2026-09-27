@@ -212,11 +212,6 @@ export type ChatSessionMachineEvent =
   | { readonly type: 'toolParts'; readonly inFlight: number; readonly approvals: number; readonly toolName?: string }
   | { readonly type: 'requestLifecycle'; readonly phase: ChatRequestLifecycle }
   | { readonly type: 'durableRunState'; readonly state: ChatDurableRunState }
-  | { readonly type: 'viewed' }
-  /** The project's unread record says this chat is unread on this device (D9). */
-  | { readonly type: 'unreadRestored' }
-  /** Raised by the machine itself when an approval becomes pending; not sent from outside. */
-  | { readonly type: 'approvalPending' }
   | { readonly type: 'close' }
   | { readonly type: 'turnFinalized'; readonly branch: string }
   | ChatTurnSettlementObservation
@@ -279,20 +274,6 @@ const captureRunIdentity = (context: ChatSessionMachineContext, event: EventOf<'
   return event.runId === context.activeRunId
     ? { activeRunId: event.runId }
     : { activeRunId: event.runId, pendingSettlement: undefined, failureReason: undefined };
-};
-
-/* Read before the count moves, so the check sees the old count. The `read`
- * region cannot take `toolParts` itself: its transition would pre-empt the
- * root's, and the count would never move. */
-const raiseApprovalPending = (
-  context: ChatSessionMachineContext,
-  requested: boolean,
-  enq: ChatSessionEnqueue,
-): void => {
-  /* The store's second unread trigger (D9): an approval that was not pending a moment ago. */
-  if (requested && context.pendingApprovalCount === 0) {
-    enq.raise({ type: 'approvalPending' });
-  }
 };
 
 /* V2: a gesture over a live turn never asks for a second lease. It is held
@@ -503,7 +484,6 @@ const pairs = (states: readonly string[], events: readonly string[]): Array<read
  * - `requestLifecycle` outside `running`: the store reports every change; only a running turn reads it.
  * - A host-attested outcome where no run is presented: the store replays an idle chat's settlement as its lifecycle.
  * - `adoptRun` and `reconcileSettlement` in the states that hold a turn or a live run (see their transitions).
- * - `viewed` while read, and `unreadRestored` while unread: idempotent.
  *
  * @public
  */
@@ -531,12 +511,10 @@ export const chatSessionIgnoredEvents: ReadonlyArray<readonly [state: string, ev
   ),
   ...pairs([runStates.queued, runStates.running, runStates.finishing], ['adoptRun']),
   ...pairs([runStates.queued, runStates.running, runStates.done], ['reconcileSettlement']),
-  ['read.read', 'viewed'],
-  ['read.unread', 'unreadRestored'],
 ];
 
 /**
- * One chat's run, read and revision state.
+ * One chat's run, host binding and revision state. Unread is the store's, derived from the chat's log (PV-S8).
  *
  * @public
  */
@@ -576,7 +554,6 @@ export const chatSessionMachine = setup({
     /* Batched per transport event (F8): one frame carries the whole tool
      * picture, so a fifty-part turn is one transition. */
     toolParts: ({ context, event }, enq) => {
-      raiseApprovalPending(context, event.approvals > 0, enq);
       announce(context, enq);
       return {
         context: {
@@ -587,7 +564,6 @@ export const chatSessionMachine = setup({
       };
     },
     interruptRecorded: ({ context, event }, enq) => {
-      raiseApprovalPending(context, event.state === 'requested', enq);
       announce(context, enq);
       return {
         context: {
@@ -733,7 +709,6 @@ export const chatSessionMachine = setup({
               if (event.state !== 'requested') {
                 return undefined;
               }
-              raiseApprovalPending(context, true, enq);
               announce(context, enq);
               return {
                 target: '.waiting.approval',
@@ -878,42 +853,6 @@ export const chatSessionMachine = setup({
               target: 'bound',
               context: { placement: event.placement, hostFailure: undefined },
             }),
-          },
-        },
-      },
-    },
-    read: {
-      initial: 'read',
-      states: {
-        read: {
-          on: {
-            /* P57: a run that *failed* while the person was elsewhere is as
-             * unseen as one that finished. The architecture's project row is
-             * red for "a run failed and is unread", which this is what makes
-             * reachable. */
-            runLifecycle: ({ context, event }, enq) => {
-              if (event.phase !== 'completed' && event.phase !== 'failed') {
-                return undefined;
-              }
-              announce(context, enq);
-              return { target: 'unread' };
-            },
-            unreadRestored: ({ context }, enq) => {
-              announce(context, enq);
-              return { target: 'unread' };
-            },
-            approvalPending: ({ context }, enq) => {
-              announce(context, enq);
-              return { target: 'unread' };
-            },
-          },
-        },
-        unread: {
-          on: {
-            viewed: ({ context }, enq) => {
-              announce(context, enq);
-              return { target: 'read' };
-            },
           },
         },
       },

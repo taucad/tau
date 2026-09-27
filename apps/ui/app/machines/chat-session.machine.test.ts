@@ -39,9 +39,6 @@ const regionPath = (value: unknown): string => {
 const runState = (actor: ReturnType<typeof start>): string =>
   regionPath((actor.getSnapshot().value as { run: unknown }).run);
 
-const readState = (actor: ReturnType<typeof start>): string =>
-  regionPath((actor.getSnapshot().value as { read: unknown }).read);
-
 const revisionState = (actor: ReturnType<typeof start>, facet: 'line' | 'tree' | 'sync'): string =>
   regionPath((actor.getSnapshot().value as { revision: Record<string, unknown> }).revision[facet]);
 
@@ -248,31 +245,6 @@ describe('chatSessionMachine', () => {
     );
   });
 
-  /*
-   * D9: the store's unread decision is the one writer of the unread record,
-   * and the `read` region follows it — restored from the record when a chat
-   * binds, and raised by a newly pending approval, the store's other trigger.
-   * Each row asks `getShortestPaths` for a generated path into `read.unread`
-   * and checks it is exactly that trigger.
-   */
-  it.each<{ readonly signal: string; readonly event: ChatSessionMachineEvent }>([
-    { signal: 'unreadRestored from the unread record', event: { type: 'unreadRestored' } },
-    { signal: 'a newly pending approval', event: { type: 'toolParts', inFlight: 1, approvals: 1 } },
-  ])('reaches read.unread from $signal with a generated path (D9)', ({ event }) => {
-    const paths = getShortestPaths(chatSessionMachine, {
-      input: { chatId: 'chat-1', projectId: 'proj_1' },
-      serializeState: (state) =>
-        JSON.stringify([(state.value as { read: unknown }).read, state.context.pendingApprovalCount]),
-      events: [event, { type: 'viewed' }],
-      toState: (state) => state.matches({ read: 'unread' }),
-    });
-
-    const triggers = paths.map((path) =>
-      path.steps.map((step): string => step.event.type).filter((type) => type !== '@xstate.init'),
-    );
-    expect(triggers).toEqual([[event.type]]);
-  });
-
   it('leaves the approval wait when the approvals clear, back to the tool that is still running', () => {
     const actor = start();
     actor.send({ type: 'runLifecycle', phase: 'running' });
@@ -294,15 +266,15 @@ describe('chatSessionMachine', () => {
     actor.stop();
   });
 
-  it('marks a completed run unread and clears it on viewed', () => {
+  it('holds no read state: unread is the store’s, derived from the log (PV-S8)', () => {
     const actor = start();
-    expect(readState(actor)).toBe('read');
-
     actor.send({ type: 'runLifecycle', phase: 'completed' });
-    expect(readState(actor)).toBe('unread');
 
-    actor.send({ type: 'viewed' });
-    expect(readState(actor)).toBe('read');
+    expect(Object.keys(actor.getSnapshot().value as Record<string, unknown>).sort()).toEqual([
+      'host',
+      'revision',
+      'run',
+    ]);
     actor.stop();
   });
 
@@ -1008,8 +980,6 @@ describe('chatSessionMachine — the machine contract (PV-S5, MC-R17)', () => {
     ),
     { type: 'durableRunState', state: 'reattaching' },
     { type: 'durableRunState', state: 'active' },
-    { type: 'viewed' },
-    { type: 'unreadRestored' },
     { type: 'close' },
     { type: 'turnFinalized', branch: 'main' },
     { type: 'turnFinalizedObserved', runId: 'r' },
@@ -1050,7 +1020,6 @@ describe('chatSessionMachine — the machine contract (PV-S5, MC-R17)', () => {
     actor.send({ type: 'toolParts', inFlight: 1, approvals: 0 });
     actor.send({ type: 'runLifecycle', phase: 'completed', runId: 'run-1' });
     actor.send({ type: 'turnFinalizedObserved', runId: 'run-1', turnId: 'turn-1' });
-    actor.send({ type: 'viewed' });
     expect(actor.getSnapshot().matches({ run: 'done' })).toBe(true);
     actor.stop();
   });

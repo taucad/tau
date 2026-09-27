@@ -1,9 +1,10 @@
 import '#styles/global.css';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { page, userEvent } from 'vitest/browser';
+import { commands, page, userEvent } from 'vitest/browser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { writeBambuContainer } from '@taucad/slicer/container';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
+import type { PrinterFileKind } from '#components/printer/printer-file.js';
 import { fixtureGcode } from '#components/printer/testing/toolpath-fixture.js';
 import type { PrinterLiveState } from '#components/printer/use-printer-live.js';
 import type { FileViewerPaneContent } from '#routes/w.$workspace.$project/file-viewers/file-viewer.types.js';
@@ -13,9 +14,10 @@ import type { FileViewerPaneContent } from '#routes/w.$workspace.$project/file-v
  * framed wide and in a narrow pane, light and dark, the pane from the manual
  * dry run, a zoom the person made surviving a resize until they frame the
  * print again, the viewer following a live run, the part alone with the
- * preparation hidden, the whole printer, each X1C plate, and the preparation
- * on the gold plate and a dark one. The print's extent is measured from the
- * rendered pixels; PNGs land under `out/research/.../V/`.
+ * preparation hidden, the whole printer, each X1C plate, the preparation on
+ * the gold plate and a dark one, and a two-colour print in its own filaments.
+ * The print's extent is measured from the rendered pixels; PNGs land under
+ * `out/research/.../V/`.
  */
 
 const mocks = vi.hoisted(() => ({
@@ -37,6 +39,8 @@ const container = writeBambuContainer({
   plate: 'textured-pei',
 });
 const readAll = async (): Promise<Uint8Array<ArrayBuffer>> => container;
+type PrinterFile = Readonly<{ name: string; kind: PrinterFileKind; readAll: () => Promise<Uint8Array<ArrayBuffer>> }>;
+const bracket: PrinterFile = { name, kind: 'container', readAll };
 const renderPane = ({ actions, body }: FileViewerPaneContent): React.ReactNode => (
   <div data-testid='frame' className='flex flex-col bg-background' style={{ width: '1280px', height: '720px' }}>
     <header
@@ -93,13 +97,29 @@ const nextFrames = async (count: number): Promise<void> =>
   });
 
 /** The print's extent in the scene canvas, as fractions of its width and height. */
-type PrintExtent = Readonly<{ left: number; right: number; top: number; bottom: number; width: number }>;
+type PrintExtent = Readonly<{
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+  width: number;
+  /** The mean column of the print's pixels. */
+  centre: number;
+}>;
+
+/** Whether one pixel is the print's colour. */
+type PrintInk = (red: number, green: number, blue: number) => boolean;
 
 /**
- * Find the loaded spool's red in a screenshot of the scene: pixels far redder
- * than they are green or blue. The purge line, trail and machine are not.
+ * A red print, such as the loaded spool's: pixels far redder than green or blue.
+ * The purge line, trail and machine are not.
  */
-const measurePrint = async (scene: HTMLElement): Promise<PrintExtent> => {
+const isRed: PrintInk = (red, green, blue) => red > 110 && red > green * 1.6 && red > blue * 1.6;
+/** A blue print: pixels far bluer than red or green. */
+const isBlue: PrintInk = (red, green, blue) => blue > 110 && blue > red * 1.6 && blue > green * 1.6;
+
+/** Find the print, red unless told otherwise, in a screenshot of the scene. */
+const measurePrint = async (scene: HTMLElement, isInk: PrintInk = isRed): Promise<PrintExtent> => {
   const base64 = await page.screenshot({ element: scene, save: false });
   const response = await fetch(`data:image/png;base64,${base64}`);
   const bitmap = await createImageBitmap(await response.blob());
@@ -118,12 +138,12 @@ const measurePrint = async (scene: HTMLElement): Promise<PrintExtent> => {
     x <= (legendBounds.right - sceneBounds.left) * scale &&
     y >= (legendBounds.top - sceneBounds.top) * scale &&
     y <= (legendBounds.bottom - sceneBounds.top) * scale;
-  let [left, right, top, bottom] = [width, -1, height, -1];
+  let [left, right, top, bottom, count, columns] = [width, -1, height, -1, 0, 0];
   for (let pixel = 0; pixel < width * height; pixel += 1) {
-    const [red, green, blue] = [data[pixel * 4]!, data[pixel * 4 + 1]!, data[pixel * 4 + 2]!];
     const [x, y] = [pixel % width, Math.floor(pixel / width)];
-    if (red > 110 && red > green * 1.6 && red > blue * 1.6 && !isLegend(x, y)) {
+    if (isInk(data[pixel * 4]!, data[pixel * 4 + 1]!, data[pixel * 4 + 2]!) && !isLegend(x, y)) {
       [left, right, top, bottom] = [Math.min(left, x), Math.max(right, x), Math.min(top, y), Math.max(bottom, y)];
+      [count, columns] = [count + 1, columns + x];
     }
   }
   expect(right, 'the print shows in the scene').toBeGreaterThan(left);
@@ -133,6 +153,7 @@ const measurePrint = async (scene: HTMLElement): Promise<PrintExtent> => {
     top: top / height,
     bottom: (bottom + 1) / height,
     width: (right + 1 - left) / width,
+    centre: (columns / count + 0.5) / width,
   };
 };
 
@@ -149,6 +170,7 @@ const expectFramed = (extent: PrintExtent, share: number): void => {
 const mount = async (
   theme: 'light' | 'dark',
   size: readonly [number, number],
+  file: PrinterFile = bracket,
 ): Promise<{ frame: HTMLElement; scene: HTMLElement }> => {
   mocks.theme = theme;
   document.documentElement.classList.toggle('dark', theme === 'dark');
@@ -156,14 +178,14 @@ const mount = async (
   await page.viewport(1320, 780);
   const { container: root } = render(
     <TooltipProvider>
-      <PrinterViewer name={name} kind='container' revision={1} readAll={readAll} renderPane={renderPane} />
+      <PrinterViewer name={file.name} kind={file.kind} revision={1} readAll={file.readAll} renderPane={renderPane} />
     </TooltipProvider>,
   );
-  await screen.findByRole('region', { name: `Printer simulation: ${name}` });
+  await screen.findByRole('region', { name: `Printer simulation: ${file.name}` });
   const frame = within(root).getByTestId('frame');
   resize(frame, size);
   await nextFrames(6);
-  return { frame, scene: within(frame).getByRole('img', { name: `Bambu Lab X1 Carbon printing ${name}` }) };
+  return { frame, scene: within(frame).getByRole('img', { name: `Bambu Lab X1 Carbon printing ${file.name}` }) };
 };
 
 const resize = (frame: HTMLElement, [width, height]: readonly [number, number]): void => {
@@ -342,6 +364,24 @@ describe('Printer viewer framing', () => {
       expectFramed(await measurePrint(scene), 0.05);
     });
   }
+
+  it('draws a two-colour print in its own filaments and lists both', async () => {
+    // Bambu Studio's two-colour slice from @taucad/slicer's fixtures: a red cube left of a blue one, 10 mm apart.
+    const gcode = new TextEncoder().encode(
+      await commands.readFile('../../packages/plugins/slicer/src/__fixtures__/two-colour-cubes.gcode'),
+    );
+    const { frame, scene } = await mount('dark', [1280, 720], {
+      name: 'two-colour-cubes.gcode',
+      kind: 'gcode',
+      readAll: async () => gcode,
+    });
+    const filaments = within(within(frame).getByRole('list', { name: 'Filaments' })).getAllByRole('listitem');
+    expect(filaments.map((item) => item.textContent)).toEqual(['Filament 1', 'Filament 2']);
+    await capture(frame, 'two-colour-cubes-dark.png');
+    const red = await measurePrint(scene);
+    const blue = await measurePrint(scene, isBlue);
+    expect(blue.centre - red.centre, 'the red cube stands left of the blue one').toBeGreaterThan(0.2);
+  });
 
   it('captures the scene following a live run in dark', async () => {
     mocks.live = printingLive;

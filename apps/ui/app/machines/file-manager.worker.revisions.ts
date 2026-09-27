@@ -984,7 +984,8 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
    * refused by the I5 gate or the fresh fence, failed, or lost to another
    * writer's compare-and-swap (D3) — each naming this request (B8: an answer),
    * so no bound waits on it. `hidden` and `close` record every checkout
-   * instead, through `awaitCheckoutCuts`, which keeps the close path's bound.
+   * instead, through `awaitCheckoutCuts`: a `close` cut is answered the same
+   * way, and only `hidden` keeps a bound, since the page may be frozen (B8).
    *
    * @returns When the cut has settled.
    */

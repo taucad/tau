@@ -1,13 +1,12 @@
 import { resolve } from 'node:path';
 
-import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 import { tauRuntime } from '@taucad/runtime/vite';
 import { defineConfig } from 'vitest/config';
 import { playwrightProvider } from './support/playwright-provider.ts';
 
 export default defineConfig({
   root: resolve(import.meta.dirname, 'apps/react-router'),
-  plugins: [nxViteTsPaths(), tauRuntime({ crossOriginIsolation: true })],
+  plugins: [tauRuntime({ crossOriginIsolation: true })],
   optimizeDeps: {
     include: [
       '@gltf-transform/core',

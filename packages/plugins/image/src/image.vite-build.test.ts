@@ -1,14 +1,12 @@
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { build } from 'vite';
-import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 
 describe('image transcoder browser build', () => {
   it('keeps Node builtin shims out of the browser-reachable bounds reader', async () => {
     const result = await build({
       configFile: false,
       logLevel: 'silent',
-      plugins: [nxViteTsPaths()],
       build: {
         write: false,
         lib: { entry: fileURLToPath(new URL('image.transcoder.ts', import.meta.url)), formats: ['es'] },

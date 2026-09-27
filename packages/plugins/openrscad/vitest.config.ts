@@ -1,8 +1,6 @@
 import { configDefaults, defineConfig } from 'vitest/config';
-import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 
 export default defineConfig({
-  plugins: [nxViteTsPaths()],
   test: {
     environment: 'node',
     // `e2e/` is its own Vitest Browser project (`e2e/vitest.config.ts`); its

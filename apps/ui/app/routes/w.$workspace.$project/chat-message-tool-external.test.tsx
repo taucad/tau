@@ -4,7 +4,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { readUIMessageStream } from 'ai';
 import type { DynamicToolUIPart, UIMessageChunk } from 'ai';
-import type { AgentLogEvent } from '@taucad/agent-host';
+import type { AgentLogEvent, JsonObject, JsonValue } from '@taucad/agent-host';
 import { tauToolKinds } from '@taucad/agent-host';
 import { toolNames } from '@taucad/chat/constants';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
@@ -144,7 +144,7 @@ afterEach(cleanup);
  * The image generation codex-acp 1.7.0 reports, as the host records it: the call row, its
  * envelope replaced with the completed facts, then the result row.
  */
-const imageGenerationEvents = (image: Record<string, unknown>, result: unknown): AgentLogEvent[] => {
+const imageGenerationEvents = (image: JsonObject, result: JsonValue): AgentLogEvent[] => {
   const call = { toolCallId: 'exec-1', kind: 'other', title: 'Image generation' };
   const content = [
     { type: 'content', content: { type: 'text', text: 'Revised prompt: a clean relief render' } },

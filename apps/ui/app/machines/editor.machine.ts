@@ -756,7 +756,7 @@ export const editorMachine = setup({
                 context: { requestedChatId: event.chatId, focusedChatId: event.chatId, focusedChatError: undefined },
               };
             },
-            /* A bare project URL (no `?chat=`) names no chat, so a chat already focused
+            /* A bare project URL (no `searchParameterName.chat`) names no chat, so a chat already focused
              * still satisfies it — revalidating would enter `ensuringFocusedChat` and
              * flash the chat pane's skeleton before the route rewrites the URL. */
             setRequestedChatId: ({ context, event }) =>

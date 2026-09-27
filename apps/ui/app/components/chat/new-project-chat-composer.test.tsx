@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import { useImperativeHandle } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CadAgentExecution } from '@taucad/chat';
@@ -210,11 +210,11 @@ describe('NewProjectChatComposer', () => {
     document.body.append(other);
 
     other.focus();
-    fireEvent.focus(globalThis);
+    globalThis.dispatchEvent(new Event('focus'));
     expect(mockFocus).not.toHaveBeenCalled();
 
     other.blur();
-    fireEvent.focus(globalThis);
+    globalThis.dispatchEvent(new Event('focus'));
     expect(mockFocus).toHaveBeenCalledOnce();
     other.remove();
   });
@@ -222,7 +222,7 @@ describe('NewProjectChatComposer', () => {
   it('leaves focus alone on surfaces without autofocus', () => {
     routerLocationState = { focusChatComposer: true };
     render(<NewProjectChatComposer enableAutoFocus={false} />);
-    fireEvent.focus(globalThis);
+    globalThis.dispatchEvent(new Event('focus'));
     expect(mockFocus).not.toHaveBeenCalled();
   });
 

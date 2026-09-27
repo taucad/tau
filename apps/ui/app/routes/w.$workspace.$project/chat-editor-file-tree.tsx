@@ -1778,7 +1778,8 @@ export const ChatEditorFileTree = memo(function ({
 
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent
-          className='sm:max-w-md'
+          // The title names the file; the dialog portals outside the replay-blocked panel.
+          className='ph-no-capture sm:max-w-md'
           onCloseAutoFocus={(event) => {
             // Prevent default focus restoration (trigger element is gone)
             // and manually focus the tree container
@@ -1818,7 +1819,8 @@ export const ChatEditorFileTree = memo(function ({
         }}
       />
 
-      <FloatingPanelContent className={cn(borderless && 'bg-background')}>
+      {/* `ph-no-capture`: session replay never records project file names. */}
+      <FloatingPanelContent className={cn('ph-no-capture', borderless && 'bg-background')}>
         {showTitle || closeButton ? (
           <FloatingPanelContentHeader className={cn(borderless && 'border-0 bg-transparent px-2')}>
             {showTitle ? <FloatingPanelContentTitle>Files</FloatingPanelContentTitle> : <span />}

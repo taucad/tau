@@ -2,6 +2,7 @@ import { act, render } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RenderFrame } from '@taucad/spatial';
 import { Controls } from '#components/geometry/graphics/three/controls.js';
+import type * as TauCameraControlsModule from '#components/geometry/graphics/three/controls/tau-camera-controls.js';
 
 type MockGraphicsContext = {
   isSectionViewActive: boolean;
@@ -48,7 +49,8 @@ vi.mock('#hooks/use-graphics.js', () => ({
   useRenderFrame: () => mocks.renderFrame,
 }));
 
-vi.mock('#components/geometry/graphics/three/controls/tau-camera-controls.js', () => ({
+vi.mock('#components/geometry/graphics/three/controls/tau-camera-controls.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof TauCameraControlsModule>()),
   TauCameraControls: (properties: Record<string, unknown>) => {
     mocks.cameraControlProperties = properties;
     return null;

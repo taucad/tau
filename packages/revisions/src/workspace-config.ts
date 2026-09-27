@@ -13,7 +13,7 @@
  * land on a Node host and in the browser provider.
  */
 
-import { pathRegistry, tauPathPolicy } from '@taucad/filesystem/path-registry';
+import { pathRegistry, reservedTauDirectory, tauPathPolicy } from '@taucad/filesystem/path-registry';
 import type { PathClassification, PathPolicy } from '@taucad/filesystem';
 
 /**
@@ -29,22 +29,49 @@ export type IgnoreRegistryRow = PathClassification &
   Readonly<{ prefix: string; anchored: boolean; directory: boolean }>;
 
 /**
- * Tau's own layout: the classifier revisions default to, and the rows the
- * generated ignore block that must agree with it is derived from (EQ6, PP5).
- *
- * **The one place `@taucad/filesystem/path-registry` is imported** in this
- * package's non-test source (`import-boundary.test.ts` pins it, mirroring L1's
- * own rule). The classifier and the rows travel as one value because PP5 is a
- * property of the *pair*: every unversioned row must be excluded by the ignore
- * block, so a project that answers with another policy has to supply that
- * policy's rows in the same breath, and the type makes it do so.
+ * What a generated ignore block is derived from (PP5): the layout's rows and,
+ * when it has one, the directory whose members no row names are unversioned.
  *
  * @public
  */
-export const tauRevisionPolicy: Readonly<{ policy: PathPolicy; rows: readonly IgnoreRegistryRow[] }> = Object.freeze({
+export type IgnoreLayout = Readonly<{
+  rows: readonly IgnoreRegistryRow[];
+  /**
+   * A directory whose unlisted members are unversioned. The block excludes its
+   * members (`/<dir>/*`, never `/<dir>/`) and re-includes each versioned row
+   * directly inside it.
+   */
+  reservedDirectory?: string;
+}>;
+
+/**
+ * Tau's own layout: the classifier revisions default to, and the rows and
+ * reserved directory the generated ignore block that must agree with it is
+ * derived from (EQ6, PP5).
+ *
+ * **The one place `@taucad/filesystem/path-registry` is imported** in this
+ * package's non-test source (`import-boundary.test.ts` pins it, mirroring L1's
+ * own rule). The classifier and its layout travel as one value because PP5 is a
+ * property of the *pair*: every unversioned path must be excluded by the ignore
+ * block, so a project that answers with another policy has to supply that
+ * policy's layout in the same breath, and the type makes it do so.
+ *
+ * @public
+ */
+export const tauRevisionPolicy: Readonly<{ policy: PathPolicy } & Required<IgnoreLayout>> = Object.freeze({
   policy: tauPathPolicy,
   rows: pathRegistry,
+  reservedDirectory: reservedTauDirectory,
 });
+
+/**
+ * One row's ignore pattern, without the anchor.
+ *
+ * @param row - The registry row.
+ * @returns Its prefix, with the directory-only `/` when the row takes one.
+ */
+const rowPattern = (row: IgnoreRegistryRow): string =>
+  `${row.prefix}${row.directory && row.class !== 'control-plane' ? '/' : ''}`;
 
 /**
  * Paths never carried by a revision, as ignore patterns. The `.tau` families and
@@ -64,17 +91,34 @@ export const tauRevisionPolicy: Readonly<{ policy: PathPolicy; rows: readonly Ig
  * pattern breaks PP5 for exactly the shape the row exists to catch. The cache
  * keeps its slash: a file named `node_modules` is not the cache.
  *
- * @param rows - The layout's registry rows; every unversioned one is excluded
- *   (PP5), so these must be the rows of the policy this project classifies with.
- * @returns One ignore pattern per unversioned row, in registry order.
+ * A reserved directory leads the block: `/<dir>/*` excludes its members rather
+ * than the directory, so the `!` line after it can re-include each versioned
+ * row inside it — which `/<dir>/` would make impossible. The rows it already
+ * covers keep their own lines so the block still names each family.
+ *
+ * @param layout - The layout's rows and reserved directory; every unversioned
+ *   path is excluded (PP5), so this must be the layout of the policy this
+ *   project classifies with.
+ * @returns The reserved directory's head, then one ignore pattern per
+ *   unversioned row, in registry order.
  * @public
  */
-export const generatedIgnoreEntries = (rows: readonly IgnoreRegistryRow[]): readonly string[] =>
-  rows
-    .filter((row) => !row.versioned)
-    .map(
-      (row) => `${row.anchored ? '/' : '**/'}${row.prefix}${row.directory && row.class !== 'control-plane' ? '/' : ''}`,
-    );
+export const generatedIgnoreEntries = ({ rows, reservedDirectory }: IgnoreLayout): readonly string[] => [
+  /* ponytail: one negation re-includes a direct member only; a versioned row
+   * nested deeper (`.tau/a/b`) needs a `!/.tau/a/` + `/.tau/a/*` chain. The
+   * unit test pins that Tau's layout has none. */
+  ...(reservedDirectory === undefined
+    ? []
+    : [
+        `/${reservedDirectory}/*`,
+        ...rows
+          .filter((row) => row.versioned && row.prefix.startsWith(`${reservedDirectory}/`))
+          /* No trailing `/`: a directory row classifies its bare path too, so a
+           * file named `.tau/skills` is versioned and must be re-included. */
+          .map((row) => `!/${row.prefix}`),
+      ]),
+  ...rows.filter((row) => !row.versioned).map((row) => `${row.anchored ? '/' : '**/'}${rowPattern(row)}`),
+];
 
 /** Project-relative path of the generated ignore file. @public */
 export const generatedIgnorePath = '.gitignore';
@@ -109,17 +153,17 @@ const withGeneratedBlock = (existing: string | undefined, markerStart: string, l
  *
  * @param existing - Current ignore file content, or `undefined` when absent.
  * @param additional - Extra project-specific lines to include in the block.
- * @param rows - The layout's rows, defaulting to Tau's own. A project that
- *   classifies with another policy passes that policy's rows, or the block and
- *   the capture disagree (PP5).
+ * @param layout - The layout, defaulting to Tau's own. A project that
+ *   classifies with another policy passes that policy's layout, or the block
+ *   and the capture disagree (PP5).
  * @returns The full file content to write.
  * @public
  */
 export const generatedIgnoreContent = (
   existing: string | undefined,
   additional: readonly string[] = [],
-  rows: readonly IgnoreRegistryRow[] = tauRevisionPolicy.rows,
-): string => withGeneratedBlock(existing, ignoreMarker, [...generatedIgnoreEntries(rows), ...additional]);
+  layout: IgnoreLayout = tauRevisionPolicy,
+): string => withGeneratedBlock(existing, ignoreMarker, [...generatedIgnoreEntries(layout), ...additional]);
 
 /**
  * The file families whose bytes are large objects wherever they appear (A24).

@@ -22,7 +22,7 @@ Revision algorithms are not here: `@taucad/revisions/algorithms`. Revision effec
 - Canonicalize at ingress before routing or provider I/O. `WorkspaceFileService` owns mount lifecycle and longest-prefix resolution.
 - A rooted view captures one exact mount, confines every operation to its prefix, preserves full write/watch behavior, and fails closed after that mount disappears. It must never fall through to a broader mount.
 - Use rooted views instead of adding parallel `*Scoped` methods to filesystem clients or services.
-- `composeView` and revision capture take an injected `PathPolicy`; composition sites pass `tauPathPolicy`. A non-default revision policy also passes its own rows to `generatedIgnoreContent`.
+- `composeView` and revision capture take an injected `PathPolicy`; composition sites pass `tauPathPolicy`. A non-default revision policy also passes its own layout (rows and reserved directory) to `generatedIgnoreContent`.
 - Every rooted bridge open declares `'user'`, `'agent'` or `'working-copy'`; `'working-copy'` is unmasked and trusted only. The fs-client owner keys connections by `(root, consumer)`.
 - Implement batch writes through the canonical per-resource mutation path. Completion requires durable provider commit, writer-side cache and tree updates, and exact-path event delivery.
 - Keep dependency-scoped kernel watches separate from coalesced directory-scoped UI observation. Preserve exact virtual paths; enter conservative resync only for explicit information-loss signals.

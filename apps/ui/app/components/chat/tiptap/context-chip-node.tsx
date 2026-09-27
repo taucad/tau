@@ -80,7 +80,9 @@ function ContextChipComponent({ node, deleteNode, selected, editor }: ReactNodeV
   );
 
   return (
-    <NodeViewWrapper as='span' className='inline-flex align-baseline'>
+    // Middle, not baseline: the wrapper's baseline follows the chip's first child, which swaps
+    // from glyph to remove button on hover and would change the line height.
+    <NodeViewWrapper as='span' className='inline-flex align-middle'>
       {isLinkable && !isMissing ? (
         <FileLink path={path} asChild>
           {chip}

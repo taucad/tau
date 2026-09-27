@@ -180,8 +180,11 @@ describe('PicoVoxel packaged runtime', () => {
       expect(!warm.superseded && warm.geometry.success).toBe(true);
 
       // Supersede only once the heavy build is computing: ordered by the worker's own progress
-      // event, never by a wall clock (invariant I5).
-      const heavySteps = 41;
+      // event, never by a wall clock (invariant I5). Nothing later is orderable: logs reach the client
+      // in the render's telemetry flush, after the build, so a log-ordered supersede lands too late.
+      // Large enough that no machine finishes it before the superseding render arrives; supersession
+      // makes the size free.
+      const heavySteps = 400;
       const computing = new Promise<void>((resolve) => {
         const stop = client.on('progress', (phase) => {
           if (phase === 'computingGeometry') {
@@ -198,7 +201,9 @@ describe('PicoVoxel packaged runtime', () => {
       expect(superseded.superseded).toBe(true);
       expect(!light.superseded && light.geometry.success).toBe(true);
       // Cooperative, in work units: the kernel's own check caught the heavy build before its loop
-      // finished (1 sphere + 41 offsets), rather than the runtime discarding a completed build.
+      // finished (1 sphere + 400 offsets), rather than the runtime discarding a completed build. The
+      // count can be 0 when the supersede lands while the build is still bundling or opening its
+      // session; the log exists only because the kernel's own check stopped it.
       const stopped = logs
         .map((message) => /^PicoVoxel stopped a superseded build after (\d+) PicoVoxel calls$/u.exec(message)?.[1])
         .filter((calls) => calls !== undefined);
@@ -214,32 +219,41 @@ describe('PicoVoxel packaged runtime', () => {
     }
   }, 300_000);
 
-  it('should export the pinned exact STL of sphere-minus-beams on both wasm builds (DP18)', async () => {
-    // The same pin the browser leg asserts (apps/ui-e2e picovoxel-multi.spec.ts).
-    const pin = (
+  it('should export the pinned exact STL and GLB of sphere-minus-beams on both wasm builds (DP18)', async () => {
+    // The same pins the browser leg asserts (apps/ui-e2e picovoxel-multi.spec.ts).
+    type Pin = { readonly sha256: string; readonly bytes: number };
+    const pins = (
       JSON.parse(await readFile(join(picovoxelExamples, 'exact-pins.json'), 'utf8')) as {
-        readonly 'sphere-minus-beams': { readonly stl: { readonly sha256: string; readonly bytes: number } };
+        readonly 'sphere-minus-beams': { readonly stl: Pin; readonly glb: Pin };
       }
-    )['sphere-minus-beams'].stl;
+    )['sphere-minus-beams'];
+    const digest = (bytes: Uint8Array<ArrayBuffer>): Pin => ({
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+      bytes: bytes.byteLength,
+    });
     const exportExact = async (wasm: PicovoxelOptionsInput['wasm']) => {
       const client = await createNodeClient({
         runtime: createRuntime(wasm),
         projectPath: join(picovoxelExamples, 'sphere-minus-beams'),
       });
       try {
-        const stl = await client.export('stl', { source: { path: 'main.ts' } });
-        if (!stl.success) {
-          throw new Error(stl.issues.map(({ message }) => message).join('; '));
+        const exported: Record<'stl' | 'glb', Pin | undefined> = { stl: undefined, glb: undefined };
+        for (const format of ['stl', 'glb'] as const) {
+          // oxlint-disable-next-line no-await-in-loop -- one client, one export at a time
+          const result = await client.export(format, { source: { path: 'main.ts' } });
+          if (!result.success) {
+            throw new Error(result.issues.map(({ message }) => message).join('; '));
+          }
+          exported[format] = digest(result.data[0]!.bytes);
         }
-        const { bytes } = stl.data[0]!;
-        return { sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.byteLength };
+        return exported;
       } finally {
         client.terminate();
       }
     };
 
-    expect(await exportExact('serial')).toEqual(pin);
-    expect(await exportExact('auto')).toEqual(pin);
+    expect(await exportExact('serial')).toEqual(pins);
+    expect(await exportExact('auto')).toEqual(pins);
   }, 300_000);
 
   it('should render a multi-file ShapeKernel model and export exact GLB and STL through the Node client', async () => {

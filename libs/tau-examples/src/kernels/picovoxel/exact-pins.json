@@ -1,9 +1,13 @@
 {
-  "$comment": "DP18: exact-lane export bytes every host produces for these examples (Node serial and auto in runtime-e2e, every browser engine in ui-e2e). Exports always replay on the serial L0 build, so a change here is a Class-X pin event: attribute it before updating.",
+  "$comment": "DP18: exact-lane export bytes every host produces for these examples (Node serial and auto in runtime-e2e, every browser engine in ui-e2e). Exports always replay on the serial L0 build, and GLB normals are normalized with the correctly rounded Math.sqrt, so a change here is a Class-X pin event: attribute it before updating.",
   "sphere-minus-beams": {
     "stl": {
       "sha256": "b924eabf75ed38eb64a60ef5fad1dc03db059f2cda7eee7f1e2549e9e69a2dc3",
       "bytes": 1042884
+    },
+    "glb": {
+      "sha256": "780a546927d590c65123f2c124d03cec6dcfb858d48aa8bdff963d93ab613ee5",
+      "bytes": 507480
     }
   }
 }

@@ -778,6 +778,32 @@ describe('machine tool registry', () => {
       );
       await host.close();
     });
+    it.each([
+      ['denied', 'denied'],
+      ['withdrawn', 'cancelled'],
+    ] as const)(
+      "should report the ledger's answer, not the recalled approval, when the Print pane settled it first (%s, GM.r3)",
+      async (state, approval) => {
+        const { fixture, host, transport, interruptId } = await pausedOnPrint([
+          { toolCalls: [{ ...printCall, id: 'call-print-again' }] },
+          { text: 'The print is on its way.' },
+        ]);
+        /* The Print pane answers the ledger directly, before the chat's approval reaches it. */
+        const resolvedBy = { kind: 'user', id: 'pane', label: 'You' } as const;
+        await (state === 'denied'
+          ? fixture.client.resolvePrintRequest({ requestId: 'call-print', decision: 'deny', resolvedBy })
+          : fixture.client.withdrawPrintRequest({ requestId: 'call-print', resolvedBy }));
+
+        await host.resolveInterrupt({ runId: 'run-print', interruptId, outcome: 'approved' });
+        await host.resume('chat-print');
+
+        expect(fixture.requests.get('call-print')?.state).toBe(state);
+        expect(JSON.stringify(transport.requests.at(-1)?.messages)).toContain(
+          `"machineName":"Workshop X1C","approval":"${approval}"`,
+        );
+        await host.close();
+      },
+    );
   });
 
   describe('nextStep', () => {

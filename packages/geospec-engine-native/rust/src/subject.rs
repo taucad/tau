@@ -1,6 +1,6 @@
 //! Retained source records and thread-confined shared analysis.
 
-use crate::protocol::{Observations, WorkCounter};
+use crate::protocol::{EvidenceProfile, Observations, WorkCounter};
 use std::{
     cell::{Cell, OnceCell, RefCell},
     mem::size_of,
@@ -1452,6 +1452,7 @@ pub(crate) struct EvaluationContext<'a> {
     /// The primary BRep's claim-local operand memo (C7), made on first use.
     operand_memo: Option<OperandMemo>,
     polarity: Polarity,
+    evidence_profile: EvidenceProfile,
 }
 
 impl<'a> EvaluationContext<'a> {
@@ -1479,6 +1480,7 @@ impl<'a> EvaluationContext<'a> {
             batch: None,
             operand_memo: None,
             polarity: Polarity::Positive,
+            evidence_profile: EvidenceProfile::Complete,
         }
     }
 
@@ -1505,6 +1507,16 @@ impl<'a> EvaluationContext<'a> {
     /// geometric result, so families build failure detail only when positive.
     pub(crate) fn wants_failure_detail(&self) -> bool {
         self.polarity == Polarity::Positive
+    }
+
+    pub(crate) fn with_evidence_profile(mut self, profile: EvidenceProfile) -> Self {
+        self.evidence_profile = profile;
+        self
+    }
+
+    /// The plan's product-selected evidence profile (PERF-OUTPUT-01).
+    pub(crate) fn bounded_evidence(&self) -> bool {
+        self.evidence_profile == EvidenceProfile::Bounded
     }
 
     pub(crate) fn connected_components(

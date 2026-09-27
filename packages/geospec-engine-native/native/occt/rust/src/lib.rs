@@ -7,16 +7,17 @@ extern crate self as geospec_engine_native_occt;
 mod finite_contact_engagement_tests;
 
 pub use geospec_engine_native_core::backend::brep::{
-    Bounds, BrepAdmissionFacts, BrepConnector, BrepEntity, BrepSubject, CircularBoreCandidate,
-    CircularBoreDisposition, CircularBoreEnd, CircularBoreInventory, CircularBoreNonMember,
-    CircularBoreTermination, CircularBoreTopology, CircularBoreUnqualified, ContinuousWallDomain,
-    ContinuousWallShape, CurveFacts, CylinderAttachmentProfile, CylinderAxialExtent,
-    CylinderBoundaryOrientation, CylinderBoundarySide, CylinderBoundaryUse,
-    CylinderPeriodicAttachment, CylinderVertex, CylindricalBandBoundaryResidual,
-    CylindricalBandProfile, CylindricalBandRim, DatumPlacementFacts, DocumentRows, EdgeFacts,
-    EdgeTreatmentBoundaryRole, EdgeTreatmentBoundaryUse, EdgeTreatmentCertificate,
-    EdgeTreatmentCounts, EdgeTreatmentDisposition, EdgeTreatmentInventory, EdgeTreatmentKind,
-    EdgeTreatmentLabel, EdgeTreatmentMaterialSide, EdgeTreatmentReason, EdgeTreatmentResidual,
+    Bounds, BrepAdmissionFacts, BrepConnector, BrepEntity, BrepSubject, Charge,
+    CircularBoreCandidate, CircularBoreDisposition, CircularBoreEnd, CircularBoreInventory,
+    CircularBoreNonMember, CircularBoreTermination, CircularBoreTopology, CircularBoreUnqualified,
+    ComponentBodies, ComponentBody, ContinuousWallDomain, ContinuousWallShape, CurveFacts,
+    CylinderAttachmentProfile, CylinderAxialExtent, CylinderBoundaryOrientation,
+    CylinderBoundarySide, CylinderBoundaryUse, CylinderPeriodicAttachment, CylinderVertex,
+    CylindricalBandBoundaryResidual, CylindricalBandProfile, CylindricalBandRim,
+    DatumPlacementFacts, DocumentRows, EdgeFacts, EdgeTreatmentBoundaryRole,
+    EdgeTreatmentBoundaryUse, EdgeTreatmentCertificate, EdgeTreatmentCounts,
+    EdgeTreatmentDisposition, EdgeTreatmentInventory, EdgeTreatmentKind, EdgeTreatmentLabel,
+    EdgeTreatmentMaterialSide, EdgeTreatmentReason, EdgeTreatmentResidual,
     EdgeTreatmentResidualKind, EdgeTreatmentRow, EdgeTreatmentSupport, FaceFacts,
     FiniteContactCircle, FiniteContactFace, LocatedFace, NominalCylindricalBand, OccurrenceFacts,
     OccurrenceOverlap, OperandMemo, PointState, RegularSolidContainment, ReportedFaces,
@@ -29,7 +30,12 @@ pub use geospec_engine_native_core::backend::brep::{
 use geospec_engine_native_core::backend::brep::{ClosureEdgeSample, ClosureFacts, ClosureGroup};
 use geospec_engine_native_core::backend::pmi::{PmiFaceAssociation, PmiField, PmiFieldStatus};
 use geospec_engine_native_core::backend::{BackendError, BackendErrorKind, TriangleMesh};
-use std::{cell::OnceCell, ffi::c_char, ptr::NonNull, rc::Rc};
+use std::{
+    cell::OnceCell,
+    ffi::{c_char, c_void},
+    ptr::NonNull,
+    rc::Rc,
+};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct OcctConnector;
@@ -864,6 +870,68 @@ impl BrepSubject for Document {
         Ok(closure)
     }
 
+    fn component_bodies(
+        &self,
+        occurrences: &[u32],
+        charge: &mut Charge<'_>,
+    ) -> Result<Option<Box<dyn ComponentBodies + '_>>, BackendError> {
+        let mut raw = std::ptr::null_mut();
+        let (mut body_count, mut face_count) = (0, 0);
+        let mut error = ErrorBuffer::new();
+        let mut charge = charge;
+        let status = unsafe {
+            ffi::geospec_occt_component_bodies_new(
+                self.raw.as_ptr(),
+                occurrences.as_ptr(),
+                occurrences.len(),
+                charge_units,
+                charge_context(&mut charge),
+                &mut raw,
+                &mut body_count,
+                &mut face_count,
+                error.raw(),
+            )
+        };
+        if status == ffi::STOPPED {
+            return Ok(None);
+        }
+        check(status, &error)?;
+        let raw = NonNull::new(raw).ok_or_else(|| backend_error("OCCT returned no bodies."))?;
+        // Owned from here, so an error below still releases the set.
+        let mut owned = OcctComponentBodies {
+            document: self,
+            raw,
+            bodies: Vec::new(),
+        };
+        let mut facts = vec![ffi::ComponentBody::default(); body_count];
+        let mut faces = vec![ffi::Bounds::default(); face_count];
+        unsafe {
+            check(
+                ffi::geospec_occt_component_bodies_facts(
+                    raw.as_ptr(),
+                    facts.as_mut_ptr(),
+                    facts.len(),
+                    faces.as_mut_ptr(),
+                    faces.len(),
+                    error.raw(),
+                ),
+                &error,
+            )?;
+        }
+        let mut faces = faces.into_iter().map(Bounds::from);
+        owned.bodies = facts
+            .into_iter()
+            .map(|body| ComponentBody {
+                occurrence: (body.occurrence != u32::MAX).then_some(body.occurrence),
+                solid: body.solid != 0,
+                vertices: body.vertex_count,
+                bounds: body.bounds.into(),
+                faces: faces.by_ref().take(body.face_count as usize).collect(),
+            })
+            .collect();
+        Ok(Some(Box::new(owned)))
+    }
+
     fn classify_face_points(
         &self,
         face: BrepEntity,
@@ -944,6 +1012,124 @@ fn invalid_input(message: impl Into<String>) -> BackendError {
     BackendError {
         kind: BackendErrorKind::InvalidInput,
         message: message.into(),
+    }
+}
+
+/// M2's bodies of one document, released before the document they borrow.
+struct OcctComponentBodies<'a> {
+    document: &'a Document,
+    raw: NonNull<ffi::ComponentBodies>,
+    bodies: Vec<ComponentBody>,
+}
+
+impl Drop for OcctComponentBodies<'_> {
+    fn drop(&mut self) {
+        unsafe { ffi::geospec_occt_component_bodies_release(self.raw.as_ptr()) }
+    }
+}
+
+impl ComponentBodies for OcctComponentBodies<'_> {
+    fn bodies(&self) -> &[ComponentBody] {
+        &self.bodies
+    }
+
+    fn faces_within(
+        &self,
+        left: usize,
+        left_faces: &[u32],
+        right: usize,
+        right_faces: &[u32],
+        tolerance: f64,
+        charge: &mut Charge<'_>,
+    ) -> Result<Option<bool>, BackendError> {
+        let mut within = 0;
+        let mut error = ErrorBuffer::new();
+        let mut charge = charge;
+        let status = unsafe {
+            ffi::geospec_occt_component_faces_within(
+                self.raw.as_ptr(),
+                left,
+                left_faces.as_ptr(),
+                left_faces.len(),
+                right,
+                right_faces.as_ptr(),
+                right_faces.len(),
+                tolerance,
+                charge_units,
+                charge_context(&mut charge),
+                &mut within,
+                error.raw(),
+            )
+        };
+        if status == ffi::STOPPED {
+            return Ok(None);
+        }
+        check(status, &error)?;
+        Ok(Some(within != 0))
+    }
+
+    fn body_inside(
+        &self,
+        outer: usize,
+        inner: usize,
+        charge: &mut Charge<'_>,
+    ) -> Result<Option<PointState>, BackendError> {
+        let mut state = 0;
+        let mut error = ErrorBuffer::new();
+        let mut charge = charge;
+        let status = unsafe {
+            ffi::geospec_occt_component_body_inside(
+                self.raw.as_ptr(),
+                outer,
+                inner,
+                charge_units,
+                charge_context(&mut charge),
+                &mut state,
+                error.raw(),
+            )
+        };
+        if status == ffi::STOPPED {
+            return Ok(None);
+        }
+        check(status, &error)?;
+        Ok(Some(match state {
+            0 => PointState::Out,
+            1 => PointState::In,
+            _ => PointState::On,
+        }))
+    }
+
+    fn bodies_within(
+        &self,
+        left: usize,
+        right: usize,
+        tolerance: f64,
+    ) -> Result<bool, BackendError> {
+        let width = self.document.parallel_grant_width;
+        let mut used_parallel = 0;
+        let mut within = 0;
+        let mut error = ErrorBuffer::new();
+        // SAFETY: a grant exists only under the connector's lifetime permit
+        // contract, which reserves it for every document query.
+        unsafe {
+            check(
+                ffi::geospec_occt_component_bodies_within_dedicated(
+                    self.raw.as_ptr(),
+                    left,
+                    right,
+                    tolerance,
+                    width.map_or(Ok(0), dedicated_width)?,
+                    &mut used_parallel,
+                    &mut within,
+                    error.raw(),
+                ),
+                &error,
+            )?;
+        }
+        if let Some(width) = width {
+            require_grant_mode(width, used_parallel != 0)?;
+        }
+        Ok(within != 0)
     }
 }
 
@@ -1156,6 +1342,18 @@ impl ErrorBuffer {
         let length = self.raw.length.min(self.bytes.len());
         String::from_utf8_lossy(&self.bytes[..length]).into_owned()
     }
+}
+
+/// The bridge's charge callback over a `&mut Charge` context; nonzero stops
+/// the step before the work it prices.
+unsafe extern "C" fn charge_units(context: *mut c_void, units: u64) -> i32 {
+    // SAFETY: `context` comes from `charge_context` for the call in progress.
+    let charge = unsafe { &mut *context.cast::<&mut Charge<'_>>() };
+    i32::from(!charge(units))
+}
+
+fn charge_context(charge: &mut &mut Charge<'_>) -> *mut c_void {
+    (charge as *mut &mut Charge<'_>).cast()
 }
 
 fn check(status: i32, error: &ErrorBuffer) -> Result<(), BackendError> {
@@ -3565,7 +3763,9 @@ impl TryFrom<ffi::FaceFacts> for FaceFacts {
 }
 
 mod ffi {
-    use super::c_char;
+    use super::{c_char, c_void};
+
+    pub type Charge = unsafe extern "C" fn(context: *mut c_void, units: u64) -> i32;
 
     pub const OK: i32 = 0;
     pub const INVALID_ARGUMENT: i32 = 1;
@@ -3574,6 +3774,7 @@ mod ffi {
     pub const NO_SHAPE: i32 = 4;
     pub const BUFFER_TOO_SMALL: i32 = 6;
     pub const UNSUPPORTED: i32 = 7;
+    pub const STOPPED: i32 = 8;
     pub const REPORT_MESH: u32 = 1;
     pub const REPORT_VOLUME: u32 = 2;
     pub const REPORT_FACES: u32 = 4;
@@ -3590,6 +3791,11 @@ mod ffi {
 
     #[repr(C)]
     pub struct OperandMemo {
+        _private: [u8; 0],
+    }
+
+    #[repr(C)]
+    pub struct ComponentBodies {
         _private: [u8; 0],
     }
 
@@ -3757,6 +3963,16 @@ mod ffi {
         pub sample_count: u32,
         pub samples: [ClosureEdgeSample; 4],
         pub occurrence_count: usize,
+    }
+
+    #[derive(Clone, Copy, Default)]
+    #[repr(C)]
+    pub struct ComponentBody {
+        pub occurrence: u32,
+        pub solid: i32,
+        pub vertex_count: u32,
+        pub face_count: u32,
+        pub bounds: Bounds,
     }
 
     #[derive(Clone, Copy, Default)]
@@ -4300,6 +4516,59 @@ mod ffi {
             group: *mut ClosureGroup,
             occurrences: *mut u32,
             occurrence_capacity: usize,
+            error: *mut StringBuffer,
+        ) -> i32;
+        pub fn geospec_occt_component_bodies_new(
+            document: *const Document,
+            occurrences: *const u32,
+            occurrence_count: usize,
+            charge: Charge,
+            context: *mut c_void,
+            bodies: *mut *mut ComponentBodies,
+            body_count: *mut usize,
+            face_count: *mut usize,
+            error: *mut StringBuffer,
+        ) -> i32;
+        pub fn geospec_occt_component_bodies_release(bodies: *mut ComponentBodies);
+        pub fn geospec_occt_component_bodies_facts(
+            bodies: *const ComponentBodies,
+            output: *mut ComponentBody,
+            body_capacity: usize,
+            face_bounds: *mut Bounds,
+            face_capacity: usize,
+            error: *mut StringBuffer,
+        ) -> i32;
+        pub fn geospec_occt_component_faces_within(
+            bodies: *const ComponentBodies,
+            left: usize,
+            left_faces: *const u32,
+            left_count: usize,
+            right: usize,
+            right_faces: *const u32,
+            right_count: usize,
+            tolerance: f64,
+            charge: Charge,
+            context: *mut c_void,
+            within: *mut i32,
+            error: *mut StringBuffer,
+        ) -> i32;
+        pub fn geospec_occt_component_body_inside(
+            bodies: *const ComponentBodies,
+            outer: usize,
+            inner: usize,
+            charge: Charge,
+            context: *mut c_void,
+            state: *mut i32,
+            error: *mut StringBuffer,
+        ) -> i32;
+        pub fn geospec_occt_component_bodies_within_dedicated(
+            bodies: *const ComponentBodies,
+            left: usize,
+            right: usize,
+            tolerance: f64,
+            grant_width: i32,
+            used_parallel: *mut i32,
+            within: *mut i32,
             error: *mut StringBuffer,
         ) -> i32;
         pub fn geospec_occt_cylinder_axial_extent(

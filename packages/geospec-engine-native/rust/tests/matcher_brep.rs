@@ -1940,3 +1940,82 @@ fn analyze_brep_meets_the_edge_treatment_face_limit_before_report_facts_and_bore
     assert_eq!(queries.get(), 0);
     assert!(subjects[0].mesh_record().is_none());
 }
+
+#[test]
+fn bounded_circular_hole_stops_at_the_first_matching_bore() {
+    let mut subject = retained_subject();
+    subject.brep = Some(Box::new(RetainedBrep::complete()));
+    let subjects = [Rc::new(subject)];
+    let hole = |diameter: f64, profile| {
+        let prepared = prepared(
+            Capability::ToHaveCircularHole,
+            Json::object([
+                ("diameter", Json::Number(diameter)),
+                ("through", Json::Bool(true)),
+            ]),
+        );
+        let normalized = prepared.normalized_payload();
+        let budget = Budget::new(1_000);
+        let mut context = EvaluationContext::new(
+            &subjects,
+            Capability::ToHaveCircularHole,
+            "claim",
+            &normalized,
+            &budget,
+            None,
+        )
+        .with_evidence_profile(profile);
+        match evaluate(&prepared, &mut context) {
+            Evaluation::Geometric {
+                positive_satisfied,
+                diagnostics,
+                evidence,
+                ..
+            } => (positive_satisfied, diagnostics, evidence),
+            _ => panic!("a retained BRep evaluates the hole claim"),
+        }
+    };
+    // Four qualified 2 mm through bores follow a 1 mm exterior cylinder.
+    let (satisfied, _, complete) = hole(2.0, crate::protocol::EvidenceProfile::Complete);
+    assert!(satisfied);
+    let complete = object_field(&complete, "witnesses").unwrap();
+    assert_eq!(
+        array_values(object_field(complete, "circularHoles").unwrap()).len(),
+        4
+    );
+    assert_eq!(
+        array_values(object_field(complete, "matches").unwrap()).len(),
+        4
+    );
+    let (satisfied, _, bounded) = hole(2.0, crate::protocol::EvidenceProfile::Bounded);
+    assert!(satisfied);
+    assert_eq!(
+        object_field(object_field(&bounded, "measured").unwrap(), "matchCount"),
+        Some(&Json::Number(1.0))
+    );
+    let bounded = object_field(&bounded, "witnesses").unwrap();
+    assert!(object_field(bounded, "circularHoles").is_none());
+    assert_eq!(
+        array_values(object_field(bounded, "matches").unwrap()),
+        &array_values(object_field(complete, "matches").unwrap())[..1]
+    );
+    let topology = object_field(bounded, "circularBoreTopology").unwrap();
+    assert!(object_field(topology, "complete").is_none());
+    let candidates = array_values(object_field(topology, "candidates").unwrap());
+    let first_qualified = array_values(
+        object_field(
+            object_field(complete, "circularBoreTopology").unwrap(),
+            "candidates",
+        )
+        .unwrap(),
+    )
+    .iter()
+    .find(|candidate| object_field(candidate, "status") == Some(&Json::string("qualified")))
+    .unwrap();
+    assert_eq!(candidates, std::slice::from_ref(first_qualified));
+    // Without a match the bounded profile keeps the complete evidence.
+    assert_eq!(
+        hole(3.0, crate::protocol::EvidenceProfile::Bounded),
+        hole(3.0, crate::protocol::EvidenceProfile::Complete)
+    );
+}

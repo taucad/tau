@@ -697,6 +697,31 @@ pub(crate) fn canonical_plan_envelope(plan: Json) -> Json {
     ])
 }
 
+/// PERF-OUTPUT-01 (ruling 13): the success-evidence profile a product
+/// selects for a whole plan as `plan.evidenceProfile`. `Complete`, the
+/// default, keeps every existing byte; the canonical plan names only
+/// `bounded`, so its hash and evidence cannot be mistaken for complete.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) enum EvidenceProfile {
+    #[default]
+    Complete,
+    /// Components: count and clusters, nearest-neighbour gaps on failure;
+    /// watertight without `perPrimitive` on success; integrity duplicate
+    /// faces only when declared; a positive circular hole's first match.
+    Bounded,
+}
+
+impl EvidenceProfile {
+    pub(crate) fn parse(value: Option<&Json>) -> Result<Self, ProtocolError> {
+        match value {
+            None => Ok(Self::Complete),
+            Some(Json::String(value)) if value == "complete" => Ok(Self::Complete),
+            Some(Json::String(value)) if value == "bounded" => Ok(Self::Bounded),
+            Some(_) => invalid_claim("Plan evidenceProfile must be 'complete' or 'bounded'."),
+        }
+    }
+}
+
 pub(crate) fn validate_versions(request: &[(String, Json)]) -> Result<(), ProtocolError> {
     let protocol = number_field(request, "protocolVersion")?;
     if protocol != PROTOCOL_VERSION {

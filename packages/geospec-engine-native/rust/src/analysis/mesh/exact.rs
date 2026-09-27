@@ -1,0 +1,616 @@
+//! Exact STEP connected components (M2; rulings 5 and 28). Bodies come from
+//! the retained BRep and exact boxes plus tolerance are only the broad phase.
+//! The O3-07 narrow phase decides each candidate pair: face-box separation,
+//! then the vertex, edge and face pairs of the faces in near face pairs,
+//! nearest first with an early exit on contact. Bodies whose boundaries stay
+//! apart meet only when one lies inside the other solid; one classified
+//! vertex per vertex-connected face set decides that as the whole-body
+//! distance's solid treatment does, and the whole-body distance runs only
+//! where a vertex classifies on a boundary. Union-find skips joined pairs,
+//! and pairs run in cost order (face pairs first, nested bodies after), so a
+//! costly near miss inside an already joined component never runs. Every
+//! step is charged before it runs (ruling 28): face-box tests by the 4,096,
+//! the native steps as the bridge prices them, and faces x faces per
+//! whole-body distance.
+
+use super::{
+    center, compare_utf16, empty_aabb, expand, find, overlaps_within, partial_cmp, sweep_axis,
+    Aabb, ClusterReport, PrimitiveRecord,
+};
+use crate::{
+    backend::{
+        brep::{Bounds, Charge, ComponentBodies, ComponentBody, PointState},
+        BackendError, BackendErrorKind,
+    },
+    budget::{Budget, BudgetExceeded},
+};
+
+/// Face-box tests per work unit.
+const BOX_TESTS_PER_UNIT: u64 = 4096;
+
+/// Why exact components stopped: a charge that would pass the budget, with
+/// the body pair it was for (none while measuring the bodies), or a kernel
+/// failure.
+#[derive(Debug)]
+pub(crate) enum ExactError {
+    Budget {
+        exceeded: BudgetExceeded,
+        pair: Option<(usize, usize)>,
+    },
+    Backend(BackendError),
+}
+
+impl From<BackendError> for ExactError {
+    fn from(error: BackendError) -> Self {
+        Self::Backend(error)
+    }
+}
+
+/// Runs a native step whose charges refuse past the budget; a stopped step
+/// becomes the refusal for `pair`.
+pub(crate) fn ask<T>(
+    budget: &Budget,
+    pair: Option<(usize, usize)>,
+    step: impl FnOnce(&mut Charge<'_>) -> Result<Option<T>, BackendError>,
+) -> Result<T, ExactError> {
+    let mut refused = None;
+    let answer = step(&mut |units| match charge(budget, units) {
+        Ok(()) => true,
+        Err(exceeded) => {
+            refused = Some(exceeded);
+            false
+        }
+    })?;
+    match (answer, refused) {
+        (_, Some(exceeded)) => Err(ExactError::Budget { exceeded, pair }),
+        (Some(answer), None) => Ok(answer),
+        (None, None) => Err(ExactError::Backend(BackendError {
+            kind: BackendErrorKind::ComputationFailed,
+            message: "A native step stopped without a refused charge.".into(),
+        })),
+    }
+}
+
+/// The clusters of bodies within `tolerance` of each other, in the mesh
+/// clusters' order; `labels[i]` names body `i`.
+pub(crate) fn exact_clusters(
+    bodies: &dyn ComponentBodies,
+    labels: &[String],
+    tolerance: f64,
+    budget: &Budget,
+) -> Result<Vec<ClusterReport>, ExactError> {
+    let list = bodies.bodies();
+    let mut parent: Vec<usize> = (0..list.len()).collect();
+    let mut pairs = candidate_pairs(list, tolerance, budget)?;
+    pairs.sort_unstable_by_key(|pair| (pair.count, pair.left, pair.right));
+    let mut nested = Vec::new();
+    for pair in pairs {
+        let (left, right) = (pair.left, pair.right);
+        if find(&mut parent, left) == find(&mut parent, right) {
+            continue;
+        }
+        let touching = pair.count > 0
+            && ask(budget, Some((left, right)), |charge| {
+                bodies.faces_within(
+                    left,
+                    &pair.left_faces,
+                    right,
+                    &pair.right_faces,
+                    tolerance,
+                    charge,
+                )
+            })?;
+        if touching {
+            union(&mut parent, left, right);
+        } else if holds(&list[left], &list[right], tolerance)
+            || holds(&list[right], &list[left], tolerance)
+        {
+            let units =
+                (list[left].faces.len() as u64).saturating_mul(list[right].faces.len() as u64);
+            nested.push((units, left, right));
+        }
+    }
+    nested.sort_unstable();
+    for (units, left, right) in nested {
+        if find(&mut parent, left) == find(&mut parent, right) {
+            continue;
+        }
+        if nested_within(bodies, left, right, tolerance, units, budget)? {
+            union(&mut parent, left, right);
+        }
+    }
+    Ok(clusters(list, labels, &mut parent))
+}
+
+/// Boundaries farther apart than `tolerance` meet only where one body lies
+/// inside the other solid. Each vertex-connected face set then lies wholly
+/// inside or wholly outside, so one vertex per set classifies all of its
+/// vertices exactly as the whole-body distance classifies each; that
+/// distance, charged faces x faces, runs only where a vertex classifies on
+/// a boundary.
+fn nested_within(
+    bodies: &dyn ComponentBodies,
+    left: usize,
+    right: usize,
+    tolerance: f64,
+    units: u64,
+    budget: &Budget,
+) -> Result<bool, ExactError> {
+    let list = bodies.bodies();
+    let mut unsure = false;
+    for (outer, inner) in [(left, right), (right, left)] {
+        if !list[outer].solid {
+            continue;
+        }
+        match ask(budget, Some((left, right)), |charge| {
+            bodies.body_inside(outer, inner, charge)
+        })? {
+            PointState::In => return Ok(true),
+            PointState::On => unsure = true,
+            PointState::Out => {}
+        }
+    }
+    if !unsure {
+        return Ok(false);
+    }
+    charge(budget, units).map_err(|exceeded| ExactError::Budget {
+        exceeded,
+        pair: Some((left, right)),
+    })?;
+    Ok(bodies.bodies_within(left, right, tolerance)?)
+}
+
+fn union(parent: &mut [usize], left: usize, right: usize) {
+    let left = find(parent, left);
+    let right = find(parent, right);
+    parent[left] = right;
+}
+
+/// Checked before charging, so a refused step never leaves the budget spent
+/// past its limit, where the plan would refuse without the pair.
+fn charge(budget: &Budget, units: u64) -> Result<(), BudgetExceeded> {
+    let used = budget.used().saturating_add(units);
+    if used > budget.limit() {
+        return Err(BudgetExceeded {
+            limit: budget.limit(),
+            used,
+        });
+    }
+    budget.charge(units)
+}
+
+fn aabb(bounds: Bounds) -> Aabb {
+    Aabb {
+        min: bounds.min,
+        max: bounds.max,
+    }
+}
+
+/// A broad-phase pair: its near face pairs' count, which orders the narrow
+/// phase cheapest first, and the faces those pairs use on each side.
+struct Candidate {
+    count: usize,
+    left: usize,
+    right: usize,
+    left_faces: Vec<u32>,
+    right_faces: Vec<u32>,
+}
+
+/// Broad-phase pairs whose boxes overlap within `tolerance`. Each pair's
+/// face-box tests are charged (by their faces x faces bound) before they run.
+fn candidate_pairs(
+    list: &[ComponentBody],
+    tolerance: f64,
+    budget: &Budget,
+) -> Result<Vec<Candidate>, ExactError> {
+    let axis = sweep_axis(list.iter().map(|body| aabb(body.bounds)));
+    let mut order: Vec<usize> = (0..list.len()).collect();
+    order.sort_by(|&left, &right| {
+        partial_cmp(list[left].bounds.min[axis], list[right].bounds.min[axis])
+            .then_with(|| left.cmp(&right))
+    });
+    let mut pairs = Vec::new();
+    for (position, &current) in order.iter().enumerate() {
+        let bounds = aabb(list[current].bounds);
+        for &candidate in &order[position + 1..] {
+            let other = aabb(list[candidate].bounds);
+            if other.min[axis] > bounds.max[axis] + tolerance {
+                break;
+            }
+            if overlaps_within(bounds, other, tolerance) {
+                let (left, right) = (current.min(candidate), current.max(candidate));
+                let tests =
+                    (list[left].faces.len() as u64).saturating_mul(list[right].faces.len() as u64);
+                charge(budget, 1 + tests / BOX_TESTS_PER_UNIT).map_err(|exceeded| {
+                    ExactError::Budget {
+                        exceeded,
+                        pair: Some((left, right)),
+                    }
+                })?;
+                pairs.push(face_pairs(
+                    &list[left],
+                    &list[right],
+                    left,
+                    right,
+                    tolerance,
+                ));
+            }
+        }
+    }
+    Ok(pairs)
+}
+
+/// Euclidean distance between two boxes, zero when they meet.
+fn box_distance(left: Bounds, right: Bounds) -> f64 {
+    let squares: f64 = (0..3)
+        .map(|axis| {
+            let gap = (left.min[axis] - right.max[axis])
+                .max(right.min[axis] - left.max[axis])
+                .max(0.0);
+            gap * gap
+        })
+        .sum();
+    squares.sqrt()
+}
+
+/// The face pairs whose memo boxes lie within `tolerance`. The boxes enclose
+/// their faces, so any other face pair is proven apart.
+fn face_pairs(
+    left: &ComponentBody,
+    right: &ComponentBody,
+    left_index: usize,
+    right_index: usize,
+    tolerance: f64,
+) -> Candidate {
+    let near = |faces: &[Bounds], other: Bounds| -> Vec<usize> {
+        (0..faces.len())
+            .filter(|&face| box_distance(faces[face], other) <= tolerance)
+            .collect()
+    };
+    let mut left_used = vec![false; left.faces.len()];
+    let mut right_used = vec![false; right.faces.len()];
+    let mut count = 0;
+    let right_near = near(&right.faces, left.bounds);
+    for left_face in near(&left.faces, right.bounds) {
+        for &right_face in &right_near {
+            if box_distance(left.faces[left_face], right.faces[right_face]) <= tolerance {
+                count += 1;
+                left_used[left_face] = true;
+                right_used[right_face] = true;
+            }
+        }
+    }
+    let used = |flags: Vec<bool>| -> Vec<u32> {
+        (0..flags.len() as u32)
+            .filter(|&face| flags[face as usize])
+            .collect()
+    };
+    Candidate {
+        count,
+        left: left_index,
+        right: right_index,
+        left_faces: used(left_used),
+        right_faces: used(right_used),
+    }
+}
+
+/// Whether `inner` can lie inside the solid `outer`'s material.
+fn holds(outer: &ComponentBody, inner: &ComponentBody, tolerance: f64) -> bool {
+    outer.solid
+        && (0..3).all(|axis| {
+            outer.bounds.min[axis] - tolerance <= inner.bounds.min[axis]
+                && inner.bounds.max[axis] <= outer.bounds.max[axis] + tolerance
+        })
+}
+
+/// Clusters in body order, labelled by their body with the most vertices
+/// (the first on ties), then sorted as the mesh clusters are.
+fn clusters(list: &[ComponentBody], labels: &[String], parent: &mut [usize]) -> Vec<ClusterReport> {
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    let mut group_of = vec![usize::MAX; list.len()];
+    for body in 0..list.len() {
+        let root = find(parent, body);
+        if group_of[root] == usize::MAX {
+            group_of[root] = groups.len();
+            groups.push(Vec::new());
+        }
+        groups[group_of[root]].push(body);
+    }
+    let mut clusters: Vec<ClusterReport> = groups
+        .into_iter()
+        .map(|members| {
+            let mut bounds = empty_aabb();
+            let mut total_vertices = 0_u32;
+            let mut heaviest = members[0];
+            let primitives = members
+                .iter()
+                .map(|&body| {
+                    let value = &list[body];
+                    let box_ = aabb(value.bounds);
+                    expand(&mut bounds, box_.min);
+                    expand(&mut bounds, box_.max);
+                    total_vertices = total_vertices.saturating_add(value.vertices);
+                    if value.vertices > list[heaviest].vertices {
+                        heaviest = body;
+                    }
+                    PrimitiveRecord {
+                        name: labels[body].clone(),
+                        color: None,
+                        vertices: value.vertices,
+                        aabb: box_,
+                    }
+                })
+                .collect();
+            ClusterReport {
+                label: labels[heaviest].clone(),
+                primitives,
+                aabb: bounds,
+                centroid: center(bounds),
+                total_vertices,
+            }
+        })
+        .collect();
+    clusters.sort_by(|left, right| {
+        right
+            .total_vertices
+            .cmp(&left.total_vertices)
+            .then_with(|| compare_utf16(&left.label, &right.label))
+    });
+    clusters
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{
+        cell::RefCell,
+        collections::{HashMap, HashSet},
+    };
+
+    fn slab(min: [f64; 3], max: [f64; 3]) -> Bounds {
+        Bounds { min, max }
+    }
+
+    fn body(faces: Vec<Bounds>, solid: bool, vertices: u32) -> ComponentBody {
+        let mut bounds = slab([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+        for face in &faces {
+            for axis in 0..3 {
+                bounds.min[axis] = bounds.min[axis].min(face.min[axis]);
+                bounds.max[axis] = bounds.max[axis].max(face.max[axis]);
+            }
+        }
+        ComponentBody {
+            occurrence: None,
+            solid,
+            vertices,
+            bounds,
+            faces,
+        }
+    }
+
+    /// Verdicts by body pair; every evaluation is recorded. A face query
+    /// charges one unit per listed face pair and a classification one unit.
+    #[derive(Default)]
+    struct Fake {
+        bodies: Vec<ComponentBody>,
+        touching: HashSet<(usize, usize)>,
+        inside: HashMap<(usize, usize), PointState>,
+        nested: HashSet<(usize, usize)>,
+        calls: RefCell<Vec<(&'static str, usize, usize)>>,
+    }
+
+    impl ComponentBodies for Fake {
+        fn bodies(&self) -> &[ComponentBody] {
+            &self.bodies
+        }
+        fn faces_within(
+            &self,
+            left: usize,
+            left_faces: &[u32],
+            right: usize,
+            right_faces: &[u32],
+            _: f64,
+            charge: &mut Charge<'_>,
+        ) -> Result<Option<bool>, BackendError> {
+            self.calls.borrow_mut().push(("faces", left, right));
+            if !charge((left_faces.len() * right_faces.len()) as u64) {
+                return Ok(None);
+            }
+            Ok(Some(self.touching.contains(&(left, right))))
+        }
+        fn body_inside(
+            &self,
+            outer: usize,
+            inner: usize,
+            charge: &mut Charge<'_>,
+        ) -> Result<Option<PointState>, BackendError> {
+            self.calls.borrow_mut().push(("inside", outer, inner));
+            if !charge(1) {
+                return Ok(None);
+            }
+            Ok(Some(
+                self.inside
+                    .get(&(outer, inner))
+                    .copied()
+                    .unwrap_or(PointState::Out),
+            ))
+        }
+        fn bodies_within(&self, left: usize, right: usize, _: f64) -> Result<bool, BackendError> {
+            self.calls.borrow_mut().push(("bodies", left, right));
+            Ok(self.nested.contains(&(left, right)))
+        }
+    }
+
+    fn labels(count: usize) -> Vec<String> {
+        (0..count).map(|index| format!("b{index}")).collect()
+    }
+
+    /// Three bodies on x: 0-1 (2 face pairs) and 1-2 (3) touch, 0-2 (6) is
+    /// a near miss that a joined component never evaluates. Each broad-phase
+    /// pair costs one unit.
+    fn chain(touching: &[(usize, usize)]) -> Fake {
+        let unit = |x: f64| slab([x, 0.0, 0.0], [x + 1.0, 1.0, 1.0]);
+        Fake {
+            bodies: vec![
+                body(vec![unit(0.0), unit(0.0)], true, 8),
+                body(vec![unit(1.0)], true, 4),
+                // A shell, so its box holding body 1 asks for no classification.
+                body(vec![slab([0.5, 0.0, 0.0], [2.5, 1.0, 1.0]); 3], false, 8),
+            ],
+            touching: touching.iter().copied().collect(),
+            ..Fake::default()
+        }
+    }
+
+    #[test]
+    fn joined_pairs_skip_their_costlier_near_misses_in_cost_order() {
+        let fake = chain(&[(0, 1), (1, 2)]);
+        let budget = Budget::new(100);
+        let clusters = exact_clusters(&fake, &labels(3), 0.001, &budget).unwrap();
+        assert_eq!(clusters.len(), 1);
+        assert_eq!(*fake.calls.borrow(), [("faces", 0, 1), ("faces", 1, 2)]);
+        assert_eq!(budget.used(), 3 + 2 + 3);
+        // Heaviest body names the cluster; ties keep the first body.
+        assert_eq!(clusters[0].label, "b0");
+        assert_eq!(clusters[0].total_vertices, 20);
+    }
+
+    #[test]
+    fn a_near_miss_evaluates_its_faces_and_stays_apart() {
+        let fake = chain(&[(0, 1)]);
+        let budget = Budget::new(100);
+        let clusters = exact_clusters(&fake, &labels(3), 0.001, &budget).unwrap();
+        // 1-2 (3 face pairs) runs before 0-2 (6); both miss.
+        assert_eq!(
+            *fake.calls.borrow(),
+            [("faces", 0, 1), ("faces", 1, 2), ("faces", 0, 2)]
+        );
+        assert_eq!(budget.used(), 3 + 2 + 3 + 6);
+        assert_eq!(
+            clusters
+                .iter()
+                .map(|cluster| cluster.label.as_str())
+                .collect::<Vec<_>>(),
+            ["b0", "b2"]
+        );
+    }
+
+    #[test]
+    fn the_refusal_names_the_pair_whose_charge_would_pass_the_budget() {
+        for (limit, pair, used) in [(1, (0, 1), 2), (5, (1, 2), 8)] {
+            let fake = chain(&[(0, 1), (1, 2)]);
+            let budget = Budget::new(limit);
+            let Err(ExactError::Budget { exceeded, pair: at }) =
+                exact_clusters(&fake, &labels(3), 0.001, &budget)
+            else {
+                panic!("expected a budget refusal");
+            };
+            // The broad phase refuses its second pair at 1 unit; the narrow
+            // phase refuses 1-2's faces after 0-1 joined at 5.
+            assert_eq!(at, Some(pair));
+            assert_eq!((exceeded.limit, exceeded.used), (limit, used));
+            // Nothing is spent past the limit, so the plan keeps this refusal.
+            assert_eq!(budget.used(), limit);
+        }
+    }
+
+    #[test]
+    fn a_nested_pair_is_decided_by_classification_before_any_whole_body_distance() {
+        let cube = |min: f64, max: f64| {
+            let (lo, hi) = ([min; 3], [max; 3]);
+            (0..3)
+                .flat_map(|axis| {
+                    [lo[axis], hi[axis]].map(|value| {
+                        let (mut a, mut b) = (lo, hi);
+                        a[axis] = value;
+                        b[axis] = value;
+                        slab(a, b)
+                    })
+                })
+                .collect::<Vec<_>>()
+        };
+        let inside = |states: &[((usize, usize), PointState)]| -> HashMap<_, _> {
+            states.iter().copied().collect()
+        };
+        let cases: [(bool, HashMap<_, _>, bool, usize, &[_], u64); 5] = [
+            // A point of the inner body inside: joined, no distance.
+            (
+                true,
+                inside(&[((0, 1), PointState::In)]),
+                false,
+                1,
+                &[("inside", 0, 1)],
+                1 + 1,
+            ),
+            // Every point outside, both ways: apart, no distance.
+            (
+                true,
+                HashMap::new(),
+                false,
+                2,
+                &[("inside", 0, 1), ("inside", 1, 0)],
+                1 + 2,
+            ),
+            // A point on a boundary: the whole-body distance decides, charged
+            // faces x faces.
+            (
+                true,
+                inside(&[((0, 1), PointState::On)]),
+                true,
+                1,
+                &[("inside", 0, 1), ("inside", 1, 0), ("bodies", 0, 1)],
+                1 + 2 + 36,
+            ),
+            (
+                true,
+                inside(&[((0, 1), PointState::On)]),
+                false,
+                2,
+                &[("inside", 0, 1), ("inside", 1, 0), ("bodies", 0, 1)],
+                1 + 2 + 36,
+            ),
+            // No solid holds the other's box: nothing is asked.
+            (false, HashMap::new(), false, 2, &[], 1),
+        ];
+        for (solid, states, nested, count, calls, units) in cases {
+            let fake = Fake {
+                bodies: vec![
+                    body(cube(0.0, 10.0), solid, 8),
+                    body(cube(4.0, 6.0), true, 8),
+                ],
+                inside: states,
+                nested: if nested {
+                    HashSet::from([(0, 1)])
+                } else {
+                    HashSet::new()
+                },
+                ..Fake::default()
+            };
+            let budget = Budget::new(100);
+            let clusters = exact_clusters(&fake, &labels(2), 0.001, &budget).unwrap();
+            assert_eq!(clusters.len(), count);
+            // Face boxes 4 mm apart prove the boundaries apart without a call.
+            assert_eq!(*fake.calls.borrow(), calls);
+            assert_eq!(budget.used(), units);
+        }
+    }
+
+    #[test]
+    fn separated_boxes_answer_from_the_broad_phase_alone() {
+        let bodies: Vec<_> = (0..64)
+            .map(|index| {
+                let x = f64::from(index) * 2.0;
+                body(vec![slab([x, 0.0, 0.0], [x + 1.0, 1.0, 1.0])], true, 8)
+            })
+            .collect();
+        let fake = Fake {
+            bodies,
+            ..Fake::default()
+        };
+        let budget = Budget::new(1);
+        let clusters = exact_clusters(&fake, &labels(64), 0.001, &budget).unwrap();
+        assert_eq!(clusters.len(), 64);
+        assert!(fake.calls.borrow().is_empty());
+        assert_eq!(budget.used(), 0);
+    }
+}

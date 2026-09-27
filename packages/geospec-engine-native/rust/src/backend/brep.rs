@@ -474,6 +474,63 @@ pub struct ClosureEdgeSample {
     pub center: [f64; 3],
 }
 
+/// One body of exact connected components (M2): a top-level solid, free
+/// shell or free face of a requested occurrence, or of the whole shape.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ComponentBody {
+    /// The requested occurrence; `None` for a whole-shape body.
+    pub occurrence: Option<u32>,
+    /// A solid, so a body inside its material is at distance zero.
+    pub solid: bool,
+    pub vertices: u32,
+    /// The fold of `faces`, bit-equal to the shape's exact bounds.
+    pub bounds: Bounds,
+    /// Each face's box from the per-located-face memo, in explorer order.
+    pub faces: Vec<Bounds>,
+}
+
+/// Asked for the work units of the next native step before it runs (ruling
+/// 28); `false` stops the step, which then answers `None`.
+pub type Charge<'a> = dyn FnMut(u64) -> bool + 'a;
+
+/// Exact narrow-phase verdicts over one set of component bodies; nothing
+/// here publishes a point.
+pub trait ComponentBodies {
+    fn bodies(&self) -> &[ComponentBody];
+    /// Whether any listed face of `left` lies within `tolerance` of any
+    /// listed face of `right`: their vertex, edge and face pairs whose boxes
+    /// lie within reach, nearest first, each charged before its serial exact
+    /// distance, stopping at the first within `tolerance`.
+    fn faces_within(
+        &self,
+        left: usize,
+        left_faces: &[u32],
+        right: usize,
+        right_faces: &[u32],
+        tolerance: f64,
+        charge: &mut Charge<'_>,
+    ) -> Result<Option<bool>, BackendError>;
+    /// Where `inner` lies in the solid `outer`, for bodies whose boundaries
+    /// lie farther apart than the tolerance: one vertex per vertex-connected
+    /// face set of `inner`, classified as the whole-body distance classifies
+    /// every vertex; `In` when one is inside, `Out` when all are outside, and
+    /// `On` otherwise.
+    fn body_inside(
+        &self,
+        outer: usize,
+        inner: usize,
+        charge: &mut Charge<'_>,
+    ) -> Result<Option<PointState>, BackendError>;
+    /// Whether two whole bodies lie within `tolerance`, a solid's interior
+    /// included; parallel under a grant, which leaves the distance exact.
+    fn bodies_within(
+        &self,
+        left: usize,
+        right: usize,
+        tolerance: f64,
+    ) -> Result<bool, BackendError>;
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PointState {
     In,
@@ -1239,6 +1296,19 @@ pub trait BrepSubject {
         Err(BackendError {
             kind: super::BackendErrorKind::Unsupported,
             message: "The BRep connector has no exact shell-closure facet.".into(),
+        })
+    }
+    /// Component bodies of the listed occurrences, or of the whole shape
+    /// when the list is empty (M2), with their face boxes charged before
+    /// they are measured; `None` when `charge` stops them.
+    fn component_bodies(
+        &self,
+        _occurrences: &[u32],
+        _charge: &mut Charge<'_>,
+    ) -> Result<Option<Box<dyn ComponentBodies + '_>>, BackendError> {
+        Err(BackendError {
+            kind: super::BackendErrorKind::Unsupported,
+            message: "The BRep connector has no exact component-body query.".into(),
         })
     }
     /// Classify against the located trimmed face. Off-surface points are Out.

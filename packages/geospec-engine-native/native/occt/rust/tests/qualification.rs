@@ -62,6 +62,11 @@ fn v3_rigid_instances_answer_from_one_analysis() {
 }
 
 #[test]
+fn v3_a_reversed_instance_is_not_answered_from_its_definition() {
+    qualify("reversed-instance-falls-through");
+}
+
+#[test]
 fn s4_wall_closure_ignores_the_stored_closed_flag() {
     qualify("wall-closure-ignores-the-stored-flag");
 }

@@ -8,10 +8,11 @@
 
 PicoVoxel WebAssembly voxel, implicit and lattice geometry kernel
 
-> **Interim dependency.** Until `picovoxel` is published to npm, this package depends on the vendored
-> candidate `vendor/picovoxel-0.1.0.tgz` through a `file:` specifier. That is an approved, temporary
-> exception to Tau's registry-only dependency policy; do not publish this package until the dependency
-> is replaced by the matching registry release.
+> **Interim dependency.** Until `picovoxel` is published to npm, this package depends on a
+> [pkg.pr.new](https://pkg.pr.new) preview of `taucad/picovoxel` main through the workspace catalog
+> (see [Preview provenance](#preview-provenance)). That is an approved, temporary exception to Tau's
+> registry-only dependency policy; do not publish this package until the dependency is replaced by the
+> matching registry release.
 
 ## Why @taucad/picovoxel?
 
@@ -66,14 +67,20 @@ serial build, so exact output is identical in every host.
 
 ### Runtime lifetime
 
-Each kernel worker compiles and instantiates each build once and keeps one warm PicoVoxel runtime per
-build (the multi build's thread pool included); every render opens a fresh session on it and disposes
-it, together with any session the model created itself, when the render ends. A runtime is replaced
-after a WebAssembly trap or once its heap passes 1.5 GiB. Renders are cancelled cooperatively: a
-superseded render stops at its next PicoVoxel call.
+Each kernel worker compiles each build's WebAssembly module once (or instantiates the module its host
+compiled for the same URL) and keeps one warm PicoVoxel runtime per build (the multi build's thread
+pool included); every render opens a fresh session on it and disposes it, together with any session
+the model created itself, when the render ends. A runtime is replaced after a WebAssembly trap or once
+its heap passes 1.5 GiB; the replacement instantiates the module already compiled. Renders are
+cancelled cooperatively: a superseded render stops at its next PicoVoxel call.
 
-If the multi build runs out of memory (or cannot start), the render is rebuilt once on the serial build
-and the result carries a `RESOURCE_LIMIT` warning naming the remedy (a coarser `voxelSize`).
+The binaries and the pthread worker script load from explicit URLs of picovoxel's asset subpaths
+(`picovoxel/wasm`, `picovoxel/multi/wasm`, `picovoxel/multi/worker`), which Tau's runtime asset plugin
+emits as files; in Node the worker script is passed as a filesystem path.
+
+If the multi build runs out of memory, the render is rebuilt once on the serial build and the result
+carries a `RESOURCE_LIMIT` warning naming the remedy (a coarser `voxelSize`). If it cannot start, the
+same rebuild carries a `KERNEL_CAPABILITY_MISSING` warning.
 
 ### WebAssembly build
 
@@ -91,24 +98,21 @@ run fails the fast build with a `KERNEL_CAPABILITY_MISSING` issue rather than si
 exact builds still work. GLB is normalized through Tau's geometry pipeline; STL is emitted by
 PicoVoxel's pure serializer.
 
-## Local candidate provenance
+## Preview provenance
 
-| Field           | Value                                                                                             |
-| --------------- | ------------------------------------------------------------------------------------------------- |
-| Picovoxel base  | `6779245` (local `webgpu`) + `lanes/ratified-menu` `add8e7b` + `perf/runtime-reuse` `a36e41d`     |
-| Version         | `picovoxel@0.1.0`                                                                                 |
-| Tarball         | `vendor/picovoxel-0.1.0.tgz`                                                                      |
-| Files           | 40                                                                                                |
-| Compressed size | 2,781,792 bytes                                                                                   |
-| Unpacked size   | 12,868,529 bytes                                                                                  |
-| SHA-1           | `dc4f069d76ead5cf4f510d6304160aaf309ae964`                                                        |
-| SHA-256         | `ab1ff8445121882be5ca82249ecf87fc9c14cd43b4a8d683169f3204b4c85c25`                                |
-| Integrity       | `sha512-LTwo10Gw9vlcLPoFnxBsLCMreK48CEfBxAo1k4pBuZKM/EEi9ZzwGm18WpqYi68xuPpuJSIaJbUrNr9OKt8cgw==` |
+| Field     | Value                                                                                               |
+| --------- | --------------------------------------------------------------------------------------------------- |
+| Specifier | `https://pkg.pr.new/picovoxel@09a1108` (workspace catalog)                                          |
+| Source    | `taucad/picovoxel` PR #9 head `09a1108`; its tree equals main `dc966e0`, which publishes no preview |
+| Version   | `0.0.0-preview-09a1108`                                                                             |
+| CI run    | [36317025531](https://github.com/taucad/picovoxel/actions/runs/36317025531), every job green        |
+| Size      | 2,762,838 bytes served                                                                              |
+| Integrity | `sha512-/rfBQbpHnXHLD1zIFgETzm4fl2OTcRPQbjm6k9WutDTJvy/hJqX7X+Ups7tjWpnaR4Qg7i8wX++AZCUQDi454g==`   |
 
-The candidate is packed from a local, unpushed merge branch (`integration/local-tarball`) that
-combines the ratified lane menu and the shared-runtime API ahead of their pull requests; both
-WebAssembly artifacts are byte-identical to the previous candidate's. The registry release replaces
-it. The merged branches' own suites pass at 100% statement, branch, function, and line coverage.
+Both WebAssembly binaries are CI-built. The kernel version carries the package version, both binary
+digests and one digest over every shipped script; `picovoxel.asset-ownership.test.ts` recomputes all
+four, so moving the dependency fails that test until the kernel's constants follow it. The registry
+release replaces the preview.
 
 Hand the definition to a client — `createNodeClient`, `createRuntimeWorker`, or your own host. See
 [`@taucad/runtime`](https://www.npmjs.com/package/@taucad/runtime) for the client lifecycle.
@@ -147,8 +151,8 @@ npm audit signatures
 
 ## License
 
-Apache-2.0 — see [LICENSE](./LICENSE). The vendored Picovoxel candidate is Apache-2.0 and retains its
-own `LICENSE` and `NOTICE` inside the tarball.
+Apache-2.0 — see [LICENSE](./LICENSE). The `picovoxel` dependency is Apache-2.0 and ships its own
+`license` and `NOTICE`.
 
 ## Links
 

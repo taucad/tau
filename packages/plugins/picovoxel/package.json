@@ -63,7 +63,7 @@
   },
   "dependencies": {
     "@taucad/geometry-core": "workspace:*",
-    "picovoxel": "file:./vendor/picovoxel-0.1.0.tgz"
+    "picovoxel": "catalog:"
   },
   "peerDependencies": {
     "@taucad/runtime": "^0.1.0-beta.0",

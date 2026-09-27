@@ -40,7 +40,7 @@
     "geospec": "workspace:*",
     "libcascade": "catalog:",
     "manifold-3d": "catalog:",
-    "picovoxel": "file:../../packages/plugins/picovoxel/vendor/picovoxel-0.1.0.tgz",
+    "picovoxel": "catalog:",
     "replicad": "catalog:",
     "replicad-opencascadejs": "catalog:",
     "sharp": "^0.34.5"

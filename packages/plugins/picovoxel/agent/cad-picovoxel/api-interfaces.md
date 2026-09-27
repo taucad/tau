@@ -790,7 +790,7 @@ Slice: interface Slice
 
   contours: SliceContour[]
 
-  // §14.1 value-class provenance of the sliced voxels (absent = `'exact'`)
+  // §14.1 value-class provenance of the sliced voxels (`'exact'` or absent = exact
   lane: 'exact' | 'fast'
 
 SliceContour: interface SliceContour
@@ -811,7 +811,7 @@ SliceStack: interface SliceStack
       max: readonly [number, number, number];
     }
 
-  // §14.1 value-class provenance (absent = `'exact'`)
+  // §14.1 value-class provenance (`'exact'` or absent = exact)
   lane: 'exact' | 'fast'
 
 SliceVoxelsOptions: interface SliceVoxelsOptions

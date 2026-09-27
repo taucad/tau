@@ -287,14 +287,14 @@ SdfImage (interface) [3 members]
 Slice (interface) [3 members]
   Slice.z (property) — Layer height position in mm (first layer at one layerHeight,…
   Slice.contours (property)
-  Slice.lane (property) — §14.1 value-class provenance of the sliced voxels (absent = `'exact'`)
+  Slice.lane (property) — §14.1 value-class provenance of the sliced voxels (`'exact'` or absent…
 SliceContour (interface) [2 members]
   SliceContour.points (property) — Flat [x0, y0, x1, y1, …] loop in mm
   SliceContour.winding (property) — Solid boundaries are CCW, holes CW (upstream contract)
 SliceStack (interface) [3 members]
   SliceStack.slices (property)
   SliceStack.bounds (property) — XY bounds over every contour + Z from first/last layer
-  SliceStack.lane (property) — §14.1 value-class provenance (absent = `'exact'`)
+  SliceStack.lane (property) — §14.1 value-class provenance (`'exact'` or absent = exact)
 SliceVoxelsOptions (interface) [3 members]
   SliceVoxelsOptions.layerHeight (property) — Layer height in mm
   SliceVoxelsOptions.useAbsoluteXY (property) — Keep absolute XY coordinates instead of the bbox-relative default

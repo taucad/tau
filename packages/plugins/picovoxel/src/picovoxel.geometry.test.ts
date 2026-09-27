@@ -227,6 +227,14 @@ describe('dropZeroAreaTriangles (D36)', () => {
     expect([...dropZeroAreaTriangles(vertices, triangles)]).toEqual(square);
   });
 
+  it('should keep a sliver whose area is tiny but not zero', () => {
+    // Height 2^-20 mm over a 1 mm base: area ~5e-7 mm², still an exact nonzero cross product.
+    const sliver = new Float32Array([0, 0, 0, 1, 0, 0, 0.5, 2 ** -20, 0]);
+    const triangles = new Uint32Array([0, 1, 2]);
+
+    expect(dropZeroAreaTriangles(sliver, triangles)).toBe(triangles);
+  });
+
   it('should return the same array when nothing is dropped', () => {
     const triangles = new Uint32Array(square);
 

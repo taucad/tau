@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, posix } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import type { BundledTypesPackageMap } from '#bundled-types.types.js';
@@ -9,11 +9,12 @@ import type { BundledTypesPackageMap } from '#bundled-types.types.js';
 /**
  * Bundle PicoVoxel's declaration graph for Monaco and the generated `cad-picovoxel` skill.
  *
- * PicoVoxel ships hashed declaration chunks (`types-<hash>.d.ts`) that its subpath entries import
- * relatively, so the bundle keeps the relative topology: every author entry plus every chunk it
- * reaches, read recursively. `picovoxel/multi` and `picovoxel/raw` are session internals Tau owns,
- * and `picovoxel/three` needs `three` types Monaco does not mount, so none of them are authoring
- * surface (blueprint Q-C10, R21).
+ * PicoVoxel ships unbundled declarations that mirror its sources (`dist/session.d.ts`,
+ * `dist/shapekernel/basePipe.d.ts`, …) and import each other relatively, across directories too
+ * (`../numerics/frame.js`). The bundle keeps that topology: every author entry plus every file it
+ * reaches, keyed by its path under `dist/`. `picovoxel/multi` and `picovoxel/raw` are session
+ * internals Tau owns, and `picovoxel/three` needs `three` types Monaco does not mount, so none of
+ * them are authoring surface (blueprint Q-C10, R21).
  *
  * Nx cannot hash `node_modules`, so the target's real input is `pnpm-lock.yaml`.
  */
@@ -21,21 +22,46 @@ import type { BundledTypesPackageMap } from '#bundled-types.types.js';
 /** Author-facing PicoVoxel export subpaths, `.` first. @public */
 export const picovoxelAuthorSubpaths = ['.', './latticelibrary', './numerics', './shapekernel', './slicing'] as const;
 
-/** Relative `from './x.js'` and `import('./x.js')` specifiers in a declaration file. */
-const relativeImportPattern = /(?:from\s+|import\s*\(\s*)["'](\.\/[^"']+)\.js["']/gu;
+type PicovoxelAuthorSubpath = (typeof picovoxelAuthorSubpaths)[number];
 
-// ponytail: resolved beside the root entry until picovoxel exports `./package.json` (blueprint D13).
-const declarationDirectory = (): string => dirname(fileURLToPath(import.meta.resolve('picovoxel')));
+/** Relative `from './x.js'`, `from '../y/x.js'` and `import('./x.js')` specifiers in a declaration file. */
+const relativeImportPattern = /(?:from\s+|import\s*\(\s*)["'](\.{1,2}\/[^"']+)\.js["']/gu;
 
-const entryFile = (subpath: (typeof picovoxelAuthorSubpaths)[number]): string =>
-  subpath === '.' ? 'index.d.ts' : `${subpath.slice(2)}.d.ts`;
+type PicovoxelManifest = Readonly<{
+  exports: Readonly<Record<string, Readonly<{ import?: Readonly<{ types?: string }> }> | string>>;
+}>;
+
+/** The installed package root, found through picovoxel's exported `./package.json` (blueprint D13). */
+const packageRoot = (): string => dirname(fileURLToPath(import.meta.resolve('picovoxel/package.json')));
+
+/**
+ * Each author subpath's declaration entry, relative to `dist/`, read from the installed exports map.
+ *
+ * @param root - The installed package root.
+ * @returns The entry file per author subpath.
+ */
+const authorEntries = (root: string): Readonly<Record<PicovoxelAuthorSubpath, string>> => {
+  const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as PicovoxelManifest;
+  const entries = picovoxelAuthorSubpaths.map((subpath) => {
+    const target = manifest.exports[subpath];
+    const types = typeof target === 'object' ? target.import?.types : undefined;
+    if (!types?.startsWith('./dist/')) {
+      throw new Error(`picovoxel exports no ESM declaration under dist/ for ${subpath}.`);
+    }
+    return [subpath, types.slice('./dist/'.length)] as const;
+  });
+  return Object.fromEntries(entries) as Record<PicovoxelAuthorSubpath, string>;
+};
 
 /**
  * Read `entries` and every declaration file they reach through relative imports.
  *
+ * A specifier resolves against the file that imports it, so nested directories and `../` climbs
+ * land on the file TypeScript would load. A specifier that climbs out of `directory` is refused.
+ *
  * @param directory - The installed `dist` directory.
- * @param entries - Declaration file names to start from.
- * @returns Every reached declaration file by name, sorted.
+ * @param entries - Declaration files to start from, relative to `directory`.
+ * @returns Every reached declaration file by its POSIX path under `directory`, sorted.
  */
 export const collectDeclarationGraph = (
   directory: string,
@@ -50,7 +76,11 @@ export const collectDeclarationGraph = (
     const content = readFileSync(join(directory, name), 'utf8');
     files.set(name, content);
     for (const [, specifier] of content.matchAll(relativeImportPattern)) {
-      pending.push(`${specifier!.slice(2)}.d.ts`);
+      const target = posix.join(posix.dirname(name), `${specifier!}.d.ts`);
+      if (target.startsWith('../')) {
+        throw new Error(`${name} imports ${specifier!}.js from outside the declaration directory.`);
+      }
+      pending.push(target);
     }
   }
   return Object.fromEntries([...files].toSorted(([left], [right]) => left.localeCompare(right)));
@@ -59,16 +89,18 @@ export const collectDeclarationGraph = (
 /**
  * Build the package-shaped PicoVoxel declaration bundle.
  *
- * @param directory - The installed `dist` directory; defaults to module resolution of `picovoxel`.
+ * @param root - The installed package root; defaults to module resolution of `picovoxel/package.json`.
  * @returns The bundle keyed by package name.
  */
-export const buildPicovoxelTypes = (directory = declarationDirectory()): BundledTypesPackageMap => {
-  const { 'index.d.ts': content, ...files } = collectDeclarationGraph(
-    directory,
-    picovoxelAuthorSubpaths.map((subpath) => entryFile(subpath)),
-  );
+export const buildPicovoxelTypes = (root = packageRoot()): BundledTypesPackageMap => {
+  const entries = authorEntries(root);
+  // The shared mount always writes a package's `content` to its `index.d.ts`.
+  if (entries['.'] !== 'index.d.ts') {
+    throw new Error(`picovoxel's root declarations moved to dist/${entries['.']}; the mount expects dist/index.d.ts.`);
+  }
+  const { 'index.d.ts': content, ...files } = collectDeclarationGraph(join(root, 'dist'), Object.values(entries));
   if (content === undefined) {
-    throw new Error(`PicoVoxel root declarations are missing from ${directory}.`);
+    throw new Error(`PicoVoxel root declarations are missing from ${root}.`);
   }
   return {
     picovoxel: {
@@ -78,7 +110,7 @@ export const buildPicovoxelTypes = (directory = declarationDirectory()): Bundled
         name: 'picovoxel',
         types: './index.d.ts',
         exports: Object.fromEntries(
-          picovoxelAuthorSubpaths.map((subpath) => [subpath, { types: `./${entryFile(subpath)}` }]),
+          picovoxelAuthorSubpaths.map((subpath) => [subpath, { types: `./${entries[subpath]}` }]),
         ),
       },
     },

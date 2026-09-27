@@ -19,8 +19,7 @@ describe('viewportRenderTiers', () => {
     expect(viewportRenderTiers.sectionCapFill).toBeLessThan(viewportRenderTiers.sectionContourOutline);
     expect(viewportRenderTiers.sectionContourOutline).toBeLessThan(viewportRenderTiers.sectionControlBody);
     expect(viewportRenderTiers.sectionControlBody).toBeLessThan(viewportRenderTiers.sectionControlLabel);
-    expect(viewportRenderTiers.sectionControlLabel).toBeLessThan(viewportRenderTiers.sectionTransformControl);
-    expect(viewportRenderTiers.sectionTransformControl).toBeLessThan(viewportRenderTiers.viewportGizmo);
+    expect(viewportRenderTiers.sectionControlLabel).toBeLessThan(viewportRenderTiers.viewportGizmo);
   });
 
   it('should keep section-view render paths off unsafe topmost arithmetic', () => {

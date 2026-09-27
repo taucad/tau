@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import { mock } from 'vitest-mock-extended';
+import { ViewportGizmo } from 'three-viewport-gizmo';
 import type {
   SectionPlanePicker,
   SectionPlanePickerRenderer,
@@ -124,5 +125,44 @@ describe('viewport-gizmo-render-loop', () => {
     expect(readGizmoViewport({ _viewport: [0, 0, 0, 0] })).toBeUndefined();
     expect(readGizmoViewport({})).toBeUndefined();
     expect(readGizmoViewport({ _viewport: [1, 2, 3, 3] })).toEqual([1, 2, 3, 3]);
+  });
+
+  // `readGizmoViewport` reads a private field of `three-viewport-gizmo`: an upgrade that renames or reshapes it fails here.
+  it('should read the viewport a real view cube placed itself in', () => {
+    const canvas = document.createElement('canvas');
+    Object.defineProperty(canvas, 'clientHeight', { value: 600 });
+    const renderer = {
+      domElement: canvas,
+      getViewport: (target: THREE.Vector4) => target.set(0, 0, 800, 600),
+      getScissorTest: () => false,
+    } as unknown as THREE.WebGLRenderer;
+    // Jsdom lays nothing out, so the canvas and the cube get the boxes a browser would give them.
+    const layout = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      return this === canvas ? new DOMRect(0, 0, 800, 600) : new DOMRect(704, 494, 96, 96);
+    });
+    // Nor does it paint: the cube's face labels draw into a context that keeps nothing.
+    const paint = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(
+      () =>
+        ({
+          beginPath: vi.fn(),
+          moveTo: vi.fn(),
+          lineTo: vi.fn(),
+          arcTo: vi.fn(),
+          closePath: vi.fn(),
+          fill: vi.fn(),
+          stroke: vi.fn(),
+          fillText: vi.fn(),
+          measureText: () => ({ width: 0, fontBoundingBoxDescent: 1 }),
+        }) as unknown as CanvasRenderingContext2D,
+    );
+    const gizmo = new ViewportGizmo(new THREE.PerspectiveCamera(), renderer);
+    try {
+      // WebGL counts `y` from the bottom: 600 - (494 + 96).
+      expect(readGizmoViewport(gizmo as unknown as Readonly<Record<string, unknown>>)).toEqual([704, 10, 96, 96]);
+    } finally {
+      gizmo.dispose();
+      paint.mockRestore();
+      layout.mockRestore();
+    }
   });
 });

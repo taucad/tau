@@ -436,7 +436,7 @@ describe('ProjectCommandPaletteItems', () => {
       files: [{ name: 'render.png', mimeType: 'image/png', bytes: new Uint8Array([1, 2, 3]) }],
       omittedSectionCutIds: ['cutaway'],
     });
-    render(<ProjectCommandPaletteItems match={match} />);
+    render(<ProjectCommandPaletteItems match={match} />, { wrapper });
 
     registeredItems.find((item) => item.id === 'download-png')?.action?.();
     await vi.waitFor(() => {

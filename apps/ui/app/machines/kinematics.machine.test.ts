@@ -6,6 +6,7 @@ import { graphicsMachine } from '#machines/graphics.machine.js';
 import * as machineModule from '#machines/kinematics.machine.js';
 import {
   describeKinematicsHover,
+  getKinematicsClipTime,
   getKinematicsDragNotice,
   getKinematicsUnitState,
   isGroundedKinematicsLink,
@@ -500,6 +501,40 @@ describe('isGroundedKinematicsLink', () => {
     expect(isGroundedKinematicsLink(chain, 'bracket')).toBe(true);
     expect(isGroundedKinematicsLink(chain, 'arm')).toBe(false);
     expect(isGroundedKinematicsLink(chain, 'tool')).toBe(false);
+  });
+});
+
+describe('setHoveredComponents', () => {
+  it('should hold the components a pane row points at without re-posing, and clear them', () => {
+    const { actor, unit } = startLoaded();
+    const { revision } = unit();
+
+    actor.send({ type: 'setHoveredComponents', unitId, componentIds: ['component:sun'] });
+    expect(unit()).toMatchObject({ hoveredComponentIds: ['component:sun'], revision });
+
+    actor.send({ type: 'setHoveredComponents', unitId, componentIds: [] });
+    expect(unit().hoveredComponentIds).toEqual([]);
+  });
+
+  it('should ignore a highlight for a unit without a mechanism', () => {
+    const actor = createActor(kinematicsMachine, { input: {} }).start();
+
+    actor.send({ type: 'setHoveredComponents', unitId, componentIds: ['component:sun'] });
+
+    expect(getKinematicsUnitState(actor.getSnapshot().context, unitId).hoveredComponentIds).toEqual([]);
+  });
+});
+
+describe('getKinematicsClipTime', () => {
+  const clip = (loop: 'none' | 'repeat' | 'pingPong') => ({ id: 'open', duration: 2, loop, keyframes: [] });
+
+  it.each([
+    { name: 'hold a clip without a loop at its end', loop: 'none', time: 5, expected: 2 },
+    { name: 'wrap a repeating clip', loop: 'repeat', time: 5, expected: 1 },
+    { name: 'reflect a back-and-forth clip on its way back', loop: 'pingPong', time: 3.5, expected: 0.5 },
+    { name: 'keep a back-and-forth clip on its way out', loop: 'pingPong', time: 4.5, expected: 0.5 },
+  ] as const)('should $name', ({ loop, time, expected }) => {
+    expect(getKinematicsClipTime(clip(loop), time)).toBeCloseTo(expected);
   });
 });
 

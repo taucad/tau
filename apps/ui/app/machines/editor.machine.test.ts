@@ -390,6 +390,28 @@ describe('editorMachine', () => {
       actor.stop();
     });
 
+    it('should emit Kinematics reveal requests', async () => {
+      const actor = await startAndLoad({ loadResult: undefined });
+      const emitted: unknown[] = [];
+      actor.on('kinematicsRevealRequested', (event) => emitted.push(event));
+
+      actor.send({
+        type: 'revealModelComponentInKinematics',
+        entryPath: 'src/main.ts',
+        unitId: 'file:src/main.ts',
+        componentId: 'component:blocker-door-3',
+      });
+      expect(emitted).toEqual([
+        {
+          type: 'kinematicsRevealRequested',
+          entryPath: 'src/main.ts',
+          unitId: 'file:src/main.ts',
+          componentId: 'component:blocker-door-3',
+        },
+      ]);
+      actor.stop();
+    });
+
     it('should rekey nested component display units on directory rename', async () => {
       const oldMainUnitId = 'file:src/foo/main.ts';
       const oldNestedUnitId = 'file:src/foo/nested/part.ts';

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_YAVXDkW5nFezQXg3M2Tl7",
+  "name": "Spur Gear Reducer",
+  "description": "An 18/54 module-2 pinion and gear at 20° pressure angle on 72 mm centres, in a bolted housing with a lifting inspection cover. Turn the input or isolate any part.",
+  "tags": ["mechanism", "gears", "gearbox", "replicad"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

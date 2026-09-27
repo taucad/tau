@@ -1,0 +1,13 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_ny7BpKTO8XhJjRCYLgDSo",
+  "name": "Wheelbarrow",
+  "description": "A lofted steel tray, a bent tubular frame and a pneumatic wheel on its axle. Resize the tray or pull out any part.",
+  "tags": ["consumer-product", "assembly", "replicad"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

@@ -646,6 +646,84 @@ describe('ParametersNumber', () => {
       expect(screen.queryByText(/changed to/)).not.toBeInTheDocument();
     });
 
+    it('bases each rapid step on its own previous step while an earlier step settles', async () => {
+      const user = userEvent.setup();
+      /* The authority applies finals in order and, like the planner, refuses a base that no longer
+       * matches its record. Each commit settles only when the test says so. */
+      let record = 10;
+      const settles: Array<() => void> = [];
+      const outcomes: string[] = [];
+      const parameterCommit: ParameterCommit & Readonly<{ calls: CommitCall[] }> = {
+        ...createParameterCommit(),
+        calls: [],
+        commit: async (field) => {
+          parameterCommit.calls.push(field);
+          await new Promise<void>((resolve) => {
+            settles.push(resolve);
+          });
+          if (field.base?.value !== record) {
+            outcomes.push('rejected');
+            return {
+              status: 'rejected',
+              requestId: 'burst',
+              code: 'STALE_MANIFEST',
+              message: 'The field changed since this edit began.',
+            };
+          }
+          record = field.value as number;
+          outcomes.push('committed');
+          const committed: Awaited<ReturnType<ParameterCommit['commit']>> = {
+            status: 'committed',
+            requestId: 'burst',
+            revision: { manifestRevision: 'burst' },
+            write: 'applied',
+          };
+          return committed;
+        },
+      };
+      const row = (): React.JSX.Element => (
+        <TestWrapper>
+          <ParametersNumber
+            value={record}
+            defaultValue={10}
+            step={1}
+            fieldProjection={{ ...testProjection('length', defaultUnits), instancePointer: '/width' }}
+            parameterCommit={parameterCommit}
+            onChange={vi.fn()}
+            aria-label='Stepped width'
+          />
+        </TestWrapper>
+      );
+      const view = render(row());
+      const field = screen.getByRole('spinbutton', { name: 'Stepped width' });
+      await user.click(field);
+
+      await user.keyboard('{ArrowUp}');
+      await user.keyboard('{ArrowUp}');
+      await act(async () => {
+        settles[0]?.();
+      });
+      view.rerender(row());
+      expect(field).toHaveValue('12');
+      await user.keyboard('{ArrowUp}');
+      await act(async () => {
+        settles[1]?.();
+      });
+      view.rerender(row());
+      await act(async () => {
+        settles[2]?.();
+      });
+      view.rerender(row());
+
+      expect(parameterCommit.calls.map(({ base, value }) => [base?.value, value])).toEqual([
+        [10, 11],
+        [11, 12],
+        [12, 13],
+      ]);
+      expect(outcomes).toEqual(['committed', 'committed', 'committed']);
+      expect(field).toHaveValue('13');
+    });
+
     it('should overwrite the changed value on Enter after a conflict', async () => {
       const user = userEvent.setup();
       const parameterCommit = createParameterCommit();

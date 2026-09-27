@@ -9,7 +9,7 @@ using Xunit;
 
 namespace Tau.PicoGK.Worker.Tests;
 
-public sealed class WorkerTests : IDisposable
+public sealed partial class WorkerTests : IDisposable
 {
     private readonly string root = Path.Combine(Path.GetTempPath(), $"tau-picogk-csharp-{Guid.NewGuid():N}");
 
@@ -528,6 +528,10 @@ Library.Go(2f, () => Library.oViewer().Add(Voxels.voxSphere(Vector3.Zero, 3)));
             backend.Remove(mesh);
             Assert.True(backend.GetBoundingBox().bIsEmpty());
             backend.RemoveAllObjects();
+            backend.Complete();
+            Assert.Equal(
+                "The PicoGK viewer command pump has completed.",
+                Assert.Throws<InvalidOperationException>(backend.RequestUpdate).Message);
             backend.Dispose();
             backend.Dispose();
             Assert.Throws<ObjectDisposedException>(() => backend.Add(mesh, 0));

@@ -3,7 +3,7 @@ title: 'Interrupted Tool-Call Contract Policy'
 description: 'Durable rules for partial, interrupted, denied, and disconnected tool calls across UI messages and portable agent events'
 status: active
 created: '2026-04-23'
-updated: '2026-09-05'
+updated: '2026-09-28'
 related:
   - docs/research/interrupted-tool-call-validation-failure.md
   - docs/research/google-cancel-followup-stale-tool-part-validation.md
@@ -71,6 +71,15 @@ UI finalization repairs presentation and persisted UI-message compatibility. Hos
 Tests must cover active-tail acceptance, historical canonicalization, invalid static approval input, dynamic input, settled-ledger preservation, disconnect output synthesis, idempotent recovery, and the one-time verification reminder.
 
 Assert typed structures and stable IDs. Do not rely only on display strings or snapshots.
+
+### 10. Recall a native approval by its key (D5)
+
+A Tau host's tool that asks for approval pauses the run on a native `interrupt.recorded` request. The asking call's output records the pause, not the answer, and the continued attempt's model issues a new call. Rule 7 applies with these bounds:
+
+- The request's context carries the tool's approval key, its tool name and the asking call ID. The continued call recalls the answer by that key through `HostToolApproval.recall` in `packages/agent-host/src/host/tau-agent-host.ts`. The output row that uses an answer records `metadata.approval.interruptId`, which spends it, so a later call under the same key asks again.
+- The continued attempt receives an approval-answer reminder (`tauInternal.kind: 'approval-answer'`). It names each answer given since the attempt last ran, with its prompt, the asking call ID and the tool. An answer is never conveyed only through the aborted call's error text.
+- The host hands each answer to the tool registry's idempotent `answerApproval`, so what the tool guards follows the answer whether or not the run continues. An answer or a Stop hands over only the requests its own command resolved. An applied resume reconciles every answer of its run.
+- Recall is at-least-once for a generic tool. A call that recalled an answer and then threw releases it, and a crash before the output row lets the next call recall it again. A tool that guards a side effect keys that effect idempotently, as `request_print` keys its ledger request by the asking call.
 
 ## Ownership
 

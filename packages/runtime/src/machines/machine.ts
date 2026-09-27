@@ -387,6 +387,8 @@ export type MachineSubmitInput<Configuration> = Readonly<{
 export type MachineReconcileInput = Readonly<{
   operationId: string;
   command: 'cancel' | 'pause' | 'project_file' | 'resume' | 'stop' | 'upload';
+  /** For a start, the transfer it sent, which a provider may name the run after. */
+  transferId?: string;
   signal: AbortSignal;
 }>;
 

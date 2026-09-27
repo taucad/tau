@@ -566,7 +566,12 @@ export const parseBambuCommandPayload = (
   }>,
 ): BambuCommandResult => {
   const print = record(parseJson(input.bytes)['print'], 'BAMBU_COMMAND_INVALID');
-  if (print['command'] !== input.command || print['sequence_id'] !== input.sequence) {
+  // Firmware may echo the sequence id as a number.
+  const sequence = print['sequence_id'];
+  if (
+    print['command'] !== input.command ||
+    (typeof sequence === 'number' ? String(sequence) : sequence) !== input.sequence
+  ) {
     return Object.freeze({ status: 'unrelated' });
   }
   const result = boundedString(print['result'], 64)?.toLowerCase();

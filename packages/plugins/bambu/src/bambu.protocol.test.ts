@@ -246,6 +246,14 @@ describe('Bambu protocol admission', () => {
         sequence: '9',
       }),
     ).toEqual({ status: 'unrelated' });
+    // Firmware may echo the sequence id as a number.
+    expect(
+      parseBambuCommandPayload({
+        bytes: bytes('{"print":{"command":"project_file","sequence_id":9,"result":"SUCCESS"}}'),
+        command: 'project_file',
+        sequence: '9',
+      }),
+    ).toEqual({ status: 'accepted' });
     expect(() => bambuTopic('serial/#', 'request')).toThrow('BAMBU_IDENTIFIER_INVALID');
     expect(() => bambuRemoteName('bad\r\nDELE all')).toThrow('BAMBU_REMOTE_NAME_INVALID');
     expect(() => parseBambuStill(Uint8Array.from([0xff, 0xd8, 0, 0]), 'now')).toThrow('BAMBU_STILL_INVALID');

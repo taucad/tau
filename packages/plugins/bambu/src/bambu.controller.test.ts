@@ -14,6 +14,8 @@ const report =
   '{"print":{"sequence_id":"8","printer_type":"BL-P001","nozzle_diameter":"0.4","nozzle_temper":215,"nozzle_target_temper":220,"bed_temper":60,"bed_target_temper":65,"gcode_state":"RUNNING","mc_percent":42,"mc_remaining_time":3,"subtask_id":"run-1","subtask_name":"Cube","layer_num":12,"total_layer_num":120,"spd_lvl":2,"spd_mag":100,"cooling_fan_speed":"15","wifi_signal":"-47dBm","sdcard":true,"lights_report":[{"node":"chamber_light","mode":"on"}],"ams":{"tray_exist_bits":"1","tray_now":"0","tray_tar":"0","ams":[{"humidity":"3","temp":"22","tray":[{"tray_type":"PLA","tray_info_idx":"GFA00"},{},{},{}]}]}}}';
 const published = vi.hoisted((): string[] => []);
 const versionReply = vi.hoisted(() => ({ serial: '00M00A391800004' }));
+// How the mocked printer answers a start: an exact echo, or only its status naming the run by the id or name Tau sent.
+const startReply = vi.hoisted((): { mode: 'echo' | 'status-id' | 'status-name' } => ({ mode: 'echo' }));
 
 vi.mock('mqtt', async () => {
   type Listener = (...values: unknown[]) => void;
@@ -57,9 +59,21 @@ vi.mock('mqtt', async () => {
       published.push(payload);
       const parsed = JSON.parse(payload) as {
         info?: { command?: string };
-        print?: { command?: string; sequence_id?: string };
+        print?: { command?: string; sequence_id?: string; subtask_id?: string; subtask_name?: string };
       };
-      if (parsed.print?.command) {
+      if (parsed.print?.command === 'project_file' && startReply.mode !== 'echo') {
+        /* eslint-disable @typescript-eslint/naming-convention -- Mocked Bambu wire field names are fixed. */
+        const run =
+          startReply.mode === 'status-id'
+            ? { gcode_state: 'FINISH', subtask_id: parsed.print.subtask_id }
+            : { gcode_state: 'RUNNING', subtask_id: '0', subtask_name: parsed.print.subtask_name };
+        this.#emit(
+          'message',
+          topic.replace('/request', '/report'),
+          Buffer.from(JSON.stringify({ print: { command: 'push_status', sequence_id: '10', ...run } })),
+        );
+        /* eslint-enable @typescript-eslint/naming-convention -- Mocked Bambu wire field section ends. */
+      } else if (parsed.print?.command) {
         /* eslint-disable @typescript-eslint/naming-convention -- Mocked Bambu wire field names are fixed. */
         this.#emit(
           'message',
@@ -417,6 +431,53 @@ describe('Bambu read-only controller', () => {
     expect(project?.['bed_type']).toBe('auto');
     // eslint-disable-next-line @typescript-eslint/naming-convention -- Bambu wire field names are fixed.
     expect(project?.['ams_mapping2']).toEqual([{ ams_id: 0, slot_id: 0 }]);
+
+    // A printer that starts without a correlated echo still confirms the start through its status, at once.
+    const start = async (operationId: string) =>
+      session.submit({
+        operationId,
+        expectedMachineId: '00M00A391800004',
+        artifact,
+        remoteName: prepared.remoteName,
+        transferId: transfer.transferId,
+        providerData: prepared.providerData,
+        configuration,
+        signal: new AbortController().signal,
+      });
+    const lastStart = (): Record<string, unknown> | undefined =>
+      published
+        .map((payload) => JSON.parse(payload) as { print?: Record<string, unknown> })
+        .findLast((payload) => payload.print?.['command'] === 'project_file')?.print;
+    try {
+      startReply.mode = 'status-id';
+      await expect(start('start-2')).resolves.toMatchObject({
+        status: 'accepted',
+        providerRunId: lastStart()?.['subtask_id'],
+      });
+      await expect(
+        session.reconcile({ operationId: 'start-2', command: 'project_file', signal: new AbortController().signal }),
+      ).resolves.toMatchObject({ status: 'accepted', providerRunId: lastStart()?.['subtask_id'] });
+      startReply.mode = 'status-name';
+      await expect(start('start-3')).resolves.toMatchObject({ status: 'accepted', providerRunId: '0' });
+      await expect(session.getSnapshot({ signal: new AbortController().signal })).resolves.toMatchObject({
+        activeRunId: '0',
+      });
+      // After a reconnect the transfer name still proves a start whose run carries only that name.
+      await expect(
+        session.reconcile({
+          operationId: 'start-8',
+          command: 'project_file',
+          transferId: prepared.remoteName,
+          signal: new AbortController().signal,
+        }),
+      ).resolves.toMatchObject({ status: 'accepted', providerRunId: '0' });
+      // A start this session never sent, whose id the printer's run does not carry, stays unproven.
+      await expect(
+        session.reconcile({ operationId: 'start-9', command: 'project_file', signal: new AbortController().signal }),
+      ).resolves.toMatchObject({ status: 'unknown', reason: 'no-correlated-provider-reply' });
+    } finally {
+      startReply.mode = 'echo';
+    }
     await session.close();
   });
 

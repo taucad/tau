@@ -553,14 +553,11 @@ pub struct RegularSolidContainment {
 /// S10 (INTERFERENCE-EXACT-01): one candidate pair of leaf occurrences.
 #[derive(Clone, Debug, PartialEq)]
 pub enum OccurrenceOverlap {
-    /// The counted work exceeds the caller's limit; nothing else ran.
-    WorkExceeded { work: u64 },
     /// The left or right operand is not one regular solid.
     Unqualified { left: bool, reason: String },
     /// The exact Common's residual: empty (no solids, zero volume, no bounds)
     /// when the operands only touch.
     Residual {
-        work: u64,
         solids: u32,
         volume: f64,
         bounds: Option<Bounds>,
@@ -1196,16 +1193,18 @@ pub trait BrepSubject {
 
     /// S10 (ruling 23): the non-destructive exact Common of two leaf
     /// occurrences' regular-solid operands, each qualified once per memo (C7).
-    /// The work (the pair plus every face pair whose exact boxes, enlarged by
-    /// `tolerance`, intersect) is counted first; beyond `max_work` nothing runs.
+    /// Each step is charged before it runs (ruling 28): the face-box
+    /// pre-count, each operand's first qualification in the memo, and the
+    /// Common, priced from the face pairs whose exact boxes, enlarged by
+    /// `tolerance`, intersect; `None` when `charge` stops one.
     fn occurrence_overlap_memoized(
         &self,
         _left: u32,
         _right: u32,
         _tolerance: f64,
-        _max_work: u64,
         _memo: &mut OperandMemo,
-    ) -> Result<OccurrenceOverlap, BackendError> {
+        _charge: &mut Charge<'_>,
+    ) -> Result<Option<OccurrenceOverlap>, BackendError> {
         Err(BackendError {
             kind: super::BackendErrorKind::Unsupported,
             message: "The BRep connector has no exact occurrence overlap query.".into(),
@@ -1274,6 +1273,12 @@ pub trait BrepSubject {
     /// except `bounds`, which a connector may leave unmeasured (NaN).
     fn source_occurrence_structure(&self) -> Result<Rc<[OccurrenceFacts]>, BackendError> {
         self.source_occurrences()
+    }
+
+    /// The work units of measuring one occurrence's exact box: M2's face-box
+    /// price of its faces (ruling 28).
+    fn occurrence_box_units(&self, _occurrence: u32) -> Result<u64, BackendError> {
+        Ok(1)
     }
 
     /// One occurrence's `source_occurrences` bounds, measured alone, so a

@@ -77,6 +77,8 @@ pub(crate) struct Subject {
     pub(crate) overlap_cache: Option<crate::cache::SharedOverlapEvidenceCache>,
     pub(crate) producer_identity: Option<Rc<crate::cache::ProducerIdentity>>,
     overlap_components: OnceCell<Rc<crate::analysis::interference::PreparedComponents>>,
+    /// S10: the work units of the exact leaf boxes, charged by every claim.
+    overlap_box_units: OnceCell<u64>,
     component_labels: OnceCell<Rc<Vec<crate::analysis::interference::ComponentIdentity>>>,
     pub mesh_record: OnceCell<Rc<MeshAnalysisRecord>>,
     pub brep: Option<Box<dyn BrepSubject>>,
@@ -195,6 +197,7 @@ impl Subject {
             overlap_cache: None,
             producer_identity: None,
             overlap_components: OnceCell::new(),
+            overlap_box_units: OnceCell::new(),
             component_labels: OnceCell::new(),
             mesh_record: OnceCell::new(),
             brep: None,
@@ -393,6 +396,17 @@ impl Subject {
         let labels = Rc::new(crate::analysis::interference::build_component_labels(self)?);
         let _ = self.component_labels.set(Rc::clone(&labels));
         Ok(labels)
+    }
+
+    /// S10: M2's face-box price of the exact leaf boxes, from structure, so a
+    /// claim charges it before `overlap_components` measures them.
+    pub(crate) fn overlap_box_units(&self) -> Result<u64, BackendError> {
+        if let Some(units) = self.overlap_box_units.get() {
+            return Ok(*units);
+        }
+        let units = crate::analysis::interference::box_units(self)?;
+        let _ = self.overlap_box_units.set(units);
+        Ok(units)
     }
 
     pub(crate) fn overlap_components(

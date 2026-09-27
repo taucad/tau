@@ -7757,20 +7757,196 @@ int geospec_occt_regular_solid_containment_dedicated(
   });
 }
 
+namespace {
+
+// S10 (ruling 23) prices each step of a candidate pair in M2's unit, about
+// 20 us of one core, before it runs. The prices are fitted to the serial
+// thread-CPU time of every candidate pair of the corpus STEP files (W2-BUDGET
+// a1 calibration): the face-box pre-count by M2's tests per unit, an
+// operand's qualification by its edges, and the Common by both operands'
+// faces and the face pairs whose boxes meet. A pair is dearer for a plane
+// against an elementary surface, for two free-form surfaces, for the poles of
+// the faces' B-spline edges, and where the surfaces nearly coincide, which
+// makes the Boolean's intersections degenerate: coplanar faces' curved edges,
+// and parallel cylinders that nearly coincide or touch.
+constexpr uint64_t kOverlapBoxTestsPerUnit = 4096;
+
+// regular_solid_operand's analyzer checks every edge and face.
+uint64_t overlap_qualification_units(const TopoDS_Shape& shape) {
+  NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> edges;
+  TopExp::MapShapes(shape, TopAbs_EDGE, edges);
+  return 14 * static_cast<uint64_t>(edges.Extent());
+}
+
+// A face of a face-box pair: its surface, how many of its edges are curved,
+// and the poles of its B-spline and Bezier edges.
+struct OverlapFace {
+  bool priced = false;
+  GeomAbs_SurfaceType type = GeomAbs_OtherSurface;
+  gp_Pln plane;
+  gp_Cylinder cylinder;
+  uint64_t curved = 0;
+  uint64_t edge_poles = 0;
+};
+
+OverlapFace overlap_face(const TopoDS_Face& face) {
+  OverlapFace value;
+  value.priced = true;
+  const BRepAdaptor_Surface surface(face, false);
+  value.type = surface.GetType();
+  if (value.type == GeomAbs_Plane) value.plane = surface.Plane();
+  if (value.type == GeomAbs_Cylinder) value.cylinder = surface.Cylinder();
+  NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> edges;
+  TopExp::MapShapes(face, TopAbs_EDGE, edges);
+  for (int index = 1; index <= edges.Extent(); ++index) {
+    const TopoDS_Edge& edge = TopoDS::Edge(edges(index));
+    if (BRep_Tool::Degenerated(edge)) continue;
+    const BRepAdaptor_Curve curve(edge);
+    if (curve.GetType() != GeomAbs_Line) ++value.curved;
+    if (curve.GetType() == GeomAbs_BSplineCurve ||
+        curve.GetType() == GeomAbs_BezierCurve) {
+      value.edge_poles += static_cast<uint64_t>(curve.NbPoles());
+    }
+  }
+  return value;
+}
+
+// 0 plane, 1 elementary (cylinder, cone, sphere, torus), 2 free-form.
+int overlap_kind(GeomAbs_SurfaceType type) {
+  switch (type) {
+    case GeomAbs_Plane:
+      return 0;
+    case GeomAbs_Cylinder:
+    case GeomAbs_Cone:
+    case GeomAbs_Sphere:
+    case GeomAbs_Torus:
+      return 1;
+    default:
+      return 2;
+  }
+}
+
+// ponytail: fixed thresholds (the calibration's); they only price.
+bool overlap_coplanar(const gp_Pln& left, const gp_Pln& right) {
+  return left.Axis().Direction().IsParallel(right.Axis().Direction(), 1e-9) &&
+         left.Distance(right.Location()) <= 1e-4;
+}
+
+// Parallel cylinders whose surfaces come within 2% of the larger radius of
+// coinciding or touching.
+bool overlap_near_cylinders(const gp_Cylinder& left, const gp_Cylinder& right) {
+  if (!left.Axis().Direction().IsParallel(right.Axis().Direction(), 1e-6)) {
+    return false;
+  }
+  const double axes = gp_Lin(left.Axis()).Distance(right.Axis().Location());
+  const double slack = 0.02 * std::max(left.Radius(), right.Radius());
+  return std::abs(std::abs(left.Radius() - right.Radius()) - axes) <= slack ||
+         std::abs(left.Radius() + right.Radius() - axes) <= slack;
+}
+
+// The Common's counts: both operands' faces, the face pairs whose enlarged
+// memo boxes meet, and among those the plane-elementary and free-form pairs,
+// their faces' edge poles, coplanar pairs' curved edges (left x right) and
+// near-coincident cylinder pairs.
+struct OverlapBoolean {
+  uint64_t faces = 0;
+  uint64_t pairs = 0;
+  uint64_t plane_elementary = 0;
+  uint64_t free_form = 0;
+  uint64_t edge_poles = 0;
+  uint64_t coplanar_curves = 0;
+  uint64_t near_cylinders = 0;
+};
+
+uint64_t overlap_boolean_units(const OverlapBoolean& common) {
+  return 4 * common.faces + 12 * common.pairs + 52 * common.plane_elementary +
+         160 * common.free_form + 2 * common.edge_poles +
+         10 * common.coplanar_curves + 64 * common.near_cylinders;
+}
+
+// The pre-count over every face pair's enlarged memo boxes (F4/F6), and the
+// counts the Common is priced from.
+OverlapBoolean overlap_boolean(const geospec_occt_document& document,
+                               uint32_t left, uint32_t right,
+                               double tolerance) {
+  const auto& lfaces = document.occurrences[left].public_faces;
+  const auto& rfaces = document.occurrences[right].public_faces;
+  const auto enlarged = [&](const FaceView& face) {
+    Bnd_Box box = memo_face_box(document, face.shape);
+    if (!box.IsVoid()) box.Enlarge(tolerance);
+    return box;
+  };
+  std::vector<Bnd_Box> right_boxes;
+  right_boxes.reserve(rfaces.size());
+  for (const FaceView& face : rfaces) right_boxes.push_back(enlarged(face));
+  std::vector<OverlapFace> lpriced(lfaces.size()), rpriced(rfaces.size());
+  const auto priced = [](std::vector<OverlapFace>& faces, size_t index,
+                         const FaceView& face) -> const OverlapFace& {
+    if (!faces[index].priced) faces[index] = overlap_face(face.shape);
+    return faces[index];
+  };
+  OverlapBoolean common;
+  common.faces = lfaces.size() + rfaces.size();
+  for (size_t lindex = 0; lindex < lfaces.size(); ++lindex) {
+    const Bnd_Box box = enlarged(lfaces[lindex]);
+    if (box.IsVoid()) continue;
+    for (size_t rindex = 0; rindex < rfaces.size(); ++rindex) {
+      if (right_boxes[rindex].IsVoid() || box.IsOut(right_boxes[rindex])) continue;
+      const OverlapFace& left_face = priced(lpriced, lindex, lfaces[lindex]);
+      const OverlapFace& right_face = priced(rpriced, rindex, rfaces[rindex]);
+      const int kinds[2] = {overlap_kind(left_face.type), overlap_kind(right_face.type)};
+      ++common.pairs;
+      common.plane_elementary += kinds[0] + kinds[1] == 1 ? 1 : 0;
+      common.free_form += kinds[0] == 2 && kinds[1] == 2 ? 1 : 0;
+      common.edge_poles += left_face.edge_poles + right_face.edge_poles;
+      if (left_face.type == GeomAbs_Plane && right_face.type == GeomAbs_Plane &&
+          overlap_coplanar(left_face.plane, right_face.plane)) {
+        common.coplanar_curves += left_face.curved * right_face.curved;
+      }
+      if (left_face.type == GeomAbs_Cylinder && right_face.type == GeomAbs_Cylinder &&
+          overlap_near_cylinders(left_face.cylinder, right_face.cylinder)) {
+        ++common.near_cylinders;
+      }
+    }
+  }
+  return common;
+}
+
+}  // namespace
+
+int geospec_occt_occurrence_box_units(const geospec_occt_document* document,
+                                      uint32_t occurrence, uint64_t* out_units,
+                                      geospec_occt_string* error) noexcept {
+  if (document == nullptr || out_units == nullptr ||
+      occurrence >= document->occurrences.size()) {
+    return fail(GEOSPEC_OCCT_INVALID_ARGUMENT,
+                "Occurrence box-price arguments are invalid.", error);
+  }
+  return guarded(error, [&]() -> int {
+    uint64_t units = 0;
+    for (TopExp_Explorer face(document->occurrences[occurrence].shape, TopAbs_FACE);
+         face.More(); face.Next()) {
+      units += component_box_units(TopoDS::Face(face.Current()));
+    }
+    *out_units = units;
+    return GEOSPEC_OCCT_OK;
+  });
+}
+
 // S10 (ruling 23, INTERFERENCE-EXACT-01): one candidate pair of leaf
-// occurrences. The work is counted before anything runs: the pair plus every
-// face pair whose exact memo boxes (F4/F6), each enlarged by the tolerance,
-// intersect, the face-face intersections a Boolean may need. Beyond
-// `max_work` neither operand is qualified and no Boolean runs. Operands are
-// the claim memo's regular solids (C7), each qualified once per claim.
+// occurrences, each step charged before it runs (ruling 28): the face-box
+// pre-count, each operand's first qualification in the claim memo (C7), and
+// the Common, priced from the face pairs whose exact memo boxes (F4/F6), each
+// enlarged by the tolerance, intersect: the face-face intersections a Boolean
+// may need. A refused charge stops the pair before the step it prices.
 int geospec_occt_occurrence_overlap_dedicated(
     const geospec_occt_document* document, uint32_t left, uint32_t right,
-    double tolerance, uint64_t max_work, geospec_occt_operand_memo* memo,
-    int grant_width, int* used_parallel,
+    double tolerance, geospec_occt_operand_memo* memo, int grant_width,
+    geospec_occt_charge charge, void* context, int* used_parallel,
     geospec_occt_occurrence_overlap_result* result, geospec_occt_string* reason,
     geospec_occt_string* error) noexcept {
   if (document == nullptr || result == nullptr || used_parallel == nullptr ||
-      grant_width < 0 || left == right ||
+      charge == nullptr || grant_width < 0 || left == right ||
       left >= document->occurrences.size() ||
       right >= document->occurrences.size() || !std::isfinite(tolerance) ||
       tolerance < 0.0) {
@@ -7784,42 +7960,35 @@ int geospec_occt_occurrence_overlap_dedicated(
   return guarded(error, [&]() -> int {
     *result = {};
     *used_parallel = 0;
-    const auto enlarged = [&](const FaceView& face) {
-      Bnd_Box box = memo_face_box(*document, face.shape);
-      if (!box.IsVoid()) box.Enlarge(tolerance);
-      return box;
-    };
-    std::vector<Bnd_Box> right_boxes;
-    right_boxes.reserve(document->occurrences[right].public_faces.size());
-    for (const FaceView& face : document->occurrences[right].public_faces) {
-      right_boxes.push_back(enlarged(face));
+    const uint64_t tests =
+        static_cast<uint64_t>(document->occurrences[left].public_faces.size()) *
+        document->occurrences[right].public_faces.size();
+    if (charge(context, 1 + tests / kOverlapBoxTestsPerUnit) != 0) {
+      return GEOSPEC_OCCT_STOPPED;
     }
-    uint64_t work = 1;
-    for (const FaceView& face : document->occurrences[left].public_faces) {
-      const Bnd_Box box = enlarged(face);
-      if (box.IsVoid()) continue;
-      for (const Bnd_Box& other : right_boxes) {
-        if (!other.IsVoid() && !box.IsOut(other)) ++work;
+    const OverlapBoolean counts = overlap_boolean(*document, left, right, tolerance);
+    std::string message;
+    TopoDS_Solid solids[2];
+    const uint32_t operands[2] = {left, right};
+    for (int side = 0; side < 2; ++side) {
+      const uint32_t occurrence = operands[side];
+      if ((memo == nullptr || memo->operands.count(occurrence) == 0) &&
+          charge(context, overlap_qualification_units(
+                              document->occurrences[occurrence].shape)) != 0) {
+        return GEOSPEC_OCCT_STOPPED;
+      }
+      if (!occurrence_operand(*document, occurrence, memo, solids[side], message)) {
+        result->unqualified = side + 1;
+        return write_string(message, reason);
       }
     }
-    result->work = work;
-    if (work > max_work) {
-      result->work_exceeded = 1;
-      return GEOSPEC_OCCT_OK;
-    }
-    std::string message;
-    TopoDS_Solid left_solid;
-    TopoDS_Solid right_solid;
-    if (!occurrence_operand(*document, left, memo, left_solid, message)) {
-      result->unqualified = 1;
-      return write_string(message, reason);
-    }
-    if (!occurrence_operand(*document, right, memo, right_solid, message)) {
-      result->unqualified = 2;
-      return write_string(message, reason);
-    }
+    const TopoDS_Solid& left_solid = solids[0];
+    const TopoDS_Solid& right_solid = solids[1];
     if (boolean_debug_requested(message)) {
       return fail(GEOSPEC_OCCT_UNSUPPORTED, message, error);
+    }
+    if (charge(context, overlap_boolean_units(counts)) != 0) {
+      return GEOSPEC_OCCT_STOPPED;
     }
     std::unique_ptr<OSD_ThreadPool::Launcher> reservation;
     const int scope_status = dedicated_pool_scope(

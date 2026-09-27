@@ -799,28 +799,49 @@ impl BrepSubject for Document {
         left: u32,
         right: u32,
         tolerance: f64,
-        max_work: u64,
         memo: &mut OperandMemo,
-    ) -> Result<OccurrenceOverlap, BackendError> {
+        charge: &mut Charge<'_>,
+    ) -> Result<Option<OccurrenceOverlap>, BackendError> {
         self.require_occurrence(left)?;
         self.require_occurrence(right)?;
         let width = self.parallel_grant_width.map(dedicated_width).transpose()?;
         // SAFETY: see the connector's lifetime permit contract.
-        let (value, used_parallel) = unsafe {
+        let Some((value, used_parallel)) = (unsafe {
             occurrence_overlap_with_control(
                 self.raw.as_ptr(),
                 left,
                 right,
                 tolerance,
-                max_work,
                 memo_raw(memo),
                 width.unwrap_or(0),
+                charge,
             )?
+        }) else {
+            return Ok(None);
         };
         if let Some(width) = self.parallel_grant_width {
             require_grant_mode(width, used_parallel)?;
         }
-        Ok(value)
+        Ok(Some(value))
+    }
+
+    fn occurrence_box_units(&self, occurrence: u32) -> Result<u64, BackendError> {
+        self.require_occurrence(occurrence)?;
+        let mut units = 0;
+        let mut error = ErrorBuffer::new();
+        // SAFETY: the document lives for &self and the index is in range.
+        check(
+            unsafe {
+                ffi::geospec_occt_occurrence_box_units(
+                    self.raw.as_ptr(),
+                    occurrence,
+                    &mut units,
+                    error.raw(),
+                )
+            },
+            &error,
+        )?;
+        Ok(units)
     }
 
     fn source_occurrences(&self) -> Result<Rc<[OccurrenceFacts]>, BackendError> {
@@ -2470,41 +2491,55 @@ unsafe fn regular_solid_containment_with_control(
     ))
 }
 
-/// S10: a Boolean that never ran reports only its work; a residual must be
-/// consistent (solids iff positive volume and bounds).
+/// S10: `None` when a charge stopped the pair; a residual must be consistent
+/// (solids iff positive volume and bounds).
 unsafe fn occurrence_overlap_with_control(
     raw: *const ffi::Document,
     left: u32,
     right: u32,
     tolerance: f64,
-    max_work: u64,
     memo: *mut ffi::OperandMemo,
     grant_width: i32,
-) -> Result<(OccurrenceOverlap, bool), BackendError> {
+    charge: &mut Charge<'_>,
+) -> Result<Option<(OccurrenceOverlap, bool)>, BackendError> {
     let mut value = ffi::OccurrenceOverlap::default();
     let mut used_parallel = 0;
-    let reason = copied_string_small(|reason, error| {
-        ffi::geospec_occt_occurrence_overlap_dedicated(
-            raw,
-            left,
-            right,
-            tolerance,
-            max_work,
-            memo,
-            grant_width,
-            &mut used_parallel,
-            &mut value,
-            reason,
-            error,
-        )
-    })?;
-    let overlap = match (value.work_exceeded, value.unqualified) {
-        (1, 0) if value.work > max_work => OccurrenceOverlap::WorkExceeded { work: value.work },
-        (0, 1 | 2) if !reason.is_empty() => OccurrenceOverlap::Unqualified {
+    let mut charge = charge;
+    // One call, never the sized retry: a second call would charge the pair's
+    // steps again. Reasons are the bridge's short constant texts.
+    let mut bytes = [0u8; 256];
+    let mut reason = ffi::StringBuffer {
+        data: bytes.as_mut_ptr().cast(),
+        capacity: bytes.len(),
+        length: 0,
+    };
+    let mut error = ErrorBuffer::new();
+    let status = ffi::geospec_occt_occurrence_overlap_dedicated(
+        raw,
+        left,
+        right,
+        tolerance,
+        memo,
+        grant_width,
+        charge_units,
+        charge_context(&mut charge),
+        &mut used_parallel,
+        &mut value,
+        &mut reason,
+        error.raw(),
+    );
+    if status == ffi::STOPPED {
+        return Ok(None);
+    }
+    check(status, &error)?;
+    let reason = String::from_utf8(bytes[..reason.length.min(bytes.len())].to_vec())
+        .map_err(|_| backend_error("OCCT returned non-UTF-8 text."))?;
+    let overlap = match value.unqualified {
+        1 | 2 if !reason.is_empty() => OccurrenceOverlap::Unqualified {
             left: value.unqualified == 1,
             reason,
         },
-        (0, 0) if value.work <= max_work => {
+        0 => {
             let bounds =
                 (value.has_residual_bounds != 0).then(|| Bounds::from(value.residual_bounds));
             let volume = value.residual_volume;
@@ -2519,7 +2554,6 @@ unsafe fn occurrence_overlap_with_control(
                 ));
             }
             OccurrenceOverlap::Residual {
-                work: value.work,
                 solids: value.residual_solid_count,
                 volume: value.residual_volume,
                 bounds,
@@ -2531,7 +2565,7 @@ unsafe fn occurrence_overlap_with_control(
             ))
         }
     };
-    Ok((overlap, used_parallel != 0))
+    Ok(Some((overlap, used_parallel != 0)))
 }
 
 unsafe fn cylinder_axial_extent(
@@ -4023,8 +4057,6 @@ mod ffi {
     #[derive(Clone, Copy, Default)]
     #[repr(C)]
     pub struct OccurrenceOverlap {
-        pub work: u64,
-        pub work_exceeded: i32,
         pub unqualified: i32,
         pub residual_solid_count: u32,
         pub has_residual_bounds: i32,
@@ -4696,14 +4728,21 @@ mod ffi {
             result: *mut RegularSolidContainment,
             error: *mut StringBuffer,
         ) -> i32;
+        pub fn geospec_occt_occurrence_box_units(
+            document: *const Document,
+            occurrence: u32,
+            units: *mut u64,
+            error: *mut StringBuffer,
+        ) -> i32;
         pub fn geospec_occt_occurrence_overlap_dedicated(
             document: *const Document,
             left: u32,
             right: u32,
             tolerance: f64,
-            max_work: u64,
             memo: *mut OperandMemo,
             grant_width: i32,
+            charge: Charge,
+            context: *mut c_void,
             used_parallel: *mut i32,
             result: *mut OccurrenceOverlap,
             reason: *mut StringBuffer,

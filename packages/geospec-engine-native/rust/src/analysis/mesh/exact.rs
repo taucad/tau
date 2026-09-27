@@ -26,7 +26,7 @@ use crate::{
 };
 
 /// Face-box tests per work unit.
-const BOX_TESTS_PER_UNIT: u64 = 4096;
+pub(crate) const BOX_TESTS_PER_UNIT: u64 = 4096;
 
 /// Why exact components stopped: a charge that would pass the budget, with
 /// the body pair it was for (none while measuring the bodies), or a kernel

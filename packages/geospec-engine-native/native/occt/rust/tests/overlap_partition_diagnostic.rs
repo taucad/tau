@@ -255,43 +255,101 @@ fn a_geometry_free_leaf_is_no_component_and_has_no_box() {
     assert_eq!(evidence["overlaps"], json!([]));
 }
 
+/// Every charge of one cold claim, in order: from budget 1, each refusal's
+/// `unitsUsed` is the budget that pays its charge, until the claim passes at
+/// its exact total.
+fn charge_trace(engine: impl Fn() -> Engine, source: &[u8]) -> (Vec<Value>, Value, u64) {
+    let mut refusals = Vec::new();
+    let mut budget = 1;
+    loop {
+        let mut cold = engine();
+        let subject = ingest(&mut cold, source);
+        let claim = overlap(&mut cold, &subject, budget);
+        if claim["status"] == "passed" {
+            return (refusals, claim, budget);
+        }
+        assert_eq!(
+            claim["diagnostics"][0]["code"], "MATCHER_TIMEOUT",
+            "{claim}"
+        );
+        budget = claim["diagnostics"][0]["details"]["unitsUsed"]
+            .as_u64()
+            .unwrap();
+        refusals.push(claim);
+        assert!(refusals.len() < 16, "the charges do not converge");
+    }
+}
+
 #[test]
 fn pair_budget_refusal_names_the_pair_and_is_history_independent() {
     let source = two_cubes(5.0, false, false);
+    let (refusals, passed_cold, total) = charge_trace(engine, &source);
+    // The leaf boxes and the broad phase name no pair; the pair's pre-count,
+    // each operand's qualification and its Common name it, each refused
+    // before it runs.
+    let details = |claim: &Value| claim["diagnostics"][0]["details"].clone();
+    assert_eq!(refusals.len(), 6, "{refusals:?}");
+    assert!(refusals[..2]
+        .iter()
+        .all(|claim| details(claim).get("pair").is_none()));
+    for claim in &refusals[2..] {
+        let details = details(claim);
+        assert_eq!(details["pair"]["leftLabel"], "cubeA");
+        assert_eq!(details["pair"]["rightLabel"], "cubeB");
+        let work = details["pairWork"].as_u64().unwrap();
+        assert_eq!(
+            details["unitsUsed"].as_u64().unwrap(),
+            details["budget"].as_u64().unwrap() + work
+        );
+    }
+    // A budget just below the pair's price refuses its Common and names it.
     let mut cold = engine();
     let subject = ingest(&mut cold, &source);
-    // Too small for the pair's counted work: the refusal names the pair.
-    let probe = overlap(&mut cold, &subject, 4);
-    assert_eq!(probe["status"], "refused", "{probe}");
-    let details = &probe["diagnostics"][0]["details"];
-    assert_eq!(probe["diagnostics"][0]["code"], "MATCHER_TIMEOUT");
-    assert_eq!(details["pair"]["leftLabel"], "cubeA");
-    assert_eq!(details["pair"]["rightLabel"], "cubeB");
-    let work = details["pairWork"].as_u64().unwrap();
-    let needed = details["unitsUsed"].as_u64().unwrap();
-    assert!(work > 1 && needed > work, "{details}");
-
-    let mut cold = engine();
-    let subject = ingest(&mut cold, &source);
-    let refused_cold = overlap(&mut cold, &subject, needed - 1);
-    assert_eq!(refused_cold["diagnostics"][0]["details"]["pairWork"], work);
-    let mut cold = engine();
-    let subject = ingest(&mut cold, &source);
-    let passed_cold = overlap(&mut cold, &subject, needed);
-    assert_eq!(passed_cold["status"], "passed", "{passed_cold}");
+    let refused_cold = overlap(&mut cold, &subject, total - 1);
+    let below = details(&refused_cold);
+    assert_eq!(below["pair"]["rightLabel"], "cubeB", "{refused_cold}");
+    assert_eq!(below["unitsUsed"], total);
+    assert_eq!(below["pairWork"], details(&refusals[5])["pairWork"]);
 
     // After a completed claim retains the overlap, the same budgets replay
-    // the same work and give the same bytes (§16).
+    // the same charges and give the same bytes (§16).
     let mut warm = engine();
     let subject = ingest(&mut warm, &source);
     assert_eq!(overlap(&mut warm, &subject, BUDGET)["status"], "passed");
-    assert_eq!(overlap(&mut warm, &subject, needed - 1), refused_cold);
-    assert_eq!(overlap(&mut warm, &subject, needed), passed_cold);
+    for claim in &refusals {
+        let budget = details(claim)["budget"].as_u64().unwrap();
+        assert_eq!(&overlap(&mut warm, &subject, budget), claim);
+    }
+    assert_eq!(overlap(&mut warm, &subject, total - 1), refused_cold);
+    assert_eq!(overlap(&mut warm, &subject, total), passed_cold);
     let observations: Value = serde_json::from_slice(&warm.observations()).unwrap();
-    // One build; the refused replay stops before its hit is counted.
+    // One build; the refused replays stop before a hit is counted.
     assert_eq!(
         observations["physical"]["overlapBuilds"], "1",
         "{observations}"
     );
     assert_eq!(observations["physical"]["overlapResidentHits"], "1");
+}
+
+#[test]
+fn the_broad_phase_refuses_before_it_runs_past_its_budget() {
+    let source = workspace(
+        "packages/geospec-engine-native/bench/fixtures/performance-lab/generated/many-occurrences-4096.step",
+    );
+    let refusal = |budget: u64| {
+        let mut cold = engine();
+        let subject = ingest(&mut cold, &source);
+        let claim = overlap(&mut cold, &subject, budget);
+        assert_eq!(
+            claim["diagnostics"][0]["code"], "MATCHER_TIMEOUT",
+            "{claim}"
+        );
+        let details = claim["diagnostics"][0]["details"].clone();
+        assert!(details.get("pair").is_none(), "{details}");
+        details["unitsUsed"].as_u64().unwrap()
+    };
+    // The BRep gate and the 4,096 leaf boxes, then the broad phase's
+    // 8,386,560 box tests at M2's 4,096 per unit, charged before any runs.
+    let boxes = refusal(1);
+    assert_eq!(refusal(boxes), boxes + 1 + 8_386_560 / 4096);
 }

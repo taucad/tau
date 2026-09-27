@@ -7,13 +7,7 @@ import { gltf } from '@taucad/gltf';
 import { image } from '@taucad/image';
 import { jscad } from '@taucad/jscad';
 import { manifold } from '@taucad/manifold';
-import {
-  geometryCache,
-  gltfEdgeDetection,
-  parameterCache,
-  parameterFileResolver,
-  parameterUnits,
-} from '@taucad/middleware';
+import { geometryCache, gltfEdgeDetection, parameterFileResolver, parameterUnits } from '@taucad/middleware';
 import { opencascade } from '@taucad/opencascade';
 import { replicad } from '@taucad/replicad';
 import { rhino } from '@taucad/rhino';
@@ -67,7 +61,6 @@ const createUiRuntimeOptions = (config: UiRuntimeConfig, options: UiRuntimeOptio
       reportUrl: `${config.tauApiUrl}/v1/telemetry/ingest`,
     }),
     parameterFileResolver(),
-    parameterCache(),
     parameterUnits(),
     geometryCache(),
     gltfEdgeDetection(),

@@ -889,7 +889,7 @@ fn evaluate_components(
         }
     };
     let satisfied = u64::from(analysis.count) == expected_count;
-    if !satisfied {
+    if !satisfied && context.wants_failure_detail() {
         mismatch(
             &mut diagnostics,
             "GEOSPEC_CONNECTED_COMPONENTS_MISMATCH",
@@ -1112,7 +1112,7 @@ fn evaluate_integrity(
             ));
         }
     }
-    if !failures.is_empty() {
+    if !failures.is_empty() && context.wants_failure_detail() {
         mismatch(
             &mut diagnostics,
             "GEOSPEC_MESH_INTEGRITY_MISMATCH",

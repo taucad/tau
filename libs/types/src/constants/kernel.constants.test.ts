@@ -13,6 +13,15 @@ describe('kernel configuration identity', () => {
     expect(configuration?.emptyCode).toContain('[Range(0.05, 5.0)]');
   });
 
+  it('starts the native kernels with no geometry', () => {
+    const picogk = kernelConfigurations.find(({ id }) => id === 'picogk');
+    const build123d = kernelConfigurations.find(({ id }) => id === 'build123d');
+
+    expect(picogk?.emptyCode).toContain('Library.Go(Params.VoxelSizeMm, () => { });');
+    expect(picogk?.emptyCode).not.toContain('oViewer');
+    expect(build123d?.emptyCode).toContain('return None');
+  });
+
   it('presents exactly one OpenSCAD-language kernel with engine-independent copy', () => {
     const scadKernels = kernelConfigurations.filter(({ language }) => language === 'openscad');
 

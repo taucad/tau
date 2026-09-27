@@ -146,6 +146,7 @@ import type {
   SyncFetchActorOutput,
   SyncIntegrateActorInput,
   SyncMergeActorOutput,
+  SyncMovedCheckout,
   SyncPushActorInput,
   SyncPushActorOutput,
   SyncReadPendingActorInput,
@@ -1128,6 +1129,62 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     const fetched = await port.listRefs(`refs/remotes/${remote.name}`);
     return fetched.length === 0 && holdsNoWork(files, new ImmutableRevisionTree([['tau.json', manifest]]));
   };
+
+  /**
+   * Whether `tau.json` is the placeholder a Tau Cloud open writes before its
+   * first pull (`cloudProjectStub`): this project's id, the remote's name, and
+   * otherwise the stub's defaults. Setup like the generated files: the remote's
+   * own manifest replaces it (e921b3d96). Any other edit is work (rule 6).
+   *
+   * @param manifest - The checkout's `tau.json` bytes.
+   * @returns `true` for the untouched placeholder.
+   */
+  const isOpenPlaceholder = (manifest: Uint8Array<ArrayBuffer> | undefined): boolean => {
+    if (manifest === undefined) {
+      return false;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(new TextDecoder().decode(manifest));
+    } catch {
+      return false;
+    }
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      return false;
+    }
+    const { $schema, id, name, description, tags, assets, ...rest } = parsed as Readonly<Record<string, unknown>>;
+    return (
+      Object.keys(rest).length === 0 &&
+      ($schema === undefined || typeof $schema === 'string') &&
+      id === options.projectId &&
+      typeof name === 'string' &&
+      description === '' &&
+      Array.isArray(tags) &&
+      tags.length === 0 &&
+      JSON.stringify(assets) === JSON.stringify({ main: { entryPath: 'main.scad' } })
+    );
+  };
+
+  /**
+   * {@link holdsNoWork} once the arriving tree is known, with the cloud open's
+   * placeholder manifest counted as setup.
+   *
+   * @param files - The checkout's captured tree.
+   * @param arriving - What the open pull brings.
+   * @returns `true` when there is nothing here to record.
+   */
+  const holdsNoWorkBeforePull = (files: ImmutableRevisionTree, arriving: ImmutableRevisionTree): boolean =>
+    holdsNoWork(
+      isOpenPlaceholder(files.get('tau.json'))
+        ? new ImmutableRevisionTree(
+            files
+              .entries()
+              .filter(({ path }) => path !== 'tau.json')
+              .map(({ path, content, mode }) => [path, content, mode] as const),
+          )
+        : files,
+      arriving,
+    );
 
   /* Tau-owned siblings carry their role in the reserved name, so recovery can
    * distinguish unpublished staging bytes from the only copy of a backup. */
@@ -2164,6 +2221,142 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     }
   };
 
+  /**
+   * Move one branch, and the checkout that holds it, onto its remote head.
+   *
+   * Refuses with `CHECKOUT_CONFLICT` when that would not be a fast-forward; a
+   * checkout whose files are not its head (unsaved, or a run holds them) is
+   * left alone and answered as a hold (D12, rule 9).
+   *
+   * @param input - The remote and the branch.
+   * @param signal - Ends the work when the caller stops waiting.
+   * @returns The checkout re-headed or held, or `undefined` for a ref-only branch.
+   */
+  const fastForwardBranch = async (
+    input: Readonly<{ remote: string; branch: string }>,
+    signal: AbortSignal,
+  ): Promise<SyncFastForwardActorOutput> => {
+    const tracking = remoteTrackingRef(input.remote, `refs/heads/${input.branch}`);
+    const head = await port.readRef(tracking);
+    signal.throwIfAborted();
+    if (head === undefined) {
+      return undefined;
+    }
+    /*
+     * R04, above both branches (C20).
+     *
+     * Compare-and-swap proves the ref did not move *during* the call; it
+     * proves nothing about whether the replacement is a fast-forward. The
+     * checkout-bearing branch below got that recheck as the R04 repair and
+     * the checkout-less one — a ref-only branch, which is exactly what a
+     * second device's branches are — kept CASing straight to the remote
+     * head, so work on a branch nobody has open could be replaced without
+     * ever being composed.
+     */
+    const ancestryHolds = async (local: RevisionId | undefined): Promise<boolean> => {
+      if (local === undefined || local === head) {
+        return true;
+      }
+      const walk = await port.log({ heads: [head, local], limit: divergenceWalkLimit });
+      return integrationOf(walk, local, head) === 'fastForward';
+    };
+    const places = await listPlaces();
+    signal.throwIfAborted();
+    const place = places.find((entry) => entry.branch === input.branch);
+    if (place === undefined) {
+      const expected = await port.readRef(`refs/heads/${input.branch}`);
+      signal.throwIfAborted();
+      if (!(await ancestryHolds(expected))) {
+        throw new RevisionPortError(
+          'CHECKOUT_CONFLICT',
+          `${input.branch} has work the remote does not. Fetch and compose the two lines first.`,
+        );
+      }
+      signal.throwIfAborted();
+      const updated = await port.updateRef({ name: `refs/heads/${input.branch}`, expectedHead: expected, head });
+      if (updated.status !== 'updated') {
+        throw new RevisionPortError('CHECKOUT_CONFLICT', `${input.branch} moved while synchronizing.`);
+      }
+      return undefined;
+    }
+    const branch = `refs/heads/${input.branch}`;
+    const target = await port.readTree(head);
+    signal.throwIfAborted();
+    if (target === undefined) {
+      throw new RevisionPortError('UNKNOWN_REVISION', `The store holds no tree for ${head}.`);
+    }
+    let expected: RevisionId | undefined;
+    try {
+      await materializeTree(place, target, {
+        signal,
+        validate: async (before) => {
+          expected = await port.readRef(branch);
+          if (!(await ancestryHolds(expected))) {
+            throw new RevisionPortError(
+              'CHECKOUT_CONFLICT',
+              `${input.branch} changed after synchronization checked it. Fetch and compose the newer work first.`,
+            );
+          }
+          signal.throwIfAborted();
+          const expectedTreeId = await treeIdOf(expected);
+          /* An unborn line is dirty only when it holds work of its own (E2E-D defect A);
+           * a cloud open's placeholder manifest is not (e921b3d96). */
+          const dirty =
+            expectedTreeId === undefined
+              ? !holdsNoWorkBeforePull(before, target)
+            : expectedTreeId !== (await checkoutTreeId(place.id, before));
+          const leases = await readLeases();
+          const leased = leases.some((lease) => lease.checkoutId === place.id);
+          signal.throwIfAborted();
+          /* The lease first: a turn's own writes are what make its checkout dirty (rule 9). */
+          if (leased) {
+            throw new CheckoutHeld({
+              hold: 'leased',
+              checkoutId: place.id,
+              message:
+                'These files are being changed by an active run. Synchronization will retry after it settles.',
+            });
+          }
+          if (dirty) {
+            throw new CheckoutHeld({
+              hold: 'dirty',
+              checkoutId: place.id,
+              message: 'These files have changes that are not in a revision yet. Save them before synchronizing.',
+            });
+          }
+        },
+        publish: async () => {
+          signal.throwIfAborted();
+          const currentLeases = await readLeases();
+          if (currentLeases.some((lease) => lease.checkoutId === place.id)) {
+            throw new CheckoutHeld({
+              hold: 'leased',
+              checkoutId: place.id,
+              message:
+                'A run started changing these files while synchronization was applying. It will retry after the run settles.',
+            });
+          }
+          const updated = await port.updateRef({ name: branch, expectedHead: expected, head });
+          if (updated.status !== 'updated') {
+            throw new RevisionPortError('CHECKOUT_CONFLICT', `${input.branch} moved while synchronizing.`);
+          }
+        },
+      });
+    } catch (error) {
+      /* Left alone, not failed (D12): the scheduler mints or waits. */
+      const held = holdOf(error, head);
+      if (held === undefined) {
+        throw error;
+      }
+      return held;
+    }
+    const treeId = await treeIdOf(head);
+    if (treeId === undefined) {
+      throw new RevisionPortError('UNKNOWN_REVISION', `No recorded tree for ${head}.`);
+    }
+    return { checkoutId: place.id, revisionId: head, treeId };
+  };
+
   type MergeBranchesInput = Readonly<{
     branch: string;
     into: string;
@@ -2506,7 +2699,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
          * has no pull to merge a root into, so its first cut is an ordinary one. */
         if ((await headOf(place)) === undefined) {
           const arriving = await arrivingTree(place);
-          if (arriving === undefined ? await holdsOnlyUnfetchedScaffold(tree) : holdsNoWork(tree, arriving)) {
+          if (arriving === undefined ? await holdsOnlyUnfetchedScaffold(tree) : holdsNoWorkBeforePull(tree, arriving)) {
             return { treeId, cutId: '', nothingToSave: true };
           }
         }
@@ -3663,7 +3856,32 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         let quotaMessage: string | undefined;
         let quotaStorage: RemoteStorageRefusal | undefined;
 
-        if (history.length > 0) {
+        /*
+         * D54: a lease is only a licence to rewrite the remote when this device
+         * has *integrated* what it leases. The lease is the head the last fetch
+         * saw, and a fetch whose merge did not happen (open files mid-save, a
+         * branch this checkout is not on) still records it — so a push under
+         * it overwrote the remote's own commits. A branch whose local head does
+         * not contain its lease is refused here as `leaseLost`, never offered;
+         * the scheduler's retry pulls and merges, or raises the conflict.
+         */
+        const unintegrated = new Set<string>();
+        for (const name of history) {
+          const lease = input.leases[name];
+          const local = localHeads.get(name);
+          if (!name.startsWith('refs/heads/') || lease === undefined || local === undefined || lease === local) {
+            continue;
+          }
+          // oxlint-disable-next-line no-await-in-loop -- one bounded walk per diverging branch, before anything is sent.
+          const walk = await port.log({ heads: [revisionId(local), revisionId(lease)], limit: divergenceWalkLimit });
+          if (integrationOf(walk, revisionId(local), revisionId(lease)) !== 'upToDate') {
+            unintegrated.add(name);
+            results.push({ name, status: 'rejected', head: local, reason: 'leaseLost' });
+          }
+        }
+        const offeredHistory = history.filter((name) => !unintegrated.has(name));
+
+        if (offeredHistory.length > 0) {
           signal.throwIfAborted();
           try {
             /* The one push a `pagehide` re-send may carry (D28, S41, review 2
@@ -3672,7 +3890,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
               port.push({
                 remote: input.remote,
                 atomic: true,
-                refs: history.map((name) => offerOf(name, input.leases)),
+                refs: offeredHistory.map((name) => offerOf(name, input.leases)),
               }),
             );
             results.push(...pushed.refs.map((entry) => outcomeOf(entry, localHeads)));
@@ -3693,7 +3911,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
               quotaMessage = error.refusal.message;
               quotaStorage = storageRefusalOf(error.refusal) ?? quotaStorage;
             }
-            results.push(...refusedAll(history, message, localHeads));
+            results.push(...refusedAll(offeredHistory, message, localHeads));
           }
         }
 
@@ -3870,8 +4088,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         /*
          * Fetch owns remote-tracking refs; this is the one reconciliation from
          * those facts into project branch identity. Unborn or previously clean
-         * ref-only branches follow the remote. Diverged and checked-out branches
-         * are preserved, including when the remote renames or deletes a name.
+         * ref-only branches follow the remote, and so does another checkout's
+         * branch whose files are clean (D60). Diverged branches, and checkouts
+         * with unsaved or leased files, are preserved, including when the
+         * remote renames or deletes a name.
          */
         const localByName = new Map(localBranchesBefore.map((entry) => [entry.name, String(entry.head)]));
         const priorTrackingPrefix = `refs/remotes/${input.remote}/`;
@@ -3893,8 +4113,47 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         const checkedOut = new Set(
           places.flatMap((place) => (place.branch === undefined ? [] : [`refs/heads/${place.branch}`])),
         );
+        const advanced: Array<SyncMovedCheckout & Readonly<{ branch: string }>> = [];
+        /* D60: another checkout's branch the remote moved on, with no work of
+         * its own, follows as the live one does. Left behind, every push
+         * offered it under a lease it could never integrate — `leaseLost` on
+         * each retry, for ever. Unsaved or leased files, or local work, keep it
+         * where it is. Ancestry, not the tracking ref before this fetch: an
+         * earlier fetch that moved the tracking ref while the files were
+         * unsaved must not strand the branch once they are saved. */
+        const followRemote = async (branch: `refs/heads/${string}`, head: string): Promise<void> => {
+          const local = localByName.get(branch);
+          if (local === undefined || local === head) {
+            return;
+          }
+          const walk = await port.log({ heads: [revisionId(head), revisionId(local)], limit: divergenceWalkLimit });
+          if (integrationOf(walk, revisionId(local), revisionId(head)) !== 'fastForward') {
+            return;
+          }
+          const name = branch.slice('refs/heads/'.length);
+          try {
+            const moved = await fastForwardBranch({ remote: input.remote, branch: name }, signal);
+            /* A held checkout stays where it is: its files are the person's or a run's. */
+            if (moved !== undefined && 'hold' in moved) {
+              return;
+            }
+            localByName.set(branch, head);
+            if (moved !== undefined) {
+              advanced.push({ ...moved, branch: name });
+            }
+          } catch (error) {
+            if (!(error instanceof RevisionPortError && error.code === 'CHECKOUT_CONFLICT')) {
+              throw error;
+            }
+          }
+        };
         for (const [branch, head] of advertisedBranches) {
-          if (branch === activeBranch || checkedOut.has(branch)) {
+          if (branch === activeBranch) {
+            continue;
+          }
+          if (checkedOut.has(branch)) {
+            // oxlint-disable-next-line no-await-in-loop -- each checkout is fenced on its own.
+            await followRemote(branch, head);
             continue;
           }
           const local = localByName.get(branch);
@@ -4079,131 +4338,12 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
            */
           return relation === 'upToDate' ? 'ahead' : relation;
         })();
-        return { leases, integration, branches, records };
+        return { leases, integration, branches, records, ...(advanced.length === 0 ? {} : { advanced }) };
       }),
 
       /** A clean checkout takes the remote head; nothing is composed (A2). */
       fastForward: fromAuthorityPromise<SyncFastForwardActorOutput, Readonly<{ remote: string; branch: string }>>(
-        async ({ input, signal }) => {
-          const tracking = remoteTrackingRef(input.remote, `refs/heads/${input.branch}`);
-          const head = await port.readRef(tracking);
-          signal.throwIfAborted();
-          if (head === undefined) {
-            return undefined;
-          }
-          /*
-           * R04, above both branches (C20).
-           *
-           * Compare-and-swap proves the ref did not move *during* the call; it
-           * proves nothing about whether the replacement is a fast-forward. The
-           * checkout-bearing branch below got that recheck as the R04 repair and
-           * the checkout-less one — a ref-only branch, which is exactly what a
-           * second device's branches are — kept CASing straight to the remote
-           * head, so work on a branch nobody has open could be replaced without
-           * ever being composed.
-           */
-          const ancestryHolds = async (local: RevisionId | undefined): Promise<boolean> => {
-            if (local === undefined || local === head) {
-              return true;
-            }
-            const walk = await port.log({ heads: [head, local], limit: divergenceWalkLimit });
-            return integrationOf(walk, local, head) === 'fastForward';
-          };
-          const places = await listPlaces();
-          signal.throwIfAborted();
-          const place = places.find((entry) => entry.branch === input.branch);
-          if (place === undefined) {
-            const expected = await port.readRef(`refs/heads/${input.branch}`);
-            signal.throwIfAborted();
-            if (!(await ancestryHolds(expected))) {
-              throw new RevisionPortError(
-                'CHECKOUT_CONFLICT',
-                `${input.branch} has work the remote does not. Fetch and compose the two lines first.`,
-              );
-            }
-            signal.throwIfAborted();
-            const updated = await port.updateRef({ name: `refs/heads/${input.branch}`, expectedHead: expected, head });
-            if (updated.status !== 'updated') {
-              throw new RevisionPortError('CHECKOUT_CONFLICT', `${input.branch} moved while synchronizing.`);
-            }
-            return undefined;
-          }
-          const branch = `refs/heads/${input.branch}`;
-          const target = await port.readTree(head);
-          signal.throwIfAborted();
-          if (target === undefined) {
-            throw new RevisionPortError('UNKNOWN_REVISION', `The store holds no tree for ${head}.`);
-          }
-          let expected: RevisionId | undefined;
-          try {
-            await materializeTree(place, target, {
-              signal,
-              validate: async (before) => {
-                expected = await port.readRef(branch);
-                if (!(await ancestryHolds(expected))) {
-                  throw new RevisionPortError(
-                    'CHECKOUT_CONFLICT',
-                    `${input.branch} changed after synchronization checked it. Fetch and compose the newer work first.`,
-                  );
-                }
-                signal.throwIfAborted();
-                const expectedTreeId = await treeIdOf(expected);
-                /* An unborn line is dirty only when it holds work of its own (E2E-D defect A). */
-                const dirty =
-                  expectedTreeId === undefined
-                    ? !holdsNoWork(before, target)
-                    : expectedTreeId !== (await checkoutTreeId(place.id, before));
-                const leases = await readLeases();
-                const leased = leases.some((lease) => lease.checkoutId === place.id);
-                signal.throwIfAborted();
-                /* The lease first: a turn's own writes are what make its checkout dirty (rule 9). */
-                if (leased) {
-                  throw new CheckoutHeld({
-                    hold: 'leased',
-                    checkoutId: place.id,
-                    message:
-                      'These files are being changed by an active run. Synchronization will retry after it settles.',
-                  });
-                }
-                if (dirty) {
-                  throw new CheckoutHeld({
-                    hold: 'dirty',
-                    checkoutId: place.id,
-                    message: 'These files have changes that are not in a revision yet. Save them before synchronizing.',
-                  });
-                }
-              },
-              publish: async () => {
-                signal.throwIfAborted();
-                const currentLeases = await readLeases();
-                if (currentLeases.some((lease) => lease.checkoutId === place.id)) {
-                  throw new CheckoutHeld({
-                    hold: 'leased',
-                    checkoutId: place.id,
-                    message:
-                      'A run started changing these files while synchronization was applying. It will retry after the run settles.',
-                  });
-                }
-                const updated = await port.updateRef({ name: branch, expectedHead: expected, head });
-                if (updated.status !== 'updated') {
-                  throw new RevisionPortError('CHECKOUT_CONFLICT', `${input.branch} moved while synchronizing.`);
-                }
-              },
-            });
-          } catch (error) {
-            /* Left alone, not failed (D12): the scheduler mints or waits. */
-            const held = holdOf(error, head);
-            if (held === undefined) {
-              throw error;
-            }
-            return held;
-          }
-          const treeId = await treeIdOf(head);
-          if (treeId === undefined) {
-            throw new RevisionPortError('UNKNOWN_REVISION', `No recorded tree for ${head}.`);
-          }
-          return { checkoutId: place.id, revisionId: head, treeId };
-        },
+        async ({ input, signal }) => fastForwardBranch(input, signal),
       ),
 
       merge: fromAuthorityPromise<SyncMergeActorOutput, SyncIntegrateActorInput>(async ({ input }) => {

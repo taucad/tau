@@ -508,6 +508,9 @@ test('chat navigation preserves ordering until an accepted user submit advances 
 });
 
 test('project and chat rows reveal their actions over a dissolving name', async () => {
+  /* No gateway fixture, so no model catalog: this is the offline open. Opening the project attaches
+   * its chat to the agent host, which needs no catalog; an attach that demanded one read `Failed`,
+   * a status sentence and so a tooltip on a chat nothing ever ran in. */
   await target.setViewport({ width: 1024, height: 900 });
   await target.navigate('/__e2e/project-navigation');
   await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 60_000);

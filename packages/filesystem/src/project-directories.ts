@@ -23,10 +23,11 @@
 
 import { z } from 'zod';
 import {
-  parseAdoptableProjectManifestBytes,
   parseProjectManifestBytes,
   projectIdSchema,
+  projectManifestSchemaUrl,
   projectToManifest,
+  readProjectManifestBytes,
   serializeProjectManifest,
 } from '@taucad/types';
 import { idPrefix } from '@taucad/types/constants';
@@ -64,17 +65,27 @@ import { projectRoute } from '#project-routes.js';
 /** Concurrent `tau.json` probes while scanning a discovery root. */
 const manifestProbeConcurrency = 16;
 
-/** Validated or quarantined result from project discovery. @public */
+/**
+ * Validated or quarantined result from project discovery.
+ *
+ * An identified entry's optional `issue` marks a degraded manifest: the
+ * identity routes, `manifest` is the normalized strict view, and the bytes
+ * on disk still need an explicit Repair.
+ *
+ * @public
+ */
 export type ProjectDiscoveryEntry =
   | {
       readonly status: 'valid';
       readonly manifest: ProjectManifest;
       readonly locator: ProjectLocator;
+      readonly issue?: ProjectManifestParseIssue;
     }
   | {
       readonly status: 'duplicate-id';
       readonly manifest: ProjectManifest;
       readonly locator: ProjectLocator;
+      readonly issue?: ProjectManifestParseIssue;
     }
   | {
       /**
@@ -86,6 +97,7 @@ export type ProjectDiscoveryEntry =
       readonly status: 'route-blocked';
       readonly manifest: ProjectManifest;
       readonly locator: ProjectLocator;
+      readonly issue?: ProjectManifestParseIssue;
     }
   | {
       readonly status: 'adoption-required';
@@ -219,23 +231,81 @@ export const pendingProjectCommitInputSchema: z.ZodType<CommitPendingProjectDire
     }
   });
 
+/** The last segment of a root-relative directory, clamped to the manifest's name bound. */
+const basenameOf = (directory: string): string => (directory.split('/').at(-1) ?? directory).slice(0, 200);
+
+/** What one immediate child directory of a discovery root holds, as far as project identity goes. */
+type ProjectDirectoryReading =
+  | { readonly kind: 'not-a-project' }
+  | { readonly kind: 'identified'; readonly manifest: ProjectManifest; readonly issue?: ProjectManifestParseIssue }
+  | {
+      readonly kind: 'adoptable';
+      readonly manifest: AdoptableProjectManifest;
+      readonly issue: ProjectManifestParseIssue;
+    }
+  | { readonly kind: 'invalid'; readonly issue: ProjectManifestParseIssue };
+
 /**
- * Manifest bytes whose *only* defect is the identity — the exact condition
- * discovery reports as `adoption-required` and the Adopt action re-validates
- * before it writes (R11). Anything else stays quarantined.
+ * Classify one project directory by its manifest — the single reading that
+ * discovery reports and that Adopt re-establishes under the physical lock
+ * before it writes (R11, blueprint R6).
  *
- * @param bytes - Encoded `tau.json`.
- * @returns The identity-less manifest, or `undefined` when adoption is unsafe.
+ * A defective declaration still identifies its project; only a missing
+ * identity makes the directory adoptable, and only unreadable, oversize or
+ * foreign-schema bytes leave it quarantined. A directory holding `.tau/`
+ * state has been a project, so losing its `tau.json` keeps it visible as
+ * adoptable instead of letting it vanish with its chats (blueprint F10).
+ *
+ * @param provider - The discovery root's provider.
+ * @param directory - Root-relative project directory.
+ * @returns The directory's reading; never throws for manifest content.
  */
-function readAdoptableManifest(bytes: Uint8Array<ArrayBuffer>): AdoptableProjectManifest | undefined {
-  const parsed = parseProjectManifestBytes(bytes);
-  if (parsed.success) {
-    return undefined;
+async function readProjectDirectory(provider: FileSystemProvider, directory: string): Promise<ProjectDirectoryReading> {
+  let bytes: Uint8Array<ArrayBuffer>;
+  try {
+    bytes = await provider.readFile(joinRelativePath(directory, 'tau.json'));
+  } catch (error) {
+    if (!isNotFoundError(error)) {
+      return {
+        kind: 'invalid',
+        issue: { code: 'manifest-unreadable', message: error instanceof Error ? error.message : String(error) },
+      };
+    }
+    // One listing, no `stat`: it both proves Tau state and finds the likely main entry.
+    const entries = await readDirectoryEntries(provider, directory).catch(() => []);
+    if (!entries.some((entry) => entry.kind === 'dir' && entry.name === '.tau')) {
+      return { kind: 'not-a-project' };
+    }
+    const mainFile = entries
+      .filter((entry) => entry.kind === 'file' && /^main\.[^.]+$/.test(entry.name))
+      .map((entry) => entry.name)
+      .sort()[0];
+    return {
+      kind: 'adoptable',
+      manifest: {
+        $schema: projectManifestSchemaUrl,
+        name: basenameOf(directory),
+        description: '',
+        tags: [],
+        assets: { main: { entryPath: mainFile ?? 'main.ts' } },
+      },
+      issue: { code: 'manifest-missing' },
+    };
   }
-  const idOnlyInvalid =
-    parsed.issue.code === 'manifest-invalid' && parsed.issue.issues.every((issue) => issue.path[0] === 'id');
-  const adoptable = idOnlyInvalid ? parseAdoptableProjectManifestBytes(bytes) : undefined;
-  return adoptable?.success === true ? adoptable.data : undefined;
+  const read = readProjectManifestBytes(bytes);
+  if (read.success) {
+    return read.issue === undefined
+      ? { kind: 'identified', manifest: read.data }
+      : { kind: 'identified', manifest: read.data, issue: read.issue };
+  }
+  if (read.adoptable === undefined) {
+    return { kind: 'invalid', issue: read.issue };
+  }
+  return {
+    kind: 'adoptable',
+    manifest: read.adoptable.name === '' ? { ...read.adoptable, name: basenameOf(directory) } : read.adoptable,
+    issue: read.issue,
+  };
 }
 
 /**
@@ -320,30 +390,26 @@ export class ProjectDirectories {
       const probe = async (directory: string): Promise<ProjectDiscoveryEntry | undefined> => {
         const relativeDirectory = assertRootedPath(directory);
         const locator = projectLocatorFor(root, storageRootKey, relativeDirectory);
-        let bytes: Uint8Array<ArrayBuffer>;
-        try {
-          bytes = await provider.readFile(joinRelativePath(relativeDirectory, 'tau.json'));
-        } catch (error) {
-          if (isNotFoundError(error)) {
+        // One unreadable child must not blank an otherwise readable root: it is
+        // reported in place and the scan continues. `inaccessible` stays
+        // reserved for failures of the root listing or its provider.
+        const reading = await readProjectDirectory(provider, relativeDirectory);
+        switch (reading.kind) {
+          case 'not-a-project': {
             return undefined;
           }
-          // One unreadable child must not blank an otherwise readable root:
-          // report it in place and keep scanning. `inaccessible` stays
-          // reserved for failures of the root listing or its provider.
-          return {
-            status: 'invalid',
-            locator,
-            issue: { code: 'manifest-unreadable', message: error instanceof Error ? error.message : String(error) },
-          };
+          case 'identified': {
+            return reading.issue === undefined
+              ? { status: 'valid', manifest: reading.manifest, locator }
+              : { status: 'valid', manifest: reading.manifest, locator, issue: reading.issue };
+          }
+          case 'adoptable': {
+            return { status: 'adoption-required', manifest: reading.manifest, locator, issue: reading.issue };
+          }
+          case 'invalid': {
+            return { status: 'invalid', locator, issue: reading.issue };
+          }
         }
-        const parsed = parseProjectManifestBytes(bytes);
-        if (parsed.success) {
-          return { status: 'valid', manifest: parsed.data, locator };
-        }
-        const adoptable = readAdoptableManifest(bytes);
-        return adoptable === undefined
-          ? { status: 'invalid', locator, issue: parsed.issue }
-          : { status: 'adoption-required', manifest: adoptable, locator, issue: parsed.issue };
       };
       // Chunked awaits bound the probe concurrency; the pre-sorted input keeps
       // the result order independent of completion order.
@@ -392,18 +458,26 @@ export class ProjectDirectories {
   }
 
   /**
-   * Give an `adoption-required` project directory a fresh Tau identity in
-   * place. Service-side because the write must re-validate adoptability under
-   * the same physical lock every other project mutation takes — a UI-side
-   * read/modify/write could adopt a directory a sibling tab just repaired.
+   * Give an `adoption-required` project directory a Tau identity in place,
+   * writing the salvaged declaration discovery showed. Service-side because the
+   * write must re-establish adoptability under the same physical lock every
+   * other project mutation takes — a UI-side read/modify/write could adopt a
+   * directory a sibling tab just repaired.
    *
    * @param locator - Discovery locator of the directory to adopt.
+   * @param options - `id` restores the identity this exact directory's route was bound to; absent mints a fresh one.
    * @returns The manifest now on disk, identity included.
    */
-  public async adoptProjectDirectory(locator: ProjectLocator): Promise<ProjectManifest> {
+  public async adoptProjectDirectory(
+    locator: ProjectLocator,
+    options?: { readonly id?: string },
+  ): Promise<ProjectManifest> {
     const path = assertRootedPath(locator.relativeDirectory);
     if (path !== locator.relativeDirectory || !isProjectDirectoryPath(path)) {
       throw new TypeError(`Adoption target must be a canonical project directory: ${locator.relativeDirectory}`);
+    }
+    if (options?.id !== undefined && !projectIdSchema.safeParse(options.id).success) {
+      throw new TypeError(`Invalid project id: ${JSON.stringify(options.id)}`);
     }
     const root = this._discoveryRoots().find((candidate) => candidate.storageRootKey === locator.storageRootKey);
     if (root === undefined) {
@@ -413,13 +487,15 @@ export class ProjectDirectories {
     const physicalLock = `${locator.storageRootKey}:${path}`;
     return this._crossTabCoordinator.withLocks([physicalLock], async () =>
       this._resourceQueue.queueForMany([physicalLock], async () => {
-        const manifestPath = `${path}/tau.json`;
-        const adoptable = readAdoptableManifest(await provider.readFile(manifestPath));
-        if (adoptable === undefined) {
+        const reading = await readProjectDirectory(provider, path);
+        if (reading.kind !== 'adoptable') {
           throw new TypeError(`Project directory is not adoptable: ${path}`);
         }
-        const manifest = projectToManifest({ ...adoptable, id: generatePrefixedId(idPrefix.project) });
-        await provider.writeFile(manifestPath, serializeProjectManifest(manifest));
+        const manifest = projectToManifest({
+          ...reading.manifest,
+          id: options?.id ?? generatePrefixedId(idPrefix.project),
+        });
+        await provider.writeFile(`${path}/tau.json`, serializeProjectManifest(manifest));
         // Ponytail: no logical route to invalidate — an unadopted project was
         // never mounted, so the caller's discovery refetch is the only reader.
         this._crossTabCoordinator.notifyDirectoryChange('/', this._scopedPhysicalAuthority(root.scope, ''));
@@ -472,7 +548,8 @@ export class ProjectDirectories {
           return { status: 'unidentifiable' };
         }
         const manifest = await provider.readFile(manifestPath);
-        const parsed = parseProjectManifestBytes(manifest);
+        // Identity is what deletion verifies; a degraded declaration still carries it.
+        const parsed = readProjectManifestBytes(manifest);
         if (!parsed.success) {
           return { status: 'unidentifiable' };
         }
@@ -532,7 +609,7 @@ export class ProjectDirectories {
             }
             const existingManifestPath = `${path}/tau.json`;
             if (await provider.exists(existingManifestPath)) {
-              const existing = parseProjectManifestBytes(await provider.readFile(existingManifestPath));
+              const existing = readProjectManifestBytes(await provider.readFile(existingManifestPath));
               if (!existing.success) {
                 return { status: 'unidentifiable-manifest' };
               }

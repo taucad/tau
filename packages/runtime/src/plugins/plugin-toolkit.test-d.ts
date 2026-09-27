@@ -9,6 +9,7 @@ import type { CapabilitiesManifest } from '#types/runtime.types.js';
 import type { RuntimeKernels, RuntimeMiddleware, RuntimeTranscoders } from '#worker/runtime-definition.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
 import { defineConfiguration } from '#configuration/configuration.js';
+import { machineManifestFixture } from '#machines/machine-manifest.fixture.js';
 
 type StepKernel = KernelPlugin<
   { step: { tolerance?: number } },
@@ -79,6 +80,7 @@ const machine = () =>
       vendor: 'test',
       technologies: ['additive.fff'],
       accepts: [],
+      manifest: machineManifestFixture,
       bindingConfiguration: jobRegistration.configuration,
       submissionConfiguration: jobRegistration.configuration,
       queries: {},

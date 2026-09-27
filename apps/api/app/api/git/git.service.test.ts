@@ -5,7 +5,6 @@ import { statfs } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
-import { setImmediate } from 'node:timers/promises';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { Logger, ServiceUnavailableException, VersioningType } from '@nestjs/common';
@@ -31,6 +30,7 @@ import type { ProjectAccessService } from '#api/collaboration/project-access.ser
 import type { DurableEventsService } from '#api/durable-events/durable-events.service.js';
 import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
+import { ShutdownService } from '#lifecycle/shutdown.service.js';
 import type { GitAccess } from '#api/git/git.service.js';
 import { commitLease } from '#api/git/store/commit.js';
 import { RepositoryStoreError } from '#api/git/store/errors.js';
@@ -237,7 +237,12 @@ const createService = (
   {
     rateLimiter = roomyBudget,
     durableEvents = mock<DurableEventsService>(),
-  }: { rateLimiter?: PublicationRateLimiterService; durableEvents?: DurableEventsService } = {},
+    shutdown = new ShutdownService(),
+  }: {
+    rateLimiter?: PublicationRateLimiterService;
+    durableEvents?: DurableEventsService;
+    shutdown?: ShutdownService;
+  } = {},
 ): GitRepositoryService =>
   new GitRepositoryService(
     database,
@@ -250,6 +255,7 @@ const createService = (
     store,
     rateLimiter,
     durableEvents,
+    shutdown,
   );
 
 const access: GitAccess = {
@@ -391,49 +397,23 @@ describe('GitRepositoryService derived state (D19)', () => {
     await service.settled();
   }, 60_000);
 
-  it('holds shutdown until an announcement still in flight has landed', async () => {
+  /* One stop mechanism: the post-reply announcement is held open by the API's
+     shutdown registry, which `closeGracefully` waits on before Postgres and
+     Redis close and abandons at its own deadline. */
+  it('registers an announcement still in flight with the shutdown registry', async () => {
     const row: GitRow = { generation: 1, derivedGeneration: 0, storageBytes: 0 };
     const durableEvents = mock<DurableEventsService>();
     const appended = Promise.withResolvers<{ appended: false; reason: 'not-found' }>();
     durableEvents.appendRevision.mockReturnValue(appended.promise);
-    const service = createService(store, databaseStub(row, { failTransaction: false }), { durableEvents });
+    const shutdown = new ShutdownService();
+    const service = createService(store, databaseStub(row, { failTransaction: false }), { durableEvents, shutdown });
     await service.advertiseRefs(access, 'git-upload-pack');
     expect(durableEvents.appendRevision).toHaveBeenCalledOnce();
 
-    const stopped = vi.fn();
-    const stopping = (async (): Promise<void> => {
-      await service.onModuleDestroy();
-      stopped();
-    })();
-    await setImmediate();
-    expect(stopped, 'shutdown must not pass an announcement still in flight').not.toHaveBeenCalled();
+    expect(await shutdown.settled(Date.now() + 50), 'the registry must hold the announcement').toBeGreaterThan(0);
 
     appended.resolve({ appended: false, reason: 'not-found' });
-    await stopping;
-    expect(stopped).toHaveBeenCalledOnce();
-  }, 60_000);
-
-  it('abandons a stuck announcement inside Fly’s 30 s kill_timeout, and says so', async () => {
-    const row: GitRow = { generation: 1, derivedGeneration: 0, storageBytes: 0 };
-    const durableEvents = mock<DurableEventsService>();
-    durableEvents.appendRevision.mockReturnValue(Promise.withResolvers<never>().promise);
-    const service = createService(store, databaseStub(row, { failTransaction: false }), { durableEvents });
-    await service.advertiseRefs(access, 'git-upload-pack');
-    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-
-    try {
-      const stopping = service.onModuleDestroy();
-      await vi.advanceTimersByTimeAsync(29_999);
-      await stopping;
-      expect(warn).toHaveBeenCalledWith(
-        expect.objectContaining({ pending: 1 }),
-        expect.stringContaining('Shutdown abandoned background work'),
-      );
-    } finally {
-      vi.useRealTimers();
-      warn.mockRestore();
-    }
+    expect(await shutdown.settled(Date.now() + 5000)).toBe(0);
   }, 60_000);
 
   it('repairs the mismatch on the next request, with no job in between', async () => {
@@ -585,9 +565,11 @@ describe('retained packs after a compacting sweep (D18)', () => {
       }
     }
     const updates: Array<Record<string, unknown>> = [];
+    const shutdown = new ShutdownService();
     const service = createService(
       store,
       databaseStub({ generation: 9, derivedGeneration: 9, storageBytes: 0 }, { failTransaction: false, updates }),
+      { shutdown },
     );
 
     await service.removeRef({
@@ -595,7 +577,8 @@ describe('retained packs after a compacting sweep (D18)', () => {
       ref: 'refs/tags/v1',
       committedBy: ownerId,
     });
-    await service.settled();
+    /* The shutdown registry alone, not `settled()`: the post-reply sweep is held open by it. */
+    expect(await shutdown.settled(Date.now() + 60_000)).toBe(0);
 
     const read = await store.readManifest(locator);
     const live = new Set(decodeManifest(read?.manifest ?? new Uint8Array()).packs.map((pack) => pack.key));
@@ -1055,6 +1038,45 @@ describe('GitRepositoryService security floor (W9)', () => {
       await expect(
         service.removeRef({ access, ref: 'refs/heads/conflicts/main/device-b', committedBy: ownerId }),
       ).rejects.toMatchObject({ status: 404, response: { code: 'GIT_REF_NOT_FOUND' } });
+    }, 60_000);
+
+    it('refuses a removal once the process begins to stop, before it commits', async () => {
+      const shutdown = new ShutdownService();
+      const service = createService(store, caughtUp(), { shutdown });
+      shutdown.stop();
+
+      await expect(service.removeRef({ access, ref: 'refs/tags/v2', committedBy: ownerId })).rejects.toMatchObject({
+        status: 503,
+        response: { code: 'GIT_SERVICE_RESTARTING' },
+      });
+      expect(await manifestReferences()).toHaveProperty(['refs/tags/v2']);
+    }, 60_000);
+
+    it('answers a committed removal as removed when its generation write fails, and says so', async () => {
+      const service = createService(store, caughtUp());
+      const recordGeneration = vi
+        .spyOn(
+          GitRepositoryService.prototype as unknown as { recordGeneration: () => Promise<void> },
+          'recordGeneration',
+        )
+        .mockRejectedValue(new Error('the database is down'));
+      const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+      try {
+        await expect(service.removeRef({ access, ref: 'refs/tags/v2', committedBy: ownerId })).resolves.toMatchObject({
+          outcome: 'removed',
+          ref: 'refs/tags/v2',
+        });
+        expect(warn).toHaveBeenCalledWith(
+          expect.objectContaining({ projectId }),
+          expect.stringContaining('A committed ref removal could not record its generation'),
+        );
+        expect(await manifestReferences()).not.toHaveProperty(['refs/tags/v2']);
+        await service.settled();
+      } finally {
+        recordGeneration.mockRestore();
+        warn.mockRestore();
+      }
     }, 60_000);
   });
 });

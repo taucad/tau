@@ -1,10 +1,11 @@
 import { Readable } from 'node:stream';
 import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
-import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
 import type { FinancialActivityKind } from '@taucad/billing';
 import type { ModelInvocationService, ModelProviderWire } from '#api/llm/model-invocation.types.js';
 import { modelInvocationServiceKey } from '#api/llm/model-invocation.types.js';
+import { ShutdownService } from '#lifecycle/shutdown.service.js';
 
 export type LlmGatewayRelayInput = {
   readonly provider: ModelProviderWire;
@@ -27,7 +28,11 @@ export type LlmGatewayRelayInput = {
 export class LlmGatewayService {
   private readonly logger = new Logger(LlmGatewayService.name);
 
-  public constructor(@Inject(modelInvocationServiceKey) private readonly invocations: ModelInvocationService) {}
+  public constructor(
+    @Inject(modelInvocationServiceKey) private readonly invocations: ModelInvocationService,
+    // oxlint-disable-next-line new-cap -- NestJS decorator
+    @Optional() private readonly shutdown: ShutdownService = new ShutdownService(),
+  ) {}
 
   public async relay(input: LlmGatewayRelayInput): Promise<void> {
     const result = await this.invocations.invoke({
@@ -59,6 +64,10 @@ export class LlmGatewayService {
     if (contentType) {
       void input.reply.header('content-type', contentType);
     }
+    /* Settlement trails the stream: once the last byte is sent the connection
+       is idle and a stopping server closes it, so the drain alone would not
+       wait for these ledger writes. */
+    this.shutdown.track(result.completion);
     try {
       // Both the stream itself and its settlement can fail after the headers are
       // sent; neither may reach an exception filter that would reply a second time.

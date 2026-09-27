@@ -192,7 +192,7 @@ describe('ChatAgentSheet', () => {
   it('chooses the agent in a row of its own, listing each host’s agents under that host', async () => {
     state.placements = [
       codex(),
-      { ...codex('EXTERNAL_AGENT_AUTH_REQUIRED'), hostId: 'studio', label: 'studio', rung: 'remote' },
+      { ...codex('EXTERNAL_AGENT_AUTH_REQUIRED'), hostId: 'studio', label: 'studio', rung: 2 },
     ];
     renderSheet();
     await userEvent.click(screen.getByRole('button', { name: /^Agent and model/u }));
@@ -288,6 +288,20 @@ describe('ChatAgentSheet', () => {
     renderSheet(vi.fn(), agentConfig);
 
     expect(screen.getByRole('button', { name: 'Agent and model: Codex, GPT-5.6-Sol, Fast mode' })).toBeInTheDocument();
+  });
+
+  it('steps back one view on Escape, and closes only from the settings', async () => {
+    const { focusEditor } = renderSheet();
+    await userEvent.click(screen.getByRole('button', { name: /^Agent and model/u }));
+    await userEvent.click(screen.getByRole('button', { name: /^Model: .*Change$/u }));
+    expect(screen.getByRole('button', { name: 'Back to settings' })).toBeInTheDocument();
+
+    await userEvent.keyboard('{Escape}');
+    expect(screen.getByRole('button', { name: /^Model: .*Change$/u })).toHaveFocus();
+    expect(focusEditor).not.toHaveBeenCalled();
+
+    await userEvent.keyboard('{Escape}');
+    expect(focusEditor).toHaveBeenCalled();
   });
 
   it('hands focus back to the editor when it closes, and opens from its shortcut', async () => {

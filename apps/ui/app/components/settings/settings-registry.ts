@@ -1,8 +1,20 @@
-import { Bot, BrainCircuit, Cpu, CreditCard, FlaskConical, HardDrive, Lock, Settings2, User } from 'lucide-react';
+import {
+  Bot,
+  BrainCircuit,
+  Cpu,
+  CreditCard,
+  FlaskConical,
+  HardDrive,
+  Lock,
+  Printer,
+  Settings2,
+  User,
+} from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { SettingsSection } from '#hooks/use-settings-dialog.js';
 import { featureFlagNames, flagRegistry } from '#flags/flag.constants.js';
 import { tauCloudEnabled } from '#cloud/cloud-enabled.js';
+import { isDesktopTarget } from '#lib/build-target.js';
 
 export type SettingDefinition = {
   readonly id: string;
@@ -151,6 +163,53 @@ const settingsCatalog = [
     ],
   },
   {
+    id: 'machines',
+    label: 'Machines',
+    icon: Printer,
+    group: 'Workspace',
+    entries: [
+      {
+        id: 'machines',
+        label: 'Machines',
+        description: 'Add a simulated X1C or bind a Bambu Lab X1C on your network',
+        keywords: [
+          'printer',
+          'bambu',
+          'x1c',
+          'simulator',
+          '3d print',
+          'bind',
+          'access code',
+          'keychain',
+          'remove',
+          'forget',
+          /* What each machine's details show. */
+          'firmware',
+          'nozzle',
+          'build volume',
+          'enclosure',
+          'kinematics',
+          'toolhead',
+          'bed',
+          'plate',
+          'chamber',
+          'fan',
+          'material system',
+          'ams',
+          'filament',
+          'camera',
+          'lan mode',
+          'speed profile',
+          'slicing',
+          'demo speed',
+          'bed leveling',
+          'flow calibration',
+          'timelapse',
+        ],
+      },
+    ],
+  },
+  {
     id: 'models',
     label: 'Models',
     icon: Bot,
@@ -236,7 +295,7 @@ const settingsCatalog = [
 ] as const satisfies readonly SettingsSectionDefinition[];
 
 export type SettingId = (typeof settingsCatalog)[number]['entries'][number]['id'];
-export const settingsSections: readonly SettingsSectionDefinition[] = tauCloudEnabled
+const cloudSections: readonly SettingsSectionDefinition[] = tauCloudEnabled
   ? settingsCatalog
   : settingsCatalog
       .filter((section) => section.id !== 'billing')
@@ -245,6 +304,11 @@ export const settingsSections: readonly SettingsSectionDefinition[] = tauCloudEn
           ? { ...section, entries: section.entries.filter((entry) => entry.id !== 'show-credits') }
           : section,
       );
+/* Machines are hosted by the desktop services utility; the web build has no
+ * host to add one to, so the section is hidden rather than shown empty. */
+export const settingsSections: readonly SettingsSectionDefinition[] = isDesktopTarget()
+  ? cloudSections
+  : cloudSections.filter((section) => section.id !== 'machines');
 
 function normalizeSearch(value: string): string {
   return value

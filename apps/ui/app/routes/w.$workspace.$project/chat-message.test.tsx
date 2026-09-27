@@ -168,6 +168,11 @@ vi.mock('#routes/w.$workspace.$project/chat-message-tool-screenshot.js', () => (
 vi.mock('#routes/w.$workspace.$project/chat-message-tool-unknown.js', () => ({
   ChatMessagePartUnknown: () => <div data-testid='tool-unknown' />,
 }));
+vi.mock('#routes/w.$workspace.$project/chat-message-tool-request-print.js', () => ({
+  ChatMessageToolRequestPrint: ({ part }: { readonly part: { readonly state: string } }) => (
+    <div data-testid='tool-request-print' data-state={part.state} />
+  ),
+}));
 
 vi.mock('#components/chat/chat-textarea.js', () => ({
   ChatTextarea: () => <div data-testid='chat-textarea' />,
@@ -772,6 +777,60 @@ describe('ChatMessage article wrapper — no sticky positioning (regression guar
 
     const textarea = screen.getByTestId('chat-textarea');
     expect(article.contains(textarea)).toBe(true);
+  });
+});
+
+describe('ChatMessage print tools', () => {
+  it('should render request_print on its own card, never as an unknown part', () => {
+    const message: MyUIMessage = {
+      id: 'msg-request-print',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'tool-request_print',
+          toolCallId: 'call-print',
+          state: 'input-available',
+          input: { targetFile: 'main.scad' },
+        },
+      ],
+    };
+    setMessages([message], 'streaming');
+
+    render(<ChatMessage messageId={message.id} />);
+
+    expect(screen.getByTestId('tool-request-print')).toHaveAttribute('data-state', 'input-available');
+    expect(screen.queryByTestId('tool-unknown')).toBeNull();
+  });
+
+  it('should render the other print tools on the generic card under their own names', () => {
+    const message: MyUIMessage = {
+      id: 'msg-print-reads',
+      role: 'assistant',
+      parts: [
+        { type: 'tool-get_machine', toolCallId: 'call-machine', state: 'input-available', input: {} },
+        {
+          type: 'tool-get_print_request',
+          toolCallId: 'call-read',
+          state: 'input-available',
+          input: { requestId: 'call-print' },
+        },
+        { type: 'tool-list_print_requests', toolCallId: 'call-list', state: 'input-available', input: {} },
+        {
+          type: 'tool-cancel_print',
+          toolCallId: 'call-cancel',
+          state: 'input-available',
+          input: { requestId: 'call-print' },
+        },
+      ],
+    };
+    setMessages([message], 'streaming');
+
+    render(<ChatMessage messageId={message.id} />);
+
+    for (const name of ['get_machine', 'get_print_request', 'list_print_requests', 'cancel_print']) {
+      expect(screen.getByText(name)).toBeInTheDocument();
+    }
+    expect(screen.queryByTestId('tool-unknown')).toBeNull();
   });
 });
 

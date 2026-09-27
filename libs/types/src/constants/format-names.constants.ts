@@ -140,6 +140,16 @@ export const formatConfigurations = {
     description:
       'Developed by NewTek for use in LightWave 3D, storing object data for 3D modeling and animation in film and television production.',
   },
+  gcode: {
+    name: 'G-code (GCODE)',
+    description:
+      'Numerical-control toolpath text consumed by FFF printers and CNC machines, listing motion, temperature and extrusion commands layer by layer.',
+  },
+  'gcode.3mf': {
+    name: 'Bambu print container (GCODE.3MF)',
+    description:
+      'Bambu Lab print-ready 3MF package carrying sliced plate G-code beside its metadata, produced by a slicer for direct upload to the printer.',
+  },
   md2: {
     name: 'Quake 2 Model (MD2)',
     description:

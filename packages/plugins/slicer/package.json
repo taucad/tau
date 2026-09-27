@@ -1,0 +1,119 @@
+{
+  "name": "@taucad/slicer",
+  "version": "0.1.0-beta.0",
+  "description": "FFF slicing to Bambu gcode.3mf with a reference engine and a tau-slicer-service client",
+  "type": "module",
+  "sideEffects": false,
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "packages/plugins/slicer"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/packages/plugins/slicer#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "keywords": [
+    "cad",
+    "plugin",
+    "slicer",
+    "gcode",
+    "3mf",
+    "bambu"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./toolpath": "./src/toolpath.ts",
+    "./container": "./src/container.ts",
+    "./print-intent": "./src/print-intent.ts",
+    "./bambu-studio": {
+      "types": "./src/bambu-studio/engine.ts",
+      "node": "./src/bambu-studio/engine.ts",
+      "default": "./src/bambu-studio/engine.stub.ts"
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      },
+      "./toolpath": {
+        "types": "./dist/toolpath.d.mts",
+        "import": "./dist/toolpath.mjs",
+        "default": "./dist/toolpath.mjs"
+      },
+      "./container": {
+        "types": "./dist/container.d.mts",
+        "import": "./dist/container.mjs",
+        "default": "./dist/container.mjs"
+      },
+      "./print-intent": {
+        "types": "./dist/print-intent.d.mts",
+        "import": "./dist/print-intent.mjs",
+        "default": "./dist/print-intent.mjs"
+      },
+      "./bambu-studio": {
+        "types": "./dist/bambu-studio/engine.d.mts",
+        "node": "./dist/bambu-studio/engine.mjs",
+        "default": "./dist/bambu-studio/engine.stub.mjs"
+      },
+      "./package.json": "./package.json"
+    },
+    "imports": {
+      "#bambu-studio/engine.js": {
+        "types": "./dist/bambu-studio/engine.d.mts",
+        "node": "./dist/bambu-studio/engine.mjs",
+        "default": "./dist/bambu-studio/engine.stub.mjs"
+      }
+    }
+  },
+  "imports": {
+    "#bambu-studio/engine.js": {
+      "types": "./src/bambu-studio/engine.ts",
+      "node": "./src/bambu-studio/engine.ts",
+      "default": "./src/bambu-studio/engine.stub.ts"
+    },
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "peerDependencies": {
+    "@taucad/runtime": "^0.1.0-beta.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@taucad/runtime": "workspace:*",
+    "vitest-mock-extended": "catalog:",
+    "zod": "catalog:"
+  },
+  "taucad": {
+    "hostTarget": "browser"
+  },
+  "dependencies": {
+    "@gltf-transform/core": "catalog:",
+    "@taucad/units": "workspace:*",
+    "fflate": "catalog:",
+    "manifold-3d": "catalog:"
+  },
+  "tau": {
+    "skills": null,
+    "reason": "Transcoder; its options are already tool schemas"
+  }
+}

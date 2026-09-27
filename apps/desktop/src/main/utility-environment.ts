@@ -137,6 +137,13 @@ export const utilityEnvironmentNames = [
   'TAU_DEBUG',
   'TAU_BUILD123D_RESOURCE_ROOT',
   'TAU_PICOGK_RESOURCE_ROOT',
+  /* Where the person's Bambu Studio lives when it is not at the platform default;
+   * the kernel utility slices with it, main reads its presets (blueprint D12). */
+  'TAU_BAMBU_STUDIO_PATH',
+  /* Where the services utility keeps printer access codes: `keychain` (the macOS
+   * default), `file` or `memory`. Automated runs set `file` so they never touch
+   * a person's keychain. */
+  'TAU_SECRET_VAULT',
 ] as const;
 
 /**

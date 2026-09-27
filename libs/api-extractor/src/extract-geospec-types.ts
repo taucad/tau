@@ -1,9 +1,8 @@
 #!/usr/bin/env node
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { dirname, join, relative, resolve } from 'node:path';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import process from 'node:process';
-import ts from 'typescript';
+import { emitPackageDeclarations } from '#emit-package-declarations.js';
 
 type GeneratedPackageTypes = {
   content: string;
@@ -31,73 +30,6 @@ const entryPaths = publicEntries.map(([relativePath]) =>
   join(geospecSourceRoot, relativePath.replace(/\.d\.ts$/u, '.ts')),
 );
 
-const createProgram = (outDirectory: string): ts.Program =>
-  ts.createProgram(entryPaths, {
-    allowSyntheticDefaultImports: true,
-    declaration: true,
-    emitDeclarationOnly: true,
-    esModuleInterop: true,
-    module: ts.ModuleKind.ESNext,
-    moduleResolution: ts.ModuleResolutionKind.Bundler,
-    noEmitOnError: false,
-    outDir: outDirectory,
-    rootDir: geospecSourceRoot,
-    skipLibCheck: true,
-    strict: true,
-    target: ts.ScriptTarget.ES2022,
-    baseUrl: repoRoot,
-    paths: Object.fromEntries([['#*', [join(geospecSourceRoot, '*')]]]),
-  });
-
-const formatDiagnostics = (diagnostics: readonly ts.Diagnostic[]): string =>
-  ts.formatDiagnosticsWithColorAndContext(diagnostics, {
-    getCanonicalFileName: (fileName) => fileName,
-    getCurrentDirectory: () => repoRoot,
-    getNewLine: () => '\n',
-  });
-
-const collectDeclarationFiles = (directory: string, root: string): Record<string, string> => {
-  const files: Record<string, string> = {};
-  for (const entry of readdirSync(directory)) {
-    const path = join(directory, entry);
-    const stat = statSync(path);
-    if (stat.isDirectory()) {
-      Object.assign(files, collectDeclarationFiles(path, root));
-      continue;
-    }
-    if (entry.endsWith('.d.ts')) {
-      const relativePath = relative(root, path).replaceAll('\\', '/');
-      files[relativePath] = readFileSync(path, 'utf8');
-    }
-  }
-  return files;
-};
-
-const relativeImport = (currentFile: string, targetFile: string): string => {
-  const currentDirectory = dirname(currentFile);
-  const targetJavaScriptFile = targetFile.replace(/\.d\.ts$/u, '.js');
-  const relativePath = relative(currentDirectory, targetJavaScriptFile).replaceAll('\\', '/');
-  return relativePath.startsWith('.') ? relativePath : `./${relativePath}`;
-};
-
-const resolveInternalAlias = (specifier: string): string => specifier.replace(/\.js$/u, '.d.ts');
-
-const rewriteInternalAliases = (files: Record<string, string>): Record<string, string> =>
-  Object.fromEntries(
-    Object.entries(files).map(([file, content]) => [
-      file,
-      content
-        .replaceAll(/from ['"]#([^'"]+)['"]/gu, (_match, specifier: string) => {
-          const target = resolveInternalAlias(specifier);
-          return `from '${relativeImport(file, target)}'`;
-        })
-        .replaceAll(/import\(['"]#([^'"]+)['"]\)/gu, (_match, specifier: string) => {
-          const target = resolveInternalAlias(specifier);
-          return `import('${relativeImport(file, target)}')`;
-        }),
-    ]),
-  );
-
 const buildPackageJson = (): Record<string, unknown> => {
   const packageExportEntries = [
     ['.', './index.d.ts'],
@@ -124,39 +56,22 @@ const buildPackageJson = (): Record<string, unknown> => {
 };
 
 export function buildGeoSpecTypeBundle(): Record<string, GeneratedPackageTypes> {
-  const temporaryDirectory = mkdtempSync(join(tmpdir(), 'geospec-dts-'));
-  try {
-    const program = createProgram(temporaryDirectory);
-    const emitResult = program.emit(undefined, undefined, undefined, true);
-    const diagnostics = [...ts.getPreEmitDiagnostics(program), ...emitResult.diagnostics];
-    const fatalDiagnostics = diagnostics.filter(
-      (diagnostic) =>
-        diagnostic.category === ts.DiagnosticCategory.Error &&
-        diagnostic.file?.fileName.replaceAll('\\', '/').startsWith(geospecSourceRoot.replaceAll('\\', '/')),
-    );
-    if (fatalDiagnostics.length > 0) {
-      throw new Error(formatDiagnostics(fatalDiagnostics));
-    }
-
-    const files = rewriteInternalAliases(collectDeclarationFiles(temporaryDirectory, temporaryDirectory));
-    const rootContent = files['index.d.ts'];
-    if (!rootContent) {
-      throw new Error('GeoSpec declaration emit did not produce index.d.ts');
-    }
-
-    const packageFiles = { ...files };
-    delete packageFiles['index.d.ts'];
-
-    return {
-      geospec: {
-        content: rootContent,
-        files: packageFiles,
-        packageJson: buildPackageJson(),
-      },
-    };
-  } finally {
-    rmSync(temporaryDirectory, { force: true, recursive: true });
+  const files = emitPackageDeclarations({ label: 'GeoSpec', sourceRoot: geospecSourceRoot, entryPaths });
+  const rootContent = files['index.d.ts'];
+  if (!rootContent) {
+    throw new Error('GeoSpec declaration emit did not produce index.d.ts');
   }
+
+  const packageFiles = { ...files };
+  delete packageFiles['index.d.ts'];
+
+  return {
+    geospec: {
+      content: rootContent,
+      files: packageFiles,
+      packageJson: buildPackageJson(),
+    },
+  };
 }
 
 function main(): void {

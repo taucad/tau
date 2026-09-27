@@ -77,7 +77,7 @@
         "cwd": "{workspaceRoot}/apps/ui-e2e",
         "commands": [
           "pnpm --dir ../.. exec nx run ui:build",
-          "../../node_modules/.bin/vitest run --config vitest.config.ts --project chromium src/browser-agent-host.spec.ts src/chat-isolated-workspace.spec.ts",
+          "../../node_modules/.bin/vitest run --config vitest.config.ts --project chromium src/browser-agent-host.spec.ts src/chat-isolated-workspace.spec.ts src/chat-todo-list.spec.ts",
           "../../node_modules/.bin/vitest run --config vitest.config.ts --project firefox src/browser-agent-host.spec.ts",
           "../../node_modules/.bin/vitest run --config vitest.config.ts --project webkit-smoke src/browser-agent-host.spec.ts"
         ],

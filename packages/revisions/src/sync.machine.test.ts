@@ -67,7 +67,7 @@
  * | 60 | `pending --revisionMinted every 500 ms--> pushing` within `syncDebounceMaxWaitMilliseconds` | **W13 follow-up**: a steady mint cadence faster than the window still pushes, at least once per bound |
  * | 59 | `merging(merged) → pushing` | **D12**: a diverged clean checkout merges, re-heads its actor, and pushes the merge revision under the fetched lease |
  * | 63 | `pushing / opening --429--> queued --Retry-After--> opening` | **W13d**: a rate limit waits the remote's own wait, a remote move does not cut it short, and it does not advance the doubling |
- * | 32d | `conflicted.offering → onError / refused → owed --syncBackoff--> opening → conflicted.offering` | **D14-P**: a conflict line the push could not offer is reported and offered again after the backoff; a terminal class waits for a person |
+ * | 32d | `conflicted.offering → onError / refused → owed --syncBackoff--> opening → conflicted.offering` | **D14-P**: a conflict line the push could not offer is reported and offered again after the backoff, announced to the parent once however often it is re-pulled; a terminal class waits for a person |
  * | 64 | `pushing --onDone[updated]--> parent pushed` | **RV-W8 F9**: a push that moved a ref tells `remote.machine` its stored figure is stale; a refused one does not |
  * | 65 | `pushing / recording --syncNow { pushId }--> … → pushing → recording` + `pushSettled` | **W15 F1**: a correlated request is answered by a push that starts after it, so it carries the head current at the request |
  * | 66 | `pushing --syncNow { pushId }, open--> opening → pushing` + one `pushSettled` | **RV-W15**: a request parked behind a push that `open` abandons is not stranded |
@@ -372,6 +372,25 @@ describe('syncMachine', () => {
     harness.stop();
   });
 
+  /* D59: a new branch mints nothing; *Backed up* must not stand over it. */
+  it('pushes from backed up when the refs change without a mint', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('backedUp')).toBe(true);
+    });
+
+    harness.actor.send({ type: 'recordsChanged' });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('pending')).toBe(true);
+    });
+    harness.clock.advance(2000);
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    harness.stop();
+  });
+
   it('pushes a durable record written while the current push is in flight', async () => {
     const harness = start();
     await openCleanly(harness);
@@ -434,6 +453,18 @@ describe('syncMachine', () => {
       into: 'main',
       paths: ['main.scad'],
     });
+
+    /* A re-pull that lands on the same waiting conflict announces nothing new. */
+    harness.actor.send({ type: 'syncNow' });
+    await settleWhenRunning(harness.effects, 'fetch', {
+      output: { leases: { [mainRef]: 'remote-head' }, integration: 'diverged' } satisfies SyncFetchActorOutput,
+    });
+    await settleWhenRunning(harness.effects, 'merge', { output: mergeConflict });
+    await vi.waitFor(() => {
+      expect(harness.effects.inputsFor('merge')).toHaveLength(2);
+      expect(harness.actor.getSnapshot().matches('conflicted')).toBe(true);
+    });
+    expect(harness.parent.events.filter((event) => event.type === 'mergeConflicted')).toHaveLength(1);
 
     harness.stop();
   });
@@ -647,6 +678,40 @@ describe('syncMachine', () => {
     expect(selectSyncFacet(harness.actor.getSnapshot()).reason).toBe('moved');
     harness.clock.advance(600_000);
     expect(harness.effects.inputsFor('fetch')).toHaveLength(1);
+
+    harness.stop();
+  });
+
+  /* D49: large files on a remote without LFS are refused before any network
+   * call, so a retry can never succeed; the person tries again with *Sync now*
+   * once the file is removed (rule 19). */
+  it('row 43c (D49): a large-file refusal fails with its own class instead of retrying on backoff', async () => {
+    const harness = start();
+    await openCleanly(harness);
+
+    harness.actor.send({ type: 'syncNow' });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    harness.effects.settle('push', {
+      error: Object.assign(new Error('Large files cannot be backed up to a Git remote: part.step.'), {
+        code: 'LFS_REMOTE_UNSUPPORTED',
+      }),
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('failed')).toBe(true);
+    });
+
+    expect(selectSyncFacet(harness.actor.getSnapshot()).reason).toBe('largeFiles');
+    harness.clock.advance(600_000);
+    expect(harness.effects.inputsFor('push')).toHaveLength(1);
+
+    /* Rule 19: a save (the file removed) waits for the person's *Sync now*, as every terminal class does. */
+    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: 'r-without-part' });
+    expect(harness.actor.getSnapshot().matches('failed')).toBe(true);
+    harness.actor.send({ type: 'syncNow' });
+    expect(harness.actor.getSnapshot().matches('failed')).toBe(false);
 
     harness.stop();
   });
@@ -1349,6 +1414,8 @@ describe('syncMachine', () => {
     harness.clock.advance(300_000);
     expect(harness.effects.inputsFor('fetch')).toHaveLength(3);
     expect(harness.actor.getSnapshot().matches('conflicted')).toBe(true);
+    /* Three pulls reached the one waiting conflict; the page heard it once (c460f9ec6). */
+    expect(harness.parent.events.filter((event) => event.type === 'mergeConflicted')).toHaveLength(1);
 
     harness.stop();
     reported.mockRestore();
@@ -1406,6 +1473,27 @@ describe('syncMachine', () => {
     harness.stop();
   });
 
+  it('names another checkout’s branch whose lease was lost', async () => {
+    const harness = start();
+    await openCleanly(harness);
+
+    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'close', revisionId: 'r1' });
+    await settleWhenRunning(harness.effects, 'push', {
+      output: pushResult(
+        { name: mainRef, status: 'updated', head: 'r1' },
+        { name: 'refs/heads/feature', status: 'rejected', head: 'f1', reason: 'leaseLost' },
+      ),
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().context.error).toBe(
+        'feature changed on the remote; this project will catch up and try again.',
+      );
+    });
+    harness.stop();
+  });
+
   it('row 34 (review 2 R9, W13c C-c): a refused chat ref never narrows history away, and a throw records only what is owed', async () => {
     const harness = start();
     await openCleanly(harness);
@@ -1446,6 +1534,33 @@ describe('syncMachine', () => {
       [chatRef, undefined],
       [mainRef, 'r2'],
     ]);
+
+    harness.stop();
+  });
+
+  it('offers the branch again when a revision is minted while a refused chat ref is retried', async () => {
+    const harness = start();
+    await openCleanly(harness);
+
+    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'close', revisionId: 'r1' });
+    await settleWhenRunning(harness.effects, 'push', {
+      output: pushResult(
+        { name: mainRef, status: 'updated', head: 'r1' },
+        { name: chatRef, status: 'rejected', head: undefined, reason: 'does not fast-forward' },
+      ),
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('queued')).toBe(true);
+    });
+
+    /* The chat is still refused, but `r2` has never been offered: the push
+     * must carry both sets, not only the chat ref it is retrying. */
+    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'close', revisionId: 'r2' });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    expect(harness.effects.inputsFor('push').at(-1)).not.toHaveProperty('refs');
 
     harness.stop();
   });

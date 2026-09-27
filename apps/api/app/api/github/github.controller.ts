@@ -37,6 +37,13 @@ const idOf = (value: string): number => {
   }
   return id;
 };
+/* A missing or repeated `connectionId` reached the database as `undefined` (500). */
+const connectionOf = (value: unknown): string => {
+  if (typeof value !== 'string' || value === '') {
+    throw new BadRequestException({ code: 'GITHUB_CONNECTION_REQUIRED' });
+  }
+  return value;
+};
 
 @Controller({ path: 'github', version: '1' })
 @UseAuth()
@@ -130,21 +137,21 @@ export class GithubController {
   @Header('Cache-Control', 'no-store')
   public async installations(
     @User('id') userId: string,
-    @Query('connectionId') connectionId: string,
+    @Query('connectionId') connectionId: unknown,
     @Query('page') page?: string,
   ): ReturnType<GithubService['installations']> {
-    return this.github.installations(userId, connectionId, pageOf(page));
+    return this.github.installations(userId, connectionOf(connectionId), pageOf(page));
   }
 
   @Get('repositories')
   @Header('Cache-Control', 'no-store')
   public async repositories(
     @User('id') userId: string,
-    @Query('connectionId') connectionId: string,
+    @Query('connectionId') connectionId: unknown,
     @Query('installationId') installationId: string,
     @Query('page') page?: string,
   ): ReturnType<GithubService['repositories']> {
-    return this.github.repositories(userId, connectionId, idOf(installationId), pageOf(page));
+    return this.github.repositories(userId, connectionOf(connectionId), idOf(installationId), pageOf(page));
   }
 
   @Get('repositories/:id/branches')
@@ -152,10 +159,10 @@ export class GithubController {
   public async branches(
     @User('id') userId: string,
     @Param('id') id: string,
-    @Query('connectionId') connectionId: string,
+    @Query('connectionId') connectionId: unknown,
     @Query('page') page?: string,
   ): ReturnType<GithubService['branches']> {
-    return this.github.branches(userId, connectionId, idOf(id), pageOf(page));
+    return this.github.branches(userId, connectionOf(connectionId), idOf(id), pageOf(page));
   }
 
   @Get('repositories/:id')
@@ -163,9 +170,9 @@ export class GithubController {
   public async repository(
     @User('id') userId: string,
     @Param('id') id: string,
-    @Query('connectionId') connectionId: string,
+    @Query('connectionId') connectionId: unknown,
   ): ReturnType<GithubService['repository']> {
-    return this.github.repository(userId, connectionId, idOf(id));
+    return this.github.repository(userId, connectionOf(connectionId), idOf(id));
   }
 
   @Get('repositories/:id/branch')
@@ -173,10 +180,10 @@ export class GithubController {
   public async branch(
     @User('id') userId: string,
     @Param('id') id: string,
-    @Query('connectionId') connectionId: string,
+    @Query('connectionId') connectionId: unknown,
     @Query('name') name: unknown,
   ): ReturnType<GithubService['branch']> {
-    return this.github.branch(userId, connectionId, idOf(id), name);
+    return this.github.branch(userId, connectionOf(connectionId), idOf(id), name);
   }
 
   @Get('repositories/:id/tree')
@@ -184,9 +191,9 @@ export class GithubController {
   public async tree(
     @User('id') userId: string,
     @Param('id') id: string,
-    @Query('connectionId') connectionId: string,
+    @Query('connectionId') connectionId: unknown,
     @Query('head') head: string,
   ): ReturnType<GithubService['tree']> {
-    return this.github.tree(userId, connectionId, idOf(id), head);
+    return this.github.tree(userId, connectionOf(connectionId), idOf(id), head);
   }
 }

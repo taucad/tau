@@ -185,8 +185,10 @@ export const TransformControls: ForwardRefComponent<TransformControlsProps, Tran
 
       React.useEffect(() => {
         const onChange = (event: THREE.Event) => {
-          invalidate();
+          // The handler runs first, so an animation-frame callback it requests for a coalesced step comes
+          // before the frame requested here, and the step lands in that frame.
           onChangeRef.current?.(event);
+          invalidate();
         };
 
         const onPointerDown = (event: THREE.Event) => onPointerDownRef.current?.(event);

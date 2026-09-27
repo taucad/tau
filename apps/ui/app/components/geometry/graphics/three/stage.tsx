@@ -14,6 +14,7 @@ import { useGeometryBounds } from '#components/geometry/graphics/three/use-geome
 import { useCameraFraming } from '#components/geometry/graphics/three/use-camera-framing.js';
 import { useGraphicsSelector, useRenderFrame, useRenderFrameRetarget, useSetRenderFrame } from '#hooks/use-graphics.js';
 import { createSectionViewSafeSnapshotStore } from '#components/geometry/graphics/three/utils/section-view-safe-snapshot.js';
+import type { SectionViewSafeSnapshotStore } from '#components/geometry/graphics/three/utils/section-view-safe-snapshot.js';
 import { selectPresentedGeometryKey } from '#machines/graphics.machine.js';
 
 export type StageOptions = {
@@ -47,6 +48,45 @@ type StageProperties = {
   readonly stageOptions?: StageOptions;
 } & Omit<React.HTMLAttributes<HTMLDivElement>, 'id'>;
 
+type SectionViewSceneProperties = {
+  // oxlint-disable-next-line typescript/no-restricted-types -- valid React ref type
+  readonly innerRef: React.RefObject<THREE.Group | null>;
+  readonly snapshotRef: React.RefObject<SectionViewSafeSnapshotStore>;
+  readonly children: ReactNode;
+};
+
+/**
+ * Section clipping and caps around the stage's model. The section view is read here rather than in
+ * `Stage`, so a plane step re-renders this subtree but not `Stage`, whose re-render would hand the
+ * clipping group a new child element and make it re-traverse the model.
+ */
+function SectionViewScene({ innerRef, snapshotRef, children }: SectionViewSceneProperties): React.JSX.Element {
+  const sectionView = useSectionView();
+
+  return (
+    <>
+      <SectionClippingGroup
+        enableLines={sectionView.enableLines}
+        enableMesh={sectionView.enableMesh}
+        enabled={sectionView.isActive}
+        innerRef={innerRef}
+        plane={sectionView.plane}
+        snapshotRef={snapshotRef}
+      >
+        {children}
+      </SectionClippingGroup>
+      <SectionContourFills
+        enabled={sectionView.isActive && sectionView.enableMesh}
+        innerRef={innerRef}
+        plane={sectionView.plane}
+        snapshotRef={snapshotRef}
+        stripeFrequency={sectionView.stripeFrequency}
+        stripeWidth={sectionView.stripeWidth}
+      />
+    </>
+  );
+}
+
 export function Stage({
   children,
   stageOptions = defaultStageOptions,
@@ -66,7 +106,6 @@ export function Stage({
   // apps/ui-e2e/global-setup.ts), which resolves this flag on.
   const isTauDebugEnabled = useFeature('tauDebug');
 
-  const sectionView = useSectionView();
   const renderFrame = useRenderFrame();
   const setRenderFrame = useSetRenderFrame();
   const initializedGeometryRef = React.useRef<{
@@ -116,24 +155,9 @@ export function Stage({
     <group {...properties}>
       {isTauDebugEnabled ? <SectionViewTestBridge isGeometryFramed={geometryRadius > 0} /> : undefined}
       <group ref={outer} matrixAutoUpdate={false}>
-        <SectionClippingGroup
-          enableLines={sectionView.enableLines}
-          enableMesh={sectionView.enableMesh}
-          enabled={sectionView.isActive}
-          innerRef={innerRef}
-          plane={sectionView.plane}
-          snapshotRef={sectionSnapshotRef}
-        >
+        <SectionViewScene innerRef={innerRef} snapshotRef={sectionSnapshotRef}>
           <group ref={innerRef}>{children}</group>
-        </SectionClippingGroup>
-        <SectionContourFills
-          enabled={sectionView.isActive && sectionView.enableMesh}
-          innerRef={innerRef}
-          plane={sectionView.plane}
-          snapshotRef={sectionSnapshotRef}
-          stripeFrequency={sectionView.stripeFrequency}
-          stripeWidth={sectionView.stripeWidth}
-        />
+        </SectionViewScene>
       </group>
       <Lights
         settings={stageOptions.lighting}

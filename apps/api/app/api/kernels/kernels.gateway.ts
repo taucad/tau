@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import type { OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
 import type { FastifyInstance } from 'fastify';
@@ -13,6 +13,8 @@ import type { CommercialEntitlementsService } from '#api/entitlements/commercial
 import { commercialEntitlementsKey } from '#api/entitlements/commercial-entitlements.js';
 import { DevWebSocketService } from '#api/websocket/dev-websocket.service.js';
 import { Span } from '#telemetry/tracer.service.js';
+import { ShutdownService } from '#lifecycle/shutdown.service.js';
+import { UpgradeRouter } from '#lifecycle/upgrade-router.js';
 
 const zooWebSocketPath = '/v1/kernels/zoo';
 
@@ -22,9 +24,8 @@ const zooWebSocketPath = '/v1/kernels/zoo';
  * In development: Uses the shared DevWebSocketService on port+1 because
  * vite-plugin-node doesn't support WebSocket connections.
  *
- * In production: Uses the ws library with manual upgrade handling on the
- * main HTTP server. This approach avoids conflicts with Socket.IO which
- * also needs to handle WebSocket upgrades for other paths.
+ * In production: Uses the ws library behind the API's `UpgradeRouter` on the
+ * main HTTP server.
  *
  * Every connection is session-authenticated before the service refuses it
  * (B7 R3/S6): hosted Zoo is disabled, so no upstream socket and no billing
@@ -40,6 +41,10 @@ export class KernelsGateway implements OnModuleInit, OnModuleDestroy {
     @Inject(authInstanceKey) private readonly auth: Auth,
     @Inject(commercialEntitlementsKey) private readonly entitlements: CommercialEntitlementsService,
     @Inject(HttpAdapterHost) private readonly httpAdapterHost: HttpAdapterHost,
+    // oxlint-disable-next-line new-cap -- NestJS decorator
+    @Optional() private readonly upgradeRouter: UpgradeRouter = new UpgradeRouter(),
+    // oxlint-disable-next-line new-cap -- NestJS decorator
+    @Optional() private readonly shutdown: ShutdownService = new ShutdownService(),
   ) {}
 
   /**
@@ -131,28 +136,32 @@ export class KernelsGateway implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Initialize WebSocket routes for production.
-   * Uses the ws library directly with manual upgrade handling.
-   * This avoids conflicts with Socket.IO which also needs to handle upgrade events.
+   * Initialize WebSocket routes for production. Clients close 1012 (Service
+   * Restart) the moment the process begins to stop.
    */
   private initFastifyWebSocket(): void {
     const fastify = this.httpAdapterHost.httpAdapter.getInstance<FastifyInstance>();
-    const httpServer = fastify.server;
     const wss = new WebSocketServer({ noServer: true });
 
-    // Handle WebSocket upgrades manually for the Zoo proxy path
-    // Socket.IO will handle other paths (like /v1/chat/rpc)
-    httpServer.on('upgrade', (request, socket, head) => {
-      const { pathname } = new URL(request.url ?? '/', `http://${request.headers.host}`);
-
-      if (pathname === zooWebSocketPath) {
+    this.upgradeRouter.route(
+      fastify.server,
+      (pathname) => pathname === zooWebSocketPath,
+      (request, socket, head) => {
         wss.handleUpgrade(request, socket, head, (ws) => {
           const url = new URL(request.url ?? '/', `http://${request.headers.host}`);
           void this.handleZooProxy(ws, url.searchParams, request);
         });
-      }
-      // Don't call socket.destroy() for other paths - let Socket.IO handle them
-    });
+      },
+    );
+    this.shutdown.signal.addEventListener(
+      'abort',
+      () => {
+        for (const client of wss.clients) {
+          client.close(1012, 'service restart');
+        }
+      },
+      { once: true },
+    );
 
     this.logger.log(`Zoo WebSocket proxy registered at ${zooWebSocketPath} (production mode)`);
   }

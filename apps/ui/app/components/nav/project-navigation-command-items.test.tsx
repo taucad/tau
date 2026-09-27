@@ -55,8 +55,8 @@ describe('ProjectNavigationCommandItems', () => {
     expect(registered).toHaveLength(3);
     expect(registered[0]).toMatchObject({
       id: 'project-project-one',
-      searchValue: 'Bracket Assembly',
-      details: ['home/Bracket Assembly · just now', 'Wall bracket with gussets'],
+      searchValue: 'Bracket Assembly   Wall bracket with gussets ',
+      detail: 'home/Bracket Assembly · just now',
       link: '/w/home/Bracket%20Assembly',
     });
     expect(registered[1]).toMatchObject({ id: 'chat-chat/two' });

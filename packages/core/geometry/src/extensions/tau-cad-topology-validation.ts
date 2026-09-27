@@ -1,3 +1,4 @@
+import { admitMechanism } from '@taucad/kinematics';
 import type { TauCadTopologyPayload, TauCadTopologyPrimitiveRef } from '#extensions/tau-cad-topology.types.js';
 
 /** Primitive mode and index bounds used to validate topology references. @public */
@@ -23,8 +24,24 @@ const referenceIssue = (
     : `references mesh ${reference.meshIndex} from node ${reference.nodeIndex}, which owns mesh ${String(node.meshIndex)}`;
 };
 
+// The mechanism must pass admission, and every link component must be a declared component id.
+const mechanismIssues = (mechanism: unknown, identifiers: ReadonlySet<string>): string[] => {
+  if (mechanism === undefined) {
+    return [];
+  }
+  const outcome = admitMechanism(mechanism);
+  if (outcome.status === 'invalid') {
+    return outcome.issues.map((issue) => `mechanism${issue.path && ` ${issue.path}`}: ${issue.message}`);
+  }
+  return Object.entries(outcome.mechanism.links).flatMap(([linkId, { components }]) =>
+    components
+      .filter((id) => !identifiers.has(id))
+      .map((id) => `mechanism link ${linkId} references missing component ${id}`),
+  );
+};
+
 /**
- * Validate payload hierarchy and references against one glTF document.
+ * Validate payload hierarchy, references and mechanism against one glTF document.
  *
  * @param payload - Canonical topology payload to inspect.
  * @param bounds - Parsed glTF node, mesh, primitive, and index bounds.
@@ -78,5 +95,5 @@ export const validateTauCadTopology = (
       }
     }
   }
-  return issues;
+  return [...issues, ...mechanismIssues(payload.mechanism, identifiers)];
 };

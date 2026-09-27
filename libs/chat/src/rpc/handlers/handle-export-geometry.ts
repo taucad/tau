@@ -18,7 +18,14 @@ export async function handleExportGeometry(
     };
   }
 
-  const result = await graphics.exportGeometry({ targetFile: input.targetFile, format: input.format }, context);
+  const result = await graphics.exportGeometry(
+    {
+      targetFile: input.targetFile,
+      format: input.format,
+      ...(input.exportOptions === undefined ? {} : { exportOptions: input.exportOptions }),
+    },
+    context,
+  );
   context?.signal?.throwIfAborted();
 
   if (!result.success) {

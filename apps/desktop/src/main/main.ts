@@ -7,7 +7,7 @@
  * work — kernels, disk, the agent host — lives in the utilities.
  */
 
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { Worker } from 'node:worker_threads';
 
@@ -36,10 +36,6 @@ import {
   projectReleaseMilliseconds,
 } from '@taucad/host';
 import type { ExternalAgentDescriptor } from '@taucad/agent-host';
-
-import kernelUtilityEntry from '#tau/kernel-host.entry?modulePath';
-import servicesUtilityEntry from '#tau/services-host.entry?modulePath';
-import computeStoreWorkerEntry from '#main/compute-store.worker?modulePath';
 
 import { appOrigin, appSchemePrivileges, registerAppProtocol } from '#main/app-protocol.js';
 import { createAuthService } from '#main/auth-service.js';
@@ -83,15 +79,18 @@ import { createQuickLookController, removeStaleQuickLookSessions } from '#main/q
 import type { QuickLookController } from '#main/quick-look.js';
 import { deepLinkArgument, parseDeepLink } from '#main/deep-links.js';
 import { createOpenFileQueue } from '#main/open-files.js';
+import { createBambuStudioService } from '#main/bambu-studio-service.js';
 import {
   appIconThemeChannel,
   agentHostSessionChannels,
+  machinesChannels,
   externalAgentsChannel,
   quitChannels,
   bootstrapArgumentPrefix,
   desktopNativeKernelIds,
   computeControlChannels,
   servicesPortRelayTag,
+  slicersChannels,
 } from '#shared/desktop-bootstrap.js';
 import type { AppIconTheme } from '#shared/desktop-bootstrap.js';
 import { openFilesIpcChannel, quickLookIpcChannels } from '#shared/quick-look.js';
@@ -110,6 +109,11 @@ const clientRoot =
   (app.isPackaged
     ? join(process.resourcesPath, 'ui/client')
     : join(import.meta.dirname, '../../../ui/desktop/build/client'));
+/* Entries `electron.vite.config.ts` emits beside `index.js`, the bundle this
+ * module lands in. */
+const kernelUtilityEntry = join(import.meta.dirname, 'kernel-host.js');
+const servicesUtilityEntry = join(import.meta.dirname, 'services-host.js');
+const computeStoreWorkerEntry = join(import.meta.dirname, 'compute-store.worker.js');
 const applicationResource = (name: string): string =>
   app.isPackaged ? join(process.resourcesPath, 'branding', name) : join(import.meta.dirname, '../../resources', name);
 const applicationIcon = applicationResource(`icon.${process.platform === 'win32' ? 'ico' : 'png'}`);
@@ -197,6 +201,15 @@ export const quitQuiesceMilliseconds = projectCloseMilliseconds + quitMarginMill
  * both read if it ever changes.
  */
 const rendererCloseStepsMilliseconds = 2 * 10_000;
+
+/**
+ * How long a binding ceremony may take to reach the printer and answer (D10).
+ *
+ * The provider's MQTT hello is seconds on the LAN; the bound only bites a
+ * printer that is asleep or unreachable, which is exactly when the person
+ * should hear "timed out" rather than wait on a spinner.
+ */
+const machineBindingMilliseconds = 60_000;
 
 /**
  * How long quit waits for the renderer's sessions registry (D31, P49).
@@ -326,6 +339,20 @@ const bootstrapElectronApp = async (): Promise<void> => {
   mkdirSync(homeRoot, { recursive: true });
   const authorityDirectory = join(app.getPath('userData'), 'filesystem-authority');
   mkdirSync(authorityDirectory, { recursive: true });
+  /* The per-user machine store every Tau host on this computer shares
+   * (`tau serve` opens it too), never under an authored root. The app's old
+   * `userData/machines` is imported from once, and only when it is another
+   * directory: on a case-insensitive volume `…/Tau` and `…/tau` are one. */
+  const tauConfigDirectory = defaultConfigDirectory();
+  const machinesDirectory = join(tauConfigDirectory, 'machines');
+  mkdirSync(machinesDirectory, { recursive: true, mode: 0o700 });
+  const legacyMachinesDirectory = join(app.getPath('userData'), 'machines');
+  const legacyMachinesEnvironment: Readonly<Record<string, string>> =
+    existsSync(legacyMachinesDirectory) &&
+    realpathSync.native(legacyMachinesDirectory) !== realpathSync.native(machinesDirectory)
+      ? // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
+        { TAU_DESKTOP_LEGACY_MACHINES_DIR: legacyMachinesDirectory }
+      : {};
 
   /* Grants outlive the session: the renderer keeps a picked folder's workspace
    * record in IndexedDB and offers it again on the next launch, so a grant main
@@ -535,7 +562,6 @@ const bootstrapElectronApp = async (): Promise<void> => {
     return computeConnection(root).control.collect({ budget: budget as number, ...(cursor ? { cursor } : {}) });
   });
 
-  const tauConfigDirectory = defaultConfigDirectory();
   const services = createServicesBroker({
     utilityEntry: servicesUtilityEntry,
     env: utilityEnvironment(environment, {
@@ -544,6 +570,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
       ...compileCacheEnvironment(app.getPath('userData')),
       TAU_CONFIG_DIR: tauConfigDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       TAU_DESKTOP_AUTHORITY_DIR: authorityDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
+      TAU_DESKTOP_MACHINES_DIR: machinesDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
+      ...legacyMachinesEnvironment,
       TAU_DESKTOP_LOG_DIR: logDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
     }),
     fork: (entry, args, forkOptions) => utilityProcess.fork(entry, args, forkOptions),
@@ -580,6 +608,35 @@ const bootstrapElectronApp = async (): Promise<void> => {
   });
   ipcMain.handle(agentHostSessionChannels.release, async (event, payload) => {
     await services.releaseAgentHost(agentHostSessionInput(event, payload), quitQuiesceMilliseconds);
+  });
+  /* The secret half of the binding ceremony (D10). The renderer never keeps
+   * the access code: it rides this one invoke to the utility, which saves it
+   * only once the printer accepts it. Without one the utility reuses the
+   * printer's saved code while its certificate still matches. A real X1C
+   * answers its MQTT hello in seconds, but a wrong code or a sleeping printer
+   * is only known at the provider's own timeout, hence the bound. */
+  ipcMain.handle(machinesChannels.completeBinding, async (event, payload) => {
+    const { ceremonyId, address, accessCode } = (payload ?? {}) as Record<string, unknown>;
+    const optionalString = (value: unknown): value is string | undefined =>
+      value === undefined || (typeof value === 'string' && value.length > 0 && value.length <= 256);
+    if (
+      !trusted(event.senderFrame) ||
+      typeof ceremonyId !== 'string' ||
+      ceremonyId === '' ||
+      ceremonyId.length > 256 ||
+      !optionalString(address) ||
+      !optionalString(accessCode)
+    ) {
+      throw new Error('Desktop shell refused invalid machine binding completion.');
+    }
+    return services.completeMachineBinding(
+      {
+        ceremonyId,
+        ...(address === undefined ? {} : { address }),
+        ...(accessCode === undefined ? {} : { accessCode }),
+      },
+      machineBindingMilliseconds,
+    );
   });
   registeredProjectRootFor = (executionRoot) => services.computeProjectRoot(executionRoot);
   const publishRoots = (): void => {
@@ -680,6 +737,22 @@ const bootstrapElectronApp = async (): Promise<void> => {
   };
 
   ipcMain.handle(externalAgentsChannel, async (event) => (trusted(event.senderFrame) ? externalAgents : []));
+  /* Blueprint D12: the Print pane's Bambu Studio presets and settings. The
+   * service parses every input; this guard keeps other senders out. */
+  const bambuStudio = createBambuStudioService({ env: environment });
+  for (const [channel, call] of [
+    [slicersChannels.bambuStudio.status, bambuStudio.status],
+    [slicersChannels.bambuStudio.catalog, bambuStudio.catalog],
+    [slicersChannels.bambuStudio.resolveSelection, bambuStudio.resolveSelection],
+    [slicersChannels.bambuStudio.settings, bambuStudio.settings],
+  ] as const) {
+    ipcMain.handle(channel, async (event, input: unknown) => {
+      if (!trusted(event.senderFrame)) {
+        throw new Error('Desktop shell refused Bambu Studio request.');
+      }
+      return call(input);
+    });
+  }
   ipcMain.handle('tau:auth:sign-in', async (event) => {
     if (trusted(event.senderFrame)) {
       await auth.signIn();
@@ -832,7 +905,9 @@ const bootstrapElectronApp = async (): Promise<void> => {
       /* Launcher 2 is scoped to one workspace root, and the renderer names it —
        * so it passes the same registry the kernel fork resolver uses. Refusing
        * outright rather than substituting Home: an agent host working over the
-       * wrong directory is worse than no agent host. */
+       * wrong directory is worse than no agent host. Machines need no root:
+       * printers belong to the per-user store, and a print request names its
+       * own project. */
       if (concern === 'agentHost' && !roots.isTrusted(resolved['workspaceRoot'] ?? '')) {
         log.log('error', 'services.untrusted-root', { concern, workspaceRoot: resolved['workspaceRoot'] });
         refuse('services.untrusted-root');

@@ -18,6 +18,7 @@ import type { EventManager, ThreeElement } from '@react-three/fiber';
 import CameraControlsImpl from 'camera-controls';
 import { useViewportGizmoInteractionLock } from '#components/geometry/graphics/three/controls/viewport-gizmo-interaction-lock.js';
 import type { ViewportGizmoInteractionLock } from '#components/geometry/graphics/three/controls/viewport-gizmo-interaction-lock.js';
+import type { SecondaryMouseButtonMode } from '#components/geometry/graphics/three/three-viewer-properties.js';
 
 export type TauCameraControlsProps = Omit<
   ThreeElement<typeof CameraControlsImpl>,
@@ -284,3 +285,58 @@ export const TauCameraControls = forwardRef<CameraControlsImpl, TauCameraControl
 );
 
 TauCameraControls.displayName = 'TauCameraControls';
+
+/**
+ * The viewer's camera feel: undamped rotate, truck and dolly at the viewer's speeds. Every canvas
+ * with a camera the person drives uses it, so they all move alike.
+ */
+export function resolveCameraControlProps({
+  enablePan,
+  enableZoom,
+  secondaryMouseButtonMode = 'camera-pan',
+  projectionKind = 'perspective',
+  zoomSpeed = 2,
+}: {
+  readonly enablePan: boolean;
+  readonly enableZoom: boolean;
+  readonly secondaryMouseButtonMode?: SecondaryMouseButtonMode;
+  readonly projectionKind?: 'orthographic' | 'perspective';
+  readonly zoomSpeed?: number;
+}): Pick<
+  React.ComponentProps<typeof TauCameraControls>,
+  'dollySpeed' | 'truckSpeed' | 'smoothTime' | 'draggingSmoothTime' | 'mouseButtons'
+> {
+  return {
+    dollySpeed: zoomSpeed * 0.5,
+    truckSpeed: enablePan ? 2 : 0,
+    smoothTime: 0,
+    draggingSmoothTime: 0,
+    mouseButtons: resolveCameraControlMouseButtons({ enablePan, enableZoom, secondaryMouseButtonMode, projectionKind }),
+  };
+}
+
+export function resolveCameraControlMouseButtons({
+  enablePan,
+  enableZoom,
+  secondaryMouseButtonMode,
+  projectionKind = 'perspective',
+}: {
+  readonly enablePan: boolean;
+  readonly enableZoom: boolean;
+  readonly secondaryMouseButtonMode: SecondaryMouseButtonMode;
+  readonly projectionKind?: 'orthographic' | 'perspective';
+}): React.ComponentProps<typeof TauCameraControls>['mouseButtons'] {
+  return {
+    left: CameraControlsImpl.ACTION.ROTATE,
+    middle: enablePan ? CameraControlsImpl.ACTION.TRUCK : CameraControlsImpl.ACTION.NONE,
+    right:
+      enablePan && secondaryMouseButtonMode === 'camera-pan'
+        ? CameraControlsImpl.ACTION.TRUCK
+        : CameraControlsImpl.ACTION.NONE,
+    wheel: enableZoom
+      ? projectionKind === 'orthographic'
+        ? CameraControlsImpl.ACTION.ZOOM
+        : CameraControlsImpl.ACTION.DOLLY
+      : CameraControlsImpl.ACTION.NONE,
+  };
+}

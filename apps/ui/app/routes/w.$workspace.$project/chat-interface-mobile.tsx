@@ -8,6 +8,7 @@ import { ChatConverter } from '#routes/w.$workspace.$project/chat-converter.js';
 import { ProjectShareWorkbenchPanel } from '#routes/w.$workspace.$project/project-share-action.js';
 import { ChatRevisions } from '#routes/w.$workspace.$project/chat-revisions.js';
 import { ProjectUnavailableOverlay } from '#routes/w.$workspace.$project/project-unavailable-overlay.js';
+import { ProjectManifestIssueBanner } from '#routes/w.$workspace.$project/project-manifest-issue-banner.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { ChatInterfaceNav } from '#routes/w.$workspace.$project/chat-interface-nav.js';
 import { Tabs, TabsContent } from '@taucad/ui/components/tabs';
@@ -43,6 +44,7 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
           }}
         >
           <ViewerDockview />
+          <ProjectManifestIssueBanner />
 
           {/* Renders the shared failure notice or WorkspaceUnavailableRecovery
             depending on which gate has failed. See Audit R8 for rationale. */}

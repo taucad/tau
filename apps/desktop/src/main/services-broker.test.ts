@@ -48,6 +48,7 @@ const spawnUtility = (): Spawned => {
 
 const brokerHarness = () => {
   const spawns: Spawned[] = [];
+  const log = vi.fn();
   const runtimeExits: Array<() => void> = [];
   const channels: Array<{
     readonly port1: { readonly id: 'renderer'; readonly close: ReturnType<typeof vi.fn> };
@@ -79,14 +80,15 @@ const brokerHarness = () => {
       return channel;
     },
     connectRuntime,
+    log,
   } as unknown as ServicesBrokerOptions;
-  return { broker: createServicesBroker(options), channels, connectRuntime, fork, runtimeExits, spawns };
+  return { broker: createServicesBroker(options), channels, connectRuntime, fork, log, runtimeExits, spawns };
 };
 
 describe('createServicesBroker', () => {
   it('keeps the rooted runtime filesystem concern main-only', () => {
     expect(servicesConcerns).toContain('runtimeFileSystem');
-    expect(rendererServicesConcerns).toEqual(['nodeFs', 'agentHost']);
+    expect(rendererServicesConcerns).toEqual(['nodeFs', 'agentHost', 'machines']);
   });
 
   it('forks nothing until the first concern is connected', () => {
@@ -145,6 +147,80 @@ describe('createServicesBroker', () => {
       { type: 'concern', concern: 'agentHost', context: { workspaceRoot: '/home/widget' } },
       [expect.objectContaining({ id: 'utility' })],
     ]);
+  });
+
+  it('should complete a machine binding through the utility and settle on its own answer', async () => {
+    const { broker, spawns } = brokerHarness();
+    const bindingFrames = (): Array<Record<string, unknown>> =>
+      (spawns[0]?.posted ?? []).filter(
+        (message): message is Record<string, unknown> =>
+          typeof message === 'object' &&
+          message !== null &&
+          'type' in message &&
+          message['type'] === 'machine-binding-complete',
+      );
+
+    const bound = broker.completeMachineBinding(
+      { ceremonyId: 'ceremony-1', address: '10.0.0.5', accessCode: '1234' },
+      1000,
+    );
+    /* The secret rides the utility frame and nothing else: no renderer relay,
+     * no log line, one control frame to the process that keeps it. */
+    expect(bindingFrames()[0]).toMatchObject({ ceremonyId: 'ceremony-1', address: '10.0.0.5', accessCode: '1234' });
+    spawns[0]?.message({
+      type: 'machine-binding-completed',
+      requestId: bindingFrames()[0]?.['requestId'],
+      outcome: { status: 'bound', machineId: 'bambu:sim' },
+    });
+    await expect(bound).resolves.toEqual({ status: 'bound', machineId: 'bambu:sim' });
+
+    const failed = broker.completeMachineBinding({ ceremonyId: 'ceremony-2' }, 1000);
+    spawns[0]?.message({
+      type: 'machine-binding-complete-failed',
+      requestId: bindingFrames()[1]?.['requestId'],
+      message: 'MACHINE_BINDING_UNKNOWN',
+    });
+    await expect(failed).rejects.toThrow('MACHINE_BINDING_UNKNOWN');
+  });
+
+  it('should never replay or log an access code, and complete without one when none was typed', async () => {
+    const { broker, log, spawns } = brokerHarness();
+    const bindingFrames = (spawned: Spawned | undefined): Array<Record<string, unknown>> =>
+      (spawned?.posted ?? []).filter(
+        (message): message is Record<string, unknown> =>
+          typeof message === 'object' &&
+          message !== null &&
+          'type' in message &&
+          message['type'] === 'machine-binding-complete',
+      );
+    broker.post({ type: 'allowRoots', roots: ['/home'] });
+
+    const typed = broker.completeMachineBinding({ ceremonyId: 'ceremony-1', accessCode: '12345678' }, 1000);
+    spawns[0]?.message({
+      type: 'machine-binding-completed',
+      requestId: bindingFrames(spawns[0])[0]?.['requestId'],
+      outcome: { status: 'bound', machineId: 'workshop-x1c' },
+    });
+    await expect(typed).resolves.toEqual({ status: 'bound', machineId: 'workshop-x1c' });
+
+    /* A fresh fork gets every control frame replayed, and never the code. */
+    spawns[0]?.exit();
+    broker.connect('nodeFs');
+    expect(spawns[1]?.posted).toContainEqual({ type: 'allowRoots', roots: ['/home'] });
+    expect(JSON.stringify(spawns[1]?.posted)).not.toContain('12345678');
+
+    /* A saved code is the utility's to reuse: main sends no code at all. */
+    const reused = broker.completeMachineBinding({ ceremonyId: 'ceremony-2' }, 1000);
+    const [reuseFrame] = bindingFrames(spawns[1]);
+    expect(reuseFrame).toMatchObject({ ceremonyId: 'ceremony-2' });
+    expect(reuseFrame).not.toHaveProperty('accessCode');
+    spawns[1]?.message({
+      type: 'machine-binding-completed',
+      requestId: reuseFrame?.['requestId'],
+      outcome: { status: 'bound', machineId: 'workshop-x1c' },
+    });
+    await expect(reused).resolves.toEqual({ status: 'bound', machineId: 'workshop-x1c' });
+    expect(JSON.stringify(log.mock.calls)).not.toContain('12345678');
   });
 
   it('releases only the last project attachment and leaves another project served', async () => {

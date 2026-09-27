@@ -9,8 +9,18 @@
 
 import type { RuntimeFileSystem } from '#filesystem/index.js';
 import type { KernelRuntimeWorker } from '#framework/kernel-runtime-worker.js';
+import type { MachineChannelClient } from '#machines/machine-channel.js';
 import type { MessagePortMainLike } from '@taucad/rpc';
 import { z } from 'zod';
+
+/** Same shape as the WebSocket transport's `machines` option: one lazy channel factory, or a truthful refusal. */
+const machinesSchema = z.union([
+  z.strictObject({
+    available: z.literal(true),
+    connect: z.custom<() => MachineChannelClient>((value) => typeof value === 'function'),
+  }),
+  z.strictObject({ available: z.literal(false), reason: z.enum(['unsupported', 'not-granted']) }),
+]);
 
 /**
  * Renderer-side options. The `port` is the WHATWG `MessagePort` the
@@ -29,6 +39,8 @@ export const electronUtilityClientOptionsSchema = z.object({
       typeof (value as { postMessage?: unknown }).postMessage === 'function',
     { message: 'port must be a MessagePort' },
   ),
+  /** Authenticated machines service the shell brokered beside the runtime port. */
+  machines: machinesSchema.optional(),
 });
 
 /** Renderer-side validated options inferred from schema. @public */

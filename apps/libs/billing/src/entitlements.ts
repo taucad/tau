@@ -18,7 +18,6 @@ export type Entitlements = {
   readonly canUseProKernels: boolean;
   readonly canCreatePrivateShares: boolean;
   readonly canSyncFiles: boolean;
-  readonly canConnectGitHub: boolean;
   readonly canConnectEnterpriseGit: boolean;
   readonly apiCadGatewayMonthlyLimit: number;
   readonly conversionApiMonthlyLimit: number;
@@ -80,14 +79,13 @@ export const formatStorageLimit = (bytes: number): string => {
 
 /**
  * What the free tier is entitled to once free sync is open (D16, EQ2): backup
- * to Tau Cloud within its allowance, publishing (which shares `canSyncFiles`)
- * and a GitHub connection.
+ * to Tau Cloud within its allowance and publishing (which shares
+ * `canSyncFiles`). A GitHub connection needs no entitlement: every plan has it.
  */
 const freeEntitlements = {
   canUseProKernels: false,
   canCreatePrivateShares: false,
   canSyncFiles: true,
-  canConnectGitHub: true,
   canConnectEnterpriseGit: false,
   apiCadGatewayMonthlyLimit: 1000,
   conversionApiMonthlyLimit: 0,
@@ -106,7 +104,6 @@ const proEntitlements = {
   canUseProKernels: true,
   canCreatePrivateShares: true,
   canSyncFiles: true,
-  canConnectGitHub: true,
   canConnectEnterpriseGit: false,
   apiCadGatewayMonthlyLimit: 30_000,
   conversionApiMonthlyLimit: 50_000,

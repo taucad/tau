@@ -39,6 +39,16 @@ describe('utilityEnvironment', () => {
     expect(environment).toEqual({ PATH: '/usr/bin' });
   });
 
+  it('should pass the Bambu Studio location to the utilities that slice and plan with it', () => {
+    expect(utilityEnvironment({ TAU_BAMBU_STUDIO_PATH: '/opt/BambuStudio.app' })).toEqual({
+      TAU_BAMBU_STUDIO_PATH: '/opt/BambuStudio.app',
+    });
+  });
+
+  it('should pass the secret vault choice to the utility that keeps printer access codes', () => {
+    expect(utilityEnvironment({ TAU_SECRET_VAULT: 'file' })).toEqual({ TAU_SECRET_VAULT: 'file' });
+  });
+
   it('merges caller-named additions last', () => {
     expect(utilityEnvironment({ PATH: '/usr/bin' }, { TAU_PROJECT_ROOT: '/root' })).toEqual({
       PATH: '/usr/bin',

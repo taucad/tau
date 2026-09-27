@@ -27,10 +27,10 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { z } from 'zod';
 
 import { createTauMcpHttpHandler } from '@taucad/mcp';
-import type { TauMcpDispatch, TauMcpRpcFailure, TauMcpRpcName, TauMcpRpcSuccess } from '@taucad/mcp';
+import type { TauMcpDispatch, TauMcpHostTool, TauMcpRpcFailure, TauMcpRpcName, TauMcpRpcSuccess } from '@taucad/mcp';
 import { rpcName, toolName } from '@taucad/chat/constants';
 
-import type { JsonValue, ToolRegistry } from '@taucad/agent-host';
+import type { JsonObject, JsonValue, ToolRegistry } from '@taucad/agent-host';
 
 /**
  * Milliseconds a host-minted capability may live.
@@ -49,13 +49,76 @@ export const hostMcpCapabilityLifetime = 12 * 60 * 60 * 1000;
 /** The prefix every host capability carries; distinct from the API's `tau-mcp-v1`. @public */
 export const hostMcpCapabilityPrefix = 'tau-mcp-host-v1';
 
-/** The exact CAD-tool grant a host capability carries. @public */
+/**
+ * The exact tool grant a host capability carries.
+ *
+ * The four CAD tools, plus the print tools (blueprint D5, Bambu Studio D13): an
+ * external agent may read the slicing profiles a machine offers, and open,
+ * read, list and stop a print request through the same ledger a Tau turn
+ * uses, and is told to wait for the person — nothing here starts a print. Every name is dispatched into the daemon's own registry by tool name.
+ *
+ * @public
+ */
 export const hostMcpAllowedTools = [
   toolName.getKernelResult,
   toolName.testModel,
   toolName.screenshot,
   toolName.exportGeometry,
+  toolName.getPrintProfiles,
+  toolName.requestPrint,
+  toolName.getPrintRequest,
+  toolName.listPrintRequests,
+  toolName.cancelPrint,
 ] as const;
+
+/** One name from {@link hostMcpAllowedTools}. @public */
+export type HostMcpAllowedTool = (typeof hostMcpAllowedTools)[number];
+
+/**
+ * The registry tools registered beside the CAD four, by name.
+ *
+ * They have no chat RPC, so `@taucad/mcp` dispatches them as `{ toolName }`
+ * calls and this endpoint answers from the registry's own content.
+ */
+const hostMcpRegistryTools: ReadonlySet<HostMcpAllowedTool> = new Set<HostMcpAllowedTool>([
+  toolName.getPrintProfiles,
+  toolName.requestPrint,
+  toolName.getPrintRequest,
+  toolName.listPrintRequests,
+  toolName.cancelPrint,
+]);
+
+/** The registry tools that change nothing, here or on a machine. */
+const readOnlyRegistryTools: ReadonlySet<string> = new Set<string>([
+  toolName.getPrintProfiles,
+  toolName.getPrintRequest,
+  toolName.listPrintRequests,
+]);
+
+const isJsonObject = (value: JsonValue): value is JsonObject =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * How one registry tool presents over MCP.
+ *
+ * @param definition - The registry's own definition, schema included.
+ * @returns The host tool `@taucad/mcp` registers.
+ */
+const hostToolOf = (definition: ReturnType<ToolRegistry['list']>[number]): TauMcpHostTool => {
+  const reads = readOnlyRegistryTools.has(definition.name);
+  return {
+    name: definition.name,
+    description: definition.description,
+    inputSchema: definition.inputSchema,
+    annotations: {
+      readOnlyHint: reads,
+      destructiveHint: definition.name === toolName.cancelPrint,
+      idempotentHint: definition.name !== toolName.cancelPrint,
+      /* A print request reaches a machine outside this process once accepted. */
+      openWorldHint: !reads,
+    },
+  };
+};
 
 /**
  * The one direction the RPC↔tool map is needed here.
@@ -64,7 +127,7 @@ export const hostMcpAllowedTools = [
  * names, and the pairing is the same one the API applies
  * (`apps/api/app/api/mcp/mcp-authority.service.ts`).
  */
-const toolForRpc: Readonly<Record<TauMcpRpcName, (typeof hostMcpAllowedTools)[number]>> = {
+const toolForRpc: Readonly<Record<TauMcpRpcName, HostMcpAllowedTool>> = {
   [rpcName.getKernelResult]: toolName.getKernelResult,
   [rpcName.runGeoSpecTests]: toolName.testModel,
   [rpcName.captureImages]: toolName.screenshot,
@@ -79,12 +142,7 @@ const capabilityClaimsSchema = z
     sessionKey: z.string().min(1),
     /** Provenance only: which run opened the session. It fences nothing (V7). */
     runId: z.string().min(1),
-    allowedTools: z.tuple([
-      z.literal(toolName.getKernelResult),
-      z.literal(toolName.testModel),
-      z.literal(toolName.screenshot),
-      z.literal(toolName.exportGeometry),
-    ]),
+    allowedTools: z.array(z.enum(hostMcpAllowedTools)).length(hostMcpAllowedTools.length),
     issuedAt: z.number().int().nonnegative(),
     expiresAt: z.number().int().positive(),
   })
@@ -190,7 +248,15 @@ const bearerOf = (authorization: string | undefined): string =>
  */
 export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpEndpoint => {
   const now = options.now ?? Date.now;
-  const handler = createTauMcpHttpHandler();
+  /* Offered iff the registry offers them: a daemon without a granted machines
+   * facet lists none, so an external agent is never told about a tool this
+   * host cannot serve. */
+  const handler = createTauMcpHttpHandler({
+    hostTools: options.registry
+      .list()
+      .filter((definition) => hostMcpRegistryTools.has(definition.name as HostMcpAllowedTool))
+      .map((definition) => hostToolOf(definition)),
+  });
   type Binding = {
     readonly runId: string;
     readonly signal: AbortSignal;
@@ -253,8 +319,23 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
     binding: Binding | undefined,
     signal: AbortSignal,
   ): TauMcpDispatch => {
-    return async (call, dispatchOptions) => {
-      const tool = toolForRpc[call.rpcName];
+    /**
+     * One allowed tool, by name, into the daemon's registry.
+     *
+     * Keyed by tool name rather than RPC name because the print request tools
+     * have no chat RPC — they are registry tools — and this is the one call
+     * the MCP adapter makes for either kind.
+     *
+     * @param tool - The registry tool name the grant is checked against.
+     * @param args - Arguments the MCP adapter already validated.
+     * @param dispatchOptions - The adapter's call identity and cancellation.
+     * @returns The registry result verbatim.
+     */
+    const invokeAllowed = async (
+      tool: HostMcpAllowedTool,
+      args: Readonly<Record<string, unknown>>,
+      dispatchOptions: Parameters<TauMcpDispatch>[1],
+    ): Promise<TauMcpRpcSuccess | TauMcpRpcFailure> => {
       if (!claims.allowedTools.includes(tool)) {
         return { errorCode: 'TOOL_NOT_ALLOWED', message: `${tool} is not in this capability's grant.` };
       }
@@ -272,7 +353,7 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
          * falls back to it, so a stale id is never a stale directory. */
         runId: binding.runId,
         // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- `@taucad/mcp` validated these args against the tool's own schema.
-        input: call.args as unknown as JsonValue,
+        input: args as unknown as JsonValue,
         signal: AbortSignal.any(
           [binding.signal, dispatchOptions.signal, signal].filter(
             (candidate): candidate is AbortSignal => candidate !== undefined,
@@ -282,11 +363,34 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
       binding.pending.add(pending);
       try {
         const result = await pending;
-        // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the registry returns the canonical RPC result verbatim.
-        return result.content as TauMcpRpcSuccess | TauMcpRpcFailure;
+        if (!hostMcpRegistryTools.has(tool)) {
+          // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the registry returns the canonical RPC result verbatim.
+          return result.content as TauMcpRpcSuccess | TauMcpRpcFailure;
+        }
+        /* A registry tool answers plain content with the error bit beside it;
+         * the adapter reads `success` and `errorCode` the way it does for an
+         * RPC result, so the bit becomes the field here. */
+        const content = isJsonObject(result.content) ? result.content : { value: result.content };
+        if (!result.isError) {
+          return { success: true, ...content };
+        }
+        return {
+          errorCode: typeof content['errorCode'] === 'string' ? content['errorCode'] : 'TOOL_ERROR',
+          message: typeof content['message'] === 'string' ? content['message'] : `${tool} failed.`,
+        };
       } finally {
         binding.pending.delete(pending);
       }
+    };
+    return async (call, dispatchOptions) => {
+      if ('rpcName' in call) {
+        return invokeAllowed(toolForRpc[call.rpcName], call.args, dispatchOptions);
+      }
+      const tool = hostMcpAllowedTools.find((name) => name === call.toolName);
+      if (tool === undefined) {
+        return { errorCode: 'TOOL_NOT_ALLOWED', message: `${call.toolName} is not in this capability's grant.` };
+      }
+      return invokeAllowed(tool, call.args, dispatchOptions);
     };
   };
 

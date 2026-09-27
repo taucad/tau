@@ -6,6 +6,8 @@ import TsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker'
 import { shikiToMonaco, textmateThemeToMonacoTheme } from '@shikijs/monaco';
 import type { CompletionRegistration } from 'monacopilot';
 import type * as Monaco from 'monaco-editor';
+import { z } from 'zod';
+import { projectManifestSchema, projectManifestSchemaUrl } from '@taucad/types';
 import {
   createJsonTokensProvider,
   generateJsonBracketHighlightColors,
@@ -238,7 +240,9 @@ const initializeMonaco = async (): Promise<typeof Monaco> => {
   const { jsonDefaults } = (await import('monaco-editor/esm/vs/language/json/monaco.contribution.js')) as unknown as {
     jsonDefaults: {
       readonly modeConfiguration: Record<string, boolean>;
+      readonly diagnosticsOptions: Record<string, unknown>;
       setModeConfiguration(config: Record<string, boolean>): void;
+      setDiagnosticsOptions(options: Record<string, unknown>): void;
     };
   };
   await import('monaco-editor/esm/vs/language/typescript/monaco.contribution.js');
@@ -252,6 +256,20 @@ const initializeMonaco = async (): Promise<typeof Monaco> => {
   jsonDefaults.setModeConfiguration({
     ...jsonDefaults.modeConfiguration,
     tokens: false,
+  });
+  // The project manifest `tau.json`: the strict v1 schema flags an unknown key
+  // where it is typed, not after discovery reads the file (blueprint R9). The
+  // published copy is asserted equal to this generated one.
+  jsonDefaults.setDiagnosticsOptions({
+    ...jsonDefaults.diagnosticsOptions,
+    validate: true,
+    schemas: [
+      {
+        uri: projectManifestSchemaUrl,
+        fileMatch: ['tau.json'],
+        schema: z.toJSONSchema(projectManifestSchema, { target: 'draft-7' }),
+      },
+    ],
   });
 
   // Phase 1: Register language metadata for all contributions (idempotent)

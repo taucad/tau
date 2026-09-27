@@ -292,7 +292,7 @@ test.describe('Chat viewer model component context menu', () => {
     const addToChatMenuItem = selectors.getByRole('menuitem', { name: /add to chat/i });
     const isolateMenuItem = selectors.getByRole('menuitem', { name: /^isolate$/i });
     const resetOpacityMenuItem = selectors.getByRole('menuitem', { name: 'Reset opacity' });
-    const opacityInput = selectors.getByRole('textbox', { name: 'Opacity' });
+    const opacityInput = selectors.getByRole('spinbutton', { name: 'Opacity' });
     const opacityRow = selectors.getByCss('[data-slot="viewer-model-component-action-slider-item"]');
     await target.expectVisible(focusMenuItem, 15_000);
     await target.expectVisible(addToChatMenuItem);
@@ -337,17 +337,18 @@ test.describe('Chat viewer model component context menu', () => {
         (element) => element.querySelectorAll('[data-slot="slider-track"], [data-slot="slider-thumb"]').length,
       ),
     ).toBe(0);
-    const initialFocusVisualState = await readMenuItemVisualState(focusMenuItem);
+    // A pointer opened the menu, so the menu holds focus and no row starts highlighted.
+    expect(await target.evaluate(() => document.activeElement?.getAttribute('role'))).toBe('menu');
+    const restVisualState = await readMenuItemVisualState(focusMenuItem);
     await target.hover(addToChatMenuItem);
-    await expect.poll(async () => readMenuItemVisualState(addToChatMenuItem)).toEqual(initialFocusVisualState);
     await expect
       .poll(async () => {
-        const visualState = await readMenuItemVisualState(focusMenuItem);
+        const visualState = await readMenuItemVisualState(addToChatMenuItem);
         return visualState.backgroundColor;
       })
-      .not.toBe(initialFocusVisualState.backgroundColor);
+      .not.toBe(restVisualState.backgroundColor);
+    expect(await readMenuItemVisualState(focusMenuItem)).toEqual(restVisualState);
 
-    await target.keyboardPress('Escape');
     await target.click(opacityRow);
     await expect
       .poll(async () => {
@@ -369,6 +370,8 @@ test.describe('Chat viewer model component context menu', () => {
     const revertedOpacityInput = await target.read(opacityInput);
     expect(revertedOpacityInput.value).toBe('100');
 
+    // The first Escape only reverted the edit; the next one closes the menu.
+    await target.keyboardPress('Escape');
     await target.expectCount(focusMenuItem, 0);
 
     const rightDragPoint = await findComponentHitPoint();
@@ -448,7 +451,7 @@ test.describe('Chat viewer model component context menu', () => {
     }
     const initialOpacityStates = await readRenderedComponentStates(opacityComponentId);
     await target.mouseClick(opacityHit.x, opacityHit.y, { button: 'right' });
-    const opacityInput = selectors.getByRole('textbox', { name: 'Opacity' });
+    const opacityInput = selectors.getByRole('spinbutton', { name: 'Opacity' });
     const opacityRow = selectors.getByCss('[data-slot="viewer-model-component-action-slider-item"]');
     const eventBaseline = await target.events();
     await target.expectVisible(opacityInput);

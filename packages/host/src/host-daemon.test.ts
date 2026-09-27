@@ -13,23 +13,28 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { NodeFsProviderClient } from '@taucad/filesystem/backend';
 import { acquireNodeAuthorityWriter } from '@taucad/filesystem/backend/node';
 import type { NodeFsWatchEvent } from '@taucad/filesystem/backend/node';
+import { bambuMachine } from '@taucad/bambu';
 import { tauRemoteUrl } from '@taucad/revisions';
+import { connectMachineChannel } from '@taucad/runtime/machine';
+import type { MachineArtifactReference } from '@taucad/runtime/machine';
 import type { RuntimeClient } from '@taucad/runtime/client';
 import { createFileSystemBridgeProxy } from '@taucad/runtime/filesystem';
 import type { FileSystemBridgeConnection } from '@taucad/runtime/filesystem';
+import type * as RuntimeFileSystem from '@taucad/runtime/filesystem';
 
 import { startHostDaemon } from '#host-daemon.js';
 import type { HostDaemonEvent } from '#host-daemon.js';
 import { writeHostCredential } from '#credential-store.js';
 import * as revisions from '#revisions.js';
 import * as agentTools from '#agent-tools.js';
+import * as machineHost from '#machine-host.js';
 import type { HostJobWorkerFactory } from '#job-worker.js';
 
 /* Observe the filesystem the daemon binds to its runtime child, without changing
  * it: the captured thunk is the connection that child's bridge opens. */
 const runtimeFileSystemOpens = vi.hoisted(() => [] as Array<() => FileSystemBridgeConnection>);
 vi.mock('@taucad/runtime/filesystem', async (importOriginal) => {
-  const original = await importOriginal<typeof import('@taucad/runtime/filesystem')>();
+  const original = await importOriginal<typeof RuntimeFileSystem>();
   return {
     ...original,
     fromFileSystemBridge: (open: () => FileSystemBridgeConnection) => {
@@ -41,6 +46,8 @@ vi.mock('@taucad/runtime/filesystem', async (importOriginal) => {
 
 /* Observe the tool-surface decision the daemon forwards, without changing it. */
 const registrySpy = vi.spyOn(agentTools, 'createHostToolRegistry');
+/* Observe the artifact reader the daemon hands its machine runtime, without changing it. */
+const machineRuntimeSpy = vi.spyOn(machineHost, 'createNodeMachineRuntime');
 /* Captured before the spy replaces it: a case that counts subscriptions still
  * has to build the real revision tree around the real launcher. */
 const realCreateProjectRevisions = revisions.createProjectRevisions;
@@ -52,6 +59,7 @@ const resources: Array<{ close(): void }> = [];
 
 afterEach(async () => {
   delete process.env['TAU_CONFIG_DIR'];
+  delete process.env['TAU_SECRET_VAULT'];
   process.chdir(originalWorkingDirectory);
   for (const resource of resources.splice(0)) {
     resource.close();
@@ -619,6 +627,171 @@ describe('startHostDaemon', () => {
 
     await daemon.close();
     expect(await daemon.closed).toEqual({ cause: 'requested' });
+  }, 20_000);
+
+  it("should open the machine store under the config directory, serve the machines route and read only its own project's artifacts by digest", async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-machines-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    /* The daemon picks the keychain on macOS; no test may touch a person's keychain. */
+    process.env['TAU_SECRET_VAULT'] = 'memory';
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    await writeHostCredential({
+      v: 1,
+      deviceId: 'device-1',
+      credential: 'secret-credential-value-that-never-enters-a-url',
+    });
+
+    const events: HostDaemonEvent[] = [];
+    const agentOptions = await agentOptionsIn(temporaryDirectory);
+    const projectId = 'proj_000000000000000000001';
+    await writeFile(join(agentOptions.workspaceRoot, 'tau.json'), JSON.stringify({ id: projectId }));
+    machineRuntimeSpy.mockClear();
+    const daemon = startHostDaemon({
+      relayUrl: new URL('http://127.0.0.1:1'),
+      runtimeHost: { modulePath: fileURLToPath(new URL('fixtures/runtime-host-failing-child.mjs', import.meta.url)) },
+      agent: { ...agentOptions, machines: { providers: [bambuMachine()] } },
+      onEvent: (event) => events.push(event),
+    });
+    await daemon.ready;
+    const agentReady = events.find(
+      (event): event is Extract<HostDaemonEvent, { readonly type: 'agent' }> => event.type === 'agent',
+    );
+    const origin = new URL(agentReady?.url ?? 'http://127.0.0.1:0');
+    /* The per-user store every Tau host on this computer shares, not a workspace's. */
+    expect(JSON.parse(await readFile(join(temporaryDirectory, 'machines', 'store.json'), 'utf8'))).toMatchObject({
+      version: 1,
+    });
+
+    /* `tau serve --machines`: the probe answers, the socket upgrades, the host
+     * lists what the flag admitted — and the tool registry was offered the
+     * same facet, with the served project's id for `request_print`. */
+    const probe = await fetch(new URL('/machines', origin), { headers: { authorization: `Bearer ${agentToken}` } });
+    expect(probe.status).toBe(204);
+    const socket = new WebSocket(new URL('/machines', origin).href.replace('http:', 'ws:'), {
+      headers: { authorization: `Bearer ${agentToken}` },
+    });
+    /* Wrapped before `open`, as the browser transport does: the host greets
+     * the socket the instant the upgrade completes, and `ws` drops a frame
+     * that lands with no listener. */
+    const client = connectMachineChannel(socket);
+    try {
+      const providers = await client.listProviders({});
+      expect(providers.map((provider) => provider.id)).toEqual(['bambu']);
+      await expect(client.list({})).resolves.toMatchObject({ entries: [] });
+    } finally {
+      client.close();
+    }
+    expect(registrySpy.mock.calls.at(-1)?.[0]).toMatchObject({ projectId, machines: { available: true } });
+
+    const readArtifact = machineRuntimeSpy.mock.calls.at(-1)?.[0].readArtifact;
+    if (readArtifact === undefined) {
+      throw new Error('The daemon composed no machine runtime.');
+    }
+    const digestOf = (bytes: Uint8Array<ArrayBuffer>): string =>
+      `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+    const plate = new TextEncoder().encode('sliced plate');
+    await writeFile(join(agentOptions.workspaceRoot, 'plate.gcode.3mf'), plate);
+    /* A candidate turn slices into its checkout, which this daemon keeps under its config directory. */
+    const candidateSlice = new TextEncoder().encode('candidate slice');
+    const candidateArtifacts = join(
+      temporaryDirectory,
+      'checkouts',
+      'workspace',
+      'candidate-1',
+      '.tau',
+      'artifacts',
+      'a1',
+    );
+    await mkdir(candidateArtifacts, { recursive: true });
+    await writeFile(join(candidateArtifacts, 'slice.gcode.3mf'), candidateSlice);
+    const artifact = (overrides: Partial<Record<'projectId' | 'path' | 'digest', string>>): MachineArtifactReference =>
+      // oxlint-disable-next-line typescript-eslint/consistent-type-assertions -- plain fixture data; the reader reads only the project, path and digest.
+      ({
+        projectId,
+        path: 'plate.gcode.3mf',
+        digest: digestOf(plate),
+        length: plate.byteLength,
+        ...overrides,
+      }) as MachineArtifactReference;
+    const { signal } = new AbortController();
+    const read = await readArtifact(artifact({}), signal);
+    expect(Buffer.from(read).toString('utf8')).toBe('sliced plate');
+    const fromCheckout = await readArtifact(
+      artifact({ path: '.tau/artifacts/a1/slice.gcode.3mf', digest: digestOf(candidateSlice) }),
+      signal,
+    );
+    expect(Buffer.from(fromCheckout).toString('utf8')).toBe('candidate slice');
+    await expect(readArtifact(artifact({ digest: `sha256:${'0'.repeat(64)}` }), signal)).rejects.toThrow(
+      'MACHINE_ARTIFACT_NOT_FOUND',
+    );
+    await expect(readArtifact(artifact({ path: 'missing.gcode.3mf' }), signal)).rejects.toThrow(
+      'MACHINE_ARTIFACT_NOT_FOUND',
+    );
+    /* The same path and bytes, named by another project, are never this root's to hand out. */
+    await expect(readArtifact(artifact({ projectId: 'proj_000000000000000000002' }), signal)).rejects.toThrow(
+      'MACHINE_ARTIFACT_NOT_FOUND',
+    );
+
+    await daemon.close();
+    expect(await daemon.closed).toEqual({ cause: 'requested' });
+  }, 20_000);
+
+  it('should warn and keep serving without machines while another Tau app owns the machine store', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-machines-owned-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.env['TAU_SECRET_VAULT'] = 'memory';
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    await writeHostCredential({
+      v: 1,
+      deviceId: 'device-1',
+      credential: 'secret-credential-value-that-never-enters-a-url',
+    });
+    /* The desktop app, say, already holds the store's writer lock. */
+    const authorityRoot = join(temporaryDirectory, 'machines', 'authority');
+    await mkdir(authorityRoot, { recursive: true, mode: 0o700 });
+    const owner = await acquireNodeAuthorityWriter({ authorityRoot });
+    try {
+      const events: HostDaemonEvent[] = [];
+      registrySpy.mockClear();
+      const daemon = startHostDaemon({
+        relayUrl: new URL('http://127.0.0.1:1'),
+        runtimeHost: { modulePath: fileURLToPath(new URL('fixtures/runtime-host-failing-child.mjs', import.meta.url)) },
+        agent: { ...(await agentOptionsIn(temporaryDirectory)), machines: { providers: [bambuMachine()] } },
+        onEvent: (event) => events.push(event),
+      });
+      await daemon.ready;
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: 'warning',
+          code: 'MACHINE_STORE_OWNED_ELSEWHERE',
+          message: expect.stringContaining('machines.unavailable (owned-elsewhere)') as string,
+        }),
+      );
+      const agentReady = events.find(
+        (event): event is Extract<HostDaemonEvent, { readonly type: 'agent' }> => event.type === 'agent',
+      );
+      const origin = new URL(agentReady?.url ?? 'http://127.0.0.1:0');
+      /* No machines route and no machine tools; the agent channel still answers. */
+      const probe = await fetch(new URL('/machines', origin), { headers: { authorization: `Bearer ${agentToken}` } });
+      expect(probe.status).toBe(404);
+      expect(registrySpy.mock.calls.at(-1)?.[0].machines).toBeUndefined();
+      const agent = new WebSocket(new URL('/agent', origin).href.replace('http:', 'ws:'), {
+        headers: { authorization: `Bearer ${agentToken}` },
+      });
+      const hello = once(agent, 'message');
+      try {
+        await once(agent, 'open');
+        await expect(Promise.race([hello, delay(5000, 'no-hello')])).resolves.not.toBe('no-hello');
+      } finally {
+        agent.close();
+      }
+      await expect(Promise.race([daemon.closed, delay(50).then(() => 'still-running')])).resolves.toBe('still-running');
+
+      await daemon.close();
+      expect(await daemon.closed).toEqual({ cause: 'requested' });
+    } finally {
+      await owner.release();
+    }
   }, 20_000);
 
   it('forwards testModel as the host-owned geospecRunner decision, defaulting to on', async () => {

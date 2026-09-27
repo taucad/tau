@@ -41,3 +41,4 @@ export { handleRunGeoSpecTests } from '#rpc/handlers/handle-run-geospec-tests.js
 export { handleResolveSkill } from '#rpc/handlers/handle-resolve-skill.js';
 export { handleReadRevisions } from '#rpc/handlers/handle-read-revisions.js';
 export { handleApplyParameterOperation, handleGetParameters } from '#rpc/handlers/handle-parameters.js';
+export { handleWriteTodos } from '#rpc/handlers/handle-write-todos.js';

@@ -242,6 +242,45 @@ const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
     input: (input) => `mode: ${input.mode}`,
     output: (output) => `Captured ${output.images.length} image(s)`,
   },
+  [toolName.updateTodos]: {
+    input: (input) => (input.items ?? []).map((item) => `- [${item?.status ?? '?'}] ${item?.title ?? ''}`).join('\n'),
+    output: (output) =>
+      `${output.path}: ${String(output.counts.done)} done, ${String(output.counts.in_progress)} in progress, ${String(output.counts.pending)} pending`,
+  },
+  [toolName.getMachine]: {
+    input: (input) => (input.machineId === undefined ? '' : `machineId: ${input.machineId}`),
+    output: (output) => JSON.stringify(output, null, 2),
+  },
+  [toolName.getPrintProfiles]: {
+    input: (input) => (input.machineId === undefined ? '' : `machineId: ${input.machineId}`),
+    output: (output) => JSON.stringify(output, null, 2),
+  },
+  [toolName.requestPrint]: {
+    input: (input) =>
+      joinLines(
+        `targetFile: ${input.targetFile}`,
+        input.machineId === undefined ? undefined : `machineId: ${input.machineId}`,
+        input.preset === undefined ? undefined : `preset: ${input.preset}`,
+      ),
+    output: (output) =>
+      joinLines(
+        `${output.request.summary.fileName} on ${output.machineName ?? output.request.machineId}: ${output.request.state}`,
+        output.request.failure?.message,
+        output.nextStep,
+      ),
+  },
+  [toolName.getPrintRequest]: {
+    input: (input) => `requestId: ${input.requestId}`,
+    output: (output) => `${output.request.summary.fileName}: ${output.request.state}`,
+  },
+  [toolName.listPrintRequests]: {
+    input: (input) => (input.machineId === undefined ? '' : `machineId: ${input.machineId}`),
+    output: (output) => `${String(output.total)} print request(s)`,
+  },
+  [toolName.cancelPrint]: {
+    input: (input) => JSON.stringify(input),
+    output: (output) => JSON.stringify(output, null, 2),
+  },
   [toolName.revisions]: {
     input: (input) => `action: ${input.action}`,
     /* The `where` line first, because it is the answer every action carries. */

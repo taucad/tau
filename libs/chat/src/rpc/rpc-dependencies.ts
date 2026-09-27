@@ -168,12 +168,13 @@ export type RpcGraphicsExportGeometryResult =
  * Geometry export client independent of image capture.
  *
  * Every method takes an explicit `targetFile` so the agent must name the
- * geometry unit it is acting on; there is no project-level fallback.
+ * geometry unit it is acting on; there is no project-level fallback. Export
+ * options, when present, are the host's and go to the runtime export as given.
  * @public
  */
 export type RpcGraphicsClient = {
   exportGeometry(
-    args: Pick<ExportGeometryRpcInput, 'targetFile' | 'format'>,
+    args: Pick<ExportGeometryRpcInput, 'targetFile' | 'format' | 'exportOptions'>,
     context?: RpcInvocationContext,
   ): Promise<RpcGraphicsExportGeometryResult>;
 };

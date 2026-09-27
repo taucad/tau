@@ -1,11 +1,14 @@
 import type { StandardJSONSchemaV1, StandardSchemaV1 } from '@standard-schema/spec';
-import type { ContentDigest } from '@taucad/cache-core';
+import type { CacheValue, ContentDigest } from '@taucad/cache-core';
+import type { Quantity } from '@taucad/units/quantity';
+import { z } from 'zod';
 
 import { cloneBoundedJson } from '@taucad/parameters/json';
-import { materializeConfigurationJsonSchema } from '#configuration/configuration.js';
+import { admitConfigurationManifest, materializeConfigurationJsonSchema } from '#configuration/configuration.js';
 import type { ConfigurationDefinition, ConfigurationManifestV1, JsonSchema } from '#configuration/index.js';
 import { admitJsonSchema } from '@taucad/parameters/schema';
-import type { JobRevision } from '#jobs/job-contract.js';
+import { machineManifestSchema, parseMachineManifest } from '#machines/machine-manifest.js';
+import type { MachineManifest } from '#machines/machine-manifest.js';
 import {
   attachRuntimePluginDefinition,
   attachRuntimePluginFactoryOptions,
@@ -36,6 +39,8 @@ export type MachineProvider<Id extends string = string, QueryName extends string
   vendor: string;
   technologies: readonly string[];
   accepts: readonly MachineAcceptedContainer[];
+  /** Frozen model facts that drive scenes, settings, actions and freshness budgets. */
+  manifest: MachineManifest;
   bindingConfiguration: ConfigurationManifestV1;
   submissionConfiguration: ConfigurationManifestV1;
   queries: Readonly<Record<QueryName, MachineQueryManifest>>;
@@ -45,7 +50,10 @@ export type MachineProvider<Id extends string = string, QueryName extends string
 export type MachineClock = Readonly<{ now(): string }>;
 
 /** Redacted provider log entry. @public */
-export type MachineLogEntry = Readonly<{ level: 'debug' | 'error' | 'info' | 'warning'; message: string }>;
+export type MachineLogEntry = Readonly<{
+  level: 'debug' | 'error' | 'info' | 'warning';
+  message: string;
+}>;
 
 /** Host-approved certificate trust for one machine service. @public */
 export type MachineTransportTrust = Readonly<{ type: 'system' }> | Readonly<{ type: 'pinned'; digest: ContentDigest }>;
@@ -71,6 +79,19 @@ export type MachineNetworkStream = Readonly<{
   close(): Promise<void>;
 }>;
 
+/** Host-owned authenticated network-video request that returns one bounded JPEG. @public */
+export type MachineNetworkStillInput = Readonly<{
+  endpoint: Readonly<{ address: string; port: number }>;
+  trust: MachineTransportTrust;
+  secretRef: string;
+  username: string;
+  path: string;
+  /** Milliseconds. */
+  connectTimeout: number;
+  maximumBytes: number;
+  signal: AbortSignal;
+}>;
+
 /** User-initiated bounded datagram-listener request. @public */
 export type MachineDatagramListenInput = Readonly<{
   port: number;
@@ -83,17 +104,32 @@ export type MachineDatagramListenInput = Readonly<{
 /** One untrusted datagram delivered with its observed peer. @public */
 export type MachineDatagram = Readonly<{
   bytes: Uint8Array<ArrayBuffer>;
-  peer: Readonly<{ address: string; port: number }>;
+  peer: Readonly<{ address: string; interface: string; port: number }>;
 }>;
 
-/** Qualified immutable prepared-artifact identity. @public */
+/** Explicit native-unit declaration carried by a physical preparation profile. @public */
+export type MachineQuantityDeclaration = Readonly<{
+  value: number;
+  unit: string;
+  kind: string;
+  space: 'difference' | 'linear' | 'point';
+}>;
+
+/**
+ * A project artifact a print request names. The host finds the project by `projectId`, reads `path` from it and
+ * re-verifies `length` and `digest` on every use, so the reference is never a copy of the bytes.
+ * @public
+ */
 export type MachineArtifactReference = Readonly<{
-  revision: JobRevision;
+  /** The project's `tau.json` id, `proj_` and 21 letters or digits. */
+  projectId: string;
+  /** Normalized project-relative path, without `.`, `..` or empty segments. */
   path: string;
   digest: ContentDigest;
   length: number;
   mediaType: string;
   contract: Readonly<{ id: string; version: number }>;
+  selectedMember: string;
 }>;
 
 /** Host-owned bounded artifact streaming request. @public */
@@ -116,13 +152,36 @@ export type MachineConnectionRuntime = Readonly<{
   connectStream(input: MachineNetworkRequest): Promise<MachineNetworkStream>;
   readArtifact(input: MachineArtifactReadInput): AsyncIterable<Uint8Array<ArrayBuffer>>;
   resolveSecret(input: Readonly<{ reference: string; signal: AbortSignal }>): Promise<string>;
+  captureNetworkStill?(input: MachineNetworkStillInput): Promise<MachineStill>;
+  uploadFile?(input: MachineFileUploadInput): Promise<MachineFileUploadReceipt>;
 }>;
 
+/** Host-owned, bounded implicit-FTPS upload request. @public */
+export type MachineFileUploadInput = Readonly<{
+  endpoint: Readonly<{ address: string; port: number }>;
+  trust: MachineTransportTrust;
+  secretRef: string;
+  username: string;
+  remoteName: string;
+  bytes: Uint8Array<ArrayBuffer>;
+  connectTimeout: number;
+  signal: AbortSignal;
+}>;
+
+/** Verified host transfer byte count. @public */
+export type MachineFileUploadReceipt = Readonly<{ bytesWritten: number }>;
+
 /** Transient endpoint evidence reported by bounded provider discovery. @public */
-export type MachineCandidateEndpoint = Readonly<{ address: string; interface: string }>;
+export type MachineCandidateEndpoint = Readonly<{
+  address: string;
+  interface: string;
+}>;
 
 /** Untrusted provider-reported identity evidence, not a physical identity key. @public */
-export type MachineClaimedIdentity = Readonly<{ serial?: string; model?: string }>;
+export type MachineClaimedIdentity = Readonly<{
+  serial?: string;
+  model?: string;
+}>;
 
 /** Candidate reported by bounded provider discovery. @public */
 export type MachineCandidate = Readonly<{
@@ -132,6 +191,8 @@ export type MachineCandidate = Readonly<{
   claimedIdentity: MachineClaimedIdentity;
   observedAt: string;
   expiresAt: string;
+  /** Host-set on discovery frames when a credential is saved for the claimed identity; never the secret, never set by a provider. */
+  credential?: 'saved';
 }>;
 
 /** One discovery stream event. @public */
@@ -139,8 +200,16 @@ export type MachineDiscoveryEvent =
   | Readonly<{ type: 'found' | 'updated'; candidate: MachineCandidate }>
   | Readonly<{ type: 'lost'; candidateId: string; observedAt: string }>;
 
+/** Non-secret outcome of starting a host-local binding ceremony. @public */
+export type MachineBindingOutcome =
+  | Readonly<{ status: 'bound'; machineId: string }>
+  | Readonly<{ status: 'operator-action-required'; ceremonyId: string }>;
+
 /** Named discovery operation input. @public */
-export type MachineDiscoveryInput<Configuration> = Readonly<{ configuration: Configuration; signal: AbortSignal }>;
+export type MachineDiscoveryInput<Configuration> = Readonly<{
+  configuration: Configuration;
+  signal: AbortSignal;
+}>;
 
 /** Host-local credential reference and approved per-service trust, never portable binding data. @public */
 export type MachineConnectionContext = Readonly<{
@@ -174,20 +243,100 @@ export type MachineDescriptor = Readonly<{
 }>;
 
 /** Axis-aligned machine envelope in canonical metres. @public */
-export type MachineEnvelope = Readonly<{ width: number; depth: number; height: number; unit: 'm' }>;
+export type MachineEnvelope = Readonly<{
+  width: number;
+  depth: number;
+  height: number;
+  unit: 'm';
+}>;
 
-/** Tool fact needed for machine/profile compatibility. @public */
-export type MachineToolCapability = Readonly<{ id: string; kind: string; nozzleDiameter?: number }>;
+/** Tool fact needed for machine/profile compatibility. Nozzle diameter is a positive executable length quantity. @public */
+export type MachineToolCapability = Readonly<{
+  id: string;
+  kind: string;
+  nozzleDiameter?: Quantity;
+}>;
 
 /** Stable material-system capacity. @public */
-export type MachineMaterialSystem = Readonly<{ kind: string; slotCount: number }>;
+export type MachineMaterialSystem = Readonly<{
+  kind: string;
+  slotCount: number;
+}>;
+
+/** One observed material slot with explicit occupancy. @public */
+export type MachineObservedMaterial = Readonly<{
+  slot: number;
+  state: 'empty' | 'loaded' | 'unknown';
+  materialId?: string;
+  /** The vendor's filament profile id for the loaded spool; Bambu `tray_info_idx`, e.g. `GFG00`. */
+  profileId?: string;
+  brand?: string;
+  color?: string;
+  remainingPercent?: number;
+}>;
 
 /** Currently observed tool/material/bed setup. @public */
 export type MachineObservedSetup = Readonly<{
   toolId?: string;
   bedType?: string;
-  materials: ReadonlyArray<Readonly<{ slot: number; materialId?: string }>>;
+  materials: readonly MachineObservedMaterial[];
 }>;
+
+/** Normalized active-run facts; provider values outside this set map to `unknown`. @public */
+export type MachineRunSnapshot = Readonly<{
+  state: 'failed' | 'finishing' | 'idle' | 'paused' | 'preparing' | 'printing' | 'succeeded' | 'unknown';
+  progress?: number;
+  remainingSeconds?: number;
+  name?: string;
+  file?: string;
+  currentLayer?: number;
+  totalLayers?: number;
+  stage?: string;
+  printType?: string;
+  speedProfile?: 'silent' | 'standard' | 'sport' | 'ludicrous' | 'unknown';
+  speedPercent?: number;
+}>;
+
+/** Native affine temperature points observed from the machine. @public */
+export type MachineTemperatureSnapshot = Readonly<{
+  nozzle?: Quantity;
+  nozzleTarget?: Quantity;
+  bed?: Quantity;
+  bedTarget?: Quantity;
+  chamber?: Quantity;
+}>;
+
+/** Normalized fan speeds as percentages of their provider-declared full scale. @public */
+export type MachineFanSnapshot = Readonly<{
+  part?: number;
+  auxiliary?: number;
+  chamber?: number;
+}>;
+
+/** One observed material-system unit. @public */
+export type MachineMaterialUnitSnapshot = Readonly<{
+  unit: number;
+  humidityIndex?: number;
+  temperature?: Quantity;
+}>;
+
+/** Live material-system routing and environment facts. @public */
+export type MachineMaterialSystemSnapshot = Readonly<{
+  currentSlot?: number;
+  targetSlot?: number;
+  units: readonly MachineMaterialUnitSnapshot[];
+}>;
+
+/** Live network quality facts that contain no endpoint or credential material. @public */
+export type MachineNetworkSnapshot = Readonly<{ wifiSignalDbm?: number }>;
+
+/** Live machine light state. @public */
+export type MachineLightSnapshot = Readonly<{
+  chamber?: 'off' | 'on' | 'unknown';
+}>;
+
+/** One normalized active diagnostic without provider payload detail. @public */
+export type MachineAlertSnapshot = Readonly<{ code: string }>;
 
 /** Current connection and readiness snapshot. @public */
 export type MachineSnapshot = Readonly<{
@@ -196,10 +345,21 @@ export type MachineSnapshot = Readonly<{
   activeRunId?: string;
   observedAt: string;
   setup: MachineObservedSetup;
+  run?: MachineRunSnapshot;
+  temperatures?: MachineTemperatureSnapshot;
+  fans?: MachineFanSnapshot;
+  materialSystem?: MachineMaterialSystemSnapshot;
+  network?: MachineNetworkSnapshot;
+  lights?: MachineLightSnapshot;
+  removableStorage?: 'absent' | 'present';
+  alerts?: readonly MachineAlertSnapshot[];
 }>;
 
 /** Pull-stream observation emitted by one live session. @public */
-export type MachineObservation = Readonly<{ type: 'snapshot'; snapshot: MachineSnapshot }>;
+export type MachineObservation = Readonly<{
+  type: 'snapshot';
+  snapshot: MachineSnapshot;
+}>;
 
 /** Named descriptor operation input. @public */
 export type MachineGetDescriptorInput = Readonly<{ signal: AbortSignal }>;
@@ -210,14 +370,86 @@ export type MachineGetSnapshotInput = Readonly<{ signal: AbortSignal }>;
 /** Named observation operation input. @public */
 export type MachineObserveInput = Readonly<{ signal: AbortSignal }>;
 
-/** Named physical submission input. @public */
+/** Named physical start input for one exact, already transferred artifact. @public */
 export type MachineSubmitInput<Configuration> = Readonly<{
+  operationId: string;
+  expectedMachineId: string;
+  artifact: MachineArtifactReference;
+  remoteName: string;
+  /** Provider transfer evidence returned by the accepted upload. */
+  transferId: string;
+  providerData: CacheValue;
+  configuration: Configuration;
+  signal: AbortSignal;
+}>;
+
+/** Provider-local lookup for a late semantic command reply. @public */
+export type MachineReconcileInput = Readonly<{
+  operationId: string;
+  command: 'cancel' | 'pause' | 'project_file' | 'resume' | 'stop' | 'upload';
+  /** For a start, the transfer it sent, which a provider may name the run after. */
+  transferId?: string;
+  signal: AbortSignal;
+}>;
+
+/** Provider-host read-only preflight input; it validates the artifact and setup and never transfers or starts. @public */
+export type MachineProviderPreparePrintInput<Configuration> = Readonly<{
   operationId: string;
   expectedMachineId: string;
   artifact: MachineArtifactReference;
   configuration: Configuration;
   signal: AbortSignal;
 }>;
+
+/** Provider proof that an immutable artifact and the observed setup are ready for one transfer. @public */
+export type MachinePreparationReceipt =
+  | Readonly<{
+      status: 'ready';
+      remoteName: string;
+      digest: ContentDigest;
+      length: number;
+      parser: Readonly<{ id: string; version: string }>;
+      providerData: CacheValue;
+      observedAt: string;
+    }>
+  | Readonly<{
+      status: 'rejected';
+      code: string;
+      message: string;
+      observedAt: string;
+    }>;
+
+/** Provider-host transfer input for one exact prepared artifact; it never starts a run. @public */
+export type MachineProviderUploadInput<Configuration> = Readonly<{
+  operationId: string;
+  expectedMachineId: string;
+  artifact: MachineArtifactReference;
+  remoteName: string;
+  providerData: CacheValue;
+  configuration: Configuration;
+  signal: AbortSignal;
+}>;
+
+/** Provider result for one physical transfer attempt. @public */
+export type MachineTransferReceipt =
+  | Readonly<{
+      status: 'transferred';
+      transferId: string;
+      digest: ContentDigest;
+      length: number;
+      observedAt: string;
+    }>
+  | Readonly<{
+      status: 'rejected';
+      code: string;
+      message: string;
+      observedAt: string;
+    }>
+  | Readonly<{
+      status: 'unknown';
+      reason: string;
+      observedAt: string;
+    }>;
 
 /** Named run-control input with stale-run preconditions. @public */
 export type MachineControlInput =
@@ -237,8 +469,18 @@ export type MachineControlInput =
 /** Provider result for one physical submission attempt. @public */
 export type MachineSubmissionReceipt =
   | Readonly<{ status: 'accepted'; providerRunId?: string; observedAt: string }>
-  | Readonly<{ status: 'rejected'; code: string; message: string; observedAt: string }>
-  | Readonly<{ status: 'unknown'; reason: string; observedAt: string }>;
+  | Readonly<{
+      status: 'rejected';
+      code: string;
+      message: string;
+      observedAt: string;
+    }>
+  | Readonly<{
+      status: 'unknown';
+      reason: string;
+      providerRunId?: string;
+      observedAt: string;
+    }>;
 
 /** Provider result for one run-control attempt. @public */
 export type MachineCommandReceipt = MachineSubmissionReceipt;
@@ -246,8 +488,13 @@ export type MachineCommandReceipt = MachineSubmissionReceipt;
 /** Named still-capture operation input. @public */
 export type MachineCaptureStillInput = Readonly<{ signal: AbortSignal }>;
 
-/** Bounded still image returned outside durable job/event storage. @public */
-export type MachineStill = Readonly<{ bytes: Uint8Array<ArrayBuffer>; mediaType: string; capturedAt: string }>;
+/** Bounded short-lived still image returned outside durable job/event storage. @public */
+export type MachineStill = Readonly<{
+  bytes: Uint8Array<ArrayBuffer>;
+  mediaType: 'image/jpeg';
+  capturedAt: string;
+  expiresAt: string;
+}>;
 
 /** Required discriminated still-capture facet. @public */
 export type MachineStillCaptureCapability =
@@ -263,8 +510,11 @@ export type MachineSession<SubmissionConfiguration = unknown> = Readonly<{
   getDescriptor(input: MachineGetDescriptorInput): Promise<MachineDescriptor>;
   getSnapshot(input: MachineGetSnapshotInput): Promise<MachineSnapshot>;
   observe(input: MachineObserveInput): AsyncIterable<MachineObservation>;
+  preparePrint(input: MachineProviderPreparePrintInput<SubmissionConfiguration>): Promise<MachinePreparationReceipt>;
+  uploadPrint(input: MachineProviderUploadInput<SubmissionConfiguration>): Promise<MachineTransferReceipt>;
   submit(input: MachineSubmitInput<SubmissionConfiguration>): Promise<MachineSubmissionReceipt>;
   control(input: MachineControlInput): Promise<MachineCommandReceipt>;
+  reconcile(input: MachineReconcileInput): Promise<MachineCommandReceipt>;
   close(): Promise<void>;
   dispose(): Promise<void>;
 }>;
@@ -294,7 +544,11 @@ export const defineMachineQuery = <InputSchema extends ProviderSchema, ResultSch
   query: MachineDeclaredQuery<InputSchema, ResultSchema>,
 ): MachineDeclaredQuery<InputSchema, ResultSchema> => query;
 
-type MachineQuerySchemas = Readonly<{ inputSchema: ProviderSchema; resultSchema: ProviderSchema; query: unknown }>;
+type MachineQuerySchemas = Readonly<{
+  inputSchema: ProviderSchema;
+  resultSchema: ProviderSchema;
+  query: unknown;
+}>;
 type QueryMap = Readonly<Record<string, MachineQuerySchemas>>;
 type MachineQueryDefinitionFor<Value> =
   Value extends Readonly<{
@@ -321,6 +575,7 @@ export type MachineProviderDefinition<
   vendor: string;
   technologies: readonly string[];
   accepts: readonly MachineAcceptedContainer[];
+  manifest: MachineManifest;
   bindingConfiguration: ConfigurationDefinition<BindingSchema>;
   submissionConfiguration: ConfigurationDefinition<SubmissionSchema>;
   queries?: Queries & MachineQueryDefinitions<Queries>;
@@ -358,7 +613,10 @@ const freezeJson = <Value>(value: Value): Value => {
 };
 
 const queryManifest = (
-  query: Readonly<{ inputSchema: ProviderSchema; resultSchema: ProviderSchema }>,
+  query: Readonly<{
+    inputSchema: ProviderSchema;
+    resultSchema: ProviderSchema;
+  }>,
 ): MachineQueryManifest => {
   const inputSchema = materializeConfigurationJsonSchema(
     query.inputSchema['~standard'].jsonSchema.input({ target: 'draft-07' }),
@@ -398,7 +656,7 @@ const assertDefinition = (definition: {
   readonly protocolVersion: number;
   readonly technologies: readonly string[];
   readonly accepts: readonly MachineAcceptedContainer[];
-  readonly queries?: QueryMap;
+  readonly queries?: Readonly<Record<string, unknown>>;
 }): void => {
   for (const [field, value] of [
     ['id', definition.id],
@@ -454,6 +712,106 @@ const assertDefinition = (definition: {
   }
 };
 
+const providerIdentitySchema = z
+  .string()
+  .min(1)
+  .max(256)
+  .refine((value) => value.isWellFormed());
+const configurationManifestSchema = z.unknown().transform((value, context) => {
+  try {
+    return admitConfigurationManifest(value).manifest;
+  } catch {
+    context.addIssue({
+      code: 'custom',
+      message: 'Invalid configuration manifest.',
+    });
+    return z.NEVER;
+  }
+});
+const acceptedContainerSchema = z.strictObject({
+  contract: z.strictObject({
+    id: providerIdentitySchema,
+    version: z.number().int().min(1),
+  }),
+  mediaType: providerIdentitySchema,
+  requiredMembers: z.array(z.string().min(1).max(512)).max(128),
+  payloadSelection: z.enum(['plate', 'single']),
+  technology: providerIdentitySchema,
+});
+const machineProviderSchema = z.strictObject({
+  id: providerIdentitySchema,
+  name: providerIdentitySchema,
+  version: providerIdentitySchema,
+  protocolVersion: z.literal(1),
+  vendor: providerIdentitySchema,
+  technologies: z.array(providerIdentitySchema).min(1).max(64),
+  accepts: z.array(acceptedContainerSchema).min(1).max(128),
+  manifest: machineManifestSchema,
+  bindingConfiguration: configurationManifestSchema,
+  submissionConfiguration: configurationManifestSchema,
+  queries: z.record(providerIdentitySchema, z.strictObject({ inputSchema: z.unknown(), resultSchema: z.unknown() })),
+});
+
+const providerKeys = [
+  'id',
+  'name',
+  'version',
+  'protocolVersion',
+  'vendor',
+  'technologies',
+  'accepts',
+  'manifest',
+  'bindingConfiguration',
+  'submissionConfiguration',
+  'queries',
+] as const;
+
+const providerWireValue = (value: unknown): Readonly<Record<string, unknown>> => {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('INVALID_MACHINE_PROVIDER_DESCRIPTOR');
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  const unexpected = Object.keys(descriptors).find(
+    (key) => !providerKeys.includes(key as (typeof providerKeys)[number]),
+  );
+  if (unexpected !== undefined) {
+    throw new TypeError('INVALID_MACHINE_PROVIDER_DESCRIPTOR');
+  }
+  return Object.fromEntries(
+    providerKeys.map((key) => {
+      const descriptor = descriptors[key];
+      if (!descriptor || !('value' in descriptor) || !descriptor.enumerable) {
+        throw new TypeError('INVALID_MACHINE_PROVIDER_DESCRIPTOR');
+      }
+      return [key, descriptor.value];
+    }),
+  );
+};
+
+/** Parse one bounded, serializable machine provider descriptor.
+ * @param value - Untrusted provider metadata or one branded host-composed provider.
+ * @returns Detached, frozen provider metadata.
+ * @public
+ */
+export const parseMachineProvider = (value: unknown): MachineProvider => {
+  const candidate = machineProviderSchema.parse(
+    cloneBoundedJson(providerWireValue(value), {
+      code: 'MACHINE_PROVIDER_DESCRIPTOR',
+      maximumDepth: 32,
+      maximumNodes: 16_384,
+      maximumCharacters: 524_288,
+    }),
+  );
+  assertDefinition(candidate);
+  for (const query of Object.values(candidate.queries)) {
+    // SAFETY: admitJsonSchema is the runtime proof for these unknown wire values.
+    admitJsonSchema(query.inputSchema as JsonSchema);
+    // SAFETY: admitJsonSchema is the runtime proof for these unknown wire values.
+    admitJsonSchema(query.resultSchema as JsonSchema);
+  }
+  return freezeJson(candidate) as MachineProvider;
+};
+
 /**
  * Define one lazy schema-bearing physical-machine provider.
  * @param definition - Flat provider metadata, configuration, queries, discovery, and connection operations.
@@ -480,6 +838,7 @@ export const defineMachine = <
     vendor: definition.vendor,
     technologies: definition.technologies,
     accepts: definition.accepts,
+    manifest: parseMachineManifest(definition.manifest),
     bindingConfiguration: definition.bindingConfiguration.manifest,
     submissionConfiguration: definition.submissionConfiguration.manifest,
     queries,

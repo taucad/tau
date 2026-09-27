@@ -450,9 +450,8 @@ const tauRepository = async (projectId: string): Promise<string> => {
   return mirror;
 };
 
-/** The revision id in the last durable host-attested turn settlement. */
-const finalizedTurnRevision = async (logPath: string): Promise<string | undefined> => {
-  const contents = await readFile(logPath, 'utf8').catch(() => '');
+/** The revision id in the last durable host-attested turn settlement of one event log's contents. */
+const finalizedTurnRevisionIn = (contents: string, logPath: string): string | undefined => {
   if (!contents) {
     return undefined;
   }
@@ -474,6 +473,10 @@ const finalizedTurnRevision = async (logPath: string): Promise<string | undefine
   }
   return undefined;
 };
+
+/** The revision id in the last durable host-attested turn settlement. */
+const finalizedTurnRevision = async (logPath: string): Promise<string | undefined> =>
+  finalizedTurnRevisionIn(await readFile(logPath, 'utf8').catch(() => ''), logPath);
 
 const chatIdentity = async (page: Page, chatId: string): Promise<ChatIdentity | undefined> => {
   const link = chatRowLink(page, chatId);
@@ -1323,6 +1326,7 @@ describe('a project on the browser client', () => {
           timeout: 180_000,
         })
         .toBeDefined();
+      const baseChatHead = await gitOutput(await tauRepository(chatProjectId), ['rev-parse', chatRef]);
 
       const destinationSlug = await openTauCloudProject(destination.page, {
         projectsUrl: 'app://tau/projects',
@@ -1359,14 +1363,28 @@ describe('a project on the browser client', () => {
         await readSourceChatHead(),
         'V15: the browser device did not write its local chat ref.',
       );
+      /* The desktop's first chat commit starts its own chain and the server
+       * refuses it as a non-fast-forward; the retry rebuilds it on the common
+       * base and moves the local ref (`chat-ref.ts`, `revision-effects.ts`).
+       * So the published head is the one both sides settle on, not the first
+       * local value. */
+      const readDestinationChatHead = async (): Promise<string | undefined> =>
+        gitOutput(destinationRoot, ['rev-parse', chatRef]);
       await expect
-        .poll(async () => gitOutput(destinationRoot, ['rev-parse', chatRef]), {
-          message: 'V14/V15: the native desktop device must write its divergent local chat ref',
-          timeout: 120_000,
-        })
-        .toBeDefined();
+        .poll(
+          async () => {
+            const local = await readDestinationChatHead();
+            const remote = await gitOutput(await tauRepository(chatProjectId), ['rev-parse', chatRef]);
+            return local !== undefined && local !== baseChatHead && local === remote;
+          },
+          {
+            message: 'V14/V15: native desktop must publish its divergent segment while browser Git is held',
+            timeout: 180_000,
+          },
+        )
+        .toBe(true);
       const destinationChatHead = required(
-        await gitOutput(destinationRoot, ['rev-parse', chatRef]),
+        await readDestinationChatHead(),
         'V14/V15: the native desktop device did not write its local chat ref.',
       );
       expect(destinationChatHead, 'V14/V15: browser and native desktop must hold divergent chat-ref heads').not.toBe(
@@ -1978,16 +1996,32 @@ describe('close and continue', () => {
       await sendPrompt(source.page, 'Build the browser continuation source.');
       const chatId = activeChatId(source.page);
       const sourceChat = await terminalChatIdentity(source.page, chatId, direction);
+      /* The settlement, not the first `Tau-Trigger: turn` revision on the
+       * remote: a turn on a never-recorded base pre-mints that base with the
+       * same trigger (`turn.machine.ts`), and it lands on Tau Cloud first. */
+      const chatLog = ['.tau', 'chats', chatId, 'events.jsonl'];
+      const settledTurn = async (): Promise<string | undefined> =>
+        finalizedTurnRevisionIn((await readBrowserFile(source, slug, chatLog)) ?? '', chatLog.join('/'));
       await expect
-        .poll(async () => gitOutput(await tauRepository(projectId), ['show', '-s', '--format=%B', 'refs/heads/main']), {
+        .poll(settledTurn, {
+          message: `${continuationOwner} ${direction}: the host must attest turn.finalized before the last edit`,
+          timeout: 180_000,
+        })
+        .toBeDefined();
+      const beforeClose = required(
+        await settledTurn(),
+        `${continuationOwner} ${direction}: finalized turn revisionId is absent`,
+      );
+      await expect
+        .poll(async () => gitHead(await tauRepository(projectId)), {
           message: `${continuationOwner} ${direction}: terminal chat must settle its turn revision before the last edit`,
           timeout: 180_000,
         })
-        .toContain('Tau-Trigger: turn');
-      const beforeClose = await gitHead(await tauRepository(projectId));
-      if (beforeClose === undefined) {
-        throw new Error(`${continuationOwner} ${direction}: settled turn revisionId is absent`);
-      }
+        .toBe(beforeClose);
+      expect(
+        await gitOutput(await tauRepository(projectId), ['show', '-s', '--format=%B', beforeClose]),
+        `${continuationOwner} ${direction}: the settled revision must be the turn's`,
+      ).toContain('Tau-Trigger: turn');
       await expect
         .poll(async () => browserHead(source, slug), {
           message: `${continuationOwner} ${direction}: source head must be the settled turn before the last edit`,
@@ -2440,7 +2474,9 @@ describe('a git remote', () => {
       const proxied = await fetch(`${desktopE2EApiUrl}/v1/git/proxy?url=${encodeURIComponent(target.toString())}`, {
         headers: {
           authorization: `Bearer ${bearer}`,
-          'x-tau-proxy-authorization': `Bearer ${token}`,
+          /* The product's shape (`github-linked-import.ts`): GitHub's git
+           * endpoint refuses `Bearer` for an OAuth or App user token. */
+          'x-tau-proxy-authorization': `Basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`,
         },
       });
       expect(proxied.status).toBe(200);

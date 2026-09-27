@@ -64,6 +64,7 @@ export {
   formatNamedComponentId,
   formatNodeSelector,
   formatPrimitiveSelector,
+  uniqueComponentId,
 } from '#utils/component-names.js';
 export { formatShapeName, isLegacyGeneratedShapeName, resolveShapeName, uniqueShapeName } from '#utils/shape-names.js';
 

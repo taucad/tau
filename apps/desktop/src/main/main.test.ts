@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/naming-convention -- mocked Electron exports and environment keys retain production names */
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, stat, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Worker as NodeWorker } from 'node:worker_threads';
@@ -8,7 +8,13 @@ import type * as WorkerThreads from 'node:worker_threads';
 import type * as Host from '@taucad/host';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { computeControlChannels, quitChannels, servicesPortRelayTag } from '#shared/desktop-bootstrap.js';
+import {
+  computeControlChannels,
+  machinesChannels,
+  quitChannels,
+  servicesPortRelayTag,
+  slicersChannels,
+} from '#shared/desktop-bootstrap.js';
 
 const originalTitle = process.title;
 const originalUncaught = new Set(process.listeners('uncaughtException'));
@@ -29,11 +35,19 @@ const state = vi.hoisted(() => ({
         fileSystemPort?: unknown;
       }),
   workers: [] as NodeWorker[],
+  /* What main asked to start; the built files themselves exist only under `dist/main`. */
+  workerEntries: [] as string[],
+  kernelUtilityEntry: undefined as string | undefined,
+  servicesUtilityEntry: undefined as string | undefined,
   userData: '',
   servicesDispose: vi.fn(async () => undefined),
   /* The quit hold's two halves, in the order main runs them (R9, D31). */
   shutdownOrder: [] as string[],
   servicesConnect: vi.fn(() => ({ id: 'services-port' })),
+  servicesCompleteBinding: vi.fn(async (_input: Readonly<Record<string, string>>, _boundMilliseconds: number) => ({
+    status: 'bound',
+    machineId: 'workshop-x1c',
+  })),
   runtimePrewarm: vi.fn(),
   runtimeMaxUtilities: undefined as number | undefined,
   servicesQuiesce: vi.fn(
@@ -49,6 +63,7 @@ const state = vi.hoisted(() => ({
   autoQuiesce: true,
   /* Lets a case hold ACP discovery open while the window boots (D17). */
   acpDiscovery: undefined as Promise<{ agents: never[]; refused: never[] }> | undefined,
+  bambuStudioStatus: vi.fn(async () => ({ available: false, reason: 'not installed' })),
   log: vi.fn(),
 }));
 
@@ -56,7 +71,9 @@ vi.mock('node:worker_threads', async (importOriginal) => {
   const actual = await importOriginal<typeof WorkerThreads>();
   class ObservedWorker extends actual.Worker {
     public constructor(filename: string | URL, options?: ConstructorParameters<typeof actual.Worker>[1]) {
-      super(filename, options);
+      state.workerEntries.push(String(filename));
+      // Main's only worker, run from the source its built entry is bundled from.
+      super(new URL('compute-store.worker.ts', import.meta.url), options);
       state.workers.push(this);
     }
   }
@@ -164,11 +181,14 @@ vi.mock('electron', () => ({
 
 vi.mock('@taucad/runtime/electron/main', () => ({
   installElectronRuntimeHeaders: vi.fn(),
-  registerElectronRuntimeMain: vi.fn((options: { maxUtilities?: number; resolveFork?: typeof state.resolveFork }) => {
-    state.resolveFork = options.resolveFork;
-    state.runtimeMaxUtilities = options.maxUtilities;
-    return { connect: vi.fn(), dispose: vi.fn(), prewarm: state.runtimePrewarm };
-  }),
+  registerElectronRuntimeMain: vi.fn(
+    (options: { maxUtilities?: number; resolveFork?: typeof state.resolveFork; utilityEntry: string }) => {
+      state.resolveFork = options.resolveFork;
+      state.runtimeMaxUtilities = options.maxUtilities;
+      state.kernelUtilityEntry = options.utilityEntry;
+      return { connect: vi.fn(), dispose: vi.fn(), prewarm: state.runtimePrewarm };
+    },
+  ),
 }));
 vi.mock('@taucad/host', async (importOriginal) => {
   /* The host's real bounds, so the quit waits main derives from them are the shipped ones (rule 9). */
@@ -181,11 +201,6 @@ vi.mock('@taucad/host', async (importOriginal) => {
     projectReleaseMilliseconds,
   };
 });
-vi.mock('#tau/kernel-host.entry?modulePath', () => ({ default: '/kernel-host.entry.js' }));
-vi.mock('#tau/services-host.entry?modulePath', () => ({ default: '/services-host.entry.js' }));
-vi.mock('#main/compute-store.worker?modulePath', () => ({
-  default: new URL('compute-store.worker.ts', import.meta.url),
-}));
 vi.mock('#main/app-protocol.js', () => ({
   appOrigin: 'app://tau',
   appSchemePrivileges: [],
@@ -227,15 +242,19 @@ vi.mock('#main/navigation-policy.js', () => ({
   rendererOrigins: vi.fn(() => []),
 }));
 vi.mock('#main/services-broker.js', () => ({
-  rendererServicesConcerns: ['nodeFs', 'agentHost'],
-  createServicesBroker: vi.fn(() => ({
-    post: vi.fn(),
-    connect: state.servicesConnect,
-    quiesce: state.servicesQuiesce,
-    dispose: state.servicesDispose,
-    computeProjectRoot: (root: string) =>
-      root.includes('/.tau/checkouts/') ? root.slice(0, root.indexOf('/.tau/checkouts/')) : undefined,
-  })),
+  rendererServicesConcerns: ['nodeFs', 'agentHost', 'machines'],
+  createServicesBroker: vi.fn((options: { utilityEntry: string }) => {
+    state.servicesUtilityEntry = options.utilityEntry;
+    return {
+      post: vi.fn(),
+      connect: state.servicesConnect,
+      completeMachineBinding: state.servicesCompleteBinding,
+      quiesce: state.servicesQuiesce,
+      dispose: state.servicesDispose,
+      computeProjectRoot: (root: string) =>
+        root.includes('/.tau/checkouts/') ? root.slice(0, root.indexOf('/.tau/checkouts/')) : undefined,
+    };
+  }),
 }));
 vi.mock('#main/utility-environment.js', () => ({
   loginShellEnvironment: vi.fn(async () => undefined),
@@ -253,6 +272,14 @@ vi.mock('#main/quick-look.js', () => ({
   createQuickLookController: vi.fn(() => ({ dispose: vi.fn() })),
   removeStaleQuickLookSessions: vi.fn(),
 }));
+vi.mock('#main/bambu-studio-service.js', () => ({
+  createBambuStudioService: vi.fn(() => ({
+    status: state.bambuStudioStatus,
+    catalog: vi.fn(),
+    resolveSelection: vi.fn(),
+    settings: vi.fn(),
+  })),
+}));
 vi.mock('#main/open-files.js', () => ({
   createOpenFileQueue: vi.fn(() => ({
     enqueue: vi.fn(() => 0),
@@ -263,6 +290,9 @@ vi.mock('#main/open-files.js', () => ({
 
 afterEach(async () => {
   await Promise.all(state.workers.splice(0).map(async (worker) => worker.terminate()));
+  state.workerEntries.length = 0;
+  state.kernelUtilityEntry = undefined;
+  state.servicesUtilityEntry = undefined;
   if (state.userData) {
     await rm(state.userData, { recursive: true, force: true });
   }
@@ -327,6 +357,21 @@ describe('desktop main compute owner', () => {
       const answer = state.handlers.get('tau:external-agents')!({ senderFrame: {} });
       discovery.resolve({ agents: [], refused: [] });
       await expect(answer).resolves.toEqual([]);
+    },
+    bootMilliseconds,
+  );
+
+  /* `electron.vite.config.ts` emits each entry as `<name>.js` beside `index.js`,
+   * the bundle main lands in. */
+  it(
+    'should start every utility and worker from its entry beside the main bundle',
+    async () => {
+      const projectRoot = await bootstrap();
+      state.resolveFork!({ projectRoot, computeMode: 'durable' });
+
+      expect(state.kernelUtilityEntry).toBe(join(import.meta.dirname, 'kernel-host.js'));
+      expect(state.servicesUtilityEntry).toBe(join(import.meta.dirname, 'services-host.js'));
+      expect(state.workerEntries).toEqual([join(import.meta.dirname, 'compute-store.worker.js')]);
     },
     bootMilliseconds,
   );
@@ -681,6 +726,141 @@ describe('desktop main deep links', () => {
         });
       });
       expect(fakeWindow.loadURL).not.toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
+});
+
+describe('desktop main Bambu Studio channels', () => {
+  const bootMilliseconds = 30_000;
+
+  it(
+    'should answer Bambu Studio calls only for the trusted renderer',
+    async () => {
+      vi.stubGlobal('tauCloudBuildEnabled', false);
+      state.userData = await mkdtemp(join(tmpdir(), 'tau-main-bambu-'));
+      await import('#main/main.js');
+      await vi.waitFor(() => {
+        expect(state.handlers.has(slicersChannels.bambuStudio.status)).toBe(true);
+      });
+      const { isTrustedSender } = await import('#main/navigation-policy.js');
+      const status = state.handlers.get(slicersChannels.bambuStudio.status)!;
+
+      await expect(status({ senderFrame: {} })).resolves.toEqual({ available: false, reason: 'not installed' });
+      vi.mocked(isTrustedSender).mockReturnValueOnce(false);
+      await expect(status({ senderFrame: { url: 'https://evil.example/' } })).rejects.toThrow(
+        'Desktop shell refused Bambu Studio request.',
+      );
+      expect(state.bambuStudioStatus).toHaveBeenCalledOnce();
+      for (const channel of Object.values(slicersChannels.bambuStudio)) {
+        expect(state.handlers.has(channel)).toBe(true);
+      }
+    },
+    bootMilliseconds,
+  );
+});
+
+describe('desktop main machine binding channel', () => {
+  const bootMilliseconds = 30_000;
+
+  it(
+    'should forward an access code only when one was typed, and refuse one over 256 characters',
+    async () => {
+      vi.stubGlobal('tauCloudBuildEnabled', false);
+      state.userData = await mkdtemp(join(tmpdir(), 'tau-main-machines-'));
+      await import('#main/main.js');
+      await vi.waitFor(() => {
+        expect(state.handlers.has(machinesChannels.completeBinding)).toBe(true);
+      });
+      const complete = state.handlers.get(machinesChannels.completeBinding)!;
+
+      /* No code: the utility reuses the printer's saved one. */
+      await expect(complete({ senderFrame: {} }, { ceremonyId: 'ceremony-1' })).resolves.toEqual({
+        status: 'bound',
+        machineId: 'workshop-x1c',
+      });
+      await complete({ senderFrame: {} }, { ceremonyId: 'ceremony-2', address: '10.0.0.5', accessCode: '12345678' });
+      await expect(
+        complete({ senderFrame: {} }, { ceremonyId: 'ceremony-3', accessCode: 'x'.repeat(257) }),
+      ).rejects.toThrow('Desktop shell refused invalid machine binding completion.');
+
+      expect(state.servicesCompleteBinding.mock.calls.map(([input]) => input)).toEqual([
+        { ceremonyId: 'ceremony-1' },
+        { ceremonyId: 'ceremony-2', address: '10.0.0.5', accessCode: '12345678' },
+      ]);
+      expect(JSON.stringify(state.log.mock.calls)).not.toContain('12345678');
+    },
+    bootMilliseconds,
+  );
+});
+
+describe('desktop main machine store', () => {
+  const bootMilliseconds = 30_000;
+
+  /**
+   * Boot main over fresh user data, after `before` lays out what an earlier build left there.
+   *
+   * @returns The environment main adds for the services utility.
+   */
+  const boot = async (before?: (userData: string) => Promise<void>): Promise<NodeJS.ProcessEnv> => {
+    vi.stubGlobal('tauCloudBuildEnabled', false);
+    state.userData = await mkdtemp(join(tmpdir(), 'tau-main-store-'));
+    await before?.(state.userData);
+    await import('#main/main.js');
+    await vi.waitFor(() => {
+      expect(state.ipcListeners.has(servicesPortRelayTag)).toBe(true);
+    });
+    return state.utilityEnvironmentAdditions.find((additions) => 'TAU_DESKTOP_MACHINES_DIR' in additions)!;
+  };
+
+  const relay = (senderFrame: Record<string, unknown>, requestId: string): void => {
+    for (const listener of state.ipcListeners.get(servicesPortRelayTag) ?? []) {
+      listener({ senderFrame }, { requestId, concern: 'machines' });
+    }
+  };
+
+  it(
+    'should keep the machine store under the config directory and connect a machines port that names no root, for a trusted frame only',
+    async () => {
+      /* A real directory an earlier build kept its printers in: imported from once. */
+      const additions = await boot(async (userData) => {
+        await mkdir(join(userData, 'machines'));
+      });
+      const store = join(state.userData, 'config', 'machines');
+      expect(additions['TAU_DESKTOP_MACHINES_DIR']).toBe(store);
+      const { mode } = await stat(store);
+      // oxlint-disable-next-line eslint/no-bitwise -- the POSIX mode is a bit field
+      expect(mode & 0o777).toBe(0o700);
+      expect(additions['TAU_DESKTOP_LEGACY_MACHINES_DIR']).toBe(join(state.userData, 'machines'));
+
+      const postMessage = vi.fn();
+      relay({ url: 'app://tau/index.html', postMessage }, 'req-machines');
+      expect(state.servicesConnect).toHaveBeenCalledExactlyOnceWith('machines', {});
+      expect(postMessage).toHaveBeenCalledExactlyOnceWith(servicesPortRelayTag, { requestId: 'req-machines' }, [
+        { id: 'services-port' },
+      ]);
+
+      const { isTrustedSender } = await import('#main/navigation-policy.js');
+      vi.mocked(isTrustedSender).mockReturnValueOnce(false);
+      const foreign = vi.fn();
+      relay({ url: 'https://evil.example/', postMessage: foreign }, 'req-foreign');
+      expect(foreign).not.toHaveBeenCalled();
+      expect(state.servicesConnect).toHaveBeenCalledOnce();
+      expect(state.log).toHaveBeenCalledWith('error', 'ipc.untrusted-sender', { url: 'https://evil.example/' });
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should not name the old machine directory when it is the store itself',
+    async () => {
+      /* How `…/Tau/machines` and `…/tau/machines` meet on a case-insensitive volume. */
+      const additions = await boot(async (userData) => {
+        await mkdir(join(userData, 'config', 'machines'), { recursive: true });
+        await symlink(join(userData, 'config', 'machines'), join(userData, 'machines'));
+      });
+      expect(additions['TAU_DESKTOP_MACHINES_DIR']).toBe(join(state.userData, 'config', 'machines'));
+      expect(additions).not.toHaveProperty('TAU_DESKTOP_LEGACY_MACHINES_DIR');
     },
     bootMilliseconds,
   );

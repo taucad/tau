@@ -848,6 +848,21 @@ export type AgentHostApproval = {
    * performs it, so a presenter renders the facts and no action of its own.
    */
   readonly login?: AgentHostLogin | undefined;
+  /**
+   * The durable record this interrupt gates, when the tool named one.
+   *
+   * `request_print` writes `{ requestId, machineId, fileName }` so the Print
+   * pane can resolve the same ledger record the banner shows; other tools may
+   * write nothing.
+   */
+  readonly context?: AgentHostApprovalContext | undefined;
+};
+
+/** Ledger correlation a tool attaches to the interrupt it raises. @public */
+export type AgentHostApprovalContext = {
+  readonly requestId?: string | undefined;
+  readonly machineId?: string | undefined;
+  readonly fileName?: string | undefined;
 };
 
 /** One sign-in method an external agent offered. @public */
@@ -890,9 +905,38 @@ const interruptRequestSchema = z.looseObject({
     .looseObject({
       toolCall: z.looseObject({ title: z.string().optional() }).optional(),
       options: z.array(approvalOptionSchema).optional(),
+      requestId: z.string().min(1).optional(),
+      machineId: z.string().min(1).optional(),
+      fileName: z.string().min(1).optional(),
     })
     .optional(),
 });
+
+const agentHostApprovalContextSchema = z.object({
+  requestId: z.string().min(1).optional(),
+  machineId: z.string().min(1).optional(),
+  fileName: z.string().min(1).optional(),
+});
+
+/**
+ * The ledger correlation one interrupt context carries, if it carries any.
+ *
+ * @param context - The parsed `context` of the interrupt payload.
+ * @returns Only the correlation keys present, or `undefined` when none are.
+ */
+const approvalContextOf = (
+  context: { requestId?: string; machineId?: string; fileName?: string } | undefined,
+): AgentHostApprovalContext | undefined => {
+  if (!context) {
+    return undefined;
+  }
+  const picked: AgentHostApprovalContext = {
+    ...(context.requestId === undefined ? {} : { requestId: context.requestId }),
+    ...(context.machineId === undefined ? {} : { machineId: context.machineId }),
+    ...(context.fileName === undefined ? {} : { fileName: context.fileName }),
+  };
+  return Object.keys(picked).length === 0 ? undefined : picked;
+};
 
 /* `externalAgentLoginSchema` in `agent-wire.ts` is the writer's own shape; this
  * is the reader's, loose for the same reason as the rest of the payload. */
@@ -962,6 +1006,7 @@ const agentHostApprovalSchema = z.object({
   options: z.array(z.object({ optionId: z.string().min(1), name: z.string(), kind: z.string().optional() })),
   agentId: z.string().optional(),
   login: agentHostLoginSchema.optional(),
+  context: agentHostApprovalContextSchema.optional(),
 });
 
 /**
@@ -987,6 +1032,7 @@ const approvalChunks = (
   }
   const request = interruptRequestSchema.safeParse(event.payload).data;
   const login = loginOf(event.payload);
+  const context = approvalContextOf(request?.context);
   const input: AgentHostApproval = {
     interruptId: event.interruptId,
     kind: request?.kind ?? 'approval',
@@ -998,6 +1044,7 @@ const approvalChunks = (
     })),
     ...(request?.agentId === undefined ? {} : { agentId: request.agentId }),
     ...(login === undefined ? {} : { login }),
+    ...(context === undefined ? {} : { context }),
   };
   return [
     {

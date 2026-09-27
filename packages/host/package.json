@@ -64,14 +64,12 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "catalog:",
-    "@hatchet-dev/typescript-sdk": "catalog:",
     "@taucad/agent-host": "workspace:*",
     "@taucad/filesystem": "workspace:*",
     "@taucad/jobs": "workspace:*",
-    "@taucad/jobs-hatchet": "workspace:*",
-    "@taucad/jobs-solvers": "workspace:*",
     "@taucad/mcp": "workspace:*",
     "@taucad/parameters": "workspace:*",
+    "basic-ftp": "catalog:",
     "ws": "catalog:"
   },
   "peerDependencies": {
@@ -92,6 +90,7 @@
   },
   "devDependencies": {
     "@taucad/agent-tools": "workspace:*",
+    "@taucad/bambu": "workspace:*",
     "@taucad/chat": "workspace:*",
     "@taucad/geospec-engine": "workspace:*",
     "@taucad/revisions": "workspace:*",

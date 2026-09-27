@@ -15,8 +15,8 @@
  * | 3 | **red pin (d)** | device B's open pull brings device A's file into B's checkout with no reload, and B renders before the pull answers |
  * | 4 | **red pin (e)** | a device that is merely *ahead* of the remote drains its durable queue on the next open, online, and never reports a conflict (review 2 R1) |
  * | 6 | **W18-b red pin (c)** | a device that has never held the project materializes its tree *and* its `.tau/chats` projection from the remote, with no chat turn (W18 DEF-2) |
- * | 11 | **W5b (D12, D13)** | two open devices editing different files converge on a remote move: B merges and pushes, A fast-forwards, nobody presses anything |
- * | 12 | **W5b a1b (D13)** | a push that lands between opening and the stream's first read is not missed: the open pull reads the remote only once the stream knows its tail |
+ * | 16 | **W5b (D12, D13)** | two open devices editing different files converge on a remote move: B merges and pushes, A fast-forwards, nobody presses anything |
+ * | 17 | **W5b a1b (D13)** | a push that lands between opening and the stream's first read is not missed: the open pull reads the remote only once the stream knows its tail |
  * | 13 | **W6 (D14)** | two devices change one file: the device that meets the divergence records it on its conflict line and pushes that line; both list it; deciding on the other device lands a merge on `main` that fast-forwards the recorder and hides the line on both |
  * | 13c | **D14-P** | the remote answers the conflict line's push `503 GIT_PUSH_RACE_LOST` (another device's push committed first): the line is offered again after the backoff and reaches the remote (isomorphic-git leg) |
  * | 13b | **RV-W6 F2** | a line removed on the remote stays on the device that recorded it, still listed, and its next push offers it again |
@@ -26,7 +26,7 @@
  * `git` (a disk host's), because A15 is that the two legs are one transport.
  */
 
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
@@ -47,6 +47,7 @@ import { startGitHttpBackend } from '#test/git-http-backend.js';
 import type { ConflictRecord, RevisionPort } from '#revision-port.js';
 import type { RevisionStreamHandlers } from '#revision-stream.js';
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
+import { generatedGitattributesPath, generatedIgnorePath } from '#workspace-config.js';
 
 const author = { name: 'Tau', email: 'tau@example.com' };
 const chatId = 'c1';
@@ -442,6 +443,67 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
   }, 180_000);
 
   /*
+   * A project opened from Tau Cloud is created with a placeholder `tau.json`
+   * before the open pull. An unborn branch has recorded nothing, so the
+   * manifest is not work to lose: the pull must replace it, not refuse it.
+   */
+  it('materializes a remote project over the placeholder manifest a cloud open writes', async () => {
+    const remoteRoot = await temporaryRoot('cloud-open-manifest');
+    const remote = await startGitHttpBackend({ root: remoteRoot });
+    try {
+      const one = await device({ leg, label: 'a-cloud-open', remoteUrl: remote.url });
+      const files = { 'tau.json': '{"name":"Bracket","main":"bracket.scad"}\n', 'bracket.scad': 'cube(7);\n' };
+      const head = await record({ device: one, files, summary: 'Device A' });
+      const first = one.scheduler();
+      first.start();
+      first.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: head });
+      await vi.waitFor(
+        () => {
+          expect(selectSyncFacet(first.getSnapshot()).state).toBe('backedUp');
+        },
+        { timeout: 30_000 },
+      );
+      first.stop();
+
+      const two = await device({
+        leg,
+        label: 'b-cloud-open',
+        remoteUrl: remote.url,
+        /* `cloudProjectStub`'s manifest, as `serializeProjectManifest` writes it. */
+        files: {
+          'tau.json': `${JSON.stringify(
+            {
+              $schema: 'https://tau.new/schemas/tau-schema-v1.json',
+              id: 'project-1',
+              name: 'Bracket',
+              description: '',
+              tags: [],
+              assets: { main: { entryPath: 'main.scad' } },
+            },
+            null,
+            2,
+          )}\n`,
+        },
+      });
+      const second = two.scheduler();
+      second.start();
+      await vi.waitFor(
+        () => {
+          expect(selectSyncFacet(second.getSnapshot()).state).toBe('backedUp');
+        },
+        { timeout: 30_000 },
+      );
+
+      expect(await two.port.readRef(mainRef)).toBe(head);
+      expect(await two.filesystem.readFile('tau.json', 'utf8')).toBe(files['tau.json']);
+      expect(await two.filesystem.readFile('bracket.scad', 'utf8')).toBe(files['bracket.scad']);
+      second.stop();
+    } finally {
+      await remote.close();
+    }
+  }, 180_000);
+
+  /*
    * W18 DEF-2 red pin (c): the second device holds a project it has never seen.
    *
    * Device A backs a project up — history *and* its chat record ref — and
@@ -808,7 +870,7 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
    * `revision-stream.spec.ts` and `revision-stream.test.ts`), so it is sent as
    * the event the subscription raises.
    */
-  it('row 11 (D12, D13): two devices editing different files converge on a remote move, without a person', async () => {
+  it('row 16 (D12, D13): two devices editing different files converge on a remote move, without a person', async () => {
     const remoteRoot = await temporaryRoot('remote-converge');
     const remote = await startGitHttpBackend({ root: remoteRoot });
     try {
@@ -1150,7 +1212,7 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
    * the pull. The stream here is scripted — its tail read is the test's to
    * time — and the push is injected in the gap between the two steps.
    */
-  it('row 12 (D13): a push between opening and the stream’s first read is not missed', async () => {
+  it('row 17 (D13): a push between opening and the stream’s first read is not missed', async () => {
     const remoteRoot = await temporaryRoot('remote-open-gap');
     const remote = await startGitHttpBackend({ root: remoteRoot });
     try {
@@ -1286,6 +1348,216 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
       expect(queue.entries).toEqual([]);
       const local = await two.port.readRef(chatRef);
       expect(local === undefined || local === chatHead).toBe(true);
+      second.stop();
+    } finally {
+      await remote.close();
+    }
+  }, 180_000);
+
+  /*
+   * D60: a branch open in another checkout, moved on by someone else, used to
+   * stay behind; every push then offered it under a lease it could not
+   * integrate and the Sync row retried for ever. Observed live 2026-09-25.
+   */
+  /* The native leg here is built without a checkouts directory; the rule is the effects layer's, shared by both. */
+  it.skipIf(leg.name === 'native git')(
+    'row 12: a pull moves another checkout’s clean branch onto its remote head (D60)',
+    async () => {
+      const remoteRoot = await temporaryRoot('remote-linked');
+      const remote = await startGitHttpBackend({ root: remoteRoot });
+      const featureRef = 'refs/heads/feature';
+      try {
+        const one = await device({ leg, label: 'a-linked', remoteUrl: remote.url, files: { 'part.scad': 'a\n' } });
+        /* A checkout is clean only against a tree that carries the store's own
+         * generated files, as every real revision does. */
+        const generated = Object.fromEntries(
+          await Promise.all(
+            [generatedGitattributesPath, generatedIgnorePath].map(
+              async (path) => [path, new TextDecoder().decode(await one.filesystem.readFile(path))] as const,
+            ),
+          ),
+        );
+        const shared = await record({ device: one, files: { ...generated, 'part.scad': 'a\n' }, summary: 'Shared' });
+        await one.port.updateRef({ name: 'feature', expectedHead: undefined, head: revisionId(shared) });
+        await one.port.push({ remote: 'tau', atomic: true, refs: [{ name: mainRef }, { name: featureRef }] });
+        await one.port.addCheckout!({ branch: 'feature' });
+        await run(one.actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 25_000 });
+
+        /* A second device moves `feature` on. */
+        const two = await device({ leg, label: 'b-linked', remoteUrl: remote.url });
+        await run(two.actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 25_000 });
+        const theirs = await two.port.writeRevision({
+          parents: [revisionId(shared)],
+          tree: projectTree({ ...generated, 'part.scad': 'b\n' }),
+          provenance: { source: 'user', actorId: 'actor-w13', createdAt: Date.UTC(2026, 8, 25) },
+          summary: { generated: 'Feature, elsewhere' },
+        });
+        await two.port.updateRef({
+          name: 'feature',
+          expectedHead: revisionId(shared),
+          head: revisionId(theirs.commitId),
+        });
+        await two.port.push({ remote: 'tau', atomic: true, refs: [{ name: featureRef }] });
+
+        /* A pull while the linked files are unsaved leaves the branch, and
+         * moves the tracking ref past it; saving must not strand it there. */
+        /* This fixture serves every checkout from the one root. */
+        const linkedPart = 'part.scad';
+        await one.filesystem.writeFile(linkedPart, 'unsaved\n');
+        const refused = await run<{ advanced?: unknown }>(one.actors.sync.fetch, {
+          remote: 'tau',
+          branch: 'main',
+          deadlineMilliseconds: 25_000,
+        });
+        expect(refused.advanced).toBeUndefined();
+        expect(await one.port.readRef('feature')).toBe(shared);
+        await one.filesystem.writeFile(linkedPart, 'a\n');
+
+        const fetched = await run<{
+          leases: Readonly<Record<string, string>>;
+          advanced?: ReadonlyArray<{ branch: string; revisionId: string }>;
+        }>(one.actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 25_000 });
+        expect(fetched.advanced).toContainEqual(
+          expect.objectContaining({ branch: 'feature', revisionId: theirs.commitId }),
+        );
+        expect(await one.port.readRef('feature')).toBe(theirs.commitId);
+
+        const pushed = await run<{ refs: ReadonlyArray<{ name: string; status: string }> }>(one.actors.sync.push, {
+          remote: 'tau',
+          branch: 'main',
+          leases: fetched.leases,
+        });
+        expect(pushed.refs.find((entry) => entry.name === featureRef)?.status).not.toBe('rejected');
+        expect(await remote.git(['rev-parse', featureRef])).toBe(theirs.commitId);
+      } finally {
+        await remote.close();
+      }
+    },
+    180_000,
+  );
+
+  /*
+   * D54: a lease is the head this device integrated, not the head it last saw.
+   * A fetch records the remote's head before any merge runs, and a merge that
+   * does not happen (open files mid-save) left that lease in place — so the
+   * next push, forced under a lease that still matched, overwrote the remote's
+   * own commit. Observed live against GitHub on 2026-09-25.
+   */
+  it('row 11: a push never overwrites a remote commit this device fetched but did not merge (D54)', async () => {
+    const remoteRoot = await temporaryRoot('remote-unmerged');
+    const remote = await startGitHttpBackend({ root: remoteRoot });
+    try {
+      const one = await device({ leg, label: 'a-unmerged', remoteUrl: remote.url, files: { 'part.scad': 'a\n' } });
+      const shared = await record({ device: one, files: { 'part.scad': 'a\n' }, summary: 'Shared' });
+      await one.port.push({ remote: 'tau', atomic: true, refs: [{ name: mainRef }] });
+      /* Someone else's commit on the remote, on top of the shared one. */
+      const theirs = await remote.git([
+        '-c',
+        'user.name=Remote',
+        '-c',
+        'user.email=remote@example.com',
+        'commit-tree',
+        `${shared}^{tree}`,
+        '-p',
+        shared,
+        '-m',
+        'Remote edit',
+      ]);
+      await remote.git(['update-ref', mainRef, theirs, shared]);
+      const mine = await record({ device: one, files: { 'part.scad': 'b\n' }, summary: 'Mine', parent: shared });
+
+      const fetched = await run<{ leases: Readonly<Record<string, string>>; integration: string }>(
+        one.actors.sync.fetch,
+        { remote: 'tau', branch: 'main', deadlineMilliseconds: 25_000 },
+      );
+      expect(fetched).toMatchObject({ integration: 'diverged', leases: { [mainRef]: theirs } });
+
+      const pushed = await run<{ refs: ReadonlyArray<{ name: string; status: string; reason?: string }> }>(
+        one.actors.sync.push,
+        { remote: 'tau', branch: 'main', leases: fetched.leases },
+      );
+      expect(pushed.refs).toContainEqual(
+        expect.objectContaining({ name: mainRef, status: 'rejected', reason: 'leaseLost' }),
+      );
+      expect(await remote.git(['rev-parse', mainRef])).toBe(theirs);
+      expect(await one.port.readRef(mainRef)).toBe(mine);
+    } finally {
+      await remote.close();
+    }
+  }, 180_000);
+
+  it("row 18: a fresh device backs up a project whose remote holds another device's empty chat", async () => {
+    const remoteRoot = await temporaryRoot('remote-empty-chat');
+    const remote = await startGitHttpBackend({ root: remoteRoot });
+    /* The Tau API's `pre-receive` rule (`git.constants.ts`): a ref that does
+     * not fast-forward is refused, which stock `http-backend` does not do. */
+    const preReceive = join(remote.repositoryPath, 'hooks', 'pre-receive');
+    await writeFile(
+      preReceive,
+      [
+        '#!/bin/sh',
+        'status=0',
+        'while read old new ref; do',
+        '  case "$old" in *[!0]*)',
+        '    if ! git merge-base --is-ancestor "$old" "$new" 2>/dev/null; then',
+        '      echo "Tau: refused $ref — it does not fast-forward $old; fetch and merge first." >&2',
+        '      status=1',
+        '    fi',
+        '  ;; esac',
+        'done',
+        'exit "$status"',
+        '',
+      ].join('\n'),
+    );
+    await chmod(preReceive, 0o755);
+    const emptyChatId = '00000000-0000-4000-8000-000000000000';
+    const emptyChatRef = chatRefName(emptyChatId);
+    try {
+      const one = await device({
+        leg,
+        label: 'a-empty-chat',
+        remoteUrl: remote.url,
+        files: { 'bracket.scad': 'cube([6, 6, 6]);\n' },
+      });
+      const head = await record({ device: one, files: { 'bracket.scad': 'cube([6, 6, 6]);\n' }, summary: 'Device A' });
+      /* What a desktop registration probe left on Tau Cloud before it stopped
+       * creating chats: an orphan chat commit whose one segment is empty. */
+      const empty = await one.port.writeRevision({
+        parents: [],
+        tree: new ImmutableRevisionTree([[chatSegmentPath('device-a-empty-chat'), new Uint8Array()]]),
+        largeObjects: false,
+        provenance: { source: 'user', actorId: 'tau-host', createdAt: Date.UTC(2026, 8, 25, 11, 51, 43) },
+        summary: { generated: `Chat ${emptyChatId}` },
+      });
+      await one.port.updateRef({ name: emptyChatRef, expectedHead: undefined, head: revisionId(empty.commitId) });
+      await one.port.push({ remote: 'tau', atomic: true, refs: [{ name: mainRef }, { name: emptyChatRef }] });
+      expect(await remote.git(['rev-parse', emptyChatRef])).toBe(empty.commitId);
+
+      const two = await device({ leg, label: 'b-empty-chat', remoteUrl: remote.url });
+      const second = two.scheduler();
+      second.start();
+      await vi.waitFor(
+        () => {
+          expect(selectSyncFacet(second.getSnapshot()).state).toBe('backedUp');
+        },
+        { timeout: 30_000 },
+      );
+      const mine = await record({
+        device: two,
+        files: { 'bracket.scad': 'cube([9, 9, 9]);\n' },
+        summary: 'Device B',
+        parent: head,
+      });
+      second.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: mine });
+      await vi.waitFor(
+        () => {
+          expect(selectSyncFacet(second.getSnapshot())).toMatchObject({ state: 'backedUp', error: undefined });
+          expect(selectSyncFacet(second.getSnapshot()).pendingCount).toBe(0);
+        },
+        { timeout: 30_000 },
+      );
+      expect(await remote.git(['rev-parse', mainRef])).toBe(mine);
+      expect(await remote.git(['rev-parse', emptyChatRef])).toBe(empty.commitId);
       second.stop();
     } finally {
       await remote.close();

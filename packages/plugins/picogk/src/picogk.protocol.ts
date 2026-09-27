@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const picogkProtocolVersion = 4;
+export const picogkProtocolVersion = 5;
 
 export const picogkIssueSchema = z.object({
   message: z.string(),
@@ -59,6 +59,9 @@ export const picogkWorkerMetricsSchema = z.object({
   processWorkingSetBytes: z.number().int().nonnegative(),
 });
 
+/** The C# files one entry compiles with: its own program and every helper, as project paths. */
+export const picogkResolveSchema = z.object({ sources: z.array(z.string().min(1)).min(1) });
+
 export const picogkAnalysisSchema = z.object({
   defaultParameters: z.record(z.string(), z.unknown()),
   jsonSchema: z.record(z.string(), z.unknown()),
@@ -100,7 +103,7 @@ export const picogkBuildSchema = z.object({
   artifactPath: z.string().min(1),
   byteLength: z.number().int().nonnegative(),
   sha256: z.string().regex(/^[\da-f]{64}$/iu),
-  components: z.array(picogkComponentSchema).min(1),
+  components: z.array(picogkComponentSchema),
   recycleAfterResponse: z.boolean(),
   timings: picogkWorkerTimingsSchema,
   metrics: picogkWorkerMetricsSchema,

@@ -71,6 +71,9 @@ const transformControlsAxes = new Set<string>([
 export const isTransformControlsAxis = (value: string): value is TransformControlsAxis =>
   transformControlsAxes.has(value);
 
+/** Whether the primary button, the one that drags a gizmo, is held; it is the lowest bit of `buttons`. */
+const isPrimaryButtonHeld = (event: PointerEvent): boolean => event.buttons % 2 === 1;
+
 type TransformControlsProperties<TCamera extends Camera> = {
   camera: TCamera;
   object: Object3D | undefined;
@@ -438,20 +441,11 @@ class TransformControls<TCamera extends Camera = Camera>
     this.axis = this.resolveAxisFromPointer(pointer, this.gizmo.getVisualGizmo(this.mode));
   };
 
-  private readonly isPointerInsideDomElement = (event: PointerEvent): boolean => {
-    if (!this.domElement) {
-      return false;
-    }
-
-    const rect = this.domElement.getBoundingClientRect();
-
-    return (
-      event.clientX >= rect.left &&
-      event.clientX <= rect.right &&
-      event.clientY >= rect.top &&
-      event.clientY <= rect.bottom
-    );
-  };
+  private readonly isPointerInsideRect = (event: PointerEvent, rect: DOMRect): boolean =>
+    event.clientX >= rect.left &&
+    event.clientX <= rect.right &&
+    event.clientY >= rect.top &&
+    event.clientY <= rect.bottom;
 
   private readonly clearHoverAxis = (): void => {
     if (this.dragging) {
@@ -774,7 +768,7 @@ class TransformControls<TCamera extends Camera = Camera>
     this.axis = undefined;
   };
 
-  private readonly getPointer = (event: Event): TransformControlsPointerObject => {
+  private readonly getPointer = (event: Event, rect?: DOMRect): TransformControlsPointerObject => {
     if (this.domElement?.ownerDocument.pointerLockElement) {
       return {
         x: 0,
@@ -788,29 +782,34 @@ class TransformControls<TCamera extends Camera = Camera>
       ? (event as TouchEvent).changedTouches[0]!
       : (event as MouseEvent);
 
-    const rect = this.domElement!.getBoundingClientRect();
+    const bounds = rect ?? this.domElement!.getBoundingClientRect();
 
     return {
-      x: ((pointer.clientX - rect.left) / rect.width) * 2 - 1,
-      y: (-(pointer.clientY - rect.top) / rect.height) * 2 + 1,
+      x: ((pointer.clientX - bounds.left) / bounds.width) * 2 - 1,
+      y: (-(pointer.clientY - bounds.top) / bounds.height) * 2 + 1,
       button: (event as MouseEvent).button,
     };
   };
 
   private readonly onPointerHover = (event: Event): void => {
-    if (!this.enabled) {
+    const pointerEvent = event as PointerEvent;
+    // A held primary button belongs to a drag, of this gizmo or its sibling, or to a camera gesture.
+    // Hover-picking then could only re-highlight axes mid-drag, and each pick reads layout.
+    if (!this.enabled || isPrimaryButtonHeld(pointerEvent)) {
       return;
     }
 
-    switch ((event as PointerEvent).pointerType) {
+    switch (pointerEvent.pointerType) {
       case 'mouse':
       case 'pen': {
-        if (!this.isPointerInsideDomElement(event as PointerEvent)) {
+        // One layout read serves both the bounds test and the pointer.
+        const rect = this.domElement?.getBoundingClientRect();
+        if (!rect || !this.isPointerInsideRect(pointerEvent, rect)) {
           this.clearHoverAxis();
           break;
         }
 
-        this.pointerHover(this.getPointer(event));
+        this.pointerHover(this.getPointer(event, rect));
         break;
       }
     }
@@ -832,7 +831,8 @@ class TransformControls<TCamera extends Camera = Camera>
   };
 
   private readonly onPointerMove = (event: Event): void => {
-    if (!this.enabled) {
+    // Any press on the canvas subscribes every gizmo here; only the dragging one maps the move.
+    if (!this.enabled || !this.dragging) {
       return;
     }
 
@@ -881,6 +881,8 @@ class TransformControlsGizmo extends Object3D {
 
   private readonly gizmo: TransformControlsGizmoPrivateGizmos;
   private readonly helper: TransformControlsGizmoPrivateGizmos;
+  /** Each mode's picker, gizmo and helper handles; they never change after construction. */
+  private readonly handlesByMode: Record<TransformControlsMode, ReadonlyArray<Object3D & { tag?: string }>>;
 
   // These are set from parent class TransformControls
   private readonly rotationAxis = new Vector3();
@@ -1467,6 +1469,17 @@ class TransformControlsGizmo extends Object3D {
     this.picker.translate.visible = false;
     this.picker.rotate.visible = false;
     this.picker.scale.visible = false;
+
+    const collectHandles = (mode: TransformControlsMode): Array<Object3D & { tag?: string }> => [
+      ...this.picker[mode].children,
+      ...this.gizmo[mode].children,
+      ...this.helper[mode].children,
+    ];
+    this.handlesByMode = {
+      translate: collectHandles('translate'),
+      rotate: collectHandles('rotate'),
+      scale: collectHandles('scale'),
+    };
   }
 
   public getVisualGizmo = (mode: 'translate' | 'rotate' | 'scale'): Object3D => this.gizmo[mode];
@@ -1491,13 +1504,7 @@ class TransformControlsGizmo extends Object3D {
     this.helper.rotate.visible = this.mode === 'rotate';
     this.helper.scale.visible = this.mode === 'scale';
 
-    const handles: Array<Object3D & { tag?: string }> = [
-      ...this.picker[this.mode].children,
-      ...this.gizmo[this.mode].children,
-      ...this.helper[this.mode].children,
-    ];
-
-    for (const handle of handles) {
+    for (const handle of this.handlesByMode[this.mode]) {
       // Hide aligned to camera
 
       handle.visible = true;
@@ -1957,7 +1964,10 @@ class TransformControlsGizmo extends Object3D {
         if (!this.enabled) {
           nextOpacity = baseOpacity * 0.5;
         } else if (activeHighlightAxis) {
-          const isSelectedAxis = handle.name === activeHighlightAxis || [...activeHighlightAxis].includes(handle.name);
+          // A one-letter handle belongs to every axis that names it: X lights for XY and XYZ.
+          const isSelectedAxis =
+            handle.name === activeHighlightAxis ||
+            (handle.name.length === 1 && activeHighlightAxis.includes(handle.name));
           nextOpacity = isSelectedAxis ? 1 : baseOpacity * 0.25;
         }
 

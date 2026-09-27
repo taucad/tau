@@ -11,6 +11,7 @@ import { ScrollDownButton } from '#routes/w.$workspace.$project/scroll-down-butt
 import { ChatError } from '#routes/w.$workspace.$project/chat-error.js';
 import type { ChatTextareaProperties, ChatTextareaHandle } from '#components/chat/chat-textarea-types.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
+import { ChatTodoList } from '#components/chat/chat-todo-list.js';
 import { useChatContext, useChatSelector } from '#hooks/use-chat.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import { ChatTitleBar } from '#routes/w.$workspace.$project/chat-title-bar.js';
@@ -319,8 +320,10 @@ export const ChatHistory = memo(function (props: {
           at a time: while there are turns, the group above owns it.
         */}
           {groups.length === 0 ? <ChatError className='mx-4 mb-1 shrink-0' /> : null}
-          {/* Chat input area */}
+          {/* Chat input area. The agent's task list sits directly above the
+              composer, keyed by chat so its fold never carries across chats (D8). */}
           <div className='relative mx-auto mb-2 w-[calc(100%_-_1rem)] max-w-xl shrink-0'>
+            <ChatTodoList key={activeChatId} />
             <ChatTextarea ref={chatTextareaRef} mode='main' enableAutoFocus={false} onSubmit={onSubmit} />
           </div>
         </FloatingPanelContent>

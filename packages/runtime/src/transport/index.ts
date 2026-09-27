@@ -62,6 +62,7 @@ export type {
   RuntimeTransportPreviewReservation,
   RuntimeTransportRenderTarget,
   RuntimeTransportTimeoutRecovery,
+  RuntimeTransportFacet,
   RuntimeTransportHost,
   RuntimeInitializePayload,
   RuntimeInitializeMemoryHandle,

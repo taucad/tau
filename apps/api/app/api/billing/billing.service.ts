@@ -28,7 +28,6 @@ const overridableEntitlementKeys = [
   'canUseProKernels',
   'canCreatePrivateShares',
   'canSyncFiles',
-  'canConnectGitHub',
   'canConnectEnterpriseGit',
   'apiCadGatewayMonthlyLimit',
   'conversionApiMonthlyLimit',

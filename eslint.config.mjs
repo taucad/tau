@@ -389,6 +389,11 @@ const config = [
       // and checks them against a baked evidence digest, so any byte change makes the splash
       // throw. They are model data outside every tsconfig, so the project service cannot parse them.
       'apps/ui/app/components/geometry/splash/planetary/**',
+      // Same class: byte-pinned PicoVoxel upstream ports (`provenance.json` hashes); only Tau's
+      // `main.ts` adapters and GeoSpec suites are linted.
+      'libs/tau-examples/src/kernels/picovoxel/*/*.ts',
+      '!libs/tau-examples/src/kernels/picovoxel/*/main.ts',
+      '!libs/tau-examples/src/kernels/picovoxel/*/*.geospec.ts',
       '**/content/docs/**/props/**',
       '**/vitest.integration.config.ts',
       'experiments/**',

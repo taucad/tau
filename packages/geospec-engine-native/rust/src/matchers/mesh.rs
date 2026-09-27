@@ -2,6 +2,7 @@
 
 use crate::{
     analysis::{
+        batch::ExactClusters,
         interference::ComponentIdentity,
         mesh::{
             exact::{ask, exact_clusters, ExactError},
@@ -831,62 +832,28 @@ fn evaluate_components(
     let (hash, mut diagnostics) = subject_meta(context);
     let bounded = context.bounded_evidence();
     let brep = context.subject().brep.is_some();
-    let analysis = if !brep && !bounded {
-        match context.connected_components(tolerance_mm) {
-            Ok(value) => value,
-            Err(result) => return result,
-        }
-    } else {
-        let clusters = if brep {
-            step_component_clusters(tolerance_mm, context)
-        } else {
-            context
-                .mesh_analysis()
-                .map(|analysis| analysis.component_clusters(tolerance_mm))
-        };
-        let clusters = match clusters {
-            Ok(value) => value,
-            Err(result) => return result,
-        };
-        if bounded {
-            // PERF-OUTPUT-01: no pairwise gaps on success, nearest ones on failure.
-            let count = clusters.len() as u32;
-            let gaps = if u64::from(count) == expected_count {
-                Vec::new()
+    let analysis = if brep {
+        let exact = step_component_clusters(tolerance_mm, context);
+        // The complete profile's C(C-1)/2 STEP gaps take the mesh route's
+        // floor and retained-byte accounting in the batch.
+        exact.and_then(|exact| {
+            if bounded {
+                bounded_components(exact.clusters.clone(), expected_count, context)
             } else {
-                match nearest_cluster_gaps(&clusters, context.budget()) {
-                    Ok(gaps) => gaps,
-                    Err(error) => {
-                        return Evaluation::budget_exceeded(
-                            Capability::ToHaveConnectedComponents,
-                            error,
-                        )
-                    }
-                }
-            };
-            Rc::new(ConnectedComponents {
-                count,
-                clusters,
-                gaps,
-            })
-        } else {
-            // The complete profile's C(C-1)/2 STEP gaps are refused past the
-            // declared retention bytes before any exists, as the batch floor
-            // refuses mesh gaps; that floor is never below this one.
-            let count = clusters.len() as u64;
-            let pairs = count.saturating_mul(count.saturating_sub(1)) / 2;
-            if pairs.saturating_mul(std::mem::size_of::<ClusterGap>() as u64)
-                > context.subject().retention_limits.max_mesh_bytes
-            {
-                return backend_refusal(BackendError {
-                    kind: BackendErrorKind::Unsupported,
-                    message:
-                        "Connected-component results exceed the declared analysis retention byte limit."
-                            .into(),
-                });
+                context.step_components(tolerance_mm, &exact)
             }
-            Rc::new(ConnectedComponents::from_clusters(clusters))
-        }
+        })
+    } else if bounded {
+        context
+            .mesh_analysis()
+            .map(|analysis| analysis.component_clusters(tolerance_mm))
+            .and_then(|clusters| bounded_components(clusters, expected_count, context))
+    } else {
+        context.connected_components(tolerance_mm)
+    };
+    let analysis = match analysis {
+        Ok(value) => value,
+        Err(result) => return result,
     };
     let satisfied = u64::from(analysis.count) == expected_count;
     if !satisfied && context.wants_failure_detail() {
@@ -928,56 +895,85 @@ fn evaluate_components(
     )
 }
 
+/// PERF-OUTPUT-01: no pairwise gaps on success, nearest ones on failure.
+fn bounded_components(
+    clusters: Vec<ClusterReport>,
+    expected_count: u64,
+    context: &EvaluationContext<'_>,
+) -> Result<Rc<ConnectedComponents>, Evaluation> {
+    let count = clusters.len() as u32;
+    let gaps = if u64::from(count) == expected_count {
+        Vec::new()
+    } else {
+        nearest_cluster_gaps(&clusters, context.budget()).map_err(|error| {
+            Evaluation::budget_exceeded(Capability::ToHaveConnectedComponents, error)
+        })?
+    };
+    Ok(Rc::new(ConnectedComponents {
+        count,
+        clusters,
+        gaps,
+    }))
+}
+
 /// M2: STEP clusters from the retained BRep's bodies, never a tessellation.
 /// Bodies belong to the component partition's leaves (C2: leaves that own a
 /// face, rulings 6 and 32), labelled through it, or to the whole shape of an
-/// occurrence-free document.
+/// occurrence-free document. The plan's batch retains them per subject.
 fn step_component_clusters(
     tolerance_mm: f64,
     context: &mut EvaluationContext<'_>,
-) -> Result<Vec<ClusterReport>, Evaluation> {
+) -> Result<Rc<ExactClusters>, Evaluation> {
     let brep = context.brep_gate()?.ok_or_else(|| {
         backend_refusal(BackendError {
             kind: BackendErrorKind::Unsupported,
             message: "Exact connected components require a retained BRep.".into(),
         })
     })?;
-    let occurrences = context.source_occurrence_structure()?.unwrap_or_default();
-    let leaves = crate::analysis::interference::leaf_components(&occurrences);
-    if leaves.is_empty() && !occurrences.is_empty() {
-        // Every leaf is faceless: no body and no component (ruling 32).
-        return Ok(Vec::new());
-    }
-    let identities = crate::analysis::interference::component_labels(context.subject())
-        .map_err(backend_refusal)?;
-    let refusal = |error: ExactError, labels: &[String]| match error {
-        ExactError::Backend(error) => backend_refusal(error),
-        ExactError::Budget { exceeded, pair } => {
-            let mut refusal =
-                Evaluation::budget_exceeded(Capability::ToHaveConnectedComponents, exceeded);
-            // Ruling 28: a narrow-phase refusal names the pair whose charge crossed.
-            if let (Some((left, right)), Evaluation::Refused { diagnostics }) = (pair, &mut refusal)
-            {
-                if let Some(Json::Object(fields)) = &mut diagnostics[0].details {
-                    fields.push((
-                        "pair".into(),
-                        Json::Array(vec![
-                            Json::string(&labels[left]),
-                            Json::string(&labels[right]),
-                        ]),
-                    ));
-                }
-            }
-            refusal
+    let subject = context.subject();
+    let budget = context.budget;
+    context.exact_clusters(tolerance_mm, || {
+        let occurrences = subject
+            .source_occurrence_structure()
+            .map_err(backend_refusal)?
+            .unwrap_or_default();
+        let leaves = crate::analysis::interference::leaf_components(&occurrences);
+        if leaves.is_empty() && !occurrences.is_empty() {
+            // Every leaf is faceless: no body and no component (ruling 32).
+            return Ok(Vec::new());
         }
-    };
-    let bodies = ask(context.budget(), None, |charge| {
-        brep.component_bodies(&leaves, charge)
+        let identities =
+            crate::analysis::interference::component_labels(subject).map_err(backend_refusal)?;
+        let refusal = |error: ExactError, labels: &[String]| match error {
+            ExactError::Backend(error) => backend_refusal(error),
+            ExactError::Budget { exceeded, pair } => {
+                let mut refusal =
+                    Evaluation::budget_exceeded(Capability::ToHaveConnectedComponents, exceeded);
+                // Ruling 28: a narrow-phase refusal names the pair whose charge crossed.
+                if let (Some((left, right)), Evaluation::Refused { diagnostics }) =
+                    (pair, &mut refusal)
+                {
+                    if let Some(Json::Object(fields)) = &mut diagnostics[0].details {
+                        fields.push((
+                            "pair".into(),
+                            Json::Array(vec![
+                                Json::string(&labels[left]),
+                                Json::string(&labels[right]),
+                            ]),
+                        ));
+                    }
+                }
+                refusal
+            }
+        };
+        let bodies = ask(budget, None, |charge| {
+            brep.component_bodies(&leaves, charge)
+        })
+        .map_err(|error| refusal(error, &[]))?;
+        let labels = body_labels(bodies.bodies(), &identities);
+        exact_clusters(bodies.as_ref(), &labels, tolerance_mm, budget)
+            .map_err(|error| refusal(error, &labels))
     })
-    .map_err(|error| refusal(error, &[]))?;
-    let labels = body_labels(bodies.bodies(), &identities);
-    exact_clusters(bodies.as_ref(), &labels, tolerance_mm, context.budget())
-        .map_err(|error| refusal(error, &labels))
 }
 
 /// A body is named by its component label, or `step` for a whole-shape

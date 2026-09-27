@@ -121,6 +121,58 @@ fn charged_components(
     (response["result"]["results"][0].clone(), charged)
 }
 
+/// Claims `(count, budget, bounded)` in order on one engine and one subject:
+/// each result with the units it charged, and the engine's component builds.
+fn one_engine(source: &[u8], claims: &[(u64, u64, bool)]) -> (Vec<(Value, u64)>, u64) {
+    let mut engine = Engine::with_backends(
+        EngineConfig::entry(),
+        Box::new(OcctConnector),
+        Box::new(NoCsg),
+    );
+    let ingest = serde_json::to_vec(&json!({
+        "method": "ingestSubject", "requestId": "cc", "protocolVersion": 3,
+        "registryVersion": 5, "canonicalProfile": "geospec-jcs-v1", "format": "step",
+        "frame": {"coordinateSystem": "z-up", "sourceUnit": "auto", "outputUnit": "mm"},
+        "ingestOptions": {}, "primaryByteLength": source.len(), "resources": []
+    }))
+    .unwrap();
+    let admission: Value =
+        serde_json::from_slice(&engine.ingest_subject(&ingest, source, vec![]).unwrap()).unwrap();
+    let counter = |engine: &Engine, group: &str, name: &str| -> u64 {
+        let observations: Value = serde_json::from_slice(&engine.observations()).unwrap();
+        observations[group][name].as_str().unwrap().parse().unwrap()
+    };
+    let mut results = Vec::new();
+    for &(count, budget, bounded) in claims {
+        let mut plan = json!({
+            "subjects": [{"slot": "part",
+                "subjectHash": admission["result"]["subject"]["subjectHash"]}],
+            "claims": [{
+                "claimId": "cc", "capability": "toHaveConnectedComponents",
+                "subjectSlots": ["part"],
+                "payload": {"kind": "connectedComponents",
+                    "expected": {"count": count, "toleranceMm": 0.001}},
+                "polarity": "positive", "workUnitBudget": budget
+            }]
+        });
+        if bounded {
+            plan["evidenceProfile"] = json!("bounded");
+        }
+        let request = serde_json::to_vec(&json!({
+            "method": "submitClaims", "requestId": "cc", "protocolVersion": 3,
+            "registryVersion": 5, "canonicalProfile": "geospec-jcs-v1", "plan": plan
+        }))
+        .unwrap();
+        let before = counter(&engine, "logical", "chargedUnits");
+        let response: Value =
+            serde_json::from_slice(&engine.process_request(&request).unwrap()).unwrap();
+        let charged = counter(&engine, "logical", "chargedUnits") - before;
+        results.push((response["result"]["results"][0].clone(), charged));
+    }
+    let builds = counter(&engine, "physical", "componentBuilds");
+    (results, builds)
+}
+
 const DESIGNED: [(&str, u64); 9] = [
     ("clearance/bolt-clearance-hole-positive", 2),
     ("clearance/shaft-bore-radial-positive", 2),
@@ -285,6 +337,32 @@ fn leaf_bodies_are_solids_with_their_exact_occurrence_boxes() {
     assert!(document
         .component_bodies(&[u32::MAX], &mut |_| true)
         .is_err());
+}
+
+#[test]
+fn a_later_claim_reuses_the_exact_clusters_and_spends_as_a_cold_one() {
+    // W2-COMP open issue 3: an S claim after F on one subject reuses the
+    // clusters F built, with the bytes and charges of a fresh engine's S.
+    let source = workspace(
+        "packages/geospec-engine/fixtures/containment/pin-through-boss-positive/model.step",
+    );
+    for bounded in [false, true] {
+        let (cold, builds) = one_engine(&source, &[(4, 8_000_000, bounded)]);
+        assert_eq!((cold[0].0["status"].as_str(), builds), (Some("passed"), 1));
+        let (warm, builds) =
+            one_engine(&source, &[(0, 8_000_000, bounded), (4, 8_000_000, bounded)]);
+        assert_eq!(warm[1], cold[0], "bounded {bounded}");
+        assert_eq!(builds, 1, "S reused F's clusters");
+        // One unit short of the build's total, S rebuilds and refuses where
+        // a fresh engine's S refuses, naming the same pair.
+        let short = cold[0].1 - 1;
+        let (cold_short, _) = one_engine(&source, &[(4, short, bounded)]);
+        let (warm_short, builds) =
+            one_engine(&source, &[(0, 8_000_000, bounded), (4, short, bounded)]);
+        assert_eq!(cold_short[0].0["status"], "refused", "{}", cold_short[0].0);
+        assert_eq!(warm_short[1], cold_short[0], "bounded {bounded}");
+        assert_eq!(builds, 2);
+    }
 }
 
 /// The two-cube assembly with cubeB's solid removed from its representation

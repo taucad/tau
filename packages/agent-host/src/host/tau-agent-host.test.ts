@@ -1166,6 +1166,76 @@ the cancelled tools left the system unchanged.
     await host.close();
   });
 
+  it('hands a Stop only the answers its own rows record, never an earlier approval (GM.r2 M2, mutant C)', async () => {
+    const file = createMemoryLogFile();
+    const answerApproval = vi.fn<NonNullable<ToolRegistry['answerApproval']>>(async () => undefined);
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport: new ScriptedParityModelTransport(printResponses),
+        toolRegistry: { ...printTool([]), answerApproval },
+        idPrefix: 'stop-after-approve',
+      }),
+    );
+    await host.admit({
+      chatId: 'chat-stop-approved',
+      runId: 'run-stop-approved',
+      trigger: 'submit',
+      message: { id: 'turn-stop-approved', role: 'user', content: 'Print it.' },
+    });
+    const [pending] = await host.pendingInterrupts('run-stop-approved');
+    await host.resolveInterrupt({ runId: 'run-stop-approved', interruptId: pending!.interruptId, outcome: 'approved' });
+    await vi.waitFor(() => {
+      expect(answerApproval).toHaveBeenCalledTimes(1);
+    });
+
+    await host.cancel({ runId: 'run-stop-approved' });
+    await host.snapshot('chat-stop-approved');
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 50);
+    });
+
+    expect(answerApproval.mock.calls.map(([answer]) => answer.resolution.outcome)).toEqual(['approved']);
+    await host.close();
+  });
+
+  it('hands an approval over again when its run continues, if the first hand-over was lost (GM.r2 M2)', async () => {
+    const file = createMemoryLogFile();
+    const answerApproval = vi
+      .fn<NonNullable<ToolRegistry['answerApproval']>>()
+      .mockRejectedValueOnce(new Error('The machine host was restarting.'))
+      .mockResolvedValue(undefined);
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport: new ScriptedParityModelTransport(printResponses),
+        toolRegistry: { ...printTool([]), answerApproval },
+        idPrefix: 'lost-hand-over',
+      }),
+    );
+    await host.admit({
+      chatId: 'chat-lost',
+      runId: 'run-lost',
+      trigger: 'submit',
+      message: { id: 'turn-lost', role: 'user', content: 'Print it.' },
+    });
+    const [pending] = await host.pendingInterrupts('run-lost');
+    await host.resolveInterrupt({ runId: 'run-lost', interruptId: pending!.interruptId, outcome: 'approved' });
+    await vi.waitFor(() => {
+      expect(errors).toHaveBeenCalled();
+    });
+
+    await host.resume('chat-lost');
+
+    await vi.waitFor(() => {
+      expect(answerApproval).toHaveBeenCalledTimes(2);
+    });
+    expect(answerApproval.mock.calls[1]![0]).toMatchObject({ resolution: { outcome: 'approved' } });
+    errors.mockRestore();
+    await host.close();
+  });
+
   it('tells the continued attempt the answer its call paused on, not only that the call was aborted', async () => {
     const file = createMemoryLogFile();
     const transport = new ScriptedParityModelTransport([...printResponses.slice(0, 1), ...printResponses.slice(2)]);
@@ -1207,13 +1277,14 @@ the cancelled tools left the system unchanged.
     });
   const readCall = (id: string, file: string) => ({ id, name: 'read_file', input: { targetFile: file } });
   const usage = { inputTokens: 1, outputTokens: 1 };
-  const keyedHost = (label: string, responses: readonly ScriptedParityResponse[], outcomes: string[]) => {
+  /* The tools: a keyed print tool recording its outcomes, or a registry of the test's own. */
+  const keyedHost = (label: string, responses: readonly ScriptedParityResponse[], tools: string[] | ToolRegistry) => {
     const file = createMemoryLogFile();
     const host = createTauAgentHost(
       hostOptions({
         openEventLog: file.open,
         transport: new ScriptedParityModelTransport(responses),
-        toolRegistry: keyedTool(outcomes),
+        toolRegistry: Array.isArray(tools) ? keyedTool(tools) : tools,
         idPrefix: label,
       }),
     );
@@ -1229,7 +1300,7 @@ the cancelled tools left the system unchanged.
       await host.resolveInterrupt({ runId, interruptId: pending!.interruptId, outcome: 'approved' });
       await host.resume(`chat-${label}`);
     };
-    return { host, admit, approveAndResume };
+    return { host, file, admit, approveAndResume };
   };
 
   it('spends an approval only on the call that recalled it, not on another key asked first (GM.r1 M1)', async () => {
@@ -1252,6 +1323,65 @@ the cancelled tools left the system unchanged.
     expect(await host.pendingInterrupts('run-spend-other')).toEqual([]);
     expect(outcomes).toEqual(['a.ts:approved']);
     await expect(host.snapshot('chat-spend-other')).resolves.toMatchObject({ state: 'completed' });
+    await host.close();
+  });
+
+  it('tells each attempt only the answers given since it last ran (GM.r2 L-a, mutant D)', async () => {
+    const { host, file, admit, approveAndResume } = keyedHost(
+      'told-once',
+      [
+        { id: 'a1', toolCalls: [readCall('c1', 'a.ts')], usage },
+        { id: 'a2', toolCalls: [readCall('c2', 'b.ts')], usage },
+        { id: 'a3', text: 'done', usage },
+      ],
+      [],
+    );
+    await admit('run-told-once');
+    await approveAndResume('run-told-once');
+    await approveAndResume('run-told-once');
+
+    const eventLog = await file.open();
+    const messages = await eventLog.messages();
+    const reminders = messages.filter(
+      (message) => message.role === 'user' && message.metadata?.tauInternal?.['kind'] === 'approval-answer',
+    );
+    expect(reminders.map((message) => JSON.stringify(message.content))).toEqual([
+      expect.stringContaining('Print a.ts?'),
+      expect.not.stringContaining('Print a.ts?'),
+    ]);
+    expect(JSON.stringify(reminders[1]?.content)).toContain('Print b.ts?');
+    await host.close();
+  });
+
+  it('releases an approval whose recalling call threw, so the next call recalls it (GM.r2 L-c)', async () => {
+    const outcomes: string[] = [];
+    let failed = false;
+    const flaky = tools(async (invocation) => {
+      const file = (invocation.input as { targetFile: string }).targetFile;
+      const resolution = await invocation.approve!({ key: `print:${file}`, prompt: `Print ${file}?` });
+      if (!failed) {
+        failed = true;
+        throw new Error('The upload failed.');
+      }
+      outcomes.push(`${file}:${resolution.outcome}`);
+      return { content: { approval: resolution.outcome }, isError: false };
+    });
+    const { host, admit, approveAndResume } = keyedHost(
+      'release-thrown',
+      [
+        { id: 'a1', toolCalls: [readCall('c1', 'a.ts')], usage },
+        { id: 'a2', toolCalls: [readCall('c2', 'a.ts')], usage },
+        { id: 'a3', toolCalls: [readCall('c3', 'a.ts')], usage },
+        { id: 'a4', text: 'done', usage },
+      ],
+      flaky,
+    );
+    await admit('run-release-thrown');
+    await approveAndResume('run-release-thrown');
+
+    expect(outcomes).toEqual(['a.ts:approved']);
+    expect(await promptsOf(host, 'run-release-thrown')).toEqual([]);
+    await expect(host.snapshot('chat-release-thrown')).resolves.toMatchObject({ state: 'completed' });
     await host.close();
   });
 

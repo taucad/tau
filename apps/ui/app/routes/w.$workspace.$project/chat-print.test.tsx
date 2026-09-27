@@ -598,9 +598,12 @@ describe('Print pane slice summary', () => {
 
     expect(result.bounds).toEqual({ min: [0, 0, 0], max: [148, 148, 50] });
     expect(result.partBounds).toEqual({ min: [108, 108, 0], max: [148, 148, 2] });
-    expect(summary.formatSize(result.bounds)).toBe('148 × 148 × 50 mm');
+    expect(result.bounds && summary.formatSize(result.bounds)).toBe('148 × 148 × 50 mm');
     expect(result.partBounds && summary.formatSize(result.partBounds)).toBe('40 × 40 × 2 mm');
-    expect(summary.fitsPlate(result, manifest.geometry.buildVolume)).toEqual({
+    expect(
+      result.bounds &&
+        summary.fitsPlate({ bounds: result.bounds, partBounds: result.partBounds }, manifest.geometry.buildVolume),
+    ).toEqual({
       fits: true,
       message: 'The part fits the plate',
     });
@@ -654,7 +657,10 @@ describe('Print pane slice summary', () => {
       reason: '3 mm past the plate edge on Y',
       message: 'The toolpath does not fit the plate: 3 mm past the plate edge on Y.',
     });
-    expect(summary.fitsPlate({ bounds: baseSliceSummary.bounds, partBounds: undefined }, buildVolume)).toEqual({
+    expect(
+      baseSliceSummary.bounds &&
+        summary.fitsPlate({ bounds: baseSliceSummary.bounds, partBounds: undefined }, buildVolume),
+    ).toEqual({
       fits: true,
       message: 'The toolpath fits the plate',
     });

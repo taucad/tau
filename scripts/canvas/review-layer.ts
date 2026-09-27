@@ -702,6 +702,25 @@ addEventListener(
   true,
 );
 
+// Pages record a comment without the composer (an API guide's question ruling) by dispatching
+// `tau-review:comment` from the element it is about, with `{ body, done }` as detail.
+type CommentRequest = { body: string; done?: (ok: boolean, message: string) => void };
+addEventListener('tau-review:comment', async (event) => {
+  const { detail, target } = event as CustomEvent<CommentRequest>;
+  if (!(target instanceof Element)) {
+    return;
+  }
+  const box = target.getBoundingClientRect();
+  const { target: anchor, offset, excerpt } = draftAt(target, { x: box.left + 8, y: box.top + 8 });
+  const ok = await send({
+    type: 'comment',
+    body: detail.body,
+    anchor: { target: anchor, offset, excerpt },
+    context: contextFor(target),
+  });
+  detail.done?.(ok, ok ? '' : notice);
+});
+
 addEventListener('scroll', schedule, { capture: true, passive: true });
 addEventListener('resize', schedule);
 // Canvases change layout without scrolling (tabs, scenarios); re-find anchors that went away.

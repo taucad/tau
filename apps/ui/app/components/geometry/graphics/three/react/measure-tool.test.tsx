@@ -29,7 +29,11 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('#hooks/use-graphics.js', () => ({
-  useGraphics: () => ({ send: vi.fn(), getSnapshot: () => mocks.graphicsSnapshot }),
+  useGraphics: () => ({
+    send: vi.fn(),
+    getSnapshot: () => mocks.graphicsSnapshot,
+    subscribe: () => ({ unsubscribe: vi.fn() }),
+  }),
   useGraphicsSelector: <T,>(selector: (snapshot: typeof mocks.graphicsSnapshot) => T): T =>
     selector(mocks.graphicsSnapshot),
   useModelInteractionSelector: <T,>(selector: (snapshot: { context: { displayRevision: number } }) => T): T =>

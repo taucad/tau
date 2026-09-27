@@ -112,6 +112,15 @@ const measureHoverReducer = (_state: MeasureHoverState, action: MeasureHoverActi
   };
 };
 
+const noMeasureHover: MeasureHoverState = { hoveredSnapPoints: [] };
+
+/** Whether two hovers draw the same marks: the same snaps, the same active snap and the same pointer point. */
+const isSameMeasureHover = (a: MeasureHoverState, b: MeasureHoverState): boolean =>
+  a.activeSnapPoint === b.activeSnapPoint &&
+  a.hoveredSnapPoints.length === b.hoveredSnapPoints.length &&
+  a.hoveredSnapPoints.every((snapPoint, index) => snapPoint === b.hoveredSnapPoints[index]) &&
+  (a.mousePosition && b.mousePosition ? a.mousePosition.equals(b.mousePosition) : a.mousePosition === b.mousePosition);
+
 type MeasurePointerCoordinates = {
   readonly clientX: number;
   readonly clientY: number;
@@ -152,7 +161,9 @@ export function MeasureTool(): React.JSX.Element {
     activeSnapPoint: undefined,
     mousePosition: undefined,
   });
-  const lastSnapPointsRef = useRef<SnapPoint[] | undefined>(undefined);
+  // The hover last dispatched: an unchanged one dispatches nothing, so a cut step under a resting pointer renders
+  // nothing.
+  const hoverRef = useRef(noMeasureHover);
 
   const currentStartRef = useRef(currentStart);
 
@@ -160,6 +171,8 @@ export function MeasureTool(): React.JSX.Element {
   const mouseRef = useRef(new THREE.Vector2());
   const measureInputActor = useMemo(() => createActor(measureInputMachine), []);
   const pointerMoveCoalescerRef = useRef<RafCoalescer<MeasurePointerCoordinates> | undefined>(undefined);
+  // Where the pointer last moved, so a cut change can raycast its snaps again from there.
+  const lastPointerRef = useRef<MeasurePointerCoordinates | undefined>(undefined);
   const wasCameraMovingRef = useRef(cameraMoving);
 
   // Cache mesh list to avoid expensive scene.traverse() on every mouse event.
@@ -249,9 +262,6 @@ export function MeasureTool(): React.JSX.Element {
         // drops the vertices, edge midpoints and face centres the section removes, every raycast.
         const isKept = createRaycastClipTest(clipping);
         allSnapPoints = isKept ? allSnapPoints.filter(({ position }) => isKept(position)) : allSnapPoints;
-        lastSnapPointsRef.current = allSnapPoints;
-      } else {
-        lastSnapPointsRef.current = undefined;
       }
 
       const closest = findClosestSnapPoint(allSnapPoints, {
@@ -261,14 +271,15 @@ export function MeasureTool(): React.JSX.Element {
         snapDistancePx: snapDistance,
         snapPointBufferPx: 15,
       });
-      const nextMousePosition = closest?.position ?? firstIntersection?.point;
-
-      dispatchHoverState({
-        type: 'set',
+      const hover = {
         hoveredSnapPoints: allSnapPoints,
         activeSnapPoint: closest,
-        mousePosition: nextMousePosition,
-      });
+        mousePosition: closest?.position ?? firstIntersection?.point,
+      };
+      if (!isSameMeasureHover(hoverRef.current, hover)) {
+        hoverRef.current = hover;
+        dispatchHoverState({ type: 'set', ...hover });
+      }
       invalidate();
 
       return {
@@ -295,10 +306,32 @@ export function MeasureTool(): React.JSX.Element {
   useEffect(() => {
     if (!isMeasureActive) {
       pointerMoveCoalescerRef.current?.cancel();
+      hoverRef.current = noMeasureHover;
       dispatchHoverState({ type: 'clear' });
-      lastSnapPointsRef.current = undefined;
+      lastPointerRef.current = undefined;
     }
   }, [isMeasureActive]);
+
+  // A committed cut change (S adds a cut, Delete removes one) raycasts the resting pointer's snaps again. Subscribed
+  // rather than selected, so a cut step renders nothing unless the snaps change.
+  useEffect(() => {
+    if (!isMeasureActive) {
+      return undefined;
+    }
+    let cuts = graphicsActor.getSnapshot().context.committedSectionCuts;
+    const subscription = graphicsActor.subscribe(({ context }) => {
+      if (context.committedSectionCuts === cuts) {
+        return;
+      }
+      cuts = context.committedSectionCuts;
+      if (lastPointerRef.current) {
+        pointerMoveCoalescerRef.current?.schedule(lastPointerRef.current);
+      }
+    });
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [graphicsActor, isMeasureActive]);
 
   useEffect(() => {
     if (isMeasureActive && cameraMoving && !wasCameraMovingRef.current) {
@@ -316,10 +349,8 @@ export function MeasureTool(): React.JSX.Element {
     }
 
     const handleMouseMove = (event: MouseEvent): void => {
-      pointerMoveCoalescerRef.current?.schedule({
-        clientX: event.clientX,
-        clientY: event.clientY,
-      });
+      lastPointerRef.current = { clientX: event.clientX, clientY: event.clientY };
+      pointerMoveCoalescerRef.current?.schedule(lastPointerRef.current);
     };
 
     const handlePointerDown = (event: MouseEvent): void => {

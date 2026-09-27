@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
-import { resolveSectionPieces } from '#components/geometry/graphics/section-cuts.js';
+import { isSectionRemoved, resolveSectionPieces } from '#components/geometry/graphics/section-cuts.js';
 import type { SectionCut } from '#components/geometry/graphics/section-cuts.js';
 import * as bvhCache from '#components/geometry/graphics/three/utils/bvh-cache.js';
 import { raycastFirstVisibleMeshHit } from '#components/geometry/graphics/three/utils/bvh-raycast.js';
@@ -264,6 +264,28 @@ describe('raycastFirstVisibleMeshHit', () => {
     const hit = raycastFirstVisibleMeshHit({ raycaster, meshes: [mesh], clipping: clipOf(aboveMinusOnePointFive) });
 
     expect(hit?.point.z).toBeCloseTo(-1.5);
+  });
+
+  it('should keep a hit on an oblique cut face that rounding puts a hair past it', () => {
+    // The start face of a 45° to 135° cutaway about X lies on z = y. cos 45° and sin 45° round an ulp apart, so
+    // (0, 0.5, 0.5), exactly on the face, tests 6e-17 past it: removed with no margin, and kept with the +ε one.
+    const cutaway: SectionCut = {
+      id: 'oblique',
+      kind: 'revolution',
+      axis: 'x',
+      origin: [0, 0, 0],
+      start: 45,
+      sweep: 90,
+    };
+    const clipping = clipOf(cutaway);
+    expect(isSectionRemoved([0, 0.5, 0.5], clipping.pieces)).toBe(true);
+    const mesh = createTrianglesMesh([[-1, 0.25, 0.25, 1, 0.25, 0.25, 0, 1, 1]]);
+    // Up from the kept side under the face, onto an exact point of it.
+    const raycaster = new THREE.Raycaster(new THREE.Vector3(0, 0.5, 0), new THREE.Vector3(0, 0, 1));
+
+    const hit = raycastFirstVisibleMeshHit({ raycaster, meshes: [mesh], clipping });
+
+    expect(hit?.point.toArray()).toEqual([0, 0.5, 0.5]);
   });
 
   it('should reject a hit on the plane the halves of a cutaway wider than 180° share', () => {

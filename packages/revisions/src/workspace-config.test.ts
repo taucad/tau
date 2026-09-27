@@ -129,6 +129,7 @@ describe('generated ignore file', () => {
 /.tau/artifacts/
 /.tau/tool-results/
 /.tau/offloaded-tool-results/
+/.tau/library.json
 /exports/
 /thumbnail.webp
 /.tau/cache/

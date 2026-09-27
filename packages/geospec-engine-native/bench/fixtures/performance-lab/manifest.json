@@ -1546,8 +1546,8 @@
     "stepZupTrial": "Discarded explicit Z-up/mm STEP-to-GLB output because a 10 mm box became 10000 coordinate units; no retained file."
   },
   "claimAuthority": {
-    "path": "packages/geospec/host-tests/m3-corpus/current-authority-v3.json",
-    "sha256": "fb0920d448648cf1ea82c1305f8701c7992156a72f5a592cc569b3b3bec0bd51",
+    "path": "packages/geospec/host-tests/m3-corpus/current-authority-v5.json",
+    "sha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86",
     "selectedMatcherRows": 52,
     "selectedQueryRows": 5,
     "casePath": "packages/geospec-engine-native/bench/fixtures/performance-lab/authority-cases.json",
@@ -1636,8 +1636,8 @@
       {
         "id": "edge-test",
         "path": "packages/geospec-engine-native/native/occt/rust/tests/edge_treatments.rs",
-        "sha256": "194193727640e1718a35ce5ab84dea347a5f4015c5cf33a9093e81c2acf78dda",
-        "bytes": 34717
+        "sha256": "2fd8e8bcf468945e1e0394cc41f41d7a6702a6b3747d511a9855ef30e790b28e",
+        "bytes": 34049
       },
       {
         "id": "native-contract",
@@ -1648,18 +1648,18 @@
       {
         "id": "public-contract",
         "path": "packages/geospec/src/runner/types.ts",
-        "sha256": "e557ae8de6066d5f1e31fba6bc6c4022ecb777971aad54ef67c1a1baa37e5378",
-        "bytes": 22830
+        "sha256": "20303ca36a5ae9531cdd035c10e108e92b70aec76bba1aca849306dbe3eed82d",
+        "bytes": 23352
       },
       {
         "id": "native-defaults",
         "path": "packages/geospec-engine-native/rust/src/prepared.rs",
-        "sha256": "14c8d35a6e5cf450dd182b5c8b600c7702eb8d9f4e3bcea45b911c5518641f76",
-        "bytes": 15594
+        "sha256": "184d67a68fa17d93fb42899e11c0e52c13a72bdb0ac78985bff602cd65cf1b22",
+        "bytes": 15534
       }
     ],
-    "m3CasesUnchangedSha256": "5eb08c834bb82e22f22537f9d482ebdec7a7cff4e26c8a62ebad2c7031022bc3",
-    "m3QueriesUnchangedSha256": "caa2fbbd54caa60fef1590fafd72804274b1f26fa2285a4c2ba53dfb5d8a14d7",
+    "m3CasesUnchangedSha256": "888ac99941d9d4dbcce8e5501723d09d36b9e0873c1133b6c07f98c17ced032f",
+    "m3QueriesUnchangedSha256": "a5ec73dd3eba91d0eeda883df2c0ce1af4d7eac7e87e05820e8303ad8bdc1a7c",
     "caseCount": 10,
     "candidateExecuted": false,
     "conversionsRun": false

@@ -1,6 +1,7 @@
 import { useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useLayoutEffect, useMemo } from 'react';
 import type { ReactNode } from 'react';
+import type { EventManager } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { SpatialBounds } from '@taucad/spatial';
 import { maxSectionCuts, resolveSectionPlaneFlip } from '#components/geometry/graphics/section-cuts.js';
@@ -79,8 +80,11 @@ type SectionHandlesProperties = Readonly<{
 /**
  * The section cuts' in-scene handles and the plane picker's pointer input.
  *
- * A press on a handle or tile is the handles' own: it is stopped at the canvas, so camera controls, Measure and the
- * model's pointer events never see it, and its click is swallowed. While it is held, the camera controls are
+ * The handles listen where R3F does, on its event source (`events.connected`) or else the canvas, as the camera controls,
+ * Measure and kinematics do. A press on a handle or tile is the handles' own: they take it in the capture phase and
+ * stop it there, so camera controls, Measure, kinematics and the model's pointer events never see it whatever order
+ * they were added in, and its click is swallowed. A press on DOM laid over the canvas, such as the view cube, is not
+ * theirs. While it is held, the camera controls are
  * disabled and the model's hover is suppressed. Cut changes reach the handles through a direct actor subscription,
  * so a drag step renders no React.
  */
@@ -93,6 +97,9 @@ export function SectionHandles({ planePicker }: SectionHandlesProperties): React
   const bounds = useCameraSelector((state) => state.context.view.bounds, areBoundsEqual);
   const gl = useThree((state) => state.gl);
   const canvas = gl.domElement;
+  // R3F binds pointer events to `eventSource` when given one (the chat viewer's region div, which covers the canvas).
+  const connected = useThree((state) => (state.events as EventManager<HTMLElement>).connected);
+  const surface: HTMLElement = connected ?? canvas;
   const get = useThree((state) => state.get);
   const invalidate = useThree((state) => state.invalidate);
   const handles = useMemo(() => createSectionHandles({ backend }), [backend]);
@@ -203,17 +210,17 @@ export function SectionHandles({ planePicker }: SectionHandlesProperties): React
     };
 
     const setCursor = (): void => {
-      canvas.classList.remove('cursor-action', 'cursor-grab', 'cursor-grabbing');
+      surface.classList.remove('cursor-action', 'cursor-grab', 'cursor-grabbing');
       if (press?.drag) {
-        canvas.classList.add('cursor-grabbing');
+        surface.classList.add('cursor-grabbing');
       } else if (
         (press?.tile !== undefined && isPickerLive()) ||
         hoveredTile !== undefined ||
         hovered?.target.kind === 'select'
       ) {
-        canvas.classList.add('cursor-action');
+        surface.classList.add('cursor-action');
       } else if (hovered) {
-        canvas.classList.add('cursor-grab');
+        surface.classList.add('cursor-grab');
       }
     };
 
@@ -309,8 +316,8 @@ export function SectionHandles({ planePicker }: SectionHandlesProperties): React
       }
       press = undefined;
       ended.release();
-      if (canvas.hasPointerCapture(ended.pointerId)) {
-        canvas.releasePointerCapture(ended.pointerId);
+      if (surface.hasPointerCapture(ended.pointerId)) {
+        surface.releasePointerCapture(ended.pointerId);
       }
       paint();
     };
@@ -340,9 +347,19 @@ export function SectionHandles({ planePicker }: SectionHandlesProperties): React
       }
     };
 
+    /** The canvas itself, not DOM laid over it: the event source when it takes the events, else the canvas. */
+    const isOnCanvas = (event: Event): boolean => event.target === surface || event.target === canvas;
+
+    const handlePointerLeave = (): void => {
+      hoverPicks.cancel();
+      if (!press) {
+        setHover({});
+      }
+    };
+
     const handlePointerDown = (event: PointerEvent): void => {
       isPressOwned = false;
-      if (event.button !== 0 || press) {
+      if (event.button !== 0 || press !== undefined || !isOnCanvas(event)) {
         return;
       }
       const { tile, handle } = pickAt(event.offsetX, event.offsetY);
@@ -351,11 +368,11 @@ export function SectionHandles({ planePicker }: SectionHandlesProperties): React
         return;
       }
       // The press is the handles': camera controls, Measure and the model's pointer events never see it.
-      event.stopPropagation();
+      event.stopImmediatePropagation();
       event.preventDefault();
       isPressOwned = true;
       hoverPicks.cancel();
-      canvas.setPointerCapture(event.pointerId);
+      surface.setPointerCapture(event.pointerId);
       // Only the selected cut has drag handles, so a press on one leaves the selection; a press on an unselected
       // revolution's fan selects it and drags nothing.
       const isSelect = handle?.target.kind === 'select';
@@ -390,7 +407,7 @@ export function SectionHandles({ planePicker }: SectionHandlesProperties): React
 
     const handlePointerMove = (event: PointerEvent): void => {
       if (press?.pointerId === event.pointerId) {
-        event.stopPropagation();
+        event.stopImmediatePropagation();
         if (!press.moved) {
           press.moved = Math.hypot(event.clientX - press.startX, event.clientY - press.startY) > dragThreshold;
         }
@@ -403,6 +420,10 @@ export function SectionHandles({ planePicker }: SectionHandlesProperties): React
         }
         return;
       }
+      if (!isOnCanvas(event)) {
+        handlePointerLeave();
+        return;
+      }
       // Hover picks wait while a button is held: another tool owns that gesture.
       if (event.buttons === 0) {
         hoverPicks.schedule({ x: event.offsetX, y: event.offsetY });
@@ -413,7 +434,7 @@ export function SectionHandles({ planePicker }: SectionHandlesProperties): React
       if (press?.pointerId !== event.pointerId) {
         return;
       }
-      event.stopPropagation();
+      event.stopImmediatePropagation();
       if (!press.moved) {
         press.moved = Math.hypot(event.clientX - press.startX, event.clientY - press.startY) > dragThreshold;
       }
@@ -451,23 +472,16 @@ export function SectionHandles({ planePicker }: SectionHandlesProperties): React
       }
     };
 
-    const handlePointerLeave = (): void => {
-      hoverPicks.cancel();
-      if (!press) {
-        setHover({});
-      }
-    };
-
     // Measure follows `mousemove`, which a stopped `pointermove` does not stop.
     const handleMouseMove = (event: MouseEvent): void => {
       if (press) {
-        event.stopPropagation();
+        event.stopImmediatePropagation();
       }
     };
 
     const handleClick = (event: MouseEvent): void => {
       if (isPressOwned) {
-        event.stopPropagation();
+        event.stopImmediatePropagation();
       }
     };
 
@@ -502,15 +516,18 @@ export function SectionHandles({ planePicker }: SectionHandlesProperties): React
     };
 
     const { signal } = listeners;
-    canvas.addEventListener('pointerdown', handlePointerDown, { signal });
-    canvas.addEventListener('pointermove', handlePointerMove, { signal });
-    canvas.addEventListener('pointerup', handlePointerUp, { signal });
-    canvas.addEventListener('pointercancel', handlePointerCancel, { signal });
-    canvas.addEventListener('lostpointercapture', handlePointerCancel, { signal });
-    canvas.addEventListener('pointerleave', handlePointerLeave, { signal });
-    canvas.addEventListener('mousemove', handleMouseMove, { signal });
-    canvas.addEventListener('click', handleClick, { signal });
-    canvas.addEventListener('dblclick', handleClick, { signal });
+    // Capture phase: every event lands on the surface or the canvas inside it, so these run before any bubble-phase
+    // listener there, which is how the camera controls, R3F, Measure and kinematics all register.
+    const options = { signal, capture: true };
+    surface.addEventListener('pointerdown', handlePointerDown, options);
+    surface.addEventListener('pointermove', handlePointerMove, options);
+    surface.addEventListener('pointerup', handlePointerUp, options);
+    surface.addEventListener('pointercancel', handlePointerCancel, options);
+    surface.addEventListener('lostpointercapture', handlePointerCancel, options);
+    surface.addEventListener('pointerleave', handlePointerLeave, { signal });
+    surface.addEventListener('mousemove', handleMouseMove, options);
+    surface.addEventListener('click', handleClick, options);
+    surface.addEventListener('dblclick', handleClick, options);
     sync();
     const subscription = graphicsActor.subscribe(sync);
 
@@ -527,7 +544,7 @@ export function SectionHandles({ planePicker }: SectionHandlesProperties): React
       hoveredTile = undefined;
       setCursor();
     };
-  }, [bounds, cameraRig, canvas, get, graphicsActor, handles, invalidate, isActive, planePicker, renderFrame]);
+  }, [bounds, cameraRig, canvas, get, graphicsActor, handles, invalidate, isActive, planePicker, renderFrame, surface]);
 
   return (
     <SceneOverlay shouldClearDepth overlayActive={isActive} renderPriority={sectionHandlesPriority}>

@@ -64,19 +64,27 @@ type HarnessOptions = Readonly<{
   eye?: readonly [number, number, number];
   up?: readonly [number, number, number];
   compileAsync?: CompileAsync;
+  /**
+   * Mount as the chat viewer does: R3F's `eventSource` is an element covering the canvas, which takes every pointer
+   * event. Otherwise R3F listens on the canvas's parent, and presses land on the canvas.
+   */
+  hasEventSource?: boolean;
 }>;
 
 type Harness = Readonly<{
   actor: GraphicsActor;
   canvas: HTMLCanvasElement;
+  /** R3F's `events.connected`: the element the tools listen on, capture the pointer on and show cursors on. */
+  surface: HTMLElement;
   controls: { enabled: boolean };
   compileAsync: Mock<CompileAsync>;
   perspectiveCamera: THREE.PerspectiveCamera;
   orthographicCamera: THREE.OrthographicCamera;
-  /** Every pointer and click event the canvas's parent saw. */
-  parentEvents: string[];
+  /** Every pointer and click event that reached a listener on the surface added before the handles mounted. */
+  toolEvents: string[];
   runFrame: () => void;
-  pointer: (type: string, at: Point & Readonly<{ buttons?: number }>) => void;
+  /** Dispatched on the surface under an event source, else on the canvas, or on `target`. */
+  pointer: (type: string, at: Point & Readonly<{ buttons?: number; target?: HTMLElement }>) => void;
   send: (event: Parameters<GraphicsActor['send']>[0]) => void;
   cuts: () => ReturnType<GraphicsActor['getSnapshot']>['context']['sectionCuts'];
 }>;
@@ -87,6 +95,7 @@ const mountHandles = ({
   eye = [0, -1000, 300],
   up = [0, 0, 1],
   compileAsync = async (scene) => scene,
+  hasEventSource = false,
 }: HarnessOptions = {}): Harness => {
   const actor = createGraphicsActor();
   actor.start();
@@ -98,18 +107,24 @@ const mountHandles = ({
   const parent = document.createElement('div');
   const canvas = document.createElement('canvas');
   parent.append(canvas);
+  const eventSource = hasEventSource ? document.createElement('div') : undefined;
+  if (eventSource) {
+    parent.append(eventSource);
+  }
+  const surface = eventSource ?? parent;
   document.body.append(parent);
   let captured: number | undefined;
-  canvas.setPointerCapture = (pointerId) => {
+  surface.setPointerCapture = (pointerId) => {
     captured = pointerId;
   };
-  canvas.hasPointerCapture = (pointerId) => captured === pointerId;
-  canvas.releasePointerCapture = () => {
+  surface.hasPointerCapture = (pointerId) => captured === pointerId;
+  surface.releasePointerCapture = () => {
     captured = undefined;
   };
-  const parentEvents: string[] = [];
+  // As the camera controls, R3F and Measure do: on the surface, in the bubble phase, before the handles mount.
+  const toolEvents: string[] = [];
   for (const type of ['pointerdown', 'pointermove', 'pointerup', 'mousemove', 'click']) {
-    parent.addEventListener(type, () => parentEvents.push(type));
+    surface.addEventListener(type, () => toolEvents.push(type));
   }
 
   const camera = new THREE.PerspectiveCamera(50, 800 / 600, 0.1, 100_000);
@@ -131,6 +146,7 @@ const mountHandles = ({
     camera,
     size: { width: 800, height: 600 },
     controls,
+    events: { connected: surface },
     invalidate: vi.fn(),
     get: () => state,
   };
@@ -155,11 +171,12 @@ const mountHandles = ({
   return {
     actor,
     canvas,
+    surface,
     controls,
     compileAsync: compile,
     perspectiveCamera,
     orthographicCamera,
-    parentEvents,
+    toolEvents,
     runFrame: () => {
       const callbacks = [...frames.values()];
       frames.clear();
@@ -169,7 +186,7 @@ const mountHandles = ({
         }
       });
     },
-    pointer: (type, { x, y, buttons = type === 'pointerup' || type === 'click' ? 0 : 1 }) => {
+    pointer: (type, { x, y, buttons = type === 'pointerup' || type === 'click' ? 0 : 1, target }) => {
       const event = new MouseEvent(type, {
         bubbles: true,
         cancelable: true,
@@ -182,7 +199,7 @@ const mountHandles = ({
       Object.defineProperty(event, 'offsetX', { value: x });
       Object.defineProperty(event, 'offsetY', { value: y });
       act(() => {
-        canvas.dispatchEvent(event);
+        (target ?? eventSource ?? canvas).dispatchEvent(event);
       });
     },
     send: (event) => {
@@ -256,7 +273,47 @@ describe('SectionHandles', () => {
     harness.pointer('click', { x: 400, y: 250 });
     expect(isHoverSuppressed(harness)).toBe(false);
     expect(harness.controls.enabled).toBe(true);
-    expect(harness.parentEvents).toEqual([]);
+    expect(harness.toolEvents).toEqual([]);
+  });
+
+  it('should own a handle press through an event source covering the canvas, whatever listens there first or later', () => {
+    harness = mountHandles({ hasEventSource: true });
+    const { surface } = harness;
+    // Added after the handles mounted, as a tool mounted later would be, and in the capture phase too.
+    const lateEvents: string[] = [];
+    for (const type of ['pointerdown', 'pointermove', 'pointerup', 'mousemove', 'click']) {
+      surface.addEventListener(type, () => lateEvents.push(type), { capture: true });
+    }
+    const [cut] = harness.cuts();
+
+    harness.pointer('pointermove', { x: 400, y: 300, buttons: 0 });
+    harness.runFrame();
+    expect(surface.classList.contains('cursor-grab')).toBe(true);
+
+    harness.pointer('pointerdown', { x: 400, y: 300 });
+    expect(surface.hasPointerCapture(1)).toBe(true);
+    expect(surface.classList.contains('cursor-grabbing')).toBe(true);
+    harness.pointer('pointermove', { x: 400, y: 250 });
+    harness.pointer('pointerup', { x: 400, y: 250 });
+    harness.pointer('click', { x: 400, y: 250 });
+
+    const [moved] = harness.cuts();
+    expect(moved?.id).toBe(cut?.id);
+    expect(moved?.kind === 'plane' ? moved.offset : Number.NaN).toBeGreaterThan(0.05);
+    // Only the hover move before the press reached the other tools.
+    expect(harness.toolEvents).toEqual(['pointermove']);
+    expect(lateEvents).toEqual(['pointermove']);
+
+    // A press on DOM laid over the canvas, such as the view cube, or away from every handle is theirs.
+    const cube = document.createElement('div');
+    surface.append(cube);
+    harness.pointer('pointerdown', { x: 400, y: 300, target: cube });
+    harness.pointer('pointerup', { x: 400, y: 300, target: cube });
+    harness.pointer('pointerdown', { x: 40, y: 40 });
+    harness.pointer('click', { x: 40, y: 40 });
+    expect(harness.cuts()[0]).toBe(moved);
+    expect(harness.toolEvents).toEqual(['pointermove', 'pointerdown', 'pointerup', 'pointerdown', 'click']);
+    expect(lateEvents).toEqual(harness.toolEvents);
   });
 
   it('should keep a dragged plane within the bounds centre ± 2 × radius along its axis', () => {
@@ -301,7 +358,7 @@ describe('SectionHandles', () => {
     harness.pointer('click', { x: 40, y: 40 });
 
     expect(isHoverSuppressed(harness)).toBe(false);
-    expect(harness.parentEvents).toEqual(['pointerdown', 'click']);
+    expect(harness.toolEvents).toEqual(['pointerdown', 'click']);
   });
 
   it('should drop a waiting drag step when the cut loses the selection', () => {
@@ -417,7 +474,7 @@ describe('SectionHandles', () => {
       expect(current.cuts()).not.toBe(before);
       expect(isHoverSuppressed(current)).toBe(true);
       expect(current.controls.enabled).toBe(false);
-      expect(current.canvas.hasPointerCapture(1)).toBe(true);
+      expect(current.surface.hasPointerCapture(1)).toBe(true);
       current.pointer('pointermove', waitingStep);
 
       end(current);
@@ -425,7 +482,7 @@ describe('SectionHandles', () => {
 
       expect(current.controls.enabled).toBe(true);
       expect(isHoverSuppressed(current)).toBe(false);
-      expect(current.canvas.hasPointerCapture(1)).toBe(false);
+      expect(current.surface.hasPointerCapture(1)).toBe(false);
       current.runFrame();
       current.pointer('pointermove', laterStep);
       current.runFrame();
@@ -471,7 +528,7 @@ describe('SectionHandles', () => {
 
       expect(harness.cuts()).toEqual([{ ...cut, plane: 'yz', offset: 0, isFlipped: false }]);
       expect(isHoverSuppressed(harness)).toBe(false);
-      expect(harness.parentEvents).toEqual([]);
+      expect(harness.toolEvents).toEqual([]);
     });
 
     it('should add a clicked tile plane when no plane cut is selected', () => {
@@ -517,7 +574,7 @@ describe('SectionHandles', () => {
           harness.send({ type: 'selectSectionCut', payload: undefined });
         }
         const before = harness.cuts();
-        const isActionCursor = (): boolean => harness?.canvas.classList.contains('cursor-action') === true;
+        const isActionCursor = (): boolean => harness?.surface.classList.contains('cursor-action') === true;
 
         // A dimmed tile takes no hover.
         harness.pointer('pointermove', { x: 660, y: 60, buttons: 0 });
@@ -549,7 +606,7 @@ describe('SectionHandles', () => {
         expect(harness.controls.enabled).toBe(true);
         expect(isHoverSuppressed(harness)).toBe(false);
         // Only the hover move reached the tools behind the picker.
-        expect(harness.parentEvents).toEqual(['pointermove']);
+        expect(harness.toolEvents).toEqual(['pointermove']);
       },
     );
 
@@ -571,7 +628,7 @@ describe('SectionHandles', () => {
 
       expect(picker.paint).toHaveBeenLastCalledWith(expect.objectContaining({ current: 'yz', isDimmed: false }));
       expect(harness.cuts()).toEqual([...cuts.slice(0, 3), { ...cuts[3], plane: 'yz', offset: 0 }]);
-      expect(harness.parentEvents).toEqual([]);
+      expect(harness.toolEvents).toEqual([]);
     });
   });
 

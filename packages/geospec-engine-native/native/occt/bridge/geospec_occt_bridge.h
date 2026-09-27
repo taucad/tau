@@ -164,7 +164,6 @@ typedef struct geospec_occt_bounds {
 } geospec_occt_bounds;
 
 typedef struct geospec_occt_shape_facts {
-  int valid;
   geospec_occt_bounds bounds;
   double volume;
   double surface_area;
@@ -237,7 +236,6 @@ typedef struct geospec_occt_located_face_facts {
   geospec_occt_face_facts face;
   geospec_occt_bounds bounds;
   int reversed;
-  size_t edge_count;
 } geospec_occt_located_face_facts;
 
 typedef struct geospec_occt_edge_facts {
@@ -587,30 +585,37 @@ int geospec_occt_step_subject_metadata(
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 
 enum geospec_occt_report_facet {
-  // The soup of the isolated copy+mesh generation.
+  // The soup of an isolated copy+mesh generation built for this call only.
   GEOSPEC_OCCT_REPORT_MESH = 1,
-  // Whole-shape facts on that generation; `valid` is not measured.
-  GEOSPEC_OCCT_REPORT_FACTS = 2,
+  // Whole-shape facts on the admitted source shape (no copy, no mesh), one
+  // part per bit, each computed once per document on first demand; the
+  // transfer carries exactly the requested parts (the others NaN, counts 0).
+  // VOLUME is the volume and centre of mass.
+  GEOSPEC_OCCT_REPORT_VOLUME = 2,
   // Whole and occurrence face tables from the source public faces: the
   // address part (index, query index, orientation, surface and analytic
-  // parameters); no generation. Edge counts are zero.
+  // parameters); no generation.
   GEOSPEC_OCCT_REPORT_FACES = 4,
   // With FACES: face areas, centres of mass and non-triangulated Add boxes.
-  GEOSPEC_OCCT_REPORT_FACE_MEASURES = 8
+  GEOSPEC_OCCT_REPORT_FACE_MEASURES = 8,
+  // Surface area.
+  GEOSPEC_OCCT_REPORT_AREA = 16,
+  // Exact AddOptimal bounds (no triangulation, no shape tolerance).
+  GEOSPEC_OCCT_REPORT_BOUNDS = 32,
+  // The seven topology counts.
+  GEOSPEC_OCCT_REPORT_COUNTS = 64
 };
 
-// Prepare the requested facets into the transfer slot. A successful copy+mesh
-// is retained until both the mesh and facts facets have been prepared from it
-// or the document is freed, so either order meshes once.
+// Prepare the requested facets into the transfer slot.
 int geospec_occt_report_prepare(
     const geospec_occt_document* document, uint32_t facets,
     geospec_occt_report_sizes* out_sizes,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 // Private control: caller proves a dedicated OCCT closure and exclusively owns
-// the caller-inclusive grant for this call. A copy+mesh built by the call runs
-// the mesher in the selected mode, and the pool reservation ends with it;
-// everything else is serial. Zero is the plain call. A faces-only call takes
-// no grant and reports serial mode.
+// the caller-inclusive grant for this call. The grant serves the mesher of a
+// MESH call and the per-face box pass of a BOUNDS call, and the pool
+// reservation ends with them; everything else is serial. Zero is the plain
+// call. A call without MESH or BOUNDS takes no grant and reports serial mode.
 int geospec_occt_report_prepare_dedicated(
     const geospec_occt_document* document, uint32_t facets, int grant_width,
     int* out_used_parallel, geospec_occt_report_sizes* out_sizes,

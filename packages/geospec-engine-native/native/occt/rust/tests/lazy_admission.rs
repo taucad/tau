@@ -48,9 +48,11 @@ fn source_numerics_and_validity_do_not_depend_on_demand_order() {
         assert_eq!(validity(&validity_first), expected_validity, "{name}");
         assert_eq!(source_numerics(&validity_first), expected, "{name}");
 
-        // The copied report generation reads no source numeric slot.
+        // The report facts read the source (F1) and fill the face-box memo
+        // (V2) with the same boxes; the report mesh reads no source slot.
         let report_first = Document::from_step(&bytes).unwrap();
-        report_first.reported_facts_and_mesh().unwrap();
+        report_first.reported_shape().unwrap();
+        report_first.reported_mesh().unwrap();
         assert_eq!(source_numerics(&report_first), expected, "{name}");
         assert_eq!(validity(&report_first), expected_validity, "{name}");
     }

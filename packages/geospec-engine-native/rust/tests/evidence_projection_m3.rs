@@ -4,8 +4,8 @@ use geospec_engine_native_core::{
     backend::{
         brep::{
             Bounds, BrepAdmissionFacts, BrepConnector, BrepEntity, BrepIdentityProfile,
-            BrepSubject, DocumentFacts, LocatedFace, PointState, ReportedBrepBundle, ShapeFacts,
-            StepSubjectMetadata, TessellationProfile, TopologyCounts, ValidityFacts,
+            BrepSubject, DocumentRows, LocatedFace, OccurrenceFacts, PointState, ReportedFaces,
+            ShapeFacts, StepSubjectMetadata, TessellationProfile, TopologyCounts, ValidityFacts,
         },
         csg::{
             BooleanOp, CsgConnector, FillRule, MeshExport, Section, SectionOp, SolidId,
@@ -57,43 +57,49 @@ impl BrepSubject for ProjectionBrep {
         }))
     }
 
-    fn reported_facts_and_mesh(&self) -> Result<ReportedBrepBundle, BackendError> {
-        // The current report seam supplies already-declared mock facts only;
-        // this test does not exercise mesh or kernel geometry.
-        Ok(ReportedBrepBundle {
-            facts: Rc::new(DocumentFacts {
-                source_length_unit: "millimetre".into(),
-                source_unit_to_millimeters: 1.0,
-                occurrences: Vec::new(),
-                shape: ShapeFacts {
-                    bounds: Bounds {
-                        min: [0.0; 3],
-                        max: [1.0; 3],
-                    },
-                    volume: 1.0,
-                    surface_area: 6.0,
-                    center_of_mass: [0.5; 3],
-                    topology: TopologyCounts {
-                        compounds: 1,
-                        solids: 1,
-                        shells: 1,
-                        faces: 6,
-                        wires: 6,
-                        edges: 12,
-                        vertices: 8,
-                    },
-                },
-                subshapes: Vec::new(),
-                datum_placements: Vec::new(),
-                semantic_datums: Vec::new(),
-            }),
+    // Already-declared mock facts only; this test does not exercise mesh or
+    // kernel geometry.
+    fn reported_shape(&self) -> Result<ShapeFacts, BackendError> {
+        Ok(ShapeFacts {
+            bounds: Bounds {
+                min: [0.0; 3],
+                max: [1.0; 3],
+            },
+            volume: 1.0,
+            surface_area: 6.0,
+            center_of_mass: [0.5; 3],
+            topology: TopologyCounts {
+                compounds: 1,
+                solids: 1,
+                shells: 1,
+                faces: 6,
+                wires: 6,
+                edges: 12,
+                vertices: 8,
+            },
+        })
+    }
+
+    fn reported_mesh(&self) -> Result<TriangleMesh, BackendError> {
+        Ok(TriangleMesh {
+            positions: Vec::new(),
+            triangles: Vec::new(),
+        })
+    }
+
+    fn reported_faces(&self, _: bool) -> Result<ReportedFaces, BackendError> {
+        Ok(ReportedFaces {
             whole_faces: Rc::from(Vec::<LocatedFace>::new()),
             occurrence_faces: Vec::new(),
-            mesh: Rc::new(TriangleMesh {
-                positions: Vec::new(),
-                triangles: Vec::new(),
-            }),
         })
+    }
+
+    fn source_occurrences(&self) -> Result<Rc<[OccurrenceFacts]>, BackendError> {
+        Ok(Rc::from(Vec::new()))
+    }
+
+    fn document_rows(&self) -> Result<DocumentRows, BackendError> {
+        Ok(DocumentRows::default())
     }
 
     fn admission_facts(&self) -> Result<BrepAdmissionFacts, BackendError> {

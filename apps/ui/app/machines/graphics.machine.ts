@@ -118,7 +118,8 @@ const removeSuppressionReason = <T extends string>(reasons: readonly T[], reason
  *   `gridSizes`, `gridSizesComputed`, `cadUnits`, `cameraVisibleSpan`, `geometryRadius`,
  *   `geometryCenter`, `resolvedGraphicsBackend`, `webGpuAvailable`, `availableSectionViews`,
  *   `hoveredSectionViewId`, `hoveredSectionCutId`, `sectionViewVisualization`, `sectionViewTranslation`
- *   (the pivot's projection on the plane axis), `hoveredMeasurementId`, `measureSnapDistance`, every
+ *   (the pivot's projection on the plane axis), `committedSectionCuts` and `sectionCertification` (what
+ *   the caps last certified), `hoveredMeasurementId`, `measureSnapDistance`, every
  *   suppression and interaction flag, `pickableMeshesVersion`, `geometry`, `geometryKey` and
  *   `gltfPresentation`.
  *
@@ -182,6 +183,10 @@ export type GraphicsContext = {
   selectedSectionCutId: string | undefined;
   /** The cut hovered in the section row or the scene; both highlight it. */
   hoveredSectionCutId: string | undefined;
+  /** The cut list the clip, caps and raycasts show: the latest one whose every cap face certified. */
+  committedSectionCuts: readonly SectionCut[];
+  /** Whether the caps certified the latest cut list they drew, or refused it and still show `committedSectionCuts`. */
+  sectionCertification: 'exact' | 'rejected';
   // The single section plane, kept beside the cut list until its last reader moves to the cuts.
   availableSectionViews: Array<{
     id: 'xy' | 'xz' | 'yz';
@@ -274,6 +279,11 @@ export type GraphicsEvent =
   | { type: 'removeSectionCut'; payload: string }
   | { type: 'selectSectionCut'; payload: string | undefined }
   | { type: 'hoverSectionCut'; payload: string | undefined }
+  /** From the caps, in the frame they certify or refuse a cut list. A repeated value keeps the snapshot. */
+  | {
+      type: 'setSectionCertification';
+      payload: { status: 'exact' | 'rejected'; cuts: readonly SectionCut[] };
+    }
   | { type: 'selectSectionView'; payload: 'xy' | 'xz' | 'yz' | undefined }
   | { type: 'setSectionViewTranslation'; payload: number }
   | { type: 'setSectionViewRotation'; payload: [number, number, number] }
@@ -914,6 +924,8 @@ export const graphicsMachine = setup({
 
       // Section view state (the cuts are durable and entry-scoped)
       ...createSectionViewSeed(input.sectionView),
+      committedSectionCuts: [],
+      sectionCertification: 'exact',
       availableSectionViews: [
         { id: 'xy', normal: [0, 0, 1], constant: 0 },
         { id: 'xz', normal: [0, 1, 0], constant: 0 },
@@ -1390,6 +1402,15 @@ export const graphicsMachine = setup({
           isSectionCutReference(context, context.hoveredSectionCutId, event.payload)
             ? { context: { hoveredSectionCutId: event.payload } }
             : {},
+        setSectionCertification: ({ context, event }) =>
+          event.payload.cuts === context.committedSectionCuts && event.payload.status === context.sectionCertification
+            ? {}
+            : {
+                context: {
+                  committedSectionCuts: event.payload.cuts,
+                  sectionCertification: event.payload.status,
+                },
+              },
 
         // Measurement events (available in all operational states)
         clearMeasurement: {

@@ -1,6 +1,16 @@
 import { render } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { resolveSectionPieces } from '#components/geometry/graphics/section-cuts.js';
+import type { SectionCut } from '#components/geometry/graphics/section-cuts.js';
 import { createSectionViewSafeSnapshotStore } from '#components/geometry/graphics/three/utils/section-view-safe-snapshot.js';
+import type { SectionCutSet } from '#components/geometry/graphics/three/utils/section-view-safe-snapshot.js';
+
+const cutSetAt = (offset: number): SectionCutSet => {
+  const cuts: SectionCut[] = [{ id: 'cut-a', kind: 'plane', plane: 'xy', offset, isFlipped: true }];
+  return { cuts, pieces: resolveSectionPieces(cuts) };
+};
+
+const onCertify = (): void => undefined;
 
 const hoistedMocks = vi.hoisted(() => {
   let unitState = { selectedComponentIds: [] as readonly string[] };
@@ -59,19 +69,19 @@ describe('SectionContourFills reactivity', () => {
 
   it('invalidates demand rendering when the active unit interaction changes while enabled', async () => {
     const { SectionContourFills } = await import('#components/geometry/graphics/three/react/section-contour-fill.js');
-    const { Plane, Vector3 } = await import('three');
     const innerRef = { current: null };
     const snapshotRef = { current: createSectionViewSafeSnapshotStore() };
-    const plane = new Plane(new Vector3(0, 0, 1), 0);
+    const cutSet = cutSetAt(0);
 
     const { rerender } = render(
       <SectionContourFills
         enabled
         innerRef={innerRef}
-        plane={plane}
+        cutSet={cutSet}
         snapshotRef={snapshotRef}
         stripeFrequency={2}
         stripeWidth={0.2}
+        onCertify={onCertify}
       />,
     );
 
@@ -82,10 +92,11 @@ describe('SectionContourFills reactivity', () => {
       <SectionContourFills
         enabled
         innerRef={innerRef}
-        plane={plane}
+        cutSet={cutSet}
         snapshotRef={snapshotRef}
         stripeFrequency={2}
         stripeWidth={0.2}
+        onCertify={onCertify}
       />,
     );
 
@@ -94,19 +105,19 @@ describe('SectionContourFills reactivity', () => {
 
   it('does not invalidate for active unit interaction changes while disabled', async () => {
     const { SectionContourFills } = await import('#components/geometry/graphics/three/react/section-contour-fill.js');
-    const { Plane, Vector3 } = await import('three');
     const innerRef = { current: null };
     const snapshotRef = { current: createSectionViewSafeSnapshotStore() };
-    const plane = new Plane(new Vector3(0, 0, 1), 0);
+    const cutSet = cutSetAt(0);
 
     const { rerender } = render(
       <SectionContourFills
         enabled={false}
         innerRef={innerRef}
-        plane={plane}
+        cutSet={cutSet}
         snapshotRef={snapshotRef}
         stripeFrequency={2}
         stripeWidth={0.2}
+        onCertify={onCertify}
       />,
     );
 
@@ -117,10 +128,11 @@ describe('SectionContourFills reactivity', () => {
       <SectionContourFills
         enabled={false}
         innerRef={innerRef}
-        plane={plane}
+        cutSet={cutSet}
         snapshotRef={snapshotRef}
         stripeFrequency={2}
         stripeWidth={0.2}
+        onCertify={onCertify}
       />,
     );
 
@@ -129,16 +141,16 @@ describe('SectionContourFills reactivity', () => {
 
   it('invalidates demand rendering when re-enabled with unchanged inputs', async () => {
     const { SectionContourFills } = await import('#components/geometry/graphics/three/react/section-contour-fill.js');
-    const { Plane, Vector3 } = await import('three');
     const innerRef = { current: null };
     const snapshotRef = { current: createSectionViewSafeSnapshotStore() };
-    const plane = new Plane(new Vector3(0, 0, 1), 0);
+    const cutSet = cutSetAt(0);
     const properties = {
       innerRef,
-      plane,
+      cutSet,
       snapshotRef,
       stripeFrequency: 2,
       stripeWidth: 0.2,
+      onCertify,
     };
 
     const { rerender } = render(<SectionContourFills enabled {...properties} />);
@@ -147,6 +159,25 @@ describe('SectionContourFills reactivity', () => {
     rerender(<SectionContourFills enabled={false} {...properties} />);
     rerender(<SectionContourFills enabled {...properties} />);
 
+    expect(hoistedMocks.invalidate).toHaveBeenCalledTimes(2);
+  });
+
+  it('should invalidate demand rendering when a cut changes, and not when the same cut set renders again', async () => {
+    const { SectionContourFills } = await import('#components/geometry/graphics/three/react/section-contour-fill.js');
+    const properties = {
+      innerRef: { current: null },
+      snapshotRef: { current: createSectionViewSafeSnapshotStore() },
+      stripeFrequency: 2,
+      stripeWidth: 0.2,
+      onCertify,
+    };
+    const cutSet = cutSetAt(0);
+
+    const { rerender } = render(<SectionContourFills enabled cutSet={cutSet} {...properties} />);
+    rerender(<SectionContourFills enabled cutSet={cutSet} {...properties} />);
+    expect(hoistedMocks.invalidate).toHaveBeenCalledTimes(1);
+
+    rerender(<SectionContourFills enabled cutSet={cutSetAt(0.25)} {...properties} />);
     expect(hoistedMocks.invalidate).toHaveBeenCalledTimes(2);
   });
 });

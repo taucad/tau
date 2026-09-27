@@ -10,23 +10,34 @@ import {
 } from '#components/geometry/graphics/three/materials/model-component-appearance.js';
 import type { ModelComponentEmphasis } from '#components/geometry/graphics/three/materials/model-component-appearance.js';
 import {
+  resolveSectionFaces,
+  sectionHalfSpaceKey,
+  sectionPiecesKey,
+} from '#components/geometry/graphics/section-cuts.js';
+import type { SectionCut, SectionFace, SectionPiece } from '#components/geometry/graphics/section-cuts.js';
+import {
   createVertexColoredSectionCapMaterial,
   markVertexColoredSectionCapMaterialInUse,
 } from '#components/geometry/graphics/three/materials/striped-material-vertex-colored.js';
 import type { ClosedContour, OpenPolyline } from '#components/geometry/graphics/three/utils/plane-mesh-contour.js';
 import { buildSectionCapBoundaryPositions } from '#components/geometry/graphics/three/utils/section-cap-boundary.js';
-import { buildSectionContourBorderPositions } from '#components/geometry/graphics/three/utils/section-contour-border.js';
 import { buildCurrentSectionBaseCapGeometry } from '#components/geometry/graphics/three/utils/section-cap-current-base.js';
 import { sceneTag, sceneTagData } from '#components/geometry/graphics/three/utils/scene-tags.js';
 import type { ModelComponentOwner } from '#components/geometry/graphics/three/utils/model-component-owner.js';
 import {
+  boundsForCapMultiPolygon,
   buildSectionCapPolygon,
+  buildSectionFaceEvidencePositions,
   createSectionCutPlaneBasis,
+  measureCapMultiPolygonArea,
+  sectionFaceWorldPlane,
+  trimSectionCapPolygon,
 } from '#components/geometry/graphics/three/utils/section-cap-region.js';
 import type {
-  SectionCapBuildResult,
+  SectionCapPolygon,
   SectionCutPlaneBasis,
 } from '#components/geometry/graphics/three/utils/section-cap-region.js';
+import { defaultSectionCapBooleanOperations } from '#components/geometry/graphics/three/utils/section-cap-polygon-boolean.js';
 import { createSectionCapPackedGeometryArena } from '#components/geometry/graphics/three/utils/section-cap-packed-geometry.js';
 import type {
   PackedSectionCapGeometryBuffers,
@@ -36,9 +47,11 @@ import { applySectionCapStyleToPackedBuffers } from '#components/geometry/graphi
 import { sectionCapOverlapDebugUserDataKey } from '#components/geometry/graphics/three/utils/section-cap-overlap-debug.js';
 import type { SectionCapOverlapDebugSummary } from '#components/geometry/graphics/three/utils/section-cap-overlap-debug.js';
 import {
+  addSectionCapFaceTiming,
   addSectionCapTiming,
   appendSectionCapPerformanceFrame,
   createSectionCapFramePerformance,
+  getSectionCapFacePerformance,
   recordSectionCapPackedGeometry,
   sectionCapPerformanceDebugUserDataKey,
 } from '#components/geometry/graphics/three/utils/section-cap-performance-debug.js';
@@ -60,6 +73,7 @@ import {
 } from '#components/geometry/graphics/three/utils/section-cap-overlap-worker-protocol.js';
 import type {
   PlainSectionCutPlaneBasis,
+  SectionCapWorkerFaceInput,
   SectionCapWorkerInputSource,
   SectionCapWorkerSuccessResponse,
 } from '#components/geometry/graphics/three/utils/section-cap-overlap-worker-protocol.js';
@@ -93,7 +107,10 @@ import {
   resetSectionViewSafeSnapshot,
   sectionViewSafeSnapshotDebugUserDataKey,
 } from '#components/geometry/graphics/three/utils/section-view-safe-snapshot.js';
-import type { SectionViewSafeSnapshotStore } from '#components/geometry/graphics/three/utils/section-view-safe-snapshot.js';
+import type {
+  SectionCutSet,
+  SectionViewSafeSnapshotStore,
+} from '#components/geometry/graphics/three/utils/section-view-safe-snapshot.js';
 import type {
   SectionSurfaceSource,
   SectionTopologyFailure,
@@ -140,15 +157,20 @@ type SectionSourceCapBuild = Readonly<{
   meshWorldInverse: THREE.Matrix4;
 }>;
 
-type SectionFrameSource = {
-  readonly record: SectionSourceRecord;
-  readonly helper: SectionHelperRecord;
-  readonly geometryKey: string;
-  readonly capBuild: SectionSourceCapBuild;
-  /** Resolved in the border pass from the owning component's emphasis. */
-  borderMaterial?: GltfFatLineMaterial;
-  borderRenderOrder?: number;
-};
+/** One source on one cut face this frame, drawn by its own helper. */
+type SectionFrameSource = Readonly<{
+  record: SectionSourceRecord;
+  helper: SectionHelperRecord;
+  /** `${faceKey}|${sourceKey}`. */
+  helperKey: string;
+  geometryKey: string;
+  capBuild: SectionSourceCapBuild;
+}>;
+
+/** A source's cap on its face, trimmed to what the face shows. */
+type SectionCappedSource = SectionFrameSource & Readonly<{ capPolygon: SectionCapPolygon }>;
+
+type SectionFrameFace<Source> = Readonly<{ face: SectionFace; faceKey: string; sources: readonly Source[] }>;
 
 type SectionCapStyleSource = Readonly<{
   sourceKey: string;
@@ -295,6 +317,22 @@ function endSectionCapPhase(
   addSectionCapTiming(frame, phase, performance.now() - startedAt);
 }
 
+/** Ends a phase of one face's work, counted for the frame and for the face. */
+function endSectionCapFacePhase(
+  frame: SectionCapFramePerformance | undefined,
+  {
+    faceKey,
+    phase,
+    startedAt,
+  }: Readonly<{ faceKey: string; phase: SectionCapPerformanceTimingPhase; startedAt: number }>,
+): void {
+  if (!frame) {
+    return;
+  }
+
+  addSectionCapFaceTiming(frame, { faceKey, phase, elapsed: performance.now() - startedAt });
+}
+
 function finishSectionCapPerformanceFrame(
   root: THREE.Group,
   frame: SectionCapFramePerformance | undefined,
@@ -430,19 +468,35 @@ const applyWorkerPerformanceToFrame = (
   addSectionCapTiming(frame, 'workerRoundTrip', response.timings.total);
 };
 
-/**
- * @remarks Multi-plane section view: each fill is built in mesh-local space from one world plane;
- * composing multiple planes is a future `ClippingGroup` nesting concern (see canonical reference F3).
- */
+/** What the caps committed: the cut list the clip, the caps and raycasts show, and whether the live list certified. */
+export type SectionCertification = Readonly<{ status: 'exact' | 'rejected'; cuts: readonly SectionCut[] }>;
+
 export type SectionContourFillsProperties = Readonly<{
-  plane: THREE.Plane;
+  /** The live cut list and its pieces in the render frame, committed once every face of it certifies. */
+  cutSet: SectionCutSet;
   enabled: boolean;
   stripeFrequency: number;
   stripeWidth: number;
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React refs use null
   innerRef: React.RefObject<THREE.Group | null>;
   snapshotRef: React.RefObject<SectionViewSafeSnapshotStore>;
+  /** Called from the frame in which the committed cut list or its certification changes. */
+  onCertify: (certification: SectionCertification) => void;
 }>;
+
+const noCuts: readonly SectionCut[] = [];
+
+/** Every face of the pieces, keyed by its cut and its place among the cut's faces, so the key survives a drag. */
+const resolveSectionFaceEntries = (
+  pieces: readonly SectionPiece[],
+): Array<Readonly<{ face: SectionFace; faceKey: string }>> => {
+  const faceCountByCutId = new Map<string, number>();
+  return resolveSectionFaces(pieces).map((face) => {
+    const index = faceCountByCutId.get(face.cutId) ?? 0;
+    faceCountByCutId.set(face.cutId, index + 1);
+    return { face, faceKey: `${face.cutId}:${index}` };
+  });
+};
 
 function extractTintHex(material: THREE.Material): number {
   return resolveModelMaterialBaseTintHex(material);
@@ -473,22 +527,14 @@ function matrixKey(matrix: THREE.Matrix4): string {
   return matrix.elements.map(numericKey).join(',');
 }
 
-function planeKey(plane: THREE.Plane): string {
-  return [
-    numericKey(plane.normal.x),
-    numericKey(plane.normal.y),
-    numericKey(plane.normal.z),
-    numericKey(plane.constant),
-  ].join(',');
-}
-
-export function buildSectionFillGeometryKey(record: SectionSourceRecord, plane: THREE.Plane): string {
+/** What a source's slice through a face is drawn from: the source as placed, and the face's plane. */
+export function buildSectionFillGeometryKey(record: SectionSourceRecord, face: SectionFace): string {
   return [
     record.key,
     record.source.revision,
     // The source's own placement, so a posed part is recut where it now is.
     matrixKey(getSectionSourceWorldMatrix(record.source, _sourceWorld)),
-    planeKey(plane),
+    sectionHalfSpaceKey(face.plane),
     record.visibleSource.visibility,
   ].join('|');
 }
@@ -729,12 +775,13 @@ export function writeBorderSegments(
 }
 
 export function SectionContourFills({
-  plane,
+  cutSet,
   enabled,
   innerRef,
   stripeFrequency,
   stripeWidth,
   snapshotRef,
+  onCertify,
 }: SectionContourFillsProperties): React.JSX.Element {
   const backend = useThreeGraphicsBackend();
   const { theme } = useTheme();
@@ -748,11 +795,12 @@ export function SectionContourFills({
   const { invalidate, size } = useThree();
   const resolution = React.useMemo(() => new THREE.Vector2(size.width, size.height), [size.height, size.width]);
   const invalidatedRenderStateRef = React.useRef<
-    readonly [number, ModelInteractionUnitState | undefined, number, number] | undefined
+    readonly [SectionCutSet, number, ModelInteractionUnitState | undefined, number, number] | undefined
   >(undefined);
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React refs use null
   const rootRef = React.useRef<THREE.Group | null>(null);
-  const helperBySourceKey = React.useRef(new Map<string, SectionHelperRecord>());
+  // One helper per source on each cut face, keyed `${faceKey}|${sourceKey}`.
+  const helperByKey = React.useRef(new Map<string, SectionHelperRecord>());
   const borderMaterialRef = React.useRef<SectionBorderMaterialState | undefined>(undefined);
   const performanceFrameSequenceRef = React.useRef(0);
   const workerClientRef = React.useRef<SectionCapOverlapWorkerClient | undefined>(undefined);
@@ -767,7 +815,8 @@ export function SectionContourFills({
   const workerErrorCountRef = React.useRef(0);
   const reportedTopologyKeysRef = React.useRef(new Set<string>());
   const reportedFailureKeyRef = React.useRef<string | undefined>(undefined);
-  // What the drawn caps were built from; a frame with the same inputs leaves them as they are.
+  const reportedCertificationRef = React.useRef<SectionCertification | undefined>(undefined);
+  // What the caps were last built or refused from; a frame with the same inputs leaves them as they are.
   const appliedFrameRef = React.useRef<
     | Readonly<{
         key: string;
@@ -791,27 +840,28 @@ export function SectionContourFills({
     }
   };
 
-  React.useEffect(() => {
+  // A layout effect, so a cut step asks for its frame before the browser paints.
+  React.useLayoutEffect(() => {
     if (!enabled) {
       invalidatedRenderStateRef.current = undefined;
       return;
     }
-    const renderState = [edgeColor, modelInteractionUnitState, resolution.x, resolution.y] as const;
+    const renderState = [cutSet, edgeColor, modelInteractionUnitState, resolution.x, resolution.y] as const;
     if (invalidatedRenderStateRef.current?.every((value, index) => Object.is(value, renderState[index])) !== true) {
       invalidatedRenderStateRef.current = renderState;
       invalidate();
     }
-  }, [edgeColor, enabled, invalidate, modelInteractionUnitState, resolution]);
+  }, [cutSet, edgeColor, enabled, invalidate, modelInteractionUnitState, resolution]);
 
   React.useEffect(
     () => () => {
       const root = rootRef.current;
       if (root) {
-        for (const helper of helperBySourceKey.current.values()) {
+        for (const helper of helperByKey.current.values()) {
           disposeHelperRecord(root, helper);
         }
       }
-      helperBySourceKey.current.clear();
+      helperByKey.current.clear();
       for (const material of borderMaterialRef.current?.byEdgeColor.values() ?? []) {
         material.dispose();
       }
@@ -840,6 +890,7 @@ export function SectionContourFills({
       lastAppliedTopologyKeyRef.current = undefined;
       lastAppliedStyleKeyRef.current = undefined;
       reportedFailureKeyRef.current = undefined;
+      reportedCertificationRef.current = undefined;
       appliedFrameRef.current = undefined;
       resetSectionViewSafeSnapshot(snapshotRef.current);
       root.userData[sectionViewSafeSnapshotDebugUserDataKey] = getSectionViewSafeSnapshotDebugState(
@@ -868,7 +919,8 @@ export function SectionContourFills({
         ].join('|'),
       )
       .join(';');
-    const candidateIdentity = `${planeKey(plane)}|${sourceIdentity}`;
+    const { pieces } = cutSet;
+    const candidateIdentity = `${sectionPiecesKey(pieces)}|${sourceIdentity}`;
     const modelInteractionContext = modelInteractionRef.getSnapshot().context;
     // Everything else the caps are drawn from: each source's emphasis (its fill tint, outline colour and
     // render order), the transform the helpers are placed under, and the fill and outline styles.
@@ -886,11 +938,12 @@ export function SectionContourFills({
     ].join('|');
     endSectionCapPhase(performanceFrame, 'sourceCollection', sourceCollectionStartedAt);
     const appliedFrame = appliedFrameRef.current;
+    const store = snapshotRef.current;
     if (
       appliedFrame?.key === frameKey &&
       appliedFrame.workerResponse === currentWorkerResponseRef.current &&
       appliedFrame.submittedWorkerRequestKey === submittedWorkerRequestKeyRef.current &&
-      snapshotRef.current.committed?.identity === candidateIdentity
+      (store.rejection ? store.rejection.identity : store.committed?.identity) === candidateIdentity
     ) {
       if (performanceFrame) {
         performanceFrame.counters.skippedFrameCount = 1;
@@ -921,194 +974,256 @@ export function SectionContourFills({
         }
       }
     }
-    const seen = new Set<string>();
-    const frameSources: SectionFrameSource[] = [];
-    const candidateBuilds = new Map<string, Readonly<{ geometryKey: string; capBuild: SectionSourceCapBuild }>>();
-    let candidateFailure: Readonly<{ status: 'unsupported' | 'failed'; failure: SectionTopologyFailure }> | undefined;
 
-    for (const record of sourceRecords) {
-      const nextGeometryKey = `${buildSectionFillGeometryKey(record, plane)}|border-backend:${backend}`;
-      const helper = helperBySourceKey.current.get(record.key);
-      if (helper?.geometryKey === nextGeometryKey && helper.capBuild) {
-        candidateBuilds.set(record.key, { geometryKey: nextGeometryKey, capBuild: helper.capBuild });
-        if (performanceFrame) {
-          performanceFrame.counters.closedContourCount += helper.capBuild.closedContours.length;
-          performanceFrame.counters.openPolylineCount += helper.capBuild.openPolylines.length;
-          performanceFrame.counters.segmentCount += helper.capBuild.closedContours.reduce(
-            (count, contour) => count + contour.length,
-            0,
-          );
-          performanceFrame.counters.trueCutComponentCount += helper.capBuild.trueCutComponentCount;
-          performanceFrame.counters.cappedTrueCutComponentCount += helper.capBuild.cappedTrueCutComponentCount;
-          performanceFrame.counters.unresolvedTrueCutEdgeCount += helper.capBuild.unresolvedTrueCutEdgeCount;
-        }
-        continue;
+    // Tells the stage what is committed, only when that changes; the clip follows it within this frame.
+    const reportCertification = (): void => {
+      const { committed, rejection } = snapshotRef.current;
+      const certification: SectionCertification = {
+        status: rejection ? 'rejected' : 'exact',
+        cuts: committed?.cutSet.cuts ?? noCuts,
+      };
+      const reported = reportedCertificationRef.current;
+      if (reported?.status === certification.status && reported.cuts === certification.cuts) {
+        return;
       }
+      reportedCertificationRef.current = certification;
+      onCertify(certification);
+    };
+    // All or nothing: a refused cut set leaves every drawn cap, and what is committed, as it was.
+    const rejectCandidate = (status: 'unsupported' | 'failed', failure: SectionTopologyFailure): void => {
+      rejectSectionViewSafeSnapshot(snapshotRef.current, { identity: candidateIdentity, sourceIdentity, failure });
+      appliedFrameRef.current = {
+        key: frameKey,
+        workerResponse: currentWorkerResponseRef.current,
+        submittedWorkerRequestKey: submittedWorkerRequestKeyRef.current,
+      };
+      reportFailure(status, failure);
+      root.visible = Boolean(snapshotRef.current.committed);
+      root.userData['sectionCapCompleteness'] = { status, failure };
+      root.userData[sectionViewSafeSnapshotDebugUserDataKey] = getSectionViewSafeSnapshotDebugState(
+        snapshotRef.current,
+      );
+      if (performanceFrame) {
+        performanceFrame.counters.unsupportedSourceCount++;
+        performanceFrame.counters.safeSnapshotCurrentCount = snapshotRef.current.committed ? 1 : 0;
+      }
+      reportCertification();
+      finishSectionCapPerformanceFrame(root, performanceFrame, frameStartedAt);
+    };
 
-      const extractionStartedAt = startSectionCapPhase(performanceFrame);
-      const slice = sliceSectionSurfaceSource({ visibleSource: record.visibleSource, worldPlane: plane });
-      endSectionCapPhase(performanceFrame, 'sourceExtraction', extractionStartedAt);
-      if (slice.status !== 'complete') {
-        candidateFailure = { status: slice.status, failure: slice.failure };
+    // Slice each source through each face, reusing a slice while the source and the face's plane are unchanged, so
+    // moving one cut re-slices only its own faces.
+    const seen = new Set<string>();
+    const slicedFaces: Array<SectionFrameFace<SectionFrameSource> & Readonly<{ worldPlane: THREE.Plane }>> = [];
+    let candidateFailure: Readonly<{ status: 'unsupported' | 'failed'; failure: SectionTopologyFailure }> | undefined;
+    for (const { face, faceKey } of resolveSectionFaceEntries(pieces)) {
+      const worldPlane = sectionFaceWorldPlane(face);
+      const sources: SectionFrameSource[] = [];
+      for (const record of sourceRecords) {
+        const helperKey = `${faceKey}|${record.key}`;
+        const geometryKey = `${buildSectionFillGeometryKey(record, face)}|border-backend:${backend}`;
+        seen.add(helperKey);
+        let helper = helperByKey.current.get(helperKey);
+        if (helper) {
+          if (performanceFrame) {
+            performanceFrame.counters.helperCacheHitCount++;
+          }
+        } else {
+          if (performanceFrame) {
+            performanceFrame.counters.helperCacheMissCount++;
+          }
+          helper = createHelperRecord(root);
+          helperByKey.current.set(helperKey, helper);
+        }
+
+        let capBuild = helper.geometryKey === geometryKey ? helper.capBuild : undefined;
+        if (capBuild) {
+          if (performanceFrame) {
+            performanceFrame.counters.closedContourCount += capBuild.closedContours.length;
+            performanceFrame.counters.openPolylineCount += capBuild.openPolylines.length;
+            performanceFrame.counters.segmentCount += capBuild.closedContours.reduce(
+              (count, contour) => count + contour.length,
+              0,
+            );
+            performanceFrame.counters.trueCutComponentCount += capBuild.trueCutComponentCount;
+            performanceFrame.counters.cappedTrueCutComponentCount += capBuild.cappedTrueCutComponentCount;
+            performanceFrame.counters.unresolvedTrueCutEdgeCount += capBuild.unresolvedTrueCutEdgeCount;
+          }
+        } else {
+          const extractionStartedAt = startSectionCapPhase(performanceFrame);
+          const slice = sliceSectionSurfaceSource({ visibleSource: record.visibleSource, worldPlane });
+          endSectionCapFacePhase(performanceFrame, {
+            faceKey,
+            phase: 'sourceExtraction',
+            startedAt: extractionStartedAt,
+          });
+          if (slice.status !== 'complete') {
+            candidateFailure = { status: slice.status, failure: slice.failure };
+            break;
+          }
+          if (performanceFrame) {
+            performanceFrame.counters.changedGeometryKeyCount++;
+            performanceFrame.counters.closedContourCount += slice.closedContours.length;
+            performanceFrame.counters.openPolylineCount += slice.openPolylines.length;
+            performanceFrame.counters.segmentCount += slice.segmentCount;
+            performanceFrame.counters.trueCutComponentCount += slice.trueCutComponentCount;
+            performanceFrame.counters.cappedTrueCutComponentCount += slice.cappedTrueCutComponentCount;
+            performanceFrame.counters.unresolvedTrueCutEdgeCount += slice.unresolvedTrueCutEdgeCount;
+            getSectionCapFacePerformance(performanceFrame, faceKey).slicedSourceCount++;
+            addSectionCapFaceTiming(performanceFrame, {
+              faceKey,
+              phase: 'candidateBroadphase',
+              elapsed: slice.candidateBroadphaseMilliseconds,
+            });
+            addSectionCapFaceTiming(performanceFrame, {
+              faceKey,
+              phase: 'topologySlice',
+              elapsed: slice.topologySliceMilliseconds,
+            });
+          }
+          const sourceWorld = getSectionSourceWorldMatrix(record.source);
+          _inverseMeshWorld.copy(sourceWorld).invert();
+          capBuild = {
+            closedContours: slice.closedContours,
+            openPolylines: slice.openPolylines,
+            trueCut: slice.trueCutComponentCount > 0,
+            trueCutComponentCount: slice.trueCutComponentCount,
+            cappedTrueCutComponentCount: slice.cappedTrueCutComponentCount,
+            unresolvedTrueCutEdgeCount: slice.unresolvedTrueCutEdgeCount,
+            topologyPath: record.source.topology.status === 'ready' ? record.source.topology.topology.path : 'fallback',
+            baseTintHex: extractTintHex(slice.dominantMaterial),
+            meshWorldMatrix: sourceWorld,
+            meshWorldInverse: _inverseMeshWorld.clone(),
+          };
+        }
+        sources.push({ record, helper, helperKey, geometryKey, capBuild });
+      }
+      if (candidateFailure) {
         break;
       }
-      if (performanceFrame) {
-        performanceFrame.counters.closedContourCount += slice.closedContours.length;
-        performanceFrame.counters.openPolylineCount += slice.openPolylines.length;
-        performanceFrame.counters.segmentCount += slice.segmentCount;
-        performanceFrame.counters.trueCutComponentCount += slice.trueCutComponentCount;
-        performanceFrame.counters.cappedTrueCutComponentCount += slice.cappedTrueCutComponentCount;
-        performanceFrame.counters.unresolvedTrueCutEdgeCount += slice.unresolvedTrueCutEdgeCount;
-        addSectionCapTiming(performanceFrame, 'candidateBroadphase', slice.candidateBroadphaseMilliseconds);
-        addSectionCapTiming(performanceFrame, 'topologySlice', slice.topologySliceMilliseconds);
-      }
-      const sourceWorld = getSectionSourceWorldMatrix(record.source);
-      _inverseMeshWorld.copy(sourceWorld).invert();
-      candidateBuilds.set(record.key, {
-        geometryKey: nextGeometryKey,
-        capBuild: {
-          closedContours: slice.closedContours,
-          openPolylines: slice.openPolylines,
-          trueCut: slice.trueCutComponentCount > 0,
-          trueCutComponentCount: slice.trueCutComponentCount,
-          cappedTrueCutComponentCount: slice.cappedTrueCutComponentCount,
-          unresolvedTrueCutEdgeCount: slice.unresolvedTrueCutEdgeCount,
-          topologyPath: record.source.topology.status === 'ready' ? record.source.topology.topology.path : 'fallback',
-          baseTintHex: extractTintHex(slice.dominantMaterial),
-          meshWorldMatrix: sourceWorld,
-          meshWorldInverse: _inverseMeshWorld.clone(),
-        },
-      });
+      slicedFaces.push({ face, faceKey, worldPlane, sources });
     }
-
     if (candidateFailure) {
-      appliedFrameRef.current = undefined;
-      rejectSectionViewSafeSnapshot(snapshotRef.current, {
-        identity: candidateIdentity,
-        sourceIdentity,
-        failure: candidateFailure.failure,
-      });
-      reportFailure(candidateFailure.status, candidateFailure.failure);
-      root.visible = Boolean(snapshotRef.current.committed);
-      root.userData['sectionCapCompleteness'] = {
-        status: candidateFailure.status,
-        failure: candidateFailure.failure,
-      };
-      root.userData[sectionViewSafeSnapshotDebugUserDataKey] = getSectionViewSafeSnapshotDebugState(
-        snapshotRef.current,
-      );
-      if (performanceFrame) {
-        performanceFrame.counters.unsupportedSourceCount++;
-        performanceFrame.counters.safeSnapshotCurrentCount = snapshotRef.current.committed ? 1 : 0;
-      }
-      finishSectionCapPerformanceFrame(root, performanceFrame, frameStartedAt);
+      rejectCandidate(candidateFailure.status, candidateFailure.failure);
       return;
     }
 
-    for (const record of sourceRecords) {
-      seen.add(record.key);
-
-      let helper = helperBySourceKey.current.get(record.key);
-      if (!helper) {
-        if (performanceFrame) {
-          performanceFrame.counters.helperCacheMissCount++;
-        }
-        helper = createHelperRecord(root);
-        helperBySourceKey.current.set(record.key, helper);
-      } else if (performanceFrame) {
-        performanceFrame.counters.helperCacheHitCount++;
-      }
-
-      const candidate = candidateBuilds.get(record.key)!;
-      const nextGeometryKey = candidate.geometryKey;
-      if (helper.geometryKey !== nextGeometryKey && performanceFrame) {
-        performanceFrame.counters.changedGeometryKeyCount++;
-      }
-
-      frameSources.push({ record, helper, geometryKey: candidate.geometryKey, capBuild: candidate.capBuild });
-    }
-
-    const basisStartedAt = startSectionCapPhase(performanceFrame);
-    const planeBasis = createSectionCutPlaneBasis({
-      worldPlane: plane,
-      sources: frameSources.map(({ capBuild }) => capBuild),
-    });
-    endSectionCapPhase(performanceFrame, 'worldPointBasis', basisStartedAt);
-    const capPolygonBuildStartedAt = startSectionCapPhase(performanceFrame);
-    const capBuildResults: SectionCapBuildResult[] = frameSources.map(({ record, geometryKey, capBuild }) =>
-      buildSectionCapPolygon({
-        sourceKey: record.key,
-        ownerKey: ownerKeyForRecord(record),
-        geometryKey,
-        contours: capBuild.closedContours,
-        meshWorldMatrix: capBuild.meshWorldMatrix,
-        planeBasis,
-        trueCut: capBuild.trueCut,
-      }),
-    );
-    endSectionCapPhase(performanceFrame, 'capPolygonBuild', capPolygonBuildStartedAt);
-    if (performanceFrame) {
-      for (const { polygon } of capBuildResults) {
-        performanceFrame.counters.capPolygonCount += polygon.multiPolygon.length;
-        performanceFrame.counters.capRingCount += countCapRings(polygon.multiPolygon);
-        performanceFrame.counters.capPointCount += countCapPoints(polygon.multiPolygon);
-      }
-    }
-    const incompleteSourceIndex = frameSources.findIndex(({ capBuild }, index) => {
-      if (!capBuild.trueCut) {
-        return false;
-      }
-      return (
-        capBuild.trueCutComponentCount !== capBuild.cappedTrueCutComponentCount ||
-        capBuild.unresolvedTrueCutEdgeCount !== 0 ||
-        capBuildResults[index]!.polygon.multiPolygon.length === 0
-      );
-    });
-    if (incompleteSourceIndex !== -1) {
-      const sourceKey = frameSources[incompleteSourceIndex]!.record.key;
-      const failure: SectionTopologyFailure = {
-        sourceKey,
-        code: 'slice-invariant',
-        message: `Section topology ${sourceKey}: did not produce a complete cap polygon`,
-      };
-      appliedFrameRef.current = undefined;
-      rejectSectionViewSafeSnapshot(snapshotRef.current, { identity: candidateIdentity, sourceIdentity, failure });
-      reportFailure('failed', failure);
-      root.visible = Boolean(snapshotRef.current.committed);
-      root.userData['sectionCapCompleteness'] = { status: 'failed', failure };
-      root.userData[sectionViewSafeSnapshotDebugUserDataKey] = getSectionViewSafeSnapshotDebugState(
-        snapshotRef.current,
-      );
-      if (performanceFrame) {
-        performanceFrame.counters.unsupportedSourceCount++;
-        performanceFrame.counters.safeSnapshotCurrentCount = snapshotRef.current.committed ? 1 : 0;
-      }
-      finishSectionCapPerformanceFrame(root, performanceFrame, frameStartedAt);
-      return;
-    }
-    const workerSources: SectionCapWorkerInputSource[] = frameSources.map(
-      ({ record, geometryKey, capBuild }, index) => {
-        const capPolygon = capBuildResults[index]!.polygon;
-        return {
+    // Each face's caps in its own basis, trimmed to what the face shows among the other cuts.
+    const cappedFaces: Array<SectionFrameFace<SectionCappedSource> & Readonly<{ basis: SectionCutPlaneBasis }>> = [];
+    for (const { face, faceKey, worldPlane, sources } of slicedFaces) {
+      const basisStartedAt = startSectionCapPhase(performanceFrame);
+      const basis = createSectionCutPlaneBasis({ worldPlane, sources: sources.map(({ capBuild }) => capBuild) });
+      endSectionCapFacePhase(performanceFrame, { faceKey, phase: 'worldPointBasis', startedAt: basisStartedAt });
+      const capPolygonBuildStartedAt = startSectionCapPhase(performanceFrame);
+      const cappedSources: SectionCappedSource[] = [];
+      for (const source of sources) {
+        const { record, geometryKey, capBuild } = source;
+        const { polygon } = buildSectionCapPolygon({
           sourceKey: record.key,
           ownerKey: ownerKeyForRecord(record),
           geometryKey,
-          sourcePolygon: capPolygon.multiPolygon,
-          bbox: capPolygon.bbox,
-          area: capPolygon.area,
+          contours: capBuild.closedContours,
+          meshWorldMatrix: capBuild.meshWorldMatrix,
+          planeBasis: basis,
           trueCut: capBuild.trueCut,
-          // Read only when a request is encoded, which copies it; the build's matrix is never mutated.
-          meshWorldInverse: capBuild.meshWorldInverse.elements,
-        };
-      },
-    );
-    const styleSources: SectionCapStyleSource[] = frameSources.map(({ record, capBuild }) => ({
-      sourceKey: record.key,
-      tintHex: resolveSectionSourceTint(record, modelInteractionContext, capBuild.baseTintHex),
+        });
+        if (
+          capBuild.trueCut &&
+          (capBuild.trueCutComponentCount !== capBuild.cappedTrueCutComponentCount ||
+            capBuild.unresolvedTrueCutEdgeCount !== 0 ||
+            polygon.multiPolygon.length === 0)
+        ) {
+          candidateFailure = {
+            status: 'failed',
+            failure: {
+              sourceKey: record.key,
+              code: 'slice-invariant',
+              message: `Section topology ${record.key}: did not produce a complete cap polygon`,
+            },
+          };
+          break;
+        }
+        const trimmed = trimSectionCapPolygon({
+          multiPolygon: polygon.multiPolygon,
+          basis,
+          face,
+          pieces,
+          booleanOperations: defaultSectionCapBooleanOperations,
+        });
+        const [booleanFailure] = trimmed.diagnostics;
+        if (booleanFailure) {
+          candidateFailure = {
+            status: 'failed',
+            failure: {
+              sourceKey: record.key,
+              code: 'slice-invariant',
+              message: `Section topology ${record.key}: its cap could not be trimmed to the other cuts: ${booleanFailure.message}`,
+            },
+          };
+          break;
+        }
+        const capPolygon =
+          trimmed.multiPolygon === polygon.multiPolygon
+            ? polygon
+            : {
+                ...polygon,
+                multiPolygon: trimmed.multiPolygon,
+                bbox: boundsForCapMultiPolygon(trimmed.multiPolygon),
+                area: measureCapMultiPolygonArea(trimmed.multiPolygon),
+              };
+        if (performanceFrame) {
+          const capPointCount = countCapPoints(capPolygon.multiPolygon);
+          performanceFrame.counters.capPolygonCount += capPolygon.multiPolygon.length;
+          performanceFrame.counters.capRingCount += countCapRings(capPolygon.multiPolygon);
+          performanceFrame.counters.capPointCount += capPointCount;
+          getSectionCapFacePerformance(performanceFrame, faceKey).capPointCount += capPointCount;
+        }
+        cappedSources.push({ ...source, capPolygon });
+      }
+      endSectionCapFacePhase(performanceFrame, {
+        faceKey,
+        phase: 'capPolygonBuild',
+        startedAt: capPolygonBuildStartedAt,
+      });
+      if (candidateFailure) {
+        break;
+      }
+      cappedFaces.push({ face, faceKey, basis, sources: cappedSources });
+    }
+    if (candidateFailure) {
+      rejectCandidate(candidateFailure.status, candidateFailure.failure);
+      return;
+    }
+
+    // One exact overlap request for every face, answered per face and source.
+    const workerFaces: SectionCapWorkerFaceInput[] = cappedFaces.map(({ faceKey, basis, sources }) => ({
+      faceKey,
+      basis: plainBasisFromSectionCutPlaneBasis(basis),
+      sources: sources.map(({ record, geometryKey, capBuild, capPolygon }) => ({
+        sourceKey: record.key,
+        ownerKey: ownerKeyForRecord(record),
+        geometryKey,
+        sourcePolygon: capPolygon.multiPolygon,
+        bbox: capPolygon.bbox,
+        area: capPolygon.area,
+        trueCut: capBuild.trueCut,
+        // Read only when a request is encoded, which copies it; the build's matrix is never mutated.
+        meshWorldInverse: capBuild.meshWorldInverse.elements,
+      })),
     }));
-    const tintBySourceKey = new Map(styleSources.map((source) => [source.sourceKey, source.tintHex] as const));
-    const sourceSetKey = buildSectionCapTopologySourceSetKey(workerSources);
-    const requestKey = `${planeBasis.planeKey}|${sourceSetKey}`;
+    const styleSources: SectionCapStyleSource[] = cappedFaces.flatMap(({ sources }) =>
+      sources.map(({ record, helperKey, capBuild }) => ({
+        sourceKey: helperKey,
+        tintHex: resolveSectionSourceTint(record, modelInteractionContext, capBuild.baseTintHex),
+      })),
+    );
+    const tintByHelperKey = new Map(styleSources.map((source) => [source.sourceKey, source.tintHex] as const));
+    const frameSourceCount = styleSources.length;
+    const requestKey = workerFaces
+      .map(
+        ({ faceKey, basis, sources }) => `${faceKey}:${basis.planeKey}|${buildSectionCapTopologySourceSetKey(sources)}`,
+      )
+      .join('||');
     const styleKey = buildSectionCapStyleKey(styleSources, { stripeFrequency, stripeWidth });
     latestWorkerRequestKeyRef.current = requestKey;
     const currentResponse =
@@ -1120,16 +1235,9 @@ export function SectionContourFills({
       lastAppliedStyleKeyRef.current !== undefined &&
       lastAppliedStyleKeyRef.current !== styleKey,
     );
-    if (!exactResponse && workerSources.length > 0 && submittedWorkerRequestKeyRef.current !== requestKey) {
+    if (!exactResponse && frameSourceCount > 0 && submittedWorkerRequestKeyRef.current !== requestKey) {
       const sequence = ++workerSequenceRef.current;
-      const encoded = encodeSectionCapWorkerRequest({
-        sequence,
-        requestKey,
-        planeKey: planeBasis.planeKey,
-        sourceSetKey,
-        basis: plainBasisFromSectionCutPlaneBasis(planeBasis),
-        sources: workerSources,
-      });
+      const encoded = encodeSectionCapWorkerRequest({ sequence, requestKey, faces: workerFaces });
 
       if (canUseSectionCapOverlapWorker()) {
         workerClientRef.current ??= createSectionCapOverlapWorkerClient({
@@ -1144,7 +1252,7 @@ export function SectionContourFills({
             }
 
             if (response.requestKey !== latestWorkerRequestKeyRef.current) {
-              // The discarded result is no longer in flight, so returning to its plane requests it again.
+              // The discarded result is no longer in flight, so returning to its cuts requests it again.
               if (response.requestKey === submittedWorkerRequestKeyRef.current) {
                 submittedWorkerRequestKeyRef.current = undefined;
               }
@@ -1185,7 +1293,7 @@ export function SectionContourFills({
         ? 'none'
         : submittedWorkerRequestKeyRef.current === requestKey
           ? 'duplicate-in-flight'
-          : workerSources.length > 0
+          : frameSourceCount > 0
             ? 'topology-change'
             : 'none';
       performanceFrame.counters.workerStaleResponseCount = staleWorkerResponseCountRef.current;
@@ -1217,7 +1325,7 @@ export function SectionContourFills({
         applyWorkerPerformanceToFrame(performanceFrame, exactResponse);
       }
     } else {
-      const pendingSummary = createPendingOverlapDebugSummary(frameSources.length);
+      const pendingSummary = createPendingOverlapDebugSummary(frameSourceCount);
       root.userData[sectionCapOverlapDebugUserDataKey] = pendingSummary;
       if (performanceFrame) {
         performanceFrame.counters.workerPendingFrameCount++;
@@ -1226,144 +1334,155 @@ export function SectionContourFills({
       }
     }
 
-    const geometryPackStartedAt = startSectionCapPhase(performanceFrame);
-    const geometryBuffers = frameSources.map(({ record, helper, capBuild }, index) => {
-      const exactBuffers = exactResponse ? getSectionCapWorkerSourceGeometry(exactResponse, record.key) : undefined;
-      const baseBuffers = exactBuffers
-        ? undefined
-        : buildCurrentSectionBaseCapGeometry({
-            multiPolygon: capBuildResults[index]!.polygon.multiPolygon,
-            basis: planeBasis,
-            meshWorldInverse: capBuild.meshWorldInverse,
-            arena: helper.packedGeometryArena,
-            debugSink: createPackingDebugSink(performanceFrame),
-          });
-      return exactBuffers ?? baseBuffers;
-    });
-    endSectionCapPhase(performanceFrame, 'geometryPack', geometryPackStartedAt);
-    const missingBufferIndex = frameSources.findIndex(({ capBuild }, index) => {
-      const buffers = geometryBuffers[index];
-      return Boolean(
-        !exactResponse &&
-        capBuild.trueCut &&
-        (!buffers || buffers.positions.length === 0 || buffers.indices.length === 0),
-      );
-    });
-    if (missingBufferIndex !== -1) {
-      const sourceKey = frameSources[missingBufferIndex]!.record.key;
-      const failure: SectionTopologyFailure = {
-        sourceKey,
-        code: 'slice-invariant',
-        message: `Section topology ${sourceKey}: complete contours did not produce renderable cap geometry`,
-      };
-      appliedFrameRef.current = undefined;
-      rejectSectionViewSafeSnapshot(snapshotRef.current, { identity: candidateIdentity, sourceIdentity, failure });
-      reportFailure('failed', failure);
-      root.visible = Boolean(snapshotRef.current.committed);
-      root.userData['sectionCapCompleteness'] = { status: 'failed', failure };
-      root.userData[sectionViewSafeSnapshotDebugUserDataKey] = getSectionViewSafeSnapshotDebugState(
-        snapshotRef.current,
-      );
-      if (performanceFrame) {
-        performanceFrame.counters.unsupportedSourceCount++;
-        performanceFrame.counters.safeSnapshotCurrentCount = snapshotRef.current.committed ? 1 : 0;
+    // The exact caps when the worker answered these cuts, else base caps built here.
+    const buffersByHelperKey = new Map<string, PackedSectionCapGeometryBuffers>();
+    let incompleteSourceKey: string | undefined;
+    for (const { faceKey, basis, sources } of cappedFaces) {
+      const geometryPackStartedAt = startSectionCapPhase(performanceFrame);
+      for (const { record, helper, helperKey, capBuild, capPolygon } of sources) {
+        const exactBuffers = exactResponse
+          ? getSectionCapWorkerSourceGeometry(exactResponse, faceKey, record.key)
+          : undefined;
+        const baseBuffers = exactBuffers
+          ? undefined
+          : buildCurrentSectionBaseCapGeometry({
+              multiPolygon: capPolygon.multiPolygon,
+              basis,
+              meshWorldInverse: capBuild.meshWorldInverse,
+              arena: helper.packedGeometryArena,
+              debugSink: createPackingDebugSink(performanceFrame),
+            });
+        const buffers = exactBuffers ?? baseBuffers;
+        if (buffers) {
+          buffersByHelperKey.set(helperKey, buffers);
+        }
+        if (
+          !exactResponse &&
+          capBuild.trueCut &&
+          capPolygon.multiPolygon.length > 0 &&
+          (!buffers || buffers.positions.length === 0 || buffers.indices.length === 0)
+        ) {
+          incompleteSourceKey ??= record.key;
+        }
       }
-      finishSectionCapPerformanceFrame(root, performanceFrame, frameStartedAt);
+      endSectionCapFacePhase(performanceFrame, { faceKey, phase: 'geometryPack', startedAt: geometryPackStartedAt });
+    }
+    if (incompleteSourceKey !== undefined) {
+      rejectCandidate('failed', {
+        sourceKey: incompleteSourceKey,
+        code: 'slice-invariant',
+        message: `Section topology ${incompleteSourceKey}: complete contours did not produce renderable cap geometry`,
+      });
       return;
     }
 
-    const borderWriteStartedAt = startSectionCapPhase(performanceFrame);
-    for (const [index, frameSource] of frameSources.entries()) {
-      const { record, helper, capBuild } = frameSource;
-      helper.capBuild = capBuild;
-      helper.geometryKey = candidateBuilds.get(record.key)!.geometryKey;
-      // The cut face belongs to the component, so its outline wears the component's emphasis.
-      const outline = resolveSectionContourOutlineEmphasis(
-        resolveSectionSourceEmphasis(record, modelInteractionContext),
-        edgeColor,
-      );
-      frameSource.borderMaterial = resolveBorderMaterial(borderMaterialRef, {
-        backend,
-        edgeColor: outline.edgeColor,
-        resolution,
-      });
-      frameSource.borderRenderOrder = outline.renderOrder;
-      assignBorderMaterial(helper, frameSource.borderMaterial, outline.renderOrder);
-      updateHelperMatrix(helper, capBuild.meshWorldMatrix);
-      const boundary = buildSectionCapBoundaryPositions({
-        multiPolygon: capBuildResults[index]!.polygon.multiPolygon,
-        basis: planeBasis,
-        meshWorldInverse: capBuild.meshWorldInverse,
-      });
-      const geometricEvidence = buildSectionContourBorderPositions({
-        closedContours: [],
-        openPolylines: capBuild.openPolylines,
-      });
-      let borderPositions = boundary.positions;
-      if (geometricEvidence.length > 0) {
-        borderPositions = new Float32Array(boundary.positions.length + geometricEvidence.length);
-        borderPositions.set(boundary.positions);
-        borderPositions.set(geometricEvidence, boundary.positions.length);
-      }
-      if (performanceFrame) {
-        performanceFrame.counters.baseBoundarySegmentCount += boundary.stats.segmentCount;
-        performanceFrame.counters.rawOpenPolylineSegmentCount += countOpenPolylineSegments(capBuild.openPolylines);
-      }
-      writeBorderSegments(root, helper, {
-        backend,
-        material: frameSource.borderMaterial,
-        renderOrder: frameSource.borderRenderOrder,
-        positions: borderPositions,
-      });
-      helper.borderSegments?.matrix.copy(helper.fillMesh.matrix);
-      helper.borderSegments?.updateMatrixWorld(true);
-    }
-    endSectionCapPhase(performanceFrame, 'borderWrite', borderWriteStartedAt);
-
-    for (const [index, frameSource] of frameSources.entries()) {
-      const { record, helper } = frameSource;
-      const buffers = geometryBuffers[index];
-
-      if (!buffers || buffers.positions.length === 0 || buffers.indices.length === 0) {
-        helper.fillMesh.visible = false;
-        if (performanceFrame) {
-          performanceFrame.counters.hiddenFillCount++;
-        }
-      } else {
-        helper.fillMesh.visible = true;
-        if (performanceFrame) {
-          performanceFrame.counters.visibleFillCount++;
-          performanceFrame.counters.baseFillVertexCount += buffers.positions.length / 3;
-          performanceFrame.counters.uploadedByteCount += fillGeometryBufferByteLength(buffers);
-        }
-        applySectionCapStyleToPackedBuffers(buffers, {
-          tintHex: tintBySourceKey.get(record.key) ?? record.baseTintHex,
-          stripeFrequency,
-          stripeWidth,
+    // Every face certified: draw its cap edges, then its caps.
+    for (const { face, faceKey, basis, sources } of cappedFaces) {
+      const borderWriteStartedAt = startSectionCapPhase(performanceFrame);
+      for (const { record, helper, geometryKey, capBuild, capPolygon } of sources) {
+        helper.capBuild = capBuild;
+        helper.geometryKey = geometryKey;
+        // The cut face belongs to the component, so its outline wears the component's emphasis.
+        const outline = resolveSectionContourOutlineEmphasis(
+          resolveSectionSourceEmphasis(record, modelInteractionContext),
+          edgeColor,
+        );
+        const borderMaterial = resolveBorderMaterial(borderMaterialRef, {
+          backend,
+          edgeColor: outline.edgeColor,
+          resolution,
         });
-        const gpuBufferWriteStartedAt = startSectionCapPhase(performanceFrame);
-        writePooledFillIndexedGeometry(helper.fillMesh, buffers);
-        endSectionCapPhase(performanceFrame, 'gpuBufferWrite', gpuBufferWriteStartedAt);
+        assignBorderMaterial(helper, borderMaterial, outline.renderOrder);
+        updateHelperMatrix(helper, capBuild.meshWorldMatrix);
+        // Every boundary ring of the trimmed cap: where the face meets the part, and where it folds into another face.
+        const boundary = buildSectionCapBoundaryPositions({
+          multiPolygon: capPolygon.multiPolygon,
+          basis,
+          meshWorldInverse: capBuild.meshWorldInverse,
+        });
+        const geometricEvidence = buildSectionFaceEvidencePositions({
+          openPolylines: capBuild.openPolylines,
+          meshWorldMatrix: capBuild.meshWorldMatrix,
+          meshWorldInverse: capBuild.meshWorldInverse,
+          face,
+          pieces,
+          basis,
+        });
+        let borderPositions = boundary.positions;
+        if (geometricEvidence.length > 0) {
+          borderPositions = new Float32Array(boundary.positions.length + geometricEvidence.length);
+          borderPositions.set(boundary.positions);
+          borderPositions.set(geometricEvidence, boundary.positions.length);
+        }
+        if (performanceFrame) {
+          performanceFrame.counters.baseBoundarySegmentCount += boundary.stats.segmentCount;
+          performanceFrame.counters.rawOpenPolylineSegmentCount += countOpenPolylineSegments(capBuild.openPolylines);
+          getSectionCapFacePerformance(performanceFrame, faceKey).boundarySegmentCount += boundary.stats.segmentCount;
+        }
+        writeBorderSegments(root, helper, {
+          backend,
+          material: borderMaterial,
+          renderOrder: outline.renderOrder,
+          positions: borderPositions,
+        });
+        helper.borderSegments?.matrix.copy(helper.fillMesh.matrix);
+        helper.borderSegments?.updateMatrixWorld(true);
       }
-
-      const materialUpdateStartedAt = startSectionCapPhase(performanceFrame);
-      updateFillMaterial(helper, { backend, stripeFrequency, stripeWidth });
-      endSectionCapPhase(performanceFrame, 'materialUpdate', materialUpdateStartedAt);
+      endSectionCapFacePhase(performanceFrame, { faceKey, phase: 'borderWrite', startedAt: borderWriteStartedAt });
     }
 
-    const trueCutComponentCount = frameSources.reduce(
-      (count, { capBuild }) => count + capBuild.trueCutComponentCount,
-      0,
-    );
-    const cappedTrueCutComponentCount = frameSources.reduce(
-      (count, { capBuild }) => count + capBuild.cappedTrueCutComponentCount,
-      0,
-    );
+    for (const { faceKey, sources } of cappedFaces) {
+      for (const { record, helper, helperKey } of sources) {
+        const buffers = buffersByHelperKey.get(helperKey);
+        if (!buffers || buffers.positions.length === 0 || buffers.indices.length === 0) {
+          helper.fillMesh.visible = false;
+          if (performanceFrame) {
+            performanceFrame.counters.hiddenFillCount++;
+          }
+        } else {
+          helper.fillMesh.visible = true;
+          if (performanceFrame) {
+            performanceFrame.counters.visibleFillCount++;
+            performanceFrame.counters.baseFillVertexCount += buffers.positions.length / 3;
+            performanceFrame.counters.uploadedByteCount += fillGeometryBufferByteLength(buffers);
+          }
+          applySectionCapStyleToPackedBuffers(buffers, {
+            tintHex: tintByHelperKey.get(helperKey) ?? record.baseTintHex,
+            stripeFrequency,
+            stripeWidth,
+          });
+          const gpuBufferWriteStartedAt = startSectionCapPhase(performanceFrame);
+          writePooledFillIndexedGeometry(helper.fillMesh, buffers);
+          endSectionCapFacePhase(performanceFrame, {
+            faceKey,
+            phase: 'gpuBufferWrite',
+            startedAt: gpuBufferWriteStartedAt,
+          });
+        }
+
+        const materialUpdateStartedAt = startSectionCapPhase(performanceFrame);
+        updateFillMaterial(helper, { backend, stripeFrequency, stripeWidth });
+        endSectionCapFacePhase(performanceFrame, {
+          faceKey,
+          phase: 'materialUpdate',
+          startedAt: materialUpdateStartedAt,
+        });
+      }
+    }
+
+    let trueCutComponentCount = 0;
+    let cappedTrueCutComponentCount = 0;
+    for (const { sources } of cappedFaces) {
+      for (const { capBuild } of sources) {
+        trueCutComponentCount += capBuild.trueCutComponentCount;
+        cappedTrueCutComponentCount += capBuild.cappedTrueCutComponentCount;
+      }
+    }
     commitSectionViewSafeSnapshot(snapshotRef.current, {
       identity: candidateIdentity,
       sourceIdentity,
       kind: trueCutComponentCount > 0 ? 'complete' : 'uncut',
-      plane,
+      cutSet,
     });
     // Recorded after this frame's own worker post or synchronous result, so only a later change re-applies.
     appliedFrameRef.current = {
@@ -1372,11 +1491,14 @@ export function SectionContourFills({
       submittedWorkerRequestKey: submittedWorkerRequestKeyRef.current,
     };
     reportedFailureKeyRef.current = undefined;
+    const extensionSourceCount = sourceRecords.filter(
+      ({ source }) => source.topology.status === 'ready' && source.topology.topology.path === 'extension',
+    ).length;
     root.userData['sectionCapCompleteness'] = {
       status: 'complete',
-      admittedSourceCount: frameSources.length,
-      extensionSourceCount: frameSources.filter(({ capBuild }) => capBuild.topologyPath === 'extension').length,
-      fallbackSourceCount: frameSources.filter(({ capBuild }) => capBuild.topologyPath === 'fallback').length,
+      admittedSourceCount: sourceRecords.length,
+      extensionSourceCount,
+      fallbackSourceCount: sourceRecords.length - extensionSourceCount,
       trueCutComponentCount,
       cappedTrueCutComponentCount,
       unresolvedTrueCutEdgeCount: 0,
@@ -1393,13 +1515,14 @@ export function SectionContourFills({
     }
 
     const staleHelperCleanupStartedAt = startSectionCapPhase(performanceFrame);
-    for (const [key, helper] of helperBySourceKey.current) {
+    for (const [key, helper] of helperByKey.current) {
       if (!seen.has(key)) {
         disposeHelperRecord(root, helper);
-        helperBySourceKey.current.delete(key);
+        helperByKey.current.delete(key);
       }
     }
     endSectionCapPhase(performanceFrame, 'staleHelperCleanup', staleHelperCleanupStartedAt);
+    reportCertification();
     finishSectionCapPerformanceFrame(root, performanceFrame, frameStartedAt);
   }, -1);
 

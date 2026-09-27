@@ -8,28 +8,7 @@ import type { RaycastClipState } from '#components/geometry/graphics/three/utils
 import { resolveSectionViewPlane } from '#components/geometry/graphics/section-view-plane.js';
 import { resolveSectionPieces, toRenderSectionPieces } from '#components/geometry/graphics/section-cuts.js';
 import type { SectionPiece } from '#components/geometry/graphics/section-cuts.js';
-
-export type SectionViewState = {
-  /** The computed clipping plane for the active section view. */
-  readonly plane: THREE.Plane;
-  /** Whether the section view is currently active and has a selected plane. */
-  readonly isActive: boolean;
-  /** The ID of the selected section view plane, if any. */
-  readonly selectedId: string | undefined;
-  /** Whether clipping lines are enabled. */
-  readonly enableLines: boolean;
-  /** Whether the clipping mesh (solid surface) is enabled. */
-  readonly enableMesh: boolean;
-  /**
-   * Striped-diagonal spacing for BVH contour fill materials (derived from zoom-aware grid sizing).
-   * Same plane units as `striped-material` frequency.
-   */
-  readonly stripeFrequency: number;
-  /**
-   * Within-stripe modulation width paired with {@link stripeFrequency}.
-   */
-  readonly stripeWidth: number;
-};
+import type { SectionCutSet } from '#components/geometry/graphics/three/utils/section-view-safe-snapshot.js';
 
 /** The graphics context fields the section clipping plane is resolved from. */
 export type SectionViewPlaneContext = Pick<
@@ -80,82 +59,57 @@ export function resolveSectionViewRaycastClip(
 }
 
 const noSectionPieces: readonly SectionPiece[] = [];
+const noSectionCutSet: SectionCutSet = { cuts: [], pieces: noSectionPieces };
 
 /**
- * The pieces the cut list removes while Section is on, in the render frame; one empty list while it is off. A cut
- * edit gives a new list, and an unrelated context change keeps the same one.
+ * The pieces the clip removes: the committed cut list's, in the render frame, while Section is on, and one empty list
+ * while it is off. They change only when the caps certify another list, so the clip, the caps and raycasts agree.
  */
 export function useSectionPieces(): readonly SectionPiece[] {
+  const renderFrame = useRenderFrame();
+  const isSectionViewActive = useGraphicsSelector((state) => state.context.isSectionViewActive);
+  const committedSectionCuts = useGraphicsSelector((state) => state.context.committedSectionCuts);
+  return useMemo(
+    () =>
+      isSectionViewActive && committedSectionCuts.length > 0
+        ? toRenderSectionPieces(resolveSectionPieces(committedSectionCuts), renderFrame)
+        : noSectionPieces,
+    [committedSectionCuts, isSectionViewActive, renderFrame],
+  );
+}
+
+/**
+ * The live cut list and its pieces in the render frame, for the caps to certify, while Section is on; one empty set
+ * while it is off. A cut edit gives a new set, and an unrelated context change keeps the same one.
+ */
+export function useLiveSectionCutSet(): SectionCutSet {
   const renderFrame = useRenderFrame();
   const isSectionViewActive = useGraphicsSelector((state) => state.context.isSectionViewActive);
   const sectionCuts = useGraphicsSelector((state) => state.context.sectionCuts);
   return useMemo(
     () =>
-      isSectionViewActive ? toRenderSectionPieces(resolveSectionPieces(sectionCuts), renderFrame) : noSectionPieces,
+      isSectionViewActive
+        ? { cuts: sectionCuts, pieces: toRenderSectionPieces(resolveSectionPieces(sectionCuts), renderFrame) }
+        : noSectionCutSet,
     [isSectionViewActive, renderFrame, sectionCuts],
   );
 }
 
 /**
- * Whether a section cut is shown and whether it cuts meshes, without the plane: a caller re-renders only
- * when these flags change, not on every drag step.
+ * Whether Section is on, so the model prepares the topology its caps are sliced from: a caller re-renders only when
+ * Section turns on or off, not on a cut edit. Every shown cut cuts meshes, so `enableMesh` equals `isActive`.
  */
-export function useSectionViewFlags(): Pick<SectionViewState, 'isActive' | 'enableMesh'> {
-  const isActive = useGraphicsSelector((state) =>
-    Boolean(state.context.isSectionViewActive && state.context.selectedSectionViewId),
-  );
-  const enableMesh = useGraphicsSelector((state) => state.context.enableClippingMesh);
-  return { isActive, enableMesh };
+export function useSectionViewFlags(): Readonly<{ isActive: boolean; enableMesh: boolean }> {
+  const isActive = useGraphicsSelector((state) => state.context.isSectionViewActive);
+  return { isActive, enableMesh: isActive };
 }
 
-/**
- * Reads section view state from the graphics context and computes the derived THREE.Plane
- * plus stripe parameters for tinted contour-cap materials.
- */
-export function useSectionView(): SectionViewState {
+/** Striped-diagonal spacing and stripe width of the cap material, in render units, from the zoom-aware grid. */
+export function useSectionStripes(): Readonly<{ stripeFrequency: number; stripeWidth: number }> {
   const renderFrame = useRenderFrame();
-  const isSectionViewActive = useGraphicsSelector((state) => state.context.isSectionViewActive);
-  const selectedSectionViewId = useGraphicsSelector((state) => state.context.selectedSectionViewId);
-  const sectionViewRotation = useGraphicsSelector((state) => state.context.sectionViewRotation);
-  const sectionViewDirection = useGraphicsSelector((state) => state.context.sectionViewDirection);
-  const sectionViewPivot = useGraphicsSelector((state) => state.context.sectionViewPivot);
-  const availableSectionViews = useGraphicsSelector((state) => state.context.availableSectionViews);
-  const enableClippingLines = useGraphicsSelector((state) => state.context.enableClippingLines);
-  const enableClippingMesh = useGraphicsSelector((state) => state.context.enableClippingMesh);
-  const gridSizesComputed = useGraphicsSelector((state) => state.context.gridSizesComputed);
-
-  // A new plane per step is the step itself: its consumers key it by value or read it once per commit.
-  const plane = useMemo(
-    () =>
-      resolveSectionViewRenderPlane(
-        { selectedSectionViewId, availableSectionViews, sectionViewPivot, sectionViewRotation, sectionViewDirection },
-        renderFrame,
-      ),
-    [
-      selectedSectionViewId,
-      sectionViewPivot,
-      sectionViewRotation,
-      sectionViewDirection,
-      availableSectionViews,
-      renderFrame,
-    ],
-  );
-
-  const { stripeFrequency, stripeWidth } = useMemo(() => {
-    const stripeSpacing = gridSizesComputed.largeSize / renderFrame.metersPerRenderUnit / 10;
-    return {
-      stripeFrequency: stripeSpacing,
-      stripeWidth: stripeSpacing * 0.2,
-    };
-  }, [gridSizesComputed.largeSize, renderFrame.metersPerRenderUnit]);
-
-  return {
-    plane,
-    isActive: Boolean(isSectionViewActive && selectedSectionViewId),
-    selectedId: selectedSectionViewId,
-    enableLines: enableClippingLines,
-    enableMesh: enableClippingMesh,
-    stripeFrequency,
-    stripeWidth,
-  };
+  const largeGridSize = useGraphicsSelector((state) => state.context.gridSizesComputed.largeSize);
+  return useMemo(() => {
+    const stripeSpacing = largeGridSize / renderFrame.metersPerRenderUnit / 10;
+    return { stripeFrequency: stripeSpacing, stripeWidth: stripeSpacing * 0.2 };
+  }, [largeGridSize, renderFrame.metersPerRenderUnit]);
 }

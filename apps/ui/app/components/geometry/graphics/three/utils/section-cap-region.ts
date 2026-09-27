@@ -1,6 +1,19 @@
 import * as THREE from 'three';
+import { resolveSectionFaceRegion, resolveSectionFootprint } from '#components/geometry/graphics/section-cuts.js';
+import type {
+  SectionFace,
+  SectionHalfSpace,
+  SectionPiece,
+  SectionPoint2,
+  SectionRect,
+} from '#components/geometry/graphics/section-cuts.js';
 import { buildPlaneBasis } from '#components/geometry/graphics/three/utils/earcut-contour.js';
-import type { ClosedContour } from '#components/geometry/graphics/three/utils/plane-mesh-contour.js';
+import { buildSectionContourBorderPositions } from '#components/geometry/graphics/three/utils/section-contour-border.js';
+import type { ClosedContour, OpenPolyline } from '#components/geometry/graphics/three/utils/plane-mesh-contour.js';
+import type {
+  SectionCapBooleanOperations,
+  SectionCapBooleanResult,
+} from '#components/geometry/graphics/three/utils/section-cap-polygon-boolean-backend.js';
 import type {
   CapMultiPolygon,
   CapPoint2,
@@ -498,4 +511,158 @@ export const buildSectionCapPolygon = (options: BuildSectionCapPolygonOptions): 
     sanitizedPlanePolygon: multiPolygon,
     diagnostics,
   };
+};
+
+// ---------------------------------------------------------------------------
+// Cut faces: what each face's cap shows among the other cuts
+// ---------------------------------------------------------------------------
+
+/** A face's kept-side plane: the three.js plane its sources are sliced through and its cap basis is built on. */
+export const sectionFaceWorldPlane = (face: SectionFace, target = new THREE.Plane()): THREE.Plane => {
+  const [x, y, z] = face.plane.normal;
+  target.normal.set(-x, -y, -z);
+  target.constant = face.plane.constant;
+  return target;
+};
+
+/** The square, in a face's plane coordinates, that holds every point of its caps: normalized cap points lie within ±0.5. */
+const resolveFaceCapRect = (basis: SectionCutPlaneBasis): SectionRect => {
+  const { x: offsetU, y: offsetV } = basis.normalizationOffset;
+  const halfSize = 1 / basis.normalizationScale;
+  return { min: [offsetU - halfSize, offsetV - halfSize], max: [offsetU + halfSize, offsetV + halfSize] };
+};
+
+/** How far into a face's kept side the other cuts are tested: a millionth of the cap square, as footprints are. */
+const resolveFaceEpsilon = (rect: SectionRect): number => 1e-6 * (rect.max[0] - rect.min[0]);
+
+type TrimSectionCapPolygonOptions = Readonly<{
+  /** The face's cap on one source, in the normalized coordinates of `basis`. */
+  multiPolygon: CapMultiPolygon;
+  /** The face's cap basis, built on {@link sectionFaceWorldPlane}. */
+  basis: SectionCutPlaneBasis;
+  face: SectionFace;
+  /** Every piece of the cut set, in cut order. The face's own cut never trims it. */
+  pieces: readonly SectionPiece[];
+  booleanOperations: SectionCapBooleanOperations;
+}>;
+
+/**
+ * The part of a face's cap that the face shows: inside the face's extent and outside every other cut's footprint, so
+ * caps meet at the folds between faces and never cover one another. Of two coincident faces removing the same side the
+ * earlier cut draws the cap, and coincident faces removing opposite sides cancel. A face nothing trims keeps its cap.
+ */
+export const trimSectionCapPolygon = ({
+  multiPolygon,
+  basis,
+  face,
+  pieces,
+  booleanOperations,
+}: TrimSectionCapPolygonOptions): SectionCapBooleanResult => {
+  const { x: offsetU, y: offsetV } = basis.normalizationOffset;
+  const scale = basis.normalizationScale;
+  const rect = resolveFaceCapRect(basis);
+  const eps = resolveFaceEpsilon(rect);
+  const toCapPolygon = (polygon: readonly SectionPoint2[]): CapMultiPolygon => [
+    [polygon.map(([u, v]): CapPoint2 => [(u - offsetU) * scale, (v - offsetV) * scale])],
+  ];
+  const ownIndex = pieces.findIndex((piece) => piece.cutId === face.cutId);
+  const footprints = pieces.flatMap((piece, index) => {
+    if (piece.cutId === face.cutId) {
+      return [];
+    }
+    const footprint = resolveSectionFootprint({ face, piece, rect, shouldClaimCoplanar: index < ownIndex, eps });
+    return footprint.length === 0 ? [] : [toCapPolygon(footprint)];
+  });
+
+  let result: SectionCapBooleanResult = { multiPolygon, diagnostics: [] };
+  if (multiPolygon.length > 0 && face.bounds.length > 0) {
+    const region = resolveSectionFaceRegion({ face, rect });
+    result =
+      region.length === 0
+        ? { multiPolygon: [], diagnostics: [] }
+        : booleanOperations.intersectCapPolygons(multiPolygon, toCapPolygon(region));
+  }
+  if (result.multiPolygon.length > 0 && footprints.length > 0) {
+    const difference = booleanOperations.differenceCapPolygon(result.multiPolygon, footprints);
+    result = { multiPolygon: difference.multiPolygon, diagnostics: [...result.diagnostics, ...difference.diagnostics] };
+  }
+  return result;
+};
+
+const _segmentStart = /* @__PURE__ */ new THREE.Vector3();
+const _segmentEnd = /* @__PURE__ */ new THREE.Vector3();
+const _segmentMiddle = /* @__PURE__ */ new THREE.Vector3();
+const _segmentPoint = /* @__PURE__ */ new THREE.Vector3();
+
+/** How far `point` lies inside the half-space: positive inside. */
+const depthIn = (point: THREE.Vector3, { normal, constant }: SectionHalfSpace): number =>
+  point.x * normal[0] + point.y * normal[1] + point.z * normal[2] - constant;
+
+type BuildSectionFaceEvidencePositionsOptions = Readonly<{
+  /** Slice edges lying in the face's plane, in the local space of their mesh. */
+  openPolylines: readonly OpenPolyline[];
+  meshWorldMatrix: THREE.Matrix4;
+  meshWorldInverse: THREE.Matrix4;
+  face: SectionFace;
+  pieces: readonly SectionPiece[];
+  /** The face's cap basis; the other cuts are tested as far into its kept side as its caps are trimmed. */
+  basis: SectionCutPlaneBasis;
+}>;
+
+/**
+ * Segment end pairs (mesh-local) for the slice edges that lie in a face's plane, keeping only the parts the face shows:
+ * inside its extent and outside every other cut's pieces, tested `eps` into its kept side, as its cap is trimmed.
+ */
+export const buildSectionFaceEvidencePositions = ({
+  openPolylines,
+  meshWorldMatrix,
+  meshWorldInverse,
+  face,
+  pieces,
+  basis,
+}: BuildSectionFaceEvidencePositionsOptions): Float32Array => {
+  const others = pieces.filter((piece) => piece.cutId !== face.cutId);
+  const planes = [...face.bounds, ...others.flatMap((piece) => piece.halfSpaces)];
+  if (planes.length === 0) {
+    return buildSectionContourBorderPositions({ closedContours: [], openPolylines });
+  }
+
+  const eps = resolveFaceEpsilon(resolveFaceCapRect(basis));
+  const [x, y, z] = face.plane.normal;
+  const positions: number[] = [];
+  const pushPoint = (t: number): void => {
+    _segmentPoint.lerpVectors(_segmentStart, _segmentEnd, t).applyMatrix4(meshWorldInverse);
+    positions.push(_segmentPoint.x, _segmentPoint.y, _segmentPoint.z);
+  };
+  for (const polyline of openPolylines) {
+    for (let index = 0; index + 1 < polyline.length; index++) {
+      _segmentStart.copy(polyline[index]!).applyMatrix4(meshWorldMatrix);
+      _segmentEnd.copy(polyline[index + 1]!).applyMatrix4(meshWorldMatrix);
+      // Split where the segment crosses a plane bounding what the face shows; keep each part whose middle it shows.
+      const splits = [0, 1];
+      for (const halfSpace of planes) {
+        const atStart = depthIn(_segmentStart, halfSpace);
+        const atEnd = depthIn(_segmentEnd, halfSpace);
+        if (atStart > 0 !== atEnd > 0) {
+          splits.push(atStart / (atStart - atEnd));
+        }
+      }
+      splits.sort((left, right) => left - right);
+      for (let split = 0; split + 1 < splits.length; split++) {
+        const from = splits[split]!;
+        const to = splits[split + 1]!;
+        _segmentMiddle.lerpVectors(_segmentStart, _segmentEnd, (from + to) / 2);
+        _segmentMiddle.set(_segmentMiddle.x - x * eps, _segmentMiddle.y - y * eps, _segmentMiddle.z - z * eps);
+        const isShown =
+          to - from > 1e-9 &&
+          face.bounds.every((bound) => depthIn(_segmentMiddle, bound) > 0) &&
+          !others.some((piece) => piece.halfSpaces.every((halfSpace) => depthIn(_segmentMiddle, halfSpace) > 0));
+        if (isShown) {
+          pushPoint(from);
+          pushPoint(to);
+        }
+      }
+    }
+  }
+  return new Float32Array(positions);
 };

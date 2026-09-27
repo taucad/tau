@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { rootedFilePathSchema } from '#schemas/rooted-path.schema.js';
+import { kernelIssueSchema } from '#schemas/tools/issue.schema.js';
 
 /*
  * The print tools a CAD agent is offered. The machine host owns their behavior
@@ -48,7 +49,12 @@ const presetNameSchema = z.string().min(1).max(256);
 const printProfilesSchema = z.strictObject({
   printer: presetNameSchema.optional(),
   process: presetNameSchema.optional(),
-  filaments: z.array(presetNameSchema).min(1).max(16).optional().describe('One per loaded slot used, in slot order.'),
+  filaments: z
+    .array(presetNameSchema)
+    .min(1)
+    .max(16)
+    .optional()
+    .describe('One per filament the model prints, filament 1 first; a one-colour model takes one.'),
 });
 
 /**
@@ -198,6 +204,12 @@ export const requestPrintOutputSchema = z.looseObject({
     .describe('How the person answered, when the call waited for them.'),
   nextStep: nextStepSchema,
   printIntent: printIntentReportSchema,
+  warnings: z
+    .array(kernelIssueSchema)
+    .optional()
+    .describe(
+      'What the slice could not honour although it was made, such as a multi-colour model sliced in one colour; tell the person.',
+    ),
 });
 
 /** @public */

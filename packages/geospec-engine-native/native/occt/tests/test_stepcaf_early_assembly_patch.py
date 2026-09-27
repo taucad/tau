@@ -1,4 +1,4 @@
-"""Check the pinned STEPCAF edit against the actual source and B2a patch."""
+"""Check the pinned STEPCAF edit against the actual source."""
 
 import hashlib
 from pathlib import Path
@@ -11,8 +11,6 @@ ROOT = Path(__file__).resolve().parents[5]
 OCCT = ROOT / 'packages/geospec-engine-native/native/occt'
 SOURCE = ROOT / 'node_modules/.cache/geospec-engine-native/sources/occt'
 STEPCAF = Path('src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx')
-SHAPE_FIX = Path('src/ModelingAlgorithms/TKShHealing/ShapeFix/ShapeFix_IntersectionTool.cxx')
-B2A = OCCT / 'shape-fix-outer-edge.patch'
 B2B = OCCT / 'stepcaf-early-assembly.patch'
 BLOCK = '''    if (!myMap.IsBound(aRootShape))
     {
@@ -46,24 +44,24 @@ def expansion(text):
 
 def main():
     assert sha256(SOURCE / STEPCAF) == '71ca22ea347c61342293bf3ff05c645c90e3d3276c5fe28a1c1ed2a3c0a66465'
-    assert sha256(B2A) == 'e01565c2c9569c4dd8e2f849ac98987f4e0e74d142035c85c3ba1e1a97cb4279'
     assert sha256(B2B) == '0c0f128fcdf169c4cbf478bf6017e123bf4e246d7fd4889c4a64446dc740a491'
     builder = (OCCT / 'build-occt.sh').read_text()
-    assert builder.index('diff -qr "${verification_staging}" "${GEOSPEC_OCCT_SOURCE}"') < builder.index('patch -t -F 0 -p1 -d "${build_source}" -i "${patch_file}"')
-    assert builder.index('patch -t -F 0 -p1 -d "${build_source}" -i "${patch_file}"') < builder.index('patch -t -F 0 -p1 -d "${build_source}" -i "${stepcaf_patch_file}"')
+    # B2b is the first edit: it applies to the freshly extracted, verified source.
+    assert builder.index('diff -qr "${verification_staging}" "${GEOSPEC_OCCT_SOURCE}"') \
+        < builder.index('tar -xzf "${archive}" --strip-components=1 -C "${build_source}"') \
+        < builder.index('patch -t -F 0 -p1 -d "${build_source}" -i "${stepcaf_patch_file}"')
+    assert builder.index('patch -t -F 0 -p1 -d "${build_source}"') \
+        == builder.index('patch -t -F 0 -p1 -d "${build_source}" -i "${stepcaf_patch_file}"')
     assert '-DGEOSPEC_OCCT_STEPCAF_PATCH_SHA256:STRING="${expected_stepcaf_patch_hash}"' in builder
     assert 'cmake -S "${build_source}"' in builder
 
     with tempfile.TemporaryDirectory() as directory:
         temp = Path(directory)
-        for rel in (STEPCAF, SHAPE_FIX):
-            target = temp / rel
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes((SOURCE / rel).read_bytes())
-        for patch in (B2A, B2B):
-            subprocess.run(['patch', '-t', '-F', '0', '-p1', '-d', directory, '-i', str(patch)], check=True)
+        target = temp / STEPCAF
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes((SOURCE / STEPCAF).read_bytes())
+        subprocess.run(['patch', '-t', '-F', '0', '-p1', '-d', directory, '-i', str(B2B)], check=True)
 
-        assert sha256(temp / SHAPE_FIX) == '5b259d58f50501568cba43b931afa67f8ecf531d1ecfe93d559e294f8d33f8ba'
         assert sha256(temp / STEPCAF) == '778a56e3a4f6b0d479116fd7dd885119d5584bfb932b476f170c429a02a4d8f6'
         before = expansion((SOURCE / STEPCAF).read_text())
         after = expansion((temp / STEPCAF).read_text())

@@ -391,11 +391,6 @@ def prefix_contract(kind, paths, env, context, producing_builder=None):
         options = RECIPE['mixedOcctOptions'] + [
             f'-DCMAKE_TOOLCHAIN_FILE={SDK}/emscripten/cmake/Modules/Platform/Emscripten.cmake',
             f'-DCMAKE_CROSSCOMPILING_EMULATOR={paths["node"]}',
-            f'-D3RDPARTY_RAPIDJSON_DIR={CACHE}/sources/rapidjson',
-            f'-D3RDPARTY_RAPIDJSON_INCLUDE_DIR={CACHE}/sources/rapidjson/include',
-            f'-D3RDPARTY_FREETYPE_DIR={CACHE}/sources/freetype',
-            f'-D3RDPARTY_FREETYPE_INCLUDE_DIR_freetype2={CACHE}/sources/freetype/include',
-            f'-D3RDPARTY_FREETYPE_INCLUDE_DIR_ft2build={CACHE}/sources/freetype/include',
         ]
     builder = PACKAGE / 'native/occt/build-occt.sh'
     selected_environment = {

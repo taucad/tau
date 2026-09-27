@@ -379,11 +379,12 @@ def source_files():
 
 def parse_cmake_cache(path):
     keys = {
-        'BUILD_ADDITIONAL_TOOLKITS', 'BUILD_LIBRARY_TYPE', 'CMAKE_BUILD_TYPE',
+        'BUILD_ADDITIONAL_TOOLKITS', 'BUILD_LIBRARY_TYPE', 'BUILD_OPT_PROFILE',
+        'BUILD_RELEASE_DISABLE_EXCEPTIONS', 'BUILD_USE_PCH', 'CMAKE_BUILD_TYPE',
         'CMAKE_CXX_COMPILER', 'CMAKE_CXX_FLAGS', 'CMAKE_CXX_FLAGS_RELEASE',
         'CMAKE_C_COMPILER', 'CMAKE_C_FLAGS', 'CMAKE_C_FLAGS_RELEASE',
         'CMAKE_OSX_DEPLOYMENT_TARGET',
-        'USE_FREETYPE', 'USE_GIT_HASH', 'USE_TBB', 'USE_TCL', 'USE_XLIB',
+        'USE_FREETYPE', 'USE_GIT_HASH', 'USE_MMGR_TYPE', 'USE_TBB', 'USE_TCL', 'USE_XLIB',
     }
     selected = {}
     for line in Path(path).read_text().splitlines():
@@ -392,6 +393,10 @@ def parse_cmake_cache(path):
             selected[match.group(1)] = match.group(2)
     require(selected.get('CMAKE_BUILD_TYPE') == 'Release', 'OCCT prefix is not Release')
     require(selected.get('BUILD_LIBRARY_TYPE') == 'Static', 'OCCT prefix is not static')
+    # GeoSpec semantics rely on these; the recipe pins them instead of trusting OCCT defaults.
+    for key, value in [('USE_MMGR_TYPE', 'NATIVE'), ('BUILD_RELEASE_DISABLE_EXCEPTIONS', 'ON'),
+                       ('BUILD_OPT_PROFILE', 'Default'), ('BUILD_USE_PCH', 'OFF'), ('USE_TBB', 'OFF')]:
+        require(selected.get(key) == value, f'OCCT prefix needs {key}={value}')
     return selected
 
 
@@ -537,6 +542,7 @@ def native_producer_recipe(napi_identity):
   GEOSPEC_PRODUCER_ROUTE=nx-build-node-release-v1 \\
   GEOSPEC_PRODUCER_CARGO_CWD="$PWD" \\
   GEOSPEC_PRODUCER_MANIFEST="$PWD/bindings/node/Cargo.toml" \\
+  RUSTFLAGS="--remap-path-prefix=$(cd "$GEOSPEC_SOURCE_ROOT" && pwd -P)=tau --remap-path-prefix=${{CARGO_HOME:-$HOME/.cargo}}=cargo" \\
   "$GEOSPEC_RUSTUP" run 1.88 "$GEOSPEC_NODE" \\
   "$GEOSPEC_WRAPPER_ROOT/node_modules/@napi-rs/cli/dist/cli.js" build \\
   --manifest-path bindings/node/Cargo.toml --target aarch64-apple-darwin \\
@@ -545,27 +551,30 @@ def native_producer_recipe(napi_identity):
   -- --locked && \\
   test -s bindings/node/generated/index.js && \\
   test -s bindings/node/generated/index.d.ts && \\
-  test -s bindings/node/generated/geospec-engine-native.darwin-arm64.node)''',
+  test -s bindings/node/generated/geospec-engine-native.darwin-arm64.node && \\
+  strip -x bindings/node/generated/geospec-engine-native.darwin-arm64.node)''',
         'python313': f'''(cd "$GEOSPEC_SOURCE_ROOT" && \\
   MACOSX_DEPLOYMENT_TARGET={shlex.quote(deployment_target)} \\
   GEOSPEC_OCCT_PREFIX="$GEOSPEC_OCCT_PREFIX" \\
   GEOSPEC_PRODUCER_ROUTE=nx-build-python-release-v1 \\
   GEOSPEC_PRODUCER_CARGO_CWD="$PWD" \\
   GEOSPEC_PRODUCER_MANIFEST="$PWD/packages/geospec-engine-native/bindings/python/Cargo.toml" \\
+  RUSTFLAGS="--remap-path-prefix=$(pwd -P)=tau --remap-path-prefix=${{CARGO_HOME:-$HOME/.cargo}}=cargo" \\
   "$GEOSPEC_RUSTUP" run 1.88 "$GEOSPEC_MATURIN313" build \\
   --manifest-path packages/geospec-engine-native/bindings/python/Cargo.toml \\
   --interpreter "$GEOSPEC_PYTHON313" --out "$GEOSPEC_BUILD_ROOT/python313-wheels" \\
-  --target-dir "$GEOSPEC_BUILD_ROOT/python313-target" --release --locked)''',
+  --target-dir "$GEOSPEC_BUILD_ROOT/python313-target" --release --locked --strip)''',
         'python314': f'''(cd "$GEOSPEC_SOURCE_ROOT" && \\
   MACOSX_DEPLOYMENT_TARGET={shlex.quote(deployment_target)} \\
   GEOSPEC_OCCT_PREFIX="$GEOSPEC_OCCT_PREFIX" \\
   GEOSPEC_PRODUCER_ROUTE=nx-build-python314-release-v1 \\
   GEOSPEC_PRODUCER_CARGO_CWD="$PWD" \\
   GEOSPEC_PRODUCER_MANIFEST="$PWD/packages/geospec-engine-native/bindings/python/Cargo.toml" \\
+  RUSTFLAGS="--remap-path-prefix=$(pwd -P)=tau --remap-path-prefix=${{CARGO_HOME:-$HOME/.cargo}}=cargo" \\
   "$GEOSPEC_RUSTUP" run 1.88 "$GEOSPEC_MATURIN314" build \\
   --manifest-path packages/geospec-engine-native/bindings/python/Cargo.toml \\
   --interpreter "$GEOSPEC_PYTHON314" --out "$GEOSPEC_BUILD_ROOT/python314-wheels" \\
-  --target-dir "$GEOSPEC_BUILD_ROOT/python314-target" --release --locked)''',
+  --target-dir "$GEOSPEC_BUILD_ROOT/python314-target" --release --locked --strip)''',
     }
     archive_python = Path(sys.executable).resolve()
     git = selected_executable('git')

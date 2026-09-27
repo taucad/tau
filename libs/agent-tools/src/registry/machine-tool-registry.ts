@@ -324,6 +324,65 @@ const approvalPrompt = (request: PrintRequest, machine: MachineDirectoryEntry): 
   return `Print ${request.summary.fileName} on ${machine.descriptor.name}?${facts.length === 0 ? '' : ` ${facts.join(', ')}.`}`;
 };
 
+/**
+ * What the agent tells the person and does next, for a request awaiting the person or settled:
+ * the start outcome in words, so an unconfirmed start is never reported as submitted or started.
+ *
+ * @param request - The request as the ledger recorded it.
+ * @returns `{ nextStep }`, or nothing while the host is still preparing, uploading or starting.
+ */
+const nextStepOf = (request: PrintRequest): Readonly<{ nextStep?: string }> => {
+  const { requestId } = request;
+  const { fileName } = request.summary;
+  switch (request.state) {
+    case 'awaiting-approval': {
+      return {
+        nextStep: `Waiting for a person to accept print request ${requestId} in Tau's Print pane; accepting uploads the file and starts the print. Do not retry; call get_print_request to observe it.`,
+      };
+    }
+    case 'started': {
+      return {
+        nextStep: `The printer confirmed the start of ${fileName} and the print is running. Observe it with get_machine or get_print_request.`,
+      };
+    }
+    case 'unknown': {
+      return {
+        nextStep: `The printer did not confirm the start of ${fileName}, so whether it is printing is unknown. Tell the person that, and to check the printer or Reconcile the request in Tau's Print pane. Do not retry or start another print.`,
+      };
+    }
+    case 'rejected':
+    case 'failed': {
+      const failure = request.failure ?? (request.receipt?.status === 'rejected' ? request.receipt : undefined);
+      const outcome =
+        request.state === 'rejected'
+          ? `The printer rejected the start of ${fileName}`
+          : `Print request ${requestId} for ${fileName} failed`;
+      return {
+        nextStep:
+          failure === undefined
+            ? `${outcome}. Tell the person it failed.`
+            : `${outcome}. Tell the person it failed and why, with any fix its message names: "${failure.message}"`,
+      };
+    }
+    case 'denied': {
+      return {
+        nextStep: `The person declined print request ${requestId}; that is their decision. Do not retry it unless they ask.`,
+      };
+    }
+    case 'withdrawn': {
+      return {
+        nextStep: `Print request ${requestId} was withdrawn before it started. Do not retry it unless the person asks.`,
+      };
+    }
+    case 'preparing':
+    case 'approved':
+    case 'uploading':
+    case 'starting': {
+      return {};
+    }
+  }
+};
+
 const findRequest = async (client: MachineClient, requestId: string, signal: AbortSignal): Promise<PrintRequest> => {
   const requests = await client.listPrintRequests({ signal });
   const found = requests.find((request) => request.requestId === requestId);
@@ -354,7 +413,7 @@ const requesterOf = (invocation: HostToolInvocation): PrintRequester =>
  * @param options - The planner that slices for it and the project filesystem.
  * @param invocation - The tool call, with its run approval when the host has one.
  * @returns The ledger's record, plus how the person answered when this call
- *   waited and what the project's print intent contributed.
+ *   waited, the next step in words, and what the project's print intent contributed.
  */
 const requestPrint = async (
   client: MachineClient,
@@ -396,18 +455,10 @@ const requestPrint = async (
     requestId,
     signal,
   });
-  if (request.state !== 'awaiting-approval') {
-    /* Preflight refused, or the retry found a request already past its
-     * approval: the record says which. */
-    return asJson({ request, machineName, ...intent });
-  }
-  if (invocation.approve === undefined) {
-    return asJson({
-      request,
-      machineName,
-      nextStep: `Waiting for a person to accept print request ${requestId} in Tau's Print pane; accepting uploads the file and starts the print. Do not retry; call get_print_request to observe it.`,
-      ...intent,
-    });
+  if (request.state !== 'awaiting-approval' || invocation.approve === undefined) {
+    /* Preflight refused, the retry found a request already past its approval,
+     * or no person can answer here: the record and its next step say which. */
+    return asJson({ request, machineName, ...nextStepOf(request), ...intent });
   }
   const resolution = await invocation.approve({
     prompt: approvalPrompt(request, machine),
@@ -429,7 +480,7 @@ const requestPrint = async (
       : resolution.outcome === 'denied'
         ? await client.resolvePrintRequest({ requestId, decision: 'deny', resolvedBy })
         : await client.withdrawPrintRequest({ requestId, resolvedBy });
-  return asJson({ request: settled, machineName, approval: resolution.outcome, ...intent });
+  return asJson({ request: settled, machineName, approval: resolution.outcome, ...nextStepOf(settled), ...intent });
 };
 
 /**
@@ -558,7 +609,8 @@ const invokeMachine = async (
     }
     case 'get_print_request': {
       const { requestId } = inputs.get_print_request.parse(input);
-      return asJson({ request: await findRequest(client, requestId, signal) });
+      const request = await findRequest(client, requestId, signal);
+      return asJson({ request, ...nextStepOf(request) });
     }
     case 'list_print_requests': {
       const parsed = inputs.list_print_requests.parse(input);

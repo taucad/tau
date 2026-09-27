@@ -9,10 +9,8 @@ import { disclosureMotion } from '#components/revisions/revision-actions.js';
  * The Parameters pane's group card: a header row with the title, a trailing status such as a count and a chevron
  * that turns; opening it adds the border and `bg-background`, and its body slides open.
  *
- * Classes follow `ObjectFieldTemplate` in `rjsf-theme.tsx`.
+ * `ObjectFieldTemplate` in `rjsf-theme.tsx` renders every Parameters group with it; the Kinematics pane reuses it.
  */
-// ponytail: the Parameters template still inlines these classes; it adopts this card once the parameter
-// performance close-out (which edits rjsf-theme.tsx) has merged.
 export function ParameterGroupCard({
   title,
   searchTerm = '',
@@ -23,6 +21,7 @@ export function ParameterGroupCard({
   triggerLabel,
   headerProps,
   headerClassName,
+  headerActions,
   children,
 }: {
   readonly title: string;
@@ -38,6 +37,8 @@ export function ParameterGroupCard({
   readonly triggerLabel?: string;
   readonly headerProps?: Omit<ComponentProps<'div'>, 'className' | 'children'>;
   readonly headerClassName?: string;
+  /** Controls beside the trigger, outside it, such as an array item's remove button. */
+  readonly headerActions?: ReactNode;
   readonly children: ReactNode;
 }): React.JSX.Element {
   return (
@@ -76,10 +77,11 @@ export function ParameterGroupCard({
             className='size-4 shrink-0 text-muted-foreground transition-transform duration-150 ease-out group-data-[state=open]/collapsible:rotate-180 motion-reduce:transition-none'
           />
         </CollapsibleTrigger>
+        {headerActions}
       </div>
       <CollapsibleContent data-slot='parameter-group-content' className={disclosureMotion}>
         {/* Padding sits inside the animated content, so the height animation starts without a jump. */}
-        <div className='border-t border-border/70 py-1'>{children}</div>
+        <div className='border-t border-border/70 py-1 [&>.field-group]:mx-1'>{children}</div>
       </CollapsibleContent>
     </Collapsible>
   );

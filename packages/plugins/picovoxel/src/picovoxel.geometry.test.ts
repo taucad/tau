@@ -8,8 +8,9 @@ import type { PicovoxelNativeHandle, PicovoxelShapeSnapshot } from '#picovoxel.g
 
 /**
  * The de-indexed render path this module replaced (codex/picovoxel a1a43ec98,
- * `picovoxel.geometry.ts:26-92`), kept verbatim as the byte oracle: per-vertex area-weighted
- * normals, then every triangle corner expanded, then the element-wise transforms.
+ * `picovoxel.geometry.ts:26-92`), kept as the byte oracle: per-vertex area-weighted normals, then
+ * every triangle corner expanded, then the element-wise transforms. Normalization uses `Math.sqrt`
+ * like the kernel since DP18 (`Math.hypot` is implementation-approximated).
  */
 const legacyExpandedAttributes = (
   shape: PicovoxelShapeSnapshot,
@@ -37,7 +38,9 @@ const legacyExpandedAttributes = (
     }
   }
   for (let offset = 0; offset < normals.length; offset += 3) {
-    const length = Math.hypot(normals[offset]!, normals[offset + 1]!, normals[offset + 2]!);
+    const [x, y, z] = [normals[offset]!, normals[offset + 1]!, normals[offset + 2]!];
+    // oxlint-disable-next-line unicorn/prefer-modern-math-apis -- DP18: Math.hypot is implementation-approximated, Math.sqrt is correctly rounded.
+    const length = Math.sqrt(x * x + y * y + z * z);
     if (length > 0) {
       normals[offset]! /= length;
       normals[offset + 1]! /= length;

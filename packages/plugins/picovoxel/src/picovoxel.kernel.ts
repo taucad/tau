@@ -923,6 +923,7 @@ export const picovoxelKernel = defineKernel({
       // D21: one serial rebuild, surfaced as a warning on the result; never a silent fallback.
       const warning = serialRetryIssue(error.code);
       runtime.logger.warn(warning.message, { data: { picoCode: error.code } });
+      buildCalls = 0;
       try {
         return { nativeHandle: await build('serial'), issues: [warning] };
       } catch (retryError) {

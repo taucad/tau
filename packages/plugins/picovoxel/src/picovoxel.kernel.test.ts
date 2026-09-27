@@ -927,6 +927,30 @@ describe('picovoxel kernel', () => {
       await definition.cleanup!(context);
     }, 60_000);
 
+    it('should count only the calls of the serial retry when a superseded retry stops', async () => {
+      const picovoxelModule = await import('picovoxel');
+      const runtime = createRuntime({
+        default: (pico: Pico): Voxels => {
+          const sphere = pico.createVoxels({ shape: 'sphere', radius: 4 });
+          if (pico.module.PThread) {
+            throw new picovoxelModule.PicoError('PICO_OUT_OF_MEMORY', 'Voxels_hOffset aborted inside WebAssembly.');
+          }
+          return sphere.subtract(pico.createVoxels({ shape: 'sphere', radius: 1 }));
+        },
+      });
+      const context = await initialize({ wasm: 'multi' }, runtime);
+      // Check 1 is the multi attempt's call; checks 2 and 3 are the retry's, and check 3 aborts.
+      abort.after = 2;
+
+      const aborted = await definition
+        .createGeometry({ entryPath: 'main.ts', parameters: {}, options: { lane: 'fast' } }, runtime, context)
+        .catch((error: unknown) => error);
+
+      expect(aborted).toBeInstanceOf(RenderAbortedError);
+      expect(runtime.logger.debug).toHaveBeenCalledWith('PicoVoxel stopped a superseded build after 1 PicoVoxel calls');
+      await definition.cleanup!(context);
+    }, 60_000);
+
     it('should rebuild on the serial build when the multi build cannot start', async () => {
       sessions.failStart = 'multi';
       const { context, result } = await createGeometry({ module: sphere(), wasm: 'multi' });

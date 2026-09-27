@@ -14,9 +14,10 @@ import {
   projectAgentHostUserTurn,
   projectTurnFinalized,
   latestAcpSessionData,
+  parseAgentHostApproval,
   projectTurnSettlement,
 } from '#services/agent-host-event-projection.js';
-import { parseErrorForPersistence } from '#utils/error.utils.js';
+import { chatTooLongMessage, parseErrorForPersistence } from '#utils/error.utils.js';
 import hexagonalNutLog from '#services/__fixtures__/daemon-reattach-hexnut.jsonl?raw';
 import hexagonalNutFourRunLog from '#services/__fixtures__/daemon-reattach-hexnut-4runs.jsonl?raw';
 
@@ -682,6 +683,29 @@ describe('projectAgentHostEvent', () => {
     ]);
   });
 
+  it('carries the ledger correlation a print request attaches, and nothing else from its context', () => {
+    const [part] = projectAgentHostEvent({
+      ...base,
+      type: 'interrupt.recorded',
+      interruptId: 'approval-print',
+      phase: 'requested',
+      reason: 'Print pyramid.gcode.3mf on Simulated X1C',
+      payload: {
+        kind: 'approval',
+        prompt: 'Print pyramid.gcode.3mf on Simulated X1C',
+        context: { requestId: 'req-7f3a', machineId: 'bambu-simulator', fileName: 'pyramid.gcode.3mf', extra: 1 },
+      },
+    });
+    expect(part).toMatchObject({
+      type: 'tool-input-available',
+      input: {
+        interruptId: 'approval-print',
+        context: { requestId: 'req-7f3a', machineId: 'bambu-simulator', fileName: 'pyramid.gcode.3mf' },
+      },
+    });
+    expect(parseAgentHostApproval((part as { input: unknown }).input)?.context?.requestId).toBe('req-7f3a');
+  });
+
   it('projects a login an external agent is waiting on as facts, not a decision', () => {
     expect(
       projectAgentHostEvent({
@@ -989,7 +1013,7 @@ describe('projectAgentHostEvent', () => {
      * person reads the host's own sentence about evicting history. */
     expect(parseErrorForPersistence(new Error(chunk.errorText))).toMatchObject({
       code: 'NO_EVICTABLE_HISTORY',
-      message: "This chat's first message is too large to continue. Start a new chat and attach less.",
+      message: chatTooLongMessage,
       raw: chunk.errorText,
     });
   });

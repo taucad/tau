@@ -1,0 +1,516 @@
+/**
+ * Bambu Studio mode of the Print pane (blueprint U2, D9, D12): which presets
+ * Bambu Studio offers for the bound printer, the settings they resolve to, and
+ * the project's print intent on top: the presets the person picked and the
+ * settings they changed, saved in `.tau/machines/printer.json`. Everything
+ * Bambu Studio answers is read through the desktop bridge. Slicing itself stays
+ * on the export route; this hook only states the export options it would slice with.
+ *
+ * @module
+ */
+
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { MachineDirectoryEntry, MachineManifest, MachineProvider } from '@taucad/runtime/machine';
+import type { PrintIntent } from '@taucad/slicer/print-intent';
+import type {
+  BambuMachineHints,
+  BambuPlate,
+  BambuPresetSummary,
+  BambuStudioCatalog,
+  BambuStudioSelection,
+  BambuStudioSettings,
+} from '@taucad/slicer/bambu-studio';
+import type { PrintIntentEdit } from '#components/print/use-print-intent.js';
+import { desktopBridge } from '#filesystem/desktop-bridge.js';
+
+/** Providers whose printers slice with Bambu Studio when it is installed. */
+const bambuProviderIds: ReadonlySet<string> = new Set(['bambu', 'bambu-simulator']);
+const bambuPlateIds: ReadonlySet<string> = new Set<BambuPlate['id']>([
+  'cool',
+  'engineering',
+  'high-temperature',
+  'textured-pei',
+]);
+
+/** Quality presets Bambu Studio's default process follows. @public */
+export type BambuQualityPreset = NonNullable<BambuMachineHints['preset']>;
+
+/**
+ * Whether a provider drives a Bambu Lab printer.
+ *
+ * @param provider - The selected machine's provider.
+ * @returns True for the Bambu LAN provider, its simulator and any provider declaring the vendor.
+ * @public
+ */
+export const isBambuProvider = (provider: MachineProvider | undefined): boolean =>
+  provider !== undefined && (bambuProviderIds.has(provider.id) || provider.vendor === 'Bambu Lab');
+
+/**
+ * Whether a provider is the real Bambu printer, which accepts only Bambu Studio archives (blueprint P3).
+ *
+ * @param provider - The selected machine's provider.
+ * @returns True for the real printer, false for the simulator and every other provider.
+ * @public
+ */
+export const isRealBambuPrinter = (provider: MachineProvider | undefined): boolean => provider?.id === 'bambu';
+
+const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * Bambu key → value from settings values nested scope → group → key.
+ *
+ * ponytail: mirrors `flattenBambuSettings`; importing that value from `@taucad/slicer/bambu-studio` would put the
+ * Node engine into the SSR bundle through the package's `node` condition.
+ *
+ * @param values - The `values` of a settings answer.
+ * @returns One entry per Bambu key.
+ */
+const flattenSettings = (values: Record<string, unknown>): Record<string, unknown> =>
+  Object.assign(
+    {},
+    ...Object.values(values)
+      .filter((scope) => isPlainRecord(scope))
+      .flatMap((scope) => Object.values(scope).filter((group) => isPlainRecord(group))),
+  ) as Record<string, unknown>;
+
+const sameValue = (left: unknown, right: unknown): boolean => JSON.stringify(left) === JSON.stringify(right);
+
+/**
+ * Keep the overrides that still name a setting of the new presets and still differ from its value.
+ *
+ * @param overrides - Bambu key → value the person changed.
+ * @param defaults - Bambu key → value of the presets now selected.
+ * @returns The overrides that still apply, and how many named a setting these presets do not have.
+ * @public
+ */
+export const reconcileOverrides = (
+  overrides: Readonly<Record<string, unknown>>,
+  defaults: Readonly<Record<string, unknown>>,
+): Readonly<{ kept: Record<string, unknown>; dropped: number }> => {
+  const kept: Record<string, unknown> = {};
+  let dropped = 0;
+  for (const [key, value] of Object.entries(overrides)) {
+    if (!Object.hasOwn(defaults, key)) {
+      dropped += 1;
+    } else if (!sameValue(value, defaults[key])) {
+      kept[key] = value;
+    }
+  }
+  return { kept, dropped };
+};
+
+/**
+ * Presets that work with a printer preset: those naming it, and those naming none.
+ *
+ * @param presets - Process or filament presets from the catalog.
+ * @param printer - The printer preset selected.
+ * @returns The compatible presets, in catalog order.
+ * @public
+ */
+export const compatiblePresets = (
+  presets: readonly BambuPresetSummary[],
+  printer: string | undefined,
+): readonly BambuPresetSummary[] =>
+  presets.filter(
+    (preset) =>
+      preset.compatiblePrinters === undefined || printer === undefined || preset.compatiblePrinters.includes(printer),
+  );
+
+type Loaded = Readonly<{
+  /** The hints the selection was resolved from, so slicing never pairs new hints with an old selection. */
+  hints: BambuMachineHints;
+  /** The hints and picks this selection answers; slicing waits while a newer request resolves. */
+  request: string;
+  selection: BambuStudioSelection;
+  settings: BambuStudioSettings;
+  /** Bambu key → value of the resolved presets. */
+  defaults: Record<string, unknown>;
+}>;
+
+/** The presets the person picked; the rest are Bambu Studio's defaults. Filaments are keyed by slot. @public */
+export type BambuStudioChosen = Readonly<Pick<PrintIntent, 'printer' | 'process' | 'filaments'>>;
+
+/** One Bambu Studio setting value a print intent may hold. */
+type SettingValue = NonNullable<PrintIntent['settings']>[string];
+
+const noSettings: Readonly<Record<string, SettingValue>> = {};
+const noChoices: BambuStudioChosen = {};
+
+/** Everything the Prepare step needs from Bambu Studio. @public */
+export type BambuStudioMode = Readonly<{
+  /**
+   * `off`: not a Bambu printer. `checking`: asking the host. `unavailable`: no desktop
+   * bridge or no Bambu Studio, so the reference engine slices. `ready`: Bambu Studio slices.
+   */
+  status: 'off' | 'checking' | 'unavailable' | 'ready';
+  version: string | undefined;
+  printers: readonly BambuPresetSummary[];
+  /** Process presets compatible with the selected printer preset. */
+  processes: readonly BambuPresetSummary[];
+  /** Filament presets compatible with the selected printer preset. */
+  filaments: readonly BambuPresetSummary[];
+  selection: BambuStudioSelection | undefined;
+  settings: BambuStudioSettings | undefined;
+  /** Bambu key → value of the selected presets. */
+  defaults: Record<string, unknown>;
+  /** Bambu key → value the print intent holds; each one is a modified setting. */
+  overrides: Readonly<Record<string, unknown>>;
+  /**
+   * Save these settings in one write: each takes its value in `values`, and one that `values` lacks
+   * or holds at its preset value leaves the print intent. Settings outside `keys` are untouched.
+   */
+  setSettings: (keys: Iterable<string>, values: Readonly<Record<string, unknown>>) => void;
+  /** Settings the print intent holds that these presets lack: kept in the file, left out of the slice. */
+  dropped: number;
+  error: string | undefined;
+  /** The used material slots, in the order `selection.filaments` follows. */
+  slots: readonly number[];
+  chosen: BambuStudioChosen;
+  /** Another printer preset has its own processes and filaments, so choosing one clears those picks. */
+  choosePrinter: (printer: string) => void;
+  chooseProcess: (process: string) => void;
+  chooseFilament: (slot: number, filament: string) => void;
+  /** Fast, Standard or Fine: Bambu Studio picks the matching 0.28, 0.20 or 0.12 mm process. */
+  choosePreset: (preset: BambuQualityPreset) => void;
+  /** Remove one pick from the print intent, so Bambu Studio's default applies again. */
+  resetChoice: (choice: 'printer' | 'process') => void;
+  resetFilament: (slot: number) => void;
+  /** What slicing sends on the export route; undefined until the presets and settings have loaded. */
+  exportOptions: Record<string, unknown> | undefined;
+}>;
+
+const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
+const toBambuPlate = (plate: string | undefined): BambuPlate['id'] | undefined =>
+  plate !== undefined && bambuPlateIds.has(plate) ? (plate as BambuPlate['id']) : undefined;
+
+/**
+ * What the bound printer tells Bambu Studio's defaults: model, nozzle, quality, plate and the used trays.
+ *
+ * @returns The hints, or `undefined` before a machine is selected.
+ */
+const machineHints = ({
+  entry,
+  manifest,
+  preset,
+  plate,
+  slots,
+}: {
+  readonly entry: MachineDirectoryEntry | undefined;
+  readonly manifest: MachineManifest | undefined;
+  readonly preset: BambuQualityPreset | undefined;
+  readonly plate: BambuPlate['id'] | undefined;
+  readonly slots: readonly number[];
+}): BambuMachineHints | undefined => {
+  if (entry === undefined) {
+    return undefined;
+  }
+  const nozzleDiameter = manifest?.toolhead.nozzles[0]?.diameter.value;
+  return {
+    model: entry.descriptor.model,
+    ...(nozzleDiameter === undefined ? {} : { nozzleDiameter }),
+    ...(preset === undefined ? {} : { preset }),
+    ...(plate === undefined ? {} : { plate }),
+    materials: slots.map((slot) => {
+      const tray = entry.snapshot.setup.materials.find((material) => material.slot === slot);
+      return {
+        slot,
+        ...(tray?.materialId === undefined ? {} : { materialId: tray.materialId }),
+        ...(tray?.profileId === undefined ? {} : { profileId: tray.profileId }),
+      };
+    }),
+  };
+};
+
+/** The presets the person picked, as a partial selection Bambu Studio completes. */
+const partialSelection = ({
+  chosen,
+  slots,
+  plate,
+  resolved,
+}: Readonly<{
+  chosen: BambuStudioChosen;
+  slots: readonly number[];
+  plate: BambuPlate['id'] | undefined;
+  /** The filaments Bambu Studio resolved last, per used slot. */
+  resolved: readonly string[] | undefined;
+}>): Partial<BambuStudioSelection> => {
+  const picked = slots.map((slot) => chosen.filaments?.[slot]);
+  // One pick among several slots keeps the others at what Bambu Studio resolved for them.
+  const filaments = picked.map((name, index) => name ?? resolved?.[index]);
+  return {
+    ...(chosen.printer === undefined ? {} : { printer: chosen.printer }),
+    ...(chosen.process === undefined ? {} : { process: chosen.process }),
+    ...(picked.some((name) => name !== undefined) && filaments.every((name) => name !== undefined)
+      ? { filaments }
+      : {}),
+    ...(plate === undefined ? {} : { plate }),
+  };
+};
+
+const modeStatus = (
+  isBambu: boolean,
+  hasBridge: boolean,
+  status: Readonly<{ available: boolean }> | undefined,
+): BambuStudioMode['status'] => {
+  if (!isBambu) {
+    return 'off';
+  }
+  if (!hasBridge) {
+    return 'unavailable';
+  }
+  if (status === undefined) {
+    return 'checking';
+  }
+  return status.available ? 'ready' : 'unavailable';
+};
+
+/**
+ * Own Bambu Studio's selection surface for the selected machine.
+ *
+ * @param input - The machine, its provider and manifest, the confirmed plate, the used slots, and the
+ * project's print intent for this printer with its `update`.
+ * @returns The mode, its presets, settings, overrides and the export options they make.
+ * @public
+ */
+export const useBambuStudio = ({
+  provider,
+  entry,
+  manifest,
+  plate,
+  slots,
+  intent,
+  update,
+}: {
+  readonly provider: MachineProvider | undefined;
+  readonly entry: MachineDirectoryEntry | undefined;
+  readonly manifest: MachineManifest | undefined;
+  readonly plate: string | undefined;
+  readonly slots: readonly number[];
+  readonly intent: PrintIntent | undefined;
+  readonly update: (edit: PrintIntentEdit) => void;
+}): BambuStudioMode => {
+  // The shell is fixed for the page's life; `desktopBridge()` builds a new facade per call.
+  const [studio] = useState(() => desktopBridge()?.slicers?.bambuStudio);
+  const isBambu = isBambuProvider(provider);
+  const [status, setStatus] = useState<Readonly<{ available: boolean; version?: string }>>();
+  const [catalog, setCatalog] = useState<BambuStudioCatalog>();
+  const [loaded, setLoaded] = useState<Loaded>();
+  const [failure, setFailure] = useState<string>();
+  const settingsCacheRef = useRef<Readonly<{ key: string; settings: BambuStudioSettings }>>(undefined);
+  const preset = intent?.preset;
+  const chosen: BambuStudioChosen = intent ?? noChoices;
+
+  const model = entry?.descriptor.model;
+  const nozzleDiameter = manifest?.toolhead.nozzles[0]?.diameter.value;
+  const bambuPlate = toBambuPlate(plate);
+  // Keyed by content so a telemetry frame that changes nothing here reloads nothing.
+  const hintsKey = JSON.stringify(machineHints({ entry, manifest, preset, plate: bambuPlate, slots }) ?? '');
+  const partialKey = JSON.stringify(
+    partialSelection({ chosen, slots, plate: bambuPlate, resolved: loaded?.selection.filaments }),
+  );
+
+  useEffect(() => {
+    if (!studio || !isBambu) {
+      return;
+    }
+    let cancelled = false;
+    const check = async (): Promise<void> => {
+      try {
+        const answer = await studio.status();
+        if (!cancelled) {
+          setStatus(answer.available ? { available: true, version: answer.version } : { available: false });
+        }
+      } catch {
+        if (!cancelled) {
+          setStatus({ available: false });
+        }
+      }
+    };
+    // async-iife: bootstrap -- the host answers once per page; a new machine keeps the answer.
+    void check();
+    return () => {
+      cancelled = true;
+    };
+  }, [isBambu, studio]);
+
+  const isAvailable = isBambu && status?.available === true;
+  useEffect(() => {
+    if (!studio || !isAvailable || model === undefined) {
+      return;
+    }
+    let cancelled = false;
+    const load = async (): Promise<void> => {
+      try {
+        const next = await studio.catalog({
+          model,
+          ...(nozzleDiameter === undefined ? {} : { nozzleDiameter }),
+        });
+        if (!cancelled) {
+          setCatalog(next);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setFailure(errorMessage(error));
+        }
+      }
+    };
+    // async-iife: bootstrap -- a newer model or nozzle supersedes this load.
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [isAvailable, model, nozzleDiameter, studio]);
+
+  useEffect(() => {
+    const parsed: unknown = JSON.parse(hintsKey);
+    if (!studio || catalog === undefined || parsed === '') {
+      return;
+    }
+    // SAFETY: the key is the JSON of `machineHints`, or of '' before a machine is selected.
+    const hints = parsed as BambuMachineHints;
+    let cancelled = false;
+    const resolve = async (): Promise<void> => {
+      try {
+        const partial = JSON.parse(partialKey) as Partial<BambuStudioSelection>;
+        const request = hintsKey + partialKey;
+        const selection = await studio.resolveSelection({ hints, partial });
+        const presets = { printer: selection.printer, process: selection.process, filaments: selection.filaments };
+        const key = JSON.stringify(presets);
+        const cached = settingsCacheRef.current;
+        const settings = cached?.key === key ? cached.settings : await studio.settings(presets);
+        if (cancelled) {
+          return;
+        }
+        settingsCacheRef.current = { key, settings };
+        setFailure(undefined);
+        setLoaded((previous) =>
+          previous?.settings === settings
+            ? { ...previous, hints, request, selection }
+            : { hints, request, selection, settings, defaults: flattenSettings(settings.values) },
+        );
+      } catch (error) {
+        if (!cancelled) {
+          setFailure(errorMessage(error));
+        }
+      }
+    };
+    // async-iife: bootstrap -- a newer choice or observation supersedes this resolution.
+    void resolve();
+    return () => {
+      cancelled = true;
+    };
+  }, [catalog, hintsKey, partialKey, studio]);
+
+  const defaults = loaded?.defaults;
+  const setSettings = useCallback(
+    (keys: Iterable<string>, values: Readonly<Record<string, unknown>>) => {
+      const replaced = new Set(keys);
+      update(({ settings = noSettings, ...rest }) => {
+        const next = Object.fromEntries(Object.entries(settings).filter(([key]) => !replaced.has(key)));
+        for (const key of replaced) {
+          const value = values[key];
+          if (value !== undefined && !sameValue(value, defaults?.[key])) {
+            // SAFETY: the form parses each value against the setting's schema, and the serializer validates it again.
+            next[key] = value as SettingValue;
+          }
+        }
+        return Object.keys(next).length === 0 ? rest : { ...rest, settings: next };
+      });
+    },
+    [defaults, update],
+  );
+  const choosePrinter = useCallback(
+    (printer: string) => {
+      update(({ process: _process, filaments: _filaments, ...rest }) => ({ ...rest, printer }));
+    },
+    [update],
+  );
+  const chooseProcess = useCallback(
+    (process: string) => {
+      update((current) => ({ ...current, process }));
+    },
+    [update],
+  );
+  const chooseFilament = useCallback(
+    (slot: number, filament: string) => {
+      update((current) => ({ ...current, filaments: { ...current.filaments, [slot]: filament } }));
+    },
+    [update],
+  );
+  const choosePreset = useCallback(
+    (next: BambuQualityPreset) => {
+      update(({ process: _process, ...rest }) => ({ ...rest, preset: next }));
+    },
+    [update],
+  );
+  const resetChoice = useCallback(
+    (choice: 'printer' | 'process') => {
+      update(({ [choice]: _removed, ...rest }) => rest);
+    },
+    [update],
+  );
+  const resetFilament = useCallback(
+    (slot: number) => {
+      update(({ filaments = {}, ...rest }) => {
+        const { [slot]: _removed, ...others } = filaments;
+        return Object.keys(others).length === 0 ? rest : { ...rest, filaments: others };
+      });
+    },
+    [update],
+  );
+
+  const overrides = intent?.settings ?? noSettings;
+  /* A preset without one of these settings leaves it in the file and out of the slice, until presets that have it return. */
+  const reconciled = useMemo(
+    () => (defaults === undefined ? { kept: {}, dropped: 0 } : reconcileOverrides(overrides, defaults)),
+    [defaults, overrides],
+  );
+  const selection = loaded?.selection;
+  const isCurrent = loaded?.request === hintsKey + partialKey && failure === undefined;
+  const exportOptions = useMemo(() => {
+    // A plate or material change, or a failed resolution, must not slice (or send) the previous selection.
+    if (loaded === undefined || !isCurrent) {
+      return undefined;
+    }
+    return {
+      engine: 'bambu-studio',
+      bambuStudio: {
+        printer: loaded.selection.printer,
+        process: loaded.selection.process,
+        filaments: loaded.selection.filaments,
+        plate: loaded.selection.plate,
+        ...(Object.keys(reconciled.kept).length === 0 ? {} : { settings: reconciled.kept }),
+        hints: loaded.hints,
+      },
+    };
+  }, [isCurrent, loaded, reconciled]);
+  const printer = selection?.printer;
+  const processes = useMemo(() => compatiblePresets(catalog?.processes ?? [], printer), [catalog, printer]);
+  const filaments = useMemo(() => compatiblePresets(catalog?.filaments ?? [], printer), [catalog, printer]);
+
+  return {
+    status: modeStatus(isBambu, studio !== undefined, status),
+    version: status?.version,
+    printers: catalog?.printers ?? [],
+    processes,
+    filaments,
+    selection,
+    settings: loaded?.settings,
+    defaults: defaults ?? noSettings,
+    overrides,
+    setSettings,
+    dropped: reconciled.dropped,
+    error: failure,
+    slots,
+    chosen,
+    choosePrinter,
+    chooseProcess,
+    chooseFilament,
+    choosePreset,
+    resetChoice,
+    resetFilament,
+    exportOptions,
+  };
+};

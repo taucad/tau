@@ -44,6 +44,7 @@ export type ProjectSharePanelProps = {
   readonly collectSnapshot?: (signal?: AbortSignal) => Promise<ShareProjectSnapshot>;
   readonly initialMethod?: ShareMethod;
   readonly githubAuthorizationOutcome?: 'returned' | 'cancelled' | 'failed';
+  readonly githubAuthorizationFailure?: string;
 };
 
 export type ShareMethod = 'direct' | 'tau' | 'github-gist';
@@ -352,12 +353,14 @@ function PortableShareBody({
   collectSnapshot,
   signIn,
   githubAuthorizationOutcome,
+  githubAuthorizationFailure,
   onBusyChange,
 }: {
   readonly method: Exclude<ShareMethod, 'tau'>;
   readonly collectSnapshot: (signal?: AbortSignal) => Promise<ShareProjectSnapshot>;
   readonly signIn: string;
   readonly githubAuthorizationOutcome?: 'returned' | 'cancelled' | 'failed';
+  readonly githubAuthorizationFailure?: string;
   readonly onBusyChange: (busy: boolean) => void;
 }): React.JSX.Element {
   const [busy, setBusy] = useState(false);
@@ -610,13 +613,17 @@ function PortableShareBody({
       {isDirect ? (
         <p className='text-sm text-purple dark:text-purple/70'>Sign in to persist a Tau-hosted share.</p>
       ) : null}
-      {!isDirect && githubAuthorizationOutcome ? (
+      {/* `returned` is the wait for the status check, so it goes once that answers:
+       * connected needs no words, and anything else has its own line below. */}
+      {!isDirect &&
+      githubAuthorizationOutcome &&
+      !(githubAuthorizationOutcome === 'returned' && githubStatus !== undefined) ? (
         <div className='rounded-md border border-purple/30 bg-purple/10 px-3 py-2 text-sm text-purple dark:text-purple/80'>
           {githubAuthorizationOutcome === 'returned'
             ? 'GitHub authorization returned. Checking Gist access…'
             : githubAuthorizationOutcome === 'cancelled'
               ? 'GitHub Gist access was not granted.'
-              : 'GitHub authorization could not be completed. Try again.'}
+              : (githubAuthorizationFailure ?? 'GitHub authorization could not be completed. Try again.')}
         </div>
       ) : null}
       {!isDirect && browserConsent ? (
@@ -705,6 +712,7 @@ function ProjectSharePanelBody(properties: ProjectSharePanelProps): React.JSX.El
     collectSnapshot,
     initialMethod,
     githubAuthorizationOutcome,
+    githubAuthorizationFailure,
   } = properties;
   const { pathname, search } = useLocation();
   const [shareMethod, setShareMethod] = useState<ShareMethod>(initialMethod ?? (collectSnapshot ? 'direct' : 'tau'));
@@ -855,6 +863,7 @@ function ProjectSharePanelBody(properties: ProjectSharePanelProps): React.JSX.El
           collectSnapshot={collectSnapshot}
           signIn={signIn}
           githubAuthorizationOutcome={githubAuthorizationOutcome}
+          githubAuthorizationFailure={githubAuthorizationFailure}
           onBusyChange={setPortableBusy}
         />
       </SharePanelFrame>

@@ -69,8 +69,8 @@ describe('@taucad/mcp', () => {
     const dispatchMock = vi.fn();
     const dispatch: TauMcpDispatch = async (call, options) => {
       dispatchMock(call, options);
-      if (call.rpcName !== rpcName.exportGeometry) {
-        throw new Error(`Unexpected RPC ${call.rpcName}`);
+      if (!('rpcName' in call) || call.rpcName !== rpcName.exportGeometry) {
+        throw new Error(`Unexpected call ${JSON.stringify(call)}`);
       }
       return {
         success: true,

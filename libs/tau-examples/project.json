@@ -36,10 +36,6 @@
       "cache": true,
       "inputs": [
         "{projectRoot}/**/*",
-        "!{projectRoot}/src/manifest.json",
-        "!{projectRoot}/src/manifest.ts",
-        "!{projectRoot}/src/builtin.ts",
-        "!{projectRoot}/src/test-fixtures.ts",
         "!{projectRoot}/src/thumbnail.assets.ts",
         "!{projectRoot}/src/kernels/**/thumbnail.webp",
         "sharedGlobals"
@@ -70,8 +66,6 @@
         "{projectRoot}/**/*",
         "!{projectRoot}/src/manifest.json",
         "!{projectRoot}/src/manifest.ts",
-        "!{projectRoot}/src/thumbnail.assets.ts",
-        "!{projectRoot}/src/kernels/**/thumbnail.webp",
         "sharedGlobals",
         "^default"
       ],

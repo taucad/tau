@@ -1,5 +1,4 @@
-import { setTimeout } from 'node:timers/promises';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import type { OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { and, asc, desc, eq, gt, lte, ne } from 'drizzle-orm';
 import type { Redis } from 'ioredis';
@@ -11,6 +10,7 @@ import { DatabaseService } from '#database/database.service.js';
 import { durableStream, durableStreamEvent } from '#database/schema.js';
 import { RedisService } from '#redis/redis.service.js';
 import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
+import { ShutdownService } from '#lifecycle/shutdown.service.js';
 import type {
   DurableAppendOutcome,
   DurableStreamEvent,
@@ -80,6 +80,8 @@ export class DurableEventsService implements OnModuleInit, OnModuleDestroy {
     private readonly databaseService: DatabaseService,
     private readonly redisService: RedisService,
     private readonly projectAccess: ProjectAccessService,
+    // oxlint-disable-next-line new-cap -- NestJS decorator
+    @Optional() private readonly shutdown: ShutdownService = new ShutdownService(),
   ) {}
 
   public async onModuleInit(): Promise<void> {
@@ -373,7 +375,24 @@ export class DurableEventsService implements OnModuleInit, OnModuleDestroy {
       if (!afterSubscribe.found || afterSubscribe.events.length > 0) {
         return afterSubscribe;
       }
-      await Promise.race([wake.promise, setTimeout(input.longPollDuration)]);
+      /* The stop wakes a parked poll too: it answers with the same final read
+         a timeout would, never `found: false`, and the client re-polls at
+         once, reaching a Machine that is staying. */
+      const stopped = this.shutdown.signal;
+      const onStop = (): void => {
+        wake.resolve();
+      };
+      stopped.addEventListener('abort', onStop, { once: true });
+      if (stopped.aborted) {
+        wake.resolve();
+      }
+      const timer = setTimeout(onStop, input.longPollDuration);
+      try {
+        await wake.promise;
+      } finally {
+        clearTimeout(timer);
+        stopped.removeEventListener('abort', onStop);
+      }
       return await this.read(input);
     } finally {
       unsubscribe();

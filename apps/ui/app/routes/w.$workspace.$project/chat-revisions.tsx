@@ -93,6 +93,14 @@ import {
   useTauCloudIntent,
 } from '#hooks/use-cloud-projects.js';
 import type { TauCloudIntent } from '#hooks/use-cloud-projects.js';
+import { toast } from '#components/ui/sonner.js';
+
+/** Sync settings live in tau.json, which Tau refuses to write while it needs repair (R4). */
+const reportSyncSettingError = (error: unknown): void => {
+  toast.error('Could not change sync settings', {
+    description: error instanceof Error ? error.message : undefined,
+  });
+};
 
 /**
  * The Revisions pane (S26, A18, A29), as a mobile `FloatingPanel` around the
@@ -984,7 +992,7 @@ export function RevisionsPanelBody(): React.JSX.Element {
   /* A29: *Sync* appears when a remote exists, or when the person opens it. */
   const [isConnectOpen, setIsConnectOpen] = useState(false);
   /* N4: the plan, read once here — the region itself stays presentational. */
-  const { canSyncFiles, canConnectGitHub, storageLimitBytes, canUpgradePlan, requestUpgrade } = useCommercialFeatures();
+  const { canSyncFiles, storageLimitBytes, canUpgradePlan, requestUpgrade } = useCommercialFeatures();
   const { signIn } = useAuthLinks();
   const chatNames = useMemo(() => Object.fromEntries(chats.map((chat) => [chat.id, chat.name])), [chats]);
   const chatCheckoutIds = useMemo(() => Object.fromEntries(chats.map((chat) => [chat.id, chat.checkoutId])), [chats]);
@@ -1094,15 +1102,16 @@ export function RevisionsPanelBody(): React.JSX.Element {
             onSync={commands.syncNow}
             syncChats={project?.syncChats !== false}
             onSyncChatsChange={(enabled) => {
-              void updateProject(projectId, { syncChats: enabled });
+              // oxlint-disable-next-line promise/prefer-await-to-then, tau-lint/no-async-iife -- a refused manifest write is named, not left loose
+              void updateProject(projectId, { syncChats: enabled }).catch(reportSyncSettingError);
             }}
             /* Generated evidence is default-off (policy Rule 13). */
             syncLargeExports={project?.syncLargeExports === true}
             onSyncLargeExportsChange={(enabled) => {
-              void updateProject(projectId, { syncLargeExports: enabled });
+              // oxlint-disable-next-line promise/prefer-await-to-then, tau-lint/no-async-iife -- a refused manifest write is named, not left loose
+              void updateProject(projectId, { syncLargeExports: enabled }).catch(reportSyncSettingError);
             }}
             canSyncFiles={canSyncFiles}
-            canConnectGitHub={canConnectGitHub}
             onUpgrade={canUpgradePlan ? requestUpgrade : undefined}
             storageLimitBytes={storageLimitBytes}
             signInHref={signIn}

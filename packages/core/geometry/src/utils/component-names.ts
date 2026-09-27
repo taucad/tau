@@ -1,4 +1,4 @@
-import { formatShapeName, isLegacyGeneratedShapeName } from '#utils/shape-names.js';
+import { formatShapeName, isLegacyGeneratedShapeName, uniqueLabel } from '#utils/shape-names.js';
 
 const assertNodeIndex = (nodeIndex: number): void => {
   if (!Number.isInteger(nodeIndex) || nodeIndex < 0) {
@@ -40,6 +40,18 @@ export const formatNamedComponentId = (name: string, nodeIndex: number): string 
     .replaceAll(/^-+|-+$/g, '');
   return slug.length > 0 ? `component:${slug}` : undefined;
 };
+
+/**
+ * De-duplicate a component ID within one payload, the way `uniqueShapeName` de-duplicates
+ * names: the first occurrence keeps its ID and a repeat gets the next free ordinal, so distinct
+ * names that slug alike (`Bolt +X`, `Bolt -X`) become `component:bolt-x` and `component:bolt-x-2`.
+ *
+ * @param id - Candidate component ID.
+ * @param usedIds - Mutable count map for IDs already emitted in this payload.
+ * @returns The original ID or a suffixed duplicate.
+ * @public
+ */
+export const uniqueComponentId = (id: string, usedIds: Map<string, number>): string => uniqueLabel(id, usedIds, '-');
 
 /**
  * Format a payload-local selector for a glTF node.

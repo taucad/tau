@@ -19,14 +19,15 @@ import {
   InternalServerErrorException,
   Logger,
   NotFoundException,
+  Optional,
   PayloadTooLargeException,
   ServiceUnavailableException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import type { OnModuleDestroy } from '@nestjs/common';
 import { and, eq, inArray, isNull, lt, sql } from 'drizzle-orm';
 import { storageLimitBytesByTier } from '@taucad/billing';
 import { DatabaseService } from '#database/database.service.js';
+import { ShutdownService } from '#lifecycle/shutdown.service.js';
 import { project, projectGit, projectGitLfsObject, publication } from '#database/schema.js';
 import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
 import type { ProjectRole } from '#api/collaboration/project-access.service.js';
@@ -253,18 +254,8 @@ const flushPacketBytes = 4;
  */
 const ownerLeaseCap = (slots: number): number => Math.max(1, Math.floor(slots / 2));
 
-/**
- * How long a stopping worker waits for tracked work before abandoning it:
- * half of Fly's `kill_timeout = '30s'` (`apps/api/fly.prod.toml`,
- * `fly.staging.toml`; Fly's own default is 5 s). The other half is for what
- * Nest does after this module: the durable-event subscriber, the database pool
- * and Redis close, the HTTP server closes, and the OTEL flush takes up to 5 s.
- * Milliseconds.
- */
-const shutdownDrainBound = 15_000;
-
 @Injectable()
-export class GitRepositoryService implements OnModuleDestroy {
+export class GitRepositoryService {
   /**
    * Scratch reserved per in-flight lease (D33: 2.5 GiB). Public so the
    * admission suite can raise it past any real disk without a fake `statfs`.
@@ -336,6 +327,7 @@ export class GitRepositoryService implements OnModuleDestroy {
     private readonly store: RepositoryStore,
     private readonly rateLimiter: PublicationRateLimiterService,
     private readonly durableEvents: DurableEventsService,
+    @Optional() private readonly shutdown: ShutdownService = new ShutdownService(),
   ) {
     /* A crash restarts a Machine in place on the same rootfs, so boot is the
        first chance to give the dead worker's disk back (W10 defect 2). Tracked
@@ -801,6 +793,11 @@ export class GitRepositoryService implements OnModuleDestroy {
         return body;
       }
 
+      /* The stop gate (D4 makes this safe): a push that has not started to
+         commit when the process begins to stop is refused before its first
+         upload, and the client re-pushes against a Machine that is staying.
+         One that has started finishes, because the drain waits for it. */
+      this.refuseWhenStopping('This server is restarting; retry the push.');
       const result = await commitLease({
         store: this.store,
         lease,
@@ -810,7 +807,17 @@ export class GitRepositoryService implements OnModuleDestroy {
         ...(this.faults === undefined ? {} : { faults: this.faults }),
       });
       if (result.committed) {
-        await this.recordGeneration(args.access.projectId, result.manifest.generation);
+        /* The push is durable: a failure to record its generation must not
+           answer 500 for it. The row trails the manifest, which is the case
+           `repairDerivedState` repairs on the next request. */
+        try {
+          await this.recordGeneration(args.access.projectId, result.manifest.generation);
+        } catch (error) {
+          this.#logger.warn(
+            { err: error, projectId: args.access.projectId, generation: result.manifest.generation },
+            'A committed push could not record its generation; the next request repairs it',
+          );
+        }
         await this.derive({ access: args.access, lease, manifest: result.manifest, moved: result.moved });
         this.sweepAfterReply(args.access.projectId, result);
       }
@@ -876,6 +883,10 @@ export class GitRepositoryService implements OnModuleDestroy {
       if (held === undefined) {
         throw new NotFoundException({ code: 'GIT_REF_NOT_FOUND', message: `This repository has no ${ref}.` });
       }
+      /* The push's stop gate: a removal that has not started to commit when the
+         process begins to stop is refused before it retires a publication, and
+         the client retries against a Machine that is staying. */
+      this.refuseWhenStopping('This server is restarting; retry the removal.');
       const decided = await this.databaseService.database.transaction(async (transaction) => {
         await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${access.projectId}, 0))`);
         const [affected] =
@@ -914,7 +925,16 @@ export class GitRepositoryService implements OnModuleDestroy {
         return decided;
       }
       if (decided.result.committed) {
-        await this.recordGeneration(access.projectId, decided.result.manifest.generation);
+        /* The removal is durable, so, as for a push, a failed generation write
+           is left to the next request's repair rather than answered as 500. */
+        try {
+          await this.recordGeneration(access.projectId, decided.result.manifest.generation);
+        } catch (error) {
+          this.#logger.warn(
+            { err: error, projectId: access.projectId, generation: decided.result.manifest.generation },
+            'A committed ref removal could not record its generation; the next request repairs it',
+          );
+        }
         await this.derive({ access, lease, manifest: decided.result.manifest, moved: decided.result.moved });
         this.sweepAfterReply(access.projectId, decided.result);
       }
@@ -937,41 +957,6 @@ export class GitRepositoryService implements OnModuleDestroy {
   /** Waits for the work a finished request left running. */
   public async settled(): Promise<void> {
     await Promise.all(this.#background);
-  }
-
-  /**
-   * Drains the tracked work before the process stops, so a deploy or a Machine
-   * restart does not cut short the D13 announcement a reader is parked on.
-   *
-   * `onModuleDestroy`, not an application-shutdown hook: Nest destroys every
-   * module before it calls either of those, and the announcement writes through
-   * `DurableEventsModule`, `DatabaseModule` and the global Redis module, which
-   * Nest destroys after this one because this module imports them. The HTTP
-   * server closes only after every module is destroyed, so work a request
-   * starts during the drain is waited for as well. Past `shutdownDrainBound` the
-   * work is abandoned and logged: a lost announcement leaves its readers to
-   * learn of the push on their next fetch, and a sweep cut short is I3's case.
-   */
-  public async onModuleDestroy(): Promise<void> {
-    let drainExpiry: NodeJS.Timeout | undefined;
-    const expired = new Promise<'expired'>((resolve) => {
-      drainExpiry = setTimeout(resolve, shutdownDrainBound, 'expired');
-    });
-    const drained = (async (): Promise<'drained'> => {
-      while (this.#background.size > 0) {
-        // oxlint-disable-next-line no-await-in-loop -- each pass waits for what the last one left behind
-        await this.settled();
-      }
-      return 'drained';
-    })();
-    const outcome = await Promise.race([drained, expired]);
-    clearTimeout(drainExpiry);
-    if (outcome === 'expired') {
-      this.#logger.warn(
-        { pending: this.#background.size, bound: shutdownDrainBound },
-        'Shutdown abandoned background work that outlived the drain bound; an unannounced push reaches readers on their next fetch',
-      );
-    }
   }
 
   /**
@@ -1322,6 +1307,24 @@ export class GitRepositoryService implements OnModuleDestroy {
     return child;
   }
 
+  /**
+   * Refuses a commit that has not started once the process begins to stop
+   * (503 `GIT_SERVICE_RESTARTING`); one already committing finishes under the drain.
+   *
+   * @param message - What the client is told to retry.
+   */
+  private refuseWhenStopping(message: string): void {
+    if (this.shutdown.signal.aborted) {
+      throw new ServiceUnavailableException({ code: 'GIT_SERVICE_RESTARTING', message });
+    }
+  }
+
+  /**
+   * Runs `work` after the reply. Every post-reply promise this service starts
+   * (announcements, sweeps, fetch disposal, the boot lease sweep) comes through
+   * here, so `settled()` and the shutdown registry, which waits for it until
+   * the stop's abandon phase, both see it.
+   */
   private track(work: Promise<void>): void {
     const settle = async (): Promise<void> => {
       try {
@@ -1337,6 +1340,7 @@ export class GitRepositoryService implements OnModuleDestroy {
     };
     const tracked = settle();
     this.#background.add(tracked);
+    this.shutdown.track(tracked);
   }
 
   /**
@@ -1513,32 +1517,40 @@ export class GitRepositoryService implements OnModuleDestroy {
       return;
     }
 
-    await this.databaseService.database
-      .insert(projectGit)
-      .values({
-        projectId: access.projectId,
-        storageBytes,
-        generation: manifest.generation,
-        derivedGeneration: manifest.generation,
-      })
-      .onConflictDoUpdate({
-        target: projectGit.projectId,
-        set: {
+    /* Swallowed like the rebuild above: the push this follows is durable. */
+    try {
+      await this.databaseService.database
+        .insert(projectGit)
+        .values({
+          projectId: access.projectId,
           storageBytes,
-          /* `generation` moves with the marker: this row is the proof that the
-             store reached this generation, so a repair that runs because
-             `recordGeneration` never did must leave the two columns agreeing
-             (review F1). */
           generation: manifest.generation,
           derivedGeneration: manifest.generation,
-          updatedAt: new Date(),
-        },
-        /* Compare-and-swap (review F4). A request repairing generation 5 and a
-           request committing generation 6 are not ordered by anything, and the
-           slower of the two must not take `derived_generation` — and
-           `storage_bytes` with it — backwards. */
-        setWhere: lt(projectGit.derivedGeneration, manifest.generation),
-      });
+        })
+        .onConflictDoUpdate({
+          target: projectGit.projectId,
+          set: {
+            storageBytes,
+            /* `generation` moves with the marker: this row is the proof that the
+               store reached this generation, so a repair that runs because
+               `recordGeneration` never did must leave the two columns agreeing
+               (review F1). */
+            generation: manifest.generation,
+            derivedGeneration: manifest.generation,
+            updatedAt: new Date(),
+          },
+          /* Compare-and-swap (review F4). A request repairing generation 5 and a
+             request committing generation 6 are not ordered by anything, and the
+             slower of the two must not take `derived_generation` — and
+             `storage_bytes` with it — backwards. */
+          setWhere: lt(projectGit.derivedGeneration, manifest.generation),
+        });
+    } catch (error) {
+      this.#logger.warn(
+        { err: error, projectId: access.projectId, generation: manifest.generation },
+        'Derived state could not be recorded; the next request for this project repairs it',
+      );
+    }
   }
 
   /**

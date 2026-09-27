@@ -30,9 +30,17 @@ const githubRepository = vi.hoisted(() => vi.fn());
 /* No connected account unless a test lists one. */
 const githubList = vi.hoisted(() => vi.fn(async (): Promise<ReadonlyArray<{ id: string }>> => []));
 
+const configureAccess = vi.hoisted(() => vi.fn((_installUrl: string, _returnTo: string) => undefined));
+
 vi.mock('#lib/github-connections.js', async (importOriginal) => ({
   ...(await importOriginal<typeof GithubConnectionsModule>()),
-  githubConnections: { token: githubToken, repository: githubRepository, list: githubList },
+  githubConnections: {
+    token: githubToken,
+    repository: githubRepository,
+    list: githubList,
+    configuration: async () => ({ installUrl: 'https://github.com/apps/tau/installations/new' }),
+  },
+  configureGithubAccess: configureAccess,
 }));
 /* eslint-disable @typescript-eslint/naming-convention -- `window.ENV`'s keys are the deployment's own environment variable names. */
 vi.mock('#environment.config.js', () => ({
@@ -611,6 +619,42 @@ describe('RevisionSyncRegion', () => {
     expect(region.connect).not.toHaveBeenCalled();
   });
 
+  /* D67: a repository transferred out of the app's reach, or removed from its
+   * installation, answered GitHub consent — which returned to the same refusal. */
+  it('sends Reconnect GitHub to the app’s repository access when a working account cannot see the repository', async () => {
+    const user = userEvent.setup();
+    githubList.mockResolvedValueOnce([{ id: '00000000-0000-4000-8000-000000000001' }]);
+    githubRepository.mockRejectedValueOnce(new GithubRequestError(404, 'GITHUB_NOT_FOUND_OR_DENIED'));
+    const region = renderRegion(
+      facet({
+        kind: 'git',
+        phase: 'connected',
+        url: 'https://github.com/o/r.git',
+        provider: 'github',
+        repositoryId: '99',
+      }),
+      syncFacet({
+        state: 'failed',
+        pendingCount: 1,
+        error: 'Write access to repository not granted.',
+        reason: 'unauthorized',
+      }),
+    );
+
+    await user.click(
+      within(screen.getByRole('status', { name: 'Backup status' })).getByRole('button', { name: 'Reconnect GitHub' }),
+    );
+
+    await waitFor(() => {
+      expect(configureAccess).toHaveBeenCalledExactlyOnceWith(
+        'https://github.com/apps/tau/installations/new',
+        expect.any(String),
+      );
+    });
+    expect(screen.queryByText('GitHub connect started')).not.toBeInTheDocument();
+    expect(region.connect).not.toHaveBeenCalled();
+  });
+
   /* R-U6: the same repository with changed access is re-sent, not skipped as "the same remote". */
   it('should re-send the same repository when its access changed', async () => {
     const user = userEvent.setup();
@@ -752,6 +796,29 @@ describe('RevisionSyncRegion', () => {
     );
 
     expect(screen.getByRole('status')).toHaveTextContent(copy);
+  });
+
+  /*
+   * D68: *Not backed up* is for revisions the server has not acknowledged. A
+   * repository removed from the app refuses access with nothing waiting; a
+   * deleted one answers not-found, which cannot be told from an unshared one.
+   */
+  it.each([
+    ['forbidden', 'Backed up · GitHub refused access'],
+    ['unauthorized', 'Backed up · GitHub refused access'],
+    ['notFound', 'Not backed up'],
+  ] as const)('should say a %s refusal with nothing waiting as “%s”', (reason, copy) => {
+    renderRegion(
+      facet({
+        kind: 'git',
+        provider: 'github',
+        phase: 'connected',
+        url: 'https://github.com/rifont/example.git',
+      }),
+      syncFacet({ state: 'failed', reason, pendingCount: 0 }),
+    );
+
+    expect(screen.getByText(copy, { exact: true })).toBeInTheDocument();
   });
 
   it('says nothing about backup when the project has no remote', () => {
@@ -977,14 +1044,14 @@ describe('RevisionSyncRegion refusals and plan gates', () => {
     expect(within(row).queryByRole('button')).not.toBeInTheDocument();
   });
 
-  it('offers Available on Pro instead of a connect a free plan cannot have (C5, N4)', async () => {
+  it('offers Available on Pro for Tau Cloud and a Git remote on every plan (C5, N4)', async () => {
     const user = userEvent.setup();
-    const region = renderRegion(facet(), syncFacet(), { canSyncFiles: false, canConnectGitHub: false });
+    const region = renderRegion(facet(), syncFacet(), { canSyncFiles: false });
 
     expect(screen.getByRole('radio', { name: 'Tau Cloud' })).toBeDisabled();
-    expect(screen.getByRole('radio', { name: 'Git remote' })).toBeDisabled();
+    expect(screen.getByRole('radio', { name: 'Git remote' })).toBeEnabled();
     const upgrades = screen.getAllByRole('button', { name: /Available on Pro/u });
-    expect(upgrades).toHaveLength(2);
+    expect(upgrades).toHaveLength(1);
 
     await user.click(upgrades[0]!);
     expect(region.upgrade).toHaveBeenCalled();

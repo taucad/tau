@@ -39,6 +39,8 @@ export type RuntimeAgentClient = Readonly<{
     format: string,
     options: {
       readonly source: { readonly path: string };
+      /** Transcoder options; the runtime validates them against the export route's schema. */
+      readonly exportOptions?: Readonly<Record<string, unknown>>;
       readonly signal?: AbortSignal;
     },
   ): Promise<
@@ -352,12 +354,13 @@ export const createRuntimeAgentClients = (
   };
 
   const graphics: RpcGraphicsClient = {
-    async exportGeometry({ targetFile, format }, context): Promise<RpcGraphicsExportGeometryResult> {
+    async exportGeometry({ targetFile, format, exportOptions }, context): Promise<RpcGraphicsExportGeometryResult> {
       try {
         context?.signal?.throwIfAborted();
         const rooted = assertRootedPath(targetFile);
         const result = await input.runtime.export(format, {
           source: { path: rooted },
+          ...(exportOptions === undefined ? {} : { exportOptions }),
           signal: context?.signal,
         });
         context?.signal?.throwIfAborted();

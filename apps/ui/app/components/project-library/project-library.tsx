@@ -20,6 +20,8 @@ import {
 } from '@tanstack/react-table';
 import type { VisibilityState, SortingState } from '@tanstack/react-table';
 import type { ProjectLocator } from '@taucad/filesystem';
+import { describeProjectManifestIssue } from '@taucad/types';
+import type { ProjectManifestParseIssue } from '@taucad/types';
 import type { ProjectListItem } from '#types/project.types.js';
 import type { PendingProjectRecovery } from '#types/pending-project-operation.types.js';
 import { createColumns } from '#components/project-library/columns.js';
@@ -75,7 +77,7 @@ import { InteractiveHoverButton } from '#components/magicui/interactive-hover-bu
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useSidebarCommands } from '#hooks/use-sidebar-status.js';
 import { Skeleton } from '@taucad/ui/components/skeleton';
-import type { WorkspaceBindingRepairGroup } from '#hooks/use-project-manager.js';
+import type { ProjectDiscoveryConflict, WorkspaceBindingRepairGroup } from '#hooks/use-project-manager.js';
 import { ProjectCard, ProjectCardCadPreview, ProjectCardMedia } from '#components/project-card.js';
 import { projectSlugOf, projectUrlOr } from '#utils/project-url.utils.js';
 import { projectLocationDescriptor, projectLocationFullLabel } from '#utils/project-creation-location.utils.js';
@@ -104,6 +106,56 @@ export type ProjectActions = {
 /** Physical directory an unfinished operation is stuck on. */
 const recoveryDirectoryName = (recovery: PendingProjectRecovery): string =>
   recovery.storage.providerBasePath.split('/').findLast(Boolean) ?? recovery.storage.providerBasePath;
+
+/** Why a discovered directory does not open, and what gets it open again. */
+const conflictSummary = (conflict: ProjectDiscoveryConflict): string => {
+  switch (conflict.status) {
+    case 'adoption-required': {
+      return conflict.issue.code === 'manifest-missing'
+        ? 'tau.json is missing. Adopt writes a new one so this folder opens as a project again.'
+        : 'This project needs a Tau identity before it can be opened.';
+    }
+    case 'duplicate-id': {
+      return 'This copied project shares an identity with another directory. Choose which folder Tau opens.';
+    }
+    case 'route-blocked': {
+      return 'This project’s workspace is not connected. Reconnect the folder to open it.';
+    }
+    case 'invalid': {
+      switch (conflict.issue.code) {
+        case 'manifest-unreadable': {
+          return 'This project directory could not be read.';
+        }
+        case 'manifest-too-large': {
+          return 'tau.json is too large to be a Tau manifest, so the project was not opened.';
+        }
+        case 'manifest-unknown-schema': {
+          return 'tau.json uses a format this version of Tau does not support. Update Tau to open it.';
+        }
+        default: {
+          return 'The tau.json manifest is invalid and was not opened.';
+        }
+      }
+    }
+  }
+};
+
+const maxIssueLines = 4;
+
+/** The exact manifest defects, so a person or an agent can fix the right key. */
+function ManifestIssueLines({ issue }: { readonly issue: ProjectManifestParseIssue }): React.JSX.Element {
+  const lines = [...new Set(describeProjectManifestIssue(issue))];
+  return (
+    <ul className='mt-1 space-y-0.5 font-mono text-xs text-muted-foreground'>
+      {lines.slice(0, maxIssueLines).map((line) => (
+        <li key={line} className='truncate'>
+          {line}
+        </li>
+      ))}
+      {lines.length > maxIssueLines ? <li>…and {lines.length - maxIssueLines} more</li> : null}
+    </ul>
+  );
+}
 
 /**
  * The project library: this device's projects and the account's Tau Cloud
@@ -137,9 +189,14 @@ export function ProjectLibrary(): React.JSX.Element {
     restoreProject,
     permanentlyDeleteProject: deleteProjectPermanently,
     adoptProject,
+    repairProject,
+    chooseProjectDirectory,
     updateName,
     isLoading,
   } = useProjects({ includeDeleted: showDeleted });
+  const degradedProjects = projects.filter(
+    (project) => project.manifestIssue !== undefined && project.deletedAt === undefined,
+  );
   const navigate = useNavigate();
   const projectManager = useProjectManager();
   const { projects: cloudProjects, isSettled: isCloudSettled, isFetching: isCloudFetching } = useCloudProjects();
@@ -230,6 +287,36 @@ export function ProjectLibrary(): React.JSX.Element {
     [adoptProject],
   );
 
+  const handleRepair = useCallback(
+    async (project: ProjectListItem): Promise<void> => {
+      try {
+        await repairProject(project.id);
+        toast.success(`Repaired ${project.name}`);
+      } catch (error) {
+        toast.error(`Could not repair ${project.name}`, {
+          description: error instanceof Error ? error.message : undefined,
+        });
+        console.error('Error repairing project manifest:', error);
+      }
+    },
+    [repairProject],
+  );
+
+  const handleChooseDirectory = useCallback(
+    async (locator: ProjectLocator, projectId: string, name: string): Promise<void> => {
+      try {
+        await chooseProjectDirectory(locator, projectId);
+        toast.success(`Tau now opens ${name} from this folder`);
+      } catch (error) {
+        toast.error(`Could not open ${name} from this folder`, {
+          description: error instanceof Error ? error.message : undefined,
+        });
+        console.error('Error choosing project directory:', error);
+      }
+    },
+    [chooseProjectDirectory],
+  );
+
   const confirmPermanentDelete = useCallback(async () => {
     const project = permanentDeleteTarget;
     if (!project) {
@@ -313,7 +400,9 @@ export function ProjectLibrary(): React.JSX.Element {
         await updateName(projectId, newName);
         toast.success(`Renamed to ${newName}`);
       } catch (error) {
-        toast.error('Failed to rename project');
+        toast.error('Failed to rename project', {
+          description: error instanceof Error ? error.message : undefined,
+        });
         console.error('Error renaming project:', error);
       }
     },
@@ -379,17 +468,12 @@ export function ProjectLibrary(): React.JSX.Element {
                 <AlertCircle className='size-4 shrink-0 text-warning' />
                 <div className='min-w-0 flex-1'>
                   <div className='truncate font-medium'>{label}</div>
-                  <div className='text-sm text-muted-foreground'>
-                    {conflict.status === 'adoption-required'
-                      ? 'This project needs a Tau identity before it can be opened.'
-                      : conflict.status === 'duplicate-id'
-                        ? 'This copied project shares an identity with another directory.'
-                        : conflict.status === 'route-blocked'
-                          ? 'This project’s workspace is not connected. Reconnect the folder to open it.'
-                          : conflict.issue.code === 'manifest-unreadable'
-                            ? 'This project directory could not be read.'
-                            : 'The tau.json manifest is invalid and was not opened.'}
-                  </div>
+                  <div className='text-sm text-muted-foreground'>{conflictSummary(conflict)}</div>
+                  {/* A missing manifest has nothing to add to its summary. */}
+                  {(conflict.status === 'invalid' || conflict.status === 'adoption-required') &&
+                  conflict.issue.code !== 'manifest-missing' ? (
+                    <ManifestIssueLines issue={conflict.issue} />
+                  ) : null}
                 </div>
                 {conflict.status === 'adoption-required' && (
                   <Button
@@ -400,9 +484,44 @@ export function ProjectLibrary(): React.JSX.Element {
                     Adopt
                   </Button>
                 )}
+                {conflict.status === 'duplicate-id' && (
+                  <Button
+                    size='sm'
+                    variant='outline'
+                    onClick={async () =>
+                      handleChooseDirectory(conflict.locator, conflict.manifest.id, conflict.manifest.name)
+                    }
+                  >
+                    Use this folder
+                  </Button>
+                )}
               </div>
             );
           })}
+        </div>
+      )}
+
+      {degradedProjects.length > 0 && (
+        <div className='mb-6 space-y-2' aria-label='Projects needing repair'>
+          {degradedProjects.map((project) => (
+            <div key={project.id} className='flex items-center gap-3 rounded-md border border-warning/40 p-3'>
+              <AlertCircle className='size-4 shrink-0 text-warning' />
+              <div className='min-w-0 flex-1'>
+                <div className='truncate font-medium'>{project.name}</div>
+                <div className='text-sm text-muted-foreground'>
+                  {project.manifestIssue?.code === 'manifest-invalid-json'
+                    ? 'tau.json has a syntax error. The project opens; fix tau.json in its editor.'
+                    : 'tau.json has problems. The project opens, and Tau won’t change tau.json until it is repaired.'}
+                </div>
+                {project.manifestIssue ? <ManifestIssueLines issue={project.manifestIssue} /> : null}
+              </div>
+              {project.manifestIssue?.code === 'manifest-invalid-json' ? null : (
+                <Button size='sm' variant='outline' onClick={async () => handleRepair(project)}>
+                  Repair
+                </Button>
+              )}
+            </div>
+          ))}
         </div>
       )}
 
@@ -648,7 +767,7 @@ function UnifiedProjectList({ rows, viewMode, actions, onOpenCloudProject }: Uni
                 <p className='text-sm'>Start by describing what you want to build, or create from code</p>
               </div>
             </div>
-            <NewProjectChatComposer className='pt-1 shadow-none' />
+            <NewProjectChatComposer enableAutoFocus={false} className='pt-1 shadow-none' />
             <div className='flex items-center justify-center gap-4 text-sm text-muted-foreground'>
               <div className='h-px flex-1 bg-border' />
               <span>or</span>

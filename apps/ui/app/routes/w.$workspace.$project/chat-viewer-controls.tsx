@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { SectionViewControl } from '#components/geometry/cad/section-view-control.js';
 import { FovControl } from '#components/geometry/cad/fov-control.js';
 import { GridSizeIndicator } from '#components/geometry/cad/grid-control.js';
-import { ResetCameraControl } from '#components/geometry/cad/reset-camera-control.js';
+import { FitViewControl } from '#components/geometry/cad/fit-view-control.js';
 import { MeasureControl } from '#components/geometry/cad/measure-control.js';
 import { CaptureViewControl, CaptureViewOverflowControl } from '#components/geometry/cad/capture-view-control.js';
 import { ViewerSettings } from '#components/geometry/cad/viewer-settings.js';
@@ -11,7 +11,7 @@ import {
   GridOverflowControl,
   SectionViewOverflowControl,
   MeasureOverflowControl,
-  ResetCameraOverflowControl,
+  FitViewOverflowControl,
 } from '#components/geometry/cad/viewer-overflow-controls.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { useToolbarOverflow } from '#hooks/use-toolbar-overflow.js';
@@ -20,14 +20,14 @@ import { useGraphicsSelector } from '#hooks/use-graphics.js';
 
 /**
  * Control items ordered by "stickiness" (first = last to overflow).
- * FOV stays visible the longest; reset camera overflows first.
+ * FOV stays visible the longest; capture overflows first.
  */
 const controlItems3d: ToolbarItemConfig[] = [
   { id: 'fov', width: 200, compactWidth: 120 },
   { id: 'grid', width: 32 },
   { id: 'section', width: 32 },
   { id: 'measure', width: 32 },
-  { id: 'reset', width: 32 },
+  { id: 'fit', width: 32 },
   { id: 'capture', width: 32 },
 ];
 
@@ -68,7 +68,7 @@ export function ChatViewerControls({
     return (
       <>
         {shouldEnableCapture && overflowIds.has('capture') && <CaptureViewOverflowControl />}
-        {overflowIds.has('reset') && <ResetCameraOverflowControl />}
+        {overflowIds.has('fit') && <FitViewOverflowControl />}
         {overflowIds.has('measure') && <MeasureOverflowControl />}
         {overflowIds.has('section') && <SectionViewOverflowControl />}
         {overflowIds.has('grid') && <GridOverflowControl />}
@@ -85,7 +85,7 @@ export function ChatViewerControls({
       {visibleIds.has('grid') && <GridSizeIndicator />}
       {visibleIds.has('section') && <SectionViewControl />}
       {visibleIds.has('measure') && <MeasureControl />}
-      {visibleIds.has('reset') && <ResetCameraControl />}
+      {visibleIds.has('fit') && <FitViewControl />}
       {shouldEnableCapture && visibleIds.has('capture') && <CaptureViewControl />}
       <ViewerSettings overflowControls={overflowControls} />
     </div>

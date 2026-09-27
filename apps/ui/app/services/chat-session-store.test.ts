@@ -1938,9 +1938,11 @@ describe('ChatSessionStore', () => {
         const fake = harness.created.findLast((entry) => entry.id === chatId)!;
         fake.status = 'submitted';
         fake.emitStatusChange();
-        fake.error = new Error('host unreachable');
+        /* The AI SDK's `setStatus` order: `status` (and its callbacks) first, `error` after. */
         fake.status = 'error';
         fake.emitStatusChange();
+        fake.error = new Error('host unreachable');
+        fake.emitErrorChange();
 
         expect(heard).toContain('runSettled');
         expect(actor.getSnapshot().matches({ run: 'failed' })).toBe(true);
@@ -2014,9 +2016,10 @@ describe('ChatSessionStore', () => {
      * to append a second copy of every text block to it (tool and data parts
      * are keyed and merge; text parts are keyed by nothing). The log is the
      * authority: the transport names the run once `attach` has answered, and
-     * the store drops that run's own message so the replay rebuilds it.
+     * the store drops that run's own message so the replay rebuilds it. Only a
+     * run still going streams; a settled one is rebuilt in place from the log.
      */
-    it('drops the run a host reattach is about to rebuild from its transcript', async () => {
+    it('drops the live run a host reattach is about to rebuild from its transcript', async () => {
       const store = createStore();
       const chatId = 'chat_reattach_rebuild';
       const runId = 'run_reattach_rebuild';
@@ -2038,7 +2041,7 @@ describe('ChatSessionStore', () => {
           nextCursor: 0,
           endCursor: 0,
           events: [],
-          snapshot: { chatId, runId, turnId: userMessage.id, state: 'completed', messages: [] } as const,
+          snapshot: { chatId, runId, turnId: userMessage.id, state: 'running', messages: [] } as const,
         })),
         tail: vi.fn(async () => ({ cursor: 0, nextCursor: 0, endCursor: 0, events: [] })),
         subscribe: vi.fn(() => () => undefined),

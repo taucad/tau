@@ -37,6 +37,44 @@ describe('section view safe snapshot', () => {
     expect(store).toEqual({ committed: undefined, rejection: undefined });
   });
 
+  it('should keep the committed snapshot and its plane when the same section is committed again', () => {
+    const store = createSectionViewSafeSnapshotStore();
+    const snapshot = {
+      identity: 'complete',
+      sourceIdentity: 'source-a',
+      kind: 'complete',
+      plane: new THREE.Plane(new THREE.Vector3(1, 0, 0), -2),
+    } as const;
+    commitSectionViewSafeSnapshot(store, snapshot);
+    const { committed } = store;
+
+    commitSectionViewSafeSnapshot(store, snapshot);
+
+    expect(store.committed).toBe(committed);
+    expect(store.committed?.plane).not.toBe(snapshot.plane);
+  });
+
+  it('should clear a rejection when the committed section is committed again', () => {
+    const store = createSectionViewSafeSnapshotStore();
+    const snapshot = {
+      identity: 'complete',
+      sourceIdentity: 'source-a',
+      kind: 'complete',
+      plane: new THREE.Plane(new THREE.Vector3(1, 0, 0), -2),
+    } as const;
+    commitSectionViewSafeSnapshot(store, snapshot);
+    rejectSectionViewSafeSnapshot(store, {
+      identity: 'unsupported',
+      sourceIdentity: 'source-a',
+      failure: { sourceKey: 'source', code: 'open-surface', message: 'unsupported' },
+    });
+
+    commitSectionViewSafeSnapshot(store, snapshot);
+
+    expect(store.rejection).toBeUndefined();
+    expect(store.committed?.identity).toBe('complete');
+  });
+
   it('returns to the ordinary view when replacement geometry cannot be certified', () => {
     const store = createSectionViewSafeSnapshotStore();
     commitSectionViewSafeSnapshot(store, {

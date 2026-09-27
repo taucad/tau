@@ -145,12 +145,11 @@ describe('owned paid access deadlines', () => {
  * the browser's plan read this projection, so this is the one switch.
  */
 describe('free-tier sync gate (D23)', () => {
-  it('should keep a free account off Tau Cloud sync while the gate is unset, but not off GitHub', async () => {
+  it('should keep a free account off Tau Cloud sync while the gate is unset', async () => {
     const { service } = createService([], false);
     expect(await service.getEntitlements('user-a')).toMatchObject({
       tier: 'free',
       canSyncFiles: false,
-      canConnectGitHub: true,
     });
   });
 
@@ -170,12 +169,11 @@ describe('free-tier sync gate (D23)', () => {
     vi.unstubAllEnvs();
   });
 
-  it('should let a free account sync, publish and connect GitHub once the deployment opens the gate', async () => {
+  it('should let a free account sync and publish once the deployment opens the gate', async () => {
     const { service } = createService([], false, { TAU_FREE_TIER_SYNC_ENABLED: true });
     expect(await service.getEntitlements('user-a')).toMatchObject({
       tier: 'free',
       canSyncFiles: true,
-      canConnectGitHub: true,
       canUseProKernels: false,
     });
   });

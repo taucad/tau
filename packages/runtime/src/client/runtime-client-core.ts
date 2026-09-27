@@ -43,7 +43,12 @@ import {
   isTranscodeTimeoutError,
 } from '#framework/runtime-worker-client.js';
 import { defaultTranscodeTimeout } from '#framework/runtime-framework.constants.js';
-import type { RuntimeTransportClient, TransportPlugin } from '#transport/runtime-transport.types.js';
+import type {
+  RuntimeTransportClient,
+  RuntimeTransportFacet,
+  TransportPlugin,
+} from '#transport/runtime-transport.types.js';
+import type { MachineClient } from '#machines/machine-client.js';
 import type { TransportDescriptor } from '#transport/runtime-transport-descriptor.types.js';
 import type { RuntimeFromTransport } from '#transport/transport-projections.js';
 import type {
@@ -927,6 +932,16 @@ type RuntimeClientProjection<
   Transcoders extends ReadonlyArray<TranscoderPlugin<any, any, any>> = TranscoderPlugin[],
   Transport extends AnyTransportPlugin = AnyTransportPlugin,
 > = {
+  /** Authenticated host machines facet, or a truthful negotiated refusal. */
+  readonly machines: RuntimeTransportFacet<MachineClient>;
+
+  /**
+   * Reserved durable-jobs facet. No job host exists yet, so the facet always
+   * negotiates `{ available: false, reason: 'unsupported' }`; consumers narrow
+   * on `available` exactly as they do for `machines`.
+   */
+  readonly jobs: RuntimeTransportFacet<never>;
+
   /**
    * Active transport snapshot. Returns the literal transport `id`
    * and the diagnostic {@link TransportDescriptor} from the materialised client's
@@ -1302,6 +1317,9 @@ export function createRuntimeClient(
     );
   }
   const transport: RuntimeTransportClient = transportPlugin.materialize();
+  const machines: RuntimeTransportFacet<MachineClient> =
+    transport.machines ?? Object.freeze({ available: false, reason: 'unsupported' });
+  const jobs: RuntimeTransportFacet<never> = Object.freeze({ available: false, reason: 'unsupported' });
   const configProvider = options.config;
 
   let workerClient: RuntimeWorkerClient | undefined;
@@ -1840,6 +1858,8 @@ export function createRuntimeClient(
   }
 
   return {
+    machines,
+    jobs,
     get lifecycleState(): RuntimeLifecycleState {
       return lifecycleState;
     },

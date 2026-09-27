@@ -1232,6 +1232,16 @@ for (const actorSet of actorSets) {
       });
       expect(await edited.port.readRef('main')).toBeUndefined();
       expect(await edited.filesystem.readFile('tau.json', 'utf8')).toBe('{"id":"project-1","name":"mine"}\n');
+
+      /* The placeholder a cloud open writes is setup, not work: the remote's manifest replaces it (e921b3d96). */
+      const placeholder = await unborn(
+        `${JSON.stringify({ id: 'project-1', name: 'Remote', description: '', tags: [], assets: { main: { entryPath: 'main.scad' } } })}\n`,
+      );
+      await expect(run(placeholder.actors.sync.fastForward, { remote: 'tau', branch: 'main' })).resolves.toMatchObject({
+        checkoutId: 'live',
+        revisionId: placeholder.remote,
+      });
+      expect(await placeholder.filesystem.readFile('tau.json', 'utf8')).toBe('{"id":"project-1"}\n');
     }, 30_000);
 
     /* W13c + W13d: the same rule for a cut taken before that pull lands (a close, a hidden tab), or before any fetch. */
@@ -1669,11 +1679,25 @@ for (const actorSet of actorSets) {
       });
     }, 30_000);
 
-    it('does not advance a branch that another checkout has open', async () => {
+    /* Policy: fast-forward a clean checkout (D60 extends that to linked ones);
+     * a branch with work of its own is never moved by a fetch. */
+    it('does not advance another checkout’s branch that has work of its own', async () => {
       const context = await synchronized();
       const feature = await context.port.addCheckout?.({ branch: 'feature', from: context.base });
       expect(feature).toMatchObject({ kind: 'linked', branch: 'feature' });
       await context.port.updateRef({ name: 'refs/remotes/tau/feature', expectedHead: undefined, head: context.base });
+      const baseTree = (await context.port.readTree(revisionId(context.base))) ?? new ImmutableRevisionTree([]);
+      const own = await context.port.writeRevision({
+        parents: [revisionId(context.base)],
+        tree: baseTree,
+        provenance: { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 8, 13, 4) },
+        summary: { generated: 'Work on feature' },
+      });
+      await context.port.updateRef({
+        name: 'feature',
+        expectedHead: revisionId(context.base),
+        head: revisionId(own.commitId),
+      });
       const wrappedPort: RevisionPort = {
         ...context.port,
         listRemoteRefs: async () => [
@@ -1697,7 +1721,7 @@ for (const actorSet of actorSets) {
       });
 
       await run(actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 10_000 });
-      expect(await context.port.readRef('feature')).toBe(context.base);
+      expect(await context.port.readRef('feature')).toBe(own.commitId);
     }, 30_000);
   });
 }

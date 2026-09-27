@@ -5,6 +5,7 @@ import {
   getProviderFacingToolInputSchemas,
   toProviderToolJsonSchema,
 } from '#schemas/provider-tool-schemas.js';
+import { getPrintProfilesInputSchema, requestPrintInputSchema } from '#schemas/tools/print.tool.schema.js';
 
 /**
  * Keywords no provider accepts today: Vertex rejects `const`/`propertyNames`/`prefixItems`, and
@@ -104,6 +105,13 @@ describe('provider-facing tool schema compatibility', () => {
       toolName.webSearch,
       toolName.webBrowser,
       toolName.revisions,
+      toolName.updateTodos,
+      toolName.getMachine,
+      toolName.getPrintProfiles,
+      toolName.requestPrint,
+      toolName.getPrintRequest,
+      toolName.listPrintRequests,
+      toolName.cancelPrint,
     ]);
   });
 
@@ -183,6 +191,47 @@ describe('provider-facing tool schema compatibility', () => {
     });
 
     expect(failures).toEqual([]);
+  });
+
+  it('should offer request_print its slicer options as a plain described object slot', () => {
+    const schema = providerSchemaFor(toolName.requestPrint);
+
+    expect(Object.keys(schema.properties ?? {}).sort()).toEqual([
+      'machineId',
+      'options',
+      'plate',
+      'preset',
+      'profiles',
+      'settings',
+      'targetFile',
+    ]);
+    expect(schema.required).toEqual(['targetFile']);
+    expect(schema.properties?.['options']).toEqual({
+      description: 'Slicer options: a JSON object mapping option names to JSON values.',
+    });
+    expect(schema.properties?.['settings']).toEqual({
+      description: 'Bambu Studio settings: a JSON object mapping setting keys from get_print_profiles to values.',
+    });
+  });
+
+  it('should bound request_print Bambu Studio settings at runtime', () => {
+    const schema = requestPrintInputSchema;
+    /* Bambu Studio's own setting keys. */
+    const settings = (key: string, value: unknown) => ({ targetFile: 'main.ts', settings: { [key]: value } });
+
+    expect(schema.safeParse(settings('sparse_infill_density', '20%')).success).toBe(true);
+    expect(schema.safeParse(settings('wall_loops', { nested: 1 })).success).toBe(false);
+    expect(schema.safeParse({ targetFile: 'main.ts', profiles: { filaments: [] } }).success).toBe(false);
+  });
+
+  it('should offer get_print_profiles a machine, profiles and a bounded key filter', () => {
+    const schema = providerSchemaFor(toolName.getPrintProfiles);
+
+    expect(Object.keys(schema.properties ?? {}).sort()).toEqual(['keys', 'machineId', 'profiles']);
+    expect(schema.required ?? []).toEqual([]);
+    expect(getPrintProfilesInputSchema.safeParse({ keys: Array.from({ length: 65 }, (_, i) => `k${i}`) }).success).toBe(
+      false,
+    );
   });
 
   it('should keep screenshot and use_skill provider inputs pruned to implemented fields', () => {

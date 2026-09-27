@@ -701,9 +701,8 @@ for (const row of ports) {
 
       /* AC9's other half: the settlement names every lease on the checkout, and
        * the revision itself still carries the run that minted it — the case
-       * where a naive "one lease, one run" rule would drop attribution. */
-      /* Sorted by the one producer (`revision-effects.ts`, 13cd18254), so two
-       * views of one settlement spell it one way; the set is what AC9 pins. */
+       * where a naive "one lease, one run" rule would drop attribution. The
+       * producer sorts the ids, so a repeated settlement compares by value. */
       expect(secondSettlement.runIds).toEqual(['run-1', 'run-2']);
       expect(firstSettlement.runIds).toContain('run-1');
       /* Which of the two mints the shared content is not fixed — the later

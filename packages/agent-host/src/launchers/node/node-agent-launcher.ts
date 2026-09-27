@@ -21,6 +21,7 @@
  * clients. Nothing here is tied to a socket lifetime.
  */
 
+import { access } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { createGatewayModelTransport } from '#transport/gateway-model-transport.js';
@@ -45,6 +46,7 @@ import type {
   ToolRegistry,
 } from '#waist/ports.js';
 import type { AgentSessionModel, CreateAgentSessionOptions } from '#harness/session.js';
+import type { EventLogBatch } from '#log/event-log-appender.js';
 import type { ExternalAgentPort, TauAgentHost } from '#host/tau-agent-host.js';
 import { admissionConfigFor, agentChannelTailByteLimit } from '#launchers/node/agent-wire.js';
 import type {
@@ -333,15 +335,15 @@ export const createNodeAgentLauncher = (options: NodeAgentLauncherOptions): Node
    * rejected `EVENT_OUT_OF_ORDER` — or worse, accepted out of order.
    */
   const logs = new Map<string, Promise<DurableEventLog>>();
+  const chatLogPath = (chatId: string): string =>
+    join(options.workspaceRoot, '.tau', 'chats', requirePathSegment(chatId, 'chatId'), 'events.jsonl');
   const openEventLog = async (chatId: string): Promise<DurableEventLog> => {
     const cached = logs.get(chatId);
     if (cached) {
       return cached;
     }
     const opened = (async (): Promise<DurableEventLog> => {
-      const log = await createNodeEventLog({
-        filePath: join(options.workspaceRoot, '.tau', 'chats', requirePathSegment(chatId, 'chatId'), 'events.jsonl'),
-      });
+      const log = await createNodeEventLog({ filePath: chatLogPath(chatId) });
       return {
         append: async (event: AgentLogEvent) => {
           const outcome = await log.append(event);
@@ -520,10 +522,32 @@ export const createNodeAgentLauncher = (options: NodeAgentLauncherOptions): Node
     maxBytes: Math.min(command.maxBytes ?? agentChannelTailByteLimit, agentChannelTailByteLimit),
   });
 
+  /**
+   * A read window over a chat's log that never creates it.
+   *
+   * Opening a log creates its file, so a `tail` or `attach` of a chat nobody
+   * wrote — the desktop's registration probe — left an empty chat behind that
+   * then synced to every device. A chat with no log on disk reads as empty.
+   *
+   * @param command - The client's `tail` or `attach` window.
+   * @returns The batch, empty for a chat that does not exist.
+   */
+  const readEvents = async (command: AgentChannelTailWindow & { readonly chatId: string }): Promise<EventLogBatch> => {
+    const exists =
+      logs.has(command.chatId) ||
+      (await access(chatLogPath(command.chatId)).then(
+        () => true,
+        () => false,
+      ));
+    return exists
+      ? host.readEvents(readWindow(command))
+      : { cursor: command.cursor, nextCursor: command.cursor, endCursor: 0, events: [] };
+  };
+
   const attach = async (
     command: Extract<AgentChannelCommand, { readonly type: 'attach' }>,
   ): Promise<Extract<AgentChannelResponse, { readonly type: 'attach' }>> => {
-    const batch = await host.readEvents(readWindow(command));
+    const batch = await readEvents(command);
     if (batch.endCursor === 0) {
       return {
         type: 'attach',
@@ -550,7 +574,7 @@ export const createNodeAgentLauncher = (options: NodeAgentLauncherOptions): Node
     return {
       type: 'attach',
       chatId: command.chatId,
-      batch: await host.readEvents(readWindow(command)),
+      batch: await readEvents(command),
       leadership: { role: 'leader', generation: generationFor(command.chatId) },
       ...(snapshot ? { snapshot } : {}),
       takeover,
@@ -562,7 +586,7 @@ export const createNodeAgentLauncher = (options: NodeAgentLauncherOptions): Node
     generationFor(command.chatId);
     switch (command.type) {
       case 'tail': {
-        return { type: 'tail', chatId: command.chatId, batch: await host.readEvents(readWindow(command)) };
+        return { type: 'tail', chatId: command.chatId, batch: await readEvents(command) };
       }
       case 'attach': {
         return attach(command);

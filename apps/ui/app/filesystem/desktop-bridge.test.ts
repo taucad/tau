@@ -20,7 +20,7 @@ const relayTag = 'tau:services-port';
  * @param options - `foreign` posts the relay from another frame instead.
  * @returns The stub's captured calls and the port it relays.
  */
-const installShellGlobal = (options: { foreign?: boolean } = {}) => {
+const installShellGlobal = (options: { foreign?: boolean; slicers?: unknown } = {}) => {
   const port = new MessageChannel().port1;
   const requestServicesPort = vi.fn((requestId: string, _concern: string, _context?: Record<string, string>) => {
     globalThis.dispatchEvent(
@@ -37,6 +37,9 @@ const installShellGlobal = (options: { foreign?: boolean } = {}) => {
   const selectDirectory = vi.fn(async () => '/Users/tester/Projects');
   const retainAgentHost = vi.fn(async () => undefined);
   const releaseAgentHost = vi.fn(async () => undefined);
+  const completeMachineBinding = vi.fn(
+    async (_input: unknown): Promise<unknown> => ({ status: 'bound', machineId: 'bambu:sim' }),
+  );
   const setAppIconTheme = vi.fn();
   let quitHandler: (() => void) | undefined;
   const onQuitAsk = vi.fn((handler: () => void) => {
@@ -53,16 +56,19 @@ const installShellGlobal = (options: { foreign?: boolean } = {}) => {
     relayTag,
     requestServicesPort,
     agentHost: { retain: retainAgentHost, release: releaseAgentHost },
+    machines: { completeBinding: completeMachineBinding },
     nodeFs: { homeRoot },
     appIcon: { setTheme: setAppIconTheme },
     quit: { isReady: isQuitReady, onAsk: onQuitAsk, reportQuiesced: vi.fn() },
     dialog: { selectDirectory },
+    ...(options.slicers === undefined ? {} : { slicers: options.slicers }),
   });
   return {
     port,
     requestServicesPort,
     retainAgentHost,
     releaseAgentHost,
+    completeMachineBinding,
     selectDirectory,
     setAppIconTheme,
     isQuitReady,
@@ -153,6 +159,34 @@ describe('desktopBridge', () => {
     });
   });
 
+  it('should connect machines without naming a root, since printers belong to the computer', async () => {
+    const { port, requestServicesPort } = installShellGlobal();
+    const { desktopBridge } = await loadBridge();
+
+    await expect(desktopBridge()?.machines.connect()).resolves.toBe(port);
+    expect(requestServicesPort).toHaveBeenCalledOnce();
+    const [, concern, context] = requestServicesPort.mock.calls[0] as [string, string, unknown];
+    expect(concern).toBe('machines');
+    expect(context).toBeUndefined();
+  });
+
+  it('should complete a binding through preload and accept only the host outcome shape', async () => {
+    const { completeMachineBinding } = installShellGlobal();
+    const { desktopBridge } = await loadBridge();
+
+    await expect(
+      desktopBridge()?.machines.completeBinding({ ceremonyId: 'ceremony-1', address: '10.0.0.5', accessCode: '1234' }),
+    ).resolves.toEqual({ status: 'bound', machineId: 'bambu:sim' });
+    expect(completeMachineBinding).toHaveBeenCalledExactlyOnceWith({
+      ceremonyId: 'ceremony-1',
+      address: '10.0.0.5',
+      accessCode: '1234',
+    });
+
+    completeMachineBinding.mockResolvedValueOnce({ status: 'bound' });
+    await expect(desktopBridge()?.machines.completeBinding({ ceremonyId: 'ceremony-2' })).rejects.toThrow();
+  });
+
   it('forwards project-session retain and release to the preload surface', async () => {
     const { retainAgentHost, releaseAgentHost } = installShellGlobal();
     const { desktopBridge } = await loadBridge();
@@ -194,5 +228,63 @@ describe('desktopBridge', () => {
     ]);
 
     expect(settlement).toBe('pending');
+  });
+
+  describe('Bambu Studio', () => {
+    const catalog = { installation: {}, printers: [], processes: [], filaments: [], plates: [] };
+    const installBambuStudio = () => {
+      const bambuStudio = {
+        status: vi.fn(async () => ({ available: true, version: '02.08.02.61', executable: '/opt/BambuStudio' })),
+        catalog: vi.fn(async (_filter?: unknown): Promise<unknown> => ({ ok: true, value: catalog })),
+        resolveSelection: vi.fn(
+          async (_input?: unknown): Promise<unknown> => ({
+            ok: false,
+            error: { code: 'BAMBU_STUDIO_PRESET_NOT_FOUND', message: 'No printer preset for "Z9".' },
+          }),
+        ),
+        settings: vi.fn(
+          async (_input?: unknown): Promise<unknown> => ({
+            ok: false,
+            error: { code: 'BAMBU_STUDIO_UNAVAILABLE', message: 'Bambu Studio was not found.' },
+          }),
+        ),
+      };
+      installShellGlobal({ slicers: { bambuStudio } });
+      return bambuStudio;
+    };
+
+    it('should be absent when the shell exposes no slicers', async () => {
+      installShellGlobal();
+      const { desktopBridge } = await loadBridge();
+
+      expect(desktopBridge()?.slicers).toBeUndefined();
+    });
+
+    it('should report status and unwrap answers from main', async () => {
+      const calls = installBambuStudio();
+      const { desktopBridge } = await loadBridge();
+      const bambuStudio = desktopBridge()?.slicers?.bambuStudio;
+
+      await expect(bambuStudio?.status()).resolves.toEqual({
+        available: true,
+        version: '02.08.02.61',
+        executable: '/opt/BambuStudio',
+      });
+      await expect(bambuStudio?.catalog({ model: 'X1C' })).resolves.toBe(catalog);
+      expect(calls.catalog).toHaveBeenCalledExactlyOnceWith({ model: 'X1C' });
+    });
+
+    it('should reject a refusal as an error that keeps the engine code', async () => {
+      installBambuStudio();
+      const { desktopBridge } = await loadBridge();
+      const bambuStudio = desktopBridge()?.slicers?.bambuStudio;
+
+      const refusal = bambuStudio?.resolveSelection({ hints: { model: 'Z9', materials: [] } });
+      await expect(refusal).rejects.toThrow('No printer preset for "Z9".');
+      await expect(refusal).rejects.toMatchObject({ name: 'BambuStudioError', code: 'BAMBU_STUDIO_PRESET_NOT_FOUND' });
+      await expect(bambuStudio?.settings({ printer: 'p', process: 'q', filaments: [] })).rejects.toMatchObject({
+        code: 'BAMBU_STUDIO_UNAVAILABLE',
+      });
+    });
   });
 });

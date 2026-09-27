@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { createActor, waitFor } from 'xstate';
 import { projectToManifest } from '@taucad/types';
-import type { ProjectManifest } from '@taucad/types';
+import type { ProjectManifest, ProjectManifestParseIssue } from '@taucad/types';
 import { isProjectContentActivityPath, projectMachine, selectProjectKernelRefusal } from '#machines/project.machine.js';
 import { defaultGraphicsSettings } from '#constants/editor.constants.js';
 import type { ProjectContext, ProjectLoadInput, ProjectRetrievedEvent } from '#machines/project.machine.js';
@@ -41,7 +41,9 @@ const stubProjectWithMechanical = stubProject;
 
 function createTestActor(options?: {
   loadResult?: ProjectManifest | (() => Promise<ProjectManifest>);
-  writeResult?: () => Promise<void>;
+  /** Loads the project as the normalized view of a degraded manifest. */
+  loadIssue?: ProjectManifestParseIssue;
+  writeResult?: (input: { project: ProjectManifest; repair?: boolean }) => Promise<void>;
   shouldAutoLoad?: boolean;
   shouldLoadModelOnStart?: boolean;
   projectId?: string;
@@ -54,6 +56,7 @@ function createTestActor(options?: {
     return {
       type: 'projectRetrieved',
       project,
+      ...(options?.loadIssue === undefined ? {} : { issue: options.loadIssue }),
     };
   });
   const { writeResult } = options ?? {};
@@ -63,9 +66,11 @@ function createTestActor(options?: {
         ? { loadProjectActor }
         : {
             loadProjectActor,
-            writeProjectActor: fromSafeAsync(async () => {
-              await writeResult();
-            }),
+            writeProjectActor: fromSafeAsync<void, { project: ProjectManifest; repair?: boolean }>(
+              async ({ input }) => {
+                await writeResult(input);
+              },
+            ),
           },
     guards: {
       isNotBrowser: () => false,
@@ -421,6 +426,73 @@ describe('projectMachine', () => {
         paths: ['', 'tau.json', '.tau/cache/render.bin', '.git/HEAD', 'node_modules/pkg/index.d.ts'],
       });
       expect(emitted).toEqual([]);
+      actor.stop();
+    });
+  });
+
+  // =========================================================================
+  // State: ready – degraded manifest (blueprint R4/R5)
+  // =========================================================================
+  describe('ready – degraded manifest', () => {
+    const unknownAssetKey: ProjectManifestParseIssue = { code: 'manifest-invalid', issues: [] };
+
+    const startDegraded = async (loadIssue: ProjectManifestParseIssue = unknownAssetKey) => {
+      const writes: Array<{ project: ProjectManifest; repair?: boolean }> = [];
+      const actor = await startAndLoad({
+        loadIssue,
+        writeResult: async (input) => {
+          writes.push(input);
+        },
+      });
+      return { actor, writes };
+    };
+
+    it('opens with the issue and refuses implicit edits of the lossy view', async () => {
+      const { actor, writes } = await startDegraded();
+
+      actor.send({ type: 'updateName', name: 'Renamed' });
+      actor.send({ type: 'updateDescription', description: 'Changed' });
+      actor.send({ type: 'updateTags', tags: ['c'] });
+      actor.send({ type: 'setMainFile', path: 'second.cs' });
+
+      expect(actor.getSnapshot().context.manifestIssue).toEqual(unknownAssetKey);
+      expect(actor.getSnapshot().context.project).toEqual(stubProject);
+      expect(actor.getSnapshot().matches({ ready: { storing: 'idle' } })).toBe(true);
+      expect(writes).toEqual([]);
+      actor.stop();
+    });
+
+    it('repairs with one explicit write, then edits again', async () => {
+      const { actor, writes } = await startDegraded();
+
+      actor.send({ type: 'repairManifest' });
+      await waitFor(actor, (snapshot) => snapshot.matches({ ready: { storing: 'idle' } }));
+
+      expect(writes).toEqual([{ project: stubProject, repair: true }]);
+      expect(actor.getSnapshot().context.manifestIssue).toBeUndefined();
+      actor.send({ type: 'updateName', name: 'Renamed' });
+      expect(actor.getSnapshot().context.project?.name).toBe('Renamed');
+      actor.stop();
+    });
+
+    it('offers no Repair for a JSON syntax error, whose defaults would erase recoverable text', async () => {
+      const { actor, writes } = await startDegraded({ code: 'manifest-invalid-json', message: 'Unexpected token' });
+
+      actor.send({ type: 'repairManifest' });
+
+      expect(actor.getSnapshot().matches({ ready: { storing: 'idle' } })).toBe(true);
+      expect(writes).toEqual([]);
+      actor.stop();
+    });
+
+    it('keeps the last good manifest open when the file stops identifying the project', async () => {
+      const actor = await startAndLoad();
+
+      actor.send({ type: 'manifestIssueObserved', issue: { code: 'manifest-missing' } });
+      actor.send({ type: 'updateName', name: 'Renamed' });
+
+      expect(actor.getSnapshot().context.manifestIssue).toEqual({ code: 'manifest-missing' });
+      expect(actor.getSnapshot().context.project).toEqual(stubProject);
       actor.stop();
     });
   });

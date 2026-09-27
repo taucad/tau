@@ -250,7 +250,14 @@ export type SyncMachineEvent =
    * machine then offers the remote under its lease (P44). Absent `ref` means
    * "whatever you were conflicted about".
    */
-  | Readonly<{ type: 'conflictResolved'; ref?: string; revisionId?: string }>;
+  | Readonly<{ type: 'conflictResolved'; ref?: string; revisionId?: string }>
+  /**
+   * The live checkout moved to another branch (D50).
+   *
+   * `branch` is read once when the project opens, so without this a switch
+   * left the pull integrating the branch the project was opened on.
+   */
+  | Readonly<{ type: 'branchChanged'; branch: string }>;
 
 /** Facts syncMachine emits for a host that holds only the root. @public */
 export type SyncMachineEmitted =
@@ -334,6 +341,8 @@ export type SyncFetchActorOutput = Readonly<{
   branches?: ReadonlyArray<Readonly<{ name: string; head: string }>>;
   /** Independent record projections attempted after the fetch. */
   records?: readonly SyncRefOutcome[];
+  /** Other checkouts this pull moved onto their remote heads (D60). */
+  advanced?: ReadonlyArray<SyncMovedCheckout & Readonly<{ branch: string }>>;
 }>;
 
 /** What applying the fetched head is asked for. @public */
@@ -437,6 +446,8 @@ const terminalFailureCodes: ReadonlySet<string> = new Set([
   'REMOTE_MOVED',
   /* A damaged hosted repository answers the same 500 to every retry. */
   'REMOTE_DAMAGED',
+  /* D49: refused before any network call; retrying cannot change the tree. */
+  'LFS_REMOTE_UNSUPPORTED',
 ]);
 
 const codeOf = (error: unknown): string | undefined => {
@@ -545,9 +556,24 @@ const historyRefOf = (branch: string): string => `refs/heads/${branch}`;
 const isQuotaAnswer = (pending: readonly SyncQueueEntry[], overQuota: readonly string[] | undefined): boolean =>
   pending.length > 0 && ((overQuota ?? []).length > 0 || pending.some((entry) => isStorageRefusal(entry.reason)));
 
-/** A refused ref's reason in a person's words; `leaseLost` is the ports' code for "the remote moved" (D39). */
-const refusalSaid = (reason: string | undefined): string | undefined =>
-  reason === 'leaseLost' ? 'This branch changed on the remote; this project will catch up and try again.' : reason;
+/**
+ * A refused ref's reason in a person's words; `leaseLost` is the ports' code
+ * for "the remote moved" (D39). Another checkout's branch is named: the row
+ * belongs to the branch in view, and "this branch" pointed at the wrong one.
+ */
+const refusalSaid = (
+  refused: Readonly<{ ref: string; reason: string | undefined }> | undefined,
+  branch: string,
+): string | undefined => {
+  if (refused?.reason !== 'leaseLost') {
+    return refused?.reason;
+  }
+  const other =
+    refused.ref.startsWith('refs/heads/') && refused.ref !== historyRefOf(branch)
+      ? refused.ref.slice('refs/heads/'.length)
+      : undefined;
+  return `${other ?? 'This branch'} changed on the remote; this project will catch up and try again.`;
+};
 
 /**
  * The queue entries *this* remote is owed.
@@ -779,6 +805,11 @@ const rememberFetch = (
   if (context.parentRef !== undefined && output.branches !== undefined) {
     enq.sendTo(context.parentRef, { type: 'branchesFetched', branches: output.branches });
   }
+  for (const moved of output.advanced ?? []) {
+    if (context.parentRef !== undefined) {
+      enq.sendTo(context.parentRef, { type: 'checkoutChanged', ...moved });
+    }
+  }
   return {
     leases: output.leases,
     pending,
@@ -998,6 +1029,15 @@ const syncMachineDefinition = setup({
      * defer it to the next push instead (W15 F1). */
     syncNow: { context: ({ context, event }) => ({ pushId: event.pushId ?? context.pushId }) },
     open: ({ context, guards }) => (guards.hasRemote(context) ? { target: '.opening', reenter: true } : undefined),
+    /* D50: pull the branch the person is now on, as a reopen would. */
+    branchChanged: ({ context, event, guards }) => {
+      if (event.branch === context.branch) {
+        return undefined;
+      }
+      return guards.hasRemote(context)
+        ? { target: '.opening', reenter: true, context: { branch: event.branch } }
+        : { context: { branch: event.branch } };
+    },
     remoteDisconnected: {
       target: '.noRemote',
       /* The queue is *paused*, not dropped (policy Rule 9, C12): its entries
@@ -1247,7 +1287,9 @@ const syncMachineDefinition = setup({
                 conflictRef: `refs/heads/${event.output.branch}`,
                 error: 'The remote and this device changed the same files.',
               };
-              if (context.parentRef !== undefined) {
+              /* A re-pull that lands on the conflict already waiting (D55) is
+               * not news: announcing it again toasted on every retry. */
+              if (context.parentRef !== undefined && context.conflictRef !== conflict.conflictRef) {
                 enq.sendTo(context.parentRef, {
                   type: 'mergeConflicted',
                   branch: event.output.branch,
@@ -1431,7 +1473,10 @@ const syncMachineDefinition = setup({
               attempt: pending.length > 0 ? context.attempt + 1 : 0,
               retryAfterMilliseconds: undefined,
               conflictRef: refusedHistory === undefined ? undefined : refusedHistory.name,
-              error: refusalSaid(refusedHistory?.reason ?? (pending.length > 0 ? pending[0]?.reason : undefined)),
+              error: refusalSaid(
+                refusedHistory === undefined ? pending[0] : { ref: refusedHistory.name, reason: refusedHistory.reason },
+                context.branch,
+              ),
               reason: quota ? 'quota' : pending.length > 0 ? 'rejected' : undefined,
             },
           };

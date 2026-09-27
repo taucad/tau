@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { authoringTypeMaps, geospecTypes } from '#authoring-types.js';
+import { authoringTypeMaps, geospecTypes, kinematicsTypes } from '#authoring-types.js';
 import type { BundledTypesPackage } from '#bundled-types.types.js';
 import {
   jscadModelingTypes,
@@ -77,6 +77,19 @@ describe('@taucad/api-extractor runtime subpaths', () => {
     expect(indexSource).not.toMatch(/\?raw/);
     expect(indexSource).not.toContain('kernelTypePackageMaps');
     expect(indexSource).not.toContain('authoringTypeMaps');
+  });
+
+  it('should expose the mechanism authoring declarations with the spatial types they reference', () => {
+    expect(authoringTypeMaps).toContain(kinematicsTypes);
+    const kinematics = kinematicsTypes['@taucad/kinematics'];
+    const spatial = kinematicsTypes['@taucad/spatial'];
+    // Type-only entries: kernel modules import these packages for types alone.
+    expect(kinematics?.content).toBe("export type * from './types.js';\n");
+    expect(kinematics?.files?.['types.d.ts']).toContain('export type Mechanism =');
+    expect(kinematics?.files?.['types.d.ts']).toContain("from '@taucad/spatial'");
+    expect(spatial?.content).toBe("export type * from './entry.js';\n");
+    expect(spatial?.files?.['entry.d.ts']).toContain("from './spatial-domain.js'");
+    expect(spatial?.files?.['spatial-domain.d.ts']).toContain('export type SpatialVector');
   });
 
   it('should expose generated GeoSpec package declarations for all public subpaths', () => {

@@ -8,18 +8,11 @@ describe('entitlementsFromTier', () => {
     expect(entitlementsFromTier('free', { freeTierSync: false })).toMatchObject({ canSyncFiles: false });
   });
 
-  /* EQ2 (F6): GitHub uses the user's own storage, so D23 does not gate it. */
-  it('should let a free account connect GitHub whatever the free-sync gate says', () => {
-    expect(entitlementsFromTier('free').canConnectGitHub).toBe(true);
-    expect(entitlementsFromTier('free', { freeTierSync: false }).canConnectGitHub).toBe(true);
-  });
-
-  /* D16 and EQ2: open, a free account backs up, publishes and connects GitHub. */
-  it('should let a free account sync and connect GitHub once free sync is open', () => {
+  /* D16: open, a free account backs up and publishes. GitHub is on every plan, so it has no flag. */
+  it('should let a free account sync once free sync is open', () => {
     expect(entitlementsFromTier('free', { freeTierSync: true })).toMatchObject({
       tier: 'free',
       canSyncFiles: true,
-      canConnectGitHub: true,
       canUseProKernels: false,
       canCreatePrivateShares: false,
     });
@@ -39,7 +32,6 @@ describe('entitlementsFromTier', () => {
       canUseProKernels: false,
       canCreatePrivateShares: false,
       canSyncFiles: false,
-      canConnectGitHub: true,
       canConnectEnterpriseGit: false,
       apiCadGatewayMonthlyLimit: 1000,
       conversionApiMonthlyLimit: 0,
@@ -77,7 +69,6 @@ describe('entitlementsFromTier', () => {
       canUseProKernels: true,
       canCreatePrivateShares: true,
       canSyncFiles: true,
-      canConnectGitHub: true,
       canConnectEnterpriseGit: false,
       apiCadGatewayMonthlyLimit: 30_000,
       conversionApiMonthlyLimit: 50_000,

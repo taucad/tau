@@ -17,7 +17,12 @@ import type {
 import type { ParameterManifest } from '@taucad/parameters';
 import type { ExportResult } from '@taucad/runtime';
 
-import { replicadKernel } from '#replicad.kernel.js';
+import { registerTauGltfExtensions } from '@taucad/geometry-core';
+import type { TauCadTopologyPayload, TauCadTopologyRoot } from '@taucad/geometry-core';
+import { tauCadTopologyExtension } from '@taucad/runtime/types';
+import { decode as msgpackDecode, encode as msgpackEncode } from '@msgpack/msgpack';
+import { resolveMechanismComponents } from '@taucad/kinematics';
+import { readMechanismExport, replicadKernel } from '#replicad.kernel.js';
 import { normalizeRenderShapes } from '#utils/render-output.js';
 import type { NativeHandleEntry } from '#interface-resolution.js';
 import {
@@ -4208,6 +4213,254 @@ describe('Normal consistency', () => {
   }, 15_000);
 });
 
+// =============================================================================
+// Mechanism export → TAU_cad_topology
+// =============================================================================
+
+const mechanismModule = (
+  driverComponent: string,
+  declaration = 'function mechanism(params: typeof defaultParams): MechanismSource',
+): string => `
+  import { makeBox } from 'replicad';
+  import type { MechanismSource } from '@taucad/kinematics';
+
+  export const defaultParams = { gap: 20 };
+
+  export default function main(params: typeof defaultParams) {
+    return [
+      { shape: makeBox([0, 0, 0], [100, 50, 10]), name: 'Base' },
+      { shape: makeBox([0, 0, 10], [20, 20, 30]), name: 'Drive Gear' },
+      { shape: makeBox([params.gap + 20, 0, 10], [params.gap + 40, 20, 30]), name: 'Driven Gear' },
+    ];
+  }
+
+  export ${declaration} {
+    return {
+      schemaVersion: 1,
+      units: { length: 'mm', angle: 'deg' },
+      root: 'base',
+      links: {
+        base: { shapes: ['Base'] },
+        drive: { shapes: ['${driverComponent}'] },
+        driven: { shapes: ['Driven Gear'] },
+      },
+      joints: {
+        drive: {
+          type: 'revolute',
+          parent: 'base',
+          child: 'drive',
+          origin: [10, 10, 10],
+          axis: [0, 0, 1],
+          limits: { lower: -180, upper: 180 },
+        },
+        driven: { type: 'revolute', parent: 'base', child: 'driven', origin: [params.gap + 30, 10, 10], axis: [0, 0, 1] },
+      },
+      couplings: [{ driver: 'drive', follower: 'driven', ratio: -0.5 }],
+    };
+  }
+`;
+
+const readTopologyPayload = async (glb: Uint8Array<ArrayBuffer> | undefined): Promise<TauCadTopologyPayload> => {
+  if (!glb) {
+    throw new Error('Expected GLB render output.');
+  }
+  const document = await registerTauGltfExtensions(new NodeIO()).readBinary(glb);
+  const root = document.getRoot().getExtension<TauCadTopologyRoot>(tauCadTopologyExtension);
+  if (!root) {
+    throw new Error('Expected a TAU_cad_topology payload.');
+  }
+  const payload: unknown = root.getPayload();
+  return payload as TauCadTopologyPayload;
+};
+
+/** Round to nanometre precision and fold negative zero so frame conversions compare exactly. */
+const rounded = (vector: readonly number[] | undefined): number[] =>
+  (vector ?? []).map((value) => Math.round(value * 1e9) / 1e9 + 0);
+
+/** `readMechanismExport` formats only a throw from `mechanism()`; these cases never throw. */
+const formatUnreachable = (): never => {
+  throw new Error('Expected mechanism() not to throw.');
+};
+
+describe('mechanism export', () => {
+  it('should carry a mechanism in GLB space with resolved component ids', async () => {
+    const result = await createGeometry({
+      files: { 'gears.ts': mechanismModule('Drive Gear') },
+      mainFile: 'gears.ts',
+      parameters: { gap: 30 },
+    });
+
+    assertSuccess(result);
+    const payload = await readTopologyPayload(extractGltfFromResult(result));
+    const { mechanism } = payload;
+    expect(result.issues).toEqual([]);
+    expect(payload.components.map((component) => component.id)).toEqual([
+      'component:base',
+      'component:drive-gear',
+      'component:driven-gear',
+    ]);
+    expect(mechanism?.units).toEqual({ length: 'm', angle: 'deg' });
+    expect(mechanism?.links).toEqual({
+      base: { components: ['component:base'] },
+      drive: { components: ['component:drive-gear'] },
+      driven: { components: ['component:driven-gear'] },
+    });
+    // Z-up millimetres → Y-up metres, the vertex rule: (x, y, z) → (x, z, −y) / 1000.
+    const drive = mechanism?.joints['drive'];
+    const driven = mechanism?.joints['driven'];
+    expect(rounded(drive?.origin)).toEqual([0.01, 0.01, -0.01]);
+    expect(drive?.type === 'revolute' ? rounded(drive.axis) : undefined).toEqual([0, 1, 0]);
+    expect(drive?.type === 'revolute' ? drive.limits : undefined).toEqual({ lower: -180, upper: 180 });
+    // The function received the render's parameters: gap 30 puts the driven axis at x = 60 mm.
+    expect(rounded(driven?.origin)).toEqual([0.06, 0.01, -0.01]);
+    expect(mechanism?.couplings).toEqual([{ driver: 'drive', follower: 'driven', ratio: -0.5 }]);
+  });
+
+  it('should report an unknown component and still render the geometry without a mechanism', async () => {
+    const result = await createGeometry({
+      files: { 'gears.ts': mechanismModule('Missing Gear') },
+      mainFile: 'gears.ts',
+    });
+
+    assertSuccess(result);
+    const payload = await readTopologyPayload(extractGltfFromResult(result));
+    expect(payload.components).toHaveLength(3);
+    expect(payload.mechanism).toBeUndefined();
+    expect(result.issues).toEqual([
+      expect.objectContaining({
+        code: 'INVALID_REFERENCE',
+        severity: 'warning',
+        message: expect.stringMatching(/\/links\/drive.*Missing Gear/s),
+        details: expect.objectContaining({
+          mechanism: expect.objectContaining({
+            code: 'UNKNOWN_COMPONENT',
+            path: expect.stringContaining('/links/drive'),
+          }),
+        }),
+      }),
+    ]);
+  });
+
+  it('should render without a mechanism and warn, source-mapped, when mechanism() throws', async () => {
+    const result = await createGeometry({
+      files: {
+        'box.ts': `
+          import { makeBox } from 'replicad';
+
+          export const defaultParams = { size: 10 };
+
+          export default function main(params: typeof defaultParams) {
+            return [{ shape: makeBox([0, 0, 0], [params.size, params.size, params.size]), name: 'Base' }];
+          }
+
+          export function mechanism(params: typeof defaultParams) {
+            throw new Error(\`mechanism typo for size \${params.size}\`);
+          }
+        `,
+      },
+      mainFile: 'box.ts',
+    });
+
+    assertSuccess(result);
+    const payload = await readTopologyPayload(extractGltfFromResult(result));
+    expect(payload.components).toHaveLength(1);
+    expect(payload.mechanism).toBeUndefined();
+    expect(result.issues).toEqual([
+      expect.objectContaining({
+        severity: 'warning',
+        type: 'runtime',
+        message: expect.stringMatching(/^Mechanism: mechanism\(\) threw ".*mechanism typo for size 10"/),
+        stackFrames: expect.arrayContaining([expect.anything()]),
+        details: {
+          producer: { kernelId: 'replicad' },
+          mechanism: {
+            code: 'INVALID_VALUE',
+            path: '',
+            message: expect.stringContaining('mechanism typo for size 10'),
+            recovery: expect.any(String),
+          },
+        },
+      }),
+    ]);
+  });
+
+  it('should resolve an async mechanism() to its value', async () => {
+    const result = await createGeometry({
+      files: {
+        'gears.ts': mechanismModule(
+          'Drive Gear',
+          'async function mechanism(params: typeof defaultParams): Promise<MechanismSource>',
+        ),
+      },
+      mainFile: 'gears.ts',
+    });
+
+    assertSuccess(result);
+    const payload = await readTopologyPayload(extractGltfFromResult(result));
+    expect(result.issues).toEqual([]);
+    expect(payload.mechanism?.links['drive']).toEqual({ components: ['component:drive-gear'] });
+  });
+
+  it('should normalise the mechanism once so a msgpack build snapshot admits it identically', async () => {
+    const authored = {
+      schemaVersion: 1,
+      units: { length: 'mm', angle: 'deg' },
+      root: 'base',
+      links: { base: { shapes: ['Base'] }, lid: { shapes: ['Lid'] } },
+      joints: {
+        hinge: {
+          type: 'revolute',
+          parent: 'base',
+          child: 'lid',
+          origin: [0, 0, 0],
+          axis: [0, 0, 1],
+          limits: undefined,
+        },
+      },
+      couplings: undefined,
+    };
+    const { mechanism, issues } = await readMechanismExport({ mechanism: () => authored }, {}, formatUnreachable);
+    // The build cache stores the handle snapshot with msgpack, which writes `undefined` as nil.
+    const restored = msgpackDecode(msgpackEncode({ shapes: [], mechanism })) as { mechanism: unknown };
+    const componentIds = Object.fromEntries([
+      ['Base', 'component:base'],
+      ['Lid', 'component:lid'],
+    ]);
+
+    expect(issues).toEqual([]);
+    expect(resolveMechanismComponents({ source: mechanism, componentIds }).status).toBe('resolved');
+    expect(resolveMechanismComponents({ source: restored.mechanism, componentIds })).toEqual(
+      resolveMechanismComponents({ source: mechanism, componentIds }),
+    );
+  });
+
+  it('should warn and drop a mechanism that JSON cannot hold', async () => {
+    const cyclic: Record<string, unknown> = { schemaVersion: 1 };
+    cyclic['self'] = cyclic;
+
+    const outcomes = await Promise.all(
+      [{ schemaVersion: 1n }, cyclic].map(async (value) =>
+        readMechanismExport({ mechanism: value }, {}, formatUnreachable),
+      ),
+    );
+
+    for (const { mechanism, issues } of outcomes) {
+      expect(mechanism).toBeUndefined();
+      expect(issues).toEqual([
+        expect.objectContaining({
+          code: 'INVALID_ANNOTATION',
+          severity: 'warning',
+          message: expect.stringMatching(/^Mechanism: The mechanism cannot be written as JSON/),
+          details: {
+            producer: { kernelId: 'replicad' },
+            mechanism: { code: 'INVALID_VALUE', path: '', message: expect.any(String), recovery: expect.any(String) },
+          },
+        }),
+      ]);
+    }
+  });
+});
+
 // Example-model fixture sweep moved to
 // apps/runtime-e2e/src/replicad-fixtures.test.ts (project-cycle break).
 
@@ -4219,16 +4472,15 @@ describe('Normal consistency', () => {
 // kernel's serializer the way the framework does: on the native handle `createGeometry` produces.
 type ReplicadKernelContext = Parameters<NonNullable<typeof replicadDefinition.serializeNativeHandle>>[2];
 
-const serializeHandle = (nativeHandle: NativeHandleEntry[]): unknown => {
+const serializeHandle = (entries: NativeHandleEntry[], mechanism?: unknown) => {
   if (!replicadDefinition.serializeNativeHandle) {
     throw new Error('The replicad kernel declares serializeNativeHandle.');
   }
-  const serialized = replicadDefinition.serializeNativeHandle(
-    { nativeHandle: { shapes: nativeHandle } },
+  return replicadDefinition.serializeNativeHandle(
+    { nativeHandle: { shapes: entries, mechanism } },
     createMockKernelRuntime(),
     mock<ReplicadKernelContext>(),
   );
-  return (serialized as { shapes: unknown[] }).shapes;
 };
 
 describe('serializeNativeHandle', () => {
@@ -4253,7 +4505,7 @@ describe('serializeNativeHandle', () => {
 
   it('should serialize nativeHandle to BRep strings with metadata', async () => {
     const { drawRoundedRectangle } = await import('replicad');
-    const serialized = serializeHandle(
+    const { shapes: serialized } = serializeHandle(
       normalizeRenderShapes({
         shape: drawRoundedRectangle(50, 30).sketchOnPlane().extrude(10),
         name: 'TestBox',
@@ -4261,23 +4513,20 @@ describe('serializeNativeHandle', () => {
         metalness: 0.8,
         roughness: 0.3,
       }),
-    ) as Array<{
-      brep: string;
-      metadata: Record<string, unknown>;
-    }>;
+    );
 
     expect(serialized).toHaveLength(1);
     expect(typeof serialized[0]!.brep).toBe('string');
     expect(serialized[0]!.brep.length).toBeGreaterThan(0);
-    expect(serialized[0]!.metadata['name']).toBe('TestBox');
-    expect(serialized[0]!.metadata['color']).toBe('#ff0000');
-    expect(serialized[0]!.metadata['metalness']).toBe(0.8);
-    expect(serialized[0]!.metadata['roughness']).toBe(0.3);
+    expect(serialized[0]!.metadata.name).toBe('TestBox');
+    expect(serialized[0]!.metadata.color).toBe('#ff0000');
+    expect(serialized[0]!.metadata.metalness).toBe(0.8);
+    expect(serialized[0]!.metadata.roughness).toBe(0.3);
   });
 
   it('should round-trip serialize/deserialize preserving shape geometry', async () => {
     const { drawRoundedRectangle, drawCircle } = await import('replicad');
-    const serialized = serializeHandle(
+    const { shapes: serialized } = serializeHandle(
       normalizeRenderShapes([
         { shape: drawRoundedRectangle(50, 30).sketchOnPlane().extrude(10), name: 'Box', color: '#ff0000' },
         {
@@ -4287,16 +4536,32 @@ describe('serializeNativeHandle', () => {
           opacity: 0.7,
         },
       ]),
-    ) as Array<{
-      brep: string;
-      metadata: { name: string; color?: string; opacity?: number };
-    }>;
+    );
 
     expect(serialized).toHaveLength(2);
     expect(serialized[0]!.metadata.name).toBe('Box');
     expect(serialized[1]!.metadata.name).toBe('Cylinder');
     expect(serialized[1]!.metadata.opacity).toBe(0.7);
   }, 15_000);
+
+  it('should keep the authored mechanism across a native-handle snapshot', async () => {
+    const replicad = await import('replicad');
+    const mechanism = { schemaVersion: 1, root: 'base', links: { base: { shapes: ['Box'] } }, joints: {} };
+    const snapshot = serializeHandle(
+      normalizeRenderShapes({ shape: replicad.makeBox([0, 0, 0], [1, 1, 1]), name: 'Box' }),
+      mechanism,
+    );
+
+    const restored = replicadDefinition.deserializeNativeHandle!(
+      { serializedNativeHandle: structuredClone(snapshot) },
+      createMockKernelRuntime(),
+      mock<ReplicadKernelContext>({ replicadLibrary: { ...replicad } }),
+    );
+
+    expect(snapshot.mechanism).toEqual(mechanism);
+    expect(restored.mechanism).toEqual(mechanism);
+    expect(restored.shapes.map((entry) => entry.name)).toEqual(['Box']);
+  });
 
   it('should have serializeNativeHandle and deserializeNativeHandle defined on the kernel', () => {
     expect(replicadDefinition.serializeNativeHandle).toBeDefined();

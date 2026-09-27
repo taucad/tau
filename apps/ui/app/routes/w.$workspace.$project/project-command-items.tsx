@@ -11,6 +11,7 @@ import {
   ImageDown,
   Info,
   RefreshCw,
+  Rotate3d,
   Save,
   Share2,
   SlidersHorizontal,
@@ -281,6 +282,15 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
         icon: <SlidersHorizontal />,
         action: () => {
           openPanel('parameters');
+        },
+      },
+      {
+        id: 'open-kinematics',
+        label: 'Open kinematics',
+        group: 'Workbench',
+        icon: <Rotate3d />,
+        action: () => {
+          openPanel('kinematics');
         },
       },
       {

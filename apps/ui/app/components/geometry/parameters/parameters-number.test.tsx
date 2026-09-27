@@ -301,7 +301,7 @@ describe('ParametersNumber', () => {
       );
       const sliderInput = container.querySelector<HTMLElement>('[data-slot="slider-input"]')!;
       Object.defineProperty(sliderInput, 'offsetWidth', { configurable: true, value: 100 });
-      const field = screen.getByRole('textbox', { name: 'Approximated width' });
+      const field = screen.getByRole('spinbutton', { name: 'Approximated width' });
       const before = field.getAttribute('value');
 
       fireSliderPointerEvent(sliderInput, 'pointerdown', { clientX: 0 });
@@ -401,7 +401,7 @@ describe('ParametersNumber', () => {
         </TestWrapper>,
       );
 
-      const input = screen.getByRole<HTMLInputElement>('textbox');
+      const input = screen.getByRole<HTMLInputElement>('spinbutton');
       // 123.456mm / 25.4 ≈ 4.860 inches (4 sig figs)
       expect(input.value).toMatch(/^4\.86/);
     });
@@ -493,7 +493,7 @@ describe('ParametersNumber', () => {
           <ParametersNumber {...properties} value={20} />
         </TestWrapper>,
       );
-      expect(screen.getByRole('textbox')).toHaveValue('20');
+      expect(screen.getByRole('spinbutton')).toHaveValue('20');
     });
 
     it('should enter edit mode on focus and show the input', () => {
@@ -511,7 +511,7 @@ describe('ParametersNumber', () => {
         </TestWrapper>,
       );
 
-      const input = screen.getByRole('textbox');
+      const input = screen.getByRole('spinbutton');
       expect(input.className).toContain('opacity-0');
 
       act(() => {
@@ -535,7 +535,7 @@ describe('ParametersNumber', () => {
         </TestWrapper>,
       );
 
-      const input = screen.getByRole('textbox');
+      const input = screen.getByRole('spinbutton');
       act(() => {
         input.focus();
       });
@@ -608,14 +608,14 @@ describe('ParametersNumber', () => {
         </TestWrapper>,
       );
 
-      const width = screen.getByRole('textbox', { name: 'Width' });
+      const width = screen.getByRole('spinbutton', { name: 'Width' });
       await user.click(width);
       await user.clear(width);
       await user.type(width, '12');
 
       expect(parameterCommit.draft('/width')).toEqual({ text: '12', valid: true });
       expect(parameterCommit.draft('/height')).toBeUndefined();
-      expect(screen.getByRole('textbox', { name: 'Height' })).toHaveValue('10');
+      expect(screen.getByRole('spinbutton', { name: 'Height' })).toHaveValue('10');
     });
 
     it('keeps a dirty draft when an equal authority value is echoed back', async () => {
@@ -634,7 +634,7 @@ describe('ParametersNumber', () => {
         </TestWrapper>
       );
       const view = render(row(10));
-      const field = screen.getByRole('textbox', { name: 'Echo width' });
+      const field = screen.getByRole('spinbutton', { name: 'Echo width' });
       await user.click(field);
       await user.clear(field);
       await user.type(field, '12');
@@ -662,7 +662,7 @@ describe('ParametersNumber', () => {
         </TestWrapper>
       );
       const view = render(row(10));
-      const field = screen.getByRole('textbox', { name: 'Conflicted width' });
+      const field = screen.getByRole('spinbutton', { name: 'Conflicted width' });
       await user.click(field);
       await user.clear(field);
       await user.type(field, '12');
@@ -695,7 +695,7 @@ describe('ParametersNumber', () => {
           />
         </TestWrapper>,
       );
-      const field = screen.getByRole('textbox', { name: 'Sequential width' });
+      const field = screen.getByRole('spinbutton', { name: 'Sequential width' });
       await user.click(field);
       await user.clear(field);
       await user.type(field, '12');
@@ -723,7 +723,7 @@ describe('ParametersNumber', () => {
           />
         </TestWrapper>,
       );
-      const field = screen.getByRole('textbox', { name: 'Discarded width' });
+      const field = screen.getByRole('spinbutton', { name: 'Discarded width' });
       await user.click(field);
       await user.clear(field);
       await user.type(field, '12');
@@ -756,7 +756,7 @@ describe('ParametersNumber', () => {
           />
         </TestWrapper>,
       );
-      const field = screen.getByRole('textbox', { name: 'Refused width' });
+      const field = screen.getByRole('spinbutton', { name: 'Refused width' });
       await user.click(field);
       await user.clear(field);
       await user.type(field, '12');
@@ -785,7 +785,7 @@ describe('ParametersNumber', () => {
           />
         </TestWrapper>,
       );
-      const field = screen.getByRole('textbox', { name: 'Displaced width' });
+      const field = screen.getByRole('spinbutton', { name: 'Displaced width' });
       await user.click(field);
       await user.clear(field);
       await user.type(field, '12');
@@ -813,7 +813,7 @@ describe('ParametersNumber', () => {
         </TestWrapper>
       );
       const first = render(view);
-      const field = screen.getByRole('textbox', { name: 'Retained width' });
+      const field = screen.getByRole('spinbutton', { name: 'Retained width' });
       await user.click(field);
       await user.clear(field);
       await user.type(field, 'invalid draft');
@@ -821,7 +821,7 @@ describe('ParametersNumber', () => {
       first.unmount();
 
       render(view);
-      const restored = screen.getByRole('textbox', { name: 'Retained width' });
+      const restored = screen.getByRole('spinbutton', { name: 'Retained width' });
       expect(restored).toHaveValue('invalid draft');
     });
 
@@ -842,7 +842,7 @@ describe('ParametersNumber', () => {
           />
         </TestWrapper>,
       );
-      const field = screen.getByRole('textbox', { name: 'Constrained width' });
+      const field = screen.getByRole('spinbutton', { name: 'Constrained width' });
       await user.click(field);
       await user.clear(field);
       await user.type(field, '999');
@@ -890,7 +890,7 @@ describe('ParametersNumber', () => {
           />
         </TestWrapper>,
       );
-      const field = screen.getByRole('textbox', { name: 'Admitted transient value' });
+      const field = screen.getByRole('spinbutton', { name: 'Admitted transient value' });
       await user.click(field);
       await user.clear(field);
       await user.type(field, text);
@@ -1202,7 +1202,7 @@ describe('ParametersNumber', () => {
 
       mockOnChange.mockClear();
 
-      const input = screen.getByRole('textbox');
+      const input = screen.getByRole('spinbutton');
 
       // Focus and blur without editing
       await user.click(input);
@@ -1458,7 +1458,7 @@ describe('ParametersNumber', () => {
         </TestWrapper>,
       );
 
-      const input = screen.getByRole('textbox');
+      const input = screen.getByRole('spinbutton');
       expect(input).toBeDisabled();
     });
 
@@ -1479,7 +1479,7 @@ describe('ParametersNumber', () => {
         </TestWrapper>,
       );
 
-      const input = screen.getByRole('textbox');
+      const input = screen.getByRole('spinbutton');
 
       // Try to type in disabled input
       await user.type(input, '5');

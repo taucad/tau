@@ -6,6 +6,7 @@ import type { DurableStreamReadOutcome } from '#api/durable-events/durable-event
 import type { DatabaseService, DatabaseType } from '#database/database.service.js';
 import type { RedisService } from '#redis/redis.service.js';
 import type { ProjectAccessService } from '#api/collaboration/project-access.service.js';
+import { ShutdownService } from '#lifecycle/shutdown.service.js';
 
 type DatabaseTransaction = Parameters<Parameters<DatabaseType['transaction']>[0]>[0];
 
@@ -48,10 +49,12 @@ const createService = () => {
   const databaseService = mockDeep<DatabaseService>();
   const redisClient = mock<Redis>();
   const redisService = mock<RedisService>({ client: redisClient });
+  const shutdown = new ShutdownService();
   return {
     databaseService,
     redisClient,
-    service: new DurableEventsService(databaseService, redisService, mock<ProjectAccessService>()),
+    shutdown,
+    service: new DurableEventsService(databaseService, redisService, mock<ProjectAccessService>(), shutdown),
   };
 };
 
@@ -270,6 +273,39 @@ describe('DurableEventsService', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('answers a parked long poll with its final read as soon as the process begins to stop', async () => {
+    const { service, shutdown } = createService();
+    const read = vi
+      .spyOn(service, 'read')
+      .mockResolvedValueOnce(emptyRead)
+      .mockResolvedValueOnce(emptyRead)
+      .mockResolvedValueOnce(emptyRead);
+    const outcome = service.waitForEvents({
+      streamId: 'stream-1',
+      ownerId: 'owner-1',
+      afterSequence: 0,
+      longPollDuration: 25_000,
+    });
+    await vi.waitFor(() => {
+      expect(read).toHaveBeenCalledTimes(2);
+    });
+
+    shutdown.stop();
+
+    await expect(outcome).resolves.toEqual(emptyRead);
+    expect(read).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not park a long poll that arrives once the process is stopping', async () => {
+    const { service, shutdown } = createService();
+    shutdown.stop();
+    vi.spyOn(service, 'read').mockResolvedValue(emptyRead);
+
+    await expect(
+      service.waitForEvents({ streamId: 'stream-1', ownerId: 'owner-1', afterSequence: 0, longPollDuration: 25_000 }),
+    ).resolves.toEqual(emptyRead);
   });
 
   it('bounds 100 simultaneous reconnect watchers independently', async () => {

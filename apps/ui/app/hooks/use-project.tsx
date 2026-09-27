@@ -7,14 +7,16 @@ import type { Remote } from 'comlink';
 import { useQueryClient } from '@tanstack/react-query';
 import type { QueryClient } from '@tanstack/react-query';
 import {
+  describeProjectManifestIssue,
   parameterEntryPath,
-  parseProjectManifestBytes,
   projectToManifest,
+  readProjectManifestBytes,
   serializeProjectManifest,
 } from '@taucad/types';
-import type { ProjectManifest } from '@taucad/types';
+import type { ProjectManifest, ProjectManifestParseIssue } from '@taucad/types';
 import type { ParameterManifest, ParameterSetOutcome } from '@taucad/parameters';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
+import { FileNotFoundError } from '@taucad/fs-client/file-content-errors';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import type { MachineActors } from '#lib/xstate.lib.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
@@ -38,6 +40,7 @@ import { useComputeReuseMode } from '#lib/compute-reuse-preference.js';
 import { createParameterSetService } from '#services/parameter-set-service.js';
 import type { ParameterSetService } from '#services/parameter-set-service.js';
 import { compareChatsByRecency } from '#utils/chat-recency.utils.js';
+import { isNotFound } from '#db/attachment-store.js';
 import { toast } from 'sonner';
 
 type ProjectContextType = {
@@ -168,36 +171,90 @@ export function isKnownChatId({
     .some(([, chats]) => chats?.some((chat) => chat.id === chatId));
 }
 
+/** What the workspace holds: the manifest it renders and why the bytes on disk are not that manifest. */
+type ObservedManifestState = {
+  readonly project: ProjectManifest | undefined;
+  readonly issue: ProjectManifestParseIssue | undefined;
+};
+
+const manifestStateKey = ({ project, issue }: ObservedManifestState): string =>
+  [
+    project === undefined ? '' : new TextDecoder().decode(serializeProjectManifest(projectToManifest(project))),
+    ...(issue === undefined ? [] : describeProjectManifestIssue(issue)),
+  ].join('\n');
+
+/** A present id that names another project: this route's bytes no longer describe it. */
+const idMismatchIssue = (expected: string, found: string): ProjectManifestParseIssue => ({
+  code: 'manifest-invalid',
+  issues: [{ code: 'custom', path: ['id'], message: `Expected ${expected}, the project open here; found ${found}` }],
+});
+
+/**
+ * Follow `tau.json` while its project is open, never silently (blueprint R5).
+ *
+ * Bytes that still identify this project (strict or degraded) reload when they
+ * differ from what the workspace holds, so a degraded write shows its issue at
+ * once. Bytes that no longer identify it — missing, unreadable, oversize, a
+ * foreign `$schema` or another project's id — are reported instead: the
+ * workspace keeps its last good manifest open so the person can fix the file.
+ */
 export const createProjectManifestChangeObserver = ({
+  projectId,
   readManifest,
-  getCurrentProject,
+  getCurrent,
   reload,
+  report,
 }: {
+  readonly projectId: string;
   readonly readManifest: () => Promise<Uint8Array<ArrayBuffer>>;
-  readonly getCurrentProject: () => ProjectManifest | undefined;
+  readonly getCurrent: () => ObservedManifestState;
   readonly reload: () => void;
+  readonly report: (issue: ProjectManifestParseIssue) => void;
 }): { readonly check: () => Promise<void>; readonly dispose: () => void } => {
   let disposed = false;
-  let lastObserved = '';
+  let lastObserved: string | undefined;
+
+  const reportIssue = (issue: ProjectManifestParseIssue): void => {
+    // A later return to the same bytes must reload to clear the report.
+    lastObserved = undefined;
+    report(issue);
+  };
 
   return {
     check: async () => {
+      let bytes: Uint8Array<ArrayBuffer>;
       try {
-        const parsed = parseProjectManifestBytes(await readManifest());
-        if (!parsed.success || disposed) {
-          return;
+        bytes = await readManifest();
+      } catch (error) {
+        if (!disposed) {
+          reportIssue(
+            error instanceof FileNotFoundError || isNotFound(error)
+              ? { code: 'manifest-missing' }
+              : { code: 'manifest-unreadable', message: errorMessage(error) },
+          );
         }
-        const serialized = new TextDecoder().decode(serializeProjectManifest(parsed.data));
-        if (serialized === lastObserved) {
-          return;
-        }
-        lastObserved = serialized;
-        const current = getCurrentProject();
-        if (!current || new TextDecoder().decode(serializeProjectManifest(projectToManifest(current))) !== serialized) {
-          reload();
-        }
-      } catch {
-        // Invalid/inaccessible external manifests remain visible through discovery conflicts.
+        return;
+      }
+      if (disposed) {
+        return;
+      }
+      const read = readProjectManifestBytes(bytes, { id: projectId });
+      if (!read.success) {
+        reportIssue(read.issue);
+        return;
+      }
+      if (read.data.id !== projectId) {
+        reportIssue(idMismatchIssue(projectId, read.data.id));
+        return;
+      }
+      const observed = manifestStateKey({ project: read.data, issue: read.issue });
+      if (observed === lastObserved) {
+        return;
+      }
+      lastObserved = observed;
+      const current = getCurrent();
+      if (current.project === undefined || manifestStateKey(current) !== observed) {
+        reload();
       }
     },
     dispose: () => {
@@ -206,26 +263,30 @@ export const createProjectManifestChangeObserver = ({
   };
 };
 
+/**
+ * Read the open route's manifest: strict, or degraded with its issue. The
+ * route's id stands in only when the bytes lost theirs (blueprint R3).
+ */
 export async function resolveScopedProjectManifest({
   contentService,
   projectId,
 }: {
   readonly contentService: FileContentService;
   readonly projectId: string;
-}): Promise<ProjectManifest> {
+}): Promise<{ readonly project: ProjectManifest; readonly issue?: ProjectManifestParseIssue }> {
   const outcome = await contentService.resolve('tau.json', { forceText: true });
   if (outcome.kind !== 'text') {
     throw new Error(`Cannot read tau.json for ${projectId}: ${outcome.kind}`);
   }
 
-  const parsed = parseProjectManifestBytes(outcome.content);
-  if (!parsed.success) {
-    throw new Error(`Invalid tau.json for ${projectId}: ${parsed.issue.code}`);
+  const read = readProjectManifestBytes(outcome.content, { id: projectId });
+  if (!read.success) {
+    throw new Error(`Invalid tau.json for ${projectId}: ${describeProjectManifestIssue(read.issue).join(' ')}`);
   }
-  if (parsed.data.id !== projectId) {
-    throw new Error(`Scoped tau.json project ID mismatch: expected ${projectId}, received ${parsed.data.id}`);
+  if (read.data.id !== projectId) {
+    throw new Error(`Scoped tau.json project ID mismatch: expected ${projectId}, received ${read.data.id}`);
   }
-  return parsed.data;
+  return read.issue === undefined ? { project: read.data } : { project: read.data, issue: read.issue };
 }
 
 export function ProjectProvider({
@@ -302,19 +363,31 @@ export function ProjectProvider({
       if (!contentService) {
         throw new Error(`Project content service is unavailable for ${input.projectId}`);
       }
-      const project = await resolveScopedProjectManifest({
+      const { project, issue } = await resolveScopedProjectManifest({
         contentService,
         projectId: input.projectId,
       });
       return {
         type: 'projectRetrieved',
         project,
+        ...(issue === undefined ? {} : { issue }),
       };
     }),
     writeProjectActor: fromSafeAsync(async ({ input }) => {
       const { contentService } = fileManager.fileManagerRef.getSnapshot().context;
       if (!contentService) {
         throw new Error('File manager content service is not ready');
+      }
+      if (!input.repair) {
+        // Re-read: the bytes may have degraded since this workspace loaded them,
+        // and an implicit write must never replace a degraded manifest (R4).
+        const current = await contentService.resolve('tau.json', { forceText: true });
+        if (current.kind === 'text') {
+          const read = readProjectManifestBytes(current.content, { id: projectId });
+          if (!read.success || read.issue !== undefined || read.data.id !== projectId) {
+            throw new Error('tau.json needs repair before Tau can change it. Repair it, or fix it in the editor.');
+          }
+        }
       }
       await contentService.write('tau.json', serializeProjectManifest(projectToManifest(input.project)), 'machine');
     }),
@@ -581,10 +654,17 @@ export function ProjectProvider({
     }
 
     const observer = createProjectManifestChangeObserver({
+      projectId,
       readManifest: async () => fileManager.readFile('tau.json'),
-      getCurrentProject: () => actorRef.getSnapshot().context.project,
+      getCurrent: () => {
+        const { project, manifestIssue } = actorRef.getSnapshot().context;
+        return { project, issue: manifestIssue };
+      },
       reload: () => {
         actorRef.send({ type: 'reloadProject' });
+      },
+      report: (issue) => {
+        actorRef.send({ type: 'manifestIssueObserved', issue });
       },
     });
     const unsubscribe = contentService.subscribe('tau.json', () => {
@@ -594,7 +674,7 @@ export function ProjectProvider({
       observer.dispose();
       unsubscribe();
     };
-  }, [actorRef, fileManager]);
+  }, [actorRef, fileManager, projectId]);
 
   const reportParameterOperation = useCallback((operation: Promise<unknown>): void => {
     const report = async (): Promise<void> => {

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { estimateContextTokens } from '@earendil-works/pi-agent-core';
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import type { Api, Model } from '@earendil-works/pi-ai';
-import type { ToolRegistry } from '#waist/ports.js';
+import type { HostToolInvocation, ToolRegistry } from '#waist/ports.js';
 import { applyHostToolResult, createAgentTools, normalizeToolInput, toPiToolContent } from '#harness/tools.js';
 import type { HostToolExecutionDetails } from '#harness/tools.js';
 import { MessageIdentities, piMessageToProvider, providerMessageToPi } from '#harness/session-record.js';
@@ -72,6 +72,28 @@ describe('EagerDispatch', () => {
     expect(result.content).toEqual([{ type: 'text', text: '{"cached":true}' }]);
     expect(result.details).toEqual({ content: { cached: true }, isError: false, substituted: true });
     expect(applyHostToolResult({ result })).toEqual({ isError: false });
+  });
+
+  it('forwards the run approval to every registry invocation', async () => {
+    const approve = vi.fn<NonNullable<HostToolInvocation['approve']>>(async () => ({
+      interruptId: 'interrupt-1',
+      outcome: 'approved',
+    }));
+    const seen: Array<HostToolInvocation['approve']> = [];
+    const registry: ToolRegistry = {
+      list: () => [{ name: 'request_print', description: 'Print', inputSchema: { type: 'object' } }],
+      invoke: async (invocation) => {
+        seen.push(invocation.approve);
+        return { content: null, isError: false };
+      },
+    };
+    const [withApproval] = createAgentTools({ registry, runId: 'run-approval', approve });
+    const [withoutApproval] = createAgentTools({ registry, runId: 'run-approval' });
+
+    await withApproval!.execute('call-1', {});
+    await withoutApproval!.execute('call-2', {});
+
+    expect(seen).toEqual([approve, undefined]);
   });
 
   it('forwards genuine registry progress through Pi tool updates', async () => {

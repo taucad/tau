@@ -3,6 +3,7 @@ import { mock } from 'vitest-mock-extended';
 import { NodeIO } from '@gltf-transform/core';
 import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
 import { tauCadTopologyExtension } from '@taucad/runtime/types';
+import type { KernelIssue } from '@taucad/runtime/types';
 import { convertReplicadGeometriesToGltf } from '#utils/replicad-to-gltf.js';
 import type { GeometryReplicad } from '#replicad.types.js';
 import type { RuntimeLogger } from '@taucad/runtime/kernel';
@@ -64,6 +65,11 @@ type TopologyPayload = {
     edgeGroups?: Array<{ edgeId: number }>;
     capabilities?: { hasPreciseTopology: boolean };
   }>;
+  mechanism?: {
+    units: { length: string; angle: string };
+    links: Record<string, { components: string[] }>;
+    joints: Record<string, { origin: number[]; axis?: number[] }>;
+  };
 };
 
 function readTopologyPayload(glb: Uint8Array<ArrayBuffer>) {
@@ -575,6 +581,115 @@ describe('convertReplicadGeometriesToGltf', () => {
 
     expect(material.getMetallicFactor()).toBeCloseTo(0, 2);
     expect(material.getRoughnessFactor()).toBeCloseTo(0.35, 2);
+  });
+
+  describe('mechanism', () => {
+    const hingedGeometries = [
+      createSimpleGeometry({
+        name: 'Base',
+        faces: {
+          vertices: [12, -34, 56, 0, 0, 0, 12, 0, 0],
+          triangles: [0, 1, 2],
+          normals: [0, 0, 1, 0, 0, 1, 0, 0, 1],
+          faceGroups: [],
+        },
+      }),
+      createSimpleGeometry({ name: 'Lid' }),
+    ];
+    const hinge = {
+      schemaVersion: 1,
+      units: { length: 'mm', angle: 'deg' },
+      root: 'base',
+      links: { base: { shapes: ['Base'] }, lid: { shapes: ['Lid'] } },
+      joints: { hinge: { type: 'revolute', parent: 'base', child: 'lid', origin: [12, -34, 56], axis: [0, 1, 0] } },
+    };
+
+    it.each([
+      { transform: {}, length: 'm' },
+      { transform: { coordinateSystem: 'z-up', unit: { length: 'millimeter' } }, length: 'mm' },
+    ] as const)(
+      'should place joint origins exactly where the vertices land for $length',
+      async ({ transform, length }) => {
+        const glb = convertReplicadGeometriesToGltf({ geometries: hingedGeometries, mechanism: hinge, ...transform });
+        const document = await new NodeIO().readBinary(glb);
+        const vertex = document
+          .getRoot()
+          .listMeshes()[0]!
+          .listPrimitives()[0]!
+          .getAttribute('POSITION')!
+          .getElement(0, []);
+        const { mechanism } = readTopologyPayload(glb).payload;
+
+        expect(mechanism?.units).toEqual({ length, angle: 'deg' });
+        expect(mechanism?.links).toEqual({
+          base: { components: ['component:base'] },
+          lid: { components: ['component:lid'] },
+        });
+        const origin = mechanism?.joints['hinge']?.origin ?? [];
+        expect(origin).toHaveLength(3);
+        for (const [axis, value] of origin.entries()) {
+          expect(value).toBeCloseTo(vertex[axis]!, 6);
+        }
+      },
+    );
+
+    it('should report omitted units rather than assume millimetres and degrees', () => {
+      const onMechanismIssues = vi.fn<(issues: KernelIssue[]) => void>();
+      const { units: _units, ...unitless } = hinge;
+
+      const glb = convertReplicadGeometriesToGltf({
+        geometries: hingedGeometries,
+        mechanism: unitless,
+        onMechanismIssues,
+      });
+
+      expect(readTopologyPayload(glb).payload.mechanism).toBeUndefined();
+      expect(onMechanismIssues.mock.calls[0]?.[0]).toMatchObject([
+        {
+          code: 'INVALID_ANNOTATION',
+          severity: 'warning',
+          details: { mechanism: { code: 'INVALID_UNIT', path: '/units' } },
+        },
+      ]);
+    });
+
+    it('should give names that slug alike distinct ids and move only the listed shape', () => {
+      const geometries = ['Base', 'Arm', 'Bolt +X', 'Bolt -X'].map((name) => createSimpleGeometry({ name }));
+      const onMechanismIssues = vi.fn<(issues: KernelIssue[]) => void>();
+      const arm = {
+        ...hinge,
+        links: { base: { shapes: ['Base'] }, arm: { shapes: ['Arm', 'Bolt +X'] } },
+        joints: { hinge: { ...hinge.joints.hinge, child: 'arm' } },
+      };
+
+      const glb = convertReplicadGeometriesToGltf({ geometries, mechanism: arm, onMechanismIssues });
+
+      const { json, payload } = readTopologyPayload(glb);
+      const ids = ['component:base', 'component:arm', 'component:bolt-x', 'component:bolt-x-2'];
+      expect(payload.components.map((component) => component.name)).toEqual(['Base', 'Arm', 'Bolt +X', 'Bolt -X']);
+      expect(payload.components.map((component) => component.id)).toEqual(ids);
+      // The viewer poses GLB nodes by this extra, so the static bolt must not share the moving bolt's id.
+      expect(json.nodes.map((node) => node.extras?.['tauComponentId'])).toEqual(ids);
+      expect(payload.mechanism?.links).toEqual({
+        base: { components: ['component:base'] },
+        arm: { components: ['component:arm', 'component:bolt-x'] },
+      });
+      expect(onMechanismIssues).not.toHaveBeenCalled();
+    });
+
+    it('should report a mechanism that is not an object and still write the geometry', () => {
+      const onMechanismIssues = vi.fn<(issues: KernelIssue[]) => void>();
+
+      const glb = convertReplicadGeometriesToGltf({ geometries: hingedGeometries, mechanism: 42, onMechanismIssues });
+
+      const { payload } = readTopologyPayload(glb);
+      expect(payload.components.map((component) => component.id)).toEqual(['component:base', 'component:lid']);
+      expect(payload.mechanism).toBeUndefined();
+      expect(onMechanismIssues).toHaveBeenCalledOnce();
+      expect(onMechanismIssues.mock.calls[0]?.[0]).toMatchObject([
+        { code: 'INVALID_ANNOTATION', severity: 'warning', details: { mechanism: { code: 'INVALID_SHAPE' } } },
+      ]);
+    });
   });
 
   describe('logger instrumentation', () => {

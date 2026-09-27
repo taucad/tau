@@ -263,6 +263,24 @@ describe('remoteTransportError', () => {
     ).toBeUndefined();
   });
 
+  /* D66: a repository transferred out of the App's reach answers 403 in plain
+   * text; Tau replaced that with "rejected the saved credentials". */
+  it('keeps GitHub’s plain-text refusal as the sentence, and ignores an HTML error page', () => {
+    const refused = (response: string): RevisionPortError =>
+      remoteTransportError(
+        Object.assign(new Error('HTTP Error: 403 Forbidden'), { data: { statusCode: 403, response } }),
+        {
+          remote: 'github-1',
+        },
+      );
+
+    expect(refused('Write access to repository not granted.\n')).toMatchObject({
+      code: 'REMOTE_REAUTHORIZATION_REQUIRED',
+      message: 'Write access to repository not granted.',
+    });
+    expect(refused('<!DOCTYPE html><html>…</html>').message).toBe('The remote rejected the saved credentials.');
+  });
+
   /* Contract §4: the server refuses a rewind or a deletion on *every* ref
    * family from its `pre-receive` hook, which answers over the sideband and
    * never with an HTTP status — so the status rule alone read a refusal every

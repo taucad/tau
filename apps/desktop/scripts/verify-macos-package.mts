@@ -538,10 +538,23 @@ Library.Go(1f, () =>
 });
 `,
 );
+/* The worker's wire protocol, `picogkProtocolVersion` in packages/plugins/picogk/src/picogk.protocol.ts;
+ * the resource manifest's own `protocolVersion` above is a separate field. */
+const picoGkWireProtocol = 4;
 const picoGkInput = [
-  { protocolVersion: 3, requestId: 'verify-analyze', method: 'analyze', params: { entryPath: 'main.cs' } },
-  { protocolVersion: 3, requestId: 'verify-build', method: 'build', params: { entryPath: 'main.cs', parameters: {} } },
-  { protocolVersion: 3, requestId: 'verify-shutdown', method: 'shutdown', params: {} },
+  {
+    protocolVersion: picoGkWireProtocol,
+    requestId: 'verify-analyze',
+    method: 'analyze',
+    params: { entryPath: 'main.cs' },
+  },
+  {
+    protocolVersion: picoGkWireProtocol,
+    requestId: 'verify-build',
+    method: 'build',
+    params: { entryPath: 'main.cs', parameters: {} },
+  },
+  { protocolVersion: picoGkWireProtocol, requestId: 'verify-shutdown', method: 'shutdown', params: {} },
 ]
   .map((request) => JSON.stringify(request))
   .join('\n');
@@ -582,7 +595,7 @@ const picoGkResult = picoGkBuild?.['result'] as
   | undefined;
 const picoGkArtifact = typeof picoGkResult?.artifactPath === 'string' ? resolve(picoGkResult.artifactPath) : '';
 if (
-  picoGkReady?.['protocolVersion'] !== 3 ||
+  picoGkReady?.['protocolVersion'] !== picoGkWireProtocol ||
   !picoGkArtifact.startsWith(`${picoGkArtifacts}/`) ||
   typeof picoGkResult?.byteLength !== 'number' ||
   picoGkResult.byteLength <= 0 ||

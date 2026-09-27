@@ -35,6 +35,7 @@ import type {
   InterruptResolution,
   StorageDurabilityClass,
   TauAgentHost,
+  ToolRegistry,
 } from '@taucad/agent-host';
 import { createOpfsEventLog, createProviderAttachmentReader, createProviderEventLog } from '@taucad/agent-host/browser';
 import { createConfiguredGatewayModelTransport } from '#cloud/gateway-model-transport.js';
@@ -844,7 +845,7 @@ const executeCommand = async (
             ...(command.config.contextMessages ? { contextMessages: command.config.contextMessages } : {}),
           }
         : undefined;
-      /* `mode` and `baseRevisionId` are deliberately dropped: on this
+      /* `mode` and `baseRevisionId` are deliberately not admitted: on this
        * placement the *page* owns the revision — `ChatWorkspaceAuthorityProvider`
        * prepares the turn's workspace in the selected mode and finalizes it —
        * so the worker would be recording a second, competing one. They ride the
@@ -1743,7 +1744,7 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
     mapRuntimeError: (error) => toRpcError(error),
     parameterActorFor,
   });
-  const toolRegistry = createChatToolRegistry({
+  const toolRegistry: ToolRegistry = createChatToolRegistry({
     fileSystemFor: (signal) =>
       createProviderRpcFileSystem({ provider: agentView, mutations: fileSystemMutations, signal }),
     recordFileSystemFor: (signal) =>
@@ -1752,6 +1753,17 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
     ...runtimeRpc,
     parameters,
     geospec: geoSpecClient,
+    machines: runtimeClient.machines,
+    print: {
+      /* The `tau.json` id every print request from this project's agent names (blueprint D5). */
+      projectId: request.authority.projectId,
+      readArtifact: async ({ path, signal }) => {
+        signal.throwIfAborted();
+        const bytes = await recordView.readFile(assertRootedPath(path));
+        signal.throwIfAborted();
+        return bytes;
+      },
+    },
     testingEnabled: request.testingEnabled ?? false,
   });
   const activeReference: { current?: WorkerSession } = {};

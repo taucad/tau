@@ -109,10 +109,11 @@ export const isGithubRemote = (remote: RemoteFacet): boolean =>
  * backup can wait on, and it says so in the words every surface uses (HQ1).
  *
  * @param sync - The settled sync facet.
+ * @param remote - The connection, so a refusal names who refused.
  * @returns What the backup line reads, or `undefined` with no remote.
  * @public
  */
-export const syncCopy = (sync: SyncFacet): string | undefined => {
+export const syncCopy = (sync: SyncFacet, remote?: RemoteFacet): string | undefined => {
   switch (sync.state) {
     case 'noRemote': {
       return undefined;
@@ -134,12 +135,39 @@ export const syncCopy = (sync: SyncFacet): string | undefined => {
     default: {
       /* `queued` and `failed` read the same to a person: their work is not on
        * the server. Whether this device retries by itself is the Sync line's. */
-      return sync.pendingCount > 0
-        ? `Not backed up · ${String(sync.pendingCount)} revision${sync.pendingCount === 1 ? '' : 's'}`
-        : 'Not backed up';
+      if (sync.pendingCount > 0) {
+        return `Not backed up · ${String(sync.pendingCount)} revision${sync.pendingCount === 1 ? '' : 's'}`;
+      }
+      if (isRefusedWhileBackedUp(sync)) {
+        const refuser =
+          remote === undefined
+            ? 'The remote'
+            : isGithubRemote(remote)
+              ? 'GitHub'
+              : remote.kind === 'tau'
+                ? 'Tau Cloud'
+                : 'The remote';
+        return `Backed up · ${refuser} refused access`;
+      }
+      return 'Not backed up';
     }
   }
 };
+
+/**
+ * Whether the remote refused access after acknowledging everything (D68).
+ *
+ * *Not backed up* is reserved for revisions the server has not acknowledged
+ * (revisions policy), so a refused credential with nothing waiting has lost
+ * no work. `notFound` is not this: a deleted repository answers exactly as an
+ * unshared one does, and only the first has lost its copy.
+ *
+ * @param sync - The settled sync facet.
+ * @returns Whether the backup line may still say *Backed up*.
+ * @public
+ */
+export const isRefusedWhileBackedUp = (sync: SyncFacet): boolean =>
+  sync.state === 'failed' && sync.pendingCount === 0 && (sync.reason === 'unauthorized' || sync.reason === 'forbidden');
 
 /**
  * The backup line for this viewer: removed access is a calm fact, not a failed
@@ -147,11 +175,15 @@ export const syncCopy = (sync: SyncFacet): string | undefined => {
  *
  * @param sync - The settled sync facet.
  * @param role - The viewer's role on the cloud project.
+ * @param remote - The connection, so a refusal names who refused.
  * @returns The sentence, or `undefined` with no remote.
  * @public
  */
-export const backupCopy = (sync: SyncFacet, role: ProjectAccessRole | undefined): string | undefined =>
-  role === 'revoked' && sync.state !== 'noRemote' ? accessRemoved : syncCopy(sync);
+export const backupCopy = (
+  sync: SyncFacet,
+  role: ProjectAccessRole | undefined,
+  remote?: RemoteFacet,
+): string | undefined => (role === 'revoked' && sync.state !== 'noRemote' ? accessRemoved : syncCopy(sync, remote));
 
 const operationWords: Record<NonNullable<RevisionStatusProjection['branchVerb']['operation']>, string> = {
   switch: 'Switching',
@@ -232,7 +264,13 @@ const interruptingFacts = (status: RevisionStatusProjection, where: RevisionWher
   const ask = where.role === 'revoked' ? undefined : backupAsk(status);
   return ask === undefined
     ? undefined
-    : { icon: CloudAlert, tone: 'text-warning', mark: 'attention', sentence: `Not backed up · ${ask}` };
+    : {
+        icon: CloudAlert,
+        tone: 'text-warning',
+        mark: 'attention',
+        /* D68: a refusal with nothing waiting has lost no work. */
+        sentence: `${isRefusedWhileBackedUp(sync) ? 'Backed up' : 'Not backed up'} · ${ask}`,
+      };
 };
 
 /** Work the person started, while it runs. */
@@ -267,7 +305,7 @@ const restingFacts = (status: RevisionStatusProjection, where: RevisionWhere): R
   if (where.role === 'read') {
     return { icon: History, tone: '', mark: 'none', sentence: 'Saved · View only' };
   }
-  const backup = backupCopy(status.sync, where.role);
+  const backup = backupCopy(status.sync, where.role, status.remote);
   return {
     icon: History,
     tone: '',

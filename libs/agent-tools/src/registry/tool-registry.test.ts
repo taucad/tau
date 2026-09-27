@@ -10,10 +10,18 @@ import type {
   RpcParameterClient,
   RpcRuntimeClient,
 } from '@taucad/chat/rpc';
+import { toRpcError } from '@taucad/chat/rpc';
 import type { JsonValue } from '@taucad/agent-host';
+import { ResourceQueue } from '@taucad/filesystem';
+import { MemoryProvider } from '@taucad/filesystem/backend';
+import { composeView } from '@taucad/filesystem/composed-view';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 
+import { createProviderRpcFileSystem } from '#registry/provider-file-system.js';
 import { createChatToolRegistry } from '#registry/tool-registry.js';
 import type { ChatToolRegistryOptions } from '#registry/tool-registry.js';
+import { createRuntimeAgentClients } from '#runtime/runtime-agent-clients.js';
+import type { RuntimeAgentClient } from '#runtime/runtime-agent-clients.js';
 
 const emptyFileSystem = (): RpcFileSystem => ({
   readFile: async () => 'export const main = 1;\n',
@@ -67,7 +75,16 @@ const invoke = async (
     signal: call.signal ?? new AbortController().signal,
   });
 
-const fileTools = ['read_file', 'edit_file', 'list_directory', 'create_file', 'delete_file', 'grep', 'glob_search'];
+const fileTools = [
+  'read_file',
+  'edit_file',
+  'list_directory',
+  'create_file',
+  'delete_file',
+  'grep',
+  'glob_search',
+  'update_todos',
+];
 
 describe('createChatToolRegistry listing', () => {
   it.each([
@@ -148,6 +165,7 @@ describe('createChatToolRegistry listing', () => {
         'read_file',
         'screenshot',
         'test_model',
+        'update_todos',
         'use_skill',
       ].toSorted(),
     );
@@ -263,6 +281,33 @@ describe('createChatToolRegistry invocation', () => {
     });
   });
 
+  it('should drop the exportOptions a model adds to export_geometry before the runtime export', async () => {
+    const exportModel = vi.fn<RuntimeAgentClient['export']>(async () => ({
+      success: true,
+      data: [{ name: 'model.stl', mimeType: 'model/stl', bytes: new Uint8Array([1]) }],
+      issues: [],
+    }));
+    const { graphics } = createRuntimeAgentClients({
+      runtime: { evaluate: vi.fn<RuntimeAgentClient['evaluate']>(), export: exportModel },
+      exportImage: vi.fn(),
+      mapRuntimeError: (error) => toRpcError(error),
+    });
+
+    const result = await invoke(build({ graphics }), 'export_geometry', {
+      input: {
+        targetFile: 'main.ts',
+        format: 'stl',
+        exportOptions: { engine: 'service', service: { url: 'https://slicer.example.com', token: 'stolen-token' } },
+      },
+    });
+
+    expect(result).toMatchObject({ isError: false, content: { success: true } });
+    expect(exportModel).toHaveBeenCalledExactlyOnceWith('stl', {
+      source: { path: 'main.ts' },
+      signal: expect.any(AbortSignal) as AbortSignal,
+    });
+  });
+
   it('persists export artifacts through the invocation record filesystem only', async () => {
     const agentWrite = vi.fn<RpcFileSystem['writeBinaryFile']>(async () => {
       throw Object.assign(new Error('Agent records are read-only.'), { code: 'EROFS' });
@@ -288,6 +333,125 @@ describe('createChatToolRegistry invocation', () => {
       new Uint8Array([1]),
     );
     expect(agentWrite).not.toHaveBeenCalled();
+  });
+
+  /* The chat task list (design-to-print workbench D8): one tool, one file,
+   * offered by every host because it needs nothing but the filesystem. */
+  describe('update_todos', () => {
+    const items = [
+      { id: 'model-pyramid', title: 'Model the pyramid', status: 'done' },
+      { id: 'slice-pyramid', title: 'Slice the pyramid', status: 'in_progress', note: '0.2 mm layers' },
+      { id: 'request-print', title: 'Request the print', status: 'pending' },
+    ];
+
+    it('writes exactly the expected YAML bytes to the chat directory and reports counts', async () => {
+      const writeFile = vi.fn<RpcFileSystem['writeFile']>(async () => undefined);
+      const registry = build({ fileSystemFor: () => ({ ...emptyFileSystem(), writeFile }) });
+
+      const result = await invoke(registry, 'update_todos', { input: { chatId: 'chat_01', items } });
+
+      expect(result).toStrictEqual({
+        isError: false,
+        content: {
+          success: true,
+          path: '.tau/chats/chat_01/todo.yaml',
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- keys are the status wire values
+          counts: { pending: 1, in_progress: 1, done: 1 },
+        },
+      });
+      expect(writeFile).toHaveBeenCalledExactlyOnceWith(
+        '.tau/chats/chat_01/todo.yaml',
+        [
+          'version: 1',
+          'items:',
+          '  - id: model-pyramid',
+          '    title: Model the pyramid',
+          '    status: done',
+          '  - id: slice-pyramid',
+          '    title: Slice the pyramid',
+          '    status: in_progress',
+          '    note: 0.2 mm layers',
+          '  - id: request-print',
+          '    title: Request the print',
+          '    status: pending',
+          '',
+        ].join('\n'),
+      );
+    });
+
+    /* Composed exactly as both hosts compose it (`packages/host/src/agent-tools.ts`,
+     * `apps/ui/app/workers/agent-host.impl.ts`): the agent's view and the record
+     * view over one checkout, under Tau's own path policy, which keeps
+     * `.tau/chats` read-only to the agent. */
+    it('should write the list through the record view that the agent view refuses', async () => {
+      const checkout = new MemoryProvider();
+      await checkout.writeFile('.tau/chats/chat_01/events.jsonl', '{"type":"run.lifecycle"}\n');
+      const agentView = composeView({ filesystem: checkout }, { consumer: 'agent', policy: tauPathPolicy });
+      const recordView = composeView({ filesystem: checkout }, { consumer: 'user', policy: tauPathPolicy });
+      const mutations = new ResourceQueue();
+      const fileSystemFor = (signal: AbortSignal) =>
+        createProviderRpcFileSystem({ provider: agentView, mutations, signal });
+      const recordFileSystemFor = (signal: AbortSignal) =>
+        createProviderRpcFileSystem({ provider: recordView, mutations, signal });
+      const input = { chatId: 'chat_01', items };
+
+      await expect(invoke(build({ fileSystemFor }), 'update_todos', { input })).resolves.toStrictEqual({
+        isError: true,
+        content: {
+          success: false,
+          errorCode: 'PERMISSION_DENIED',
+          message: 'EROFS: this agent may read but not write .tau/chats/chat_01/todo.yaml; Tau records that itself.',
+        },
+      });
+      expect(await checkout.exists('.tau/chats/chat_01/todo.yaml')).toBe(false);
+
+      const result = await invoke(build({ fileSystemFor, recordFileSystemFor }), 'update_todos', { input });
+
+      expect(result).toStrictEqual({
+        isError: false,
+        content: {
+          success: true,
+          path: '.tau/chats/chat_01/todo.yaml',
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- keys are the status wire values
+          counts: { pending: 1, in_progress: 1, done: 1 },
+        },
+      });
+      expect(await checkout.readFile('.tau/chats/chat_01/todo.yaml', 'utf8')).toBe(
+        [
+          'version: 1',
+          'items:',
+          '  - id: model-pyramid',
+          '    title: Model the pyramid',
+          '    status: done',
+          '  - id: slice-pyramid',
+          '    title: Slice the pyramid',
+          '    status: in_progress',
+          '    note: 0.2 mm layers',
+          '  - id: request-print',
+          '    title: Request the print',
+          '    status: pending',
+          '',
+        ].join('\n'),
+      );
+      /* The record route writes the list and nothing else of the chat's. */
+      expect(await checkout.readFile('.tau/chats/chat_01/events.jsonl', 'utf8')).toBe('{"type":"run.lifecycle"}\n');
+    });
+
+    it.each([
+      ['duplicate ids', { chatId: 'chat_01', items: [items[0], { ...items[1], id: 'model-pyramid' }] }, 'unique'],
+      ['a chat id with a path separator', { chatId: '../other', items }, 'chatId'],
+      ['an unknown status', { chatId: 'chat_01', items: [{ ...items[0], status: 'doing' }] }, 'status'],
+      ['a missing list', { chatId: 'chat_01' }, 'items'],
+    ])('refuses %s without writing', async (_label, input, expectedMessage) => {
+      const writeFile = vi.fn<RpcFileSystem['writeFile']>(async () => undefined);
+      const registry = build({ fileSystemFor: () => ({ ...emptyFileSystem(), writeFile }) });
+
+      const result = await invoke(registry, 'update_todos', { input });
+
+      expect(result).toMatchObject({ isError: true, content: { errorCode: 'TOOL_INPUT_VALIDATION_FAILED' } });
+      expect(JSON.stringify(result.content)).toContain(expectedMessage);
+      expect(writeFile).not.toHaveBeenCalled();
+    });
   });
 
   it('throws the abort reason when the signal is already aborted', async () => {

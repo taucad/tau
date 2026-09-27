@@ -49,6 +49,7 @@ import { RepositoryStoreError } from '#api/git/store/errors.js';
 import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
 import { livePackBound } from '#api/git/store/limits.js';
 import type { RepositoryStore, StoredObject } from '#api/git/store/port.js';
+import { ShutdownService } from '#lifecycle/shutdown.service.js';
 
 /**
  * The Tau Hosted Remote end to end over the repository store (W4).
@@ -214,6 +215,10 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
     return response.text();
   };
 
+  /** The stop signal the service reads; a test swaps in an aborted one and back. */
+  let stopping = new AbortController();
+  let failGenerationWrites = false;
+
   beforeAll(async () => {
     workspace = await mkdtemp(path.join(tmpdir(), 'tau-git-work-'));
     const port = await reservePort();
@@ -246,6 +251,9 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
         insert: () => ({
           values: (values: Record<string, unknown>) => ({
             onConflictDoUpdate: async (change: { set: Record<string, unknown> }): Promise<void> => {
+              if (failGenerationWrites) {
+                throw new Error('database unavailable');
+              }
               const merged = { ...values, ...change.set };
               if (typeof merged['storageBytes'] === 'number') {
                 state.storageBytes = merged['storageBytes'];
@@ -313,6 +321,15 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
             appendRevision: async (entry: (typeof announced)[number]) => {
               announced.push({ generation: entry.generation, refs: entry.refs, heads: entry.heads });
             },
+          },
+        },
+        {
+          provide: ShutdownService,
+          useValue: {
+            get signal() {
+              return stopping.signal;
+            },
+            track: () => undefined,
           },
         },
         {
@@ -532,6 +549,39 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
 
     const retried = await runGit(['push', 'origin', 'HEAD:refs/heads/main'], clone);
     expect(retried.code, retried.stderr).toBe(0);
+  }, 120_000);
+
+  it('refuses a push that has not started to commit once the process begins to stop, and takes the retry', async () => {
+    const clone = path.join(workspace, 'clone');
+    await writeFile(path.join(clone, 'part.ts'), 'export const width = 15;\n', 'utf8');
+    await gitOk(['commit', '-am', 'revision during a stop'], clone);
+
+    stopping.abort();
+    const refused = await runGit(['push', 'origin', 'HEAD:refs/heads/main'], clone);
+    stopping = new AbortController();
+
+    expect(refused.code, `the push was accepted by a stopping server: ${refused.stderr}`).not.toBe(0);
+    expect(refused.stderr).toMatch(/503|restarting/u);
+    expect(await advertised()).not.toContain('revision during a stop');
+
+    const retried = await runGit(['push', 'origin', 'HEAD:refs/heads/main'], clone);
+    expect(retried.code, retried.stderr).toBe(0);
+  }, 120_000);
+
+  it('answers a committed push as pushed when its database writes fail, and repairs them on the next request', async () => {
+    const clone = path.join(workspace, 'clone');
+    await writeFile(path.join(clone, 'part.ts'), 'export const width = 16;\n', 'utf8');
+    await gitOk(['commit', '-am', 'revision with the database down'], clone);
+    const before = state.generation;
+
+    failGenerationWrites = true;
+    const pushed = await runGit(['push', 'origin', 'HEAD:refs/heads/main'], clone);
+    failGenerationWrites = false;
+
+    expect(pushed.code, pushed.stderr).toBe(0);
+    expect(state.generation).toBe(before);
+    await advertised();
+    expect(state.generation).toBeGreaterThan(before);
   }, 120_000);
 
   /**

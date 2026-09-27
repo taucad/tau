@@ -85,7 +85,7 @@ describe('MenuSliderItem', () => {
     const onValueChange = vi.fn();
     render(<DropdownHarness onValueChange={onValueChange} />);
     await user.click(screen.getByRole('button', { name: 'Open' }));
-    const input = screen.getByRole('textbox', { name: 'Opacity' });
+    const input = screen.getByRole('spinbutton', { name: 'Opacity' });
 
     await user.click(input);
     await user.clear(input);
@@ -109,12 +109,31 @@ describe('MenuSliderItem', () => {
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
   });
 
+  it('should read its value with the unit, announce its range and take End without leaving the menu', async () => {
+    const user = userEvent.setup();
+    const onValueChange = vi.fn();
+    render(<DropdownHarness onValueChange={onValueChange} />);
+    await user.click(screen.getByRole('button', { name: 'Open' }));
+    const input = screen.getByRole('spinbutton', { name: 'Opacity' });
+
+    expect(input).toHaveAttribute('aria-valuetext', '50%');
+    expect(input).toHaveAttribute('aria-valuemin', '0');
+    expect(input).toHaveAttribute('aria-valuemax', '100');
+
+    await user.click(input);
+    await user.keyboard('{End}');
+    expect(onValueChange).toHaveBeenLastCalledWith(100);
+    expect(input).toHaveAttribute('aria-valuetext', '100%');
+    expect(input).toHaveFocus();
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+  });
+
   it('scrubs and reverts editing inside a context menu without dismissing it early', async () => {
     const user = userEvent.setup();
     const onValueChange = vi.fn();
     render(<ContextHarness onValueChange={onValueChange} />);
     fireEvent.contextMenu(screen.getByText('Target'));
-    const input = screen.getByRole('textbox', { name: 'Opacity' });
+    const input = screen.getByRole('spinbutton', { name: 'Opacity' });
     const sliderItem = input.closest<HTMLElement>('[data-slot="context-menu-slider-item"]')!;
     Object.defineProperty(sliderItem, 'offsetWidth', { configurable: true, value: 100 });
 

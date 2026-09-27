@@ -11,12 +11,11 @@ import {
   Patch,
   Post,
   Res,
+  ServiceUnavailableException,
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
-import { createHatchetOwnerAffinity } from '@taucad/jobs-hatchet';
-import type { HatchetJobRuntimeAffinity } from '@taucad/jobs-hatchet';
 
 import { AuthGuard } from '#auth/auth.guard.js';
 import { PublicAuth, UseAuth, User } from '#auth/decorators/auth.decorator.js';
@@ -94,14 +93,15 @@ export class HostsController {
 
   @Get('worker-affinity')
   @PublicAuth()
-  public async getWorkerAffinity(
-    @Headers('authorization') authorization?: string,
-  ): Promise<{ readonly runtimeAffinity: HatchetJobRuntimeAffinity }> {
+  public async getWorkerAffinity(@Headers('authorization') authorization?: string): Promise<never> {
     const device = await this.hostsService.authenticateDevice(authorization);
     if (!device) {
       throw new UnauthorizedException({ code: 'AGENT_CREDENTIAL_REJECTED' });
     }
-    return { runtimeAffinity: createHatchetOwnerAffinity(device.ownerId) };
+    throw new ServiceUnavailableException({
+      code: 'JOB_SCHEDULER_UNAVAILABLE',
+      message: 'Scheduler worker affinity is no longer available.',
+    });
   }
 
   @Patch(':id')

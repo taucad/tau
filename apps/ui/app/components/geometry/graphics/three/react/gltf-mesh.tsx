@@ -76,8 +76,8 @@ import type { RenderFrame } from '@taucad/spatial';
 import { deriveModelInteractionUnitId, getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
 import type { ModelInteractionUnitState } from '#machines/model-interaction.machine.js';
 import {
-  createSectionViewRaycastClipState,
-  useSectionView,
+  resolveSectionViewRaycastClip,
+  useSectionViewFlags,
 } from '#components/geometry/graphics/three/use-section-view.js';
 import { raycastFirstVisibleMeshHit } from '#components/geometry/graphics/three/utils/bvh-raycast.js';
 import type { RaycastClipState } from '#components/geometry/graphics/three/utils/bvh-raycast.js';
@@ -96,6 +96,7 @@ import type {
   SectionTopologyGltfParser,
 } from '#components/geometry/graphics/three/utils/section-surface-topology.js';
 import { createSectionTopologyScheduler } from '#components/geometry/graphics/three/utils/section-topology-scheduler.js';
+import { useKinematicsViewer } from '#components/geometry/graphics/three/react/kinematics-viewer.js';
 import type { GltfPresentationBarrier, GltfPresentationTelemetry } from '#machines/graphics.machine.js';
 
 // Module-scoped GLTFLoader instance. GLTFLoader is stateless and fully reusable,
@@ -1068,7 +1069,7 @@ export function GltfMesh({
 }: GltfMeshDisplayProperties): React.JSX.Element | undefined {
   const graphicsActor = useGraphics();
   const graphicsBackendThree = useThreeGraphicsBackend();
-  const sectionView = useSectionView();
+  const sectionView = useSectionViewFlags();
   const cameraRig = useCameraRig();
   const renderFrame = useRenderFrame();
   const assetMatrix = useMemo(() => createCanonicalGltfToTauMatrix(), []);
@@ -1115,14 +1116,6 @@ export function GltfMesh({
     () => ({ ...modelUnitState, isViewerHoverSuppressed }),
     [isViewerHoverSuppressed, modelUnitState],
   );
-  const modelRaycastClipState = useMemo<RaycastClipState | undefined>(() => {
-    return createSectionViewRaycastClipState({
-      enableMesh: sectionView.enableMesh,
-      isActive: sectionView.isActive,
-      plane: sectionView.plane,
-    });
-  }, [sectionView.enableMesh, sectionView.isActive, sectionView.plane]);
-
   const getModelPickableMeshes = useCallback((): readonly Mesh[] => {
     if (!scene) {
       modelPickableMeshesSceneRef.current = undefined;
@@ -1149,10 +1142,19 @@ export function GltfMesh({
     // false to stop Three's descendant walk after the clipping-aware BVH query.
     // oxlint-disable-next-line react/immutability -- This presentation owns the external Three.js scene and restores its imperative raycast hook on teardown.
     scene.raycast = (raycaster, intersections): false => {
+      const { context } = graphicsActor.getSnapshot();
+      // A section gizmo drag owns the pointer and suppresses model hover, so its moves skip the model query.
+      // The model's presses (secondary, and a primary one that starts a kinematics drag) never start that
+      // drag, and the release's click raycasts after pointer-up has lifted the suppression.
+      if (context.viewerHoverSuppressionReasons.includes('sectionViewTransform')) {
+        return false;
+      }
+
       const hit = raycastFirstVisibleMeshHit({
         raycaster,
         meshes: getModelPickableMeshes(),
-        clipping: modelRaycastClipState,
+        // Read here, not selected: a section drag step must not re-render the model.
+        clipping: resolveSectionViewRaycastClip(context, renderFrame),
       });
       if (hit) {
         intersections.push(hit);
@@ -1162,7 +1164,14 @@ export function GltfMesh({
     return () => {
       scene.raycast = previousRaycast;
     };
-  }, [getModelPickableMeshes, modelRaycastClipState, scene]);
+  }, [getModelPickableMeshes, graphicsActor, renderFrame, scene]);
+
+  const handleKinematicsPointerDown = useKinematicsViewer({
+    unitId,
+    scene,
+    manifest: componentManifest,
+    getPickableMeshes: getModelPickableMeshes,
+  });
 
   // Update resolution when size changes. Deferred via requestAnimationFrame
   // so that rapid resize events (e.g. dragging a Dockview divider) batch into
@@ -1934,6 +1943,13 @@ export function GltfMesh({
 
   const handlePointerDown = useCallback(
     (event: ThreeEvent<PointerEvent>) => {
+      if (event.nativeEvent.button === 0) {
+        if (!hasModelHitBlockingSceneUiHit(event.intersections)) {
+          handleKinematicsPointerDown(event);
+        }
+        return;
+      }
+
       if (!onModelComponentSecondaryPointerCandidate || event.nativeEvent.button !== 2) {
         return;
       }
@@ -1947,7 +1963,12 @@ export function GltfMesh({
       event.stopPropagation();
       publishSecondaryPointerAction(contextMenuAction);
     },
-    [onModelComponentSecondaryPointerCandidate, publishSecondaryPointerAction, resolveContextMenuActionFromEvent],
+    [
+      handleKinematicsPointerDown,
+      onModelComponentSecondaryPointerCandidate,
+      publishSecondaryPointerAction,
+      resolveContextMenuActionFromEvent,
+    ],
   );
 
   const handlePointerMissed = useCallback(() => {

@@ -16,8 +16,6 @@ export const useCommercialFeatures = (): {
   readonly canCreatePrivateShares: boolean;
   /** Whether this plan may back a project's files up to Tau Cloud (N4). */
   readonly canSyncFiles: boolean;
-  /** Whether this plan may connect a Git remote (N4). */
-  readonly canConnectGitHub: boolean;
   /** The Tau Cloud allowance this plan includes (D16), once known and while it syncs. */
   readonly storageLimitBytes: number | undefined;
   /** Whether a larger plan exists to offer (D17): never on the top tier, never before the plan is known. */
@@ -32,7 +30,6 @@ export const useCommercialFeatures = (): {
   return {
     canCreatePrivateShares: entitlements.canCreatePrivateShares,
     canSyncFiles: entitlements.canSyncFiles,
-    canConnectGitHub: entitlements.canConnectGitHub,
     storageLimitBytes:
       entitlements.isResolved && entitlements.canSyncFiles ? storageLimitBytesByTier[entitlements.tier] : undefined,
     canUpgradePlan: entitlements.isResolved && entitlements.tier !== 'enterprise',

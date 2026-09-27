@@ -1,10 +1,12 @@
 import type { StandardJSONSchemaV1, StandardSchemaV1 } from '@standard-schema/spec';
+import { createQuantity, quantityKinds } from '@taucad/units/quantity';
 import { describe, expect, it, vi } from 'vitest';
 
 import { defineConfiguration } from '#configuration/configuration.js';
 import { defineMachine, defineMachineQuery } from '#machines/machine.js';
 import type { MachineConnectionRuntime, MachineConnectInput, MachineSession } from '#machines/machine.js';
 import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
+import { machineManifestFixture } from '#machines/machine-manifest.fixture.js';
 
 type Binding = Readonly<{ logicalId: string }>;
 type Submission = Readonly<{ copies: number }>;
@@ -44,6 +46,16 @@ const accepted = {
   payloadSelection: 'plate',
   technology: 'fff',
 } as const;
+const nozzleDiameter = createQuantity({
+  value: 0.4,
+  unit: 'mm',
+  kind: quantityKinds.diameter,
+  space: 'linear',
+  semanticMode: 'declared-only',
+});
+if (nozzleDiameter.status !== 'success') {
+  throw new Error(nozzleDiameter.diagnostic.message);
+}
 
 describe('defineMachine', () => {
   it('keeps authoring and invocation lazy while exposing frozen serializable metadata', async () => {
@@ -75,6 +87,7 @@ describe('defineMachine', () => {
       vendor: 'test',
       technologies: ['fff'],
       accepts: [accepted],
+      manifest: machineManifestFixture,
       bindingConfiguration,
       submissionConfiguration,
       queries: {
@@ -120,7 +133,7 @@ describe('defineMachine', () => {
               operations: ['submit'],
               ratedEnvelope: { width: 0.3, depth: 0.3, height: 0.3, unit: 'm' },
               printableEnvelope: { width: 0.25, depth: 0.25, height: 0.25, unit: 'm' },
-              tools: [{ id: 'tool-0', kind: 'extruder', nozzleDiameter: 0.0004 }],
+              tools: [{ id: 'tool-0', kind: 'extruder', nozzleDiameter: nozzleDiameter.value }],
               materialSystem: { kind: 'single', slotCount: 1 },
               bedTypes: ['textured'],
             };
@@ -136,11 +149,20 @@ describe('defineMachine', () => {
           async *observe() {
             yield* [];
           },
+          async preparePrint() {
+            return { status: 'rejected', code: 'UNSUPPORTED', message: 'Fixture never prepares.', observedAt: 'now' };
+          },
+          async uploadPrint() {
+            return { status: 'rejected', code: 'UNSUPPORTED', message: 'Fixture never transfers.', observedAt: 'now' };
+          },
           async submit() {
             return { status: 'accepted', observedAt: 'now' };
           },
           async control() {
             return { status: 'accepted', observedAt: 'now' };
+          },
+          async reconcile() {
+            return { status: 'unknown', reason: 'fixture', observedAt: 'now' };
           },
           stillCapture: { type: 'unsupported' },
           close,
@@ -238,6 +260,7 @@ describe('defineMachine', () => {
       vendor: 'test',
       technologies: ['fff'],
       accepts: [accepted],
+      manifest: machineManifestFixture,
       bindingConfiguration,
       submissionConfiguration,
       async *discover() {
@@ -282,6 +305,7 @@ describe('defineMachine', () => {
         vendor: 'test',
         technologies: ['fff'],
         accepts: [accepted],
+        manifest: machineManifestFixture,
         bindingConfiguration,
         submissionConfiguration,
         queries: { unsafe: unsafeQuery },

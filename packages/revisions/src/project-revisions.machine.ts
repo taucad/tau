@@ -1161,6 +1161,10 @@ const projectRevisionsMachineDefinition = setup({
           ) {
             announceSelection({ ...context, checkouts }, enq);
           }
+          /* D50: the scheduler pulls the live checkout's branch. */
+          if (event.checkoutId === context.liveCheckoutId && event.branch !== undefined) {
+            enq.sendTo('sync', { type: 'branchChanged', branch: event.branch });
+          }
           return { context: { checkouts } };
         },
         pinTo: ({ context, event }, enq) => {

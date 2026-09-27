@@ -122,6 +122,7 @@ const mockCommitPendingProjectDirectory = vi.fn<FileManagerProxy['commitPendingP
   return { status: 'committed' } as const;
 });
 const mockListProjectManifests = vi.fn<() => Promise<ProjectDiscoveryResult>>(async () => ({ roots: [], entries: [] }));
+const mockAdoptProjectDirectory = vi.fn<FileManagerProxy['adoptProjectDirectory']>(async () => fakeProject);
 
 /** Worker change-channel double: one live subscription per event channel. */
 type WorkerChangeSubscription = {
@@ -187,6 +188,7 @@ vi.mock('#hooks/use-file-manager.js', () => ({
     },
     client: {
       listProjectManifests: mockListProjectManifests,
+      adoptProjectDirectory: mockAdoptProjectDirectory,
       permanentlyDeleteProjectDirectory: mockPermanentlyDeleteProjectDirectory,
       commitPendingProjectDirectory: mockCommitPendingProjectDirectory,
     },
@@ -1063,6 +1065,141 @@ describe('useProjectManager.createProject', () => {
       'duplicate-id',
       'route-blocked',
     ]);
+  });
+
+  describe('tau.json failure recovery', () => {
+    const copyLocator: ProjectLocator = { ...fakeLocator, relativeDirectory: 'test-project-copy' };
+    const boundToOriginal: ProjectFileSystemConfig = {
+      projectId: fakeProject.id,
+      backend: 'opfs',
+      providerBasePath: fakeLocator.relativeDirectory,
+    };
+    const encode = (value: unknown): Uint8Array<ArrayBuffer> => new TextEncoder().encode(JSON.stringify(value));
+
+    /* A Finder copy must not brick the original: the route binding names it (R7). */
+    it('keeps the directory its route binds open when a copy of it appears', async () => {
+      mockGetAllProjectFileSystemConfigs.mockResolvedValue([boundToOriginal]);
+      mockListProjectManifests.mockResolvedValue({
+        roots: [{ status: 'complete', root: { backend: 'opfs' } }],
+        entries: [
+          { status: 'duplicate-id', manifest: fakeProject, locator: fakeLocator },
+          { status: 'duplicate-id', manifest: fakeProject, locator: copyLocator },
+        ],
+      });
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toMatchObject({ status: 'ready' });
+      const listing = await result.current.getProjectListing();
+      expect(listing.conflicts).toEqual([{ status: 'duplicate-id', manifest: fakeProject, locator: copyLocator }]);
+    });
+
+    it('rebinds a duplicated id to the folder a person chooses and writes no project file', async () => {
+      mockGetAllProjectFileSystemConfigs.mockResolvedValue([boundToOriginal]);
+      mockListProjectManifests.mockResolvedValue({
+        roots: [{ status: 'complete', root: { backend: 'opfs' } }],
+        entries: [
+          { status: 'duplicate-id', manifest: fakeProject, locator: fakeLocator },
+          { status: 'duplicate-id', manifest: fakeProject, locator: copyLocator },
+        ],
+      });
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await result.current.chooseProjectDirectory(copyLocator, fakeProject.id);
+
+      expect(mockSetProjectFileSystemConfig).toHaveBeenCalledExactlyOnceWith({
+        projectId: fakeProject.id,
+        backend: 'opfs',
+        providerBasePath: copyLocator.relativeDirectory,
+      });
+      expect(mockSyncProjectRoots).toHaveBeenCalled();
+      expect(mockWriteFile).not.toHaveBeenCalled();
+      await expect(
+        result.current.chooseProjectDirectory({ ...fakeLocator, relativeDirectory: 'elsewhere' }, fakeProject.id),
+      ).rejects.toThrow('This folder no longer holds that project.');
+    });
+
+    it('restores the id a route last bound when adopting its identity-less directory', async () => {
+      mockGetAllProjectFileSystemConfigs.mockResolvedValue([boundToOriginal]);
+      mockListProjectManifests.mockResolvedValue({
+        roots: [{ status: 'complete', root: { backend: 'opfs' } }],
+        entries: [
+          {
+            status: 'adoption-required',
+            manifest: {
+              $schema: fakeProject.$schema,
+              name: 'test-project',
+              description: '',
+              tags: [],
+              assets: fakeProject.assets,
+            },
+            locator: fakeLocator,
+            issue: { code: 'manifest-missing' },
+          },
+        ],
+      });
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await result.current.adoptProject(fakeLocator);
+
+      expect(mockAdoptProjectDirectory).toHaveBeenCalledExactlyOnceWith(fakeLocator, { id: fakeProject.id });
+    });
+
+    it('mints a fresh id on adoption when another directory now claims the remembered one', async () => {
+      mockGetAllProjectFileSystemConfigs.mockResolvedValue([boundToOriginal]);
+      mockListProjectManifests.mockResolvedValue({
+        roots: [{ status: 'complete', root: { backend: 'opfs' } }],
+        entries: [
+          {
+            status: 'adoption-required',
+            manifest: {
+              $schema: fakeProject.$schema,
+              name: 'test-project',
+              description: '',
+              tags: [],
+              assets: fakeProject.assets,
+            },
+            locator: fakeLocator,
+            issue: { code: 'manifest-missing' },
+          },
+          { status: 'valid', manifest: fakeProject, locator: copyLocator },
+        ],
+      });
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await result.current.adoptProject(fakeLocator);
+
+      expect(mockAdoptProjectDirectory).toHaveBeenCalledExactlyOnceWith(fakeLocator, undefined);
+    });
+
+    /* The incident bytes: an extra asset key beside an intact identity. */
+    it('refuses to write over a degraded manifest until an explicit Repair canonicalizes it', async () => {
+      mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+      manifestBytes = encode({ ...fakeProject, assets: { ...fakeProject.assets, second: { entryPath: 'second.cs' } } });
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await expect(result.current.getProject(fakeProject.id)).resolves.toEqual(fakeProject);
+      await expect(result.current.updateProject(fakeProject.id, { name: 'Renamed' })).rejects.toThrow(
+        'tau.json needs repair',
+      );
+      expect(mockWriteFile).not.toHaveBeenCalled();
+
+      await expect(result.current.repairProject(fakeProject.id)).resolves.toEqual(fakeProject);
+      expect(mockWriteFile).toHaveBeenCalledExactlyOnceWith(
+        `/projects/${fakeProject.id}/tau.json`,
+        serializeProjectManifest(fakeProject),
+      );
+    });
+
+    it('offers no Repair for a JSON syntax error, whose defaults would erase recoverable text', async () => {
+      mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+      manifestBytes = new TextEncoder().encode(
+        `{"$schema": "${fakeProject.$schema}", "id": "${fakeProject.id}", "name": "Test",`,
+      );
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await expect(result.current.repairProject(fakeProject.id)).rejects.toThrow('not valid JSON');
+      expect(mockWriteFile).not.toHaveBeenCalled();
+    });
   });
 
   it('keeps a config whose directory is discovered but unreadable', async () => {

@@ -20,6 +20,7 @@ import { openrscadKernel } from '@taucad/openrscad';
 import { picogk } from '@taucad/picogk';
 import { replicad } from '@taucad/replicad';
 import { rhino } from '@taucad/rhino';
+import { slicer } from '@taucad/slicer';
 
 import { build123dKernelOptions } from '#tau/build123d-resources.js';
 import { picogkKernelOptions } from '#tau/picogk-resources.js';
@@ -50,6 +51,7 @@ const createDesktopRuntimeImplementation = (options: DesktopRuntimeOptions = {})
         brep(),
         rhino(),
         image(),
+        slicer(),
         assimp({
           preset: 'all',
           transcoders: { export: { backend: desktopAssimpBackend } },

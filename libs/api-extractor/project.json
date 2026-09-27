@@ -47,10 +47,27 @@
       "cache": true,
       "inputs": [
         "{projectRoot}/src/extract-geospec-types.ts",
+        "{projectRoot}/src/emit-package-declarations.ts",
         "{workspaceRoot}/packages/geospec/src/**/*",
         "sharedGlobals"
       ],
       "outputs": ["{projectRoot}/src/generated/geospec"]
+    },
+    "extract-kinematics": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsx src/extract-kinematics-types.ts",
+        "cwd": "libs/api-extractor"
+      },
+      "cache": true,
+      "inputs": [
+        "{projectRoot}/src/extract-kinematics-types.ts",
+        "{projectRoot}/src/emit-package-declarations.ts",
+        "{workspaceRoot}/packages/kinematics/src/types.ts",
+        "{workspaceRoot}/packages/spatial/src/**/*",
+        "sharedGlobals"
+      ],
+      "outputs": ["{projectRoot}/src/generated/kinematics"]
     },
     "extract-kcl": {
       "executor": "nx:run-commands",

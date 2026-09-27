@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import process from 'node:process';
 import { resolve } from 'node:path';
 import { defineConfig } from 'vitest/config';
@@ -17,6 +18,24 @@ const liveProviderSpecs = ['src/gemini-browser-agent-host.live.spec.ts', 'src/pr
 const liveProvidersEnabled = process.env['TAU_E2E_LIVE_GEMINI'] === 'true';
 const playwrightProvider = (options?: Parameters<typeof playwright>[0]): BrowserProviderOption =>
   playwright(options) as unknown as BrowserProviderOption;
+/* Only the snapshot production server honours TAU_E2E_DISABLE_COI (`production-server.ts`): the
+ * development server and `apps/ui/server.ts` stay isolated, so the specs would assert a
+ * non-isolated page against an isolated one. Refuse the combination instead. */
+const disableCoi = process.env['TAU_E2E_DISABLE_COI'] === 'true';
+const snapshotServer =
+  process.env['TAU_E2E_SERVER_MODE'] !== 'development' && process.env['TAU_E2E_UI_SNAPSHOT'] === 'true';
+if (disableCoi && !snapshotServer) {
+  throw new Error(
+    'TAU_E2E_DISABLE_COI=true needs the snapshot production server: set TAU_E2E_UI_SNAPSHOT=true and leave TAU_E2E_SERVER_MODE unset.',
+  );
+}
+/* DP18: the exact STL bytes every host must export for `picovoxel.sphere-minus-beams`, read from the
+ * pin tau-examples owns (runtime-e2e asserts the same pin in Node). */
+const picovoxelExactStlPin = (
+  JSON.parse(
+    readFileSync(resolve(import.meta.dirname, '../../libs/tau-examples/src/kernels/picovoxel/exact-pins.json'), 'utf8'),
+  ) as { readonly 'sphere-minus-beams': { readonly stl: { readonly sha256: string; readonly bytes: number } } }
+)['sphere-minus-beams'].stl;
 
 export default defineConfig({
   root: import.meta.dirname,
@@ -42,8 +61,7 @@ export default defineConfig({
     hookTimeout: 300_000,
     retry: isCi ? 2 : 0,
     fileParallelism: false,
-    // Only the snapshot production server honours TAU_E2E_DISABLE_COI (`production-server.ts`).
-    provide: { crossOriginIsolation: process.env['TAU_E2E_DISABLE_COI'] !== 'true' },
+    provide: { crossOriginIsolation: !disableCoi, picovoxelExactStlPin },
     browser: {
       enabled: true,
       headless: true,

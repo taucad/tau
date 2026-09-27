@@ -2,7 +2,6 @@ import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import { playwright } from '@vitest/browser-playwright';
 import { defineConfig } from 'vitest/config';
-import type { BrowserProviderOption } from 'vitest/node';
 import { tauRuntime } from '@taucad/runtime/vite';
 
 /**
@@ -24,8 +23,7 @@ export default defineConfig({
     browser: {
       enabled: true,
       headless: true,
-      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- duplicated `vitest` declarations leave no narrower bridge
-      provider: playwright({ launchOptions: { channel: 'chromium' } }) as unknown as BrowserProviderOption,
+      provider: playwright({ launchOptions: { channel: 'chromium' } }),
       instances: [{ browser: 'chromium' }],
     },
   },

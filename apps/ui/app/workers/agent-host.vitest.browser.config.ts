@@ -2,7 +2,6 @@
 import { fileURLToPath } from 'node:url';
 import { playwright } from '@vitest/browser-playwright';
 import { defineConfig } from 'vitest/config';
-import type { BrowserProviderOption } from 'vitest/node';
 import { tauRuntime } from '@taucad/runtime/vite';
 // eslint-disable-next-line @nx/enforce-module-boundaries -- This composed browser contract fixture exercises the package wire through the UI worker until FIX-PROJ adds the UI package dependency.
 import { authoritativeGatewayWireFixtures } from '../../../../packages/agent-host/src/transport/gateway-wire.fixture.js';
@@ -89,13 +88,7 @@ export default defineConfig({
       headless: true,
       // `--enable-unsafe-webgpu` is what `apps/ui-e2e` launches with; the
       // headless capture probe needs a real adapter or its answer is vacuous.
-      // CI's GPU-less lane sets the software profile, which takes SwiftShader's
-      // adapter exactly as `apps/ui-e2e`'s `webGpuLaunchArguments` does.
-      // `@vitest/browser-playwright` resolves a second `vitest` peer variant (its jsdom lacks
-      // the optional `supports-color` peer), so the option it returns is nominally — not
-      // structurally — distinct from this program's own `vitest/node` declaration. This is the
-      // only vitest config inside a typecheck program, so no other config surfaces the split.
-      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- duplicated `vitest` declarations leave no narrower bridge
+      // CI's GPU-less lane uses SwiftShader as in apps/ui-e2e.
       provider: playwright({
         launchOptions: {
           channel: 'chromium',
@@ -104,7 +97,7 @@ export default defineConfig({
             ...(process.env['TAU_E2E_WEBGPU_PROFILE'] === 'software' ? ['--use-webgpu-adapter=swiftshader'] : []),
           ],
         },
-      }) as unknown as BrowserProviderOption,
+      }),
       instances: [{ browser: 'chromium' }],
     },
   },

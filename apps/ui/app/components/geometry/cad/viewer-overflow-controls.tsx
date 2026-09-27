@@ -4,7 +4,8 @@
  * toolbar is too narrow to display them inline.
  */
 import { useCallback, useMemo } from 'react';
-import { FlipHorizontal, Focus, Grid3X3, Ruler } from 'lucide-react';
+import { FlipHorizontal, Focus, Grid3X3, Ruler, Shapes } from 'lucide-react';
+import type { JSONSchema7 } from '@taucad/json-schema';
 import {
   DropdownMenuItem,
   DropdownMenuLabel,
@@ -14,11 +15,14 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
   DropdownMenuSwitchItem,
+  DropdownMenuToggleGroupItem,
 } from '@taucad/ui/components/dropdown-menu';
 import { DropdownMenuSliderItem } from '#components/ui/menu-slider-item.js';
 import { formatNumberEngineeringNotation } from '#utils/number.utils.js';
 import { gridUnitOptions, maxGridDigits } from '#components/geometry/cad/grid-unit-options.js';
 import { useCameraRig, useCameraSelector, useGraphics, useGraphicsSelector } from '#hooks/use-graphics.js';
+import { useCad, useCadSelector } from '#hooks/use-cad.js';
+import { selectRenderOptions, selectRenderOptionsDefaults, selectRenderOptionsSchema } from '#machines/cad.machine.js';
 
 // ── FOV Overflow Control ──────────────────────────────────────────────────────
 
@@ -185,5 +189,63 @@ export function FitViewOverflowControl(): React.JSX.Element {
       <Focus />
       Fit view
     </DropdownMenuItem>
+  );
+}
+
+// ── Output Overflow Control ───────────────────────────────────────────────────
+
+const emptyRenderOptions: Record<string, unknown> = {};
+
+// Short enum values are initialisms (`3d`, `pcb`); longer ones are words (`schematic`).
+const capitalize = (value: string): string =>
+  value.length <= 3 ? value.toUpperCase() : value.charAt(0).toUpperCase() + value.slice(1);
+
+type OutputChoices = { readonly values: readonly string[]; readonly defaultValue: unknown };
+
+/** The `output` enum of a kernel's render-option schema, when it declares one. */
+function selectOutputChoices(schema: JSONSchema7 | undefined): OutputChoices | undefined {
+  const output = schema?.properties?.['output'];
+  if (typeof output !== 'object' || !Array.isArray(output.enum)) {
+    return undefined;
+  }
+  const values = output.enum.filter((value): value is string => typeof value === 'string');
+  return values.length > 0 ? { values, defaultValue: output.default } : undefined;
+}
+
+/**
+ * Output-kind selector rendered as a DropdownMenuToggleGroupItem.
+ * Driven by the active kernel's `renderOptions.schema.properties.output` enum; hidden when there is none.
+ */
+export function OutputOverflowControl(): React.ReactNode {
+  const cadRef = useCad();
+  const schema = useCadSelector(selectRenderOptionsSchema, undefined);
+  const defaults = useCadSelector(selectRenderOptionsDefaults, undefined);
+  const renderOptions = useCadSelector(selectRenderOptions, emptyRenderOptions);
+
+  const choices = useMemo(() => selectOutputChoices(schema), [schema]);
+  const options = useMemo(
+    () => choices?.values.map((value) => ({ value, label: capitalize(value), ariaLabel: capitalize(value) })),
+    [choices],
+  );
+
+  const handleOutputChange = useCallback(
+    (output: string) => {
+      cadRef?.send({ type: 'setRenderOptions', renderOptions: { output } });
+    },
+    [cadRef],
+  );
+
+  if (!choices || !options) {
+    return null;
+  }
+
+  const current = renderOptions['output'] ?? defaults?.['output'] ?? choices.defaultValue;
+  const value = typeof current === 'string' && choices.values.includes(current) ? current : choices.values[0]!;
+
+  return (
+    <DropdownMenuToggleGroupItem value={value} options={options} onValueChange={handleOutputChange}>
+      <Shapes />
+      Output
+    </DropdownMenuToggleGroupItem>
   );
 }

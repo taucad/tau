@@ -405,6 +405,39 @@ describe('cadMachine', () => {
       actor.stop();
     });
 
+    it('should re-render with merged render options on setRenderOptions', async () => {
+      const { actor, mockClient } = await startAndConnect();
+
+      actor.send({ type: 'setEntryPath', entryPath: stubEntryPath });
+      actor.send({ type: 'setRenderOptions', renderOptions: { output: 'schematic' } });
+      expect(mockClient.render).toHaveBeenLastCalledWith({
+        source: { path: stubEntryPath },
+        content: { includeEdges: true },
+        renderOptions: { output: 'schematic' },
+      });
+
+      actor.send({ type: 'setRenderOptions', renderOptions: { quality: 'draft' } });
+      expect(mockClient.render).toHaveBeenLastCalledWith(
+        expect.objectContaining({ renderOptions: { output: 'schematic', quality: 'draft' } }),
+      );
+      expect(actor.getSnapshot().context.renderOptions).toEqual({ output: 'schematic', quality: 'draft' });
+      actor.stop();
+    });
+
+    it('should store render options without rendering when no entry path is selected', async () => {
+      const { actor, mockClient } = await startAndConnect();
+      vi.mocked(mockClient.render).mockClear();
+
+      actor.send({ type: 'setRenderOptions', renderOptions: { output: 'pcb' } });
+      expect(mockClient.render).not.toHaveBeenCalled();
+      expect(actor.getSnapshot().context.renderOptions).toEqual({ output: 'pcb' });
+      expect(actor.getSnapshot().value).toEqual('idle');
+
+      actor.send({ type: 'setEntryPath', entryPath: stubEntryPath });
+      expect(mockClient.render).toHaveBeenLastCalledWith(expect.objectContaining({ renderOptions: { output: 'pcb' } }));
+      actor.stop();
+    });
+
     it('should re-assert the entry once when a watched rerender supersedes the render', async () => {
       const { actor, mockClient } = await startAndConnect();
       vi.mocked(mockClient.render).mockClear();

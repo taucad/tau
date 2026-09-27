@@ -37,6 +37,14 @@ import { useCommercialFeatures } from '#cloud/commercial-features.js';
 import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
 import { useSelector } from '@xstate/react';
 import { useProjectManager } from '#hooks/use-project-manager.js';
+import { toast } from '#components/ui/sonner.js';
+
+/** Sync settings live in tau.json, which Tau refuses to write while it needs repair (R4). */
+const reportSyncSettingError = (error: unknown): void => {
+  toast.error('Could not change sync settings', {
+    description: error instanceof Error ? error.message : undefined,
+  });
+};
 
 /**
  * The Revisions pane (S26, A18, A29).
@@ -612,13 +620,15 @@ export function RevisionsPanelBody(): React.JSX.Element {
             onSync={commands.syncNow}
             syncChats={project?.syncChats !== false}
             onSyncChatsChange={(enabled) => {
-              void updateProject(projectId, { syncChats: enabled });
+              // oxlint-disable-next-line promise/prefer-await-to-then, tau-lint/no-async-iife -- a refused manifest write is named, not left loose
+              void updateProject(projectId, { syncChats: enabled }).catch(reportSyncSettingError);
             }}
             /* Generated evidence is default-off (policy Rule 13), so an absent
                field is `false` rather than `true` as `syncChats` is. */
             syncLargeExports={project?.syncLargeExports === true}
             onSyncLargeExportsChange={(enabled) => {
-              void updateProject(projectId, { syncLargeExports: enabled });
+              // oxlint-disable-next-line promise/prefer-await-to-then, tau-lint/no-async-iife -- a refused manifest write is named, not left loose
+              void updateProject(projectId, { syncLargeExports: enabled }).catch(reportSyncSettingError);
             }}
             canSyncFiles={canSyncFiles}
             onUpgrade={requestUpgrade}

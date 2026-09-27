@@ -61,7 +61,7 @@ export type PerformanceLabCase = {
     subjectSlots: readonly string[];
     workUnitBudget: number;
   };
-  expectedStatus: 'passed' | 'failed' | 'unverified';
+  expectedStatus: 'passed' | 'failed' | 'refused' | 'unverified';
   baseline: 'supported' | 'unsupported' | 'unverified';
   authority?: PerformanceLabAuthority;
   analyticAuthority?: PerformanceLabAnalyticAuthority;
@@ -511,7 +511,7 @@ export type PerformanceLabDifference = {
   sources: ReadonlyArray<{ path: string; sha256: string; jsonPointer: string }>;
 };
 
-const currentAuthorityHash = 'fb0920d448648cf1ea82c1305f8701c7992156a72f5a592cc569b3b3bec0bd51';
+const currentAuthorityHash = 'ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86';
 const referenceCompatibilityHash = '0d0da6ad2b5c7beca4eced08d489f2d4da6fc56baeb3270cdf8481a3979dcd9e';
 const mixedDifferences = [
   {

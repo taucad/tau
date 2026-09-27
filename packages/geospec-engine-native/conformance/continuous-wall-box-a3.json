@@ -1,0 +1,241 @@
+{
+  "taskId": "MATCHER-WALL-NOMINAL-ORACLE-A2",
+  "status": "independent-prospective-qualified-box-expectations-before-principal-review",
+  "authority": [
+    "W3-WALL-CONTINUOUS-02",
+    "W2.C-EVIDENCE-02",
+    "W3-STEP-REPORT-PROFILE-01",
+    "W2.C-LOGICAL-BUDGET-02",
+    "GEOSPEC-NATIVE-CLOSEOUT/RULING-1",
+    "GEOSPEC-NATIVE-CLOSEOUT/RULING-22"
+  ],
+  "predecessor": {
+    "path": "packages/geospec-engine-native/conformance/continuous-wall-box-a2.json",
+    "sha256": "b43e2939a75814940dcb72ff0f522f10d7dfa960bfc823ba8ec4464de156aba3",
+    "immutable": true
+  },
+  "identityAmendment": {
+    "id": "W2-AUTH/authored-v5-identity",
+    "predecessor": {
+      "ingestProfile": "geospec-step-xde-report-v2",
+      "backendProfile": "occt-8.1.0-dev1-3d097a-report-v2",
+      "descriptorSha256": "ebf7de565b87397322ecf8ede9b2ccb109202789e519d49b7cebb3745159f89c",
+      "subjectHash": "ebf7de565b87397322ecf8ede9b2ccb109202789e519d49b7cebb3745159f89c"
+    },
+    "successor": {
+      "ingestProfile": "geospec-step-xde-report-authored-v5",
+      "backendProfile": "occt-8.1.0-dev1-3d097a-report-authored-v5",
+      "descriptorSha256": "3073933a2c760e234bd7ee26a99527477c439d3fd2ebbbc2e79d86734087058b",
+      "subjectHash": "3073933a2c760e234bd7ee26a99527477c439d3fd2ebbbc2e79d86734087058b"
+    },
+    "statement": "Only the subject identity moves: the descriptor profile strings and the subjectHash every row names. Every canonical plan, evaluation and submit response replays byte-identical under the authored-v5 product; no verdict or evidence byte moved."
+  },
+  "subject": {
+    "primary": {
+      "path": "packages/geospec-engine-native/native/occt/rust/tests/fixtures/ap242-box.step",
+      "byteLength": 15465,
+      "sha256": "9d3db06c9381009ceeb4c82742f662becbdfce3d3d2084e46e195901d8b3b9bf"
+    },
+    "resourceBuffers": [],
+    "descriptorUtf8": "{\"backendProfile\":\"occt-8.1.0-dev1-3d097a-report-authored-v5\",\"format\":\"step\",\"frame\":{\"coordinateSystem\":\"z-up\",\"outputUnit\":\"mm\",\"sourceUnit\":\"millimetre\",\"uniformScale\":1},\"ingestOptions\":{},\"ingestProfile\":\"geospec-step-xde-report-authored-v5\",\"primary\":{\"byteLength\":15465,\"sha256\":\"9d3db06c9381009ceeb4c82742f662becbdfce3d3d2084e46e195901d8b3b9bf\"},\"resources\":[],\"schema\":\"geospec-subject-v1\"}",
+    "descriptorSha256": "3073933a2c760e234bd7ee26a99527477c439d3fd2ebbbc2e79d86734087058b",
+    "subjectHash": "3073933a2c760e234bd7ee26a99527477c439d3fd2ebbbc2e79d86734087058b",
+    "subjectContentHash": "9d3db06c9381009ceeb4c82742f662becbdfce3d3d2084e46e195901d8b3b9bf",
+    "ingestRequestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"format\":\"step\",\"frame\":{\"coordinateSystem\":\"z-up\",\"outputUnit\":\"mm\",\"sourceUnit\":\"auto\"},\"ingestOptions\":{},\"method\":\"ingestSubject\",\"primaryByteLength\":15465,\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"nominal-a2-box-ingest\",\"resources\":[]}",
+    "ingestRequestSha256": "0460b2c8b4d63815073557c03f1e493c09a50f596ba26ed673141a958b4b699a",
+    "binaryCall": "ingestSubject(UTF8(ingestRequestUtf8),primaryBytes,[])",
+    "authoredName": {
+      "disposition": "omitted",
+      "ingestOptions": {},
+      "reason": "New authored public ingest request explicitly omits name; no basename or STEP product label is promoted to authored options."
+    },
+    "unitSource": {
+      "raw": {
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lanes/matcher-full-wall-oracle-a1/revisions/nominal-facts-a2/box-raw.json",
+        "byteLength": 75975,
+        "sha256": "e1ed9edec4e125426f83b346a63b981747ddc562124f555be1d41646f542d6e5"
+      },
+      "rawLengthUnit": "millimetre",
+      "transferSystemLengthUnit": 1,
+      "appliedUniformScale": 1
+    }
+  },
+  "rows": [
+    {
+      "id": "continuous02/nominal-box/min5/positive",
+      "polarity": "positive",
+      "thresholdMm": 5,
+      "positiveSatisfied": true,
+      "expectedAdmission": "accepted",
+      "expectedOperationDisposition": "passed",
+      "authoredRequestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveMinimumWallThickness\",\"claimId\":\"nominal-box-min5-positive\",\"payload\":{\"expected\":{\"tolerance\":0,\"value\":{\"greaterThanOrEqual\":5}},\"kind\":\"minimumWallThickness\"},\"polarity\":\"positive\",\"subjectSlots\":[\"subject\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"subject\",\"subjectHash\":\"3073933a2c760e234bd7ee26a99527477c439d3fd2ebbbc2e79d86734087058b\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"continuous02/nominal-box/min5/positive\"}",
+      "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-logical-requests-v2\",\"plan\":{\"claims\":[{\"capability\":\"toHaveMinimumWallThickness\",\"claimId\":\"nominal-box-min5-positive\",\"payload\":{\"expected\":{\"tolerance\":0,\"value\":{\"greaterThanOrEqual\":5}},\"kind\":\"minimumWallThickness\"},\"polarity\":\"positive\",\"subjectSlots\":[\"subject\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"subject\",\"subjectHash\":\"3073933a2c760e234bd7ee26a99527477c439d3fd2ebbbc2e79d86734087058b\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+      "evaluatePlanResultUtf8": "{\"numericProfile\":\"geospec-st-logical-requests-v2\",\"results\":[{\"claimId\":\"nominal-box-min5-positive\",\"diagnostics\":[],\"evidence\":{\"measured\":{\"criterion\":\"minimum-antiparallel-smooth-support-material-chord-v1\",\"domain\":\"axis-aligned-box\",\"maximumTopologyToleranceMm\":1e-7,\"value\":10},\"normalizedExpected\":{\"tolerance\":0,\"value\":{\"greaterThanOrEqual\":5}},\"polarity\":\"positive\",\"positiveSatisfied\":true,\"profile\":\"geospec-original24-v1\",\"subjectContentHash\":\"9d3db06c9381009ceeb4c82742f662becbdfce3d3d2084e46e195901d8b3b9bf\",\"witnesses\":{\"attainingSupports\":{\"faceA\":1,\"faceB\":2,\"normalA\":[-1,0,0],\"normalB\":[1,0,0],\"pointA\":[-5,0,0],\"pointB\":[5,0,0]},\"domainCertificate\":{\"domain\":{\"corners\":[[-5,-10,-15],[-5,-10,15],[-5,10,-15],[-5,10,15],[5,-10,-15],[5,-10,15],[5,10,-15],[5,10,15]],\"edgeLengths\":[10,20,30],\"faceCornerIndices\":[[0,1,3,2],[4,6,7,5],[0,4,5,1],[2,3,7,6],[0,2,6,4],[1,5,7,3]],\"faceIndices\":[1,2,3,4,5,6],\"kind\":\"axis-aligned-box\",\"oppositeFacePairs\":[[1,2],[3,4],[5,6]],\"outwardNormals\":[[-1,0,0],[1,0,0],[0,-1,0],[0,1,0],[0,0,-1],[0,0,1]]},\"maximumTopologyToleranceMm\":1e-7},\"formula\":{\"kind\":\"minimum-edge-length\",\"operands\":[10,20,30]},\"materialInterval\":{\"from\":0,\"method\":\"validated-convex-domain\",\"to\":1}}},\"status\":\"passed\"}]}",
+      "submitClaimsResultUtf8": "{\"requestId\":\"continuous02/nominal-box/min5/positive\",\"result\":{\"numericProfile\":\"geospec-st-logical-requests-v2\",\"results\":[{\"claimId\":\"nominal-box-min5-positive\",\"diagnostics\":[],\"evidence\":{\"measured\":{\"criterion\":\"minimum-antiparallel-smooth-support-material-chord-v1\",\"domain\":\"axis-aligned-box\",\"maximumTopologyToleranceMm\":1e-7,\"value\":10},\"normalizedExpected\":{\"tolerance\":0,\"value\":{\"greaterThanOrEqual\":5}},\"polarity\":\"positive\",\"positiveSatisfied\":true,\"profile\":\"geospec-original24-v1\",\"subjectContentHash\":\"9d3db06c9381009ceeb4c82742f662becbdfce3d3d2084e46e195901d8b3b9bf\",\"witnesses\":{\"attainingSupports\":{\"faceA\":1,\"faceB\":2,\"normalA\":[-1,0,0],\"normalB\":[1,0,0],\"pointA\":[-5,0,0],\"pointB\":[5,0,0]},\"domainCertificate\":{\"domain\":{\"corners\":[[-5,-10,-15],[-5,-10,15],[-5,10,-15],[-5,10,15],[5,-10,-15],[5,-10,15],[5,10,-15],[5,10,15]],\"edgeLengths\":[10,20,30],\"faceCornerIndices\":[[0,1,3,2],[4,6,7,5],[0,4,5,1],[2,3,7,6],[0,2,6,4],[1,5,7,3]],\"faceIndices\":[1,2,3,4,5,6],\"kind\":\"axis-aligned-box\",\"oppositeFacePairs\":[[1,2],[3,4],[5,6]],\"outwardNormals\":[[-1,0,0],[1,0,0],[0,-1,0],[0,1,0],[0,0,-1],[0,0,1]]},\"maximumTopologyToleranceMm\":1e-7},\"formula\":{\"kind\":\"minimum-edge-length\",\"operands\":[10,20,30]},\"materialInterval\":{\"from\":0,\"method\":\"validated-convex-domain\",\"to\":1}}},\"status\":\"passed\"}]}}",
+      "accounting": {
+        "workUnitBudget": 8000000,
+        "reportBundle": 1,
+        "continuousDomainQueryBeforeCache": 1,
+        "historicalWallPairRequests": 0,
+        "total": 2,
+        "remaining": 7999998,
+        "coldWarmEqual": true
+      },
+      "stringSha256": {
+        "authoredRequestUtf8": "1ab0355ec2ac6ba398f9789f5ee72058d01495ab5691a83ec01b0e7765b3ae46",
+        "canonicalPlanUtf8": "0c30281f989f5c054af40cdb9c57124a177b15d80458bae895f7bab99c1f6e31",
+        "evaluatePlanResultUtf8": "37275bc537a98648166a1f236cbb670a1fb2b238215ca60f39608397a699f683",
+        "submitClaimsResultUtf8": "5b8a0cc8c9b069163c6a34ba5b9b9916d8cc92909e19ec0b66fcd6019e931b3f"
+      }
+    },
+    {
+      "id": "continuous02/nominal-box/min5/negative",
+      "polarity": "negative",
+      "thresholdMm": 5,
+      "positiveSatisfied": true,
+      "expectedAdmission": "accepted",
+      "expectedOperationDisposition": "failed",
+      "authoredRequestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveMinimumWallThickness\",\"claimId\":\"nominal-box-min5-negative\",\"payload\":{\"expected\":{\"tolerance\":0,\"value\":{\"greaterThanOrEqual\":5}},\"kind\":\"minimumWallThickness\"},\"polarity\":\"negative\",\"subjectSlots\":[\"subject\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"subject\",\"subjectHash\":\"3073933a2c760e234bd7ee26a99527477c439d3fd2ebbbc2e79d86734087058b\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"continuous02/nominal-box/min5/negative\"}",
+      "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-logical-requests-v2\",\"plan\":{\"claims\":[{\"capability\":\"toHaveMinimumWallThickness\",\"claimId\":\"nominal-box-min5-negative\",\"payload\":{\"expected\":{\"tolerance\":0,\"value\":{\"greaterThanOrEqual\":5}},\"kind\":\"minimumWallThickness\"},\"polarity\":\"negative\",\"subjectSlots\":[\"subject\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"subject\",\"subjectHash\":\"3073933a2c760e234bd7ee26a99527477c439d3fd2ebbbc2e79d86734087058b\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+      "evaluatePlanResultUtf8": "{\"numericProfile\":\"geospec-st-logical-requests-v2\",\"results\":[{\"claimId\":\"nominal-box-min5-negative\",\"diagnostics\":[{\"code\":\"GEOSPEC_NEGATED_MATCH\",\"details\":{\"matcher\":\"toHaveMinimumWallThickness\",\"polarity\":\"negative\"},\"message\":\"GeoSpec matcher 'toHaveMinimumWallThickness' satisfies the declared requirement, but the claim requires it not to.\",\"severity\":\"error\",\"suggestion\":\"Correct the model, or revise the negated requirement.\"}],\"evidence\":{\"measured\":{\"criterion\":\"minimum-antiparallel-smooth-support-material-chord-v1\",\"domain\":\"axis-aligned-box\",\"maximumTopologyToleranceMm\":1e-7,\"value\":10},\"normalizedExpected\":{\"tolerance\":0,\"value\":{\"greaterThanOrEqual\":5}},\"polarity\":\"negative\",\"positiveSatisfied\":true,\"profile\":\"geospec-original24-v1\",\"subjectContentHash\":\"9d3db06c9381009ceeb4c82742f662becbdfce3d3d2084e46e195901d8b3b9bf\",\"witnesses\":{\"attainingSupports\":{\"faceA\":1,\"faceB\":2,\"normalA\":[-1,0,0],\"normalB\":[1,0,0],\"pointA\":[-5,0,0],\"pointB\":[5,0,0]},\"domainCertificate\":{\"domain\":{\"corners\":[[-5,-10,-15],[-5,-10,15],[-5,10,-15],[-5,10,15],[5,-10,-15],[5,-10,15],[5,10,-15],[5,10,15]],\"edgeLengths\":[10,20,30],\"faceCornerIndices\":[[0,1,3,2],[4,6,7,5],[0,4,5,1],[2,3,7,6],[0,2,6,4],[1,5,7,3]],\"faceIndices\":[1,2,3,4,5,6],\"kind\":\"axis-aligned-box\",\"oppositeFacePairs\":[[1,2],[3,4],[5,6]],\"outwardNormals\":[[-1,0,0],[1,0,0],[0,-1,0],[0,1,0],[0,0,-1],[0,0,1]]},\"maximumTopologyToleranceMm\":1e-7},\"formula\":{\"kind\":\"minimum-edge-length\",\"operands\":[10,20,30]},\"materialInterval\":{\"from\":0,\"method\":\"validated-convex-domain\",\"to\":1}}},\"status\":\"failed\"}]}",
+      "submitClaimsResultUtf8": "{\"requestId\":\"continuous02/nominal-box/min5/negative\",\"result\":{\"numericProfile\":\"geospec-st-logical-requests-v2\",\"results\":[{\"claimId\":\"nominal-box-min5-negative\",\"diagnostics\":[{\"code\":\"GEOSPEC_NEGATED_MATCH\",\"details\":{\"matcher\":\"toHaveMinimumWallThickness\",\"polarity\":\"negative\"},\"message\":\"GeoSpec matcher 'toHaveMinimumWallThickness' satisfies the declared requirement, but the claim requires it not to.\",\"severity\":\"error\",\"suggestion\":\"Correct the model, or revise the negated requirement.\"}],\"evidence\":{\"measured\":{\"criterion\":\"minimum-antiparallel-smooth-support-material-chord-v1\",\"domain\":\"axis-aligned-box\",\"maximumTopologyToleranceMm\":1e-7,\"value\":10},\"normalizedExpected\":{\"tolerance\":0,\"value\":{\"greaterThanOrEqual\":5}},\"polarity\":\"negative\",\"positiveSatisfied\":true,\"profile\":\"geospec-original24-v1\",\"subjectContentHash\":\"9d3db06c9381009ceeb4c82742f662becbdfce3d3d2084e46e195901d8b3b9bf\",\"witnesses\":{\"attainingSupports\":{\"faceA\":1,\"faceB\":2,\"normalA\":[-1,0,0],\"normalB\":[1,0,0],\"pointA\":[-5,0,0],\"pointB\":[5,0,0]},\"domainCertificate\":{\"domain\":{\"corners\":[[-5,-10,-15],[-5,-10,15],[-5,10,-15],[-5,10,15],[5,-10,-15],[5,-10,15],[5,10,-15],[5,10,15]],\"edgeLengths\":[10,20,30],\"faceCornerIndices\":[[0,1,3,2],[4,6,7,5],[0,4,5,1],[2,3,7,6],[0,2,6,4],[1,5,7,3]],\"faceIndices\":[1,2,3,4,5,6],\"kind\":\"axis-aligned-box\",\"oppositeFacePairs\":[[1,2],[3,4],[5,6]],\"outwardNormals\":[[-1,0,0],[1,0,0],[0,-1,0],[0,1,0],[0,0,-1],[0,0,1]]},\"maximumTopologyToleranceMm\":1e-7},\"formula\":{\"kind\":\"minimum-edge-length\",\"operands\":[10,20,30]},\"materialInterval\":{\"from\":0,\"method\":\"validated-convex-domain\",\"to\":1}}},\"status\":\"failed\"}]}}",
+      "accounting": {
+        "workUnitBudget": 8000000,
+        "reportBundle": 1,
+        "continuousDomainQueryBeforeCache": 1,
+        "historicalWallPairRequests": 0,
+        "total": 2,
+        "remaining": 7999998,
+        "coldWarmEqual": true
+      },
+      "stringSha256": {
+        "authoredRequestUtf8": "f4ccdcc6a850fa6a6deb945401c2383f23dbb8d445fa5fc4f71d9dedf5faa3f3",
+        "canonicalPlanUtf8": "5943e86368a53e594ffce190cc9ca145466b4095e4cde5c0bcabbbfd17b6f139",
+        "evaluatePlanResultUtf8": "11236c826bb601d883fe0ff62e36446742b69b54819d87676cccb9b5592c4f03",
+        "submitClaimsResultUtf8": "bd24d79779979b318d5c328737e246a3b57782ce72736cae9a20a66d8939712d"
+      }
+    },
+    {
+      "id": "continuous02/nominal-box/min10/positive",
+      "polarity": "positive",
+      "thresholdMm": 10,
+      "positiveSatisfied": true,
+      "expectedAdmission": "accepted",
+      "expectedOperationDisposition": "passed",
+      "authoredRequestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveMinimumWallThickness\",\"claimId\":\"nominal-box-min10-positive\",\"payload\":{\"expected\":{\"tolerance\":0,\"value\":{\"greaterThanOrEqual\":10}},\"kind\":\"minimumWallThickness\"},\"polarity\":\"positive\",\"subjectSlots\":[\"subject\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"subject\",\"subjectHash\":\"3073933a2c760e234bd7ee26a99527477c439d3fd2ebbbc2e79d86734087058b\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"continuous02/nominal-box/min10/positive\"}",
+      "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-logical-requests-v2\",\"plan\":{\"claims\":[{\"capability\":\"toHaveMinimumWallThickness\",\"claimId\":\"nominal-box-min10-positive\",\"payload\":{\"expected\":{\"tolerance\":0,\"value\":{\"greaterThanOrEqual\":10}},\"kind\":\"minimumWallThickness\"},\"polarity\":\"positive\",\"subjectSlots\":[\"subject\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"subject\",\"subjectHash\":\"3073933a2c760e234bd7ee26a99527477c439d3fd2ebbbc2e79d86734087058b\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+      "evaluatePlanResultUtf8": "{\"numericProfile\":\"geospec-st-logical-requests-v2\",\"results\":[{\"claimId\":\"nominal-box-min10-positive\",\"diagnostics\":[],\"evidence\":{\"measured\":{\"criterion\":\"minimum-antiparallel-smooth-support-material-chord-v1\",\"domain\":\"axis-aligned-box\",\"maximumTopologyToleranceMm\":1e-7,\"value\":10},\"normalizedExpected\":{\"tolerance\":0,\"value\":{\"greaterThanOrEqual\":10}},\"polarity\":\"positive\",\"positiveSatisfied\":true,\"profile\":\"geospec-original24-v1\",\"subjectContentHash\":\"9d3db06c9381009ceeb4c82742f662becbdfce3d3d2084e46e195901d8b3b9bf\",\"witnesses\":{\"attainingSupports\":{\"faceA\":1,\"faceB\":2,\"normalA\":[-1,0,0],\"normalB\":[1,0,0],\"pointA\":[-5,0,0],\"pointB\":[5,0,0]},\"domainCertificate\":{\"domain\":{\"corners\":[[-5,-10,-15],[-5,-10,15],[-5,10,-15],[-5,10,15],[5,-10,-15],[5,-10,15],[5,10,-15],[5,10,15]],\"edgeLengths\":[10,20,30],\"faceCornerIndices\":[[0,1,3,2],[4,6,7,5],[0,4,5,1],[2,3,7,6],[0,2,6,4],[1,5,7,3]],\"faceIndices\":[1,2,3,4,5,6],\"kind\":\"axis-aligned-box\",\"oppositeFacePairs\":[[1,2],[3,4],[5,6]],\"outwardNormals\":[[-1,0,0],[1,0,0],[0,-1,0],[0,1,0],[0,0,-1],[0,0,1]]},\"maximumTopologyToleranceMm\":1e-7},\"formula\":{\"kind\":\"minimum-edge-length\",\"operands\":[10,20,30]},\"materialInterval\":{\"from\":0,\"method\":\"validated-convex-domain\",\"to\":1}}},\"status\":\"passed\"}]}",
+      "submitClaimsResultUtf8": "{\"requestId\":\"continuous02/nominal-box/min10/positive\",\"result\":{\"numericProfile\":\"geospec-st-logical-requests-v2\",\"results\":[{\"claimId\":\"nominal-box-min10-positive\",\"diagnostics\":[],\"evidence\":{\"measured\":{\"criterion\":\"minimum-antiparallel-smooth-support-material-chord-v1\",\"domain\":\"axis-aligned-box\",\"maximumTopologyToleranceMm\":1e-7,\"value\":10},\"normalizedExpected\":{\"tolerance\":0,\"value\":{\"greaterThanOrEqual\":10}},\"polarity\":\"positive\",\"positiveSatisfied\":true,\"profile\":\"geospec-original24-v1\",\"subjectContentHash\":\"9d3db06c9381009ceeb4c82742f662becbdfce3d3d2084e46e195901d8b3b9bf\",\"witnesses\":{\"attainingSupports\":{\"faceA\":1,\"faceB\":2,\"normalA\":[-1,0,0],\"normalB\":[1,0,0],\"pointA\":[-5,0,0],\"pointB\":[5,0,0]},\"domainCertificate\":{\"domain\":{\"corners\":[[-5,-10,-15],[-5,-10,15],[-5,10,-15],[-5,10,15],[5,-10,-15],[5,-10,15],[5,10,-15],[5,10,15]],\"edgeLengths\":[10,20,30],\"faceCornerIndices\":[[0,1,3,2],[4,6,7,5],[0,4,5,1],[2,3,7,6],[0,2,6,4],[1,5,7,3]],\"faceIndices\":[1,2,3,4,5,6],\"kind\":\"axis-aligned-box\",\"oppositeFacePairs\":[[1,2],[3,4],[5,6]],\"outwardNormals\":[[-1,0,0],[1,0,0],[0,-1,0],[0,1,0],[0,0,-1],[0,0,1]]},\"maximumTopologyToleranceMm\":1e-7},\"formula\":{\"kind\":\"minimum-edge-length\",\"operands\":[10,20,30]},\"materialInterval\":{\"from\":0,\"method\":\"validated-convex-domain\",\"to\":1}}},\"status\":\"passed\"}]}}",
+      "accounting": {
+        "workUnitBudget": 8000000,
+        "reportBundle": 1,
+        "continuousDomainQueryBeforeCache": 1,
+        "historicalWallPairRequests": 0,
+        "total": 2,
+        "remaining": 7999998,
+        "coldWarmEqual": true
+      },
+      "stringSha256": {
+        "authoredRequestUtf8": "44e77b448df9d28bc9fc7aebde25fc34359b4f8270f07169f72d277e5df8f587",
+        "canonicalPlanUtf8": "eb48dcd6b947ea875b73d3fe4fec50c6e23e4e48d364406f9836fd5576d9ae4d",
+        "evaluatePlanResultUtf8": "92ab24590b5d9e838a435dd275b016c2383f03e63acc1d565f5fe4acc1927096",
+        "submitClaimsResultUtf8": "f2ec219402f0fc1cdc89b915bcf93aca23603918188b7adfafdf99c626d18b80"
+      }
+    },
+    {
+      "id": "continuous02/nominal-box/min10/negative",
+      "polarity": "negative",
+      "thresholdMm": 10,
+      "positiveSatisfied": true,
+      "expectedAdmission": "accepted",
+      "expectedOperationDisposition": "failed",
+      "authoredRequestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveMinimumWallThickness\",\"claimId\":\"nominal-box-min10-negative\",\"payload\":{\"expected\":{\"tolerance\":0,\"value\":{\"greaterThanOrEqual\":10}},\"kind\":\"minimumWallThickness\"},\"polarity\":\"negative\",\"subjectSlots\":[\"subject\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"subject\",\"subjectHash\":\"3073933a2c760e234bd7ee26a99527477c439d3fd2ebbbc2e79d86734087058b\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"continuous02/nominal-box/min10/negative\"}",
+      "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-logical-requests-v2\",\"plan\":{\"claims\":[{\"capability\":\"toHaveMinimumWallThickness\",\"claimId\":\"nominal-box-min10-negative\",\"payload\":{\"expected\":{\"tolerance\":0,\"value\":{\"greaterThanOrEqual\":10}},\"kind\":\"minimumWallThickness\"},\"polarity\":\"negative\",\"subjectSlots\":[\"subject\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"subject\",\"subjectHash\":\"3073933a2c760e234bd7ee26a99527477c439d3fd2ebbbc2e79d86734087058b\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+      "evaluatePlanResultUtf8": "{\"numericProfile\":\"geospec-st-logical-requests-v2\",\"results\":[{\"claimId\":\"nominal-box-min10-negative\",\"diagnostics\":[{\"code\":\"GEOSPEC_NEGATED_MATCH\",\"details\":{\"matcher\":\"toHaveMinimumWallThickness\",\"polarity\":\"negative\"},\"message\":\"GeoSpec matcher 'toHaveMinimumWallThickness' satisfies the declared requirement, but the claim requires it not to.\",\"severity\":\"error\",\"suggestion\":\"Correct the model, or revise the negated requirement.\"}],\"evidence\":{\"measured\":{\"criterion\":\"minimum-antiparallel-smooth-support-material-chord-v1\",\"domain\":\"axis-aligned-box\",\"maximumTopologyToleranceMm\":1e-7,\"value\":10},\"normalizedExpected\":{\"tolerance\":0,\"value\":{\"greaterThanOrEqual\":10}},\"polarity\":\"negative\",\"positiveSatisfied\":true,\"profile\":\"geospec-original24-v1\",\"subjectContentHash\":\"9d3db06c9381009ceeb4c82742f662becbdfce3d3d2084e46e195901d8b3b9bf\",\"witnesses\":{\"attainingSupports\":{\"faceA\":1,\"faceB\":2,\"normalA\":[-1,0,0],\"normalB\":[1,0,0],\"pointA\":[-5,0,0],\"pointB\":[5,0,0]},\"domainCertificate\":{\"domain\":{\"corners\":[[-5,-10,-15],[-5,-10,15],[-5,10,-15],[-5,10,15],[5,-10,-15],[5,-10,15],[5,10,-15],[5,10,15]],\"edgeLengths\":[10,20,30],\"faceCornerIndices\":[[0,1,3,2],[4,6,7,5],[0,4,5,1],[2,3,7,6],[0,2,6,4],[1,5,7,3]],\"faceIndices\":[1,2,3,4,5,6],\"kind\":\"axis-aligned-box\",\"oppositeFacePairs\":[[1,2],[3,4],[5,6]],\"outwardNormals\":[[-1,0,0],[1,0,0],[0,-1,0],[0,1,0],[0,0,-1],[0,0,1]]},\"maximumTopologyToleranceMm\":1e-7},\"formula\":{\"kind\":\"minimum-edge-length\",\"operands\":[10,20,30]},\"materialInterval\":{\"from\":0,\"method\":\"validated-convex-domain\",\"to\":1}}},\"status\":\"failed\"}]}",
+      "submitClaimsResultUtf8": "{\"requestId\":\"continuous02/nominal-box/min10/negative\",\"result\":{\"numericProfile\":\"geospec-st-logical-requests-v2\",\"results\":[{\"claimId\":\"nominal-box-min10-negative\",\"diagnostics\":[{\"code\":\"GEOSPEC_NEGATED_MATCH\",\"details\":{\"matcher\":\"toHaveMinimumWallThickness\",\"polarity\":\"negative\"},\"message\":\"GeoSpec matcher 'toHaveMinimumWallThickness' satisfies the declared requirement, but the claim requires it not to.\",\"severity\":\"error\",\"suggestion\":\"Correct the model, or revise the negated requirement.\"}],\"evidence\":{\"measured\":{\"criterion\":\"minimum-antiparallel-smooth-support-material-chord-v1\",\"domain\":\"axis-aligned-box\",\"maximumTopologyToleranceMm\":1e-7,\"value\":10},\"normalizedExpected\":{\"tolerance\":0,\"value\":{\"greaterThanOrEqual\":10}},\"polarity\":\"negative\",\"positiveSatisfied\":true,\"profile\":\"geospec-original24-v1\",\"subjectContentHash\":\"9d3db06c9381009ceeb4c82742f662becbdfce3d3d2084e46e195901d8b3b9bf\",\"witnesses\":{\"attainingSupports\":{\"faceA\":1,\"faceB\":2,\"normalA\":[-1,0,0],\"normalB\":[1,0,0],\"pointA\":[-5,0,0],\"pointB\":[5,0,0]},\"domainCertificate\":{\"domain\":{\"corners\":[[-5,-10,-15],[-5,-10,15],[-5,10,-15],[-5,10,15],[5,-10,-15],[5,-10,15],[5,10,-15],[5,10,15]],\"edgeLengths\":[10,20,30],\"faceCornerIndices\":[[0,1,3,2],[4,6,7,5],[0,4,5,1],[2,3,7,6],[0,2,6,4],[1,5,7,3]],\"faceIndices\":[1,2,3,4,5,6],\"kind\":\"axis-aligned-box\",\"oppositeFacePairs\":[[1,2],[3,4],[5,6]],\"outwardNormals\":[[-1,0,0],[1,0,0],[0,-1,0],[0,1,0],[0,0,-1],[0,0,1]]},\"maximumTopologyToleranceMm\":1e-7},\"formula\":{\"kind\":\"minimum-edge-length\",\"operands\":[10,20,30]},\"materialInterval\":{\"from\":0,\"method\":\"validated-convex-domain\",\"to\":1}}},\"status\":\"failed\"}]}}",
+      "accounting": {
+        "workUnitBudget": 8000000,
+        "reportBundle": 1,
+        "continuousDomainQueryBeforeCache": 1,
+        "historicalWallPairRequests": 0,
+        "total": 2,
+        "remaining": 7999998,
+        "coldWarmEqual": true
+      },
+      "stringSha256": {
+        "authoredRequestUtf8": "ef713da02a5c30264fdd56febde224d6609776d6066fac983c39038856a5b622",
+        "canonicalPlanUtf8": "fd60bcf3aa49ec203f1536912c5398e744eab7b818e84bdef29113e52a27b734",
+        "evaluatePlanResultUtf8": "eb811a9f9c8d0fdfa8cf249dd849b29c54bf96c64366fb76423e0e5d535d3247",
+        "submitClaimsResultUtf8": "ce48be80543c7f121b2f1cc0cada0626346af9266cc7b221cacb3fa611c18e02"
+      }
+    },
+    {
+      "id": "continuous02/nominal-box/min11/positive",
+      "polarity": "positive",
+      "thresholdMm": 11,
+      "positiveSatisfied": false,
+      "expectedAdmission": "accepted",
+      "expectedOperationDisposition": "failed",
+      "authoredRequestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveMinimumWallThickness\",\"claimId\":\"nominal-box-min11-positive\",\"payload\":{\"expected\":{\"tolerance\":0,\"value\":{\"greaterThanOrEqual\":11}},\"kind\":\"minimumWallThickness\"},\"polarity\":\"positive\",\"subjectSlots\":[\"subject\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"subject\",\"subjectHash\":\"3073933a2c760e234bd7ee26a99527477c439d3fd2ebbbc2e79d86734087058b\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"continuous02/nominal-box/min11/positive\"}",
+      "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-logical-requests-v2\",\"plan\":{\"claims\":[{\"capability\":\"toHaveMinimumWallThickness\",\"claimId\":\"nominal-box-min11-positive\",\"payload\":{\"expected\":{\"tolerance\":0,\"value\":{\"greaterThanOrEqual\":11}},\"kind\":\"minimumWallThickness\"},\"polarity\":\"positive\",\"subjectSlots\":[\"subject\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"subject\",\"subjectHash\":\"3073933a2c760e234bd7ee26a99527477c439d3fd2ebbbc2e79d86734087058b\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+      "evaluatePlanResultUtf8": "{\"numericProfile\":\"geospec-st-logical-requests-v2\",\"results\":[{\"claimId\":\"nominal-box-min11-positive\",\"diagnostics\":[{\"code\":\"GEOSPEC_FEATURE_MISMATCH\",\"details\":{\"expected\":{\"tolerance\":0,\"value\":{\"greaterThanOrEqual\":11}},\"matcher\":\"toHaveMinimumWallThickness\",\"measured\":{\"criterion\":\"minimum-antiparallel-smooth-support-material-chord-v1\",\"domain\":\"axis-aligned-box\",\"maximumTopologyToleranceMm\":1e-7,\"value\":10}},\"message\":\"The minimum wall thickness is 10 mm, which does not satisfy >= 11.\",\"severity\":\"error\",\"suggestion\":\"Thicken the thinnest wall, or lower the declared minimum.\"}],\"evidence\":{\"measured\":{\"criterion\":\"minimum-antiparallel-smooth-support-material-chord-v1\",\"domain\":\"axis-aligned-box\",\"maximumTopologyToleranceMm\":1e-7,\"value\":10},\"normalizedExpected\":{\"tolerance\":0,\"value\":{\"greaterThanOrEqual\":11}},\"polarity\":\"positive\",\"positiveSatisfied\":false,\"profile\":\"geospec-original24-v1\",\"subjectContentHash\":\"9d3db06c9381009ceeb4c82742f662becbdfce3d3d2084e46e195901d8b3b9bf\",\"witnesses\":{\"attainingSupports\":{\"faceA\":1,\"faceB\":2,\"normalA\":[-1,0,0],\"normalB\":[1,0,0],\"pointA\":[-5,0,0],\"pointB\":[5,0,0]},\"domainCertificate\":{\"domain\":{\"corners\":[[-5,-10,-15],[-5,-10,15],[-5,10,-15],[-5,10,15],[5,-10,-15],[5,-10,15],[5,10,-15],[5,10,15]],\"edgeLengths\":[10,20,30],\"faceCornerIndices\":[[0,1,3,2],[4,6,7,5],[0,4,5,1],[2,3,7,6],[0,2,6,4],[1,5,7,3]],\"faceIndices\":[1,2,3,4,5,6],\"kind\":\"axis-aligned-box\",\"oppositeFacePairs\":[[1,2],[3,4],[5,6]],\"outwardNormals\":[[-1,0,0],[1,0,0],[0,-1,0],[0,1,0],[0,0,-1],[0,0,1]]},\"maximumTopologyToleranceMm\":1e-7},\"formula\":{\"kind\":\"minimum-edge-length\",\"operands\":[10,20,30]},\"materialInterval\":{\"from\":0,\"method\":\"validated-convex-domain\",\"to\":1}}},\"status\":\"failed\"}]}",
+      "submitClaimsResultUtf8": "{\"requestId\":\"continuous02/nominal-box/min11/positive\",\"result\":{\"numericProfile\":\"geospec-st-logical-requests-v2\",\"results\":[{\"claimId\":\"nominal-box-min11-positive\",\"diagnostics\":[{\"code\":\"GEOSPEC_FEATURE_MISMATCH\",\"details\":{\"expected\":{\"tolerance\":0,\"value\":{\"greaterThanOrEqual\":11}},\"matcher\":\"toHaveMinimumWallThickness\",\"measured\":{\"criterion\":\"minimum-antiparallel-smooth-support-material-chord-v1\",\"domain\":\"axis-aligned-box\",\"maximumTopologyToleranceMm\":1e-7,\"value\":10}},\"message\":\"The minimum wall thickness is 10 mm, which does not satisfy >= 11.\",\"severity\":\"error\",\"suggestion\":\"Thicken the thinnest wall, or lower the declared minimum.\"}],\"evidence\":{\"measured\":{\"criterion\":\"minimum-antiparallel-smooth-support-material-chord-v1\",\"domain\":\"axis-aligned-box\",\"maximumTopologyToleranceMm\":1e-7,\"value\":10},\"normalizedExpected\":{\"tolerance\":0,\"value\":{\"greaterThanOrEqual\":11}},\"polarity\":\"positive\",\"positiveSatisfied\":false,\"profile\":\"geospec-original24-v1\",\"subjectContentHash\":\"9d3db06c9381009ceeb4c82742f662becbdfce3d3d2084e46e195901d8b3b9bf\",\"witnesses\":{\"attainingSupports\":{\"faceA\":1,\"faceB\":2,\"normalA\":[-1,0,0],\"normalB\":[1,0,0],\"pointA\":[-5,0,0],\"pointB\":[5,0,0]},\"domainCertificate\":{\"domain\":{\"corners\":[[-5,-10,-15],[-5,-10,15],[-5,10,-15],[-5,10,15],[5,-10,-15],[5,-10,15],[5,10,-15],[5,10,15]],\"edgeLengths\":[10,20,30],\"faceCornerIndices\":[[0,1,3,2],[4,6,7,5],[0,4,5,1],[2,3,7,6],[0,2,6,4],[1,5,7,3]],\"faceIndices\":[1,2,3,4,5,6],\"kind\":\"axis-aligned-box\",\"oppositeFacePairs\":[[1,2],[3,4],[5,6]],\"outwardNormals\":[[-1,0,0],[1,0,0],[0,-1,0],[0,1,0],[0,0,-1],[0,0,1]]},\"maximumTopologyToleranceMm\":1e-7},\"formula\":{\"kind\":\"minimum-edge-length\",\"operands\":[10,20,30]},\"materialInterval\":{\"from\":0,\"method\":\"validated-convex-domain\",\"to\":1}}},\"status\":\"failed\"}]}}",
+      "accounting": {
+        "workUnitBudget": 8000000,
+        "reportBundle": 1,
+        "continuousDomainQueryBeforeCache": 1,
+        "historicalWallPairRequests": 0,
+        "total": 2,
+        "remaining": 7999998,
+        "coldWarmEqual": true
+      },
+      "stringSha256": {
+        "authoredRequestUtf8": "bd4e1c344e50ebf58fd2255467247290daa809cb32a2868a045a5ea6dd7b739b",
+        "canonicalPlanUtf8": "67e0f8baad096fb638701d5e2bb6861ba4111300be1ee806b6e03b11293f8d31",
+        "evaluatePlanResultUtf8": "d8141d8fa8430f6effbc45861447fa25f702dbaa03dd12ea7ef31c4a4002f265",
+        "submitClaimsResultUtf8": "9f85d25a29bae6437da0e1b8fedbc6dcb38248f7f049da20aff3f5261775b26b"
+      }
+    },
+    {
+      "id": "continuous02/nominal-box/min11/negative",
+      "polarity": "negative",
+      "thresholdMm": 11,
+      "positiveSatisfied": false,
+      "expectedAdmission": "accepted",
+      "expectedOperationDisposition": "passed",
+      "authoredRequestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveMinimumWallThickness\",\"claimId\":\"nominal-box-min11-negative\",\"payload\":{\"expected\":{\"tolerance\":0,\"value\":{\"greaterThanOrEqual\":11}},\"kind\":\"minimumWallThickness\"},\"polarity\":\"negative\",\"subjectSlots\":[\"subject\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"subject\",\"subjectHash\":\"3073933a2c760e234bd7ee26a99527477c439d3fd2ebbbc2e79d86734087058b\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"continuous02/nominal-box/min11/negative\"}",
+      "canonicalPlanUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"numericProfile\":\"geospec-st-logical-requests-v2\",\"plan\":{\"claims\":[{\"capability\":\"toHaveMinimumWallThickness\",\"claimId\":\"nominal-box-min11-negative\",\"payload\":{\"expected\":{\"tolerance\":0,\"value\":{\"greaterThanOrEqual\":11}},\"kind\":\"minimumWallThickness\"},\"polarity\":\"negative\",\"subjectSlots\":[\"subject\"],\"workUnitBudget\":8000000}],\"subjects\":[{\"slot\":\"subject\",\"subjectHash\":\"3073933a2c760e234bd7ee26a99527477c439d3fd2ebbbc2e79d86734087058b\"}]},\"protocolVersion\":3,\"registryVersion\":4}",
+      "evaluatePlanResultUtf8": "{\"numericProfile\":\"geospec-st-logical-requests-v2\",\"results\":[{\"claimId\":\"nominal-box-min11-negative\",\"diagnostics\":[],\"evidence\":{\"measured\":{\"criterion\":\"minimum-antiparallel-smooth-support-material-chord-v1\",\"domain\":\"axis-aligned-box\",\"maximumTopologyToleranceMm\":1e-7,\"value\":10},\"normalizedExpected\":{\"tolerance\":0,\"value\":{\"greaterThanOrEqual\":11}},\"polarity\":\"negative\",\"positiveSatisfied\":false,\"profile\":\"geospec-original24-v1\",\"subjectContentHash\":\"9d3db06c9381009ceeb4c82742f662becbdfce3d3d2084e46e195901d8b3b9bf\",\"witnesses\":{\"attainingSupports\":{\"faceA\":1,\"faceB\":2,\"normalA\":[-1,0,0],\"normalB\":[1,0,0],\"pointA\":[-5,0,0],\"pointB\":[5,0,0]},\"domainCertificate\":{\"domain\":{\"corners\":[[-5,-10,-15],[-5,-10,15],[-5,10,-15],[-5,10,15],[5,-10,-15],[5,-10,15],[5,10,-15],[5,10,15]],\"edgeLengths\":[10,20,30],\"faceCornerIndices\":[[0,1,3,2],[4,6,7,5],[0,4,5,1],[2,3,7,6],[0,2,6,4],[1,5,7,3]],\"faceIndices\":[1,2,3,4,5,6],\"kind\":\"axis-aligned-box\",\"oppositeFacePairs\":[[1,2],[3,4],[5,6]],\"outwardNormals\":[[-1,0,0],[1,0,0],[0,-1,0],[0,1,0],[0,0,-1],[0,0,1]]},\"maximumTopologyToleranceMm\":1e-7},\"formula\":{\"kind\":\"minimum-edge-length\",\"operands\":[10,20,30]},\"materialInterval\":{\"from\":0,\"method\":\"validated-convex-domain\",\"to\":1}}},\"status\":\"passed\"}]}",
+      "submitClaimsResultUtf8": "{\"requestId\":\"continuous02/nominal-box/min11/negative\",\"result\":{\"numericProfile\":\"geospec-st-logical-requests-v2\",\"results\":[{\"claimId\":\"nominal-box-min11-negative\",\"diagnostics\":[],\"evidence\":{\"measured\":{\"criterion\":\"minimum-antiparallel-smooth-support-material-chord-v1\",\"domain\":\"axis-aligned-box\",\"maximumTopologyToleranceMm\":1e-7,\"value\":10},\"normalizedExpected\":{\"tolerance\":0,\"value\":{\"greaterThanOrEqual\":11}},\"polarity\":\"negative\",\"positiveSatisfied\":false,\"profile\":\"geospec-original24-v1\",\"subjectContentHash\":\"9d3db06c9381009ceeb4c82742f662becbdfce3d3d2084e46e195901d8b3b9bf\",\"witnesses\":{\"attainingSupports\":{\"faceA\":1,\"faceB\":2,\"normalA\":[-1,0,0],\"normalB\":[1,0,0],\"pointA\":[-5,0,0],\"pointB\":[5,0,0]},\"domainCertificate\":{\"domain\":{\"corners\":[[-5,-10,-15],[-5,-10,15],[-5,10,-15],[-5,10,15],[5,-10,-15],[5,-10,15],[5,10,-15],[5,10,15]],\"edgeLengths\":[10,20,30],\"faceCornerIndices\":[[0,1,3,2],[4,6,7,5],[0,4,5,1],[2,3,7,6],[0,2,6,4],[1,5,7,3]],\"faceIndices\":[1,2,3,4,5,6],\"kind\":\"axis-aligned-box\",\"oppositeFacePairs\":[[1,2],[3,4],[5,6]],\"outwardNormals\":[[-1,0,0],[1,0,0],[0,-1,0],[0,1,0],[0,0,-1],[0,0,1]]},\"maximumTopologyToleranceMm\":1e-7},\"formula\":{\"kind\":\"minimum-edge-length\",\"operands\":[10,20,30]},\"materialInterval\":{\"from\":0,\"method\":\"validated-convex-domain\",\"to\":1}}},\"status\":\"passed\"}]}}",
+      "accounting": {
+        "workUnitBudget": 8000000,
+        "reportBundle": 1,
+        "continuousDomainQueryBeforeCache": 1,
+        "historicalWallPairRequests": 0,
+        "total": 2,
+        "remaining": 7999998,
+        "coldWarmEqual": true
+      },
+      "stringSha256": {
+        "authoredRequestUtf8": "1d7dd277c0a2c5eb0637ea86b851e86e4901feb3cfd3170bbe19e101e0d2e434",
+        "canonicalPlanUtf8": "bffc2a85ea3422eaec504943399ee6a55c2a95ce7b5724ab8bf2deb5ab80324b",
+        "evaluatePlanResultUtf8": "e06c518f8733958d37e8cf430e045640a94f3bec48e7dac736c2101a14a6aaf8",
+        "submitClaimsResultUtf8": "742c7c5cef87bde5e04de9a159fc13f945cff1fc4dc47b90523da0ef02a73865"
+      }
+    }
+  ],
+  "targetComparisons": [],
+  "targetQualified": false,
+  "numericCertification": "none",
+  "interpretation": "Prospective complete public wire derived from independently observed nominal metadata and predeclared analytic truth. It is not an actual candidate execution or whole-family acceptance. A1 interim expectations remain frozen separately.",
+  "diagnosticDerivation": {
+    "positiveFailure": {
+      "path": "out/artifacts/geospec/native-spikes-20260905/s1/reference-a3/packages/geospec-engine/src/matchers/brep-matchers.ts",
+      "rule": "Retain existing toHaveMinimumWallThickness/featureMismatch code, message template, suggestion, matcher and expected details. Bind details.measured to the full newly ruled CONTINUOUS02 measured record; retain that exact record in common evidence. No historical support-search witness is relabeled as continuous evidence."
+    },
+    "negativeFailure": {
+      "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/execution/family-evidence-ruling.json",
+      "rule": "Exact adopted generic GEOSPEC_NEGATED_MATCH with matcher/polarity details; successful negation has no failure diagnostic."
+    }
+  }
+}

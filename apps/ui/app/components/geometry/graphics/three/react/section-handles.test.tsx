@@ -620,5 +620,23 @@ describe('SectionHandles', () => {
       });
       expect(warmup.total).toBeGreaterThan(0);
     });
+
+    it('should keep the warm-up alive after its compile settles until the viewer unmounts', async () => {
+      harness = mountHandles();
+      const warmup = watchMaterialDisposals(harness.compileAsync.mock.calls[0]?.[0]);
+
+      // A macrotask drains the warm-up's settle continuation.
+      await act(async () => {
+        await new Promise((resolve) => {
+          setTimeout(resolve, 0);
+        });
+      });
+      // Disposing on settle would release the programs, and the first real frame would compile again.
+      expect(warmup.disposed()).toBe(0);
+
+      cleanup();
+      expect(warmup.disposed()).toBe(warmup.total);
+      expect(warmup.total).toBeGreaterThan(0);
+    });
   });
 });

@@ -16,6 +16,9 @@ type IconConfig =
       id: FileExtension;
     };
 
+// Export-only text formats in the extension catalog; they carry no 3D badge.
+const textFormats: ReadonlySet<FileExtension> = new Set<FileExtension>(['csv', 'json', 'txt']);
+
 // Only lib types and renamed format-3d types (where extension doesn't match format name)
 const iconConfigMap: Partial<Record<string, IconConfig>> = {
   // Languages (lib types)
@@ -146,7 +149,7 @@ function getIconConfig(filename: string): IconConfig | undefined {
     return explicitConfig;
   }
 
-  if (fileExtensionSet.has(extension as FileExtension)) {
+  if (fileExtensionSet.has(extension as FileExtension) && !textFormats.has(extension as FileExtension)) {
     return {
       type: 'format-3d',
       id: extension as FileExtension,

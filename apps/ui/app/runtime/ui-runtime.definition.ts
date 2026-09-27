@@ -17,6 +17,7 @@ import {
 import { opencascade } from '@taucad/opencascade';
 import { replicad } from '@taucad/replicad';
 import { rhino } from '@taucad/rhino';
+import { tscircuit } from '@taucad/tscircuit';
 import { zoo } from '@taucad/zoo';
 import { zooCloseErrors } from '#cloud/zoo-close-errors.js';
 import { observabilityMiddleware } from '#runtime/observability/observability.middleware.js';
@@ -59,6 +60,7 @@ const createUiRuntimeOptions = (config: UiRuntimeConfig, options: UiRuntimeOptio
         },
       },
     }),
+    tscircuit(),
   ],
   middleware: [
     observabilityMiddleware({

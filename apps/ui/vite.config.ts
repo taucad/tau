@@ -75,6 +75,20 @@ export const uiSsrOptions = {
   external: ['@taucad/runtime', '@taucad/openrscad', '@taulabs/openrscad-engine'],
 } as const satisfies UserConfig['ssr'];
 
+/**
+ * Module aliases shared with `desktop/vite.config.ts`.
+ *
+ * `@resvg/resvg-js`: `@taucad/tscircuit` (composed into the runtime worker)
+ * depends on `circuit-json-to-gltf`, whose `svg-to-png` chunk statically imports
+ * this native `.node` binding; the kernel never reaches it
+ * (`boardTextureResolution: 0`) but the dependency optimizer and the production
+ * bundle fail on the binary. See `app/lib/browser-stubs/resvg-js.ts` and the
+ * tscircuit EDA kernel charter (T8).
+ */
+export const uiResolveAlias = [
+  { find: '@resvg/resvg-js', replacement: path.resolve(__dirname, 'app/lib/browser-stubs/resvg-js.ts') },
+] as const satisfies NonNullable<UserConfig['resolve']>['alias'];
+
 type UiSourceAliasPluginOptions = {
   readonly emitModuleGraph?: boolean;
   readonly tauCloudEnabled?: boolean;
@@ -453,7 +467,10 @@ export default defineConfig(({ mode }) => {
       plugins: () => [createUiSourceAliasPlugin({ emitModuleGraph: true, tauCloudEnabled }), nxViteTsPaths()],
     },
     resolve: {
-      alias: isTest ? [{ find: testScriptsAlias, replacement: path.resolve(__dirname, 'scripts') }] : [],
+      alias: [
+        ...uiResolveAlias,
+        ...(isTest ? [{ find: testScriptsAlias, replacement: path.resolve(__dirname, 'scripts') }] : []),
+      ],
     },
 
     ssr: uiSsrOptions,

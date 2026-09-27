@@ -338,16 +338,18 @@ const liveRoot = Symbol('live checkout');
 /** A watched checkout root: the live one, or a linked checkout by id. */
 type WatchKey = string | typeof liveRoot;
 
-/** How long a host waits for the live checkout, and then for the `close` cuts, before it lets the project go. */
+/** What a caller allows each of the close flush's two answered waits: the live checkout, then the `close` cuts. */
 const closeFlushMilliseconds = closeCutMilliseconds;
 
 /**
- * The longest `release()` holds one project before it lets go (rule 9).
+ * How long a caller that waits on `release()` allows one project (rule 9): the caller's bound, not the host's.
  *
- * The close flush runs three bounded waits in sequence: the live checkout
- * (a registry that answers late), the close cuts, then the scheduler's
- * quiesce. A caller that waits on `release()` — desktop quit — nests strictly
- * outside this, so the host's own reason lands before the caller's generic one.
+ * The close flush waits for the registry's live checkout and then for every
+ * `close` cut by request id, with no bound of its own (B3, B8), and only the
+ * scheduler's quiesce is bounded (W13 P33). This budget allows each of the two
+ * answered waits one close-cut bound before the quiesce. A caller that waits on
+ * `release()` (desktop quit, B9) nests strictly outside it, so a host that is
+ * merely slow answers before the caller gives up with its generic reason.
  *
  * @public
  */
@@ -1064,9 +1066,11 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
    * Record what is on disk before this host lets the project go (S30 `close`).
    *
    * The checkout's I5 gate decides whether anything is minted, so a clean
-   * checkout pays one tree hash. Bounded, because quitting must not hang on a
-   * store that stopped answering: a revision that was not minted here is minted
-   * by the next host to open the project, from the same bytes.
+   * checkout pays one tree hash. The registry and every cut are answered by
+   * request id, not bounded (B3, B8); only the scheduler's quiesce is. A quit
+   * that must not hang is bounded by its owner (desktop quit, B9): a revision
+   * not minted here is minted by the next host to open the project, from the
+   * same bytes.
    *
    * @returns Nothing; the outcome is the revision, or the absence of one.
    */

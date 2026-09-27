@@ -207,17 +207,7 @@ fn candidate_pairs(
     tolerance: f64,
     budget: &Budget,
 ) -> Result<Vec<Candidate>, ExactError> {
-    let reaches: Vec<Aabb> = list
-        .iter()
-        .map(|body| {
-            let mut reach = empty_aabb();
-            for face in &body.faces {
-                expand(&mut reach, face.min);
-                expand(&mut reach, face.max);
-            }
-            reach
-        })
-        .collect();
+    let reaches: Vec<Aabb> = list.iter().map(|body| aabb(reach(body))).collect();
     let axis = sweep_axis(reaches.iter().copied());
     let mut order: Vec<usize> = (0..list.len()).collect();
     order.sort_by(|&left, &right| {

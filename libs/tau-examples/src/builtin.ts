@@ -6,40 +6,69 @@ import thumbnail0 from "./kernels/jscad/cube/thumbnail.webp?url";
 import thumbnail1 from "./kernels/jscad/cylinder/thumbnail.webp?url";
 import thumbnail2 from "./kernels/jscad/gear/thumbnail.webp?url";
 import thumbnail3 from "./kernels/openscad/kitchen-sink/thumbnail.webp?url";
-import thumbnail4 from "./kernels/replicad/birdhouse/thumbnail.webp?url";
-import thumbnail5 from "./kernels/replicad/bottle/thumbnail.webp?url";
-import thumbnail6 from "./kernels/replicad/card-holder/thumbnail.webp?url";
-import thumbnail7 from "./kernels/replicad/chair/thumbnail.webp?url";
-import thumbnail8 from "./kernels/replicad/copper-lampshade/thumbnail.webp?url";
-import thumbnail9 from "./kernels/replicad/cycloidal-gear/thumbnail.webp?url";
-import thumbnail10 from "./kernels/replicad/decorated-box/thumbnail.webp?url";
-import thumbnail11 from "./kernels/replicad/drinking-glass/thumbnail.webp?url";
-import thumbnail12 from "./kernels/replicad/gridfinity-box/thumbnail.webp?url";
-import thumbnail13 from "./kernels/replicad/hex-screwdriver/thumbnail.webp?url";
-import thumbnail14 from "./kernels/replicad/hollow-box/thumbnail.webp?url";
-import thumbnail15 from "./kernels/replicad/ibeam/thumbnail.webp?url";
-import thumbnail16 from "./kernels/replicad/lego/thumbnail.webp?url";
-import thumbnail17 from "./kernels/replicad/planetary-gear-system/thumbnail.webp?url";
-import thumbnail18 from "./kernels/replicad/pot-plant/thumbnail.webp?url";
-import thumbnail19 from "./kernels/replicad/simple-tray/thumbnail.webp?url";
-import thumbnail20 from "./kernels/replicad/six-axis-arm/thumbnail.webp?url";
-import thumbnail21 from "./kernels/replicad/staircase/thumbnail.webp?url";
-import thumbnail22 from "./kernels/replicad/t-slot-rail/thumbnail.webp?url";
-import thumbnail23 from "./kernels/replicad/table/thumbnail.webp?url";
-import thumbnail24 from "./kernels/replicad/tray/thumbnail.webp?url";
-import thumbnail25 from "./kernels/replicad/turbofan/thumbnail.webp?url";
-import thumbnail26 from "./kernels/replicad/v8-engine/thumbnail.webp?url";
-import thumbnail27 from "./kernels/replicad/vase/thumbnail.webp?url";
-import thumbnail28 from "./kernels/replicad/wavy-vase/thumbnail.webp?url";
-import thumbnail29 from "./kernels/replicad/wedge-door-stopper/thumbnail.webp?url";
-import thumbnail30 from "./kernels/replicad/worm-gear-system/thumbnail.webp?url";
+import thumbnail4 from "./kernels/picovoxel/base-box/thumbnail.webp?url";
+import thumbnail5 from "./kernels/picovoxel/base-cylinder/thumbnail.webp?url";
+import thumbnail6 from "./kernels/picovoxel/base-lens/thumbnail.webp?url";
+import thumbnail7 from "./kernels/picovoxel/base-pipe/thumbnail.webp?url";
+import thumbnail8 from "./kernels/picovoxel/base-pipe-segment/thumbnail.webp?url";
+import thumbnail9 from "./kernels/picovoxel/base-ring/thumbnail.webp?url";
+import thumbnail10 from "./kernels/picovoxel/base-sphere/thumbnail.webp?url";
+import thumbnail11 from "./kernels/picovoxel/basic-lattices/thumbnail.webp?url";
+import thumbnail12 from "./kernels/picovoxel/boolean-showcase/thumbnail.webp?url";
+import thumbnail13 from "./kernels/picovoxel/gear/thumbnail.webp?url";
+import thumbnail14 from "./kernels/picovoxel/gyroid-sdf/thumbnail.webp?url";
+import thumbnail15 from "./kernels/picovoxel/hello-world/thumbnail.webp?url";
+import thumbnail16 from "./kernels/picovoxel/implicit-gyroid-genus/thumbnail.webp?url";
+import thumbnail17 from "./kernels/picovoxel/implicit-gyroid-sphere/thumbnail.webp?url";
+import thumbnail18 from "./kernels/picovoxel/implicit-logic-split/thumbnail.webp?url";
+import thumbnail19 from "./kernels/picovoxel/implicit-modular/thumbnail.webp?url";
+import thumbnail20 from "./kernels/picovoxel/implicit-radial/thumbnail.webp?url";
+import thumbnail21 from "./kernels/picovoxel/implicit-random/thumbnail.webp?url";
+import thumbnail22 from "./kernels/picovoxel/implicit-regular/thumbnail.webp?url";
+import thumbnail23 from "./kernels/picovoxel/implicit-super-ellipsoid/thumbnail.webp?url";
+import thumbnail24 from "./kernels/picovoxel/lattice-conformal/thumbnail.webp?url";
+import thumbnail25 from "./kernels/picovoxel/lattice-manifold/thumbnail.webp?url";
+import thumbnail26 from "./kernels/picovoxel/lattice-pipe/thumbnail.webp?url";
+import thumbnail27 from "./kernels/picovoxel/lattice-regular/thumbnail.webp?url";
+import thumbnail28 from "./kernels/picovoxel/mesh-painter/thumbnail.webp?url";
+import thumbnail29 from "./kernels/picovoxel/mesh-trafo/thumbnail.webp?url";
+import thumbnail30 from "./kernels/picovoxel/over-offset/thumbnail.webp?url";
+import thumbnail31 from "./kernels/picovoxel/sphere-minus-beams/thumbnail.webp?url";
+import thumbnail32 from "./kernels/picovoxel/torus-knot-round-trip/thumbnail.webp?url";
+import thumbnail33 from "./kernels/replicad/birdhouse/thumbnail.webp?url";
+import thumbnail34 from "./kernels/replicad/bottle/thumbnail.webp?url";
+import thumbnail35 from "./kernels/replicad/card-holder/thumbnail.webp?url";
+import thumbnail36 from "./kernels/replicad/chair/thumbnail.webp?url";
+import thumbnail37 from "./kernels/replicad/copper-lampshade/thumbnail.webp?url";
+import thumbnail38 from "./kernels/replicad/cycloidal-gear/thumbnail.webp?url";
+import thumbnail39 from "./kernels/replicad/decorated-box/thumbnail.webp?url";
+import thumbnail40 from "./kernels/replicad/drinking-glass/thumbnail.webp?url";
+import thumbnail41 from "./kernels/replicad/gridfinity-box/thumbnail.webp?url";
+import thumbnail42 from "./kernels/replicad/hex-screwdriver/thumbnail.webp?url";
+import thumbnail43 from "./kernels/replicad/hollow-box/thumbnail.webp?url";
+import thumbnail44 from "./kernels/replicad/ibeam/thumbnail.webp?url";
+import thumbnail45 from "./kernels/replicad/lego/thumbnail.webp?url";
+import thumbnail46 from "./kernels/replicad/planetary-gear-system/thumbnail.webp?url";
+import thumbnail47 from "./kernels/replicad/pot-plant/thumbnail.webp?url";
+import thumbnail48 from "./kernels/replicad/simple-tray/thumbnail.webp?url";
+import thumbnail49 from "./kernels/replicad/six-axis-arm/thumbnail.webp?url";
+import thumbnail50 from "./kernels/replicad/staircase/thumbnail.webp?url";
+import thumbnail51 from "./kernels/replicad/t-slot-rail/thumbnail.webp?url";
+import thumbnail52 from "./kernels/replicad/table/thumbnail.webp?url";
+import thumbnail53 from "./kernels/replicad/tray/thumbnail.webp?url";
+import thumbnail54 from "./kernels/replicad/turbofan/thumbnail.webp?url";
+import thumbnail55 from "./kernels/replicad/v8-engine/thumbnail.webp?url";
+import thumbnail56 from "./kernels/replicad/vase/thumbnail.webp?url";
+import thumbnail57 from "./kernels/replicad/wavy-vase/thumbnail.webp?url";
+import thumbnail58 from "./kernels/replicad/wedge-door-stopper/thumbnail.webp?url";
+import thumbnail59 from "./kernels/replicad/worm-gear-system/thumbnail.webp?url";
 
 const textAssetLoaders = import.meta.glob<string>(
-  ["./kernels/jscad/cube/main.ts","./kernels/jscad/cube/tau.json","./kernels/jscad/cylinder/main.ts","./kernels/jscad/cylinder/tau.json","./kernels/jscad/gear/main.ts","./kernels/jscad/gear/tau.json","./kernels/openscad/kitchen-sink/main.scad","./kernels/openscad/kitchen-sink/tau.json","./kernels/replicad/birdhouse/main.ts","./kernels/replicad/birdhouse/tau.json","./kernels/replicad/bottle/main.ts","./kernels/replicad/bottle/tau.json","./kernels/replicad/card-holder/main.ts","./kernels/replicad/card-holder/tau.json","./kernels/replicad/chair/main.ts","./kernels/replicad/chair/tau.json","./kernels/replicad/copper-lampshade/main.ts","./kernels/replicad/copper-lampshade/tau.json","./kernels/replicad/cycloidal-gear/main.ts","./kernels/replicad/cycloidal-gear/tau.json","./kernels/replicad/decorated-box/main.ts","./kernels/replicad/decorated-box/tau.json","./kernels/replicad/drinking-glass/main.ts","./kernels/replicad/drinking-glass/tau.json","./kernels/replicad/gridfinity-box/main.ts","./kernels/replicad/gridfinity-box/tau.json","./kernels/replicad/hex-screwdriver/main.ts","./kernels/replicad/hex-screwdriver/tau.json","./kernels/replicad/hollow-box/main.ts","./kernels/replicad/hollow-box/tau.json","./kernels/replicad/ibeam/main.ts","./kernels/replicad/ibeam/tau.json","./kernels/replicad/lego/main.ts","./kernels/replicad/lego/tau.json","./kernels/replicad/planetary-gear-system/DESIGN.md","./kernels/replicad/planetary-gear-system/main.geospec.ts","./kernels/replicad/planetary-gear-system/main.ts","./kernels/replicad/planetary-gear-system/tau.json","./kernels/replicad/pot-plant/main.ts","./kernels/replicad/pot-plant/tau.json","./kernels/replicad/simple-tray/main.ts","./kernels/replicad/simple-tray/tau.json","./kernels/replicad/six-axis-arm/DESIGN.md","./kernels/replicad/six-axis-arm/main.geospec.ts","./kernels/replicad/six-axis-arm/main.ts","./kernels/replicad/six-axis-arm/tau.json","./kernels/replicad/staircase/main.ts","./kernels/replicad/staircase/tau.json","./kernels/replicad/t-slot-rail/main.ts","./kernels/replicad/t-slot-rail/tau.json","./kernels/replicad/table/main.ts","./kernels/replicad/table/tau.json","./kernels/replicad/tray/main.ts","./kernels/replicad/tray/tau.json","./kernels/replicad/turbofan/DESIGN.md","./kernels/replicad/turbofan/layout.ts","./kernels/replicad/turbofan/main.geospec.ts","./kernels/replicad/turbofan/main.ts","./kernels/replicad/turbofan/tau.json","./kernels/replicad/v8-engine/DESIGN.md","./kernels/replicad/v8-engine/layout.ts","./kernels/replicad/v8-engine/main.geospec.ts","./kernels/replicad/v8-engine/main.ts","./kernels/replicad/v8-engine/tau.json","./kernels/replicad/vase/main.ts","./kernels/replicad/vase/tau.json","./kernels/replicad/wavy-vase/main.ts","./kernels/replicad/wavy-vase/tau.json","./kernels/replicad/wedge-door-stopper/main.ts","./kernels/replicad/wedge-door-stopper/tau.json","./kernels/replicad/worm-gear-system/MANUFACTURING.md","./kernels/replicad/worm-gear-system/main.geospec.ts","./kernels/replicad/worm-gear-system/main.ts","./kernels/replicad/worm-gear-system/tau.json","./kernels/replicad/worm-gear-system/tooth-profile.ts"],
+  ["./kernels/jscad/cube/main.ts","./kernels/jscad/cube/tau.json","./kernels/jscad/cylinder/main.ts","./kernels/jscad/cylinder/tau.json","./kernels/jscad/gear/main.ts","./kernels/jscad/gear/tau.json","./kernels/openscad/kitchen-sink/main.scad","./kernels/openscad/kitchen-sink/tau.json","./kernels/picovoxel/base-box/README.md","./kernels/picovoxel/base-box/ex-base-box.ts","./kernels/picovoxel/base-box/example-spline.ts","./kernels/picovoxel/base-box/main.ts","./kernels/picovoxel/base-box/tau.json","./kernels/picovoxel/base-cylinder/README.md","./kernels/picovoxel/base-cylinder/ex-base-cylinder.ts","./kernels/picovoxel/base-cylinder/example-spline.ts","./kernels/picovoxel/base-cylinder/main.ts","./kernels/picovoxel/base-cylinder/tau.json","./kernels/picovoxel/base-lens/README.md","./kernels/picovoxel/base-lens/ex-base-lens.ts","./kernels/picovoxel/base-lens/main.ts","./kernels/picovoxel/base-lens/tau.json","./kernels/picovoxel/base-pipe/README.md","./kernels/picovoxel/base-pipe/ex-base-pipe.ts","./kernels/picovoxel/base-pipe/example-spline.ts","./kernels/picovoxel/base-pipe/main.ts","./kernels/picovoxel/base-pipe/tau.json","./kernels/picovoxel/base-pipe-segment/README.md","./kernels/picovoxel/base-pipe-segment/ex-base-pipe-segment.ts","./kernels/picovoxel/base-pipe-segment/ex-base-pipe.ts","./kernels/picovoxel/base-pipe-segment/example-spline.ts","./kernels/picovoxel/base-pipe-segment/main.ts","./kernels/picovoxel/base-pipe-segment/tau.json","./kernels/picovoxel/base-ring/README.md","./kernels/picovoxel/base-ring/ex-base-ring.ts","./kernels/picovoxel/base-ring/main.ts","./kernels/picovoxel/base-ring/tau.json","./kernels/picovoxel/base-sphere/README.md","./kernels/picovoxel/base-sphere/ex-base-sphere.ts","./kernels/picovoxel/base-sphere/main.ts","./kernels/picovoxel/base-sphere/tau.json","./kernels/picovoxel/basic-lattices/README.md","./kernels/picovoxel/basic-lattices/ex-basic-lattices.ts","./kernels/picovoxel/basic-lattices/main.ts","./kernels/picovoxel/basic-lattices/tau.json","./kernels/picovoxel/boolean-showcase/README.md","./kernels/picovoxel/boolean-showcase/boolean-showcase.ts","./kernels/picovoxel/boolean-showcase/main.ts","./kernels/picovoxel/boolean-showcase/tau.json","./kernels/picovoxel/gear/README.md","./kernels/picovoxel/gear/gear.ts","./kernels/picovoxel/gear/main.ts","./kernels/picovoxel/gear/tau.json","./kernels/picovoxel/gyroid-sdf/README.md","./kernels/picovoxel/gyroid-sdf/main.ts","./kernels/picovoxel/gyroid-sdf/tau.json","./kernels/picovoxel/hello-world/README.md","./kernels/picovoxel/hello-world/hello-world.ts","./kernels/picovoxel/hello-world/main.geospec.ts","./kernels/picovoxel/hello-world/main.ts","./kernels/picovoxel/hello-world/tau.json","./kernels/picovoxel/implicit-gyroid-genus/README.md","./kernels/picovoxel/implicit-gyroid-genus/ex-implicit-gyroid-genus.ts","./kernels/picovoxel/implicit-gyroid-genus/main.ts","./kernels/picovoxel/implicit-gyroid-genus/tau.json","./kernels/picovoxel/implicit-gyroid-sphere/README.md","./kernels/picovoxel/implicit-gyroid-sphere/ex-implicit-gyroid-sphere.ts","./kernels/picovoxel/implicit-gyroid-sphere/main.ts","./kernels/picovoxel/implicit-gyroid-sphere/tau.json","./kernels/picovoxel/implicit-logic-split/README.md","./kernels/picovoxel/implicit-logic-split/ex-implicit-logic-split.ts","./kernels/picovoxel/implicit-logic-split/main.ts","./kernels/picovoxel/implicit-logic-split/tau.json","./kernels/picovoxel/implicit-modular/README.md","./kernels/picovoxel/implicit-modular/ex-implicit-modular.ts","./kernels/picovoxel/implicit-modular/main.ts","./kernels/picovoxel/implicit-modular/tau.json","./kernels/picovoxel/implicit-radial/README.md","./kernels/picovoxel/implicit-radial/ex-implicit-radial.ts","./kernels/picovoxel/implicit-radial/main.ts","./kernels/picovoxel/implicit-radial/tau.json","./kernels/picovoxel/implicit-random/README.md","./kernels/picovoxel/implicit-random/ex-implicit-random.ts","./kernels/picovoxel/implicit-random/main.ts","./kernels/picovoxel/implicit-random/tau.json","./kernels/picovoxel/implicit-regular/README.md","./kernels/picovoxel/implicit-regular/ex-implicit-regular.ts","./kernels/picovoxel/implicit-regular/main.ts","./kernels/picovoxel/implicit-regular/tau.json","./kernels/picovoxel/implicit-super-ellipsoid/README.md","./kernels/picovoxel/implicit-super-ellipsoid/ex-implicit-super-ellipsoid.ts","./kernels/picovoxel/implicit-super-ellipsoid/main.ts","./kernels/picovoxel/implicit-super-ellipsoid/tau.json","./kernels/picovoxel/lattice-conformal/README.md","./kernels/picovoxel/lattice-conformal/ex-lattice-conformal.ts","./kernels/picovoxel/lattice-conformal/main.ts","./kernels/picovoxel/lattice-conformal/tau.json","./kernels/picovoxel/lattice-manifold/README.md","./kernels/picovoxel/lattice-manifold/ex-lattice-manifold.ts","./kernels/picovoxel/lattice-manifold/main.ts","./kernels/picovoxel/lattice-manifold/tau.json","./kernels/picovoxel/lattice-pipe/README.md","./kernels/picovoxel/lattice-pipe/ex-lattice-pipe.ts","./kernels/picovoxel/lattice-pipe/example-spline.ts","./kernels/picovoxel/lattice-pipe/main.ts","./kernels/picovoxel/lattice-pipe/tau.json","./kernels/picovoxel/lattice-regular/README.md","./kernels/picovoxel/lattice-regular/ex-lattice-regular.ts","./kernels/picovoxel/lattice-regular/main.ts","./kernels/picovoxel/lattice-regular/tau.json","./kernels/picovoxel/mesh-painter/README.md","./kernels/picovoxel/mesh-painter/ex-mesh-painter.ts","./kernels/picovoxel/mesh-painter/main.ts","./kernels/picovoxel/mesh-painter/tau.json","./kernels/picovoxel/mesh-trafo/README.md","./kernels/picovoxel/mesh-trafo/ex-mesh-trafo.ts","./kernels/picovoxel/mesh-trafo/main.ts","./kernels/picovoxel/mesh-trafo/tau.json","./kernels/picovoxel/over-offset/README.md","./kernels/picovoxel/over-offset/ex-over-offset.ts","./kernels/picovoxel/over-offset/main.ts","./kernels/picovoxel/over-offset/tau.json","./kernels/picovoxel/sphere-minus-beams/README.md","./kernels/picovoxel/sphere-minus-beams/main.ts","./kernels/picovoxel/sphere-minus-beams/tau.json","./kernels/picovoxel/torus-knot-round-trip/README.md","./kernels/picovoxel/torus-knot-round-trip/main.ts","./kernels/picovoxel/torus-knot-round-trip/tau.json","./kernels/replicad/birdhouse/main.ts","./kernels/replicad/birdhouse/tau.json","./kernels/replicad/bottle/main.ts","./kernels/replicad/bottle/tau.json","./kernels/replicad/card-holder/main.ts","./kernels/replicad/card-holder/tau.json","./kernels/replicad/chair/main.ts","./kernels/replicad/chair/tau.json","./kernels/replicad/copper-lampshade/main.ts","./kernels/replicad/copper-lampshade/tau.json","./kernels/replicad/cycloidal-gear/main.ts","./kernels/replicad/cycloidal-gear/tau.json","./kernels/replicad/decorated-box/main.ts","./kernels/replicad/decorated-box/tau.json","./kernels/replicad/drinking-glass/main.ts","./kernels/replicad/drinking-glass/tau.json","./kernels/replicad/gridfinity-box/main.ts","./kernels/replicad/gridfinity-box/tau.json","./kernels/replicad/hex-screwdriver/main.ts","./kernels/replicad/hex-screwdriver/tau.json","./kernels/replicad/hollow-box/main.ts","./kernels/replicad/hollow-box/tau.json","./kernels/replicad/ibeam/main.ts","./kernels/replicad/ibeam/tau.json","./kernels/replicad/lego/main.ts","./kernels/replicad/lego/tau.json","./kernels/replicad/planetary-gear-system/DESIGN.md","./kernels/replicad/planetary-gear-system/main.geospec.ts","./kernels/replicad/planetary-gear-system/main.ts","./kernels/replicad/planetary-gear-system/tau.json","./kernels/replicad/pot-plant/main.ts","./kernels/replicad/pot-plant/tau.json","./kernels/replicad/simple-tray/main.ts","./kernels/replicad/simple-tray/tau.json","./kernels/replicad/six-axis-arm/DESIGN.md","./kernels/replicad/six-axis-arm/main.geospec.ts","./kernels/replicad/six-axis-arm/main.ts","./kernels/replicad/six-axis-arm/tau.json","./kernels/replicad/staircase/main.ts","./kernels/replicad/staircase/tau.json","./kernels/replicad/t-slot-rail/main.ts","./kernels/replicad/t-slot-rail/tau.json","./kernels/replicad/table/main.ts","./kernels/replicad/table/tau.json","./kernels/replicad/tray/main.ts","./kernels/replicad/tray/tau.json","./kernels/replicad/turbofan/DESIGN.md","./kernels/replicad/turbofan/layout.ts","./kernels/replicad/turbofan/main.geospec.ts","./kernels/replicad/turbofan/main.ts","./kernels/replicad/turbofan/tau.json","./kernels/replicad/v8-engine/DESIGN.md","./kernels/replicad/v8-engine/layout.ts","./kernels/replicad/v8-engine/main.geospec.ts","./kernels/replicad/v8-engine/main.ts","./kernels/replicad/v8-engine/tau.json","./kernels/replicad/vase/main.ts","./kernels/replicad/vase/tau.json","./kernels/replicad/wavy-vase/main.ts","./kernels/replicad/wavy-vase/tau.json","./kernels/replicad/wedge-door-stopper/main.ts","./kernels/replicad/wedge-door-stopper/tau.json","./kernels/replicad/worm-gear-system/MANUFACTURING.md","./kernels/replicad/worm-gear-system/main.geospec.ts","./kernels/replicad/worm-gear-system/main.ts","./kernels/replicad/worm-gear-system/tau.json","./kernels/replicad/worm-gear-system/tooth-profile.ts"],
   { query: '?raw', import: 'default' },
 );
 const binaryAssetLoaders = import.meta.glob<string>(
-  ["./kernels/jscad/cube/thumbnail.webp","./kernels/jscad/cylinder/thumbnail.webp","./kernels/jscad/gear/thumbnail.webp","./kernels/openscad/kitchen-sink/thumbnail.webp","./kernels/replicad/birdhouse/thumbnail.webp","./kernels/replicad/bottle/thumbnail.webp","./kernels/replicad/card-holder/thumbnail.webp","./kernels/replicad/chair/thumbnail.webp","./kernels/replicad/copper-lampshade/thumbnail.webp","./kernels/replicad/cycloidal-gear/thumbnail.webp","./kernels/replicad/decorated-box/thumbnail.webp","./kernels/replicad/drinking-glass/thumbnail.webp","./kernels/replicad/gridfinity-box/thumbnail.webp","./kernels/replicad/hex-screwdriver/thumbnail.webp","./kernels/replicad/hollow-box/thumbnail.webp","./kernels/replicad/ibeam/thumbnail.webp","./kernels/replicad/lego/thumbnail.webp","./kernels/replicad/planetary-gear-system/thumbnail.webp","./kernels/replicad/pot-plant/thumbnail.webp","./kernels/replicad/simple-tray/thumbnail.webp","./kernels/replicad/six-axis-arm/thumbnail.webp","./kernels/replicad/staircase/thumbnail.webp","./kernels/replicad/t-slot-rail/thumbnail.webp","./kernels/replicad/table/thumbnail.webp","./kernels/replicad/tray/thumbnail.webp","./kernels/replicad/turbofan/thumbnail.webp","./kernels/replicad/v8-engine/thumbnail.webp","./kernels/replicad/vase/thumbnail.webp","./kernels/replicad/wavy-vase/thumbnail.webp","./kernels/replicad/wedge-door-stopper/thumbnail.webp","./kernels/replicad/worm-gear-system/thumbnail.webp"],
+  ["./kernels/jscad/cube/thumbnail.webp","./kernels/jscad/cylinder/thumbnail.webp","./kernels/jscad/gear/thumbnail.webp","./kernels/openscad/kitchen-sink/thumbnail.webp","./kernels/picovoxel/base-box/thumbnail.webp","./kernels/picovoxel/base-cylinder/thumbnail.webp","./kernels/picovoxel/base-lens/thumbnail.webp","./kernels/picovoxel/base-pipe/thumbnail.webp","./kernels/picovoxel/base-pipe-segment/thumbnail.webp","./kernels/picovoxel/base-ring/thumbnail.webp","./kernels/picovoxel/base-sphere/thumbnail.webp","./kernels/picovoxel/basic-lattices/thumbnail.webp","./kernels/picovoxel/boolean-showcase/thumbnail.webp","./kernels/picovoxel/gear/thumbnail.webp","./kernels/picovoxel/gyroid-sdf/thumbnail.webp","./kernels/picovoxel/hello-world/thumbnail.webp","./kernels/picovoxel/implicit-gyroid-genus/thumbnail.webp","./kernels/picovoxel/implicit-gyroid-sphere/thumbnail.webp","./kernels/picovoxel/implicit-logic-split/thumbnail.webp","./kernels/picovoxel/implicit-modular/thumbnail.webp","./kernels/picovoxel/implicit-radial/thumbnail.webp","./kernels/picovoxel/implicit-random/thumbnail.webp","./kernels/picovoxel/implicit-regular/thumbnail.webp","./kernels/picovoxel/implicit-super-ellipsoid/thumbnail.webp","./kernels/picovoxel/lattice-conformal/thumbnail.webp","./kernels/picovoxel/lattice-manifold/thumbnail.webp","./kernels/picovoxel/lattice-pipe/thumbnail.webp","./kernels/picovoxel/lattice-regular/thumbnail.webp","./kernels/picovoxel/mesh-painter/thumbnail.webp","./kernels/picovoxel/mesh-trafo/thumbnail.webp","./kernels/picovoxel/over-offset/thumbnail.webp","./kernels/picovoxel/sphere-minus-beams/thumbnail.webp","./kernels/picovoxel/torus-knot-round-trip/thumbnail.webp","./kernels/replicad/birdhouse/thumbnail.webp","./kernels/replicad/bottle/thumbnail.webp","./kernels/replicad/card-holder/thumbnail.webp","./kernels/replicad/chair/thumbnail.webp","./kernels/replicad/copper-lampshade/thumbnail.webp","./kernels/replicad/cycloidal-gear/thumbnail.webp","./kernels/replicad/decorated-box/thumbnail.webp","./kernels/replicad/drinking-glass/thumbnail.webp","./kernels/replicad/gridfinity-box/thumbnail.webp","./kernels/replicad/hex-screwdriver/thumbnail.webp","./kernels/replicad/hollow-box/thumbnail.webp","./kernels/replicad/ibeam/thumbnail.webp","./kernels/replicad/lego/thumbnail.webp","./kernels/replicad/planetary-gear-system/thumbnail.webp","./kernels/replicad/pot-plant/thumbnail.webp","./kernels/replicad/simple-tray/thumbnail.webp","./kernels/replicad/six-axis-arm/thumbnail.webp","./kernels/replicad/staircase/thumbnail.webp","./kernels/replicad/t-slot-rail/thumbnail.webp","./kernels/replicad/table/thumbnail.webp","./kernels/replicad/tray/thumbnail.webp","./kernels/replicad/turbofan/thumbnail.webp","./kernels/replicad/v8-engine/thumbnail.webp","./kernels/replicad/vase/thumbnail.webp","./kernels/replicad/wavy-vase/thumbnail.webp","./kernels/replicad/wedge-door-stopper/thumbnail.webp","./kernels/replicad/worm-gear-system/thumbnail.webp"],
   { query: '?inline&url', import: 'default' },
 );
 
@@ -131,10 +160,391 @@ export const builtinExamples = [
     ],
   },
   {
+    locator: "picovoxel.base-box",
+    kernel: "picovoxel",
+    manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_picovoxel000000000004","name":"PicoVoxel Base Box","description":"PicoVoxel Base Box community example, adapted to Tau's injected-session runtime.","tags":["picovoxel","typescript","community-example"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
+    thumbnailUrl: thumbnail4,
+    assets: [
+      { path: "README.md", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/base-box/README.md") },
+      { path: "ex-base-box.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/base-box/ex-base-box.ts") },
+      { path: "example-spline.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/base-box/example-spline.ts") },
+      { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/base-box/main.ts") },
+      { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/base-box/tau.json") },
+      { path: "thumbnail.webp", load: loadBinaryAsset.bind(undefined, "./kernels/picovoxel/base-box/thumbnail.webp") },
+    ],
+  },
+  {
+    locator: "picovoxel.base-cylinder",
+    kernel: "picovoxel",
+    manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_picovoxel000000000005","name":"PicoVoxel Base Cylinder","description":"PicoVoxel Base Cylinder community example, adapted to Tau's injected-session runtime.","tags":["picovoxel","typescript","community-example"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
+    thumbnailUrl: thumbnail5,
+    assets: [
+      { path: "README.md", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/base-cylinder/README.md") },
+      { path: "ex-base-cylinder.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/base-cylinder/ex-base-cylinder.ts") },
+      { path: "example-spline.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/base-cylinder/example-spline.ts") },
+      { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/base-cylinder/main.ts") },
+      { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/base-cylinder/tau.json") },
+      { path: "thumbnail.webp", load: loadBinaryAsset.bind(undefined, "./kernels/picovoxel/base-cylinder/thumbnail.webp") },
+    ],
+  },
+  {
+    locator: "picovoxel.base-lens",
+    kernel: "picovoxel",
+    manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_picovoxel000000000006","name":"PicoVoxel Base Lens","description":"PicoVoxel Base Lens community example, adapted to Tau's injected-session runtime.","tags":["picovoxel","typescript","community-example"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
+    thumbnailUrl: thumbnail6,
+    assets: [
+      { path: "README.md", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/base-lens/README.md") },
+      { path: "ex-base-lens.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/base-lens/ex-base-lens.ts") },
+      { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/base-lens/main.ts") },
+      { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/base-lens/tau.json") },
+      { path: "thumbnail.webp", load: loadBinaryAsset.bind(undefined, "./kernels/picovoxel/base-lens/thumbnail.webp") },
+    ],
+  },
+  {
+    locator: "picovoxel.base-pipe",
+    kernel: "picovoxel",
+    manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_picovoxel000000000008","name":"PicoVoxel Base Pipe","description":"PicoVoxel Base Pipe community example, adapted to Tau's injected-session runtime.","tags":["picovoxel","typescript","community-example"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
+    thumbnailUrl: thumbnail7,
+    assets: [
+      { path: "README.md", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/base-pipe/README.md") },
+      { path: "ex-base-pipe.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/base-pipe/ex-base-pipe.ts") },
+      { path: "example-spline.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/base-pipe/example-spline.ts") },
+      { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/base-pipe/main.ts") },
+      { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/base-pipe/tau.json") },
+      { path: "thumbnail.webp", load: loadBinaryAsset.bind(undefined, "./kernels/picovoxel/base-pipe/thumbnail.webp") },
+    ],
+  },
+  {
+    locator: "picovoxel.base-pipe-segment",
+    kernel: "picovoxel",
+    manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_picovoxel000000000007","name":"PicoVoxel Base Pipe Segment","description":"PicoVoxel Base Pipe Segment community example, adapted to Tau's injected-session runtime.","tags":["picovoxel","typescript","community-example"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
+    thumbnailUrl: thumbnail8,
+    assets: [
+      { path: "README.md", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/base-pipe-segment/README.md") },
+      { path: "ex-base-pipe-segment.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/base-pipe-segment/ex-base-pipe-segment.ts") },
+      { path: "ex-base-pipe.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/base-pipe-segment/ex-base-pipe.ts") },
+      { path: "example-spline.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/base-pipe-segment/example-spline.ts") },
+      { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/base-pipe-segment/main.ts") },
+      { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/base-pipe-segment/tau.json") },
+      { path: "thumbnail.webp", load: loadBinaryAsset.bind(undefined, "./kernels/picovoxel/base-pipe-segment/thumbnail.webp") },
+    ],
+  },
+  {
+    locator: "picovoxel.base-ring",
+    kernel: "picovoxel",
+    manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_picovoxel000000000009","name":"PicoVoxel Base Ring","description":"PicoVoxel Base Ring community example, adapted to Tau's injected-session runtime.","tags":["picovoxel","typescript","community-example"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
+    thumbnailUrl: thumbnail9,
+    assets: [
+      { path: "README.md", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/base-ring/README.md") },
+      { path: "ex-base-ring.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/base-ring/ex-base-ring.ts") },
+      { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/base-ring/main.ts") },
+      { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/base-ring/tau.json") },
+      { path: "thumbnail.webp", load: loadBinaryAsset.bind(undefined, "./kernels/picovoxel/base-ring/thumbnail.webp") },
+    ],
+  },
+  {
+    locator: "picovoxel.base-sphere",
+    kernel: "picovoxel",
+    manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_picovoxel000000000010","name":"PicoVoxel Base Sphere","description":"PicoVoxel Base Sphere community example, adapted to Tau's injected-session runtime.","tags":["picovoxel","typescript","community-example"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
+    thumbnailUrl: thumbnail10,
+    assets: [
+      { path: "README.md", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/base-sphere/README.md") },
+      { path: "ex-base-sphere.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/base-sphere/ex-base-sphere.ts") },
+      { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/base-sphere/main.ts") },
+      { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/base-sphere/tau.json") },
+      { path: "thumbnail.webp", load: loadBinaryAsset.bind(undefined, "./kernels/picovoxel/base-sphere/thumbnail.webp") },
+    ],
+  },
+  {
+    locator: "picovoxel.basic-lattices",
+    kernel: "picovoxel",
+    manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_picovoxel000000000011","name":"PicoVoxel Basic Lattices","description":"PicoVoxel Basic Lattices community example, adapted to Tau's injected-session runtime.","tags":["picovoxel","typescript","community-example"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
+    thumbnailUrl: thumbnail11,
+    assets: [
+      { path: "README.md", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/basic-lattices/README.md") },
+      { path: "ex-basic-lattices.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/basic-lattices/ex-basic-lattices.ts") },
+      { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/basic-lattices/main.ts") },
+      { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/basic-lattices/tau.json") },
+      { path: "thumbnail.webp", load: loadBinaryAsset.bind(undefined, "./kernels/picovoxel/basic-lattices/thumbnail.webp") },
+    ],
+  },
+  {
+    locator: "picovoxel.boolean-showcase",
+    kernel: "picovoxel",
+    manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_picovoxel000000000002","name":"PicoVoxel Boolean Showcase","description":"PicoVoxel Boolean Showcase community example, adapted to Tau's injected-session runtime.","tags":["picovoxel","typescript","community-example"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
+    thumbnailUrl: thumbnail12,
+    assets: [
+      { path: "README.md", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/boolean-showcase/README.md") },
+      { path: "boolean-showcase.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/boolean-showcase/boolean-showcase.ts") },
+      { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/boolean-showcase/main.ts") },
+      { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/boolean-showcase/tau.json") },
+      { path: "thumbnail.webp", load: loadBinaryAsset.bind(undefined, "./kernels/picovoxel/boolean-showcase/thumbnail.webp") },
+    ],
+  },
+  {
+    locator: "picovoxel.gear",
+    kernel: "picovoxel",
+    manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_picovoxel000000000003","name":"PicoVoxel Involute Gear","description":"PicoVoxel Involute Gear community example, adapted to Tau's injected-session runtime.","tags":["picovoxel","typescript","community-example"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
+    thumbnailUrl: thumbnail13,
+    assets: [
+      { path: "README.md", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/gear/README.md") },
+      { path: "gear.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/gear/gear.ts") },
+      { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/gear/main.ts") },
+      { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/gear/tau.json") },
+      { path: "thumbnail.webp", load: loadBinaryAsset.bind(undefined, "./kernels/picovoxel/gear/thumbnail.webp") },
+    ],
+  },
+  {
+    locator: "picovoxel.gyroid-sdf",
+    kernel: "picovoxel",
+    manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_picovoxel000000000031","name":"PicoVoxel Gyroid SDF","description":"PicoVoxel Gyroid SDF community example, adapted to Tau's injected-session runtime.","tags":["picovoxel","typescript","community-example"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
+    thumbnailUrl: thumbnail14,
+    assets: [
+      { path: "README.md", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/gyroid-sdf/README.md") },
+      { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/gyroid-sdf/main.ts") },
+      { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/gyroid-sdf/tau.json") },
+      { path: "thumbnail.webp", load: loadBinaryAsset.bind(undefined, "./kernels/picovoxel/gyroid-sdf/thumbnail.webp") },
+    ],
+  },
+  {
+    locator: "picovoxel.hello-world",
+    kernel: "picovoxel",
+    manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_picovoxel000000000001","name":"PicoVoxel Hello World","description":"PicoVoxel Hello World community example, adapted to Tau's injected-session runtime.","tags":["picovoxel","typescript","community-example"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
+    thumbnailUrl: thumbnail15,
+    assets: [
+      { path: "README.md", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/hello-world/README.md") },
+      { path: "hello-world.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/hello-world/hello-world.ts") },
+      { path: "main.geospec.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/hello-world/main.geospec.ts") },
+      { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/hello-world/main.ts") },
+      { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/hello-world/tau.json") },
+      { path: "thumbnail.webp", load: loadBinaryAsset.bind(undefined, "./kernels/picovoxel/hello-world/thumbnail.webp") },
+    ],
+  },
+  {
+    locator: "picovoxel.implicit-gyroid-genus",
+    kernel: "picovoxel",
+    manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_picovoxel000000000012","name":"PicoVoxel Implicit Gyroid Genus","description":"PicoVoxel Implicit Gyroid Genus community example, adapted to Tau's injected-session runtime.","tags":["picovoxel","typescript","community-example"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
+    thumbnailUrl: thumbnail16,
+    assets: [
+      { path: "README.md", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/implicit-gyroid-genus/README.md") },
+      { path: "ex-implicit-gyroid-genus.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/implicit-gyroid-genus/ex-implicit-gyroid-genus.ts") },
+      { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/implicit-gyroid-genus/main.ts") },
+      { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/implicit-gyroid-genus/tau.json") },
+      { path: "thumbnail.webp", load: loadBinaryAsset.bind(undefined, "./kernels/picovoxel/implicit-gyroid-genus/thumbnail.webp") },
+    ],
+  },
+  {
+    locator: "picovoxel.implicit-gyroid-sphere",
+    kernel: "picovoxel",
+    manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_picovoxel000000000013","name":"PicoVoxel Implicit Gyroid Sphere","description":"PicoVoxel Implicit Gyroid Sphere community example, adapted to Tau's injected-session runtime.","tags":["picovoxel","typescript","community-example"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
+    thumbnailUrl: thumbnail17,
+    assets: [
+      { path: "README.md", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/implicit-gyroid-sphere/README.md") },
+      { path: "ex-implicit-gyroid-sphere.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/implicit-gyroid-sphere/ex-implicit-gyroid-sphere.ts") },
+      { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/implicit-gyroid-sphere/main.ts") },
+      { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/implicit-gyroid-sphere/tau.json") },
+      { path: "thumbnail.webp", load: loadBinaryAsset.bind(undefined, "./kernels/picovoxel/implicit-gyroid-sphere/thumbnail.webp") },
+    ],
+  },
+  {
+    locator: "picovoxel.implicit-logic-split",
+    kernel: "picovoxel",
+    manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_picovoxel000000000020","name":"PicoVoxel Implicit Logic Split","description":"PicoVoxel Implicit Logic Split community example, adapted to Tau's injected-session runtime.","tags":["picovoxel","typescript","community-example"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
+    thumbnailUrl: thumbnail18,
+    assets: [
+      { path: "README.md", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/implicit-logic-split/README.md") },
+      { path: "ex-implicit-logic-split.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/implicit-logic-split/ex-implicit-logic-split.ts") },
+      { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/implicit-logic-split/main.ts") },
+      { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/implicit-logic-split/tau.json") },
+      { path: "thumbnail.webp", load: loadBinaryAsset.bind(undefined, "./kernels/picovoxel/implicit-logic-split/thumbnail.webp") },
+    ],
+  },
+  {
+    locator: "picovoxel.implicit-modular",
+    kernel: "picovoxel",
+    manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_picovoxel000000000021","name":"PicoVoxel Implicit Modular","description":"PicoVoxel Implicit Modular community example, adapted to Tau's injected-session runtime.","tags":["picovoxel","typescript","community-example"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
+    thumbnailUrl: thumbnail19,
+    assets: [
+      { path: "README.md", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/implicit-modular/README.md") },
+      { path: "ex-implicit-modular.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/implicit-modular/ex-implicit-modular.ts") },
+      { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/implicit-modular/main.ts") },
+      { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/implicit-modular/tau.json") },
+      { path: "thumbnail.webp", load: loadBinaryAsset.bind(undefined, "./kernels/picovoxel/implicit-modular/thumbnail.webp") },
+    ],
+  },
+  {
+    locator: "picovoxel.implicit-radial",
+    kernel: "picovoxel",
+    manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_picovoxel000000000022","name":"PicoVoxel Implicit Radial","description":"PicoVoxel Implicit Radial community example, adapted to Tau's injected-session runtime.","tags":["picovoxel","typescript","community-example"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
+    thumbnailUrl: thumbnail20,
+    assets: [
+      { path: "README.md", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/implicit-radial/README.md") },
+      { path: "ex-implicit-radial.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/implicit-radial/ex-implicit-radial.ts") },
+      { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/implicit-radial/main.ts") },
+      { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/implicit-radial/tau.json") },
+      { path: "thumbnail.webp", load: loadBinaryAsset.bind(undefined, "./kernels/picovoxel/implicit-radial/thumbnail.webp") },
+    ],
+  },
+  {
+    locator: "picovoxel.implicit-random",
+    kernel: "picovoxel",
+    manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_picovoxel000000000023","name":"PicoVoxel Implicit Random","description":"PicoVoxel Implicit Random community example, adapted to Tau's injected-session runtime.","tags":["picovoxel","typescript","community-example"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
+    thumbnailUrl: thumbnail21,
+    assets: [
+      { path: "README.md", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/implicit-random/README.md") },
+      { path: "ex-implicit-random.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/implicit-random/ex-implicit-random.ts") },
+      { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/implicit-random/main.ts") },
+      { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/implicit-random/tau.json") },
+      { path: "thumbnail.webp", load: loadBinaryAsset.bind(undefined, "./kernels/picovoxel/implicit-random/thumbnail.webp") },
+    ],
+  },
+  {
+    locator: "picovoxel.implicit-regular",
+    kernel: "picovoxel",
+    manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_picovoxel000000000024","name":"PicoVoxel Implicit Regular","description":"PicoVoxel Implicit Regular community example, adapted to Tau's injected-session runtime.","tags":["picovoxel","typescript","community-example"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
+    thumbnailUrl: thumbnail22,
+    assets: [
+      { path: "README.md", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/implicit-regular/README.md") },
+      { path: "ex-implicit-regular.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/implicit-regular/ex-implicit-regular.ts") },
+      { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/implicit-regular/main.ts") },
+      { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/implicit-regular/tau.json") },
+      { path: "thumbnail.webp", load: loadBinaryAsset.bind(undefined, "./kernels/picovoxel/implicit-regular/thumbnail.webp") },
+    ],
+  },
+  {
+    locator: "picovoxel.implicit-super-ellipsoid",
+    kernel: "picovoxel",
+    manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_picovoxel000000000014","name":"PicoVoxel Implicit Super Ellipsoid","description":"PicoVoxel Implicit Super Ellipsoid community example, adapted to Tau's injected-session runtime.","tags":["picovoxel","typescript","community-example"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
+    thumbnailUrl: thumbnail23,
+    assets: [
+      { path: "README.md", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/implicit-super-ellipsoid/README.md") },
+      { path: "ex-implicit-super-ellipsoid.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/implicit-super-ellipsoid/ex-implicit-super-ellipsoid.ts") },
+      { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/implicit-super-ellipsoid/main.ts") },
+      { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/implicit-super-ellipsoid/tau.json") },
+      { path: "thumbnail.webp", load: loadBinaryAsset.bind(undefined, "./kernels/picovoxel/implicit-super-ellipsoid/thumbnail.webp") },
+    ],
+  },
+  {
+    locator: "picovoxel.lattice-conformal",
+    kernel: "picovoxel",
+    manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_picovoxel000000000025","name":"PicoVoxel Lattice Conformal","description":"PicoVoxel Lattice Conformal community example, adapted to Tau's injected-session runtime.","tags":["picovoxel","typescript","community-example"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
+    thumbnailUrl: thumbnail24,
+    assets: [
+      { path: "README.md", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/lattice-conformal/README.md") },
+      { path: "ex-lattice-conformal.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/lattice-conformal/ex-lattice-conformal.ts") },
+      { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/lattice-conformal/main.ts") },
+      { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/lattice-conformal/tau.json") },
+      { path: "thumbnail.webp", load: loadBinaryAsset.bind(undefined, "./kernels/picovoxel/lattice-conformal/thumbnail.webp") },
+    ],
+  },
+  {
+    locator: "picovoxel.lattice-manifold",
+    kernel: "picovoxel",
+    manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_picovoxel000000000015","name":"PicoVoxel Lattice Manifold","description":"PicoVoxel Lattice Manifold community example, adapted to Tau's injected-session runtime.","tags":["picovoxel","typescript","community-example"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
+    thumbnailUrl: thumbnail25,
+    assets: [
+      { path: "README.md", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/lattice-manifold/README.md") },
+      { path: "ex-lattice-manifold.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/lattice-manifold/ex-lattice-manifold.ts") },
+      { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/lattice-manifold/main.ts") },
+      { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/lattice-manifold/tau.json") },
+      { path: "thumbnail.webp", load: loadBinaryAsset.bind(undefined, "./kernels/picovoxel/lattice-manifold/thumbnail.webp") },
+    ],
+  },
+  {
+    locator: "picovoxel.lattice-pipe",
+    kernel: "picovoxel",
+    manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_picovoxel000000000016","name":"PicoVoxel Lattice Pipe","description":"PicoVoxel Lattice Pipe community example, adapted to Tau's injected-session runtime.","tags":["picovoxel","typescript","community-example"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
+    thumbnailUrl: thumbnail26,
+    assets: [
+      { path: "README.md", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/lattice-pipe/README.md") },
+      { path: "ex-lattice-pipe.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/lattice-pipe/ex-lattice-pipe.ts") },
+      { path: "example-spline.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/lattice-pipe/example-spline.ts") },
+      { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/lattice-pipe/main.ts") },
+      { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/lattice-pipe/tau.json") },
+      { path: "thumbnail.webp", load: loadBinaryAsset.bind(undefined, "./kernels/picovoxel/lattice-pipe/thumbnail.webp") },
+    ],
+  },
+  {
+    locator: "picovoxel.lattice-regular",
+    kernel: "picovoxel",
+    manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_picovoxel000000000026","name":"PicoVoxel Lattice Regular","description":"PicoVoxel Lattice Regular community example, adapted to Tau's injected-session runtime.","tags":["picovoxel","typescript","community-example"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
+    thumbnailUrl: thumbnail27,
+    assets: [
+      { path: "README.md", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/lattice-regular/README.md") },
+      { path: "ex-lattice-regular.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/lattice-regular/ex-lattice-regular.ts") },
+      { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/lattice-regular/main.ts") },
+      { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/lattice-regular/tau.json") },
+      { path: "thumbnail.webp", load: loadBinaryAsset.bind(undefined, "./kernels/picovoxel/lattice-regular/thumbnail.webp") },
+    ],
+  },
+  {
+    locator: "picovoxel.mesh-painter",
+    kernel: "picovoxel",
+    manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_picovoxel000000000017","name":"PicoVoxel Mesh Painter","description":"PicoVoxel Mesh Painter community example, adapted to Tau's injected-session runtime.","tags":["picovoxel","typescript","community-example"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
+    thumbnailUrl: thumbnail28,
+    assets: [
+      { path: "README.md", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/mesh-painter/README.md") },
+      { path: "ex-mesh-painter.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/mesh-painter/ex-mesh-painter.ts") },
+      { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/mesh-painter/main.ts") },
+      { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/mesh-painter/tau.json") },
+      { path: "thumbnail.webp", load: loadBinaryAsset.bind(undefined, "./kernels/picovoxel/mesh-painter/thumbnail.webp") },
+    ],
+  },
+  {
+    locator: "picovoxel.mesh-trafo",
+    kernel: "picovoxel",
+    manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_picovoxel000000000018","name":"PicoVoxel Mesh Trafo","description":"PicoVoxel Mesh Trafo community example, adapted to Tau's injected-session runtime.","tags":["picovoxel","typescript","community-example"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
+    thumbnailUrl: thumbnail29,
+    assets: [
+      { path: "README.md", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/mesh-trafo/README.md") },
+      { path: "ex-mesh-trafo.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/mesh-trafo/ex-mesh-trafo.ts") },
+      { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/mesh-trafo/main.ts") },
+      { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/mesh-trafo/tau.json") },
+      { path: "thumbnail.webp", load: loadBinaryAsset.bind(undefined, "./kernels/picovoxel/mesh-trafo/thumbnail.webp") },
+    ],
+  },
+  {
+    locator: "picovoxel.over-offset",
+    kernel: "picovoxel",
+    manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_picovoxel000000000019","name":"PicoVoxel Over Offset","description":"PicoVoxel Over Offset community example, adapted to Tau's injected-session runtime.","tags":["picovoxel","typescript","community-example"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
+    thumbnailUrl: thumbnail30,
+    assets: [
+      { path: "README.md", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/over-offset/README.md") },
+      { path: "ex-over-offset.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/over-offset/ex-over-offset.ts") },
+      { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/over-offset/main.ts") },
+      { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/over-offset/tau.json") },
+      { path: "thumbnail.webp", load: loadBinaryAsset.bind(undefined, "./kernels/picovoxel/over-offset/thumbnail.webp") },
+    ],
+  },
+  {
+    locator: "picovoxel.sphere-minus-beams",
+    kernel: "picovoxel",
+    manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_picovoxel000000000032","name":"PicoVoxel Sphere Minus Beams","description":"PicoVoxel Sphere Minus Beams community example, adapted to Tau's injected-session runtime.","tags":["picovoxel","typescript","community-example"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
+    thumbnailUrl: thumbnail31,
+    assets: [
+      { path: "README.md", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/sphere-minus-beams/README.md") },
+      { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/sphere-minus-beams/main.ts") },
+      { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/sphere-minus-beams/tau.json") },
+      { path: "thumbnail.webp", load: loadBinaryAsset.bind(undefined, "./kernels/picovoxel/sphere-minus-beams/thumbnail.webp") },
+    ],
+  },
+  {
+    locator: "picovoxel.torus-knot-round-trip",
+    kernel: "picovoxel",
+    manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_picovoxel000000000033","name":"PicoVoxel Torus Knot Round Trip","description":"PicoVoxel Torus Knot Round Trip community example, adapted to Tau's injected-session runtime.","tags":["picovoxel","typescript","community-example"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
+    thumbnailUrl: thumbnail32,
+    assets: [
+      { path: "README.md", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/torus-knot-round-trip/README.md") },
+      { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/torus-knot-round-trip/main.ts") },
+      { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/torus-knot-round-trip/tau.json") },
+      { path: "thumbnail.webp", load: loadBinaryAsset.bind(undefined, "./kernels/picovoxel/torus-knot-round-trip/thumbnail.webp") },
+    ],
+  },
+  {
     locator: "replicad.birdhouse",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_iEbCJko3yX1UiAvGEdTjB","name":"Birdhouse","description":"Invite nature into your backyard with this modern, geometric birdhouse design. Its clean triangular silhouette and rounded edges create a contemporary look while the customizable entrance hole size and wall thickness ensure it's perfectly suited for your local bird species. Features an integrated hanging hook for easy placement.","tags":["3d-printing","parametric","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail4,
+    thumbnailUrl: thumbnail33,
     assets: [
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/birdhouse/main.ts") },
       { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/replicad/birdhouse/tau.json") },
@@ -145,7 +555,7 @@ export const builtinExamples = [
     locator: "replicad.bottle",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_YEf7fNIWx82wCY2gtRzyh","name":"Bottle","description":"A modern bottle design with soft, rounded shoulders and a refined neck detail. The parametric construction allows precise control over proportions while the shell operation creates a hollow interior. Optional threading detail adds authenticity, making this perfect for functional prototypes or decorative pieces.","tags":["3d-printing","parametric","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail5,
+    thumbnailUrl: thumbnail34,
     assets: [
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/bottle/main.ts") },
       { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/replicad/bottle/tau.json") },
@@ -156,7 +566,7 @@ export const builtinExamples = [
     locator: "replicad.card-holder",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_CZ83d8z6kVjsAD8XbniS8","name":"Card Holder","description":"A thoughtfully designed card holder with ergonomic finger cutouts and a secure locking mechanism. Features smooth filleted edges for comfortable handling and precise screw hole placement for mounting. The parametric design ensures a perfect fit for your cards while maintaining a clean, professional appearance.","tags":["3d-printing","parametric","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail6,
+    thumbnailUrl: thumbnail35,
     assets: [
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/card-holder/main.ts") },
       { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/replicad/card-holder/tau.json") },
@@ -167,7 +577,7 @@ export const builtinExamples = [
     locator: "replicad.chair",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_NyDjQAlOxiy2qXNI6ZyXL","name":"Chair","description":"A clean, approachable chair design with balanced proportions and thoughtful ergonomics. Features a solid seat, sturdy square legs, and an adjustable backrest angle for comfort. Optional edge fillets add refinement while maintaining the simple, modern aesthetic. Customize dimensions to fit any space or user preference.","tags":["3d-printing","parametric","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail7,
+    thumbnailUrl: thumbnail36,
     assets: [
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/chair/main.ts") },
       { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/replicad/chair/tau.json") },
@@ -178,7 +588,7 @@ export const builtinExamples = [
     locator: "replicad.copper-lampshade",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_86yHcpiI8LD1zAexvj46G","name":"Copper Lampshade","description":"A shelled BRep copper pendant with editable brushed-metal anisotropy, lacquer, porcelain, fabric sheen, refractive glass and emissive LED filaments. Uses standard glTF materials throughout.","tags":["replicad","parametric","materials","lighting"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail8,
+    thumbnailUrl: thumbnail37,
     assets: [
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/copper-lampshade/main.ts") },
       { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/replicad/copper-lampshade/tau.json") },
@@ -189,7 +599,7 @@ export const builtinExamples = [
     locator: "replicad.cycloidal-gear",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_WhqwZ4ODSnw2JSdd4gjCx","name":"Cycloidal Gear","description":"A striking gear design driven by mathematical elegance. Combines epicycloid and hypocycloid curves to create a unique tooth profile, with optional twist for added visual interest. Perfect for decorative applications, educational demonstrations, or architectural accents that showcase the beauty of parametric design.","tags":["3d-printing","parametric","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail9,
+    thumbnailUrl: thumbnail38,
     assets: [
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/cycloidal-gear/main.ts") },
       { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/replicad/cycloidal-gear/tau.json") },
@@ -200,7 +610,7 @@ export const builtinExamples = [
     locator: "replicad.decorated-box",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_KUU0U8lMwFeljIgovWEGk","name":"Decorated Box","description":"A sleek storage box that becomes a canvas for pattern and texture. Start with clean, shelled geometry, then apply decorative patterns like Voronoi cells, grids, or honeycomb structures. Perfect for creating unique, personalized storage solutions that combine functionality with artistic expression.","tags":["3d-printing","parametric","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail10,
+    thumbnailUrl: thumbnail39,
     assets: [
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/decorated-box/main.ts") },
       { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/replicad/decorated-box/tau.json") },
@@ -211,7 +621,7 @@ export const builtinExamples = [
     locator: "replicad.drinking-glass",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_5L941IPUceeAKufTuaCm7","name":"Drinking Glass","description":"Create elegant glassware with precise control over form and function. This parametric design uses advanced revolve and shelling techniques to produce a refined drinking glass with customizable height, taper, and wall thickness. Optional rim and base fillets add a professional finishing touch for a truly polished result.","tags":["3d-printing","parametric","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail11,
+    thumbnailUrl: thumbnail40,
     assets: [
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/drinking-glass/main.ts") },
       { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/replicad/drinking-glass/tau.json") },
@@ -222,7 +632,7 @@ export const builtinExamples = [
     locator: "replicad.gridfinity-box",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_Qm3WoFmeLCX4jj4GZ3i4V","name":"Gridfinity Box","description":"The ultimate modular storage solution. This Gridfinity-compatible box features accurate socket geometry, optional magnet and screw holes, and clean shelling for a professional finish. Customize size, height, and features to create a perfectly organized workspace that scales with your needs.","tags":["3d-printing","parametric","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail12,
+    thumbnailUrl: thumbnail41,
     assets: [
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/gridfinity-box/main.ts") },
       { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/replicad/gridfinity-box/tau.json") },
@@ -233,7 +643,7 @@ export const builtinExamples = [
     locator: "replicad.hex-screwdriver",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_r9TH1zB4clnbIu7EJYnIx","name":"Hex Screwdriver","description":"A robust M5 hex key screwdriver with a comfortable hexagonal handle and precise tip geometry. Features smooth filleted edges for comfortable grip and accurate shaft dimensions. Perfect for creating custom tools, replacement handles, or educational demonstrations of parametric tool design.","tags":["3d-printing","parametric","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail13,
+    thumbnailUrl: thumbnail42,
     assets: [
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/hex-screwdriver/main.ts") },
       { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/replicad/hex-screwdriver/tau.json") },
@@ -244,7 +654,7 @@ export const builtinExamples = [
     locator: "replicad.hollow-box",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_NkkZlTciWX0tA6BHNNyF9","name":"Hollow Box","description":"The perfect everyday organizer—simple, elegant, and endlessly useful. This minimalist design features smooth rounded corners and a clean hollow construction that keeps it lightweight yet sturdy. Fully customizable dimensions, wall thickness, and corner radius make it ideal for everything from desk organizers to workshop storage bins.","tags":["3d-printing","parametric","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail14,
+    thumbnailUrl: thumbnail43,
     assets: [
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/hollow-box/main.ts") },
       { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/replicad/hollow-box/tau.json") },
@@ -255,7 +665,7 @@ export const builtinExamples = [
     locator: "replicad.ibeam",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_DBiP4RDlK54lXpqTaATJT","name":"I-Beam","description":"Industrial elegance meets precision engineering. This accurate I-beam profile features customizable dimensions, web and flange thickness, and optional root fillets for a professional finish. Ideal for structural studies, furniture accents, or architectural elements that require authentic beam geometry.","tags":["3d-printing","parametric","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail15,
+    thumbnailUrl: thumbnail44,
     assets: [
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/ibeam/main.ts") },
       { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/replicad/ibeam/tau.json") },
@@ -266,7 +676,7 @@ export const builtinExamples = [
     locator: "replicad.lego",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_PwxF7vbT3RmK6AM7xa8mL","name":"Interlocking Brick","description":"A faithful recreation of the classic interlocking brick system. Features accurate stud placement, hollow underside, and optional bottom tubes for authentic connections. Fully parametric dimensions let you create bricks of any size while maintaining the precise geometry needed for reliable interlocking.","tags":["3d-printing","parametric","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail16,
+    thumbnailUrl: thumbnail45,
     assets: [
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/lego/main.ts") },
       { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/replicad/lego/tau.json") },
@@ -277,7 +687,7 @@ export const builtinExamples = [
     locator: "replicad.planetary-gear-system",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_K56O7izOKVeumWMffxb7J","name":"Planetary Gear System","description":"An open, coaxial 4:1 planetary stage: a fixed 72-tooth ring, a 24-tooth sun on a keyed input shaft and three 24-tooth planets on a twin-plate carrier with stepped pins, bronze bushings, thrust hardware and socket screws. The model declares its mechanism, so the sun, carrier and planets turn together at the true gear ratios, and GeoSpec checks cover the envelope, planet positions and tooth clearance across mesh phases.","tags":["assembly","gears","kinematics","parametric","replicad","manufacturing"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail17,
+    thumbnailUrl: thumbnail46,
     assets: [
       { path: "DESIGN.md", load: loadTextAsset.bind(undefined, "./kernels/replicad/planetary-gear-system/DESIGN.md") },
       { path: "main.geospec.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/planetary-gear-system/main.geospec.ts") },
@@ -290,7 +700,7 @@ export const builtinExamples = [
     locator: "replicad.pot-plant",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_dB6KxezSHEFUv8aX4ibub","name":"Pot Plant","description":"A thoughtfully designed plant pot holder that combines form and function. Features an optional integrated saucer, customizable drainage holes, and smooth filleted edges for easy cleaning. Adjust dimensions to perfectly fit your favorite plants while maintaining proper drainage and a clean, modern aesthetic.","tags":["3d-printing","parametric","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail18,
+    thumbnailUrl: thumbnail47,
     assets: [
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/pot-plant/main.ts") },
       { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/replicad/pot-plant/tau.json") },
@@ -301,7 +711,7 @@ export const builtinExamples = [
     locator: "replicad.simple-tray",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_xEaivK3ZY8tYt2Yc6hn4D","name":"Simple Tray","description":"A practical drawer organizer with customizable compartments. Create the perfect grid layout for your needs with adjustable rows and columns. Features rounded corners, clean shelling, and optional edge fillets for a premium feel. Ideal for organizing tools, office supplies, or any small items that need dedicated spaces.","tags":["3d-printing","parametric","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail19,
+    thumbnailUrl: thumbnail48,
     assets: [
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/simple-tray/main.ts") },
       { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/replicad/simple-tray/tau.json") },
@@ -312,7 +722,7 @@ export const builtinExamples = [
     locator: "replicad.six-axis-arm",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_3MEVtmRsZETjASPwp8gM0","name":"Six-Axis Arm","description":"A compact six-revolute industrial arm with a spherical wrist and a parallel gripper: turned pedestal and turntable, clevis shoulder, windowed twin-plate upper arm, rolling forearm and wrist clevis. The joint angles are parameters that pose the as-built model, and the declared mechanism carries realistic joint limits and a wave clip so the arm can be posed, played and dragged by its tool.","tags":["assembly","kinematics","robotics","parametric","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail20,
+    thumbnailUrl: thumbnail49,
     assets: [
       { path: "DESIGN.md", load: loadTextAsset.bind(undefined, "./kernels/replicad/six-axis-arm/DESIGN.md") },
       { path: "main.geospec.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/six-axis-arm/main.geospec.ts") },
@@ -325,7 +735,7 @@ export const builtinExamples = [
     locator: "replicad.staircase",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_4RHier4pc3fPiLbHATqp9","name":"Staircase","description":"A complete staircase system with steps, stringers, handrails, and balusters—all fully parametric. Built to real-world building code proportions with customizable dimensions, optional features, and proper step geometry. Perfect for architectural visualization, furniture design, or educational demonstrations.","tags":["3d-printing","parametric","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail21,
+    thumbnailUrl: thumbnail50,
     assets: [
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/staircase/main.ts") },
       { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/replicad/staircase/tau.json") },
@@ -336,7 +746,7 @@ export const builtinExamples = [
     locator: "replicad.t-slot-rail",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_u8iLpUn39XKwwJ00B49J4","name":"T-Slot Rail","description":"A precise T-slot extrusion profile perfect for modular framing systems. Features accurate interior geometry with proper clearances and scoring details. Customizable rail height and length make it ideal for building custom fixtures, jigs, or furniture that requires the versatility of T-slot construction.","tags":["3d-printing","parametric","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail22,
+    thumbnailUrl: thumbnail51,
     assets: [
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/t-slot-rail/main.ts") },
       { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/replicad/t-slot-rail/tau.json") },
@@ -347,7 +757,7 @@ export const builtinExamples = [
     locator: "replicad.table",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_MGaJc46GJ3f2t9COgF4GR","name":"Table","description":"A complete table system with customizable top, legs, apron, and optional shelf. Choose between square or round legs, adjust proportions for any space, and add optional features like rounded corners or a lower shelf. The parametric design ensures perfect alignment and professional results for any furniture project.","tags":["3d-printing","parametric","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail23,
+    thumbnailUrl: thumbnail52,
     assets: [
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/table/main.ts") },
       { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/replicad/table/tau.json") },
@@ -358,7 +768,7 @@ export const builtinExamples = [
     locator: "replicad.tray",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_Puxz0MZamfmSL0LC8YhiO","name":"Tray","description":"A beautifully sculpted tray with elegant curved edges that elevates everyday items. Perfect for serving coffee, displaying jewelry, or organizing your entryway essentials. The sophisticated swept profile creates visual interest while the raised brim keeps everything secure. Fully customizable proportions let you create the perfect size for your space.","tags":["3d-printing","parametric","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail24,
+    thumbnailUrl: thumbnail53,
     assets: [
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/tray/main.ts") },
       { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/replicad/tray/tau.json") },
@@ -369,7 +779,7 @@ export const builtinExamples = [
     locator: "replicad.turbofan",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_CaIAcPYKNjKQ7026Sp7hD","name":"Turbofan Engine","description":"A two-spool, high-bypass turbofan at CFM56 scale: inlet, 22-blade fan, outlet guide vanes, three-stage booster, six-stage HP compressor with variable guide vanes, annular combustor with 20 fuel nozzles, two-stage HP and four-stage LP turbines, plug and nozzles, a radial drive to the accessory gearbox, and a translating-sleeve cascade thrust reverser. Its mechanism turns both spools and the radial drive, schedules the variable vanes from their unison rings, and deploys the reverser, whose blocker doors and drag links follow the exact linkage through sampled curve couplings.","tags":["assembly","kinematics","aerospace","engine","parametric","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail25,
+    thumbnailUrl: thumbnail54,
     assets: [
       { path: "DESIGN.md", load: loadTextAsset.bind(undefined, "./kernels/replicad/turbofan/DESIGN.md") },
       { path: "layout.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/turbofan/layout.ts") },
@@ -383,7 +793,7 @@ export const builtinExamples = [
     locator: "replicad.v8-engine",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_4w9wTW4GJbpzweI6qnOwK","name":"V8 Engine","description":"A complete 90° pushrod V8 with a cross-plane crank and the 1-8-4-3-6-5-7-2 firing order: block, crank, pistons and rods, a valley camshaft driving flat-tappet lifters, pushrods, stud rockers and valves, heads, manifolds, timing drive and dress. Every repeated part is modelled once and instanced. Its mechanism drives all 64 moving parts from the crank through sampled curve couplings, so the engine can be turned, played through a full four-stroke cycle or dragged by any piston.","tags":["assembly","kinematics","automotive","engine","parametric","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail26,
+    thumbnailUrl: thumbnail55,
     assets: [
       { path: "DESIGN.md", load: loadTextAsset.bind(undefined, "./kernels/replicad/v8-engine/DESIGN.md") },
       { path: "layout.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/v8-engine/layout.ts") },
@@ -397,7 +807,7 @@ export const builtinExamples = [
     locator: "replicad.vase",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_1VjdguUg32d0rHEiZMFto","name":"Vase","description":"A graceful, timeless vase design created through revolution of a carefully crafted profile. Adjustable wall thickness and elegant curves allow you to create everything from delicate bud vases to substantial statement pieces. Optional top fillets add refinement while maintaining the classic silhouette.","tags":["3d-printing","parametric","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail27,
+    thumbnailUrl: thumbnail56,
     assets: [
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/vase/main.ts") },
       { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/replicad/vase/tau.json") },
@@ -408,7 +818,7 @@ export const builtinExamples = [
     locator: "replicad.wavy-vase",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_1LAOVYHh7fBvACWzn41Uk","name":"Wavy Vase","description":"A bold, sculptural vase featuring dynamic twisted geometry and rhythmic faceting. The parametric design lets you control the number of sides, twist angle, and wall thickness to create unique light-catching forms. Perfect for making a statement piece that combines mathematical precision with artistic expression.","tags":["3d-printing","parametric","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail28,
+    thumbnailUrl: thumbnail57,
     assets: [
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/wavy-vase/main.ts") },
       { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/replicad/wavy-vase/tau.json") },
@@ -419,7 +829,7 @@ export const builtinExamples = [
     locator: "replicad.wedge-door-stopper",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_cDWerB7Efbatf8cJ6eGKu","name":"Wedge Door Stopper","description":"A hollow, printable wedge door stopper with rounded front and back profiles, a solid nose, and concentric underside grip ridges.","tags":["3d-printing","parametric","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail29,
+    thumbnailUrl: thumbnail58,
     assets: [
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/wedge-door-stopper/main.ts") },
       { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/replicad/wedge-door-stopper/tau.json") },
@@ -430,7 +840,7 @@ export const builtinExamples = [
     locator: "replicad.worm-gear-system",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_AI8JPdNx5sVGrywnIlDRy","name":"Worm Gear System","description":"A 30:1 single-start worm and bronze wheel on a bolted base with drilled supports and bearings. The worm is cut from a turned blank with a helical groove, the wheel is generated by the matching hob envelope, and the assembly ships with a manufacturing specification and GeoSpec checks for clearance and mesh positions.","tags":["assembly","gears","kinematics","parametric","replicad","manufacturing"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail30,
+    thumbnailUrl: thumbnail59,
     assets: [
       { path: "MANUFACTURING.md", load: loadTextAsset.bind(undefined, "./kernels/replicad/worm-gear-system/MANUFACTURING.md") },
       { path: "main.geospec.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/worm-gear-system/main.geospec.ts") },

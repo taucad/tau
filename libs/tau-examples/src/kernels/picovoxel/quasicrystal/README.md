@@ -1,0 +1,8 @@
+# Quasicrystal
+
+Tau adapter for the PicoVoxel community example from [taucad/picovoxel](https://github.com/taucad/picovoxel/tree/802d86da6e6120a472b045fddb306ce0dfa5d5f8) at commit `802d86da6e6120a472b045fddb306ce0dfa5d5f8`.
+
+- Upstream source: `examples/quasicrystals/icosahedralFace.ts`, `examples/quasicrystals/quasiCrystal.ts`, `examples/quasicrystals/quasiTile.ts`, `examples/quasicrystals/quasiTileInflation.ts`, `examples/quasicrystals/run.ts`
+- License: Apache-2.0; the copied source headers remain authoritative.
+- Adaptation: `main.ts` supplies Tau's injected `Pico` session and returns only renderable geometry.
+- Expected cost: heavy; increase `voxelSize` for a faster coarse preview.

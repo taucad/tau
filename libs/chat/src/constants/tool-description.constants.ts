@@ -40,7 +40,7 @@ Give explicit \`targetFile\` and \`format\` (extension only, matching the Tau MI
 
 Examples: \`format: "stl"\`, \`format: "step"\`, \`format: "glb"\`, \`format: "3mf"\`. The runtime must expose an export route for that extension on the user's active kernel — when it does not, the tool surfaces an RPC error explaining the rejection.
 
-Returns an ordered \`files\` array with each producer name, persisted \`artifactPath\`, \`mimeType\`, and \`byteLength\`. The first entry is the primary artifact and later entries are required companions.
+Returns an ordered \`files\` array with each producer name, persisted \`artifactPath\`, \`mimeType\`, and \`byteLength\`. The first entry is the primary artifact and later entries are required companions. Any \`warnings\` name what the export could not honour, such as colours; tell the person.
 
 For deterministic measurement runs, create or edit \`*.geospec.ts\` tests and use \`${toolName.testModel}\` instead.`,
   [toolName.getParameters]: `Read the admitted parameter manifest and current checked parameter record for one geometry source file.

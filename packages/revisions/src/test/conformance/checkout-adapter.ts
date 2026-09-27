@@ -30,6 +30,9 @@ const maxExternal = 0;
 
 const key = { chatId: 'chat-1', turnId: 'turn-1', runId: 'run-1', attempt: 0 } as const;
 
+/** How many D4 comparisons the harness has answered, for the conformance test's coverage check. */
+export const captureTreeAnswers = { count: 0 };
+
 /* A head is a per-branch counter in the spec; the harness names the revision `<branch>:<n>`. */
 const revisionOf = (branch: string, head: number): string => `${branch}:${String(head)}`;
 const headOf = (revisionId: unknown): number => Number(String(revisionId).split(':')[1] ?? 0);
@@ -55,6 +58,7 @@ const startHarness = (machine: CheckoutMachine) => {
         writeRevision: promises.actor('writeRevision'),
         casHead: promises.actor('casHead'),
         readHead: promises.actor('readHead'),
+        captureTree: promises.actor('captureTree'),
         fence: callbacks.actor('fence'),
       },
     }),
@@ -97,14 +101,22 @@ const flush = async (): Promise<void> => {
   });
 };
 
-/* The step the spec does not take: grant a waiting fence. */
+/*
+ * The steps the spec does not take: grant a waiting fence, and answer a D4 comparison (the spec's files are always
+ * their head's, so the capture reads the head's own tree).
+ */
 const settleInternal = async (harness: CheckoutHarness): Promise<void> => {
-  const { callbacks } = harness;
+  const { callbacks, promises } = harness;
   for (;;) {
     // oxlint-disable-next-line no-await-in-loop -- each internal step settles before the next is read.
     await flush();
     if (snapshotOf(harness).matches({ minting: 'acquiring' }) && callbacks.active('fence') > 0) {
       callbacks.sendBack('fence', { type: 'fenceGranted' });
+      continue;
+    }
+    if (promises.running('captureTree') > 0) {
+      captureTreeAnswers.count += 1;
+      promises.settle('captureTree', { output: { treeId: String(contextOf(harness)['headTreeId']) } });
       continue;
     }
     return;

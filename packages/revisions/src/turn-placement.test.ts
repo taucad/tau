@@ -11,7 +11,7 @@ import { join } from 'node:path';
 
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import type { RootedFileSystem } from '@taucad/filesystem';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { waitFor } from 'xstate';
 
 import { revisionId } from '#algorithms/index.js';
@@ -498,6 +498,59 @@ describe('createTurnPlacementPort (TS-S3)', () => {
    * TS-R15 (W8.r1 MU14, L-A): `complete` revokes the tools after the writes they accepted, so the cut holds every byte.
    * The write is held until `complete` answers or 2 s pass: `complete` may answer only after the write settled.
    */
+  /* E1 through W8 (GM merge): a host whose change feed is complete settles it before the admission and before the
+   * completion cut, so each cut re-reads only the paths it was told of (GM.r1 L5). */
+  it("should wait for the host's settle before it admits and before it cuts the completion", async () => {
+    const project = await createProject();
+    const revisions = createProjectRevisionsActor({
+      port: project.port,
+      projectId: 'project-1',
+      filesystem: () => project.filesystem,
+    });
+    revisions.actor.start();
+    stops.push(async () => {
+      revisions.actor.stop();
+      await revisions.settled();
+    });
+    const gates: Array<PromiseWithResolvers<void>> = [];
+    const settle = async (): Promise<void> => {
+      const gate = Promise.withResolvers<void>();
+      gates.push(gate);
+      await gate.promise;
+    };
+    const placement = createTurnPlacementPort({ revisions, openTools: ({ filesystem: view }) => view, settle });
+    const idle = async (): Promise<void> => {
+      await new Promise<void>((resolve) => {
+        setImmediate(resolve);
+      });
+    };
+
+    const admitting = placement.admit({ requestId: 'admit:run-1:1', key });
+    await vi.waitFor(() => {
+      expect(gates).toHaveLength(1);
+    });
+    await idle();
+    expect(revisions.actor.getSnapshot().context.turnFacts).toEqual({});
+    gates[0]!.resolve();
+    await expect(admitting).resolves.toMatchObject({ status: 'applied' });
+
+    let answered = false;
+    const complete = async () => {
+      const answer = await placement.complete({ requestId: 'complete:run-1:1', key, cut: true });
+      answered = true;
+      return answer;
+    };
+    const completing = complete();
+    await vi.waitFor(() => {
+      expect(gates).toHaveLength(2);
+    });
+    await idle();
+    expect(answered).toBe(false);
+    expect(await turnCuts(project.port, key)).toEqual(['base']);
+    gates[1]!.resolve();
+    await expect(completing).resolves.toMatchObject({ status: 'applied' });
+  });
+
   it('should cut a write the tools accepted before complete was sent', async () => {
     const project = await createProject();
     const gate = Promise.withResolvers<void>();

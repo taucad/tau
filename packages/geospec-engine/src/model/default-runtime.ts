@@ -10,6 +10,7 @@ import { middleware } from '@taucad/middleware';
 import { opencascade } from '@taucad/opencascade';
 import { replicad } from '@taucad/replicad';
 import { rhino } from '@taucad/rhino';
+import { tscircuit } from '@taucad/tscircuit';
 
 export const defaultRuntime = defineRuntime({
   plugins: [
@@ -24,5 +25,6 @@ export const defaultRuntime = defineRuntime({
     rhino(),
     image(),
     assimp({ preset: 'all' }),
+    tscircuit(),
   ],
 });

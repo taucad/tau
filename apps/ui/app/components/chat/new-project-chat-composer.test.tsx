@@ -1,7 +1,8 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
+import { useImperativeHandle } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CadAgentExecution } from '@taucad/chat';
-import type { ChatTextareaProperties } from '#components/chat/chat-textarea-types.js';
+import type { ChatTextareaHandle, ChatTextareaProperties } from '#components/chat/chat-textarea-types.js';
 import type { ProjectCreationLocationState } from '#hooks/use-project-creation-location.js';
 
 const mockNavigate = vi.fn(async () => undefined);
@@ -9,15 +10,25 @@ const mockCreateProject = vi.fn();
 const mockConsumeDraft = vi.fn(async () => undefined);
 const mockPresentLocationError = vi.fn(() => false);
 const mockRefresh = vi.fn(async () => undefined);
+const mockFocus = vi.fn();
+let routerLocationState: unknown;
+let locationKey = 0;
 let capturedTextarea: ChatTextareaProperties | undefined;
 let locationState: ProjectCreationLocationState;
 let composerExecution: CadAgentExecution;
 let attachmentSource: string | undefined;
 let draftAttachments: Array<{ hash: string; mediaType: string; byteLength?: number; filename?: string }>;
 
-vi.mock('react-router', () => ({ useNavigate: () => mockNavigate }));
+vi.mock('react-router', () => ({
+  useNavigate: () => mockNavigate,
+  useLocation: () => ({ key: String(locationKey), state: routerLocationState }),
+}));
 vi.mock('#components/chat/chat-textarea.js', () => ({
-  ChatTextarea: (properties: ChatTextareaProperties) => {
+  ChatTextarea: ({
+    ref,
+    ...properties
+  }: ChatTextareaProperties & { readonly ref?: React.Ref<Partial<ChatTextareaHandle>> }) => {
+    useImperativeHandle(ref, () => ({ focus: mockFocus }));
     capturedTextarea = properties;
     return (
       <>
@@ -93,6 +104,7 @@ describe('NewProjectChatComposer', () => {
     composerExecution = { kind: 'tau', model: 'gpt-test' };
     draftAttachments = [];
     attachmentSource = undefined;
+    routerLocationState = null;
     mockCreateProject.mockResolvedValue({ slugs: { workspaceSlug: 'workshop', projectSlug: 'bracket' } });
   });
 
@@ -175,6 +187,43 @@ describe('NewProjectChatComposer', () => {
         },
       }),
     );
+  });
+
+  it('focuses the composer when a navigation asks for it, including a return to an already-mounted Home', () => {
+    const { rerender } = render(<NewProjectChatComposer />);
+    expect(mockFocus).not.toHaveBeenCalled();
+
+    routerLocationState = { focusChatComposer: true };
+    locationKey += 1;
+    rerender(<NewProjectChatComposer />);
+    expect(mockFocus).toHaveBeenCalledOnce();
+
+    // A second "New Project" press is a new navigation, so it refocuses too.
+    locationKey += 1;
+    rerender(<NewProjectChatComposer />);
+    expect(mockFocus).toHaveBeenCalledTimes(2);
+  });
+
+  it('refocuses on window return only when nothing else holds focus', () => {
+    render(<NewProjectChatComposer />);
+    const other = document.createElement('input');
+    document.body.append(other);
+
+    other.focus();
+    fireEvent.focus(globalThis);
+    expect(mockFocus).not.toHaveBeenCalled();
+
+    other.blur();
+    fireEvent.focus(globalThis);
+    expect(mockFocus).toHaveBeenCalledOnce();
+    other.remove();
+  });
+
+  it('leaves focus alone on surfaces without autofocus', () => {
+    routerLocationState = { focusChatComposer: true };
+    render(<NewProjectChatComposer enableAutoFocus={false} />);
+    fireEvent.focus(globalThis);
+    expect(mockFocus).not.toHaveBeenCalled();
   });
 
   it('retains the draft and refreshes selected-folder status after a typed failure', async () => {

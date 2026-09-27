@@ -259,7 +259,7 @@ vi.mock('#hooks/use-project.js', () => ({
 // =============================================================================
 
 vi.mock('#hooks/use-file-tree.js', () => ({
-  useFileTreeMap: () => mockFileTree,
+  useFileTreeSelector: <T,>(select: (tree: typeof mockFileTree) => T): T => select(mockFileTree),
 }));
 
 vi.mock('#hooks/use-file-content.js', () => ({

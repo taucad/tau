@@ -137,6 +137,8 @@ declare module 'vitest' {
   export interface ProvidedContext {
     webGpuProfile: TargetWebGpuProfile;
     acpLiveEnabled: boolean;
+    /** False when the server was started without COOP/COEP (`TAU_E2E_DISABLE_COI`). */
+    crossOriginIsolation: boolean;
   }
 }
 

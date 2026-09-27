@@ -148,6 +148,14 @@ export type KernelRuntime = {
    * to cancellable platform APIs and do not retain it for later work.
    */
   readonly signal: AbortSignal;
+  /**
+   * Identity of the runtime operation this call belongs to. Every kernel call inside one
+   * operation — a render's dependency, parameter and geometry calls — shares it, and the runtime
+   * treats the workspace as unchanged for that operation's duration; any other call carries a
+   * different value. Key per-operation reuse of workspace reads on it. Hosts that do not scope
+   * calls into operations, such as test doubles, omit it, and nothing should then be reused.
+   */
+  readonly operationId?: number;
   /** Rooted filesystem capability; all paths are canonical and relative to its root. */
   filesystem: KernelFileSystem;
   /** Logger with kernel name pre-configured */

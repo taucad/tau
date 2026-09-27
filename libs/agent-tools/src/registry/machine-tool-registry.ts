@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/naming-convention -- tool identifiers are an external wire contract */
 import type { HostToolInvocation, InterruptResolution, JsonObject, JsonValue, ToolRegistry } from '@taucad/agent-host';
+import type { KernelIssue } from '@taucad/runtime';
 import type {
   MachineArtifactReference,
   MachineBeginBindingInput,
@@ -208,6 +209,8 @@ export type MachinePrintPlanner = (
     summary?: Omit<PrintRequestSummary, 'fileName'> | undefined;
     /** What the project's print intent contributed, or why it was ignored, for the tool result. */
     printIntent?: JsonObject | undefined;
+    /** What the slice could not honour although it was made (the export's warning issues); the agent tells the person. */
+    warnings?: readonly KernelIssue[] | undefined;
   }>
 >;
 
@@ -413,7 +416,8 @@ const requesterOf = (invocation: HostToolInvocation): PrintRequester =>
  * @param options - The planner that slices for it and the project filesystem.
  * @param invocation - The tool call, with its run approval when the host has one.
  * @returns The ledger's record, plus how the person answered when this call
- *   waited, the next step in words, and what the project's print intent contributed.
+ *   waited, the next step in words, what the project's print intent contributed,
+ *   and what the slice could not honour.
  */
 const requestPrint = async (
   client: MachineClient,
@@ -442,7 +446,10 @@ const requestPrint = async (
     signal,
   });
   signal.throwIfAborted();
-  const intent = plan.printIntent === undefined ? {} : { printIntent: plan.printIntent };
+  const reported = {
+    ...(plan.printIntent === undefined ? {} : { printIntent: plan.printIntent }),
+    ...(plan.warnings === undefined ? {} : { warnings: plan.warnings }),
+  };
   /* Idempotent by the tool call: a retried call finds its own request rather
    * than opening a second one for the same intent. */
   const requestId = invocation.toolCallId;
@@ -458,7 +465,7 @@ const requestPrint = async (
   if (request.state !== 'awaiting-approval' || invocation.approve === undefined) {
     /* Preflight refused, the retry found a request already past its approval,
      * or no person can answer here: the record and its next step say which. */
-    return asJson({ request, machineName, ...nextStepOf(request), ...intent });
+    return asJson({ request, machineName, ...nextStepOf(request), ...reported });
   }
   const resolution = await invocation.approve({
     prompt: approvalPrompt(request, machine),
@@ -480,7 +487,7 @@ const requestPrint = async (
       : resolution.outcome === 'denied'
         ? await client.resolvePrintRequest({ requestId, decision: 'deny', resolvedBy })
         : await client.withdrawPrintRequest({ requestId, resolvedBy });
-  return asJson({ request: settled, machineName, approval: resolution.outcome, ...nextStepOf(settled), ...intent });
+  return asJson({ request: settled, machineName, approval: resolution.outcome, ...nextStepOf(settled), ...reported });
 };
 
 /**

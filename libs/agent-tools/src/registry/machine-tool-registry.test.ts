@@ -527,6 +527,29 @@ describe('machine tool registry', () => {
       },
     );
 
+    it('should pass on what the slice could not honour, in the kernel issue shape', async () => {
+      const warnings = [
+        {
+          message: "The printer loads at most 4 filaments, so the model's 5 colours print as one, in #FF0000.",
+          code: 'REPRESENTATION_UNSUPPORTED',
+          type: 'runtime',
+          severity: 'warning',
+          details: { operation: 'transcode', engine: 'bambu-studio', colors: ['#FF0000', '#00FF00'] },
+        },
+      ] as const;
+      planPrint.mockResolvedValueOnce({
+        artifact: artifactFixture,
+        configuration: { expectedBedType: 'textured-pei' },
+        warnings,
+      });
+      const result = await run(clientFixture().client, {
+        toolName: 'request_print',
+        input: { targetFile: 'main.ts' },
+        approve: approveWith('approved'),
+      });
+      expect(requestPrintOutputSchema.parse(result.content).warnings).toEqual(warnings);
+    });
+
     it('should say a very short print takes under a minute, without "about"', async () => {
       const approve = approveWith('approved');
       planPrint.mockResolvedValueOnce({

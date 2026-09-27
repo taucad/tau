@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Bambu Studio setting keys are its own wire vocabulary */
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import type { JsonObject } from '@taucad/agent-host';
 import type { MachineDirectoryEntry, MachineProvider } from '@taucad/runtime/machine';
@@ -7,9 +8,13 @@ import type { PrintIntent } from '@taucad/slicer';
 import { writeBambuContainer } from '@taucad/slicer/container';
 import { quantityKinds } from '@taucad/units/quantity';
 import { sha256Bytes } from '@taucad/utils/hash';
-import { createMachinePrintPlanner } from '#registry/machine-print-planner.js';
+import {
+  createMachinePrintPlanner,
+  defaultFilamentSlots,
+  slicedFilamentColors,
+} from '#registry/machine-print-planner.js';
 import type { MachinePrintPlannerDependencies } from '#registry/machine-print-planner.js';
-import type { PrintIntentFile } from '#registry/print-profiles.js';
+import type { BambuStudioEngine, PrintIntentFile } from '#registry/print-profiles.js';
 
 /* Three annotated layers; relative extrusion totals 5 mm. */
 const gcode = [
@@ -41,6 +46,38 @@ const install = {
   version: '02.08.02.61',
   resourcesDir: '/Applications/BambuStudio.app/Contents/Resources',
 };
+const printers = ['Bambu Lab X1 Carbon 0.4 nozzle'];
+const filament = (name: string, filamentId: string, filamentType: string) =>
+  ({ name, kind: 'filament', source: 'system', filamentId, filamentType, compatiblePrinters: printers }) as const;
+/** The X1C presets of an installed Bambu Studio, as its catalog summarizes them. */
+const catalog = {
+  installation: install,
+  printers: [
+    { name: printers[0]!, kind: 'machine', source: 'system', printerModel: 'Bambu Lab X1 Carbon', nozzleDiameter: 0.4 },
+  ],
+  processes: [
+    {
+      name: '0.20mm Standard @BBL X1C',
+      kind: 'process',
+      source: 'system',
+      layerHeight: 0.2,
+      compatiblePrinters: printers,
+    },
+    {
+      name: '0.12mm Fine @BBL X1C',
+      kind: 'process',
+      source: 'system',
+      layerHeight: 0.12,
+      compatiblePrinters: printers,
+    },
+  ],
+  filaments: [
+    filament('Bambu PLA Basic @BBL X1C', 'GFA00', 'PLA'),
+    filament('Bambu PLA Matte @BBL X1C', 'GFA01', 'PLA'),
+    filament('Bambu PETG Basic @BBL X1C', 'GFG00', 'PETG'),
+  ],
+  plates: [],
+} as const;
 
 const machine = (setup: unknown): MachineDirectoryEntry =>
   ({
@@ -105,7 +142,10 @@ const dependencies = () => ({
   projectId,
   machines: { listProviders: async () => [provider] },
   /* No Bambu Studio on this host unless a test installs one. */
-  bambuStudio: { findBambuStudio: async () => undefined },
+  bambuStudio: {
+    findBambuStudio: async () => undefined,
+    loadBambuStudioCatalog: vi.fn<BambuStudioEngine['loadBambuStudioCatalog']>(async () => catalog),
+  },
 });
 
 type PlanCall = Parameters<ReturnType<typeof createMachinePrintPlanner>>[0];
@@ -124,7 +164,10 @@ const plan = async (
   });
 
 /** The same planner on a host where Bambu Studio is installed. */
-const withBambuStudio = () => ({ ...dependencies(), bambuStudio: { findBambuStudio: async () => install } });
+const withBambuStudio = () => {
+  const deps = dependencies();
+  return { ...deps, bambuStudio: { ...deps.bambuStudio, findBambuStudio: async () => install } };
+};
 
 /** The project's print intent for this printer's model, as read. */
 const current = (intent: Partial<PrintIntent>): PrintIntentFile => ({
@@ -448,6 +491,192 @@ describe('machine print planner', () => {
         `Slicing main.ts failed: Bambu Studio has no process preset "0.12mm Old @BBL X1C". The project's ${printIntentPath} supplied process; edit it there, or pass your own.`,
       );
     });
+  });
+
+  describe('with a model of several colours', () => {
+    /* Lane M's real Bambu Studio slice: a red cube (filament 1) beside a blue one (filament 2). */
+    const twoColour = writeBambuContainer({
+      gcode: readFileSync(
+        new URL('../../../../packages/plugins/slicer/src/__fixtures__/two-colour-cubes.gcode', import.meta.url),
+      ).toString(),
+      modelName: 'cubes',
+    });
+    const resliced = writeBambuContainer({ gcode, modelName: 'cubes-resliced' });
+    const tray = (slot: number, materialId: string, color: string) => ({
+      slot,
+      state: 'loaded',
+      materialId,
+      profileId: materialId.toUpperCase() === 'PETG' ? 'GFG00' : 'GFA00',
+      color,
+    });
+    /* The first slice reads two colours; the one after it is a re-slice. */
+    const slicing = <Deps extends MachinePrintPlannerDependencies>(deps: Deps) => ({
+      ...deps,
+      readArtifact: vi
+        .fn<MachinePrintPlannerDependencies['readArtifact']>()
+        .mockResolvedValueOnce(twoColour)
+        .mockResolvedValue(resliced),
+    });
+    const exported = (deps: Pick<ReturnType<typeof dependencies>, 'exportGeometry'>) =>
+      deps.exportGeometry.mock.calls.map(([call]) => call.exportOptions?.['bambuStudio']);
+
+    it("should map each colour to a tray of that colour, and re-slice with each tray's filament", async () => {
+      const deps = slicing(withBambuStudio());
+      /* The printer reports RGBA; slot 0 is the first loaded one, which a one-colour print uses. */
+      const entry = machine({
+        bedType: 'textured-pei',
+        materials: [
+          tray(0, 'PLA', '#0000FFFF'),
+          { ...tray(1, 'PLA', '#FF0000FF'), profileId: 'GFA01' },
+          tray(3, 'PETG', '#FF0000FF'),
+        ],
+      });
+      const result = await plan(deps, entry);
+      expect(result.configuration).toMatchObject({
+        expectedMaterials: [
+          { slot: 1, materialId: 'PLA' },
+          { slot: 0, materialId: 'PLA' },
+        ],
+        amsMapping: [1, 0],
+      });
+      /* The first slice printed both parts with slot 0's preset; filament 1 prints from slot 1's. */
+      const [first, second, ...more] = exported(deps);
+      expect(first).not.toHaveProperty('filaments');
+      expect(second).toMatchObject({ filaments: ['Bambu PLA Matte @BBL X1C', 'Bambu PLA Basic @BBL X1C'] });
+      expect(more).toEqual([]);
+      expect(deps.bambuStudio.loadBambuStudioCatalog).toHaveBeenCalledWith(install, {
+        model: 'X1C',
+        nozzleDiameter: 0.4,
+      });
+      /* The request names the re-slice, which the export recorded at the same path. */
+      expect(result.artifact).toMatchObject({
+        path: artifactPath,
+        digest: `sha256:${await sha256Bytes(resliced)}`,
+        length: resliced.byteLength,
+      });
+    });
+
+    it("should take a free tray of the print's material for a colour none holds, and slice once when the presets agree", async () => {
+      const deps = slicing(withBambuStudio());
+      /* No PLA tray is blue; slot 2 is free, and slot 3 is blue but PETG. */
+      const entry = machine({
+        bedType: 'textured-pei',
+        materials: [tray(0, 'PLA', '#FF0000FF'), tray(2, 'pla', '#FFFFFFFF'), tray(3, 'PETG', '#0000FFFF')],
+      });
+      const result = await plan(deps, entry);
+      /* Each tray's own spelling, which preflight compares. */
+      expect(result.configuration).toMatchObject({
+        expectedMaterials: [
+          { slot: 0, materialId: 'PLA' },
+          { slot: 2, materialId: 'pla' },
+        ],
+        amsMapping: [0, 2],
+      });
+      expect(deps.exportGeometry).toHaveBeenCalledTimes(1);
+      expect(result.artifact.digest).toBe(`sha256:${await sha256Bytes(twoColour)}`);
+    });
+
+    it('should refuse a colour no free tray of the material can print, naming it', async () => {
+      const deps = slicing(withBambuStudio());
+      const entry = machine({
+        bedType: 'textured-pei',
+        materials: [tray(0, 'PLA', '#FF0000FF'), tray(3, 'PETG', '#0000FFFF')],
+      });
+      await expect(plan(deps, entry)).rejects.toThrow(
+        "No free PLA slot in Workshop X1C for the model's colour #0000FF; load one for each, then ask again.",
+      );
+    });
+
+    it("should keep the filaments a call names, and the file's for each mapped slot", async () => {
+      const entry = machine({
+        bedType: 'textured-pei',
+        materials: [tray(0, 'PLA', '#0000FFFF'), tray(1, 'PLA', '#FF0000FF')],
+      });
+      const own = slicing(withBambuStudio());
+      const named = await plan(own, entry, { profiles: { filaments: ['Bambu PLA Matte @BBL X1C'] } });
+      expect(named.configuration).toMatchObject({ amsMapping: [1, 0] });
+      expect(exported(own)).toMatchObject([{ filaments: ['Bambu PLA Matte @BBL X1C'] }]);
+      expect(own.bambuStudio.loadBambuStudioCatalog).not.toHaveBeenCalled();
+
+      const deps = slicing(withBambuStudio());
+      const result = await plan(deps, entry, {
+        intentFile: current({
+          printer: printers[0],
+          filaments: { '0': 'Bambu PLA Basic @BBL X1C', '1': 'Bambu PLA Matte @BBL X1C', '2': 'Generic PLA' },
+        }),
+      });
+      expect(exported(deps)).toMatchObject([
+        { printer: printers[0], filaments: ['Bambu PLA Basic @BBL X1C'] },
+        { printer: printers[0], filaments: ['Bambu PLA Matte @BBL X1C', 'Bambu PLA Basic @BBL X1C'] },
+      ]);
+      expect(deps.bambuStudio.loadBambuStudioCatalog).toHaveBeenCalledWith(install, { printer: printers[0] });
+      /* Only the slots this print uses. */
+      expect(result.printIntent).toEqual({
+        path: printIntentPath,
+        applied: {
+          printer: printers[0],
+          filaments: { '1': 'Bambu PLA Matte @BBL X1C', '0': 'Bambu PLA Basic @BBL X1C' },
+        },
+      });
+    });
+
+    it('should print a one-part slice of several loaded presets from one slot', async () => {
+      /* Bambu Studio records a colour per loaded preset; its header says the plate prints filament 1 only. */
+      const onePart = writeBambuContainer({
+        gcode: `; HEADER_BLOCK_START\n; filament: 1\n; HEADER_BLOCK_END\n${gcode}`,
+        modelName: 'pyramid',
+        filamentColors: ['#F5A623', '#FFFFFF'],
+      });
+      const deps = { ...withBambuStudio(), readArtifact: async () => onePart };
+      const result = await plan(deps);
+      expect(result.configuration).toMatchObject({
+        expectedMaterials: [{ slot: 2, materialId: 'PETG' }],
+        amsMapping: [2],
+      });
+      expect(deps.exportGeometry).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('reads the colours a slice prints and the slots that print them', () => {
+    const colors = (header: string, filamentColors: readonly string[]) =>
+      slicedFilamentColors({ gcode: new TextEncoder().encode(`${header}\nG28\n`), filamentColors });
+    expect(colors('; filament: 1', ['#F5A623', '#FFFFFF'])).toEqual(['#F5A623']);
+    expect(colors('; filament: 1,2', ['#FF0000', '#0000FF'])).toEqual(['#FF0000', '#0000FF']);
+    /* No header: every recorded colour, as the reference engine's one. */
+    expect(colors('G90', ['#F5A623'])).toEqual(['#F5A623']);
+
+    const trays = [
+      { slot: 0, state: 'loaded', materialId: 'PLA', color: '#FF0000FF' },
+      { slot: 1, state: 'loaded', materialId: 'pla', color: 'ffffffff' },
+      { slot: 2, state: 'empty', color: '#0000FFFF' },
+      { slot: 3, state: 'loaded', materialId: 'PETG', color: '#0000FFFF' },
+    ] as const;
+    /* A colour no tray holds waits until red has taken its own tray. */
+    expect(defaultFilamentSlots(['#123456', '#FF0000'], trays, 'PLA')).toEqual([1, 0]);
+    expect(defaultFilamentSlots(['#FFFFFF', '#FF0000', '#0000FF'], trays, 'PLA')).toEqual([1, 0, undefined]);
+    expect(defaultFilamentSlots(['#0000FF'], trays, 'PETG')).toEqual([3]);
+  });
+
+  it('passes on what the export warned about the slice it made', async () => {
+    const warning = {
+      message: "The reference engine prints one material, so the model's 2 colours (#FF0000, #0000FF) print as one.",
+      code: 'REPRESENTATION_UNSUPPORTED',
+      severity: 'warning',
+      details: { colors: ['#FF0000', '#0000FF'] },
+    } as const;
+    const deps = dependencies();
+    deps.exportGeometry.mockResolvedValueOnce({
+      isError: false,
+      content: {
+        success: true,
+        format: 'gcode.3mf',
+        files: [{ name: 'pyramid.gcode.3mf', artifactPath, mimeType: mediaType, byteLength: container.byteLength }],
+        warnings: [warning],
+      },
+    });
+    const warned = await plan(deps);
+    expect(warned.warnings).toEqual([warning]);
+    expect(await plan(dependencies())).not.toHaveProperty('warnings');
   });
 
   it('reports why the export refused instead of requesting nothing', async () => {

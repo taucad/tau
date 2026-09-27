@@ -13,7 +13,7 @@ fn current(value: &str) -> String {
 #[test]
 fn six_independent_box_rows_match_complete_runtime_bytes_cold_and_warm() {
     let oracle: Value = serde_json::from_str(include_str!(
-        "../../../conformance/continuous-wall-box-a2.json"
+        "../../../conformance/continuous-wall-box-a3.json"
     ))
     .unwrap();
     let mut outcomes = Vec::new();

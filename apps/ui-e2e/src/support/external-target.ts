@@ -139,8 +139,8 @@ declare module 'vitest' {
     acpLiveEnabled: boolean;
     /** False when the server was started without COOP/COEP (`TAU_E2E_DISABLE_COI`). */
     crossOriginIsolation: boolean;
-    /** DP18: the exact STL of `picovoxel.sphere-minus-beams` every host exports (tau-examples `exact-pins.json`). */
-    picovoxelExactStlPin: { readonly sha256: string; readonly bytes: number };
+    /** DP18: the exact STL and GLB of `picovoxel.sphere-minus-beams` every host exports (tau-examples `exact-pins.json`). */
+    picovoxelExactPins: Readonly<Record<'stl' | 'glb', { readonly sha256: string; readonly bytes: number }>>;
   }
 }
 

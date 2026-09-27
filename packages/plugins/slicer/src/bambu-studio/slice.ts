@@ -150,6 +150,7 @@ const sliceNow = async ({
   install,
   selection,
   stl,
+  filamentColor,
   signal,
 }: BambuStudioSliceInput): Promise<BambuStudioSliceResult> => {
   signal.throwIfAborted();
@@ -198,6 +199,8 @@ const sliceNow = async ({
         'machine.json;process.json',
         '--load-filaments',
         filamentFiles.join(';'),
+        // The project's filament colours come from the command line; filament presets carry none.
+        ...(filamentColor === undefined ? [] : ['--filament-colour', filamentColor]),
         '--outputdir',
         join(directory, 'out'),
         '--export-3mf',

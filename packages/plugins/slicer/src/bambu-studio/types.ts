@@ -111,6 +111,11 @@ export type BambuStudioSliceInput = Readonly<{
   selection: BambuStudioSelection;
   /** Binary STL in millimetres. */
   stl: Uint8Array<ArrayBuffer>;
+  /**
+   * `#RRGGBB` the file records for the first filament, so previews draw the print in the model's
+   * colour; the preset's colour when absent.
+   */
+  filamentColor?: string;
   signal: AbortSignal;
 }>;
 

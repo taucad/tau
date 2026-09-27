@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { Document, WebIO } from '@gltf-transform/core';
+import { ColorUtils, Document, WebIO } from '@gltf-transform/core';
 import type { MachineArtifactReference } from '@taucad/runtime/machine';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import type { TranscoderRuntime } from '@taucad/runtime/transcoder';
@@ -44,6 +44,8 @@ const createRuntime = (signal = new AbortController().signal): TranscoderRuntime
 const createGlb = async (
   vertices: ReadonlyArray<readonly [number, number, number]>,
   triangles: ReadonlyArray<readonly [number, number, number]>,
+  /** The part's material colour as sRGB hex; no material when absent. */
+  color?: number,
 ): Promise<ExportFile> => {
   const document = new Document();
   const buffer = document.createBuffer();
@@ -58,6 +60,11 @@ const createGlb = async (
     .setArray(Uint32Array.from(triangles.flat()))
     .setBuffer(buffer);
   const primitive = document.createPrimitive().setAttribute('POSITION', position).setIndices(indices);
+  if (color !== undefined) {
+    primitive.setMaterial(
+      document.createMaterial('part').setBaseColorFactor(ColorUtils.hexToFactor(color, [0, 0, 0, 1])),
+    );
+  }
   const mesh = document.createMesh('part').addPrimitive(primitive);
   const node = document.createNode('part').setMesh(mesh);
   document.createScene().addChild(node);
@@ -348,11 +355,24 @@ describe('slicerTranscoder', () => {
       expect(new TextDecoder().decode(result.data[0]!.bytes)).toBe('demo archive bytes');
       const { args, files } = await recorded();
       expect(args[args.indexOf('--curr-bed-type') + 1]).toBe('Cool Plate');
+      // An uncoloured model keeps the filament preset's colour.
+      expect(args).not.toContain('--filament-colour');
       expect(Object.values(files).map(({ name }) => name)).toEqual([
         'Bambu Lab X1 Carbon 0.4 nozzle',
         '0.20mm Standard @BBL X1C',
         'Bambu PLA Basic @BBL X1C',
       ]);
+    });
+
+    it("should record the model's colour as the filament colour", async () => {
+      useFakeInstall();
+      await fake.control({ mode: 'succeed' });
+      const result = await sliceWithRealSignal(await createGlb(cubeVertices(20), cubeTriangles, 0xf5_a6_23), {
+        engine: 'bambu-studio',
+      });
+      expect(result.success).toBe(true);
+      const { args } = await recorded();
+      expect(args[args.indexOf('--filament-colour') + 1]).toBe('#F5A623');
     });
 
     it('should slice with the chosen presets and fill the rest from the printer hints', async () => {

@@ -772,14 +772,44 @@ fn negated_claims_skip_the_failure_diagnostics_that_finish_drops() {
             Capability::ToHaveCenterOfMass,
             payload("centerOfMass", Json::object([("point", origin.clone())])),
         ),
+        (
+            Capability::ToHaveConnectedComponents,
+            payload(
+                "connectedComponents",
+                Json::object([
+                    ("count", Json::Number(1.0)),
+                    ("toleranceMm", Json::Number(0.0)),
+                ]),
+            ),
+        ),
+        (
+            Capability::ToHaveMeshIntegrity,
+            payload(
+                "meshIntegrity",
+                Json::object([("watertight", Json::Bool(true))]),
+            ),
+        ),
     ] {
         let prepared = prepare(capability, &payload).unwrap();
         let subjects = [subject(open.clone())];
         let normalized = prepared.normalized_payload();
         let negated = |context_polarity| {
+            let batch = BatchAnalysis::new(
+                prepared
+                    .demand()
+                    .connected_components_tolerance_bits
+                    .map(|bits| (subjects[0].cache_identity().unwrap(), bits)),
+                AnalysisRetentionLimits {
+                    max_mesh_bytes: 1_000_000,
+                    max_mesh_entries: 1,
+                    max_solid_entries: 0,
+                },
+            )
+            .unwrap();
             let budget = Budget::new(10_000);
             let mut context =
                 EvaluationContext::new(&subjects, capability, "not", &normalized, &budget, None)
+                    .with_batch(&batch)
                     .with_polarity(context_polarity);
             let before = MISMATCH_BUILDS.with(std::cell::Cell::get);
             let evaluation = evaluate(&prepared, &mut context);

@@ -742,3 +742,60 @@ fn projected_mesh_family_results_keep_their_bytes() {
         ]
     );
 }
+
+#[test]
+fn negated_claims_skip_the_failure_diagnostics_that_finish_drops() {
+    // H9: finish() keeps no error diagnostic of a negated geometric result, so
+    // the family no longer builds one; the result bytes are those it had when
+    // it built the diagnostic for either polarity.
+    let mut open = box_record(0.0);
+    open.positions
+        .extend([[9.0, 0.0, 0.0], [10.0, 0.0, 0.0], [9.0, 1.0, 0.5]]);
+    open.triangles.push([8, 9, 10]);
+    open.triangle_primitives.push(1);
+    open.primitives.push(Primitive {
+        name: "fin#0".into(),
+        vertex_start: 8,
+        vertex_count: 3,
+    });
+    let origin = Json::Array(vec![Json::Number(0.0); 3]);
+    for (capability, payload) in [
+        (
+            Capability::ToBeWatertight,
+            payload("watertight", Json::Bool(true)),
+        ),
+        (
+            Capability::ToHaveVolume,
+            payload("volume", Json::object([("value", Json::Number(3.0))])),
+        ),
+        (
+            Capability::ToHaveCenterOfMass,
+            payload("centerOfMass", Json::object([("point", origin.clone())])),
+        ),
+    ] {
+        let prepared = prepare(capability, &payload).unwrap();
+        let subjects = [subject(open.clone())];
+        let normalized = prepared.normalized_payload();
+        let negated = |context_polarity| {
+            let budget = Budget::new(10_000);
+            let mut context =
+                EvaluationContext::new(&subjects, capability, "not", &normalized, &budget, None)
+                    .with_polarity(context_polarity);
+            let before = MISMATCH_BUILDS.with(std::cell::Cell::get);
+            let evaluation = evaluate(&prepared, &mut context);
+            let builds = MISMATCH_BUILDS.with(std::cell::Cell::get) - before;
+            let result = crate::result::finish(
+                "not",
+                capability,
+                crate::result::Polarity::Negative,
+                evaluation,
+            )
+            .unwrap();
+            (crate::codec::encode(&result).unwrap(), builds)
+        };
+        let (before, built) = negated(crate::result::Polarity::Positive);
+        let (after, skipped) = negated(crate::result::Polarity::Negative);
+        assert_eq!((built, skipped), (1, 0), "{}", capability.name());
+        assert_eq!(after, before, "{}", capability.name());
+    }
+}

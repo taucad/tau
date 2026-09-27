@@ -440,7 +440,8 @@ impl ResolvedPlan {
                     scope,
                 )
                 .with_batch(&self.batch)
-                .with_report_paid(claim.report_paid);
+                .with_report_paid(claim.report_paid)
+                .with_polarity(claim.polarity);
                 let value = match claim.payload {
                     Payload::Matcher(value) => value.evaluate(&mut context),
                     Payload::Query(value) => value.evaluate(&mut context),

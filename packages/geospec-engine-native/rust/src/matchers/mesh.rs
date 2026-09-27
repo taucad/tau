@@ -929,8 +929,9 @@ fn evaluate_components(
 }
 
 /// M2: STEP clusters from the retained BRep's bodies, never a tessellation.
-/// Bodies belong to leaf occurrences (none names another as parent, C2's
-/// rule), labelled through the component partition, or to the whole shape.
+/// Bodies belong to the component partition's leaves (C2: leaves that own a
+/// face, rulings 6 and 32), labelled through it, or to the whole shape of an
+/// occurrence-free document.
 fn step_component_clusters(
     tolerance_mm: f64,
     context: &mut EvaluationContext<'_>,
@@ -942,18 +943,11 @@ fn step_component_clusters(
         })
     })?;
     let occurrences = context.source_occurrence_structure()?.unwrap_or_default();
-    let mut parents = vec![false; occurrences.len()];
-    for occurrence in occurrences.iter() {
-        if let Some(parent) = occurrence
-            .parent
-            .and_then(|value| parents.get_mut(value as usize))
-        {
-            *parent = true;
-        }
+    let leaves = crate::analysis::interference::leaf_components(&occurrences);
+    if leaves.is_empty() && !occurrences.is_empty() {
+        // Every leaf is faceless: no body and no component (ruling 32).
+        return Ok(Vec::new());
     }
-    let leaves: Vec<u32> = (0..occurrences.len() as u32)
-        .filter(|&index| !parents[index as usize])
-        .collect();
     let identities = crate::analysis::interference::component_labels(context.subject())
         .map_err(backend_refusal)?;
     let refusal = |error: ExactError, labels: &[String]| match error {

@@ -62,19 +62,19 @@ describe('PicogkSession', () => {
       String(process.pid),
     ]);
     expect(() => {
-      configured.parseReady({ protocolVersion: 4, type: 'ready', dotnetVersion: '10', picogkVersion: '2' });
+      configured.parseReady({ protocolVersion: 5, type: 'ready', dotnetVersion: '10', picogkVersion: '2' });
     }).not.toThrow();
-    expect(configured.parseResponse({ protocolVersion: 4, requestId: '1', result: { ok: true } })).toEqual({
+    expect(configured.parseResponse({ protocolVersion: 5, requestId: '1', result: { ok: true } })).toEqual({
       requestId: '1',
       result: { ok: true },
     });
-    expect(configured.parseResponse({ protocolVersion: 4, requestId: '2', error: { issues: [issue] } })).toEqual({
+    expect(configured.parseResponse({ protocolVersion: 5, requestId: '2', error: { issues: [issue] } })).toEqual({
       requestId: '2',
       issues: [issue],
     });
-    expect(() => configured.parseResponse({ protocolVersion: 4, requestId: '3' })).toThrow(/exactly one/);
+    expect(() => configured.parseResponse({ protocolVersion: 5, requestId: '3' })).toThrow(/exactly one/);
     expect(() =>
-      configured.parseResponse({ protocolVersion: 4, requestId: '4', result: {}, error: { issues: [issue] } }),
+      configured.parseResponse({ protocolVersion: 5, requestId: '4', result: {}, error: { issues: [issue] } }),
     ).toThrow(/exactly one/);
     expect(configured.shutdown.parseResult({ shutdown: true })).toEqual({ shutdown: true });
 

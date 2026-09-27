@@ -1,8 +1,8 @@
 // @vitest-environment node
 /* oxlint-disable typescript/no-unsafe-assignment -- Vitest asymmetric matchers are typed as any. */
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, relative, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 
 import { validateTauCadTopology } from '@taucad/geometry-core';
 import type { TauCadTopologyPayload } from '@taucad/geometry-core';
@@ -112,6 +112,88 @@ public static class ShapeFactory
         Vector3.Zero, radius * ${String(factor)}f * float.Parse(File.ReadAllText("scale.txt"), CultureInfo.InvariantCulture));
 }
 `;
+
+/* Independent programs in one project, the way a person or an agent writes a second model: each
+ * entry declares its own `Params` and `ModelPart` (identically named) and both build on one shared
+ * helper. The first set uses top-level statements, the second classic `static Main` methods. */
+type ProgramFixture = {
+  readonly name: string;
+  readonly files: (helperScale?: number) => Record<string, string>;
+  readonly entries: ReadonlyArray<{ readonly path: string; readonly defaultSizeMm: number }>;
+  readonly helper: string;
+};
+const sharedBox = (scale: number): string => `using System.Numerics;
+using PicoGK;
+public static partial class Model
+{
+    public static Mesh Box(float size) => Utils.mshCreateCube(new Vector3(size * ${String(scale)}f, 4f, 4f));
+}
+`;
+const programFixtures: readonly ProgramFixture[] = [
+  {
+    name: 'top-level statements',
+    helper: 'Shared.cs',
+    entries: [
+      { path: 'main.cs', defaultSizeMm: 10 },
+      { path: 'regions/other.cs', defaultSizeMm: 20 },
+    ],
+    files: (helperScale = 1) => ({
+      'main.cs': `using PicoGK;
+Library.Go(Params.VoxelSizeMm, () => Library.oViewer().Add(Model.Box(Params.Part == ModelPart.Base ? Params.SizeMm : 1f)));
+public enum ModelPart { Base, Lid }
+public static class Params
+{
+    public static float VoxelSizeMm { get; set; } = 1f;
+    public static float SizeMm { get; set; } = 10f;
+    public static ModelPart Part { get; set; } = ModelPart.Base;
+}
+`,
+      'regions/other.cs': `using PicoGK;
+Library.Go(Params.VoxelSizeMm, () => Library.oViewer().Add(Model.Box(Params.Part == ModelPart.Relief ? Params.SizeMm : 2f)));
+public enum ModelPart { Relief, Frame, Label }
+public static class Params
+{
+    public static float VoxelSizeMm { get; set; } = 1f;
+    public static float SizeMm { get; set; } = 20f;
+    public static ModelPart Part { get; set; } = ModelPart.Relief;
+}
+`,
+      'Shared.cs': sharedBox(helperScale),
+    }),
+  },
+  {
+    name: 'static Main methods',
+    helper: 'ModelParts.cs',
+    entries: [
+      { path: 'a.cs', defaultSizeMm: 6 },
+      { path: 'b.cs', defaultSizeMm: 8 },
+    ],
+    files: (helperScale = 1) => ({
+      'a.cs': `using PicoGK;
+public static partial class Model
+{
+    public static void Main() => Library.Go(1f, () => Library.oViewer().Add(Box(Params.SizeMm)));
+}
+public enum ModelPart { Base }
+public static class Params { public static float SizeMm { get; set; } = 6f; }
+`,
+      'b.cs': `using PicoGK;
+internal static class Program
+{
+    private static async Task<int> Main(string[] args)
+    {
+        await Task.Yield();
+        Library.Go(1f, () => Library.oViewer().Add(Model.Box(Params.SizeMm)));
+        return 0;
+    }
+}
+public enum ModelPart { Relief }
+public static class Params { public static float SizeMm { get; set; } = 8f; }
+`,
+      'ModelParts.cs': sharedBox(helperScale),
+    }),
+  },
+];
 
 const helixHeatExchangerFixtureRoot = resolve(import.meta.dirname, '../dotnet/fixtures/helix-heat-exchanger');
 const readCsharpFiles = (root: string): Record<string, string> => {
@@ -549,5 +631,107 @@ Library.Go(1f, () => Sh.PreviewBoxWireframe(new BaseBox(new LocalFrame(), 10f, 2
       await roverClient.shutdown();
     }
   }, 240_000);
+
+  describe.each(programFixtures)('independent C# programs in one project ($name)', ({ files, entries, helper }) => {
+    const [first, second] = entries as readonly [ProgramFixture['entries'][number], ProgramFixture['entries'][number]];
+
+    it('evaluates each entry alone, with its own parameters and exactly the sources it compiled', async () => {
+      const client = createTestRuntimeClient({ runtime, files: files() });
+      const evaluate = async (
+        entry: string,
+        options: { readonly parameters?: Record<string, unknown>; readonly files?: Record<string, string> } = {},
+      ) =>
+        client.evaluate({
+          source: { files: options.files ?? files(), entry },
+          ...(options.parameters === undefined ? {} : { parameters: options.parameters }),
+        });
+      const widthMm = async (...args: Parameters<typeof evaluate>): Promise<number> => {
+        const result = await evaluate(...args);
+        assertSuccess(result);
+        const glb = extractGltfFromResult(result);
+        if (!glb) {
+          throw new Error('Expected PicoGK GLB geometry.');
+        }
+        const bounds = getBoundingBoxFromInspect(await getInspectReport(glb));
+        if (!bounds) {
+          throw new Error('Expected a PicoGK bounding box.');
+        }
+        return bounds.size[0] * 1000;
+      };
+      try {
+        // Switching back and forth keeps each model's geometry, and an override stays with its entry.
+        await expect(widthMm(first.path)).resolves.toBeCloseTo(first.defaultSizeMm, 1);
+        await expect(widthMm(second.path)).resolves.toBeCloseTo(second.defaultSizeMm, 1);
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- C# parameter names are PascalCase.
+        await expect(widthMm(first.path, { parameters: { SizeMm: 5 } })).resolves.toBeCloseTo(5, 1);
+        await expect(widthMm(second.path)).resolves.toBeCloseTo(second.defaultSizeMm, 1);
+        await expect(widthMm(first.path)).resolves.toBeCloseTo(first.defaultSizeMm, 1);
+
+        // Provenance names what was compiled: this program and the helper, never the other program.
+        const evaluated = await evaluate(first.path);
+        expect(Object.keys(evaluated.sourceRevision?.files ?? {}).toSorted()).toEqual([helper, first.path].toSorted());
+
+        // The shared helper is a source of both programs, so an edit to it reaches both.
+        await expect(widthMm(first.path, { files: files(2) })).resolves.toBeCloseTo(first.defaultSizeMm * 2, 1);
+        await expect(widthMm(second.path, { files: files(2) })).resolves.toBeCloseTo(second.defaultSizeMm * 2, 1);
+
+        // A syntax error in the other program leaves this one running, and is reported where it is.
+        const broken = { ...files(), [second.path]: `${files()[second.path]!}\nLibrary.Go(1f, () => {` };
+        await expect(widthMm(first.path, { files: broken })).resolves.toBeCloseTo(first.defaultSizeMm, 1);
+        await expect(evaluate(second.path, { files: broken })).resolves.toMatchObject({
+          success: false,
+          issues: expect.arrayContaining([
+            expect.objectContaining({ location: expect.objectContaining({ fileName: second.path }) }),
+          ]),
+        });
+
+        // A helper names no model of its own when two programs could claim it.
+        await expect(evaluate(helper)).resolves.toMatchObject({
+          success: false,
+          issues: [expect.objectContaining({ details: expect.objectContaining({ workerCode: 'CS_TAU_ENTRY' }) })],
+        });
+      } finally {
+        await client.shutdown();
+      }
+    }, 300_000);
+
+    it('rerenders an entry for its helper but never for another program', async () => {
+      const projectRoot = mkdtempSync(join(tmpdir(), 'tau-picogk-entries-'));
+      const write = (path: string, content: string): void => {
+        mkdirSync(dirname(join(projectRoot, path)), { recursive: true });
+        writeFileSync(join(projectRoot, path), content, 'utf8');
+      };
+      for (const [path, content] of Object.entries(files())) {
+        write(path, content);
+      }
+      const client = await createNodeClient({ runtime, projectPath: projectRoot });
+      const geometries: unknown[] = [];
+      const stopGeometry = client.on('geometry', (geometry) => geometries.push(geometry));
+      try {
+        const initial = await client.render({ source: { path: first.path } });
+        expect(initial.superseded).toBe(false);
+        geometries.length = 0;
+
+        write(second.path, `${files()[second.path]!}\n// edited\n`);
+        await new Promise((resolve) => {
+          setTimeout(resolve, 3000);
+        });
+        expect(geometries).toHaveLength(0);
+
+        write(helper, files(2)[helper]!);
+        await vi.waitFor(
+          () => {
+            expect(geometries).toHaveLength(1);
+          },
+          { timeout: 120_000, interval: 50 },
+        );
+      } finally {
+        stopGeometry();
+        await client.shutdown({ drain: true });
+        client.terminate();
+        rmSync(projectRoot, { recursive: true, force: true });
+      }
+    }, 300_000);
+  });
 });
 /* oxlint-enable typescript/no-unsafe-assignment */

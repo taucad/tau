@@ -58,8 +58,13 @@ function FileSystemInfo({
   );
 }
 
-export function DetailsPanelBody({ readOnly = false }: { readonly readOnly?: boolean } = {}): React.JSX.Element {
+export function DetailsPanelBody({
+  readOnly: sharedReadOnly = false,
+}: { readonly readOnly?: boolean } = {}): React.JSX.Element {
   const { projectRef, updateName, updateDescription, updateTags } = useProject();
+  // A degraded tau.json is shown through a lossy view, so it is not edited here until it is repaired (R4).
+  const needsRepair = useSelector(projectRef, (state) => state.context.manifestIssue !== undefined);
+  const readOnly = sharedReadOnly || needsRepair;
 
   const projectName = useSelector(projectRef, (state) => state.context.project?.name ?? '');
   const projectDescription = useSelector(projectRef, (state) => state.context.project?.description ?? '');
@@ -91,6 +96,9 @@ export function DetailsPanelBody({ readOnly = false }: { readonly readOnly?: boo
           <section aria-label='Project' className='overflow-hidden rounded-xl border border-border bg-card'>
             <h2 className='border-b px-3 py-2 text-[13px] font-medium text-foreground'>Project</h2>
             <div className='space-y-3 p-3'>
+              {needsRepair ? (
+                <p className='text-sm text-muted-foreground'>Repair tau.json to edit these details.</p>
+              ) : null}
               <div className='space-y-2'>
                 <label className='text-sm font-medium text-foreground' htmlFor='project-name'>
                   Name
@@ -149,7 +157,7 @@ export function DetailsPanelBody({ readOnly = false }: { readonly readOnly?: boo
           </section>
 
           <FileSystemInfo backendType={backendType} activeWorkspaceName={activeWorkspaceName} />
-          {readOnly ? null : <ChatDetailsUsage />}
+          {sharedReadOnly ? null : <ChatDetailsUsage />}
         </div>
       </div>
     </div>

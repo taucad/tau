@@ -7,8 +7,8 @@ import { useActorRef, useSelector } from '@xstate/react';
 import { waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import { z } from 'zod';
-import { parseProjectManifestBytes, projectIdSchema, projectToManifest, serializeProjectManifest } from '@taucad/types';
-import type { ProjectManifest } from '@taucad/types';
+import { projectIdSchema, projectToManifest, readProjectManifestBytes, serializeProjectManifest } from '@taucad/types';
+import type { ProjectManifest, ProjectManifestReadResult } from '@taucad/types';
 import { idPrefix } from '@taucad/types/constants';
 import type { KernelProvider } from '@taucad/runtime';
 import type {
@@ -213,7 +213,10 @@ type ProjectManagerContextType = {
   refreshWorkspaceCatalog: () => Promise<void>;
   repairWorkspaceBindings: (workspaceId: string) => Promise<WorkspaceBindingRepairResult>;
   createProject: (options: CreateProjectOptions) => Promise<CreatedProject>;
+  /** Rejects while `tau.json` is degraded: the normalized view is lossy (blueprint R4). */
   updateProject: (projectId: string, update: PartialDeep<ProjectManifest>) => Promise<ProjectManifest | undefined>;
+  /** Rewrite a degraded `tau.json` as its normalized strict manifest; refuses a JSON syntax error. */
+  repairProject: (projectId: string) => Promise<ProjectManifest | undefined>;
   touchProject: (projectId: string, activityAt?: number) => Promise<ProjectLibraryState | undefined>;
   duplicateProject: (projectId: string) => Promise<CreatedProject>;
   getProjects: (options?: { includeDeleted?: boolean }) => Promise<ProjectLibraryEntry[]>;
@@ -234,8 +237,13 @@ type ProjectManagerContextType = {
    * project route depends on this counter, which makes that a live transition.
    */
   libraryRevision: number;
-  /** Give an `adoption-required` directory a fresh identity so it becomes a real project (R11). */
+  /**
+   * Give an `adoption-required` directory an identity so it becomes a real project (R11): the id its
+   * route last bound when no other directory claims it, otherwise a fresh one.
+   */
   adoptProject: (locator: ProjectLocator) => Promise<ProjectManifest>;
+  /** Bind a project id's route to one of the directories that claim it; writes no project file. */
+  chooseProjectDirectory: (locator: ProjectLocator, projectId: string) => Promise<void>;
   /** Pending operations this session is still settling, or has given up on (DF11). */
   recoveries: readonly PendingProjectRecovery[];
   /** Drop a pending operation the user has given up on (DF11). */
@@ -472,6 +480,26 @@ const persistentStorageRootKey = (root: PersistentStorageRoot): string =>
     root.backend === 'node' ? { backend: 'node', path: root.path ?? nodeHomeRoot() } : root,
     metaConfig.databasePrefix,
   );
+
+/** The persisted route that binds a project id to exactly this discovered directory. */
+const routeConfigFor = (projectId: string, locator: ProjectLocator): ProjectFileSystemConfig =>
+  locator.backend === 'webaccess'
+    ? {
+        projectId,
+        backend: 'webaccess',
+        workspaceId: locator.workspaceId,
+        providerBasePath: locator.relativeDirectory,
+      }
+    : locator.backend === 'node'
+      ? { projectId, backend: 'node', ...nodeRootPath(locator.path), providerBasePath: locator.relativeDirectory }
+      : { projectId, backend: locator.backend, providerBasePath: locator.relativeDirectory };
+
+/** Whether a persisted route already binds its project to exactly this directory. */
+const routeBindsLocator = (config: ProjectFileSystemConfig | undefined, locator: ProjectLocator): boolean =>
+  config !== undefined &&
+  config.backend !== 'memory' &&
+  persistentStorageRootKey(config) === locator.storageRootKey &&
+  config.providerBasePath === locator.relativeDirectory;
 
 /**
  * Allocate the physical directory for a new project at `root`: the name slug,
@@ -1126,8 +1154,15 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
   const runDiscoveryPass = useCallback(
     async (options?: { quarantinedLocators?: ReadonlyMap<string, string> }) => {
       const epoch = ++discoveryEpochRef.current;
-      const discovered = await fileManager.client.listProjectManifests();
+      const [discovered, persistedConfigs] = await Promise.all([
+        fileManager.client.listProjectManifests(),
+        getAllProjectFileSystemConfigs(),
+      ]);
       const quarantinedLocators = options?.quarantinedLocators ?? quarantinedLocatorsOf(recoveriesRef.current.values());
+      // One cursor pass over the route configs serves duplicate anchoring, the
+      // per-entry reconcile below and the orphan sweep after it. Mid-loop writes
+      // update the map so the sweep judges the route this pass just published.
+      const configs = new Map(persistedConfigs.map((config) => [config.projectId, config] as const));
       const occurrenceCount = new Map<string, number>();
       for (const entry of discovered.entries) {
         if (entry.status === 'valid' || entry.status === 'duplicate-id' || entry.status === 'route-blocked') {
@@ -1139,7 +1174,11 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
           if (entry.status !== 'valid' && entry.status !== 'duplicate-id') {
             return entry;
           }
-          return (occurrenceCount.get(entry.manifest.id) ?? 0) > 1
+          /* A copy never demotes the directory its route already binds: only an
+           * unbound copy is quarantined, and with no binding every copy is
+           * (blueprint R7; no scan-order winner, F10). */
+          return (occurrenceCount.get(entry.manifest.id) ?? 0) > 1 &&
+            !routeBindsLocator(configs.get(entry.manifest.id), entry.locator)
             ? { ...entry, status: 'duplicate-id' }
             : { ...entry, status: 'valid' };
         })
@@ -1168,12 +1207,8 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       // its old location is unreachable by definition, so re-pointing cannot
       // lose data. `rootStatuses` alone cannot tell "unknown workspace" from
       // "workspace not scanned this pass", which is why the store is consulted.
-      const [workspaces, persistedConfigs] = await Promise.all([listWorkspaces(), getAllProjectFileSystemConfigs()]);
+      const workspaces = await listWorkspaces();
       const knownWorkspaceIds = new Set(workspaces.map((workspace) => workspace.workspaceId));
-      // One cursor pass over the route configs serves both the per-entry
-      // reconcile below and the orphan sweep after it. Mid-loop writes update
-      // the map so the sweep judges the route this pass just published.
-      const configs = new Map(persistedConfigs.map((config) => [config.projectId, config] as const));
       const configUpserts: ProjectFileSystemConfig[] = [];
       const configDeletes: string[] = [];
       const blockedProjectIds = new Set<string>();
@@ -1182,26 +1217,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
           continue;
         }
         const existing = configs.get(entry.manifest.id);
-        const next: ProjectFileSystemConfig =
-          entry.locator.backend === 'webaccess'
-            ? {
-                projectId: entry.manifest.id,
-                backend: 'webaccess',
-                workspaceId: entry.locator.workspaceId,
-                providerBasePath: entry.locator.relativeDirectory,
-              }
-            : entry.locator.backend === 'node'
-              ? {
-                  projectId: entry.manifest.id,
-                  backend: 'node',
-                  ...nodeRootPath(entry.locator.path),
-                  providerBasePath: entry.locator.relativeDirectory,
-                }
-              : {
-                  projectId: entry.manifest.id,
-                  backend: entry.locator.backend,
-                  providerBasePath: entry.locator.relativeDirectory,
-                };
+        const next = routeConfigFor(entry.manifest.id, entry.locator);
         if (existing) {
           // Which physical root the row names: the workspace for webaccess, the
           // absolute path for node. Every other backend has exactly one root.
@@ -1420,15 +1436,21 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     }
   }, [discoverProjects, getReadiedWorker, settleRecovery]);
 
-  const getProject = useCallback(
-    async (projectId: string): Promise<ProjectManifest | undefined> => {
+  /**
+   * The routed project's manifest: strict, or degraded with the issue that
+   * write-protects it (blueprint R3/R4). The route supplies the id only when the
+   * bytes lost theirs; a different id there is another project, not this one.
+   */
+  const readProjectManifest = useCallback(
+    async (projectId: string): Promise<Extract<ProjectManifestReadResult, { success: true }> | undefined> => {
       await ensureDiscoveryReady();
-      const read = async (): Promise<ProjectManifest | undefined> => {
+      const read = async (): Promise<Extract<ProjectManifestReadResult, { success: true }> | undefined> => {
         try {
-          const parsed = parseProjectManifestBytes(
+          const result = readProjectManifestBytes(
             await fileManager.recordFiles.readFile(`/projects/${projectId}/tau.json`),
+            { id: projectId },
           );
-          return parsed.success ? parsed.data : undefined;
+          return result.success && result.data.id === projectId ? result : undefined;
         } catch {
           return undefined;
         }
@@ -1442,6 +1464,14 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       return read();
     },
     [discoverProjects, ensureDiscoveryReady, fileManager.recordFiles],
+  );
+
+  const getProject = useCallback(
+    async (projectId: string): Promise<ProjectManifest | undefined> => {
+      const read = await readProjectManifest(projectId);
+      return read?.data;
+    },
+    [readProjectManifest],
   );
 
   /**
@@ -1551,18 +1581,43 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
 
   const updateProject = useCallback(
     async (projectId: string, update: PartialDeep<ProjectManifest>): Promise<ProjectManifest | undefined> => {
-      const project = await getProject(projectId);
+      const project = await readProjectManifest(projectId);
       if (!project) {
         return undefined;
       }
-      const updated = deepmerge(project, update) as ProjectManifest;
+      // A degraded view is lossy (dropped keys, clamped text), so writing it
+      // back would erase what a person or a newer build wrote (blueprint R4).
+      if (project.issue) {
+        throw new Error('tau.json needs repair before Tau can change it. Repair it, or fix it in the editor.');
+      }
+      const updated = deepmerge(project.data, update) as ProjectManifest;
       await fileManager.recordFiles.writeFile(
         `/projects/${projectId}/tau.json`,
         serializeProjectManifest(projectToManifest(updated)),
       );
       return updated;
     },
-    [fileManager.recordFiles, getProject],
+    [fileManager.recordFiles, readProjectManifest],
+  );
+
+  const repairProject = useCallback(
+    async (projectId: string): Promise<ProjectManifest | undefined> => {
+      const project = await readProjectManifest(projectId);
+      if (!project?.issue) {
+        return project?.data;
+      }
+      // Defaults would erase text a person can still fix by hand.
+      if (project.issue.code === 'manifest-invalid-json') {
+        throw new Error('tau.json is not valid JSON. Fix it in the editor; Repair would discard its text.');
+      }
+      await fileManager.recordFiles.writeFile(
+        `/projects/${projectId}/tau.json`,
+        serializeProjectManifest(project.data),
+      );
+      invalidateProjectsList();
+      return project.data;
+    },
+    [fileManager.recordFiles, invalidateProjectsList, readProjectManifest],
   );
 
   const touchProject = useCallback(
@@ -1742,6 +1797,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
           locator,
           ...(slugs === undefined ? {} : { slugs }),
           ...(workspaceName === undefined ? {} : { workspaceName }),
+          ...(entry.issue === undefined ? {} : { issue: entry.issue }),
         };
       });
       const conflicts: ProjectDiscoveryConflict[] = discovery.entries.filter(
@@ -2106,13 +2162,47 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
 
   const adoptProject = useCallback(
     async (locator: ProjectLocator): Promise<ProjectManifest> => {
-      const manifest = await fileManager.client.adoptProjectDirectory(locator);
+      await ensureDiscoveryReady();
+      // The route that last bound this directory keys its chats, library row and
+      // editor state: restore that id unless another directory now claims it (R6).
+      const [configs, discovery] = await Promise.all([getAllProjectFileSystemConfigs(), discoverProjects()]);
+      const remembered = configs.find((config) => routeBindsLocator(config, locator))?.projectId;
+      const claimed = discovery.entries.some(
+        (entry) => 'manifest' in entry && 'id' in entry.manifest && entry.manifest.id === remembered,
+      );
+      const manifest = await fileManager.client.adoptProjectDirectory(
+        locator,
+        remembered === undefined || claimed ? undefined : { id: remembered },
+      );
       // The next discovery pass reconciles the route config from the manifest
       // now on disk, so nothing else has to be written here.
       invalidateProjectsList();
       return manifest;
     },
-    [fileManager.client, invalidateProjectsList],
+    [discoverProjects, ensureDiscoveryReady, fileManager.client, invalidateProjectsList],
+  );
+
+  const chooseProjectDirectory = useCallback(
+    async (locator: ProjectLocator, projectId: string): Promise<void> => {
+      await ensureDiscoveryReady();
+      // Re-verify on a fresh scan: the folder may have changed since the card
+      // rendered. Only the route binding moves; no project file is written (R7).
+      const discovery = await discoverProjects();
+      const chosen = discovery.entries.find(
+        (entry) =>
+          (entry.status === 'duplicate-id' || entry.status === 'valid') &&
+          entry.manifest.id === projectId &&
+          entry.locator.storageRootKey === locator.storageRootKey &&
+          entry.locator.relativeDirectory === locator.relativeDirectory,
+      );
+      if (!chosen) {
+        throw new Error('This folder no longer holds that project.');
+      }
+      await setProjectFileSystemConfig(routeConfigFor(projectId, chosen.locator));
+      await fileManager.workspace.syncProjectRoots();
+      invalidateProjectsList();
+    },
+    [discoverProjects, ensureDiscoveryReady, fileManager.workspace, invalidateProjectsList],
   );
 
   const assertWorkspaceMutationAllowed = useCallback(
@@ -2276,6 +2366,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       repairWorkspaceBindings,
       createProject,
       updateProject,
+      repairProject,
       touchProject,
       duplicateProject,
       getProjects,
@@ -2288,6 +2379,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       permanentlyDeleteProject,
       libraryRevision,
       adoptProject,
+      chooseProjectDirectory,
       recoveries,
       discardRecovery,
       assertWorkspaceMutationAllowed,
@@ -2319,6 +2411,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     repairWorkspaceBindings,
     createProject,
     updateProject,
+    repairProject,
     touchProject,
     duplicateProject,
     getProjects,
@@ -2331,6 +2424,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     permanentlyDeleteProject,
     libraryRevision,
     adoptProject,
+    chooseProjectDirectory,
     recoveries,
     discardRecovery,
     assertWorkspaceMutationAllowed,

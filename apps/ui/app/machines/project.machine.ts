@@ -1,7 +1,7 @@
 import { setup, types } from 'xstate';
 import type { ActorRefFrom, AnyActorRef, EnqueueObject, SnapshotFrom, SystemRegistry } from 'xstate';
 import { produce } from 'immer';
-import type { ProjectManifest } from '@taucad/types';
+import type { ProjectManifest, ProjectManifestParseIssue } from '@taucad/types';
 import { assertRootedPath, normalizePath } from '@taucad/utils/path';
 import { classify } from '@taucad/filesystem/path-registry';
 import { isBrowser } from '#constants/browser.constants.js';
@@ -21,6 +21,14 @@ import type { fileManagerMachine } from '#machines/file-manager.machine.js';
 export type ProjectContext = {
   projectId: string;
   project: ProjectManifest | undefined;
+  /**
+   * Why `tau.json` on disk is not the canonical manifest `project` holds (blueprint R4/R5).
+   *
+   * Set by the load for a degraded manifest, and by the change observer when the
+   * bytes stop identifying this project while it is open. While set, implicit
+   * writes are refused; `repairManifest` is the one explicit write.
+   */
+  manifestIssue: ProjectManifestParseIssue | undefined;
   error: Error | undefined;
   isLoading: boolean;
   shouldLoadModelOnStart: boolean;
@@ -66,6 +74,8 @@ export type ProjectLoadInput = { readonly projectId: string };
 export type ProjectRetrievedEvent = {
   readonly type: 'projectRetrieved';
   readonly project: ProjectManifest;
+  /** Present when `project` is the normalized view of a degraded manifest. */
+  readonly issue?: ProjectManifestParseIssue;
 };
 
 // Define the actors that the machine can invoke
@@ -75,7 +85,7 @@ const loadProjectActor = fromSafeAsync<ProjectRetrievedEvent, ProjectLoadInput>(
   );
 });
 
-const writeProjectActor = fromSafeAsync<void, { project: ProjectManifest }>(async () => {
+const writeProjectActor = fromSafeAsync<void, { project: ProjectManifest; repair?: boolean }>(async () => {
   throw new Error(
     'Not implemented. Please supply the `provide.actors.writeProjectActor` option to the project machine.',
   );
@@ -126,6 +136,10 @@ export function isProjectContentActivityPath(projectRelativePath: string): boole
  */
 type ProjectEventInternal =
   | { type: 'reloadProject' }
+  /* The change observer: tau.json no longer identifies this project; keep the last good manifest open. */
+  | { type: 'manifestIssueObserved'; issue: ProjectManifestParseIssue }
+  /* The one explicit write over a degraded or unidentifiable tau.json: the manifest this workspace holds. */
+  | { type: 'repairManifest' }
   | { type: 'updateName'; name: string }
   | { type: 'updateDescription'; description: string }
   | { type: 'updateTags'; tags: string[] }
@@ -189,8 +203,17 @@ const setError = (error: unknown): ProjectPatch => ({
   isLoading: false,
 });
 
+/** Implicit writes never replace a degraded manifest: its normalized view is lossy (blueprint R4). */
+const isManifestWritable = (context: ProjectContext): boolean => context.manifestIssue === undefined;
+
+/** Repair is refused for a JSON syntax error, whose defaults would erase text a person can still fix. */
+const isManifestRepairable = (context: ProjectContext): boolean =>
+  context.project !== undefined &&
+  context.manifestIssue !== undefined &&
+  context.manifestIssue.code !== 'manifest-invalid-json';
+
 const shouldUpdateProjectName = (context: ProjectContext, event: Extract<ProjectEvent, { type: 'updateName' }>) =>
-  Boolean(context.project && context.project.name !== event.name);
+  Boolean(isManifestWritable(context) && context.project && context.project.name !== event.name);
 
 /** Rewrite the loaded manifest, or leave context alone when no project is loaded. */
 const withProject = (context: ProjectContext, recipe: (project: ProjectManifest) => void): ProjectPatch =>
@@ -384,6 +407,7 @@ export const projectMachine = setup({
     return {
       projectId,
       project: undefined,
+      manifestIssue: undefined,
       error: undefined,
       isLoading: true,
       shouldLoadModelOnStart,
@@ -491,7 +515,9 @@ export const projectMachine = setup({
         // zero dependency on context.project or any loaded data.
         createViewGraphics,
         destroyViewGraphics,
-        projectRetrieved: { context: ({ event }) => ({ project: event.project, isLoading: false }) },
+        projectRetrieved: {
+          context: ({ event }) => ({ project: event.project, manifestIssue: event.issue, isLoading: false }),
+        },
       },
       invoke: {
         src: 'loadProjectActor',
@@ -515,6 +541,7 @@ export const projectMachine = setup({
           },
           on: {
             reloadProject: { target: '#project.loading', context: { isLoading: true } },
+            manifestIssueObserved: ({ event }) => ({ context: { manifestIssue: event.issue } }),
             updateName: ({ context, event }) =>
               shouldUpdateProjectName(context, event)
                 ? {
@@ -523,12 +550,18 @@ export const projectMachine = setup({
                     }),
                   }
                 : undefined,
-            updateDescription: ({ context, event }) => ({
-              context: withProject(context, (project) => {
-                project.description = event.description;
-              }),
-            }),
+            updateDescription: ({ context, event }) =>
+              isManifestWritable(context)
+                ? {
+                    context: withProject(context, (project) => {
+                      project.description = event.description;
+                    }),
+                  }
+                : undefined,
             updateTags: ({ context, event }) => {
+              if (!isManifestWritable(context)) {
+                return undefined;
+              }
               // Deduplicate tags to ensure uniqueness
               const uniqueTags = [...new Set(event.tags)];
               return {
@@ -541,11 +574,14 @@ export const projectMachine = setup({
             loadModel: ({ context, self }, enq) => ({
               context: loadMainModel(context, enq, { self, options: { pointAtExistingUnit: false } }),
             }),
-            setMainFile: ({ context, event }) => ({
-              context: withProject(context, (project) => {
-                project.assets.main.entryPath = event.path;
-              }),
-            }),
+            setMainFile: ({ context, event }) =>
+              isManifestWritable(context)
+                ? {
+                    context: withProject(context, (project) => {
+                      project.assets.main.entryPath = event.path;
+                    }),
+                  }
+                : undefined,
             createGeometryUnit: ({ context, event, self }, enq) => {
               assertRootedPath(event.entryPath);
 
@@ -691,12 +727,14 @@ export const projectMachine = setup({
           states: {
             idle: {
               on: {
-                flushNow: ({ context }) => (context.error === undefined ? undefined : { target: 'writing' }),
+                flushNow: ({ context }) =>
+                  context.error === undefined || !isManifestWritable(context) ? undefined : { target: 'writing' },
                 updateName: ({ context, event }) =>
                   shouldUpdateProjectName(context, event) ? { target: 'writing' } : undefined,
-                updateDescription: { target: 'writing' },
-                updateTags: { target: 'writing' },
-                setMainFile: { target: 'writing' },
+                updateDescription: ({ context }) => (isManifestWritable(context) ? { target: 'writing' } : undefined),
+                updateTags: ({ context }) => (isManifestWritable(context) ? { target: 'writing' } : undefined),
+                setMainFile: ({ context }) => (isManifestWritable(context) ? { target: 'writing' } : undefined),
+                repairManifest: ({ context }) => (isManifestRepairable(context) ? { target: 'repairing' } : undefined),
               },
             },
             pending: {
@@ -706,9 +744,12 @@ export const projectMachine = setup({
               on: {
                 updateName: ({ context, event }) =>
                   shouldUpdateProjectName(context, event) ? { target: 'pending', reenter: true } : undefined,
-                updateDescription: { target: 'pending', reenter: true },
-                updateTags: { target: 'pending', reenter: true },
-                setMainFile: { target: 'pending', reenter: true },
+                updateDescription: ({ context }) =>
+                  isManifestWritable(context) ? { target: 'pending', reenter: true } : undefined,
+                updateTags: ({ context }) =>
+                  isManifestWritable(context) ? { target: 'pending', reenter: true } : undefined,
+                setMainFile: ({ context }) =>
+                  isManifestWritable(context) ? { target: 'pending', reenter: true } : undefined,
                 flushNow: { target: 'writing' },
               },
             },
@@ -725,9 +766,20 @@ export const projectMachine = setup({
               on: {
                 updateName: ({ context, event }) =>
                   shouldUpdateProjectName(context, event) ? { target: 'pending' } : undefined,
-                updateDescription: { target: 'pending' },
-                updateTags: { target: 'pending' },
-                setMainFile: { target: 'pending' },
+                updateDescription: ({ context }) => (isManifestWritable(context) ? { target: 'pending' } : undefined),
+                updateTags: ({ context }) => (isManifestWritable(context) ? { target: 'pending' } : undefined),
+                setMainFile: ({ context }) => (isManifestWritable(context) ? { target: 'pending' } : undefined),
+              },
+            },
+            repairing: {
+              invoke: {
+                src: 'writeProjectActor',
+                input: ({ context }) => ({ project: context.project!, repair: true }),
+                onDone: ({ context }, enq) => {
+                  enq.emit({ type: 'projectUpdated', project: context.project! });
+                  return { target: 'idle', context: { manifestIssue: undefined, error: undefined } };
+                },
+                onError: ({ event }) => ({ target: 'idle', context: setError(event.error) }),
               },
             },
           },

@@ -557,9 +557,9 @@
       "sha256": "ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86"
     },
     "packages/geospec/host-tests/m3-corpus/authored-v5-identity-amendment.json": {
-      "path": "packages/geospec/host-tests/fixtures/data/7cfc8f6a2236d680b497c690e3f4084f0a9384d8d5bc84c6672525e5c1490c99",
-      "byteLength": 649270,
-      "sha256": "7cfc8f6a2236d680b497c690e3f4084f0a9384d8d5bc84c6672525e5c1490c99"
+      "path": "packages/geospec/host-tests/fixtures/data/0e1de1773cc470afd9b4a1898958a49502881c1e31bd6d39f35199fb9f004c8e",
+      "byteLength": 649433,
+      "sha256": "0e1de1773cc470afd9b4a1898958a49502881c1e31bd6d39f35199fb9f004c8e"
     }
   }
 }

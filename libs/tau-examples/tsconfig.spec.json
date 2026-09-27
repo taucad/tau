@@ -29,5 +29,7 @@
     "src/**/*.tsx",
     "src/**/*.js",
     "src/**/*.jsx"
-  ]
+  ],
+  // A bundler fixture: its asset queries, JSX and untyped modules are checked by the bundler suites, not tsc.
+  "exclude": ["src/kernels/replicad/bundler-feature-matrix/**"]
 }

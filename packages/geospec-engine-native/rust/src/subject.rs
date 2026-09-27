@@ -86,6 +86,8 @@ pub(crate) struct Subject {
     /// Report facts facet: whole-shape facts on the source (F1), one cell per
     /// demanded `ShapeParts` set, indexed by its bits.
     report_shape: [OnceCell<ShapeFacts>; 16],
+    /// C8: the last claim phase that hit or built each `report_shape` cell.
+    shape_demands: [Cell<u64>; 16],
     /// Report face tables (F5); a measured transfer replaces an address one.
     report_faces: RefCell<Option<RetainedReportFaces>>,
     /// Structure-only occurrences are replaced once bounds are demanded.
@@ -112,7 +114,6 @@ pub(crate) struct Subject {
 #[derive(Clone, Copy)]
 enum Facet {
     ReportMesh,
-    ReportShape,
     ReportFaces,
     SourceOccurrences,
     CircularBores,
@@ -195,6 +196,7 @@ impl Subject {
             mesh_analysis: OnceCell::new(),
             report_mesh_bytes: OnceCell::new(),
             report_shape: std::array::from_fn(|_| OnceCell::new()),
+            shape_demands: std::array::from_fn(|_| Cell::new(0)),
             report_faces: RefCell::new(None),
             source_occurrences: RefCell::new(None),
             circular_bores: OnceCell::new(),
@@ -227,8 +229,9 @@ impl Subject {
         self.facet_demands[facet as usize].get() == self.demand_phase.get()
     }
 
-    /// The report facets this phase demanded (`retained_report_bytes` less the
-    /// undemanded ones; the shape cells are the remainder).
+    /// The report facets this phase demanded: the mesh and face tables when
+    /// demanded, and each facts cell this phase hit or built (not every
+    /// retained cell, which would count earlier claims' part sets).
     fn demanded_report_bytes(&self) -> u64 {
         let mesh = self.report_mesh_bytes.get().copied().unwrap_or(0);
         let faces = self
@@ -236,18 +239,18 @@ impl Subject {
             .borrow()
             .as_ref()
             .map_or(0, |value| value.bytes);
+        let phase = self.demand_phase.get();
         let shape = self
-            .retained_report_bytes()
-            .saturating_sub(mesh)
-            .saturating_sub(faces);
-        [
-            (Facet::ReportMesh, mesh),
-            (Facet::ReportShape, shape),
-            (Facet::ReportFaces, faces),
-        ]
-        .into_iter()
-        .filter(|(facet, _)| self.demanded(*facet))
-        .fold(0, |sum, (_, bytes)| sum.saturating_add(bytes))
+            .report_shape
+            .iter()
+            .zip(&self.shape_demands)
+            .filter(|(cell, demand)| cell.get().is_some() && demand.get() == phase)
+            .count() as u64
+            * size_of::<ShapeFacts>() as u64;
+        [(Facet::ReportMesh, mesh), (Facet::ReportFaces, faces)]
+            .into_iter()
+            .filter(|(facet, _)| self.demanded(*facet))
+            .fold(shape, |sum, (_, bytes)| sum.saturating_add(bytes))
     }
 
     fn demanded_tessellations(&self) -> (u64, u64) {
@@ -477,22 +480,23 @@ impl Subject {
         &self,
         parts: ShapeParts,
     ) -> Result<Option<&ShapeFacts>, BackendError> {
-        self.demand(Facet::ReportShape);
         let Some(brep) = &self.brep else {
             return Ok(None);
         };
         self.cache_identity()?;
         let wanted = usize::from(parts.bits());
-        if let Some(value) = (wanted..self.report_shape.len())
-            .filter(|bits| bits & wanted == wanted)
-            .find_map(|bits| self.report_shape[bits].get())
+        let phase = self.demand_phase.get();
+        if let Some(bits) = (wanted..self.report_shape.len())
+            .find(|bits| bits & wanted == wanted && self.report_shape[*bits].get().is_some())
         {
+            self.shape_demands[bits].set(phase);
             self.observations.add(WorkCounter::DerivedHits, 1);
-            return Ok(Some(value));
+            return Ok(self.report_shape[bits].get());
         }
         let shape = brep.reported_shape_parts(parts)?;
         self.check_f2_pending(size_of::<ShapeFacts>() as u64)?;
         self.observations.add(WorkCounter::ReportBuilds, 1);
+        self.shape_demands[wanted].set(phase);
         Ok(Some(self.report_shape[wanted].get_or_init(|| shape)))
     }
 
@@ -535,6 +539,8 @@ impl Subject {
         Ok(Some(faces))
     }
 
+    /// Every retained report facet, demanded this phase or not (physical).
+    #[cfg(test)]
     fn retained_report_bytes(&self) -> u64 {
         let shape = self
             .report_shape

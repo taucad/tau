@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::backend::{
-    brep::{BrepIdentityProfile, PointState, ValidityFacts},
+    brep::{BrepIdentityProfile, PointState, TopologyCounts, ValidityFacts},
     AnalysisRetentionLimits,
 };
 
@@ -40,6 +40,26 @@ fn cube() -> TriangleMesh {
 impl BrepSubject for Cubes {
     fn reported_mesh(&self) -> Result<TriangleMesh, BackendError> {
         Ok(cube())
+    }
+    fn reported_shape(&self) -> Result<ShapeFacts, BackendError> {
+        Ok(ShapeFacts {
+            bounds: Bounds {
+                min: [0.0; 3],
+                max: [1.0; 3],
+            },
+            volume: 1.0,
+            surface_area: 6.0,
+            center_of_mass: [0.5; 3],
+            topology: TopologyCounts {
+                compounds: 0,
+                solids: 1,
+                shells: 1,
+                faces: 6,
+                wires: 6,
+                edges: 12,
+                vertices: 8,
+            },
+        })
     }
     fn tessellate(
         &self,
@@ -151,4 +171,35 @@ fn a_claim_phase_refuses_on_its_own_demand_hits_included() {
     // The report mesh counts only when this phase demands it.
     let report = subject(u64::MAX, 2);
     assert_eq!(phase(&report, true, &[0, 1]), refusal);
+}
+
+#[test]
+fn a_claim_phase_counts_only_the_facts_cells_it_demands() {
+    // F1 x C8: one facts cell per demanded part set, each counted only in the
+    // phases that hit or build it, never because an earlier claim kept it.
+    let probe = subject(u64::MAX, u32::MAX);
+    phase(&probe, false, &[0]).unwrap();
+    let mesh = probe.tessellations.borrow()[0].bytes;
+    let fixed = probe.continuous_owned_bytes();
+    let cell = size_of::<ShapeFacts>() as u64;
+    let claim = |subject: &Subject| {
+        subject.begin_demand_phase();
+        subject
+            .report_shape(ShapeParts::VOLUME)
+            .map_err(|error| error.message)?;
+        subject
+            .tessellate(BrepEntity::Occurrence(0), PROFILE)
+            .map(drop)
+            .map_err(|error| error.message)
+    };
+    // Room for the claim's one cell and one mesh, not for other part sets.
+    let cold = subject(mesh + cell + fixed, 256);
+    let warm = subject(mesh + cell + fixed, 256);
+    for parts in [ShapeParts::BOUNDS, ShapeParts::COUNTS, ShapeParts::AREA] {
+        warm.begin_demand_phase();
+        warm.report_shape(parts).unwrap();
+    }
+    assert_eq!(claim(&warm), claim(&cold));
+    assert_eq!(claim(&cold), Ok(()));
+    assert_eq!(warm.demanded_report_bytes(), cell);
 }

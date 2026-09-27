@@ -45,7 +45,7 @@ const writeProject = async (): Promise<string> => {
   return directory;
 };
 
-const stlHeader = (bytes: Uint8Array): string => new TextDecoder().decode(bytes.subarray(0, 80)).trimEnd();
+const stlHeader = (bytes: Uint8Array<ArrayBuffer>): string => new TextDecoder().decode(bytes.subarray(0, 80)).trimEnd();
 
 afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map(async (directory) => rm(directory, { recursive: true })));
@@ -102,7 +102,7 @@ describe('PicoVoxel packaged runtime', () => {
 
   it('should export the same exact bytes whatever wasm build the host selects for the fast lane', async () => {
     const projectPath = await writeProject();
-    const exportExact = async (wasm: PicovoxelOptionsInput['wasm']): Promise<Uint8Array> => {
+    const exportExact = async (wasm: PicovoxelOptionsInput['wasm']): Promise<Uint8Array<ArrayBuffer>> => {
       const client = await createNodeClient({ runtime: createRuntime(wasm), projectPath });
       try {
         // Request-scoped, as GeoSpec exports: one private exact build.

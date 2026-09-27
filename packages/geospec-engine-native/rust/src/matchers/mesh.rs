@@ -835,7 +835,15 @@ fn evaluate_components(
             let gaps = if u64::from(count) == expected_count {
                 Vec::new()
             } else {
-                nearest_cluster_gaps(&clusters)
+                match nearest_cluster_gaps(&clusters, context.budget()) {
+                    Ok(gaps) => gaps,
+                    Err(error) => {
+                        return Evaluation::budget_exceeded(
+                            Capability::ToHaveConnectedComponents,
+                            error,
+                        )
+                    }
+                }
             };
             Rc::new(ConnectedComponents {
                 count,

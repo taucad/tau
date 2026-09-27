@@ -296,7 +296,7 @@ fn nearest_gaps_are_each_clusters_first_minimum_of_the_complete_list() {
             .filter(|gap| pairs.contains(&(index(&gap.from_label), index(&gap.to_label))))
             .cloned()
             .collect();
-        let actual = nearest_cluster_gaps(&clusters);
+        let actual = nearest_cluster_gaps(&clusters, &Budget::new(u64::MAX)).unwrap();
         assert_eq!(actual, expected, "size {size}");
         assert!(actual.len() < size.max(1));
     }

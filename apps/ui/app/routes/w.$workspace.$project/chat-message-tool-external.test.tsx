@@ -509,6 +509,40 @@ describe('the external tool-call renderer', () => {
     expect(screen.queryByText(/terminal-1/)).not.toBeInTheDocument();
   });
 
+  it('names the skills a compound read command loaded, and keeps the command in the body', async () => {
+    const user = userEvent.setup();
+    const skills = String.raw`/Users/me/Library/Application\ Support/Tau/acp-skills/6948/.agents/skills`;
+    const command = `sed -n '1,240p' ${skills}/cad-openscad/SKILL.md && sed -n '1,280p' ${skills}/geospec-authoring/SKILL.md`;
+    const part = await partFromLog([
+      {
+        id: 'm-skill',
+        role: 'tool-input',
+        toolCallId: 'call-skill',
+        toolName: command,
+        call: { toolCallId: 'exec-1', kind: 'execute', title: command, status: 'pending' },
+        content: { command, cwd: '/work' },
+        metadata: externalMetadata,
+      },
+      {
+        id: 'm-skill-out',
+        role: 'tool-output',
+        toolCallId: 'call-skill',
+        toolName: command,
+        call: { toolCallId: 'exec-1', kind: 'execute', status: 'completed' },
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Codex's own `rawOutput` field names.
+        content: { formatted_output: '--- name: cad-openscad', exit_code: 0 },
+        isError: false,
+        metadata: externalMetadata,
+      },
+    ]);
+
+    renderExternal(part);
+    const header = screen.getByRole('button', { name: /skills cad-openscad, geospec-authoring/ });
+    expect(header).toHaveTextContent(/^Read skills cad-openscad, geospec-authoring$/u);
+    await user.click(header);
+    expect(screen.getByText(/\$ sed -n '1,240p'.*--- name: cad-openscad/u)).toBeVisible();
+  });
+
   it('strips control and bidirectional-override characters from an agent-authored title', async () => {
     const hostile = `rm -rf ‮gpj.exe‬ ${'x'.repeat(400)}`;
     expect(sanitizeAgentText(hostile)).not.toMatch(/[‬‮]/u);

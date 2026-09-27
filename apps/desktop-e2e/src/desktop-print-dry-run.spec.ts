@@ -280,14 +280,19 @@ test('prints the chat pyramid on the simulated X1C only after Accept', async () 
   }
 });
 
-test('denies the chat pyramid print without uploading anything', async () => {
+/* The pane card and the chat banner answer the same interrupt; either one's Deny reaches the ledger. */
+test.each([
+  ['the Print pane', 'pane'],
+  ['the chat banner', 'chat'],
+] as const)('denies the chat pyramid print from %s without uploading anything', async (_surface, surface) => {
   const script = { current: seedTurn };
-  const { page, root } = await openPrintProject('print-dry-run-deny', script);
+  const { page, root } = await openPrintProject(`print-dry-run-deny-${surface}`, script);
   script.current = printTurn;
   try {
     const fileName = await requestPyramidPrint(page, root);
     const paused = fixture!.gatewayRequests.length;
-    await paneApprovalOf(page, fileName).getByRole('button', { name: 'Deny' }).click();
+    const answering = surface === 'pane' ? paneApprovalOf(page, fileName) : chatApprovalOf(page);
+    await answering.getByRole('button', { name: 'Deny' }).click();
     await expect
       .poll(async () => latestRequestRow(page), { timeout: 60_000 })
       .toMatch(new RegExp(`^Denied${escapeRegExp(fileName)}by Tau agent`, 'u'));
@@ -309,7 +314,7 @@ test('denies the chat pyramid print without uploading anything', async () => {
       [],
     );
   } catch (error) {
-    await session!.capture('print-dry-run-deny');
+    await session!.capture(`print-dry-run-deny-${surface}`);
     throw error;
   }
 });

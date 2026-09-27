@@ -408,7 +408,6 @@ export class ChatSessionStore {
   #focusedChatId: string | undefined;
   readonly #membershipTopic = new Topic<void>({ name: 'ChatSessionStore.membership' });
   readonly #chatTopics = new Map<string, Topic<void>>();
-  readonly #statusTopics = new Map<string, Topic<void>>();
   #snapshot: readonly string[] = [];
   /**
    * Coalesces membership notifications onto a microtask so an `acquire`/
@@ -569,7 +568,6 @@ export class ChatSessionStore {
       existing.runHeld = true;
       existing.durableRunId = input.runId;
       existing.durableRunState = nextState;
-      this.#statusTopics.get(input.chatId)?.emit();
       if (shouldResume) {
         queueMicrotask(() => {
           if (
@@ -654,11 +652,6 @@ export class ChatSessionStore {
     }
     session.durableRunId = undefined;
     session.durableRunState = undefined;
-    /* Every other writer of these two fields wakes the chat's status topic, and
-     * the settlement components read both through `useSyncExternalStore`: a
-     * silent release left them deciding from the released run's snapshot until
-     * some unrelated status change happened to arrive. */
-    this.#statusTopics.get(input.chatId)?.emit();
     this.#disposeIfUnreferenced(session);
   }
 
@@ -718,20 +711,12 @@ export class ChatSessionStore {
     return this.#addPerChatListener({ bucket: this.#chatTopics, namePrefix: 'chat', chatId, listener });
   }
 
-  public getStatus(chatId: string): ChatStatus | undefined {
-    return this.#sessions.get(chatId)?.status;
-  }
-
   public getDurableRunState(chatId: string): InternalSession['durableRunState'] {
     return this.#sessions.get(chatId)?.durableRunState;
   }
 
   public getDurableRunId(chatId: string): string | undefined {
     return this.#sessions.get(chatId)?.durableRunId;
-  }
-
-  public subscribeStatus(chatId: string, listener: () => void): () => void {
-    return this.#addPerChatListener({ bucket: this.#statusTopics, namePrefix: 'status', chatId, listener });
   }
 
   /**
@@ -1845,7 +1830,6 @@ export class ChatSessionStore {
         if (durableRunId && !isDisconnect) {
           session.durableRunId = durableRunId;
           session.durableRunState = 'terminal';
-          this.#statusTopics.get(chatId)?.emit();
           this.#reconcileUnsettledRun(session, { runId: durableRunId, isAbort, isError });
         }
         persistenceActorRef.send({ type: 'requestFinished', messages, isAbort, isError, isDisconnect });
@@ -2112,7 +2096,6 @@ export class ChatSessionStore {
         if (session.durableRunId && (next === 'submitted' || next === 'streaming')) {
           session.durableRunState = 'active';
         }
-        this.#statusTopics.get(chatId)?.emit();
       }
       this.#syncChatState(session);
       this.#chatTopics.get(chatId)?.emit();
@@ -2496,13 +2479,8 @@ export class ChatSessionStore {
   }
 
   #disposeChatTopics(chatId: string): void {
-    for (const bucket of [this.#chatTopics, this.#statusTopics]) {
-      const topic = bucket.get(chatId);
-      if (topic) {
-        topic.dispose();
-        bucket.delete(chatId);
-      }
-    }
+    this.#chatTopics.get(chatId)?.dispose();
+    this.#chatTopics.delete(chatId);
   }
 
   #refreshSnapshot(): void {

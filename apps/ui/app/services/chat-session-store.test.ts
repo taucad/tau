@@ -1681,7 +1681,7 @@ describe('ChatSessionStore', () => {
       }
     });
 
-    it('should notify status subscribers when a durable run is released', () => {
+    it('should forget a durable run when it is released', () => {
       const store = createStore();
       store.acquire('chat_release', 'project_test');
       store.retainDurableRun({
@@ -1690,12 +1690,9 @@ describe('ChatSessionStore', () => {
         runId: 'run_release',
         state: 'terminal',
       });
-      const status = vi.fn();
-      store.subscribeStatus('chat_release', status);
 
       store.releaseDurableRun({ chatId: 'chat_release', runId: 'run_release' });
 
-      expect(status).toHaveBeenCalledTimes(1);
       expect(store.getDurableRunId('chat_release')).toBeUndefined();
     });
 
@@ -2605,32 +2602,6 @@ describe('ChatSessionStore', () => {
 
       expect(fresh).toHaveBeenCalledTimes(1);
       expect(stale).not.toHaveBeenCalled();
-    });
-
-    it('subscribeStatus notifies only its own chatId', () => {
-      const store = createStore();
-      store.acquire('chat_a', 'project_test');
-      store.acquire('chat_b', 'project_test');
-
-      const fakeA = harness.created.find((chat) => chat.id === 'chat_a')!;
-      const fakeB = harness.created.find((chat) => chat.id === 'chat_b')!;
-
-      const statusA = vi.fn();
-      const statusB = vi.fn();
-      store.subscribeStatus('chat_a', statusA);
-      store.subscribeStatus('chat_b', statusB);
-
-      fakeA.status = 'streaming';
-      fakeA.emitStatusChange();
-
-      expect(statusA).toHaveBeenCalledTimes(1);
-      expect(statusB).not.toHaveBeenCalled();
-
-      fakeB.status = 'submitted';
-      fakeB.emitStatusChange();
-
-      expect(statusA).toHaveBeenCalledTimes(1);
-      expect(statusB).toHaveBeenCalledTimes(1);
     });
   });
 

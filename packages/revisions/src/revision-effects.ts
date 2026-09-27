@@ -456,7 +456,7 @@ export type RevisionActorsOptions = Readonly<{
    * value, so a project opened under another layout cannot have Tau's rows
    * quietly applied to its files.
    *
-   * A non-default policy must also hand its rows to
+   * A non-default policy must also hand its layout to
    * `generatedIgnoreContent`, or the generated ignore block and the capture
    * disagree (PP5); `tauRevisionPolicy` keeps the pair together.
    */
@@ -2304,7 +2304,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           const dirty =
             expectedTreeId === undefined
               ? !holdsNoWorkBeforePull(before, target)
-            : expectedTreeId !== (await checkoutTreeId(place.id, before));
+              : expectedTreeId !== (await checkoutTreeId(place.id, before));
           const leases = await readLeases();
           const leased = leases.some((lease) => lease.checkoutId === place.id);
           signal.throwIfAborted();
@@ -2313,8 +2313,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             throw new CheckoutHeld({
               hold: 'leased',
               checkoutId: place.id,
-              message:
-                'These files are being changed by an active run. Synchronization will retry after it settles.',
+              message: 'These files are being changed by an active run. Synchronization will retry after it settles.',
             });
           }
           if (dirty) {

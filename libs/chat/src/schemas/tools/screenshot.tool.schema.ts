@@ -55,6 +55,7 @@ export const screenshotMcpOutputSchema = z
   .object({
     images: z.array(screenshotArtifactImageSchema).min(1),
     sourceRevision: sourceRevisionSchema.optional(),
+    message: z.string().optional(),
   })
   .strict();
 
@@ -71,6 +72,7 @@ export const screenshotOutputSchema = z
     sourceRevision: sourceRevisionSchema
       .optional()
       .describe('Digests of the source the captured geometry was computed from (R4).'),
+    message: z.string().optional().describe('What the images leave out of the viewer, such as a section cut.'),
   })
   .strict();
 /** @public */

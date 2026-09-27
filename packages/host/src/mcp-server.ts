@@ -396,6 +396,7 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
               success: true,
               images,
               ...(capture.sourceRevision ? { sourceRevision: capture.sourceRevision } : {}),
+              ...(capture.message === undefined ? {} : { message: capture.message }),
             };
           }
           if (tool === toolName.testModel && !result.isError && isJsonObject(result.content)) {

@@ -440,6 +440,7 @@ describe('the mounted /mcp route', () => {
                 success: true,
                 images: views.map((view) => ({ view, dataUrl: 'data:image/webp;base64,QUJD' })),
                 sourceRevision: { entry: 'main.cs', files: { 'main.cs': `sha256:${'a'.repeat(64)}` } },
+                message: 'Section cutaways narrower than 180° are not shown in captures.',
               },
             };
           }
@@ -491,6 +492,7 @@ describe('the mounted /mcp route', () => {
       const { images } = manifest;
       expect(images.map((image) => image.view)).toEqual(views);
       expect(manifest.sourceRevision?.entry).toBe('main.cs');
+      expect(manifest.message).toBe('Section cutaways narrower than 180° are not shown in captures.');
       expect(JSON.stringify(capture)).not.toContain('QUJD');
       expect(Buffer.byteLength(JSON.stringify(capture), 'utf8')).toBeLessThan(128 * 1024);
       for (const image of images) {

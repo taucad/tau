@@ -1106,16 +1106,14 @@ export function GltfMesh({
   const scene = presentation?.scene;
   const componentManifest = presentation?.manifest;
   const unitId = presentation?.unitId ?? requestedUnitId;
-  const sectionBarrierRef = useRef<GltfPresentationBarrier>(
-    sectionView.isActive && sectionView.enableMesh ? 'analysis-ready' : 'display-ready',
-  );
+  const sectionBarrierRef = useRef<GltfPresentationBarrier>(sectionView.isActive ? 'analysis-ready' : 'display-ready');
   const materialOptionsRef = useRef({ enableMatcap, matcapTint });
   const materialSignaturesRef = useRef(new WeakMap<PreparedGltfPresentation, string>());
 
   useEffect(() => {
-    sectionBarrierRef.current = sectionView.isActive && sectionView.enableMesh ? 'analysis-ready' : 'display-ready';
+    sectionBarrierRef.current = sectionView.isActive ? 'analysis-ready' : 'display-ready';
     materialOptionsRef.current = { enableMatcap, matcapTint };
-  }, [enableMatcap, matcapTint, sectionView.enableMesh, sectionView.isActive]);
+  }, [enableMatcap, matcapTint, sectionView.isActive]);
 
   // Memoize resolution vector to avoid creating new objects on each render
   const resolutionRef = useRef(new Vector2(size.width, size.height));
@@ -1162,7 +1160,7 @@ export function GltfMesh({
     // oxlint-disable-next-line react/immutability -- This presentation owns the external Three.js scene and restores its imperative raycast hook on teardown.
     scene.raycast = (raycaster, intersections): false => {
       const { context } = graphicsActor.getSnapshot();
-      // A section gizmo drag owns the pointer and suppresses model hover, so its moves skip the model query.
+      // A section handle drag owns the pointer and suppresses model hover, so its moves skip the model query.
       // The model's presses (secondary, and a primary one that starts a kinematics drag) never start that
       // drag, and the release's click raycasts after pointer-up has lifted the suppression.
       if (context.viewerHoverSuppressionReasons.includes('sectionViewTransform')) {
@@ -1663,11 +1661,11 @@ export function GltfMesh({
    * 100k triangles and 1.7 s at 1M, against a 16 ms pipeline. An active section view still submits
    * immediately and awaits the same promise before its next swap. */
   useEffect(() => {
-    if (presentation?.sectionStatus !== 'pending' || !sectionView.isActive || !sectionView.enableMesh) {
+    if (presentation?.sectionStatus !== 'pending' || !sectionView.isActive) {
       return;
     }
     void ensureSectionAnalysis(presentation);
-  }, [ensureSectionAnalysis, presentation, sectionView.enableMesh, sectionView.isActive]);
+  }, [ensureSectionAnalysis, presentation, sectionView.isActive]);
 
   useFrame(() => {
     if (!scene && frameProbeRef.current) {

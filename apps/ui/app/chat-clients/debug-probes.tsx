@@ -20,19 +20,19 @@ import { useProject } from '#hooks/use-project.js';
 import { awaitFreshRender } from '#machines/await-fresh-render.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
 import { createUiRuntimeConfig } from '#runtime/ui-runtime.config.js';
-import { captureFilesToDataUrls } from '#services/headless-capture.js';
+import { captureFilesToDataUrls, captureSettledCadImages } from '#services/headless-capture.js';
+import type { SectionCutValues } from '#components/geometry/graphics/section-cuts.js';
 import { createGeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js';
 import type { GeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js';
 import { armChatTurnHold, releaseChatTurnHold } from '#chat-clients/_internal/chat-host-binding.js';
 import type { ChatTurnHold } from '#chat-clients/_internal/chat-host-binding.js';
 
-type SectionPlane = Readonly<{ point: readonly [number, number, number]; normal: readonly [number, number, number] }>;
-
 type DebugProbeGlobals = {
   __tauRunGeoSpec?: (args?: RunGeoSpecTestsRpcInput) => Promise<unknown>;
   __tauGeoSpecReady?: () => boolean;
   __tauCaptureImages?: (input: CaptureImagesRpcInput) => Promise<CaptureImagesRpcResult>;
-  __tauCaptureSectionPlanePair?: () => Promise<{ onePlane: string; twoPlanes: string }>;
+  /** The agent's isometric capture of `src/main.ts` once per cut list, as data URLs, through the packaged worker. */
+  __tauCaptureSectionCuts?: (cutLists: ReadonlyArray<readonly SectionCutValues[]>) => Promise<string[]>;
   /**
    * Park the chat's next admission or settlement, so a row can make a gesture,
    * a reload or a stop land inside `run.queued.admitting` or `run.finishing.*`.
@@ -97,51 +97,32 @@ export function DebugProbes(): ReactNode {
         toolCallId: 'e2e-capture-images',
       });
     };
-    probeGlobals.__tauCaptureSectionPlanePair = async () => {
+    probeGlobals.__tauCaptureSectionCuts = async (cutLists) => {
       const { projectRef: liveProjectRef, headlessImageService: imageService } = depsRef.current;
       const cadUnit = liveProjectRef.getSnapshot().context.geometryUnits.get('src/main.ts');
       if (!cadUnit) {
         throw new Error('No geometry unit for src/main.ts');
       }
-      const settled = await awaitFreshRender(cadUnit);
-      const { geometry, entryPath } = settled.context;
-      if (!geometry || !entryPath || geometry.format === 'svg' || geometry.format === 'webrtc') {
-        throw new Error('Section planes need settled GLB geometry');
-      }
-      const render = async (planes: readonly SectionPlane[]): Promise<string> => {
-        const files = await imageService.export({
-          kind: 'capture',
-          identity: `e2e-section-planes:${geometry.hash}:${planes.length}`,
-          sourceFormat: 'glb',
-          sourcePath: entryPath,
-          geometryHash: geometry.hash,
-          content: geometry.content,
-          format: 'png',
-          exportOptions: {
-            mode: 'single',
-            width: 512,
-            height: 512,
-            lineWidth: 1,
-            camera: {
-              framing: 'fit',
-              direction: [0.6123724357, -0.6123724357, 0.5],
-              up: [0, 0, 1],
-              margin: 0.1,
-              projection: { kind: 'perspective', verticalFieldOfView: 45 },
-            },
-            sections: { planes, clipSurfaces: true, clipLines: true },
+      const cadSnapshot = await awaitFreshRender(cadUnit);
+      const dataUrls: string[] = [];
+      for (const cuts of cutLists) {
+        // oxlint-disable-next-line no-await-in-loop -- the image service runs one capture at a time, in order.
+        const files = await captureSettledCadImages({
+          cadSnapshot,
+          imageService,
+          recipe: { purpose: 'agent', mode: 'isometric', includeEdges: true },
+          presentation: {
+            upDirection: 'z',
+            enableSurfaces: true,
+            enableLines: true,
+            hiddenComponentIds: [],
+            isolatedComponentIds: [],
+            sectionCuts: cuts.map((cut, index) => ({ ...cut, id: `e2e-cut-${index}` })),
           },
         });
-        if (files?.length !== 1) {
-          throw new Error(`Expected one section image, received ${files?.length ?? 0}`);
-        }
-        return captureFilesToDataUrls(files)[0]!;
-      };
-      const first: SectionPlane = { point: [0, 0, 0], normal: [1, 0, 0] };
-      return {
-        onePlane: await render([first]),
-        twoPlanes: await render([first, { point: [0, 0, 0], normal: [0, 1, 0] }]),
-      };
+        dataUrls.push(...captureFilesToDataUrls(files));
+      }
+      return dataUrls;
     };
     probeGlobals.__tauHoldChatTurn = armChatTurnHold;
     probeGlobals.__tauReleaseChatTurn = releaseChatTurnHold;
@@ -150,7 +131,7 @@ export function DebugProbes(): ReactNode {
       delete probeGlobals.__tauRunGeoSpec;
       delete probeGlobals.__tauGeoSpecReady;
       delete probeGlobals.__tauCaptureImages;
-      delete probeGlobals.__tauCaptureSectionPlanePair;
+      delete probeGlobals.__tauCaptureSectionCuts;
       /* Nothing else can release these: a hold left armed by a chat switch or
        * a route unmount would park the next turn with no probe left to let it
        * go. A row that wants one across a reload arms it again on the new

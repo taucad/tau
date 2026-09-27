@@ -47,7 +47,7 @@ const mocks = vi.hoisted(() => {
       selectedComponentIds: [],
     },
     renderFrame: { anchorFrameId: 'tau:root', originMeters: [0, 0, 0], metersPerRenderUnit: 1 },
-    sectionView: { enableMesh: false, isActive: false, plane: undefined },
+    sectionView: { isActive: false },
   };
 });
 

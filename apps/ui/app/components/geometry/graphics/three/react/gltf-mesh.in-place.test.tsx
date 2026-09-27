@@ -52,7 +52,7 @@ const mocks = vi.hoisted(() => {
       originMeters: [0, 0, 0] as [number, number, number],
       metersPerRenderUnit: 1,
     },
-    sectionView: { enableMesh: false, isActive: false, plane: undefined },
+    sectionView: { isActive: false },
   };
 });
 
@@ -174,7 +174,7 @@ describe('GltfMesh in-place updates', () => {
     mocks.cameraRig.actorRef.send.mockClear();
     mocks.invalidate.mockClear();
     mocks.frameCallback = undefined;
-    mocks.sectionView = { enableMesh: false, isActive: false, plane: undefined };
+    mocks.sectionView = { isActive: false };
   });
 
   it('should present a same-topology result without reparsing it', async () => {
@@ -235,7 +235,7 @@ describe('GltfMesh in-place updates', () => {
       expect(committedRevisions()).toEqual([1]);
     });
 
-    mocks.sectionView = { enableMesh: true, isActive: true, plane: undefined };
+    mocks.sectionView = { isActive: true };
     view.rerender(
       <GltfMesh gltfFile={buildGlb({ lift: 5 })} geometryHash='b' presentationRevision={2} enableMatcap={false} />,
     );

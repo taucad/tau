@@ -95,7 +95,7 @@ const mocks = vi.hoisted(() => {
       originMeters: [0, 0, 0] as [number, number, number],
       metersPerRenderUnit: 1,
     },
-    sectionView: { enableMesh: false, isActive: false, plane: undefined },
+    sectionView: { isActive: false },
     raycastClipState: undefined as RaycastClipState | undefined,
     sceneBounds,
     backend: 'webgl' as 'webgl' | 'webgpu',
@@ -293,11 +293,7 @@ describe('GltfMesh camera lifecycle', () => {
     delete mocks.gl.coordinateSystem;
     mocks.cameraRig.perspectiveCamera.coordinateSystem = undefined;
     mocks.cameraRig.orthographicCamera.coordinateSystem = undefined;
-    mocks.sectionView = {
-      enableMesh: false,
-      isActive: false,
-      plane: undefined,
-    };
+    mocks.sectionView = { isActive: false };
     mocks.raycastClipState = undefined;
   });
 
@@ -909,7 +905,7 @@ describe('GltfMesh camera lifecycle', () => {
 
   it('keeps the complete active-section model until its analyzed replacement commits', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    mocks.sectionView = { enableMesh: true, isActive: true, plane: undefined };
+    mocks.sectionView = { isActive: true };
     let finishSecond: (() => void) | undefined;
     vi.spyOn(sectionTopology, 'registerGltfSectionSurfaceSources')
       .mockResolvedValueOnce([])
@@ -956,7 +952,7 @@ describe('GltfMesh camera lifecycle', () => {
 
   it('preserves A when active-section analysis of B fails', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    mocks.sectionView = { enableMesh: true, isActive: true, plane: undefined };
+    mocks.sectionView = { isActive: true };
     vi.spyOn(sectionTopology, 'registerGltfSectionSurfaceSources')
       .mockResolvedValueOnce([])
       .mockRejectedValueOnce(new Error('topology failed'));
@@ -984,7 +980,7 @@ describe('GltfMesh camera lifecycle', () => {
 
   it('cannot let a late B completion clear the queued C candidate', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    mocks.sectionView = { enableMesh: true, isActive: true, plane: undefined };
+    mocks.sectionView = { isActive: true };
     let finishSecond: (() => void) | undefined;
     vi.spyOn(sectionTopology, 'registerGltfSectionSurfaceSources')
       .mockResolvedValueOnce([])
@@ -1058,7 +1054,7 @@ describe('GltfMesh camera lifecycle', () => {
     async (backend) => {
       const clip = presentOn(backend);
       // With Section on a result is never written in place, so each revision presents a fresh scene.
-      mocks.sectionView = { enableMesh: true, isActive: true, plane: undefined };
+      mocks.sectionView = { isActive: true };
       vi.spyOn(sectionTopology, 'registerGltfSectionSurfaceSources').mockResolvedValue([]);
       const gltfs = [createClippableGltf(), createClippableGltf()];
       vi.spyOn(GLTFLoader.prototype, 'parseAsync').mockResolvedValueOnce(gltfs[0]!).mockResolvedValueOnce(gltfs[1]!);
@@ -1082,7 +1078,7 @@ describe('GltfMesh camera lifecycle', () => {
 
   it('should clip the first model before it commits when Section is already on', async () => {
     const clip = presentOn('webgl');
-    mocks.sectionView = { enableMesh: true, isActive: true, plane: undefined };
+    mocks.sectionView = { isActive: true };
     vi.spyOn(sectionTopology, 'registerGltfSectionSurfaceSources').mockResolvedValue([]);
     const gltf = createClippableGltf();
     vi.spyOn(GLTFLoader.prototype, 'parseAsync').mockResolvedValue(gltf);

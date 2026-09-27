@@ -29,13 +29,14 @@ if (disableCoi && !snapshotServer) {
     'TAU_E2E_DISABLE_COI=true needs the snapshot production server: set TAU_E2E_UI_SNAPSHOT=true and leave TAU_E2E_SERVER_MODE unset.',
   );
 }
-/* DP18: the exact STL bytes every host must export for `picovoxel.sphere-minus-beams`, read from the
- * pin tau-examples owns (runtime-e2e asserts the same pin in Node). */
-const picovoxelExactStlPin = (
+/* DP18: the exact STL and GLB bytes every host must export for `picovoxel.sphere-minus-beams`, read
+ * from the pins tau-examples owns (runtime-e2e asserts the same pins in Node). */
+type ExactPin = { readonly sha256: string; readonly bytes: number };
+const picovoxelExactPins = (
   JSON.parse(
     readFileSync(resolve(import.meta.dirname, '../../libs/tau-examples/src/kernels/picovoxel/exact-pins.json'), 'utf8'),
-  ) as { readonly 'sphere-minus-beams': { readonly stl: { readonly sha256: string; readonly bytes: number } } }
-)['sphere-minus-beams'].stl;
+  ) as { readonly 'sphere-minus-beams': { readonly stl: ExactPin; readonly glb: ExactPin } }
+)['sphere-minus-beams'];
 
 export default defineConfig({
   root: import.meta.dirname,
@@ -61,7 +62,7 @@ export default defineConfig({
     hookTimeout: 300_000,
     retry: isCi ? 2 : 0,
     fileParallelism: false,
-    provide: { crossOriginIsolation: !disableCoi, picovoxelExactStlPin },
+    provide: { crossOriginIsolation: !disableCoi, picovoxelExactPins },
     browser: {
       enabled: true,
       headless: true,

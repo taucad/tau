@@ -355,7 +355,8 @@ describe('ChatError', () => {
     expect(screen.queryByTestId('code-viewer')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Try again' }));
-    expect(continueChat).toHaveBeenCalledTimes(1);
+    expect(regenerate).toHaveBeenCalledTimes(1);
+    expect(continueChat).not.toHaveBeenCalled();
   });
 
   /* E1. A run whose document died is recorded abandoned, not failed by
@@ -378,6 +379,31 @@ describe('ChatError', () => {
     await user.click(screen.getByRole('button', { name: 'Resume' }));
     expect(continueChat).toHaveBeenCalledTimes(1);
     expect(regenerate).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['LEADER_VERSION_MISMATCH', 'Another version of Tau is running this chat'],
+    ['RUN_UNREADABLE', 'This chat was continued in a newer version of Tau'],
+    ['HISTORY_INVALID', "Tau can't read this chat's history"],
+    ['EXTERNAL_AGENT_RECOVERY_UNKNOWN', 'Tau restarted while the agent waited for your approval'],
+  ] as const)('shows the approved recovery card for %s', (code, title) => {
+    persisted({ category: errorCategory.generic, title: 'Error', message: 'A coded refusal', code });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByText(title)).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+  });
+
+  it('offers New chat for unreadable history without offering Resume', async () => {
+    const user = userEvent.setup();
+    persisted({ category: errorCategory.generic, title: 'Error', message: 'Bad history', code: 'HISTORY_INVALID' });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'New chat' }));
+    expect(openNewChat).toHaveBeenCalledOnce();
   });
 
   /* A silent peer (a crashed worker, or a daemon past its liveness bound) leaves the command's effect unknown: the

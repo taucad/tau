@@ -786,7 +786,7 @@ describe('durable log reattach after a reload', () => {
     expect(await readGatewayRequestCount()).toBe(1);
 
     /* The person's gesture is what spends. `RUN_ABANDONED` presents a resumable
-     * card, and its next command has its own sender-minted run id. */
+     * card, and Resume opens a second attempt of the same durable run. */
     await target.expectVisible(continueAction, 60_000);
     await target.click(continueAction);
     /* The document that died left *its* request parked at the stream gate, and
@@ -800,9 +800,13 @@ describe('durable log reattach after a reload', () => {
     await target.releaseAgentHostGatewayFixture();
     await target.expectVisible(selectors.getByText(finalText, { exact: true }), 120_000);
 
-    const tree = await waitForLocalPublishedTree('home');
+    const tree = await waitForLocalPublishedTree('home', 2);
     assertPublication(tree);
     expect(settlementTypesOf(tree)).toEqual([abandoned[0]?.type, 'turn.finalized']);
+    expect(settledTurns(tree).at(-1)?.runId).toBe(abandoned[0]?.runId);
+    expect(eventLog(tree).filter((event) => event.type === 'run.lifecycle' && event.state === 'admitted')).toHaveLength(
+      1,
+    );
     await expect.poll(seededLease, { timeout: 60_000, interval: 250 }).toBeUndefined();
     await assertNoApiRunCalls();
   });
@@ -825,16 +829,40 @@ describe('durable log reattach after a reload', () => {
     // A settled failure leaves the chat submittable again — the wedge this
     // vertical exists for was a chat that accepted no further turn. A fresh
     // send, not the card's continuation: this half is about the *next* turn.
+    const previousRunId = eventLog(await readActiveProjectTree('home')).find(
+      (event) => event.type === 'run.lifecycle' && event.state === 'admitted',
+    )?.runId;
     const priorRequests = await readGatewayRequestCount();
     await target.type(composer, `${seedPrompt} Again.`);
     await target.click(selectors.getByCss('button:has(svg.lucide-arrow-up)').last());
     await expect.poll(readGatewayRequestCount, { timeout: 120_000 }).toBeGreaterThan(priorRequests);
-    // The new sender's command id is the run id of its host attempt.
-    await expect.poll(seededLease, { timeout: 60_000, interval: 250 }).toMatchObject({
-      runId: expect.stringMatching(/^req_/u) as unknown,
-      chatId: expect.any(String) as unknown,
-      checkoutId: expect.any(String) as unknown,
-    });
+    // The second run can finish before a lease poll sees it; its log rows are durable.
+    await expect
+      .poll(
+        async () => {
+          const events = eventLog(await readActiveProjectTree('home'));
+          const runId = events.find(
+            (event) => event.type === 'run.lifecycle' && event.state === 'admitted' && event.runId !== previousRunId,
+          )?.runId;
+          return runId === undefined
+            ? undefined
+            : {
+                runId,
+                states: events
+                  .filter((event) => event.runId === runId && event.type === 'run.lifecycle')
+                  .map((event) => event.state),
+                settlements: events
+                  .filter((event) => event.runId === runId && settlementTypes.has(event.type))
+                  .map((event) => event.type),
+              };
+        },
+        { timeout: 60_000 },
+      )
+      .toEqual({
+        runId: expect.stringMatching(/^req_/u) as unknown,
+        states: ['admitted', 'running', 'completed'],
+        settlements: ['turn.finalized'],
+      });
   });
 });
 

@@ -1756,12 +1756,11 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         workspaceSlug = homeWorkspaceSlug;
       }
 
-      /* The project's own composed view, `versionedOnly`: the duplicate carries
-         the source's authored bytes and none of the control plane, records or
-         cache beside them (charter D11, ZIP follow-up F-2). The fresh manifest
-         is written by the commit, so the source's own `tau.json` is dropped. */
+      /* The source's own composed view supplies authored files and the
+         registry-selected writable records. The fresh manifest is written by
+         the commit, so the source's own `tau.json` is dropped. */
       const sourceFiles = Object.fromEntries(
-        Object.entries(await fileManager.readVersionedProjectFiles(`/projects/${projectId}`))
+        Object.entries(await fileManager.readDuplicateProjectFiles(`/projects/${projectId}`))
           .filter(([path]) => path !== 'tau.json')
           .map(([path, content]) => [path, { content }]),
       );

@@ -14,11 +14,17 @@ import { WebAnalyticsProvider } from '#providers/web-analytics-provider.js';
 import { readConsentStatusFromHeader } from '#lib/cookie-consent.lib.js';
 import { ProductApp, RootErrorBoundary, RootLayout } from '#root-layout.js';
 import { RootCommandPaletteItems } from '#root-command-items.js';
+import { ExampleCommandPaletteItems } from '#components/nav/example-command-items.js';
 import type { Handle } from '#types/matches.types.js';
 
 export const handle: Handle = {
   commandPalette(match) {
-    return <RootCommandPaletteItems match={match} />;
+    return (
+      <>
+        <RootCommandPaletteItems match={match} />
+        <ExampleCommandPaletteItems />
+      </>
+    );
   },
 };
 

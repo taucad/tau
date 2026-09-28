@@ -1,7 +1,6 @@
 import { Topic } from '@taucad/events';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
-import { retireBrowserAgentHostRun } from '#chat-clients/_internal/browser-agent-host-transport.js';
-import type { ChatTurn, ChatTurnGesture, ChatTurnSettlementInput } from '#machines/chat-session.machine.js';
+import type { ChatTurn, ChatTurnGesture } from '#machines/chat-session.machine.js';
 
 /**
  * Take one chat's next turn: derive its rewind point, wait out host
@@ -59,7 +58,6 @@ export const clearChatTurnServices = (chatId: string): void => {
 export const resetChatTurnServices = (): void => {
   admissionsByChat.clear();
   releaseChatTurnHold('admission');
-  releaseChatTurnHold('settlement');
 };
 
 /**
@@ -122,20 +120,17 @@ const awaitTurnService = async <T>(
   });
 };
 
-/** The two points an e2e row can park a chat's turn at. @public */
-export type ChatTurnHold = 'admission' | 'settlement';
+/** The admission point an e2e row can park a chat's turn at. @public */
+export type ChatTurnHold = 'admission';
 
 const holds = new Map<ChatTurnHold, PromiseWithResolvers<void>>();
 
 /**
- * Park this chat's next admission or settlement until it is released.
+ * Park this chat's next admission until it is released.
  *
  * `TAU_DEBUG` only, and armed only through the debug probes, because the two
- * states a browser row most needs to observe — `run.queued.admitting` and
- * `run.finishing.*` — are the two it cannot hold open from the outside: the
- * admission window is microseconds long and the settlement runs after the
- * stream the row is watching has already closed. Holding them is the only way
- * a row can make a gesture, a reload or a stop land *inside* them.
+ * `run.queued.admitting` is too brief to hold open from the outside. This
+ * lets a browser row make a gesture, reload or stop inside that admission.
  *
  * Global rather than per chat: a row drives one chat.
  *
@@ -155,7 +150,7 @@ export const armChatTurnHold = (hold: ChatTurnHold): void => {
 };
 
 /**
- * Let a parked admission or settlement carry on.
+ * Let a parked admission carry on.
  *
  * @param hold - The point to release; releasing one that was never armed is a
  *   no-op, so a row's cleanup never has to ask.
@@ -166,7 +161,7 @@ export const releaseChatTurnHold = (hold: ChatTurnHold): void => {
   holds.delete(hold);
 };
 
-/** Wait out a debug hold; nothing armed is one map lookup. */
+/** Wait out the debug admission hold; nothing armed is one map lookup. */
 const awaitChatTurnHold = async (hold: ChatTurnHold): Promise<void> => {
   await holds.get(hold)?.promise;
 };
@@ -194,17 +189,4 @@ export const chatTurnAdmission = fromSafeAsync<
     throw new Error('This turn was replaced before it started.');
   }
   return { type: 'turnAdmitted', turn };
-});
-
-/**
- * The chat's settlement, as `chatSessionMachine.run.finishing` invokes it.
- *
- * The host settles every attempt and appends its `turn.*` row (W8 TS-S6), so
- * the page settles nothing: it lets the run's record go. The chat's next
- * stream still starts behind this one's, which follows the log until that row
- * arrives. W9 reduces the machine's `finishing`. @public
- */
-export const chatTurnSettlement = fromSafeAsync<void, ChatTurnSettlementInput>(async ({ input }) => {
-  await awaitChatTurnHold('settlement');
-  retireBrowserAgentHostRun(input.chatId, input.runId);
 });

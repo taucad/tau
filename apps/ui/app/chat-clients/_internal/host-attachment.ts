@@ -10,7 +10,7 @@ export type HostAttachmentInput = Readonly<{
   connect: () => Promise<Pick<AgentHostClient, 'read' | 'subscribe' | 'close'>>;
   projection: Readonly<{
     getSnapshot: () => Readonly<{ context: ChatProjection }>;
-    send: (event: ChatProjectionEvent) => void;
+    send: (event: Extract<ChatProjectionEvent, { type: 'batch' }>) => void;
   }>;
   onStatus?: (event: {
     type: 'attachment.attached' | 'attachment.lost' | 'attachment.refused';

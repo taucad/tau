@@ -224,7 +224,7 @@ describe('ChatError', () => {
         },
         projection: projection.getSnapshot().context,
         attachmentStatus: 'attached',
-      } as CombinedChatState),
+      } as unknown as CombinedChatState),
     );
     render(<ChatErrorBanner />);
     expect(screen.getByText('Could not resume this run')).toBeInTheDocument();

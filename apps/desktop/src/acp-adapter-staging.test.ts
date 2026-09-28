@@ -114,6 +114,18 @@ describe('ACP adapter staging', () => {
     ]).toStrictEqual(['1.4.0', '1.3.0']);
   });
 
+  it('should resolve a shared glTF core from the staged root', async () => {
+    for (const name of ['@gltf-transform/core', '@gltf-transform/functions']) {
+      // oxlint-disable-next-line no-await-in-loop -- The second closure must see the first staged package.
+      await copyRuntimeClosure({ name, source: await realpath(resolve(appRoot, 'node_modules', name)), modulesRoot });
+    }
+
+    const fromFunctions = createRequire(resolve(modulesRoot, '@gltf-transform/functions/package.json'));
+    expect(fromFunctions.resolve('@gltf-transform/core')).toBe(
+      resolve(modulesRoot, '@gltf-transform/core/dist/index.cjs'),
+    );
+  });
+
   it.each(adapters)(
     'spawns %s from the staged tree and completes an ACP handshake',
     async (name) => {

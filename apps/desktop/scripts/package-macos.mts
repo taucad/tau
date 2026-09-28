@@ -4,7 +4,8 @@
  * Purpose: Assemble and verify Tau macOS packages, with signing/notarization selected explicitly.
  * Why: Quick Look extensions must enter Contents/PlugIns before one inside-out signing pass.
  * Environment: macOS, Xcode tools, built desktop/UI/native artifacts;
- * TAU_GEOSPEC_NATIVE_ASSEMBLY_ROOT selects the qualified assemble-package.sh output (required);
+ * optional TAU_GEOSPEC_NATIVE_ASSEMBLY_ROOT selects a qualified assemble-package.sh output;
+ * otherwise the current-source CI delivery is ensured and used;
  * optional TAU_MACOS_PACKAGE_OUTPUT_ROOT;
  * Apple credentials only for --release; --unsigned skips all package signing.
  * Usage: node --import @oxc-node/core/register scripts/package-macos.mts [--release | --unsigned] [--zip]
@@ -30,7 +31,13 @@ import { packager } from '@electron/packager';
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
 import { parseMacosPackageMode } from './macos-package-mode.mjs';
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
-import { copyGeoSpecNative, copyGeoSpecNativeAssembly, copyRuntimeClosure, copyTree } from './runtime-closure.mjs';
+import {
+  copyGeoSpecNative,
+  copyGeoSpecNativeAssembly,
+  copyGeoSpecSourceRelink,
+  copyRuntimeClosure,
+  copyTree,
+} from './runtime-closure.mjs';
 
 type PackageMetadata = {
   readonly name: string;
@@ -54,13 +61,8 @@ type PicoGkResourceManifest = {
 const desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const workspaceRoot = resolve(desktopRoot, '../..');
 const outputRoot = resolve(process.env['TAU_MACOS_PACKAGE_OUTPUT_ROOT'] ?? resolve(desktopRoot, 'package-out'));
-const geospecAssemblyInput = process.env['TAU_GEOSPEC_NATIVE_ASSEMBLY_ROOT'];
-if (!geospecAssemblyInput) {
-  throw new Error('Set TAU_GEOSPEC_NATIVE_ASSEMBLY_ROOT to the selected native assemble-package.sh output.');
-}
-const geospecAssemblyRoot = await realpath(resolve(workspaceRoot, geospecAssemblyInput));
-if (geospecAssemblyRoot === outputRoot || geospecAssemblyRoot.startsWith(`${outputRoot}/`)) {
-  throw new Error('GeoSpec native assembly must be outside the disposable package output root.');
+if (process.platform !== 'darwin') {
+  throw new Error('The macOS package can only be assembled on macOS.');
 }
 const stageRoot = resolve(outputRoot, 'stage');
 const extensionRoot = resolve(desktopRoot, 'macos/dist/extensions');
@@ -102,9 +104,6 @@ const machObjectMagics = new Set([...universalMagics, 0xfe_ed_fa_ce, 0xce_fa_ed_
 /** `CPU_TYPE_ARM64`; with subtype `CPU_SUBTYPE_ARM64_ALL` (0) it is the header `lipo -archs` names `arm64`. */
 const arm64CpuType = 0x01_00_00_0c;
 
-if (process.platform !== 'darwin') {
-  throw new Error('The macOS package can only be assembled on macOS.');
-}
 /* A shipped app records revisions with the binaries it carries: a machine
  * launched from Finder has `/usr/bin:/bin:/usr/sbin:/sbin` and no `git-lfs`, so
  * a release without this payload is an app that cannot back a project up. A
@@ -117,6 +116,22 @@ if (!shipsGit) {
 }
 if ([resolve('/'), homedir(), tmpdir(), desktopRoot, workspaceRoot].includes(outputRoot)) {
   throw new Error(`Refusing unsafe package output root: ${outputRoot}`);
+}
+const selectedGeoSpecAssembly = process.env['TAU_GEOSPEC_NATIVE_ASSEMBLY_ROOT'];
+if (selectedGeoSpecAssembly === '') {
+  throw new Error('TAU_GEOSPEC_NATIVE_ASSEMBLY_ROOT must name a qualified native assembly.');
+}
+const geospecAssemblyInput = selectedGeoSpecAssembly ?? 'out/artifacts/geospec-native-engine/ci/assembly';
+if (selectedGeoSpecAssembly === undefined) {
+  execFileSync(
+    process.execPath,
+    [resolve(workspaceRoot, 'packages/geospec-engine-native/scripts/ci-artifacts.mjs'), 'ensure-delivery'],
+    { cwd: workspaceRoot, stdio: 'inherit' },
+  );
+}
+const geospecAssemblyRoot = await realpath(resolve(workspaceRoot, geospecAssemblyInput));
+if (geospecAssemblyRoot === outputRoot || geospecAssemblyRoot.startsWith(`${outputRoot}/`)) {
+  throw new Error('GeoSpec native assembly must be outside the disposable package output root.');
 }
 const readJson = async <Value extends NonNullable<unknown>>(path: string): Promise<Value> =>
   JSON.parse(await readFile(path, 'utf8')) as Value;
@@ -292,6 +307,21 @@ const acpAdapters = await Promise.all(
  * can import it from a real directory, and stays inside the ASAR. */
 const sandboxRuntime = await realpath(resolve(desktopRoot, 'node_modules/@anthropic-ai/sandbox-runtime'));
 const sandboxRuntimeMetadata = await readJson<{ readonly version: string }>(resolve(sandboxRuntime, 'package.json'));
+const bundledImports = await Promise.all(
+  ['@gltf-transform/core', '@gltf-transform/functions', 'fflate', 'uint8array-extras', 'xstate'].map(async (name) => {
+    const source = await realpath(resolve(desktopRoot, 'node_modules', name));
+    const { version } = await readJson<{ readonly version: string }>(resolve(source, 'package.json'));
+    return { name, source, version };
+  }),
+);
+const sharpRoot = dirname(dirname(createRequire(resolve(bundledImports[1]!.source, 'package.json')).resolve('sharp')));
+const sharpPlatformImports = await Promise.all(
+  ['@img/sharp-darwin-arm64', '@img/sharp-libvips-darwin-arm64'].map(async (name) => {
+    const source = await realpath(resolve(sharpRoot, '..', name));
+    const { version } = await readJson<{ readonly version: string }>(resolve(source, 'package.json'));
+    return { name, source, version };
+  }),
+);
 
 await rm(outputRoot, { recursive: true, force: true });
 await Promise.all([
@@ -302,6 +332,10 @@ await Promise.all([
 const geospecNativeDependencies = await copyGeoSpecNativeAssembly(
   geospecAssemblyRoot,
   resolve(stageRoot, 'node_modules'),
+);
+const geospecSourceRelinkReceipt = await readFile(
+  resolve(stageRoot, 'node_modules/@taucad/geospec-engine-native/licenses/SOURCE-RELINK.json'),
+  'utf8',
 );
 
 const metadata = await readJson<PackageMetadata>(resolve(desktopRoot, 'package.json'));
@@ -347,6 +381,8 @@ await Promise.all([
           nanoraster: nanorasterMetadata.version,
           'nanoraster-darwin-arm64': nanorasterMetadata.version,
           '@anthropic-ai/sandbox-runtime': sandboxRuntimeMetadata.version,
+          ...Object.fromEntries(bundledImports.map(({ name, version }) => [name, version])),
+          ...Object.fromEntries(sharpPlatformImports.map(({ name, version }) => [name, version])),
           ...Object.fromEntries(acpAdapters.map(({ name, version }) => [name, version])),
         },
       },
@@ -356,7 +392,12 @@ await Promise.all([
   ),
 ]);
 
-for (const { name, source } of [...acpAdapters, { name: '@anthropic-ai/sandbox-runtime', source: sandboxRuntime }]) {
+for (const { name, source } of [
+  ...bundledImports,
+  ...sharpPlatformImports,
+  ...acpAdapters,
+  { name: '@anthropic-ai/sandbox-runtime', source: sandboxRuntime },
+]) {
   /* Serial: the closure nests one package inside another, so two adapters
    * racing on the same staged directories would make the layout undecidable. */
   // oxlint-disable-next-line no-await-in-loop -- see above.
@@ -388,7 +429,7 @@ const packagePaths = await packager({
    * and writes this key afterwards, and `TauHost-Info.plist` declares document
    * types and UTIs only, never a URL type. */
   protocols: [{ name: 'Tau', schemes: ['tau'] }],
-  asar: { unpack: '**/{*.node,bin/esbuild,@agentclientprotocol/**}' },
+  asar: { unpack: '**/{*.node,bin/esbuild,@agentclientprotocol/**,@img/**}' },
   prune: false,
 });
 
@@ -405,6 +446,7 @@ await Promise.all([
   cp(resolve(desktopRoot, 'resources/icon-dark.png'), resolve(resources, 'branding/icon-dark.png')),
   copyTree(resolve(pythonResourceRoot, 'darwin-arm64'), resolve(resources, 'python/darwin-arm64')),
   copyTree(resolve(picoGkResourceRoot, 'darwin-arm64'), resolve(resources, 'picogk/darwin-arm64')),
+  copyGeoSpecSourceRelink(geospecAssemblyRoot, geospecSourceRelinkReceipt, resources),
   ...(shipsGit
     ? [
         copyTree(gitResourceRoot, resolve(resources, 'git/darwin-arm64')),
@@ -436,6 +478,11 @@ if (!unsigned) {
     optionsForFile: (path) => ({
       ...(!release && (path === appPath || /\/Tau Helper(?: \([^)]+\))?\.app(?:\/|$)/u.test(path))
         ? { entitlements: adhocAppEntitlements }
+        : {}),
+      ...(release && path.endsWith('/Tau Helper (Plugin).app')
+        ? {
+            entitlements: ['com.apple.security.cs.allow-jit', 'com.apple.security.cs.allow-unsigned-executable-memory'],
+          }
         : {}),
       ...(path.includes('/Contents/PlugIns/') ? { entitlements: extensionEntitlements } : {}),
       ...(path.includes('/Contents/Resources/python/') && path.endsWith('/bin/python3.13')

@@ -37,7 +37,20 @@ const verifyPublicReuse = async (
       return { resolved: [input.entryPath], unresolved: [] };
     },
     async getParameters() {
-      return { success: true, data: { defaults: {}, schema: {} }, issues: [] };
+      return {
+        success: true,
+        data: {
+          defaults: {},
+          schema: {
+            $schema: 'https://json-structure.org/meta/extended/v0/#',
+            $id: 'urn:taucad:test:file-manager-compute-parameters',
+            $uses: ['JSONSchemaUnits'],
+            name: 'FileManagerComputeParameters',
+            type: 'object',
+          },
+        },
+        issues: [],
+      };
     },
     async exportGeometry() {
       return { success: false, issues: [] };
@@ -97,6 +110,9 @@ const verifyPublicReuse = async (
   const rendered = await producer.client.render({
     source: { files: { 'main.compute': 'producer' } },
   });
+  if (!existingStore) {
+    expect(rendered).toMatchObject({ superseded: false, geometry: { success: true, issues: [] } });
+  }
   if (existingStore) {
     expect(rendered.superseded || !rendered.geometry.success).toBe(true);
     expect(publication).toBeUndefined();
@@ -409,6 +425,7 @@ it('owns durable compute by admitted project and preserves generation across aut
       type: 'computeStoreAdmission',
       projectId: projectB,
     });
+    first.ready.context.worker!.postMessage({ type: 'computeStoreRelease', projectId });
     await verifyPublicReuse(() => rawComputePort(first.ready.context.worker!, projectId), 'revoked-a', {
       existingStore: oldA.store,
     });

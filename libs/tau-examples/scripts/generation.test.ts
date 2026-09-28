@@ -26,7 +26,6 @@ describe('generated example artifacts', () => {
   it('enables one unit-inference middleware after parameter declarations resolve', () => {
     expect(exampleRuntime.middleware.map(({ id }) => id)).toEqual([
       'parameterFileResolver',
-      'parameterCache',
       'parameterUnits',
       'gltfEdgeDetection',
     ]);

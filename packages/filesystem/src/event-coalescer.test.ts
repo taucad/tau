@@ -409,4 +409,58 @@ describe('EventCoalescer (timed)', () => {
     kernelCoalescer.dispose();
     uiCoalescer.dispose();
   });
+
+  describe('leading edge', () => {
+    it('should deliver a lone write on the next tick', () => {
+      const deliver = vi.fn();
+      const coalescer = new EventCoalescer(deliver, { coalescingWindow: 75, leadingEdge: true });
+
+      coalescer.push(written('/a.txt'));
+      vi.advanceTimersByTime(1);
+
+      expect(deliver).toHaveBeenCalledExactlyOnceWith([written('/a.txt')]);
+
+      coalescer.dispose();
+    });
+
+    it('should deliver a burst of ten writes within 50 ms in at most two batches', () => {
+      const deliver = vi.fn<(events: ChangeEvent[]) => void>();
+      const coalescer = new EventCoalescer(deliver, { coalescingWindow: 75, leadingEdge: true });
+      const paths = Array.from({ length: 10 }, (_, index) => `/burst/${index}.txt`);
+
+      for (const path of paths) {
+        coalescer.push(written(path));
+        vi.advanceTimersByTime(5);
+      }
+      vi.advanceTimersByTime(75);
+
+      expect(deliver.mock.calls.length).toBeLessThanOrEqual(2);
+      expect(deliver.mock.calls.flatMap(([batch]) => batch)).toEqual(paths.map((path) => written(path)));
+
+      coalescer.dispose();
+    });
+
+    it('should batch events pushed in the same tick and coalesce events a delivery causes into the window', () => {
+      const batches: ChangeEvent[][] = [];
+      const coalescer = new EventCoalescer(
+        (events) => {
+          batches.push(events);
+          if (batches.length === 1) {
+            coalescer.push(written('/echo.txt'));
+          }
+        },
+        { coalescingWindow: 75, leadingEdge: true },
+      );
+
+      coalescer.push(written('/a.txt'));
+      coalescer.push(written('/b.txt'));
+      vi.advanceTimersByTime(1);
+      expect(batches).toEqual([[written('/a.txt'), written('/b.txt')]]);
+
+      vi.advanceTimersByTime(75);
+      expect(batches).toEqual([[written('/a.txt'), written('/b.txt')], [written('/echo.txt')]]);
+
+      coalescer.dispose();
+    });
+  });
 });

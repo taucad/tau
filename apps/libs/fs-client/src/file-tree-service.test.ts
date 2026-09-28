@@ -722,7 +722,7 @@ describe('FileTreeService mergeChildren / isDirectoryResolved', () => {
     }
   });
 
-  it('should keep a pending root refresh when a narrower write arrives inside the debounce window', async () => {
+  it("should keep a pending root refresh and re-read the narrower write's directory in the same window", async () => {
     vi.useFakeTimers();
     const { tree, proxy, emitFileChanged, disposeChannel } = createTreeHarness({
       proxy: mock<ComposedViewClient>({
@@ -744,8 +744,11 @@ describe('FileTreeService mergeChildren / isDirectoryResolved', () => {
     emitFileChanged({ type: 'fileWritten', path: 'src/main.ts', backend: 'indexeddb' });
     await vi.advanceTimersByTimeAsync(100);
 
-    expect(proxy.readDirectory).toHaveBeenCalledOnce();
+    /* The narrower write keeps the root re-read and adds its own directory:
+     * a root re-read lists only the root's children (W2d F2). */
+    expect(proxy.readDirectory).toHaveBeenCalledTimes(2);
     expect(proxy.readDirectory).toHaveBeenCalledWith('/projects/abc');
+    expect(proxy.readDirectory).toHaveBeenCalledWith('/projects/abc/src');
     tree.dispose();
     disposeChannel();
     vi.useRealTimers();
@@ -928,6 +931,25 @@ describe('FileTreeService mergeChildren / isDirectoryResolved', () => {
     disposeChannel();
   });
 
+  /* A thumbnail capture rewrites `thumbnail.webp` on every render; dropping the
+   * stamp until the parent re-read redrew every file-tree row twice per commit. */
+  it.each(['machine', 'user', 'editor'] as const)(
+    "should keep a listed file's provenance when the %s writes its content",
+    (source) => {
+      const provenance = provenanceOf(false);
+      const { tree, disposeChannel } = createTreeHarness({
+        initialEntries: [{ ...textEntry('thumbnail.webp'), provenance }],
+      });
+      const emit = connectContentService(tree);
+
+      emit({ type: 'written', path: 'thumbnail.webp', data: new Uint8Array([1, 2, 3]), source });
+
+      expect(tree.getTreeSnapshot().get('thumbnail.webp')).toMatchObject({ size: 3, provenance });
+      tree.dispose();
+      disposeChannel();
+    },
+  );
+
   it('should drop directory descendants on directoryDeleted content events', () => {
     const { tree, disposeChannel } = createTreeHarness({
       initialEntries: [directoryEntry('old'), textEntry('old/file.ts')],
@@ -953,6 +975,121 @@ describe('FileTreeService mergeChildren / isDirectoryResolved', () => {
     expect(tree.getTreeSnapshot().has('old/file.ts')).toBe(false);
     expect(tree.getTreeSnapshot().has('new')).toBe(true);
     expect(tree.getTreeSnapshot().has('new/file.ts')).toBe(true);
+    disposeChannel();
+  });
+});
+
+/*
+ * A restore replaces a file by renaming it aside and a staged copy into place
+ * (`packages/revisions/src/apply-tree.ts`). Each row is one way the tree lost
+ * the replaced file for good while the kernel still read it (W2d F2, T9): the
+ * swap's own events cannot re-add a path whose staged name the tree never
+ * listed, so the parent's re-read is the only repair, and it must not be lost.
+ */
+describe('FileTreeService after a rename swap (W2d F2)', () => {
+  const models = 'public/models';
+  const staged = `${models}/.honeycomb.js.tau-staged.0.tmp`;
+  const backup = `${models}/.honeycomb.js.tau-backup.0.tmp`;
+  const final = [textNode('box-corner.js'), textNode('honeycomb.js')];
+
+  const startSwapTree = (
+    readModels: () => Promise<FileTreeNode[]>,
+  ): ReturnType<typeof createTreeHarness> & { readDirectory: ReturnType<typeof vi.fn> } => {
+    const readDirectory = vi.fn(async (path: string): Promise<FileTreeNode[]> => {
+      if (path === `${workspaceRoot}/${models}`) {
+        return readModels();
+      }
+      const listings: Record<string, FileTreeNode[]> = {
+        [workspaceRoot]: [directoryNode('public'), directoryNode('src')],
+        [`${workspaceRoot}/public`]: [directoryNode('models')],
+        [`${workspaceRoot}/src`]: [textNode('main.ts')],
+      };
+      return listings[path] ?? [];
+    });
+    const harness = createTreeHarness({
+      proxy: mock<ComposedViewClient>({
+        readDirectory,
+        readdir: vi.fn().mockResolvedValue([]),
+        stat: vi.fn().mockResolvedValue(textStat()),
+        getDirectoryStat: vi.fn().mockResolvedValue([]),
+      }),
+      initialEntries: [
+        { ...directoryEntry('public'), isDirectoryResolved: true },
+        { ...directoryEntry(models), isDirectoryResolved: true },
+        { ...textEntry(`${models}/box-corner.js`), name: 'box-corner.js' },
+        { ...textEntry(`${models}/honeycomb.js`), name: 'honeycomb.js' },
+        { ...directoryEntry('src'), isDirectoryResolved: true },
+      ],
+    });
+    return { ...harness, readDirectory };
+  };
+
+  const swap = (emit: (event: ChangeEvent) => void): void => {
+    emit({ type: 'fileRenamed', oldPath: `${models}/honeycomb.js`, newPath: backup, backend: 'indexeddb' });
+    emit({ type: 'fileRenamed', oldPath: staged, newPath: `${models}/honeycomb.js`, backend: 'indexeddb' });
+    emit({ type: 'fileDeleted', path: backup, backend: 'indexeddb' });
+  };
+
+  const modelsListing = (tree: FileTreeService): readonly string[] =>
+    [...tree.getTreeSnapshot().keys()].filter((path) => path.startsWith(`${models}/`)).toSorted();
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('re-reads the swapped directory when a write elsewhere lands in the same window', async () => {
+    vi.useFakeTimers();
+    const { tree, emitFileChanged, disposeChannel } = startSwapTree(async () => final);
+
+    emitFileChanged({ type: 'fileWritten', path: staged, backend: 'indexeddb' });
+    emitFileChanged({ type: 'fileWritten', path: 'src/main.ts', backend: 'indexeddb' });
+    swap(emitFileChanged);
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(modelsListing(tree)).toEqual([`${models}/box-corner.js`, `${models}/honeycomb.js`]);
+    tree.dispose();
+    disposeChannel();
+  });
+
+  it("keeps a directory's re-read when another directory's refresh starts before it answers", async () => {
+    vi.useFakeTimers();
+    const slow = Promise.withResolvers<FileTreeNode[]>();
+    const { tree, emitFileChanged, disposeChannel } = startSwapTree(async () => slow.promise);
+
+    emitFileChanged({ type: 'fileWritten', path: staged, backend: 'indexeddb' });
+    swap(emitFileChanged);
+    await vi.advanceTimersByTimeAsync(500);
+    emitFileChanged({ type: 'fileWritten', path: 'src/main.ts', backend: 'indexeddb' });
+    await vi.advanceTimersByTimeAsync(500);
+    slow.resolve(final);
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(modelsListing(tree)).toEqual([`${models}/box-corner.js`, `${models}/honeycomb.js`]);
+    tree.dispose();
+    disposeChannel();
+  });
+
+  it('re-reads after the swap when a listing taken mid-swap answers late', async () => {
+    vi.useFakeTimers();
+    const midSwap = Promise.withResolvers<FileTreeNode[]>();
+    let reads = 0;
+    const { tree, emitFileChanged, disposeChannel } = startSwapTree(async () => {
+      reads++;
+      return reads === 1 ? midSwap.promise : final;
+    });
+
+    emitFileChanged({ type: 'fileWritten', path: staged, backend: 'indexeddb' });
+    await vi.advanceTimersByTimeAsync(500);
+    swap(emitFileChanged);
+    midSwap.resolve([
+      textNode('box-corner.js'),
+      textNode('.honeycomb.js.tau-backup.0.tmp'),
+      textNode('.honeycomb.js.tau-staged.0.tmp'),
+    ]);
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(modelsListing(tree)).toEqual([`${models}/box-corner.js`, `${models}/honeycomb.js`]);
+    tree.dispose();
     disposeChannel();
   });
 });

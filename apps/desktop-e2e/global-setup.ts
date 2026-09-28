@@ -10,6 +10,7 @@ import process from 'node:process';
 import {
   desktopE2EApiUrl,
   desktopE2ECompletedArtifact,
+  desktopE2EFreeTierSyncEnabled,
   desktopE2EFrontendUrl,
   desktopE2EPackagedExecutable,
   desktopE2EProviderStubKey,
@@ -155,7 +156,10 @@ export const setup = async (): Promise<() => void> => {
    * server-side is otherwise invisible from the Electron side of the glass. */
   const logDirectory = resolve(import.meta.dirname, '../../out/test-results/desktop-e2e');
   mkdirSync(logDirectory, { recursive: true });
-  const apiLog = createWriteStream(resolve(logDirectory, 'api.log'), { flags: 'w' });
+  /* The gate-open pass is a second API in the same target run; its own log
+   * keeps the first pass's evidence. */
+  const apiLogName = desktopE2EFreeTierSyncEnabled ? 'api-free-tier-sync.log' : 'api.log';
+  const apiLog = createWriteStream(resolve(logDirectory, apiLogName), { flags: 'w' });
   // Nest also loads .env from cwd. Completed-package tests use the fixture's
   // private directory so neither Node nor Nest can read real API credentials.
   const apiCwd = desktopE2ECompletedArtifact ? process.env['TAU_E2E_API_CWD'] : apiRoot;

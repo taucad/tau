@@ -416,7 +416,7 @@ const chatRollup = (row: ProjectSidebarRow): SidebarFacts | undefined => {
       count: row.attention,
       /* R4: "1 needs you" alone sends the person into the chats to look for a
        * conflict that lives in the checkout, so the sentence names it. */
-      sentence: `${needsYou(row.attention)}${row.conflicted ? ' · needs resolution' : ''}`,
+      sentence: `${needsYou(row.attention)}${row.conflicted ? ' · Needs your decision' : ''}`,
     };
   }
   if (row.failed > 0) {
@@ -481,7 +481,7 @@ export const selectProjectFacts = (row: ProjectSidebarRow, expanded: boolean): S
   if (rollup === undefined) {
     /* An expanded conflict still names itself: no chat row can carry it. */
     return row.conflicted
-      ? { mark: 'attention', sentence: `${liveness} · needs resolution` }
+      ? { mark: 'attention', sentence: `${liveness} · Needs your decision` }
       : { mark: 'none', sentence: liveness };
   }
   return { ...rollup, sentence: `${liveness} · ${rollup.sentence ?? ''}` };

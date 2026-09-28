@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import axe from 'axe-core';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -7,6 +9,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MachineClient } from '@taucad/runtime/machine';
 import { printIntentPath } from '@taucad/slicer/print-intent';
 import { writeBambuContainer } from '@taucad/slicer/container';
+import { ToolpathParseError, parseGcode } from '@taucad/slicer/toolpath';
+import type * as Toolpath from '@taucad/slicer/toolpath';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { projectFiles } from '#components/print/testing/project-files.js';
 import { fixtureGcode } from '#components/printer/testing/toolpath-fixture.js';
@@ -46,6 +50,11 @@ import {
 } from '#routes/w.$workspace.$project/chat-print-send.js';
 import { PrintPanel, nextAction, presentMachine } from '#routes/w.$workspace.$project/chat-print.js';
 
+/* The real parser, which one test makes refuse a plate too large to preview. */
+vi.mock('@taucad/slicer/toolpath', async (importOriginal) => {
+  const actual = await importOriginal<typeof Toolpath>();
+  return { ...actual, parseGcode: vi.fn(actual.parseGcode) };
+});
 vi.mock('#hooks/use-project.js', async () => {
   const fixtures = await import('#routes/w.$workspace.$project/chat-print.fixture.js');
   return fixtures.projectMock;
@@ -92,6 +101,12 @@ const machineSliceOptions = {
   nozzleTemperature: 250,
   bedTemperature: 70,
 };
+
+/* Lane M's two-colour slice records a red part (filament 1) and a blue one. */
+// oxlint-disable-next-line tau-lint/no-hardcoded-color -- the colours Bambu Studio records for the model
+const [red, blue] = ['#FF0000', '#0000FF'] as const;
+// oxlint-disable-next-line tau-lint/no-hardcoded-color -- the RGBA a machine reports for a red and a blue spool
+const [redTray, blueTray] = ['#FF0000FF', '#0000FFFF'] as const;
 
 /** The Prepare section, whose slice and send buttons share their names with the orientation card's primary action. */
 const prepareRegion = (): HTMLElement => screen.getByRole('region', { name: 'Prepare' });
@@ -483,7 +498,7 @@ describe('Print pane prepare and send', () => {
 
   it("starts the machine mapping from the provider schema's own defaults, so bed leveling and flow calibration show on", async () => {
     // Bambu declares both flags `.default(true)` in its submission schema; its declared defaults stay empty.
-    expect(submissionDefaults(provider, entry(), manifest)).toMatchObject({
+    expect(submissionDefaults(provider, entry(), { manifest })).toMatchObject({
       bedLeveling: true,
       flowCalibration: true,
       timelapse: false,
@@ -583,11 +598,50 @@ describe('Print pane slice summary', () => {
 
     expect(result.bounds).toEqual({ min: [0, 0, 0], max: [148, 148, 50] });
     expect(result.partBounds).toEqual({ min: [108, 108, 0], max: [148, 148, 2] });
-    expect(summary.formatSize(result.bounds)).toBe('148 × 148 × 50 mm');
+    expect(result.bounds && summary.formatSize(result.bounds)).toBe('148 × 148 × 50 mm');
     expect(result.partBounds && summary.formatSize(result.partBounds)).toBe('40 × 40 × 2 mm');
-    expect(summary.fitsPlate(result, manifest.geometry.buildVolume)).toEqual({
+    expect(
+      result.bounds &&
+        summary.fitsPlate({ bounds: result.bounds, partBounds: result.partBounds }, manifest.geometry.buildVolume),
+    ).toEqual({
       fits: true,
       message: 'The part fits the plate',
+    });
+  });
+
+  it("should read the colours of lane M's real two-colour Bambu Studio slice in filament order", async () => {
+    const summary = await vi.importActual<typeof PrintSummary>('#routes/w.$workspace.$project/chat-print-summary.js');
+    const gcode = readFileSync(
+      join(process.cwd(), '../../packages/plugins/slicer/src/__fixtures__/two-colour-cubes.gcode'),
+    );
+    expect(
+      summary.summarizeGcodeContainer(writeBambuContainer({ gcode: gcode.toString(), modelName: 'cubes' }))
+        .filamentColors,
+    ).toEqual([red, blue]);
+  });
+
+  it("should summarize a plate too large to preview from Bambu Studio's header", async () => {
+    const summary = await vi.importActual<typeof PrintSummary>('#routes/w.$workspace.$project/chat-print-summary.js');
+    const gcode = readFileSync(
+      join(process.cwd(), '../../packages/plugins/slicer/src/__fixtures__/two-colour-cubes.gcode'),
+    );
+    const refusal = 'This G-code is too large to preview. The printer can still print it as it is.';
+    vi.mocked(parseGcode).mockImplementationOnce(() => {
+      throw new ToolpathParseError('TOOLPATH_SEGMENT_LIMIT', refusal, 2_000_001);
+    });
+    expect(
+      summary.summarizeGcodeContainer(writeBambuContainer({ gcode: gcode.toString(), modelName: 'cubes' })),
+    ).toEqual({
+      layers: 50,
+      estimatedDuration: 6411,
+      isSlicerEstimate: true,
+      producer: undefined,
+      filamentLength: 9372.5,
+      bounds: undefined,
+      partBounds: undefined,
+      coverageComplete: false,
+      filamentColors: [red, blue],
+      previewRefusal: refusal,
     });
   });
 
@@ -603,7 +657,10 @@ describe('Print pane slice summary', () => {
       reason: '3 mm past the plate edge on Y',
       message: 'The toolpath does not fit the plate: 3 mm past the plate edge on Y.',
     });
-    expect(summary.fitsPlate({ bounds: baseSliceSummary.bounds, partBounds: undefined }, buildVolume)).toEqual({
+    expect(
+      baseSliceSummary.bounds &&
+        summary.fitsPlate({ bounds: baseSliceSummary.bounds, partBounds: undefined }, buildVolume),
+    ).toEqual({
       fits: true,
       message: 'The toolpath fits the plate',
     });
@@ -969,7 +1026,7 @@ describe('Print pane Bambu Studio mode', () => {
     fireEvent.blur(field);
   };
 
-  it("loads Bambu Studio's defaults for the bound printer and slices with its presets and hints", async () => {
+  it("loads Bambu Studio's defaults for the bound printer and slices with its presets", async () => {
     const user = userEvent.setup();
     const { fixture, studio } = await renderStudio();
 
@@ -995,7 +1052,7 @@ describe('Print pane Bambu Studio mode', () => {
       expect(mockExport).toHaveBeenCalledExactlyOnceWith('gcode.3mf', {
         exportOptions: {
           engine: 'bambu-studio',
-          bambuStudio: { printer: x1c, process: standard, filaments: [plaMatte], plate: 'textured-pei', hints },
+          bambuStudio: { printer: x1c, process: standard, filaments: [plaMatte], plate: 'textured-pei' },
         },
       });
     });
@@ -1101,7 +1158,6 @@ describe('Print pane Bambu Studio mode', () => {
             plate: 'textured-pei',
             // eslint-disable-next-line @typescript-eslint/naming-convention -- a Bambu Studio setting key.
             settings: { bridge_flow: '95%' },
-            hints,
           },
         },
       });
@@ -1133,6 +1189,167 @@ describe('Print pane Bambu Studio mode', () => {
     await user.selectOptions(combobox('Filament preset for A1'), 'Bambu PETG Basic @BBL X1C');
     expect(await screen.findByText('No compatible process for Bambu PETG Basic @BBL X1C.')).toBeInTheDocument();
     expect(within(prepareRegion()).getByRole('button', { name: 'Send to Workshop X1C' })).toBeDisabled();
+  });
+
+  describe('with a model of several colours', () => {
+    const petg = 'Bambu PETG Basic @BBL X1C';
+    /** The real printer with a red and a blue PLA tray and a blue PETG one, colours as the printer reports them. */
+    const colourful = (materials?: ReturnType<typeof entry>['snapshot']['setup']['materials']) => {
+      const base = realPrinter();
+      return {
+        ...base,
+        snapshot: {
+          ...base.snapshot,
+          setup: {
+            ...base.snapshot.setup,
+            materials: materials ?? [
+              { slot: 0, state: 'loaded', materialId: 'PLA', profileId: 'GFA01', color: redTray },
+              { slot: 1, state: 'loaded', materialId: 'PLA', profileId: 'GFA01', color: blueTray },
+              { slot: 2, state: 'loaded', materialId: 'PETG', profileId: 'GFG00', color: blueTray },
+            ],
+          },
+        },
+      } satisfies ReturnType<typeof entry>;
+    };
+    /** Bambu Studio's slice of a blue part (filament 1) and a red one (filament 2). */
+    const twoColours = { ...bambuStudioSliceSummary, filamentColors: [blue, red] };
+    const slot = (filament: number): HTMLElement => combobox(`Slot for Filament ${String(filament)}`);
+
+    const sliceTwoColours = async (
+      user: ReturnType<typeof userEvent.setup>,
+      machine: ReturnType<typeof entry>,
+    ): Promise<ReturnType<typeof createFixture>> => {
+      const { fixture } = await renderStudio(machine);
+      summarizeGcodeContainerMock.mockReturnValueOnce(twoColours);
+      await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
+      await screen.findByRole('group', { name: 'Filaments' });
+      return fixture;
+    };
+
+    it('maps each filament to a tray of its colour and sends without slicing again when the presets agree', async () => {
+      const user = userEvent.setup();
+      const fixture = await sliceTwoColours(user, colourful());
+      // One row per filament replaces the material chips.
+      expect(screen.queryByRole('group', { name: 'Material' })).not.toBeInTheDocument();
+      expect(slot(1)).toHaveValue('1');
+      expect(slot(2)).toHaveValue('0');
+      expect(
+        within(slot(1))
+          .getAllByRole('option')
+          .map(({ textContent }) => textContent),
+      ).toEqual([`A1 · PLA · ${redTray}`, `A2 · PLA · ${blueTray}`, `A3 · PETG · ${blueTray}`]);
+      // Both trays hold Bambu PLA Matte, which the slice already printed both filaments with.
+      const send = await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' });
+      await waitFor(() => {
+        expect(send).toBeEnabled();
+      });
+      expect(mockExport).toHaveBeenCalledOnce();
+      const accessibility = await axe.run(document.body, { rules: { region: { enabled: false } } });
+      expect(accessibility.violations).toEqual([]);
+
+      await user.click(send);
+      const confirmation = screen.getByRole('group', { name: 'Confirm before starting' });
+      expect(within(confirmation).getByText('PLA is loaded in A2 and A1')).toBeInTheDocument();
+      confirmAll(confirmation);
+      await user.click(within(confirmation).getByRole('button', { name: 'Start print on Workshop X1C' }));
+      await waitFor(() => {
+        expect(fixture.resolvePrintRequest).toHaveBeenCalledOnce();
+      });
+      expect(fixture.requestPrint.mock.calls.at(0)?.[0].configuration).toMatchObject({
+        expectedMaterials: [
+          { slot: 1, materialId: 'PLA' },
+          { slot: 0, materialId: 'PLA' },
+        ],
+        amsMapping: [1, 0],
+      });
+    });
+
+    it("slices again when a remap changes a filament's preset, and swaps a slot another filament holds", async () => {
+      const user = userEvent.setup();
+      await sliceTwoColours(user, colourful());
+      await waitFor(() => {
+        expect(within(prepareRegion()).getByRole('button', { name: 'Send to Workshop X1C' })).toBeEnabled();
+      });
+
+      await user.selectOptions(slot(1), '2');
+      expect(
+        await screen.findByText('Options changed since this slice. Slice again to send the current settings.'),
+      ).toBeInTheDocument();
+      expect(within(prepareRegion()).getByRole('button', { name: 'Send to Workshop X1C' })).toBeDisabled();
+      // Presets per tray, as Bambu Studio resolves them.
+      await waitFor(() => {
+        expect(combobox('Filament preset for A3')).toHaveValue(petg);
+      });
+      summarizeGcodeContainerMock.mockReturnValueOnce(twoColours);
+      await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice again' }));
+      await waitFor(() => {
+        expect(mockExport).toHaveBeenLastCalledWith('gcode.3mf', {
+          exportOptions: {
+            engine: 'bambu-studio',
+            // In filament order: filament 1 from A3, filament 2 from A1.
+            bambuStudio: { printer: x1c, process: standard, filaments: [petg, plaMatte], plate: 'textured-pei' },
+          },
+        });
+      });
+
+      // A1 is filament 2's, so filament 2 takes A3 in exchange.
+      await user.selectOptions(slot(1), '0');
+      expect(slot(1)).toHaveValue('0');
+      expect(slot(2)).toHaveValue('2');
+    });
+
+    it('holds Send until a filament no free tray could take has a slot', async () => {
+      const user = userEvent.setup();
+      await sliceTwoColours(
+        user,
+        colourful([
+          { slot: 0, state: 'loaded', materialId: 'PLA', profileId: 'GFA01', color: redTray },
+          { slot: 1, state: 'empty' },
+        ]),
+      );
+      expect(slot(1)).toHaveValue('');
+      expect(within(slot(1)).getByRole('option', { name: 'Choose a slot' })).toBeDisabled();
+      expect(slot(2)).toHaveValue('0');
+      expect(
+        await within(prepareRegion()).findByText('Filament 1 has no slot. Choose a loaded slot for it before sending.'),
+      ).toBeInTheDocument();
+      expect(within(prepareRegion()).getByRole('button', { name: 'Send to Workshop X1C' })).toBeDisabled();
+    });
+  });
+
+  it('sends a slice too large to preview, saying why there is no preview or plate check', async () => {
+    const user = userEvent.setup();
+    await renderStudio();
+    const refusal = 'This G-code is too large to preview. The printer can still print it as it is.';
+    summarizeGcodeContainerMock.mockReturnValueOnce({
+      ...bambuStudioSliceSummary,
+      bounds: undefined,
+      partBounds: undefined,
+      previewRefusal: refusal,
+    });
+    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
+    const result = await screen.findByLabelText('Slice result');
+    expect(within(result).getByRole('status')).toHaveTextContent(refusal);
+    expect(within(result).queryByText('Toolpath')).not.toBeInTheDocument();
+    expect(within(result).queryByText(/fits the plate/u)).not.toBeInTheDocument();
+    expect(within(prepareRegion()).getByRole('button', { name: 'Send to Workshop X1C' })).toBeEnabled();
+  });
+
+  it('shows what the slicer warned about a slice it still made', async () => {
+    const user = userEvent.setup();
+    await renderStudio();
+    summarizeGcodeContainerMock.mockReturnValueOnce(bambuStudioSliceSummary);
+    const merged = `The printer loads at most 4 filaments, so the model's 5 colours print as one, in ${red}.`;
+    mockExport.mockResolvedValueOnce({
+      success: true,
+      data: [{ name: 'main.gcode.3mf', bytes: new Uint8Array([1]), mimeType: 'application/vnd.bambulab.gcode-3mf' }],
+      issues: [{ message: merged, code: 'REPRESENTATION_UNSUPPORTED', severity: 'warning' }],
+    });
+    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
+    const result = await screen.findByLabelText('Slice result');
+    expect(within(result).getByText(merged)).toBeInTheDocument();
+    // One colour prints as the material chips choose it.
+    expect(screen.getByRole('group', { name: 'Material' })).toBeInTheDocument();
   });
 
   /**
@@ -1402,13 +1619,6 @@ describe('Print pane print settings file', () => {
             plate: 'cool',
             // eslint-disable-next-line @typescript-eslint/naming-convention -- a Bambu Studio setting key.
             settings: { wall_loops: 3 },
-            hints: {
-              model: 'X1C',
-              nozzleDiameter: 0.4,
-              preset: 'fine',
-              plate: 'cool',
-              materials: [{ slot: 0, materialId: 'pla-black', profileId: 'GFA01' }],
-            },
           },
         },
       });

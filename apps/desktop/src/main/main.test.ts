@@ -5,6 +5,8 @@ import { join, resolve } from 'node:path';
 import type { Worker as NodeWorker } from 'node:worker_threads';
 import type * as WorkerThreads from 'node:worker_threads';
 
+import type * as Host from '@taucad/host';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   computeControlChannels,
@@ -166,6 +168,11 @@ vi.mock('electron', () => ({
   net: { fetch: vi.fn() },
   protocol: { registerSchemesAsPrivileged: vi.fn(), handle: vi.fn() },
   safeStorage: { isEncryptionAvailable: vi.fn(() => false), encryptString: vi.fn(), decryptString: vi.fn() },
+  screen: {
+    getAllDisplays: vi.fn(() => [{ workArea: { x: 0, y: 0, width: 1440, height: 900 } }]),
+    getCursorScreenPoint: vi.fn(() => ({ x: 0, y: 0 })),
+    getDisplayNearestPoint: vi.fn(() => ({ workArea: { x: 0, y: 0, width: 1440, height: 900 } })),
+  },
   session: {
     defaultSession: {
       setPermissionRequestHandler: vi.fn(),
@@ -188,11 +195,17 @@ vi.mock('@taucad/runtime/electron/main', () => ({
     },
   ),
 }));
-vi.mock('@taucad/host', () => ({
-  defaultConfigDirectory: vi.fn(() => join(state.userData, 'config')),
-  discoverAcpAgents: vi.fn(async () => state.acpDiscovery ?? { agents: [], refused: [] }),
-  externalAgentDescriptors: vi.fn(() => []),
-}));
+vi.mock('@taucad/host', async (importOriginal) => {
+  /* The host's real bounds, so the quit waits main derives from them are the shipped ones (rule 9). */
+  const { projectCloseMilliseconds, projectReleaseMilliseconds } = await importOriginal<typeof Host>();
+  return {
+    defaultConfigDirectory: vi.fn(() => join(state.userData, 'config')),
+    discoverAcpAgents: vi.fn(async () => state.acpDiscovery ?? { agents: [], refused: [] }),
+    externalAgentDescriptors: vi.fn(() => []),
+    projectCloseMilliseconds,
+    projectReleaseMilliseconds,
+  };
+});
 vi.mock('#main/app-protocol.js', () => ({
   appOrigin: 'app://tau',
   appSchemePrivileges: [],
@@ -251,6 +264,7 @@ vi.mock('#main/services-broker.js', () => ({
 vi.mock('#main/utility-environment.js', () => ({
   loginShellEnvironment: vi.fn(async () => undefined),
   packagedEsbuildEnvironment: vi.fn(() => ({})),
+  bundledGitEnvironment: vi.fn(() => ({})),
   compileCacheEnvironment: vi.fn((userDataPath: string) => ({
     TAU_COMPILE_CACHE_DIR: join(userDataPath, 'compile-cache'),
   })),
@@ -575,6 +589,21 @@ describe('desktop main compute owner', () => {
     },
     bootMilliseconds,
   );
+});
+
+describe('desktop quit bounds', () => {
+  it('nests each quit wait strictly outside the host close it awaits (rule 9, RV-W2b #1)', async () => {
+    const host = await vi.importActual<typeof Host>('@taucad/host');
+    vi.stubGlobal('tauCloudBuildEnabled', false);
+    state.userData = await mkdtemp(join(tmpdir(), 'tau-main-quit-'));
+    const { quitQuiesceMilliseconds, quitRendererMilliseconds } = await import('#main/main.js');
+
+    /* The utility's launchers drain their runs before they release. */
+    expect(host.projectCloseMilliseconds).toBeGreaterThan(host.projectReleaseMilliseconds);
+    expect(quitQuiesceMilliseconds).toBeGreaterThan(host.projectCloseMilliseconds);
+    /* The page cancels runs and flushes producers (10 s each) before the host's close. */
+    expect(quitRendererMilliseconds).toBeGreaterThan(2 * 10_000 + host.projectReleaseMilliseconds);
+  }, 60_000);
 });
 
 /*

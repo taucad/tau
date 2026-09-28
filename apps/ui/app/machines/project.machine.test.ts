@@ -6,7 +6,7 @@ import type { ProjectManifest, ProjectManifestParseIssue } from '@taucad/types';
 import { isProjectContentActivityPath, projectMachine, selectProjectKernelRefusal } from '#machines/project.machine.js';
 import { defaultGraphicsSettings } from '#constants/editor.constants.js';
 import type { ProjectContext, ProjectLoadInput, ProjectRetrievedEvent } from '#machines/project.machine.js';
-import { actorIdOf, fromSafeAsync } from '#lib/xstate.lib.js';
+import { fromSafeAsync } from '#lib/xstate.lib.js';
 import type { KernelOptionsFactory, LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
 
 vi.mock('#constants/browser.constants.js', () => ({
@@ -222,8 +222,7 @@ describe('projectMachine', () => {
         settings: {
           ...defaultGraphicsSettings,
           enableGrid: false,
-          sectionView: { active: true, plane: 'xz', pivot: [1, 2, 3], rotation: [0, 0.5, 0], direction: 1 },
-          sectionDisplay: { clipLines: false, clipMesh: false, planeName: 'cartesian' },
+          sectionView: { active: true, cuts: [{ kind: 'plane', plane: 'xz', offset: 2, isFlipped: true }] },
         },
       });
 
@@ -232,14 +231,11 @@ describe('projectMachine', () => {
       expect(graphics!.getSnapshot().context).toMatchObject({
         enableGrid: false,
         isSectionViewActive: true,
-        selectedSectionViewId: 'xz',
-        sectionViewPivot: [1, 2, 3],
-        sectionViewRotation: [0, 0.5, 0],
-        sectionViewDirection: 1,
-        enableClippingLines: false,
-        enableClippingMesh: false,
-        planeName: 'cartesian',
+        sectionCuts: [
+          { id: expect.stringMatching(/^cut_/u) as unknown, kind: 'plane', plane: 'xz', offset: 2, isFlipped: true },
+        ],
       });
+      expect(graphics!.getSnapshot().matches({ operational: { section: 'on' } })).toBe(true);
       actor.stop();
     });
 
@@ -344,7 +340,6 @@ describe('projectMachine', () => {
         shouldLoadModelOnStart: false,
       });
       expect(actor.getSnapshot().context.geometryUnits.size).toBe(0);
-      expect(actor.getSnapshot().context.exportableGeometryUnitPaths.size).toBe(0);
       actor.stop();
     });
 
@@ -653,118 +648,6 @@ describe('projectMachine', () => {
       actor.stop();
     });
 
-    it('should add an exportable geometry unit path from a child availability event', async () => {
-      const actor = await startAndLoad();
-      actor.send({ type: 'createGeometryUnit', entryPath: 'main.ts' });
-      const unit = actor.getSnapshot().context.geometryUnits.get('main.ts');
-      expect(unit).toBeDefined();
-
-      actor.send({
-        type: 'geometryUnit.exportAvailabilityChanged',
-        actorId: actorIdOf(unit!),
-        available: true,
-      });
-
-      expect(actor.getSnapshot().context.exportableGeometryUnitPaths).toEqual(new Set(['main.ts']));
-      actor.stop();
-    });
-
-    it('should track only the exportable secondary geometry unit when the main unit is unavailable', async () => {
-      const actor = await startAndLoad();
-      actor.send({ type: 'createGeometryUnit', entryPath: 'main.ts' });
-      actor.send({ type: 'createGeometryUnit', entryPath: 'helper.ts' });
-      const mainUnit = actor.getSnapshot().context.geometryUnits.get('main.ts');
-      const helperUnit = actor.getSnapshot().context.geometryUnits.get('helper.ts');
-      expect(mainUnit).toBeDefined();
-      expect(helperUnit).toBeDefined();
-
-      actor.send({
-        type: 'geometryUnit.exportAvailabilityChanged',
-        actorId: actorIdOf(mainUnit!),
-        available: false,
-      });
-      actor.send({
-        type: 'geometryUnit.exportAvailabilityChanged',
-        actorId: actorIdOf(helperUnit!),
-        available: true,
-      });
-
-      expect(actor.getSnapshot().context.exportableGeometryUnitPaths).toEqual(new Set(['helper.ts']));
-      actor.stop();
-    });
-
-    it('should remove an exportable geometry unit path when availability becomes false', async () => {
-      const actor = await startAndLoad();
-      actor.send({ type: 'createGeometryUnit', entryPath: 'main.ts' });
-      const unit = actor.getSnapshot().context.geometryUnits.get('main.ts');
-      expect(unit).toBeDefined();
-
-      actor.send({
-        type: 'geometryUnit.exportAvailabilityChanged',
-        actorId: actorIdOf(unit!),
-        available: true,
-      });
-      actor.send({
-        type: 'geometryUnit.exportAvailabilityChanged',
-        actorId: actorIdOf(unit!),
-        available: false,
-      });
-
-      expect(actor.getSnapshot().context.exportableGeometryUnitPaths.size).toBe(0);
-      actor.stop();
-    });
-
-    it('should ignore availability events from unknown geometry units', async () => {
-      const actor = await startAndLoad();
-
-      actor.send({
-        type: 'geometryUnit.exportAvailabilityChanged',
-        actorId: 'missing-actor',
-        available: true,
-      });
-
-      expect(actor.getSnapshot().context.exportableGeometryUnitPaths.size).toBe(0);
-      actor.stop();
-    });
-
-    it('should clear exportability when destroying a geometry unit', async () => {
-      const actor = await startAndLoad();
-      actor.send({ type: 'createGeometryUnit', entryPath: 'main.ts' });
-      const unit = actor.getSnapshot().context.geometryUnits.get('main.ts');
-      expect(unit).toBeDefined();
-      actor.send({
-        type: 'geometryUnit.exportAvailabilityChanged',
-        actorId: actorIdOf(unit!),
-        available: true,
-      });
-
-      actor.send({ type: 'destroyGeometryUnit', entryPath: 'main.ts' });
-
-      expect(actor.getSnapshot().context.exportableGeometryUnitPaths.size).toBe(0);
-      actor.stop();
-    });
-
-    it('should rekey exportability when a geometry unit file moves', async () => {
-      const actor = await startAndLoad();
-      actor.send({ type: 'createGeometryUnit', entryPath: 'main.ts' });
-      const unit = actor.getSnapshot().context.geometryUnits.get('main.ts');
-      expect(unit).toBeDefined();
-      actor.send({
-        type: 'geometryUnit.exportAvailabilityChanged',
-        actorId: actorIdOf(unit!),
-        available: true,
-      });
-
-      actor.send({
-        type: 'fileMoved',
-        oldPath: 'main.ts',
-        newPath: 'renamed.ts',
-      });
-
-      expect(actor.getSnapshot().context.exportableGeometryUnitPaths).toEqual(new Set(['renamed.ts']));
-      actor.stop();
-    });
-
     it('should point a moved geometry unit at its new file', async () => {
       const actor = await startAndLoad();
       actor.send({ type: 'createGeometryUnit', entryPath: 'parts/main.ts' });
@@ -777,37 +660,15 @@ describe('projectMachine', () => {
       actor.stop();
     });
 
-    it('should clear exportability when a geometry unit file is deleted', async () => {
+    it('should drop the geometry units a file or directory deletion matched', async () => {
       const actor = await startAndLoad();
       actor.send({ type: 'createGeometryUnit', entryPath: 'main.ts' });
-      const unit = actor.getSnapshot().context.geometryUnits.get('main.ts');
-      expect(unit).toBeDefined();
-      actor.send({
-        type: 'geometryUnit.exportAvailabilityChanged',
-        actorId: actorIdOf(unit!),
-        available: true,
-      });
+      actor.send({ type: 'createGeometryUnit', entryPath: 'parts/helper.ts' });
 
       actor.send({ type: 'fileDeleted', path: 'main.ts' });
-
-      expect(actor.getSnapshot().context.exportableGeometryUnitPaths.size).toBe(0);
-      actor.stop();
-    });
-
-    it('should clear exportability when a geometry unit directory is deleted', async () => {
-      const actor = await startAndLoad();
-      actor.send({ type: 'createGeometryUnit', entryPath: 'parts/main.ts' });
-      const unit = actor.getSnapshot().context.geometryUnits.get('parts/main.ts');
-      expect(unit).toBeDefined();
-      actor.send({
-        type: 'geometryUnit.exportAvailabilityChanged',
-        actorId: actorIdOf(unit!),
-        available: true,
-      });
-
       actor.send({ type: 'directoryDeleted', path: 'parts' });
 
-      expect(actor.getSnapshot().context.exportableGeometryUnitPaths.size).toBe(0);
+      expect(actor.getSnapshot().context.geometryUnits.size).toBe(0);
       actor.stop();
     });
   });

@@ -21,6 +21,7 @@ import {
   revokeReloadConsent,
 } from '#lib/billing-lifecycle-client.js';
 import { useFinancialSession } from '#providers/financial-session-provider.js';
+import type { FinancialSessionRequest } from '#providers/financial-session-provider.js';
 
 /* oxlint-disable no-void, unicorn/no-negated-condition -- event handlers deliberately fire tracked UI operations */
 
@@ -50,24 +51,13 @@ export function AutoReloadSettings({
   const financial = useFinancialSession();
   const { isResolved, paymentCollectionAvailable } = useEntitlements();
   const [load, setLoad] = useState<'loading' | 'loaded' | 'failed'>('loading');
-  const [attempt, setAttempt] = useState(0);
   const [consent, setConsent] = useState<WireAutoReloadConsent>();
   const [action, setAction] = useState<WirePaymentAction>();
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    if (!binding) {
-      return;
-    }
-    const currentBinding = {
-      apiBaseUrl: binding.apiBaseUrl,
-      environment: binding.environment,
-      ownerId: binding.ownerId,
-      subjectId: binding.subjectId,
-    };
-    const token = financial.capture();
-    // oxlint-disable-next-line react/set-state-in-effect -- the owned GET starts from a visible loading state
+  /* Runs on the binding's identity and again from Retry; the caller captures the financial token. */
+  const loadConsent = (currentBinding: PaymentActionBinding, token: FinancialSessionRequest): void => {
     setLoad('loading');
     // async-iife: bootstrap
     void (async () => {
@@ -84,7 +74,23 @@ export function AutoReloadSettings({
         }
       }
     })();
-  }, [binding?.apiBaseUrl, binding?.environment, binding?.ownerId, binding?.subjectId, financial, attempt]);
+  };
+
+  useEffect(() => {
+    if (!binding) {
+      return;
+    }
+    // oxlint-disable-next-line react/set-state-in-effect -- the owned GET starts from a visible loading state
+    loadConsent(
+      {
+        apiBaseUrl: binding.apiBaseUrl,
+        environment: binding.environment,
+        ownerId: binding.ownerId,
+        subjectId: binding.subjectId,
+      },
+      financial.capture(),
+    );
+  }, [binding?.apiBaseUrl, binding?.environment, binding?.ownerId, binding?.subjectId, financial]);
 
   const refresh = async (): Promise<void> => {
     if (!binding) {
@@ -140,7 +146,9 @@ export function AutoReloadSettings({
               variant='ghost'
               size='sm'
               onClick={() => {
-                setAttempt((value) => value + 1);
+                if (binding) {
+                  loadConsent(binding, financial.capture());
+                }
               }}
             >
               Retry

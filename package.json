@@ -42,7 +42,9 @@
     "repos:sync": "node scripts/dist/repos.mjs sync --all",
     "repos:status": "node scripts/dist/repos.mjs status --all",
     "knip": "nx run scripts:validate-dead-code",
-    "docs:validate": "nx run scripts:validate-frontmatter",
+    "docs:validate": "nx run scripts:validate-frontmatter && node scripts/src/canvas-review.ts check",
+    "canvas:review": "node scripts/src/canvas-review.ts",
+    "canvas:typecheck": "node scripts/src/canvas-typecheck.ts",
     "size:build": "node tools/size-build.mjs",
     "prepare": "husky"
   },

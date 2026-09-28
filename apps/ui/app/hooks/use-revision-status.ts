@@ -17,12 +17,14 @@ import type {
   GitRemoteCredential,
   PublishDraft,
   RevisionDiffEntry,
+  RevisionDivergence,
   RevisionLogRequest,
   RevisionRow,
   RevisionStatusProjection,
   RevisionTag,
 } from '@taucad/revisions';
 import { branchRegistryMilliseconds } from '@taucad/revisions/branch-machine';
+import type { EditorConflictInput, EditorConflictOutcome } from '@taucad/revisions/revision-effects';
 import type {
   RevisionToast,
   RevisionFileComparison,
@@ -37,7 +39,12 @@ import type {
 import { isGithubRemoteUrl, tauRemoteUrl } from '@taucad/revisions';
 import { requireClientEnvironmentUrl } from '#environment.config.js';
 import { useParams } from 'react-router';
-import { revisionUserActor, useAnonymousRevisions, useRevisionSessionUser } from '#lib/revision-actor.js';
+import {
+  revisionUserActor,
+  useAnonymousRevisions,
+  useRevisionSalt,
+  useRevisionSessionUser,
+} from '#lib/revision-actor.js';
 import { deviceId } from '#lib/device-id.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useFlushOnClose } from '#hooks/use-flush-on-close.js';
@@ -61,6 +68,12 @@ export type RevisionClient = Readonly<{
    * credential. Memory only, on both sides (I8).
    */
   remoteCredential: (credential: GitRemoteCredential) => void;
+  /**
+   * Say whether this project is the page's focused one (RV-W5b F12): only the
+   * focused project holds the `revision` long poll. A port frame, kept across
+   * reconnects. Absent on a host-served client, whose polls have no socket cap.
+   */
+  focus?: (focused: boolean) => void;
   subscribe: (listener: () => void) => () => void;
   /** Every settled revision signal this project's root published. */
   subscribeEvents: (listener: (event: WorkerRevisionEvent) => void) => () => void;
@@ -68,6 +81,8 @@ export type RevisionClient = Readonly<{
   subscribeToasts: (listener: (toast: RevisionToast) => void) => () => void;
   /** One branch's history, newest first, each row carrying its `Rev N` (I3). */
   log: (request?: RevisionLogRequest) => Promise<readonly RevisionRow[]>;
+  /** How far `head` and `base` have gone apart, counted by the port without listing either history. */
+  divergence: (head: string, base: string) => Promise<RevisionDivergence>;
   /** Which paths one revision changed, against `from` or its own first parent. */
   diff: (revisionId: string, from?: string) => Promise<readonly RevisionDiffEntry[]>;
   /** Name one revision, or re-point an existing name (S31). */
@@ -112,6 +127,15 @@ export type RevisionClient = Readonly<{
    * new branch has to refuse the turn rather than silently run it elsewhere.
    */
   createBranch: (name: string, from?: string) => Promise<BranchCreated>;
+  /**
+   * Record an editor's overlapping edit as a conflicted revision (charter D14).
+   *
+   * Resolves once it is in the graph, so the editor can let go of its text: the
+   * *Needs your decision* card is then the one surface, and it survives a
+   * reload. `unchanged` means the file is back on the bytes the edit was made
+   * from, and the editor saves as usual.
+   */
+  recordEditorConflict: (input: EditorConflictInput) => Promise<EditorConflictOutcome>;
   /**
    * Connect, or do nothing when the connection is already open.
    *
@@ -184,7 +208,7 @@ const awaitBranchCreated = async (
         /* A branch with no checkout named is no placement: `''` used to reach
          * `Chat.checkoutId` and leave the chat nothing to run on (finding 5). */
         created.reject(
-          Object.assign(new Error(describeRevisionFailure('branch', 'BRANCH_UNPLACED', name).description), {
+          Object.assign(new Error(describeRevisionFailure('branch', 'BRANCH_UNPLACED', { branch: name }).description), {
             code: 'BRANCH_UNPLACED',
           }),
         );
@@ -419,7 +443,10 @@ export const createHostRevisionClient = (input: {
         command: 'log',
         ...(request?.branch === undefined ? {} : { branch: request.branch }),
         ...(request?.limit === undefined ? {} : { limit: request.limit }),
+        ...(request?.from === undefined ? {} : { from: request.from }),
       })) as unknown as readonly RevisionRow[],
+    divergence: async (head, base) =>
+      (await ask({ command: 'divergence', head, base })) as unknown as RevisionDivergence,
     diff: async (revisionId, from) =>
       (await ask({
         command: 'diff',
@@ -442,6 +469,8 @@ export const createHostRevisionClient = (input: {
     saveRevision: async (trigger) => {
       await ask({ command: 'saveRevision', ...(trigger === undefined ? {} : { trigger }) });
     },
+    recordEditorConflict: async (conflict) =>
+      (await ask({ command: 'recordEditorConflict', ...conflict })) as unknown as EditorConflictOutcome,
     /* The host answers this verb with its projection, not with the checkout, so
      * the settlement is taken off the same toast stream the pane reads (P4). */
     createBranch: async (name, from) =>
@@ -739,6 +768,8 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
    * lifecycle calls once the GitHub credential is minted and queued first. */
   let admitted = false;
   const queued: WorkerRevisionRequest[] = [];
+  /* The page's last word on focus, re-said on every new port: a reopened root starts unfocused. */
+  let focused: boolean | undefined;
   const receive = (generation: number, { data }: MessageEvent<WorkerRevisionResponse>): void => {
     if (generation !== connectionGeneration) {
       return;
@@ -837,6 +868,13 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
     remoteCredential: (credential) => {
       post({ command: 'remoteCredential', ...credential });
     },
+    focus: (next) => {
+      focused = next;
+      /* Not queued: `open` says it once on every new port, including the first. */
+      if (admitted) {
+        open().postMessage({ command: 'focus', focused: next } satisfies WorkerRevisionRequest);
+      }
+    },
     subscribe: (listener) => listeners.subscribe(listener),
     subscribeEvents: (listener) => {
       const unsubscribe = events.subscribe(listener);
@@ -873,8 +911,18 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
         command: 'log',
         ...(request?.branch === undefined ? {} : { branch: request.branch }),
         ...(request?.limit === undefined ? {} : { limit: request.limit }),
+        ...(request?.from === undefined ? {} : { from: request.from }),
       });
       return result.kind === 'log' ? result.rows : [];
+    },
+    divergence: async (head, base) => {
+      const result = await ask({ command: 'divergence', head, base });
+      if (result.kind !== 'divergence') {
+        throw Object.assign(new Error('The revision root answered a divergence with something else.'), {
+          code: 'INVALID_REVISION_RESPONSE',
+        });
+      }
+      return result.divergence;
     },
     diff: async (revisionId, from) => {
       const result = await ask({
@@ -915,11 +963,21 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
       const { kind: _kind, ...created } = result;
       return created;
     },
+    recordEditorConflict: async (conflict) => {
+      const result = await ask({ command: 'recordEditorConflict', ...conflict });
+      if (result.kind !== 'editorConflict') {
+        throw new Error('The revision root answered an editor conflict with something else.');
+      }
+      return result.outcome;
+    },
     open: () => {
       admitted = true;
       const port = open();
       for (const request of queued.splice(0)) {
         port.postMessage(request);
+      }
+      if (focused !== undefined) {
+        port.postMessage({ command: 'focus', focused } satisfies WorkerRevisionRequest);
       }
     },
     close: () => {
@@ -1110,12 +1168,17 @@ export const useRevisionClientLifecycle = (): RevisionClient | undefined => {
    * identity.
    */
   const anonymous = useAnonymousRevisions(workspace ?? '');
+  /* EQ10 (a): the pseudonym derives from the account's salt for this
+   * workspace, served by the API and never written to the tree; fetched on
+   * sign-in whatever the preference, so it is ready before anonymity is. */
+  const salt = useRevisionSalt({ workspace: workspace ?? '', userId: sessionUser?.id });
   /*
    * Which device this document is (W13, W17).
    *
    * Sent from the page because the id lives in `localStorage`, which the worker
-   * cannot read. It names a chat log segment, so a worker that was never told
-   * writes no chat refs rather than guessing an id two profiles could share.
+   * cannot read. Records name a random record device instead; this id decides
+   * whether chat refs are recorded at all — a worker never told writes none —
+   * and counts as own for a segment written before record devices existed.
    */
   useEffect(() => {
     if (client === undefined) {
@@ -1199,6 +1262,7 @@ export const useRevisionClientLifecycle = (): RevisionClient | undefined => {
           workspace: workspace ?? '',
           user: sessionUser,
           anonymous,
+          salt,
           commitIdentity: githubProjectBinding.get(projectId)?.author,
         }),
       });
@@ -1206,7 +1270,7 @@ export const useRevisionClientLifecycle = (): RevisionClient | undefined => {
     send();
     /* Linking or unlinking GitHub changes who the next revision is authored as (D33). */
     return githubProjectBinding.subscribe(send);
-  }, [client, projectId, workspace, sessionUser, anonymous]);
+  }, [client, projectId, workspace, sessionUser, anonymous, salt]);
   return client;
 };
 
@@ -1238,8 +1302,10 @@ export const useRevisionStatus = (): RevisionStatusProjection | undefined =>
 /** The verbs the page sends to its revision root. @public */
 export type RevisionCommands = Readonly<{
   restore: (revisionId: string) => void;
-  returnToLatest: () => void;
+  /** *Undo restore* (D2). */
   undo: () => void;
+  /** *Undo*: reverse this device's newest operation on the line (D15). */
+  undoOperation: () => void;
   confirm: () => void;
   cancel: () => void;
   switchTo: (branch: string) => void;
@@ -1315,8 +1381,9 @@ export type RevisionCommands = Readonly<{
    * The API origin goes with it for the same reason it goes with `connectRemote`:
    * publishing pushes to this project's Tau Cloud repository and records the
    * publication there, and only the page knows which API it is signed in to.
+   * `revisionId` opens it on an older revision (a History row's *Publish*).
    */
-  publishProject: (tag?: string) => void;
+  publishProject: (tag?: string, revisionId?: string) => void;
   /** Publish the chosen name, with everything only a person decides. */
   confirmPublish: (draft: PublishDraft) => void;
   cancelPublish: () => void;
@@ -1339,8 +1406,8 @@ export const useRevisionCommands = (): RevisionCommands => {
   return useMemo(
     () => ({
       restore: (revisionId: string) => client?.send({ command: 'restore', revisionId }),
-      returnToLatest: () => client?.send({ command: 'returnToLatest' }),
       undo: () => client?.send({ command: 'undo' }),
+      undoOperation: () => client?.send({ command: 'undoOperation' }),
       confirm: () => client?.send({ command: 'confirm' }),
       cancel: () => client?.send({ command: 'cancel' }),
       switchTo: (branch: string) => client?.send({ command: 'switch', branch }),
@@ -1492,7 +1559,7 @@ export const useRevisionCommands = (): RevisionCommands => {
       saveRevision: async (trigger?: 'save' | 'hidden' | 'close') => client?.saveRevision(trigger),
       tag: async (input) => client?.tag(input),
       deleteTag: async (name) => client?.deleteTag(name),
-      publishProject: (tag?: string) => {
+      publishProject: (tag?: string, revisionId?: string) => {
         /* The origin rides the command itself: it is how the worker names this
          * project's Tau Cloud repository and reaches the publications route
          * (I8 — no credential travels, the session is a cookie the worker's own
@@ -1503,6 +1570,7 @@ export const useRevisionCommands = (): RevisionCommands => {
           command: 'publishProject',
           apiBaseUrl: requireClientEnvironmentUrl('TAU_API_URL'),
           ...(tag === undefined ? {} : { tag }),
+          ...(revisionId === undefined ? {} : { revisionId }),
         });
       },
       confirmPublish: (draft) => client?.send({ command: 'confirmPublish', draft }),

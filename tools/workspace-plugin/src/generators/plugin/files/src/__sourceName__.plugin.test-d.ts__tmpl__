@@ -23,8 +23,12 @@ import type {
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 <% } %>
 
+<% if (capabilities.some(({ role }) => role === 'job' || role === 'machine')) { %>
+import { plugin, <%= alias %><% capabilities.forEach((capability) => { %>, <%= capability.factoryName %><% }); %> } from '#index.js';
+<% } else { %>
 import { plugin, <%= alias %> } from '#index.js';
-import<%= capabilities.some(({ role }) => role === 'job' || role === 'machine') ? '' : ' type' %> {<% capabilities.forEach((capability, index) => { %><%= index === 0 ? ' ' : ', ' %><%= capability.factoryName %><% }); %> } from '#index.js';
+import type {<% capabilities.forEach((capability, index) => { %><%= index === 0 ? ' ' : ', ' %><%= capability.factoryName %><% }); %> } from '#index.js';
+<% } %>
 
 const selected = plugin();
 <% for (const capability of capabilities) { const projection = capability.role === 'kernel' ? 'ExpandPluginKernels' : capability.role === 'middleware' ? 'ExpandPluginMiddleware' : capability.role === 'bundler' ? 'ExpandPluginBundlers' : capability.role === 'job' ? 'ExpandPluginJobs' : capability.role === 'machine' ? 'ExpandPluginMachines' : 'ExpandPluginTranscoders'; %>

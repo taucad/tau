@@ -24,6 +24,7 @@ import type {
 } from '#schemas/rpc.schema.js';
 import type { DiffStatsWithContent } from '#schemas/tools/diff.schema.js';
 import type { ExportFile, FileContentMetadata, FileProvenance } from '@taucad/types';
+import type { KernelIssue } from '@taucad/runtime';
 
 /** Local execution metadata that never enters an RPC payload or durable record. @public */
 export type RpcInvocationContext = Readonly<{
@@ -157,7 +158,12 @@ export type RpcParameterClient = {
  * @public
  */
 export type RpcGraphicsExportGeometryResult =
-  | { success: true; files: ExportFile[] }
+  | {
+      success: true;
+      files: ExportFile[];
+      /** The non-fatal issues the runtime returned with the files; the handler hands the warnings to the agent. */
+      issues?: KernelIssue[];
+    }
   | {
       success: false;
       errorCode: RpcClientErrorCode;
@@ -192,7 +198,7 @@ export type RpcImageClient = {
  * @public
  */
 export type RpcGeoSpecClient = {
-  runTests(args: RunGeoSpecTestsRpcInput): Promise<RunGeoSpecTestsRpcResult>;
+  runTests(args: RunGeoSpecTestsRpcInput, context?: RpcInvocationContext): Promise<RunGeoSpecTestsRpcResult>;
 };
 
 /**

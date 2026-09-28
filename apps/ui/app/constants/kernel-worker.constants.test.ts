@@ -60,7 +60,6 @@ describe('kernel-worker constants', () => {
     expect(resolvedRuntime.middleware.map((middleware) => middleware.id)).toEqual([
       'observability',
       'parameterFileResolver',
-      'parameterCache',
       'parameterUnits',
       'geometryCache',
       'gltfEdgeDetection',

@@ -1,4 +1,4 @@
-import { createContext, useContext } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef } from 'react';
 import type { RJSFSchema, WidgetProps } from '@rjsf/utils';
 import { getSchemaType } from '@rjsf/utils';
 import { projectParameterField, resolveParameterBinding } from '@taucad/parameters';
@@ -64,11 +64,44 @@ export function ParametersWidget(
       ? undefined
       : getSchemaType(schema);
   const isDisabled = disabled === true || readonly === true;
-  const handleChange = (newValue: unknown) => {
-    if (!isDisabled) {
-      onChange(newValue);
+  /* RJSF hands every widget fresh `onChange` closures whenever its parent object field renders (any
+   * form data or filter change), so the handlers passed down read the latest ones and keep one
+   * identity; otherwise the memoised number row re-renders with every field. */
+  const latest = useRef({ id, value, isDisabled, onChange, onFocus, onBlur });
+  useEffect(() => {
+    latest.current = { id, value, isDisabled, onChange, onFocus, onBlur };
+  });
+  const handleChange = useCallback((newValue: unknown) => {
+    if (!latest.current.isDisabled) {
+      latest.current.onChange(newValue);
     }
-  };
+  }, []);
+  const handleFocus = useCallback(() => {
+    latest.current.onFocus(latest.current.id, latest.current.value);
+  }, []);
+  const handleBlur = useCallback(() => {
+    latest.current.onBlur(latest.current.id, latest.current.value);
+  }, []);
+  const instancePointer = fieldPath === undefined ? undefined : toInstancePointer(fieldPath);
+  const isNumeric = type === 'number' || type === 'integer';
+  const { parameterManifest, parameterGroup } = formContext;
+  const lengthSymbol = formContext.units.length.displaySymbol;
+  const fieldProjection = useMemo(() => {
+    if (!isNumeric || instancePointer === undefined) {
+      return undefined;
+    }
+    const nativeBinding = resolveParameterBinding(parameterManifest, instancePointer);
+    const requestedUnit =
+      nativeBinding?.representation !== 'safe-integer' && isLengthUnit(nativeBinding?.unit)
+        ? toUcumLengthCode(lengthSymbol)
+        : undefined;
+    return projectParameterField(
+      parameterManifest,
+      instancePointer,
+      { unit: requestedUnit, locale: globalThis.navigator.language },
+      parameterGroup,
+    );
+  }, [instancePointer, isNumeric, lengthSymbol, parameterGroup, parameterManifest]);
   /* An authoritative form commits a non-numeric field on its own: RJSF's whole-group `formData` can
    * still hold a pre-commit value of another field, which a group replacement would write back. */
   const commitField = async (newValue: boolean | string | undefined): Promise<void> => {
@@ -106,12 +139,8 @@ export function ParametersWidget(
         readOnly={readonly}
         autoFocus={autofocus}
         aria-label={`Input for ${prettyLabel}`}
-        onFocus={() => {
-          onFocus(id, value);
-        }}
-        onBlur={() => {
-          onBlur(id, value);
-        }}
+        onFocus={handleFocus}
+        onBlur={handleBlur}
         onChange={handleChange}
       />
     );
@@ -128,12 +157,8 @@ export function ParametersWidget(
           disabled={isDisabled}
           autoFocus={autofocus}
           aria-label={`Toggle for ${prettyLabel}`}
-          onFocus={() => {
-            onFocus(id, value);
-          }}
-          onBlur={() => {
-            onBlur(id, value);
-          }}
+          onFocus={handleFocus}
+          onBlur={handleBlur}
           onChange={commitField}
         />
       );
@@ -143,24 +168,9 @@ export function ParametersWidget(
     case 'integer': {
       const numericValue = value === null ? Number.NaN : typeof value === 'number' ? value : Number(value);
       const defaultNumericValue = typeof defaultValue === 'number' ? defaultValue : Number.NaN;
-      const instancePointer = fieldPath ? toInstancePointer(fieldPath) : undefined;
-      if (instancePointer === undefined) {
+      if (instancePointer === undefined || fieldProjection === undefined) {
         throw new Error(`Numeric parameter '${name}' has no rendered instance path.`);
       }
-      const nativeBinding = resolveParameterBinding(formContext.parameterManifest, instancePointer);
-      const requestedUnit =
-        nativeBinding?.representation !== 'safe-integer' && isLengthUnit(nativeBinding?.unit)
-          ? toUcumLengthCode(formContext.units.length.displaySymbol)
-          : undefined;
-      const fieldProjection = projectParameterField(
-        formContext.parameterManifest,
-        instancePointer,
-        {
-          unit: requestedUnit,
-          locale: globalThis.navigator.language,
-        },
-        formContext.parameterGroup,
-      );
       const constraints = fieldProjection.schema === undefined ? schema : fieldProjection.constraints;
       const effectiveDefault = numericConstraint(constraints, 'default') ?? defaultNumericValue;
       const min = numericConstraint(constraints, 'minimum');
@@ -178,12 +188,8 @@ export function ParametersWidget(
             autoFocus={autofocus}
             placeholder={Number.isFinite(defaultNumericValue) ? String(defaultNumericValue) : undefined}
             aria-label={`Input for ${prettyLabel}`}
-            onFocus={() => {
-              onFocus(id, value);
-            }}
-            onBlur={() => {
-              onBlur(id, value);
-            }}
+            onFocus={handleFocus}
+            onBlur={handleBlur}
             onChange={(event) => {
               const next = event.target.valueAsNumber;
               if (!Number.isFinite(next)) {
@@ -215,7 +221,7 @@ export function ParametersWidget(
           value={numericValue}
           defaultValue={Number.isFinite(effectiveDefault) ? effectiveDefault : numericValue}
           fieldProjection={fieldProjection}
-          sourceUnit={formContext.parameterGroup?.sourceUnits?.[instancePointer]}
+          sourceUnit={parameterGroup?.sourceUnits?.[instancePointer]}
           edit={formContext.parameterEdit}
           min={min}
           max={max}
@@ -225,12 +231,8 @@ export function ParametersWidget(
           readOnly={readonly}
           autoFocus={autofocus}
           aria-label={`Input for ${prettyLabel}`}
-          onFocus={() => {
-            onFocus(id, value);
-          }}
-          onBlur={() => {
-            onBlur(id, value);
-          }}
+          onFocus={handleFocus}
+          onBlur={handleBlur}
           onChange={handleChange}
         />
       );
@@ -249,12 +251,8 @@ export function ParametersWidget(
           readOnly={readonly}
           autoFocus={autofocus}
           aria-label={`Input for ${prettyLabel}`}
-          onFocus={() => {
-            onFocus(id, value);
-          }}
-          onBlur={() => {
-            onBlur(id, value);
-          }}
+          onFocus={handleFocus}
+          onBlur={handleBlur}
           onChange={(nextValue) => {
             void commitField(nextValue === '' && props.required !== true ? undefined : nextValue);
           }}

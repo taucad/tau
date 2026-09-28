@@ -65,6 +65,25 @@ describe('thumbnailMachine', () => {
     }
   });
 
+  it('should wait a full window again when a newer render is requested before the debounce ends', async () => {
+    vi.useFakeTimers();
+    const deps = createDeps();
+    const actor = createActor(thumbnailMachine, { input: deps }).start();
+    try {
+      actor.send({ type: 'settled', hash: 'h1' });
+      await vi.advanceTimersByTimeAsync(1500);
+      actor.send({ type: 'renderRequested' });
+      await vi.advanceTimersByTimeAsync(1500);
+      expect(deps.render).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(500);
+
+      expect(deps.render).toHaveBeenCalledWith(expect.objectContaining({ identity: 'h1' }));
+    } finally {
+      actor.stop();
+    }
+  });
+
   it('should skip regeneration when the hash matches the last rendered thumbnail', async () => {
     vi.useFakeTimers();
     const deps = createDeps();

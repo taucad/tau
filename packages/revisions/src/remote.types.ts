@@ -2,6 +2,47 @@ import type { RemoteKind } from '#remotes.js';
 import type { RemoteStorageRefusal } from '#revision-port.js';
 import type { SyncFailureReason } from '#sync.types.js';
 
+/**
+ * What a remote says this project stores against its plan (S35, C13).
+ *
+ * `retained` is the bytes of packs a compaction retired but still keeps for
+ * recovery (D18): shown beside `used`, never counted against `quota`.
+ *
+ * @public
+ */
+export type RemoteStorage = Readonly<{ used: number; quota: number; retained?: number }>;
+
+/**
+ * Where a host reads {@link RemoteStorage} from (C13, D18).
+ *
+ * The seam the browser worker, the disk host and the desktop host each supply
+ * (W8): not part of the git protocol, so a remote whose host cannot answer
+ * resolves `undefined` and the Sync region leaves the storage row out rather
+ * than drawing a meter nothing fills in.
+ *
+ * @param remote - The remote's name in git's config.
+ * @returns The usage, or `undefined` when this remote cannot say.
+ * @public
+ */
+export type RemoteStorageSupplier = (remote: string) => Promise<RemoteStorage | undefined>;
+
+/**
+ * A child's toast, routed through the root (L2-F8).
+ *
+ * `remote` and `resolution` emit toasts for a host that holds them, and no host
+ * does — it holds the root. Sent to the parent beside the emit, so one
+ * subscription on the root covers every child and a new child cannot be
+ * forgotten by a composition.
+ *
+ * @public
+ */
+export type RevisionChildToast = Readonly<{
+  type: 'childToast';
+  subject: 'remote' | 'resolution';
+  tone: 'info' | 'error';
+  message: string;
+}>;
+
 /** Which remote a project is connected to, and what it costs. @public */
 export type RemoteFacet = Readonly<{
   kind: RemoteKind | 'none';
@@ -9,7 +50,7 @@ export type RemoteFacet = Readonly<{
   /** Where the connection is, for the Sync row's own copy. */
   phase: 'none' | 'connecting' | 'connected' | 'failed' | 'disconnecting' | 'reconnectRequired';
   /** Bytes stored and allowed, when the remote reports them (S35). */
-  storage: Readonly<{ used: number; quota: number }> | undefined;
+  storage: RemoteStorage | undefined;
   /** Files a refused push named as over the plan (D16, AC16). */
   overQuota: readonly string[];
   /**
@@ -64,7 +105,7 @@ export type RemoteMachineEvent =
    */
   | Readonly<{ type: 'authorized' }>
   /** A host that validated the remote itself says so. */
-  | Readonly<{ type: 'validated'; storage?: Readonly<{ used: number; quota: number }> }>
+  | Readonly<{ type: 'validated'; storage?: RemoteStorage }>
   | Readonly<{ type: 'disconnect' }>
   | Readonly<{ type: 'cancel' }>
   /**
@@ -81,4 +122,9 @@ export type RemoteMachineEvent =
       quota?: number;
       /** What the remote said about room, when it said anything (C13). */
       storage?: RemoteStorageRefusal;
-    }>;
+    }>
+  /**
+   * A push put bytes on the remote (RV-W8 F9): the stored figure is stale, so
+   * a connected remote reads it again. Forwarded by `sync.machine`.
+   */
+  | Readonly<{ type: 'pushed' }>;

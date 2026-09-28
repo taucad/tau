@@ -30,6 +30,7 @@ const actorStub = vi.hoisted(() => {
 
 vi.mock('#hooks/use-file-tree.js', () => ({
   useFileTreeMap: () => tree.current,
+  useFileTreeSelector: <T,>(select: (snapshot: typeof tree.current) => T): T => select(tree.current),
   useFileTreeEntry: () => undefined,
 }));
 vi.mock('#hooks/use-keyboard.js', () => ({

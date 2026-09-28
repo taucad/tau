@@ -65,13 +65,19 @@ let nodeFsDelivery = Promise.withResolvers<MessagePort>();
 /** Nobody may await a port the previous channel already consumed and killed. */
 let nodeFsPortClaimed = false;
 const nodeFsHomeRoot = Promise.withResolvers<string>();
-self.addEventListener('message', (event: MessageEvent<{ type?: string; port?: unknown; homeRoot?: unknown }>) => {
-  const { data } = event;
-  if (data.type === 'nodeFsPort' && data.port instanceof MessagePort && typeof data.homeRoot === 'string') {
-    nodeFsHomeRoot.resolve(data.homeRoot);
-    nodeFsDelivery.resolve(data.port);
-  }
-});
+self.addEventListener(
+  'message',
+  (event: MessageEvent<{ type?: string; port?: unknown; homeRoot?: unknown; message?: unknown }>) => {
+    const { data } = event;
+    if (data.type === 'nodeFsPort' && data.port instanceof MessagePort && typeof data.homeRoot === 'string') {
+      nodeFsHomeRoot.resolve(data.homeRoot);
+      nodeFsDelivery.resolve(data.port);
+    } else if (data.type === 'nodeFsPortError' && typeof data.message === 'string') {
+      nodeFsPortClaimed = true;
+      nodeFsDelivery.reject(new Error(data.message));
+    }
+  },
+);
 
 const providerRegistry = new ProviderRegistry({
   databasePrefix: metaConfig.databasePrefix,
@@ -388,9 +394,12 @@ const revisionRegistry = createWorkerRevisionRegistry({
     pushRecorders.delete(projectId);
   },
   filesystem: (root) => fileService.createRootedFileSystem(root),
-  observe: (projectId, onChanged) =>
+  /* Every write in this worker raises its change event inside the write, so a
+   * cut can capture only the paths the bus named (E1). */
+  completeChanges: true,
+  observe: (root, onChanged) =>
     eventBus.subscribe((event) => {
-      const paths = versionedChangePaths(event, `/projects/${projectId}`);
+      const paths = versionedChangePaths(event, root);
       if (paths.length > 0) {
         onChanged(paths);
       }

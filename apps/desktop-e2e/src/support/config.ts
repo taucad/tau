@@ -33,6 +33,17 @@ export const desktopE2EProviderStubUrl = process.env['TAU_E2E_PROVIDER_STUB_URL'
  */
 export const desktopE2EProviderStubKey = 'desktop-e2e-provider-stub-key';
 
+/**
+ * Whether this run's API opens charter D23's free-tier sync gate.
+ *
+ * `global-setup.ts` hands the process environment to the API, so the one
+ * variable opens both. The gate is read once at boot, so a gate-open row and
+ * the gate-closed rows cannot share an API: the Nx targets run
+ * `sync-refusals.spec.ts` a second time with it set, and each describe runs
+ * under exactly one of the two.
+ */
+export const desktopE2EFreeTierSyncEnabled = process.env['TAU_FREE_TIER_SYNC_ENABLED'] === 'true';
+
 /** Whether this run must use a completed package and externally isolated services. */
 export const desktopE2ECompletedArtifact = process.env['TAU_E2E_COMPLETED_ARTIFACT'] === 'true';
 

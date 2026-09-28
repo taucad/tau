@@ -43,12 +43,13 @@ Hand the definition to a client — `createNodeClient`, `createRuntimeWorker`, o
 | `middleware`            | toolkit factory    | package-named authoring factory; presets select capabilities                       |
 | `plugin`                | toolkit factory    | the same factory under its mechanical name, for loaders that read a fixed key      |
 | `parameterFileResolver` | middleware factory | loads `<parameters>/<entry>.json` beside a model and merges it into the parameters |
-| `parameterCache`        | middleware factory | caches `getParameters` on the runtime's dependency hash                            |
+| `parameterUnits`        | middleware factory | infers parameter units; also the `units` preset                                    |
+| `parameterCache`        | middleware factory | deprecated: a hit saves nothing, so no preset selects it; remove it from your list |
 | `geometryCache`         | middleware factory | content-addressable cache over `createGeometry` results                            |
 | `gltfEdgeDetection`     | middleware factory | adds CAD edge overlay primitives to triangle meshes                                |
 
-Two presets: `default` selects all five in that order; `cache` selects `parameterCache` followed by
-`geometryCache`.
+Three presets: `default` selects `parameterFileResolver`, `parameterUnits`, `geometryCache` and
+`gltfEdgeDetection` in that order; `cache` selects `geometryCache`; `units` selects `parameterUnits`.
 
 Ordering is the point: to interleave your own stages, compose the role factories in `defineRuntime`'s
 `middleware` bucket instead of calling `middleware()`.

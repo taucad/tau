@@ -87,6 +87,23 @@ const configureComposer = (
   }
 };
 
+type ComposerSync = Readonly<{
+  settings: WebGlPostProcessingSettings;
+  viewport: { readonly width: number; readonly height: number; readonly dpr: number };
+}>;
+
+/** Size the composer and apply the viewer's settings for the active camera. */
+const syncComposer = (
+  resource: ComposerResources,
+  activeCamera: ThreeCamera,
+  { settings, viewport }: ComposerSync,
+): void => {
+  // EffectComposer sizes its buffers from the renderer's pixel ratio, which R3F has set to `viewport.dpr`.
+  resource.composer.setSize(viewport.width, viewport.height);
+  selectComposerCamera(resource, activeCamera, settings.aoEnabled);
+  configureComposer(resource, settings, viewport);
+};
+
 /** Receives the composer's stable depth texture, then writes it to the canvas or a caller's target. */
 class CanvasDepthRestorePass extends Pass {
   public constructor() {
@@ -244,47 +261,29 @@ export function PostProcessingWebGL({ settings }: { readonly settings?: Partial<
   const cameraRig = useCameraRig();
   const resourceRef = useRef<ComposerResources | undefined>(undefined);
 
+  const syncRef = useRef<ComposerSync | undefined>(undefined);
+
+  // Declared before the owner below, so a composer it replaces is gone by the time this runs and
+  // its successor is synced from what this recorded, including on first mount.
   useLayoutEffect(() => {
-    try {
-      resourceRef.current = createComposer({
-        camera: cameraRig.activeCamera,
-        cameras: [cameraRig.perspectiveCamera, cameraRig.orthographicCamera],
-        gl,
-        scene,
-      });
-    } catch (error) {
-      console.error('Failed to create WebGL post-processing pipeline', error);
-    }
-    return () => {
-      resourceRef.current?.composer.dispose();
-      resourceRef.current = undefined;
+    const sync: ComposerSync = {
+      settings: {
+        aoEnabled,
+        aoCompositeStage,
+        radiusCssPixels,
+        intensity,
+        distanceFalloff,
+        displayMode,
+        toneMapping,
+        webglHalfResolution,
+        webglDenoiseRadiusCssPixels,
+      },
+      viewport: { width: size.width, height: size.height, dpr: viewport.dpr },
     };
-  }, [cameraRig, gl, scene]);
-
-  useLayoutEffect(() => {
-    resourceRef.current?.composer.setSize(size.width, size.height);
-    invalidate();
-  }, [cameraRig, gl, invalidate, scene, size.height, size.width, viewport.dpr]);
-
-  useLayoutEffect(() => {
+    syncRef.current = sync;
     const resource = resourceRef.current;
     if (resource) {
-      selectComposerCamera(resource, cameraRig.activeCamera, aoEnabled);
-      configureComposer(
-        resource,
-        {
-          aoEnabled,
-          aoCompositeStage,
-          radiusCssPixels,
-          intensity,
-          distanceFalloff,
-          displayMode,
-          toneMapping,
-          webglHalfResolution,
-          webglDenoiseRadiusCssPixels,
-        },
-        { ...size, dpr: gl.getPixelRatio() },
-      );
+      syncComposer(resource, cameraRig.activeCamera, sync);
     }
     invalidate();
   }, [
@@ -293,11 +292,9 @@ export function PostProcessingWebGL({ settings }: { readonly settings?: Partial<
     cameraRig,
     distanceFalloff,
     displayMode,
-    gl,
     intensity,
     invalidate,
     radiusCssPixels,
-    scene,
     size.height,
     size.width,
     toneMapping,
@@ -307,18 +304,36 @@ export function PostProcessingWebGL({ settings }: { readonly settings?: Partial<
   ]);
 
   useLayoutEffect(() => {
-    const resource = resourceRef.current;
-    if (resource) {
-      try {
-        // Size and settings effects above run first, including on renderer/scene replacement.
-        warmComposer(resource, gl, cameraRig.activeCamera);
-      } catch (error) {
-        resource.composer.dispose();
-        resourceRef.current = undefined;
-        console.error('Failed to warm WebGL post-processing pipeline', error);
-      }
-      invalidate();
+    let resource: ComposerResources;
+    try {
+      resource = createComposer({
+        camera: cameraRig.activeCamera,
+        cameras: [cameraRig.perspectiveCamera, cameraRig.orthographicCamera],
+        gl,
+        scene,
+      });
+    } catch (error) {
+      console.error('Failed to create WebGL post-processing pipeline', error);
+      return undefined;
     }
+    try {
+      // Warm with the current size and settings, so the first real frame compiles nothing.
+      if (syncRef.current) {
+        syncComposer(resource, cameraRig.activeCamera, syncRef.current);
+      }
+      warmComposer(resource, gl, cameraRig.activeCamera);
+    } catch (error) {
+      resource.composer.dispose();
+      console.error('Failed to warm WebGL post-processing pipeline', error);
+      invalidate();
+      return undefined;
+    }
+    resourceRef.current = resource;
+    invalidate();
+    return () => {
+      resource.composer.dispose();
+      resourceRef.current = undefined;
+    };
   }, [cameraRig, gl, invalidate, scene]);
 
   const retarget = useCallback(

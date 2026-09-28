@@ -271,6 +271,7 @@ export const buildMechanism = (crankAngle: number, staticParts: string[]) => {
   const joints: Record<string, MechanismSource['joints'][string]> = {
     crank: {
       type: 'revolute',
+      name: 'Crankshaft',
       parent: 'block',
       child: 'crank',
       origin: [0, 0, 0],
@@ -278,6 +279,7 @@ export const buildMechanism = (crankAngle: number, staticParts: string[]) => {
     },
     cam: {
       type: 'revolute',
+      name: 'Camshaft',
       parent: 'block',
       child: 'cam',
       origin: [0, 0, camHeight],

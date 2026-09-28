@@ -28,17 +28,17 @@ const writeCollapsed = (chatId: string, collapsed: boolean): void => {
 };
 
 /** Status glyphs shared by the list above the composer and the transcript card. */
-// eslint-disable-next-line @typescript-eslint/naming-convention -- keys are the status wire values
 export const todoStatusIcons: Record<TodoItemStatus, LucideIcon> = {
   pending: Circle,
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- keys are the status wire values
   in_progress: CircleDot,
   done: CircleCheck,
 };
 
 /** Screen-reader prefix for a status glyph. */
-// eslint-disable-next-line @typescript-eslint/naming-convention -- keys are the status wire values
 export const todoStatusLabels: Record<TodoItemStatus, string> = {
   pending: 'pending',
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- keys are the status wire values
   in_progress: 'in progress',
   done: 'done',
 };

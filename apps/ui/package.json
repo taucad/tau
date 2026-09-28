@@ -4,6 +4,11 @@
   "type": "module",
   "private": true,
   "license": "Apache-2.0",
+  "imports": {
+    "#package.json": "./package.json",
+    "#scripts/*": "./scripts/*",
+    "#*": "./app/*"
+  },
   "dependencies": {
     "@base-ui/react": "catalog:",
     "@better-auth-ui/core": "1.6.15",

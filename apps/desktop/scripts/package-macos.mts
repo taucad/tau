@@ -68,6 +68,12 @@ const picoGkResourceRoot = resolve(desktopRoot, 'resources/picogk');
  * so `git lfs` resolves through the binary main points the services host at. */
 const gitResourceRoot = resolve(desktopRoot, 'resources/git/darwin-arm64');
 const shipsGit = existsSync(gitResourceRoot);
+/* GPL-2.0 §3(a): the exact source the payload was built from travels with it
+ * (`prepare-git.mts`). A payload without it is not shipped. */
+const gitSourceRoot = resolve(desktopRoot, 'resources/git/SOURCES');
+if (shipsGit && !existsSync(gitSourceRoot)) {
+  throw new Error(`The git payload ships with its source; ${gitSourceRoot} is missing. Run prepare-git again.`);
+}
 const { release, unsigned, zip } = parseMacosPackageMode(process.argv.slice(2));
 const extensions = ['TauQuickLookPreview.appex', 'TauQuickLookThumbnail.appex'] as const;
 const adhocAppEntitlements = [
@@ -384,7 +390,12 @@ await Promise.all([
   cp(resolve(desktopRoot, 'resources/icon-dark.png'), resolve(resources, 'branding/icon-dark.png')),
   copyTree(resolve(pythonResourceRoot, 'darwin-arm64'), resolve(resources, 'python/darwin-arm64')),
   copyTree(resolve(picoGkResourceRoot, 'darwin-arm64'), resolve(resources, 'picogk/darwin-arm64')),
-  ...(shipsGit ? [copyTree(gitResourceRoot, resolve(resources, 'git/darwin-arm64'))] : []),
+  ...(shipsGit
+    ? [
+        copyTree(gitResourceRoot, resolve(resources, 'git/darwin-arm64')),
+        copyTree(gitSourceRoot, resolve(resources, 'git/SOURCES')),
+      ]
+    : []),
   ...extensions.map(async (extension) =>
     copyTree(resolve(extensionRoot, extension), resolve(plugins, extension), excludesBuildDiagnostics),
   ),

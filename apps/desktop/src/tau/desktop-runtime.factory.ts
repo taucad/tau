@@ -8,13 +8,7 @@ import { gltf } from '@taucad/gltf';
 import { image } from '@taucad/image';
 import { jscad } from '@taucad/jscad';
 import { manifold } from '@taucad/manifold';
-import {
-  geometryCache,
-  gltfEdgeDetection,
-  parameterCache,
-  parameterFileResolver,
-  parameterUnits,
-} from '@taucad/middleware';
+import { geometryCache, gltfEdgeDetection, parameterFileResolver, parameterUnits } from '@taucad/middleware';
 import { opencascade } from '@taucad/opencascade';
 import { openrscadKernel } from '@taucad/openrscad';
 import { picogk } from '@taucad/picogk';
@@ -74,7 +68,7 @@ const createDesktopRuntimeImplementation = (options: DesktopRuntimeOptions = {})
         }),
       ],
       kernels: [desktopOpenrscadKernel],
-      middleware: [parameterFileResolver(), parameterCache(), parameterUnits(), geometryCache(), gltfEdgeDetection()],
+      middleware: [parameterFileResolver(), parameterUnits(), geometryCache(), gltfEdgeDetection()],
     }),
   });
 

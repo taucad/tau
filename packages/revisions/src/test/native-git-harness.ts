@@ -5,16 +5,22 @@ import { dirname, join } from 'node:path';
 
 import type { Checkout, RevisionPort } from '#revision-port.js';
 import { createNativeGitRevisionPort } from '#native-git-port.js';
+import { resolveGitToolchain } from '#git-toolchain.js';
 
-/** Whether the native Git fixture can run on this host. @internal */
-export const gitOnPath = ((): boolean => {
-  try {
-    execFileSync('git', ['--version'], { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-})();
+/**
+ * Whether this host has the toolchain a native store records with: `git` and
+ * `git lfs`, probed exactly as a disk host probes them (`resolveGitToolchain`).
+ *
+ * A native suite gated on `git` alone fails product-shaped on a machine without
+ * `git-lfs` (the host refuses, large objects are never pointerised), which is
+ * indistinguishable from a real regression. Gate every native suite on this.
+ *
+ * @internal
+ */
+export const gitToolchainOnPath = await resolveGitToolchain().then(
+  () => true,
+  () => false,
+);
 
 const directoryFiles = async (directory: string, path = ''): Promise<readonly string[]> => {
   const entries = await readdir(join(directory, path), { withFileTypes: true }).catch(() => []);

@@ -10,6 +10,7 @@ import type { ParameterSetService } from '#services/parameter-set-service.js';
 import type { ActorRefFrom } from 'xstate';
 import type { projectMachine } from '#machines/project.machine.js';
 import type { editorMachine } from '#machines/editor.machine.js';
+import { holdEditorConflictRecord } from '#lib/monaco-model-service.js';
 
 const projectA = 'proj_aaaaaaaaaaaaaaaaaaaaa';
 const projectB = 'proj_bbbbbbbbbbbbbbbbbbbbb';
@@ -18,10 +19,11 @@ const projectC = 'proj_ccccccccccccccccccccc';
 let currentProjectId = projectA;
 const getProjectRouteAccess = vi.fn<(projectId: string) => Promise<ProjectRouteAccess>>();
 const restoreProject = vi.fn<(projectId: string) => Promise<void>>();
-const projectManager = {
+/* W2: a trash or restore publishes a new manager value carrying the next
+ * `libraryRevision`, and that value is how it reaches an already-resolved route. */
+let projectManager = {
   getProjectRouteAccess,
   restoreProject,
-  /* W2: bumping this is how a trash or restore reaches an already-resolved route. */
   libraryRevision: 0,
 };
 const mounts: string[] = [];
@@ -434,6 +436,28 @@ describe('project route session identity', () => {
     expect(editor.send).not.toHaveBeenCalled();
   });
 
+  it('should refuse the close flush while an editor conflict is being recorded, before anything is torn down (RV-W5b2 R2-1)', async () => {
+    const parameters = mock<ParameterSetService>();
+    const project = mock<ActorRefFrom<typeof projectMachine>>();
+    const editor = mock<ActorRefFrom<typeof editorMachine>>();
+    const release = holdEditorConflictRecord('proj-recording');
+    try {
+      await expect(
+        sessionsModule.flushProjectSessionPersistence({
+          projectId: 'proj-recording',
+          parameterService: parameters,
+          projectRef: project,
+          editorRef: editor,
+          closeFlushMilliseconds: 100,
+        }),
+      ).rejects.toThrow('An edit that overlapped another change is still being recorded. Try again in a moment.');
+      expect(parameters.close).not.toHaveBeenCalled();
+      expect(project.send).not.toHaveBeenCalled();
+    } finally {
+      release();
+    }
+  });
+
   it('should refuse the producers flush when project storage reports idle with an error', async () => {
     const parameters = mock<ParameterSetService>();
     const project = mock<ActorRefFrom<typeof projectMachine>>();
@@ -780,7 +804,7 @@ describe('project route session identity', () => {
      * Finding 2: deleting the open project closes its session and writes
      * `deletedAt`. The close was live; the trash was not, so the route kept
      * showing "Closed" — and its Reopen would have re-mounted a trashed
-     * project. The revision counter is what makes the second fact arrive.
+     * project. The manager's next value is what makes the second fact arrive.
      */
     getProjectRouteAccess.mockResolvedValue(ready(projectA));
     const { Provider, view } = renderRouteProvider();
@@ -788,7 +812,7 @@ describe('project route session identity', () => {
 
     getProjectRouteAccess.mockResolvedValue(trashed(projectA));
     await act(async () => {
-      projectManager.libraryRevision += 1;
+      projectManager = { ...projectManager, libraryRevision: projectManager.libraryRevision + 1 };
       view.rerender(<Provider>content</Provider>);
       await new Promise<void>((resolve) => {
         globalThis.setTimeout(resolve, 0);
@@ -805,7 +829,7 @@ describe('project route session identity', () => {
 
     getProjectRouteAccess.mockResolvedValue(ready(projectA));
     await act(async () => {
-      projectManager.libraryRevision += 1;
+      projectManager = { ...projectManager, libraryRevision: projectManager.libraryRevision + 1 };
       view.rerender(<Provider>content</Provider>);
       await new Promise<void>((resolve) => {
         globalThis.setTimeout(resolve, 0);

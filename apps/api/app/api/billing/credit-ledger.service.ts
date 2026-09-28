@@ -2895,7 +2895,7 @@ export class CreditLedgerService {
       ) {
         throw new Error('Period must bind its owned subscription and invoice');
       }
-      customerBindingId = slot.customerBindingId ?? undefined;
+      customerBindingId = slot.customerBindingId;
     }
     const [customer] = await tx
       .select()

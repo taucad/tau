@@ -36,7 +36,10 @@ beforeAll(async () => {
   token = await seedTauTestUser(account);
 });
 
-afterEach(async () => {
+afterEach(async (context) => {
+  if (context.task.result?.state === 'fail') {
+    await session?.capture(`thumbnail-lifecycle-${context.task.name.includes('GLB') ? 'glb' : 'svg'}-failure`);
+  }
   await session?.close();
   session = undefined;
   await fixture?.close();

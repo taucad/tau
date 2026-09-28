@@ -41,8 +41,6 @@ export type ProjectContext = {
   modelInteractionRef: ActorRefFrom<typeof modelInteractionMachine>;
   /** Dynamic geometry units keyed by entry path. Each is a headless CadMachine+KernelMachine. */
   geometryUnits: Map<string, ActorRefFrom<typeof cadMachine>>;
-  /** Geometry unit file paths that currently have geometry and at least one export route. */
-  exportableGeometryUnitPaths: Set<string>;
   /**
    * Why this project has no kernel, and which unit said so (R4).
    *
@@ -146,11 +144,6 @@ type ProjectEventInternal =
   | { type: 'loadModel' }
   | { type: 'setMainFile'; path: string }
   | { type: 'createGeometryUnit'; entryPath: string; renderTimeout?: number }
-  | {
-      type: 'geometryUnit.exportAvailabilityChanged';
-      actorId: string;
-      available: boolean;
-    }
   /* R4: a unit reporting whether its kernel was refused, and why. */
   | { type: 'geometryUnit.kernelRefused'; actorId: string; reason: string | undefined }
   | { type: 'openInViewer'; entryPath: string }
@@ -302,7 +295,6 @@ const createViewGraphics = ({ context, event }: ProjectArgs<'createViewGraphics'
     upDirection: settings.upDirection,
     pinnedMeasurements: settings.pinnedMeasurements,
     sectionView: settings.sectionView,
-    sectionDisplay: settings.sectionDisplay,
     graphicsBackend: settings.graphicsBackend ?? 'webgl',
   };
 
@@ -331,7 +323,7 @@ const destroyViewGraphics = ({ context, event }: ProjectArgs<'destroyViewGraphic
   return { context: { viewGraphics } };
 };
 
-/** Drop the units a deletion matched, their export routes and a main pointer into them. */
+/** Drop the units a deletion matched and a main pointer into them. */
 const withoutUnits = (context: ProjectContext, matches: (entryPath: string) => boolean): ProjectPatch => {
   const geometryUnits = new Map(context.geometryUnits);
   for (const key of context.geometryUnits.keys()) {
@@ -339,15 +331,8 @@ const withoutUnits = (context: ProjectContext, matches: (entryPath: string) => b
       geometryUnits.delete(key);
     }
   }
-  const exportableGeometryUnitPaths = new Set(context.exportableGeometryUnitPaths);
-  for (const key of context.exportableGeometryUnitPaths) {
-    if (matches(key)) {
-      exportableGeometryUnitPaths.delete(key);
-    }
-  }
   return {
     geometryUnits,
-    exportableGeometryUnitPaths,
     ...(matches(context.mainEntryPath) ? { mainEntryPath: '' } : {}),
   };
 };
@@ -399,7 +384,6 @@ export const projectMachine = setup({
     // Compilation units are created dynamically after project loads (when we know the main file).
     // The primary geometry unit is created once the project loads.
     const geometryUnits = new Map<string, CadUnitRef>();
-    const exportableGeometryUnitPaths = new Set<string>();
 
     // View graphics are created dynamically by Dockview viewer panels.
     const viewGraphics = new Map<string, ActorRefFrom<typeof graphicsMachine>>();
@@ -417,35 +401,12 @@ export const projectMachine = setup({
       viewGraphics,
       modelInteractionRef,
       geometryUnits,
-      exportableGeometryUnitPaths,
       kernelRefusal: undefined,
       mainEntryPath: '',
       logRef,
     };
   },
   on: {
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- XState event name
-    'geometryUnit.exportAvailabilityChanged': ({ context, event }) => {
-      let entryPath: string | undefined;
-      for (const [candidateEntryPath, actor] of context.geometryUnits) {
-        if (actorIdOf(actor) === event.actorId) {
-          entryPath = candidateEntryPath;
-          break;
-        }
-      }
-
-      if (!entryPath || context.exportableGeometryUnitPaths.has(entryPath) === event.available) {
-        return {};
-      }
-
-      const exportableGeometryUnitPaths = new Set(context.exportableGeometryUnitPaths);
-      if (event.available) {
-        exportableGeometryUnitPaths.add(entryPath);
-      } else {
-        exportableGeometryUnitPaths.delete(entryPath);
-      }
-      return { context: { exportableGeometryUnitPaths } };
-    },
     /* R4: the project keeps the refusal so its live session can report the
      * runtime region failed, which is what puts the reason on the row. */
     // eslint-disable-next-line @typescript-eslint/naming-convention -- XState event name
@@ -665,20 +626,9 @@ export const projectMachine = setup({
                 }
               }
 
-              const exportableGeometryUnitPaths = new Set(context.exportableGeometryUnitPaths);
-              let mutatedExportablePaths = false;
-              for (const key of context.exportableGeometryUnitPaths) {
-                if (matches(key)) {
-                  exportableGeometryUnitPaths.delete(key);
-                  exportableGeometryUnitPaths.add(rewrite(key));
-                  mutatedExportablePaths = true;
-                }
-              }
-
               return {
                 context: {
                   ...(mutatedUnits ? { geometryUnits } : {}),
-                  ...(mutatedExportablePaths ? { exportableGeometryUnitPaths } : {}),
                   ...(matches(context.mainEntryPath) ? { mainEntryPath: rewrite(context.mainEntryPath) } : {}),
                   // If the main file was renamed, persist its entry pointer.
                   // Recency is stamped separately by `projectFileActivity`, so this

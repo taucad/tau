@@ -1,5 +1,6 @@
 import { Plane, Vector2, Vector3 } from 'three';
 import type { Camera, Raycaster } from 'three';
+import { setRaycasterFromCamera } from '#components/geometry/graphics/three/utils/raycaster-from-camera.js';
 
 /** CSS pixels a press on a movable part must travel before it becomes a kinematic drag. */
 export const kinematicsDragThresholdPx = 4;
@@ -46,6 +47,6 @@ export function intersectKinematicsDragPlane({
 }: Readonly<{ raycaster: Raycaster; camera: Camera; plane: Plane; ndc: Vector2; target?: Vector3 }>):
   | Vector3
   | undefined {
-  raycaster.setFromCamera(ndc, camera);
+  setRaycasterFromCamera(raycaster, ndc, camera);
   return raycaster.ray.intersectPlane(plane, target) ?? undefined;
 }

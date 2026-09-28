@@ -2,24 +2,25 @@
  * `resolution.machine` — one conflicted revision, and the choices that end it.
  *
  * A conflicted merge does not fail: it records a conflicted revision on the
- * branch a person merged *from*, leaves the branch they were on and its files
- * byte-identical, and shows *Needs resolution* (A22, AC14). This machine owns
- * what happens next, one actor per conflicted revision, spawned by
+ * conflict line of the branch the decision lands on, leaves every branch and
+ * its files byte-identical, and shows *Needs your decision* (A22, D14). This
+ * machine owns what happens next, one actor per conflicted revision, spawned by
  * `project-revisions.machine` with a stored ref and stopped with `stopChild`
- * when it resolves or is abandoned (A38).
+ * when it resolves or is abandoned (A38). A conflict fetched from another
+ * device is the same value, so every device runs the same machine for it.
  *
  * Per file, never per conflict-as-a-whole: *Keep mine*, *Keep theirs*, and for a
  * file whose three terms are decodable text, *Open in editor* — which is handed
  * marker text and answers with the resolved bytes. Nothing is auto-resolved and
- * nothing is silent. *Ask chat to resolve* seeds a turn on the conflict branch's
+ * nothing is silent. *Ask chat to resolve* seeds a turn on the decided line's
  * checkout with the conflict record as its context; it is a request, so the
  * machine emits it and stays where it was.
  *
- * `finish` mints the resolving revision — a normal revision on that branch, from
- * the paths that settled plus one chosen side each — and the person merges
- * again, which now fast-forwards. `abandon` leaves the conflicted revision in
- * History, reachable by id, because conflict evidence is one of the things local
- * GC is not allowed to collect (A25).
+ * `finish` lands the decision: a merge revision on the decided line with the
+ * conflicted revision among its parents, so "resolved" is ancestry and the
+ * conflict line needs no further move (D14). `abandon` leaves the conflicted
+ * revision in History, reachable by id, because conflict evidence is one of the
+ * things local GC is not allowed to collect (A25).
  *
  * Context holds paths and side choices only: no bytes, no functions (I29). The
  * editor's resolved bytes ride the event into the actor's input and are held by
@@ -31,6 +32,7 @@ import type { AnyActorRef, EnqueueObject, SnapshotFrom } from 'xstate';
 
 import { eventSchemas } from '#machine-schemas.js';
 import type { MachineActors } from '#machine-schemas.js';
+import type { RevisionChildToast } from '#remote.types.js';
 import type { ResolutionSide } from '#resolution.types.js';
 
 /** One conflicted path, and whether it can be opened as text. @public */
@@ -44,6 +46,11 @@ export type ResolutionPath = Readonly<{
    * (A22, canvas "Conflicts" — `params/wall.json` has no *Open*).
    */
   openable: boolean;
+  /**
+   * The parameter keys both sides changed (RFC 6901 pointers), for a parameter
+   * record whose keys collided: what a choose-one decides (D14).
+   */
+  keys?: readonly string[];
 }>;
 
 /** Input accepted when creating the resolutionMachine actor. @public */
@@ -105,14 +112,6 @@ export type ResolutionMachineEmitted =
    * only a page or a CLI can, and both hold the root that routes this (A38).
    */
   | Readonly<{ type: 'turnRequested'; revisionId: string; checkoutId: string | undefined; paths: readonly string[] }>
-  /**
-   * A step of this resolution failed, and why (D56).
-   *
-   * Routed through the parent like the facts above: a child spawned per
-   * conflict is not one a host can subscribe to, so its own `toast.error`
-   * reached nobody and *Merge into* read as a button that did nothing.
-   */
-  | Readonly<{ type: 'resolutionFailed'; revisionId: string; reason: string }>
   /** The marker text one file was opened with. */
   | Readonly<{ type: 'conflictMaterialized'; path: string; text: string; ours: string; theirs: string }>
   /**
@@ -129,11 +128,11 @@ export type ResolutionMachineEmitted =
 
 /** What `loadConflict` answers about one conflicted revision. @public */
 export type ResolutionLoadActorOutput = Readonly<{
-  /** The branch the conflicted revision is the head of, when one names it. */
+  /** The conflict line the conflicted revision is on (D14). */
   branch: string | undefined;
   labels: Readonly<{ ours: string; theirs: string }>;
   paths: readonly ResolutionPath[];
-  /** The checkout that branch has, for *Ask chat to resolve*. */
+  /** The checkout of the line the decision lands on, for *Ask chat to resolve*. */
   checkoutId: string | undefined;
 }>;
 
@@ -177,20 +176,26 @@ const describeFailure = (error: unknown): string =>
 
 type ResolutionEnqueue = EnqueueObject<ResolutionMachineEvent, ResolutionMachineEmitted>;
 
-/* The toast, and the same sentence to the parent that a host can hear (D56). */
-const announceFailure = (context: ResolutionMachineContext, enq: ResolutionEnqueue, fallback: string): void => {
-  const reason = context.reason ?? fallback;
-  enq.emit({ type: 'toast.error', message: reason });
-  if (context.parentRef !== undefined) {
-    enq.sendTo(context.parentRef, { type: 'resolutionFailed', revisionId: context.revisionId, reason });
-  }
-};
-
 const announceChange = (context: ResolutionMachineContext, enq: ResolutionEnqueue): void => {
   const fact: ResolutionMachineEmitted = { type: 'resolutionChanged', revisionId: context.revisionId };
   enq.emit(fact);
   if (context.parentRef !== undefined) {
     enq.sendTo(context.parentRef, fact);
+  }
+};
+
+/* Emitted for a host that holds this child, and sent to the root for every
+ * host that holds only the root: a failed resolution step has no other surface
+ * (L2-F8). */
+const toastError = (context: ResolutionMachineContext, enq: ResolutionEnqueue, message: string): void => {
+  enq.emit({ type: 'toast.error', message });
+  if (context.parentRef !== undefined) {
+    enq.sendTo(context.parentRef, {
+      type: 'childToast',
+      subject: 'resolution',
+      tone: 'error',
+      message,
+    } satisfies RevisionChildToast);
   }
 };
 
@@ -254,11 +259,12 @@ const resolutionMachineDefinition = setup({
   guards: {
     /* Every conflicted path has a side. The guard, not a disabled button, is
        what makes *Merge into `<current>`* unreachable while one is unanswered. */
-    /* `paths.length > 0` as well, so the guard and `selectResolutionFacet`'s
-       `ready` are the same question: an empty conflict has nothing to mint and
-       `finish` would otherwise be reachable on it (review R12). */
+    /* Only once the conflict has been read (`labels`), so the guard and
+       `selectResolutionFacet`'s `ready` are the same question (review R12). A
+       read conflict with nothing left — this line already holds both sides —
+       still finishes: the merge it mints is what hides the line (D14). */
     everyPathChosen: (context: ResolutionMachineContext) =>
-      context.paths.length > 0 && context.paths.every((entry) => context.chosen[entry.path] !== undefined),
+      context.labels !== undefined && context.paths.every((entry) => context.chosen[entry.path] !== undefined),
   },
 }).createMachine({
   id: 'resolution',
@@ -308,7 +314,7 @@ const resolutionMachineDefinition = setup({
            event. The failure edge every invoked effect has (I29). */
         failed: {
           entry: ({ context }, enq) => {
-            announceFailure(context, enq, 'This conflict could not be read.');
+            toastError(context, enq, context.reason ?? 'This conflict could not be read.');
             announceChange(context, enq);
           },
           on: { reload: { target: 'loading' } },
@@ -391,7 +397,7 @@ const resolutionMachineDefinition = setup({
                       theirs: event.output.theirs,
                     };
               if (event.output.text === undefined) {
-                enq.emit({ type: 'toast.error', message: unopenableMessage });
+                toastError(context, enq, unopenableMessage);
               }
               enq.emit(fact);
               /* Through the parent as well: the editor that shows this is on
@@ -446,7 +452,7 @@ const resolutionMachineDefinition = setup({
            carries on from here rather than starting over. */
         failed: {
           entry: ({ context }, enq) => {
-            announceFailure(context, enq, 'That resolution step failed.');
+            toastError(context, enq, context.reason ?? 'That resolution step failed.');
             announceChange(context, enq);
           },
           always: { target: 'idle' },
@@ -516,7 +522,9 @@ export const selectResolutionFacet = (
   revisionId: string;
   branch: string | undefined;
   labels: Readonly<{ ours: string; theirs: string }> | undefined;
-  paths: ReadonlyArray<Readonly<{ path: string; openable: boolean; side: ResolutionSide | undefined }>>;
+  paths: ReadonlyArray<
+    Readonly<{ path: string; openable: boolean; keys?: readonly string[]; side: ResolutionSide | undefined }>
+  >;
   busy: boolean;
   finishing: boolean;
   /** Every path has a side, so the merge can be asked for again. */
@@ -530,6 +538,7 @@ export const selectResolutionFacet = (
     paths: context.paths.map((entry) => ({
       path: entry.path,
       openable: entry.openable,
+      ...(entry.keys === undefined ? {} : { keys: entry.keys }),
       side: context.chosen[entry.path],
     })),
     busy:
@@ -539,7 +548,7 @@ export const selectResolutionFacet = (
       snapshot.matches({ resolving: 'seeding' }) ||
       snapshot.matches('finishing'),
     finishing: snapshot.matches('finishing'),
-    ready: context.paths.length > 0 && context.paths.every((entry) => context.chosen[entry.path] !== undefined),
+    ready: context.labels !== undefined && context.paths.every((entry) => context.chosen[entry.path] !== undefined),
   };
 };
 

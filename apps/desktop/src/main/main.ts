@@ -20,6 +20,7 @@ import {
   net,
   protocol,
   safeStorage,
+  screen,
   session,
   shell,
   utilityProcess,
@@ -28,7 +29,13 @@ import type { IpcMainInvokeEvent } from 'electron';
 import { installElectronRuntimeHeaders, registerElectronRuntimeMain } from '@taucad/runtime/electron/main';
 import { connectSqliteComputeStoreWorker } from '@taucad/runtime/node';
 import type { ComputeBinding } from '@taucad/runtime/types';
-import { defaultConfigDirectory, discoverAcpAgents, externalAgentDescriptors } from '@taucad/host';
+import {
+  defaultConfigDirectory,
+  discoverAcpAgents,
+  externalAgentDescriptors,
+  projectCloseMilliseconds,
+  projectReleaseMilliseconds,
+} from '@taucad/host';
 import type { ExternalAgentDescriptor } from '@taucad/agent-host';
 
 import { appOrigin, appSchemePrivileges, registerAppProtocol } from '#main/app-protocol.js';
@@ -63,6 +70,7 @@ import {
 import { createServicesBroker, rendererServicesConcerns } from '#main/services-broker.js';
 import type { ServicesConcern } from '#main/services-broker.js';
 import {
+  bundledGitEnvironment,
   compileCacheEnvironment,
   loginShellEnvironment,
   packagedEsbuildEnvironment,
@@ -73,6 +81,7 @@ import type { QuickLookController } from '#main/quick-look.js';
 import { deepLinkArgument, parseDeepLink } from '#main/deep-links.js';
 import { createOpenFileQueue } from '#main/open-files.js';
 import { createBambuStudioService } from '#main/bambu-studio-service.js';
+import { readWindowState, writeWindowState } from '#main/window-state.js';
 import {
   appIconThemeChannel,
   agentHostSessionChannels,
@@ -170,14 +179,30 @@ if (launchDeepLink !== undefined) {
   receiveDeepLink(launchDeepLink);
 }
 
+/* How far each quit wait outlasts the bound it awaits, so the inner reason lands first (rule 9). */
+const quitMarginMilliseconds = 3000;
+
 /**
  * How long quit waits for every served project to settle (W19, D31).
  *
- * Long enough for a close cut plus W13's `closeFlushMilliseconds` sync wait on
- * several projects, short enough that a wedged utility never holds the app
- * open: after it the durable queue is the guarantee (D28).
+ * Derived from the host's own worst case for closing one project — its runs
+ * drain, then the live-checkout wait, the close cuts and the sync quiesce — so
+ * rule 9's nesting holds whatever those bounds become: the host's reason
+ * lands before this wait's. Projects close in parallel, so the per-project
+ * bound is the whole bound. After it the durable queue is the guarantee (D28).
+ *
+ * @internal
  */
-const quitQuiesceMilliseconds = 20_000;
+export const quitQuiesceMilliseconds = projectCloseMilliseconds + quitMarginMilliseconds;
+
+/*
+ * The page's own close steps before its sync flush: `cancelRuns`, then
+ * `flushProducers`, each on the editor bound of `project-live-sessions.tsx`
+ * (`editorFlushTimeoutMilliseconds`, 10 s). ponytail: mirrored, not imported —
+ * desktop has no dependency on the ui app; move the page bound into a package
+ * both read if it ever changes.
+ */
+const rendererCloseStepsMilliseconds = 2 * 10_000;
 
 /**
  * How long a binding ceremony may take to reach the printer and answer (D10).
@@ -191,12 +216,17 @@ const machineBindingMilliseconds = 60_000;
 /**
  * How long quit waits for the renderer's sessions registry (D31, P49).
  *
- * The page runs every live project's `closing` — cancel, sync flush, lease
- * release — and answers `quiesced`. The person can cut it short with *Quit
- * anyway*. The bound reports failure to main; it never turns an incomplete
- * close into permission to quit.
+ * The page runs every live project's `closing` — cancel, producer flush, sync
+ * flush, lease release — and answers `quiesced`. A desktop project's sync
+ * flush is the host's close, so the wait is the page's own steps plus
+ * {@link projectReleaseMilliseconds} plus a margin (rule 9, RV-W2b #1). The
+ * person can cut it short with *Quit anyway*. The bound reports failure to
+ * main; it never turns an incomplete close into permission to quit.
+ *
+ * @internal
  */
-const quitRendererMilliseconds = 20_000;
+export const quitRendererMilliseconds =
+  rendererCloseStepsMilliseconds + projectReleaseMilliseconds + quitMarginMilliseconds;
 
 /**
  * Ask every window's sessions registry to close its projects, and wait.
@@ -294,26 +324,10 @@ const bootstrapElectronApp = async (): Promise<void> => {
   const picogkResourceRoot = app.isPackaged
     ? join(process.resourcesPath, 'picogk')
     : join(import.meta.dirname, '../../resources/picogk');
-  /*
-   * The `git` this app records revisions with (OQ3, C68).
-   *
-   * One binary, not two: the bundled git's own exec path carries `git-lfs`, so
-   * `git lfs` resolves through it and nothing has to name a second executable.
-   * Absent — a development tree, or a platform whose payload is not built — the
-   * toolchain comes from `PATH`, which on a Finder launch is
-   * `/usr/bin:/bin:/usr/sbin:/sbin`; a machine that has neither is told once,
-   * by name, through `revision.unavailable`.
-   */
-  const bundledGitExecutable = join(
-    app.isPackaged ? join(process.resourcesPath, 'git') : join(import.meta.dirname, '../../resources/git'),
-    `${process.platform}-${process.arch}`,
-    'bin',
-    process.platform === 'win32' ? 'git.exe' : 'git',
+  /* The `git` this app records revisions with, when this build ships one (OQ3, C68). */
+  const gitEnvironment = bundledGitEnvironment(
+    app.isPackaged ? process.resourcesPath : join(import.meta.dirname, '../../resources'),
   );
-  const gitEnvironment: Readonly<Record<string, string>> = existsSync(bundledGitExecutable)
-    ? // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
-      { TAU_GIT_EXECUTABLE: bundledGitExecutable }
-    : {};
   const esbuildEnvironment = packagedEsbuildEnvironment(app.isPackaged, process.resourcesPath);
   const log = createDiagnosticsLog({ directory: logDirectory, echo: isDevelopment });
   log.log('info', 'main.ready', { electron: process.versions.electron, packaged: app.isPackaged, isDevelopment });
@@ -347,6 +361,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
    * forgot would answer `EACCES` for a folder the user believes is connected. */
   const roots = createProjectRootRegistry({ storePath: join(app.getPath('userData'), 'granted-roots.json') });
   roots.admit(homeRoot);
+  const windowStatePath = join(app.getPath('userData'), 'window-state.json');
   const quickLookTemporaryRoot = join(app.getPath('temp'), 'tau-quick-look');
   removeStaleQuickLookSessions(quickLookTemporaryRoot);
   const quickLookControllers = new Map<number, QuickLookController>();
@@ -929,9 +944,15 @@ const bootstrapElectronApp = async (): Promise<void> => {
     new URL(path, isDevelopment ? environment.ELECTRON_RENDERER_URL! : `${appOrigin}/`).href;
 
   const createMainWindow = async (): Promise<BrowserWindow> => {
+    /* Reopen where the user left the window; the first launch fills the work
+     * area (display minus menu bar and dock) of the display the user launched
+     * from. */
+    const saved = readWindowState(
+      windowStatePath,
+      screen.getAllDisplays().map((display) => display.workArea),
+    );
     const window = new BrowserWindow({
-      width: 1440,
-      height: 900,
+      ...(saved?.bounds ?? screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea),
       show: false,
       icon: applicationIcon,
       title: 'Tau',
@@ -961,6 +982,15 @@ const bootstrapElectronApp = async (): Promise<void> => {
     });
     quickLookControllers.set(window.id, quickLook);
     window.once('close', () => {
+      try {
+        writeWindowState(windowStatePath, {
+          bounds: window.getNormalBounds(),
+          maximized: window.isMaximized(),
+          fullScreen: window.isFullScreen(),
+        });
+      } catch (error) {
+        log.log('warn', 'window-state.write-failed', { message: String(error) });
+      }
       quickLook.dispose();
       quickLookControllers.delete(window.id);
     });
@@ -998,7 +1028,13 @@ const bootstrapElectronApp = async (): Promise<void> => {
     window.webContents.on('will-redirect', guardNavigation('will-redirect'));
 
     await window.loadURL(rendererUrl(openFiles.hasPending() ? '/import?desktop-open=1' : '/'));
+    if (saved?.maximized) {
+      window.maximize();
+    }
     window.show();
+    if (saved?.fullScreen) {
+      window.setFullScreen(true);
+    }
     return window;
   };
 

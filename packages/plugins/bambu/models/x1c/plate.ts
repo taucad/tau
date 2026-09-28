@@ -2,11 +2,11 @@
  * Bambu Lab X1-Carbon build plates: Cool, Engineering, High Temp (Smooth PEI)
  * and Textured PEI (gold).
  *
- * Clean-room model from `out/research/x1c-build-plates/spec.md` only. Frame:
- * millimetres; X right, Y toward the rear, Z up; origin at the printable
- * area's front-left corner; Z = 0 on the print (top) surface with the plate
- * below it. Printed markings are
- * single faces 0.02 mm above that surface.
+ * Clean-room model from `docs/research/artifacts/x1c-build-plates/spec.md`
+ * only. Frame: millimetres; X right, Y toward the rear, Z up; origin at the
+ * printable area's front-left corner; Z = 0 on the print (top) surface with
+ * the plate below it. Printed markings are single faces 0.02 or 0.04 mm above
+ * that surface.
  *
  * Each model returns separately coloured shapes: `steel` (sheet, edges and
  * underside), `surface` (the coated top), `underside` (Textured PEI's second
@@ -30,25 +30,42 @@ const steelColor = '#9A9A9A';
 /** Height of the printed-ink faces above the print surface, clear of the coat so they never z-fight. */
 const inkHeight = 0.02;
 
-/** Label band Y range in the lip (§3 "Common front label band": y≈257.1–263.0 from the rear). */
-const bandMaxY = bodyMax - 257.1;
-const bandMinY = bodyMax - 263;
-/** Hairline along the body/lip boundary (§3: y≈256.7, x≈60–250), 0.3 mm wide (assumed). */
-const hairlineSpec = { minX: 59.5, maxX: 249.5, centerY: bodyMax - 256.7, width: 0.3 };
+/** Label band Y range on the current plates (§3 "Common front label band": y≈257.1–263.0 from the rear). */
+const currentBandY = { minY: bodyMax - 263, maxY: bodyMax - 257.1 };
+/** Hairline along the body/lip boundary (§3: y≈256.7), 0.3 mm wide (assumed); its X extent is per plate. */
+const hairlineSpec = { centerY: bodyMax - 256.7, width: 0.3 };
+/** The current plates' hairline X extent (§3: x≈60–250). */
+const currentHairline = [59.5, 249.5] as const;
 /**
- * Plate-detection code footprint (§3: ~5 mm square, Engineering x≈84–91).
+ * Colour of the plate-detection codes.
  *
- * ponytail: modelled as a neutral dark square, not a code pattern; the real
- * ArUco ids are unverified (§6.4).
+ * ponytail: each code is modelled as a neutral dark block, not a code
+ * pattern; the real ArUco ids are unverified (§6.4).
  */
-const detectionCode = { centerX: 87, size: 5, color: '#1E1E1E' };
+const codeColor = '#1E1E1E';
 /** "Place plate this way" icon triplet (§3: Engineering x≈204–220). */
 const iconsMinX = 203.5;
-/** Plate-name glyph band along the left edge (§3: x≈6.4–11.6, cap ≈5 mm, from y≈18 behind the rear edge). */
-const edgeName = { minX: 5.9, height: 5.2, maxY: bodyMax - 18, length: 106 };
+
+/** An axis-aligned rectangle in the plate frame. */
+type Box = Readonly<{ minX: number; maxX: number; minY: number; maxY: number }>;
+
+/** The current plates' code: a 5 mm square centred at x = 87 on the band (§3: ~5 mm square, Engineering x≈84–91). */
+const currentCode: Box = { minX: 84.5, maxX: 89.5, minY: currentBandY.minY + 0.45, maxY: currentBandY.maxY - 0.45 };
 
 /** A text run fitted to `height`, and stretched to `width` when the plate's wider typeface was measured. */
 type TextBox = Readonly<{ text: string; minX: number; centerY: number; height: number; width?: number }>;
+
+/** A text run along the left edge, reading from rear to front: its glyph band starts at `minX`, its first glyph at `maxY`. */
+type EdgeRun = Readonly<{ text: string; minX: number; height: number; maxY: number; length: number }>;
+
+/**
+ * Plate-name glyph band along the left edge of the PEI plates (§3: x≈6.4–11.6, cap ≈5 mm; the full
+ * name runs ≈106 mm from y≈18 behind the rear edge).
+ *
+ * The brand word is omitted (trademark), so each name starts where its first remaining word stood
+ * and keeps that word's length, both taken from Geist's advance widths.
+ */
+const peiEdgeName = { minX: 5.9, height: 5.2 };
 
 type PlateSpec = Readonly<{
   /** Coated top layer thickness. */
@@ -63,10 +80,20 @@ type PlateSpec = Readonly<{
   roughness: number;
   inkColor: string;
   bandColor: string;
-  bandMinX: number;
-  bandMaxX: number;
+  /** The label band in the lip. */
+  band: Box;
+  /** Text left unprinted in the band, so it shows the surface colour. */
   bandText: readonly TextBox[];
-  edgeName?: string;
+  /** Whether the band carries the "place plate this way" pictogram. */
+  placementIcons: boolean;
+  /** Plate-detection code footprints. */
+  codes: readonly Box[];
+  /** X extent of the hairline along the body/lip boundary. */
+  hairline: readonly [minX: number, maxX: number];
+  /** Ink runs along the left edge. */
+  edgeText: readonly EdgeRun[];
+  /** Any other ink on the bare surface. */
+  ink?: () => Drawing[];
 }>;
 
 /** Textured PEI and Smooth PEI share the band layout (§3 "Band text strings", measured on FAP033). */
@@ -76,27 +103,102 @@ const peiBandText: readonly TextBox[] = [
   { text: 'SURFACE', minX: 177.5, centerY: -4.8, height: 1.7, width: 18 },
 ];
 
+/**
+ * Draws a text run in Geist, the OFL font the Replicad kernel loads.
+ *
+ * @param box - The run's text, left edge, vertical centre, height and optional width.
+ * @returns The glyph outlines, left-aligned at `minX` and centred on `centerY`.
+ */
+const drawLabel = ({ text, minX, centerY, height, width }: TextBox): Drawing => {
+  const glyphs = drawText(text, { fontSize: 10 });
+  const [[x0, y0], [x1, y1]] = glyphs.boundingBox.bounds;
+  const scale = height / (y1 - y0);
+  const fitted = glyphs.translate(-x0, -(y0 + y1) / 2).scale(scale, [0, 0]);
+  // Replicad stretches along the normal of `direction`, so [0, 1] widens the run along X.
+  const stretched = width === undefined ? fitted : fitted.stretch(width / ((x1 - x0) * scale), [0, 1], [0, 0]);
+  return stretched.translate(minX, centerY);
+};
+
+/**
+ * Draws an axis-aligned rectangle.
+ *
+ * @param box - Its extent.
+ * @param radius - Its corner radius; square corners when omitted.
+ * @returns The rectangle.
+ */
+const drawBox = ({ minX, maxX, minY, maxY }: Box, radius?: number): Drawing =>
+  drawRoundedRectangle(maxX - minX, maxY - minY, radius).translate((minX + maxX) / 2, (minY + maxY) / 2);
+
+/** The Cool Plate's band (§8): lower and taller than the current plates' band. */
+const coolBand: Box = { minX: 80.8, maxX: 138.6, minY: -8.3, maxY: -1.4 };
+
+/**
+ * Draws the Cool Plate's other ink (§8): the 45° stripes that continue its
+ * band, the glue-stick pictogram and note, and the bar between the edge name
+ * and its note.
+ *
+ * @returns The ink outlines.
+ */
+const drawCoolInk = (): Drawing[] => {
+  const { minY, maxY } = coolBand;
+  const stripeZone = drawBox({ minX: coolBand.maxX, maxX: 172.7, minY, maxY });
+  // 2 mm stripes every 3.92 mm; each rises at 45° from `x` on the band's front edge.
+  const stripes = Array.from({ length: 11 }, (_, index) => {
+    const x = 131.48 + 3.92 * index;
+    return draw([x, minY])
+      .lineTo([x + 2, minY])
+      .lineTo([x + 2 + maxY - minY, maxY])
+      .lineTo([x + maxY - minY, maxY])
+      .close()
+      .intersect(stripeZone);
+  });
+  // ponytail: the pictogram is a plain tilted bar outline over a base stroke, not the printed glyph.
+  const bar = drawRoundedRectangle(6.9, 2.4, 0.5);
+  return [
+    ...stripes,
+    bar
+      .cut(drawRoundedRectangle(6.2, 1.7, 0.2))
+      .rotate(35)
+      .translate(179, -4.7),
+    drawBox({ minX: 176.4, maxX: 183, minY: -8.15, maxY: -7.75 }),
+    // ponytail: the Chinese line beneath is omitted; the Geist font has no CJK glyphs.
+    drawLabel({ text: 'GLUE STICK CAN HELP.', minX: 184.9, centerY: -4.33, height: 1.8, width: 30.3 }),
+    drawBox({ minX: 4.4, maxX: 9.5, minY: 170.2, maxY: 170.5 }),
+  ];
+};
+
 const plates: Readonly<Record<PlateId, PlateSpec>> = {
   /*
-   * Legacy PC-film sticker on Engineering Plate steel: 0.5 + 0.3 mm film,
-   * near-black satin (§0, §2 "Cool Plate", low confidence). No official image
-   * survives, so the band carries only the plate name and PLA (§4).
+   * Legacy PC-film sticker on Engineering Plate steel: 0.5 + 0.3 mm film (§0,
+   * low confidence). Colour, finish and markings are measured from the
+   * official product render (§8): smooth near-black #2F3030 film with
+   * light-grey #D4D7D7 ink; the name and a cleaning note along the left edge;
+   * a band of two codes and "PLA" that runs into 45° stripes, then a
+   * glue-stick note. The brand word before the name is omitted (trademark),
+   * as are the Chinese lines (the Geist font has no CJK glyphs).
    */
   cool: {
     surfaceThickness: 0.3,
     steelThickness,
     undersideThickness: 0,
     surfaceCoversTab: false,
-    surfaceColor: '#2B2C2F',
+    surfaceColor: '#2F3030',
     roughness: 0.3,
-    inkColor: '#CECECE',
-    bandColor: '#CECECE',
-    bandMinX: 92.7,
-    bandMaxX: 220.9,
-    bandText: [
-      { text: 'Cool Plate', minX: 100.1, centerY: -3.55, height: 3.3 },
-      { text: 'PLA', minX: 151.5, centerY: -3.55, height: 2 },
+    inkColor: '#D4D7D7',
+    bandColor: '#D4D7D7',
+    band: coolBand,
+    bandText: [{ text: 'PLA', minX: 97.8, centerY: -4.8, height: 3, width: 8.6 }],
+    placementIcons: false,
+    codes: [
+      { minX: 82.6, maxX: 86.75, minY: -7.55, maxY: -2.2 },
+      { minX: 88.75, maxX: 94.1, minY: -7.55, maxY: -2.2 },
     ],
+    hairline: [72.5, 216.2],
+    edgeText: [
+      { text: 'Cool Plate', minX: 4.45, height: 5.4, maxY: 213.8, length: 39.6 },
+      { text: 'USE DETERGENT TO CLEAN THE SURFACE', minX: 7.65, height: 1.65, maxY: 166.2, length: 56.4 },
+    ],
+    ink: drawCoolInk,
   },
   /*
    * Current powder-coated plate, 0.5 mm overall (§0). The coat depth inside
@@ -112,13 +214,16 @@ const plates: Readonly<Record<PlateId, PlateSpec>> = {
     roughness: 0.4,
     inkColor: '#E3E7EE',
     bandColor: '#E3E7EE',
-    bandMinX: 92.7,
-    bandMaxX: 220.9,
+    band: { minX: 92.7, maxX: 220.9, ...currentBandY },
     bandText: [
       { text: 'Engineering Plate', minX: 100.1, centerY: -3.55, height: 3.3, width: 40.9 },
       // ponytail: the Chinese line beneath is omitted; the Geist font has no CJK glyphs.
       { text: 'APPLY GLUE STICK BEFORE PRINTING', minX: 151.5, centerY: -2.6, height: 1.6, width: 50 },
     ],
+    placementIcons: true,
+    codes: [currentCode],
+    hairline: currentHairline,
+    edgeText: [],
   },
   /*
    * Current "Bambu Smooth PEI Plate" generation: 0.125 mm PEI sheet on 0.05 mm
@@ -134,10 +239,12 @@ const plates: Readonly<Record<PlateId, PlateSpec>> = {
     roughness: 0.7,
     inkColor: '#56585D',
     bandColor: '#3E4045',
-    bandMinX: 90.9,
-    bandMaxX: 222.9,
+    band: { minX: 90.9, maxX: 222.9, ...currentBandY },
     bandText: peiBandText,
-    edgeName: 'Bambu Smooth PEI Plate',
+    placementIcons: true,
+    codes: [currentCode],
+    hairline: currentHairline,
+    edgeText: [{ text: 'Smooth PEI Plate', ...peiEdgeName, maxY: bodyMax - 50.5, length: 73.5 }],
   },
   /*
    * Current gold generation: 0.075 mm PEI powder on both faces of 0.5 mm steel
@@ -157,27 +264,13 @@ const plates: Readonly<Record<PlateId, PlateSpec>> = {
     roughness: 0.9,
     inkColor: '#CECECE',
     bandColor: '#CECECE',
-    bandMinX: 90.9,
-    bandMaxX: 222.9,
+    band: { minX: 90.9, maxX: 222.9, ...currentBandY },
     bandText: peiBandText,
-    edgeName: 'Bambu Textured PEI Plate',
+    placementIcons: true,
+    codes: [currentCode],
+    hairline: currentHairline,
+    edgeText: [{ text: 'Textured PEI Plate', ...peiEdgeName, maxY: bodyMax - 49.1, length: 74.9 }],
   },
-};
-
-/**
- * Draws a text run in Geist, the OFL font the Replicad kernel loads.
- *
- * @param box - The run's text, left edge, vertical centre, height and optional width.
- * @returns The glyph outlines, left-aligned at `minX` and centred on `centerY`.
- */
-const drawLabel = ({ text, minX, centerY, height, width }: TextBox): Drawing => {
-  const glyphs = drawText(text, { fontSize: 10 });
-  const [[x0, y0], [x1, y1]] = glyphs.boundingBox.bounds;
-  const scale = height / (y1 - y0);
-  const fitted = glyphs.translate(-x0, -(y0 + y1) / 2).scale(scale, [0, 0]);
-  // Replicad stretches along the normal of `direction`, so [0, 1] widens the run along X.
-  const stretched = width === undefined ? fitted : fitted.stretch(width / ((x1 - x0) * scale), [0, 1], [0, 0]);
-  return stretched.translate(minX, centerY);
 };
 
 /**
@@ -190,6 +283,18 @@ const drawLabel = ({ text, minX, centerY, height, width }: TextBox): Drawing => 
 const film = (drawing: Drawing, layers = 1): AnyShape => {
   const sketch = drawing.sketchOnPlane('XY', layers * inkHeight);
   return 'faces' in sketch ? sketch.faces() : sketch.face();
+};
+
+/**
+ * Draws a text run along the left edge, reading from rear to front (§3 "Plate name along the left edge").
+ *
+ * @param run - The run's text, glyph band and extent.
+ * @returns The rotated glyph outlines.
+ */
+const drawEdgeRun = ({ text, minX, height, maxY, length }: EdgeRun): Drawing => {
+  const run = drawLabel({ text, minX: 0, centerY: 0, height, width: length }).rotate(-90, [0, 0]);
+  const [[x0], [, y1]] = run.boundingBox.bounds;
+  return run.translate(minX - x0, maxY - y1);
 };
 
 /**
@@ -270,20 +375,19 @@ export default function main(params = defaultParams): ModelShape[] {
   const steelBottom = steelTop - spec.steelThickness;
   const material = { roughness: spec.roughness, metalness: 0 };
 
-  const band = drawRectangle(spec.bandMaxX - spec.bandMinX, bandMaxY - bandMinY).translate(
-    (spec.bandMinX + spec.bandMaxX) / 2,
-    (bandMinY + bandMaxY) / 2,
-  );
   // Band text and icons show the plate's own colour through the band's ink (§3, FAP033/FAP042).
-  const bandText = [...spec.bandText.map((box) => drawLabel(box)), ...drawPlacementIcons()];
-  const hairline = drawRectangle(hairlineSpec.maxX - hairlineSpec.minX, hairlineSpec.width).translate(
-    (hairlineSpec.minX + hairlineSpec.maxX) / 2,
-    hairlineSpec.centerY,
-  );
-  const code = drawRoundedRectangle(detectionCode.size, detectionCode.size, 0.3).translate(
-    detectionCode.centerX,
-    (bandMinY + bandMaxY) / 2,
-  );
+  const bandText = [
+    ...spec.bandText.map((box) => drawLabel(box)),
+    ...(spec.placementIcons ? drawPlacementIcons() : []),
+  ];
+  const [hairlineMinX, hairlineMaxX] = spec.hairline;
+  const hairline = drawBox({
+    minX: hairlineMinX,
+    maxX: hairlineMaxX,
+    minY: hairlineSpec.centerY - hairlineSpec.width / 2,
+    maxY: hairlineSpec.centerY + hairlineSpec.width / 2,
+  });
+  const ink = [hairline, ...spec.edgeText.map((run) => drawEdgeRun(run)), ...(spec.ink?.() ?? [])];
 
   const shapes: ModelShape[] = [
     {
@@ -294,39 +398,32 @@ export default function main(params = defaultParams): ModelShape[] {
       metalness: 0.8,
     },
     { shape: slab(coat, steelTop, spec.surfaceThickness), name: 'surface', color: spec.surfaceColor, ...material },
-    { shape: film(band), name: 'marking-band', color: spec.bandColor, ...material },
+    { shape: film(drawBox(spec.band)), name: 'marking-band', color: spec.bandColor, ...material },
     {
       shape: makeCompound(bandText.map((drawing) => film(drawing, 2))),
       name: 'marking-text',
       color: spec.surfaceColor,
       ...material,
     },
-    { shape: film(hairline), name: 'marking-hairline', color: spec.inkColor, ...material },
-    { shape: film(code), name: 'marking-code', color: detectionCode.color, ...material },
+    // A layer up, like the band text: the Cool Plate's codes lie on its band.
+    {
+      shape: makeCompound(spec.codes.map((code) => film(drawBox(code, 0.3), 2))),
+      name: 'marking-code',
+      color: codeColor,
+      ...material,
+    },
+    {
+      shape: makeCompound(ink.map((drawing) => film(drawing))),
+      name: 'marking-ink',
+      color: spec.inkColor,
+      ...material,
+    },
   ];
   if (spec.undersideThickness > 0) {
     shapes.push({
       shape: slab(coat, steelBottom - spec.undersideThickness, spec.undersideThickness),
       name: 'underside',
       color: spec.surfaceColor,
-      ...material,
-    });
-  }
-
-  if (spec.edgeName !== undefined) {
-    // Rotated to read from rear to front along the left edge (§3 "Plate name along the left edge").
-    const name = drawLabel({
-      text: spec.edgeName,
-      minX: 0,
-      centerY: 0,
-      height: edgeName.height,
-      width: edgeName.length,
-    }).rotate(-90, [0, 0]);
-    const [[x0], [, y1]] = name.boundingBox.bounds;
-    shapes.push({
-      shape: film(name.translate(edgeName.minX - x0, edgeName.maxY - y1)),
-      name: 'marking-name',
-      color: spec.inkColor,
       ...material,
     });
   }

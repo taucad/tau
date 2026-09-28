@@ -8,7 +8,7 @@ import { IndexedDbStorageProvider } from '#db/indexeddb-storage.js';
 import { defaultPanelState } from '#constants/editor.constants.js';
 import type { PendingProjectOperation } from '#types/pending-project-operation.types.js';
 import type { EditorState } from '#types/editor.types.js';
-import type { ProjectLibraryState } from '#types/project.types.js';
+import type { ProjectLibraryState } from '#types/project-library.types.js';
 
 const projectOneId = 'proj_one';
 const projectTwoId = 'proj_two';

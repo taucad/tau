@@ -210,11 +210,11 @@ describe('NewProjectChatComposer', () => {
     document.body.append(other);
 
     other.focus();
-    fireEvent.focus(globalThis);
+    fireEvent.focus(globalThis.window);
     expect(mockFocus).not.toHaveBeenCalled();
 
     other.blur();
-    fireEvent.focus(globalThis);
+    fireEvent.focus(globalThis.window);
     expect(mockFocus).toHaveBeenCalledOnce();
     other.remove();
   });
@@ -222,7 +222,7 @@ describe('NewProjectChatComposer', () => {
   it('leaves focus alone on surfaces without autofocus', () => {
     routerLocationState = { focusChatComposer: true };
     render(<NewProjectChatComposer enableAutoFocus={false} />);
-    fireEvent.focus(globalThis);
+    fireEvent.focus(globalThis.window);
     expect(mockFocus).not.toHaveBeenCalled();
   });
 

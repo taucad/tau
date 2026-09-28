@@ -35,16 +35,44 @@ export const screenshotImageSchema = z
   })
   .strict();
 
+/** A persisted image returned to an external agent without inline image bytes. @public */
+export const screenshotArtifactImageSchema = z
+  .object({
+    view: screenshotViewSchema.describe('Canonical captured view'),
+    path: z
+      .string()
+      .regex(/^attachments\/[\da-f]{64}\.(?:png|webp)$/u)
+      .describe('Chat attachment reference'),
+    absolutePath: z.string().min(1).describe('Local image path readable by the agent image viewer'),
+    mimeType: z.enum(['image/png', 'image/webp']),
+    byteLength: z.number().int().positive(),
+    sha256: z.string().regex(/^[\da-f]{64}$/u),
+  })
+  .strict();
+
+/** MCP screenshot result: full bytes live in the chat attachment, not the tool response. @public */
+export const screenshotMcpOutputSchema = z
+  .object({
+    images: z.array(screenshotArtifactImageSchema).min(1),
+    sourceRevision: sourceRevisionSchema.optional(),
+    message: z.string().optional(),
+  })
+  .strict();
+
 /**
  * Output schema for screenshot tool.
  * @public
  */
 export const screenshotOutputSchema = z
   .object({
-    images: z.array(screenshotImageSchema).min(1).describe('Array of captured screenshot images'),
+    images: z
+      .array(z.union([screenshotImageSchema, screenshotArtifactImageSchema]))
+      .min(1)
+      .describe('Array of captured screenshot images'),
     sourceRevision: sourceRevisionSchema
       .optional()
       .describe('Digests of the source the captured geometry was computed from (R4).'),
+    message: z.string().optional().describe('What the images leave out of the viewer, such as a section cut.'),
   })
   .strict();
 /** @public */

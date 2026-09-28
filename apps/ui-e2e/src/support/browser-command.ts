@@ -34,6 +34,7 @@ import type { GatewayScriptTurn, GatewayScriptWalk, GatewayTurnCount } from './a
 
 type ProviderContext = BrowserCommandContext['context'];
 type TargetPage = Awaited<ReturnType<ProviderContext['newPage']>>;
+type CdpSession = Awaited<ReturnType<ProviderContext['newCDPSession']>>;
 
 /** Refusal the agent-host gateway fixture answers with while it is armed. */
 type AgentHostGatewayFailure = {
@@ -79,6 +80,8 @@ type Session = {
     readonly type: string;
   }>;
   readonly context: ProviderContext;
+  /** The DevTools session of each page whose CPU profile `uiCpuProfile` is recording. */
+  readonly cpuProfiles: Map<TargetSurface, CdpSession>;
   readonly pageErrors: string[];
   readonly primary: TargetPage;
   readonly workerIds: WeakMap<object, string>;
@@ -280,7 +283,12 @@ export const uiAuthenticateTauTestUser: BrowserCommand<[account: TargetTauTestAc
     headers,
   });
   if (!signUp.ok()) {
-    throw new Error(`Tau test-account sign-up failed with HTTP ${signUp.status()}.`);
+    /* `INVALID_ORIGIN` is the usual one: the API at TAU_E2E_API_URL trusts only
+     * its own TAU_FRONTEND_URL, which must be this run's origin. */
+    const body = await signUp.text();
+    throw new Error(
+      `Tau test-account sign-up failed with HTTP ${signUp.status()} from ${tauApiUrl} for origin ${testBaseURL}: ${body.slice(0, 200)}`,
+    );
   }
 
   await executeTauDatabase(`UPDATE "user" SET email_verified = true WHERE email = '${account.email}';`);
@@ -339,6 +347,7 @@ export const uiOpenTarget: BrowserCommand = async (commandContext) => {
     agentHostGatewayRequests: [],
     consoleMessages: [],
     context,
+    cpuProfiles: new Map(),
     pageErrors: [],
     primary,
     workerIds: new WeakMap(),
@@ -1558,6 +1567,48 @@ export const uiSampleCameraDuringClick: BrowserCommand<[selector: string, frameC
   return samples;
 };
 
+/**
+ * Records a CPU profile of one target page through the DevTools protocol.
+ *
+ * `start` begins sampling at 100 µs; `stop` ends it and writes the profile as `artifactName`
+ * (a `.cpuprofile` that DevTools and speedscope open) beside the other test output. The page's
+ * own `performance` entries cannot say which function held the main thread; this can.
+ *
+ * @param commandContext - The Vitest browser command context.
+ * @param action - Whether to begin or end the recording.
+ * @param artifactName - File name for the profile; required by `stop`.
+ * @param surface - Which target page to profile.
+ * @returns The profile's absolute path after `stop`; nothing after `start`.
+ */
+export const uiCpuProfile: BrowserCommand<
+  [action: 'start' | 'stop', artifactName?: string, surface?: TargetSurface],
+  string | undefined
+> = async (commandContext, action, artifactName, surface = 'primary') => {
+  const session = sessionFor(commandContext);
+  if (action === 'start') {
+    if (session.cpuProfiles.has(surface)) {
+      throw new Error(`A CPU profile of the ${surface} page is already recording.`);
+    }
+    const cdp = await session.context.newCDPSession(pageFor(session, surface));
+    await cdp.send('Profiler.enable');
+    await cdp.send('Profiler.setSamplingInterval', { interval: 100 });
+    await cdp.send('Profiler.start');
+    session.cpuProfiles.set(surface, cdp);
+    return undefined;
+  }
+  const cdp = session.cpuProfiles.get(surface);
+  if (!cdp || !artifactName) {
+    throw new Error(`Stopping a CPU profile needs a recording of the ${surface} page and an artifact name.`);
+  }
+  session.cpuProfiles.delete(surface);
+  const { profile } = await cdp.send('Profiler.stop');
+  await cdp.detach();
+  const path = resolve(outputRoot, commandContext.sessionId, artifactName.replaceAll(/[^a-zA-Z0-9._-]+/gu, '-'));
+  await mkdir(resolve(path, '..'), { recursive: true });
+  await writeFile(path, JSON.stringify(profile));
+  return path;
+};
+
 export const uiOpenSecondaryTarget: BrowserCommand<[path: string]> = async (commandContext, path) => {
   const session = sessionFor(commandContext);
   if (session.secondary) {
@@ -1693,6 +1744,7 @@ export const uiBrowserCommands = {
   uiCloseSecondaryTarget,
   uiCloseTarget,
   uiCookies,
+  uiCpuProfile,
   uiDragTarget,
   uiDownloadTarget,
   uiEmulateColorScheme,

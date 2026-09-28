@@ -15,6 +15,8 @@ import type { GatewayFixture } from '#support/gateway-fixture.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
 import {
   connectPickedFolder,
+  expectCount,
+  expectGeometryFramed,
   expectSignedIn,
   expectVisible,
   selectChatModel,
@@ -232,6 +234,11 @@ test.for(cases)(
       });
       await expectVisible(page.getByText(gatewayFixtureFinalText, { exact: true }), 420_000);
       await expectVisible(page.getByTestId('cad-viewer-canvas-region').locator('canvas'), 120_000);
+      /* The first render can read the scaffold while the agent's write lands;
+       * export only once the written source has rendered to framed geometry. */
+      await expect.poll(() => readFileSync(sourcePath, 'utf8'), { timeout: 120_000 }).toBe(kernelCase.source);
+      await expectCount(page.getByRole('alert', { name: 'CAD runtime error' }), 0, 120_000);
+      await expectGeometryFramed(page);
 
       const bytes = await exportGlbToProject(page, dirname(sourcePath));
       validateGlbData(bytes);

@@ -4,7 +4,7 @@
 // Ported to TypeScript for picovoxel (blueprint R11); see NOTICE.
 // The three standalone construction modules the heat exchanger composes.
 
-import type { Pico, Vec3, Voxels } from 'picovoxel';
+import type { Pico, Voxels } from 'picovoxel';
 import { frame, type Frame, BaseCylinder, BasePipe, SurfaceModulation, vecOps } from 'picovoxel/shapekernel';
 import { vec3 } from 'picovoxel/numerics';
 

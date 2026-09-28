@@ -24,7 +24,7 @@ import {
 import type { PrinterBounds, PrinterBox, PrinterGeometry, PrinterPanel } from '#components/printer/printer-geometry.js';
 import { eventValueAt } from '#components/printer/printer-playback.js';
 import type { PlaybackStore } from '#components/printer/printer-playback.js';
-import { plateModelMatrix, printerHotendModel } from '#components/printer/printer-plates.js';
+import { liftPlateSurface, plateModelMatrix, printerHotendModel } from '#components/printer/printer-plates.js';
 import type { PrinterPlateModel } from '#components/printer/printer-plates.js';
 import {
   createToolpathPalette,
@@ -39,8 +39,8 @@ export type PrinterSceneProps = Readonly<{
   geometry: PrinterGeometry;
   store: PlaybackStore;
   theme: 'light' | 'dark';
-  /** `#RRGGBB` of the filament the walls take. */
-  filamentColor: string;
+  /** `#RRGGBB` per tool: entry *i* is the filament whose colour tool `T<i>`'s walls and infill take. */
+  filamentColors: readonly string[];
   chamberLight: 'on' | 'off' | 'unknown';
   /** No glow pulse; autoplay is the viewer's decision. */
   isReducedMotion: boolean;
@@ -87,19 +87,11 @@ const plateRoughness: Readonly<Record<PrinterPlateModel['finish'], number>> = {
   matte: 0.65,
   textured: 0.9,
 };
-/**
- * How far the print surface lifts toward white. The plates' true surfaces are near black, so the
- * first layers and the empty build area vanish against them; the viewer draws them lighter.
- */
-const plateSurfaceLift = 0.3;
-const plateSurfaceLiftTarget = new THREE.Color(printerBody.plateSurfaceLift);
 const gltfLoader = new GLTFLoader();
 const boundsKey = ({ min, max }: PrinterBounds): string => [...min, ...max].join(',');
 /** The CAD viewer's own camera feel, without its easing. */
 const printerCameraControlProps = resolveCameraControlProps({ enablePan: true, enableZoom: true });
 
-/** The print surface's colour as the viewer draws it; `color` is changed in place. */
-const liftPlateSurface = (color: THREE.Color): THREE.Color => color.lerp(plateSurfaceLiftTarget, plateSurfaceLift);
 /** The plate's opacity seen from below the print surface: a shade over the print, as Bambu Studio draws it. */
 const plateUndersideOpacity = 0.2;
 /** The mesh that is the print surface, in the plate GLBs and the flat stand-in alike. */
@@ -194,12 +186,12 @@ const buildMachine = ({
   geometry,
   program,
   theme,
-  filamentColor,
+  filamentColors,
   isWholePrinter,
   grouping,
 }: Pick<
   PrinterSceneProps,
-  'geometry' | 'program' | 'theme' | 'filamentColor' | 'isWholePrinter' | 'grouping'
+  'geometry' | 'program' | 'theme' | 'filamentColors' | 'isWholePrinter' | 'grouping'
 >): MachineParts => {
   const geometries = new Set<THREE.BufferGeometry>();
   const materials = new Set<THREE.Material>();
@@ -365,7 +357,8 @@ const buildMachine = ({
       track(plateGrid(geometry, own(new THREE.LineBasicMaterial({ color: printerBody.plateGrid[theme] })))),
     );
   }
-  const reveal = createToolpathReveal(program, createToolpathPalette(filamentColor, theme), grouping);
+  const palettes = filamentColors.map((color) => createToolpathPalette(color, theme));
+  const reveal = createToolpathReveal(program, palettes, grouping);
   plateGroup.add(reveal.lines, reveal.trail);
   root.add(plateGroup);
 
@@ -594,7 +587,7 @@ function PrinterObjects({
   geometry,
   store,
   theme,
-  filamentColor,
+  filamentColors,
   chamberLight,
   isReducedMotion,
   liveNozzleTarget,
@@ -607,8 +600,8 @@ function PrinterObjects({
   const { invalidate, scene } = useThree();
   const [eye] = useState(() => new THREE.Vector3());
   const machine = useMemo(
-    () => buildMachine({ geometry, program, theme, filamentColor, isWholePrinter, grouping }),
-    [geometry, program, theme, filamentColor, isWholePrinter, grouping],
+    () => buildMachine({ geometry, program, theme, filamentColors, isWholePrinter, grouping }),
+    [geometry, program, theme, filamentColors, isWholePrinter, grouping],
   );
   useEffect(
     () => () => {

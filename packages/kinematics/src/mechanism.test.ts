@@ -61,6 +61,13 @@ describe('admitMechanism', () => {
       expect(outcome.status === 'admitted' && outcome.mechanism).toBe(mechanism);
     });
 
+    it('should admit a named joint and keep its name', () => {
+      const named = withValue(['joints', 'arm', 'name'], 'Arm');
+      const outcome = admitMechanism(named);
+
+      expect(outcome.status === 'admitted' && outcome.mechanism.joints['arm']?.name).toBe('Arm');
+    });
+
     it('should admit parsed JSON of a valid mechanism', () => {
       const text = JSON.stringify(everyJoint());
       const parsed: unknown = JSON.parse(text);
@@ -111,6 +118,7 @@ describe('admitMechanism', () => {
       ],
       ['non-object joints', withValue(['joints'], 1), 'INVALID_SHAPE', '/joints'],
       ['a non-object joint', withValue(['joints', 'arm'], 'hinge'), 'INVALID_SHAPE', '/joints/arm'],
+      ['a non-string joint name', withValue(['joints', 'arm', 'name'], 7), 'INVALID_SHAPE', '/joints/arm/name'],
       [
         'an unsupported joint type',
         withValue(['joints', 'arm', 'type'], 'gear'),

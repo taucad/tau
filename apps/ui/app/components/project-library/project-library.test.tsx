@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 import { useState } from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router';
 import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { projectManifestSchemaUrl, projectToManifest } from '@taucad/types';
 import { ProjectLibrary } from '#components/project-library/project-library.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
-import type { ProjectListItem } from '#types/project.types.js';
+import { cookieName } from '#constants/cookie.constants.js';
+import type { ProjectListItem } from '#types/project-library.types.js';
 import type { PendingProjectRecovery } from '#types/pending-project-operation.types.js';
 import type { ProjectDiscoveryConflict, WorkspaceBindingRepairGroup } from '#hooks/use-project-manager.js';
 
@@ -45,13 +46,17 @@ const createUseProjectsResult = () => ({
   chooseProjectDirectory: vi.fn(async () => undefined),
 });
 let mockUseProjectsResult = createUseProjectsResult();
+/** Projects in this device's Trash: answered only to a listing that includes them. */
+let mockTrashedProjects: ProjectListItem[] = [];
 
 /** What `useProjects` was last asked for, so the trashed view is observable. */
 const useProjectsOptions: Array<{ includeDeleted: boolean }> = [];
 vi.mock('#hooks/use-projects.js', () => ({
   useProjects: (options: { includeDeleted: boolean }) => {
     useProjectsOptions.push(options);
-    return mockUseProjectsResult;
+    return options.includeDeleted
+      ? { ...mockUseProjectsResult, projects: [...mockUseProjectsResult.projects, ...mockTrashedProjects] }
+      : mockUseProjectsResult;
   },
 }));
 
@@ -153,6 +158,25 @@ vi.mock('#hooks/use-file-manager.js', () => ({
   HomeFileManagerProvider: ({ children }: { readonly children: React.ReactNode }): React.ReactNode => children,
 }));
 
+/* D20: the Tau Cloud listing, scripted rather than fetched. */
+const { cloudListing, mockOpenCloudProject } = vi.hoisted(() => ({
+  cloudListing: {
+    current: [] as Array<{ id: string; name: string; role: 'owner' | 'write' | 'read'; updatedAt?: number }>,
+  },
+  mockOpenCloudProject: vi.fn(async () => undefined),
+}));
+vi.mock('#hooks/use-cloud-projects.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useCloudProjects: () => ({ projects: cloudListing.current, isSettled: true, isFailed: false, isFetching: false }),
+}));
+vi.mock('#hooks/use-open-cloud-project.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useOpenCloudProject: () => mockOpenCloudProject,
+}));
+vi.mock('#hooks/use-resolved-auth.js', () => ({ useResolvedAuth: () => 'authed' }));
+/* eslint-disable-next-line @typescript-eslint/naming-convention -- `window.ENV`'s keys are the deployment's own environment variable names. */
+vi.mock('#environment.config.js', () => ({ ENV: { TAU_API_URL: 'https://api.test' } }));
+
 vi.mock('#hooks/use-cad-preview.js', () => ({
   CadPreviewProvider: ({ children }: { readonly children: React.ReactNode }): React.ReactNode => children,
 }));
@@ -166,6 +190,141 @@ describe('ProjectLibrary', () => {
     vi.clearAllMocks();
     mockCookieValues = {};
     mockUseProjectsResult = createUseProjectsResult();
+    mockTrashedProjects = [];
+    cloudListing.current = [];
+  });
+
+  // ── D20: one list, local and Tau Cloud ──────────────────────────────────────
+  describe('one list with Tau Cloud (D20)', () => {
+    const renderLibrary = (): void => {
+      render(
+        <MemoryRouter>
+          <TooltipProvider>
+            <ProjectLibrary />
+          </TooltipProvider>
+        </MemoryRouter>,
+      );
+    };
+
+    it('should list local-only, both and Tau-Cloud-only projects in the same grid, with no second section', () => {
+      cloudListing.current = [
+        { id: 'proj_aaaaaaaaaaaaaaaaaaaaa', name: 'Gearbox Alpha', role: 'owner' },
+        { id: 'proj_ddddddddddddddddddddd', name: 'Hinge Delta', role: 'owner' },
+      ];
+      renderLibrary();
+
+      expect(screen.getByRole('link', { name: 'Open Gearbox Alpha' })).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'Open Bracket Beta' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Open Hinge Delta' })).toBeInTheDocument();
+      /* Both: the Tau Cloud glyph, once. */
+      expect(screen.getAllByText('Also on Tau Cloud')).toHaveLength(1);
+      expect(screen.getByText('Backed up on Tau Cloud. This device does not have it yet.')).toBeInTheDocument();
+      expect(screen.queryByRole('heading', { name: 'From Tau Cloud' })).toBeNull();
+    });
+
+    it('should mark each row local, both or Tau Cloud only', () => {
+      mockCookieValues = { [cookieName.projectViewMode]: 'table' };
+      cloudListing.current = [
+        { id: 'proj_aaaaaaaaaaaaaaaaaaaaa', name: 'Gearbox Alpha', role: 'owner' },
+        { id: 'proj_ddddddddddddddddddddd', name: 'Hinge Delta', role: 'owner' },
+      ];
+      renderLibrary();
+
+      expect(screen.getByRole('row', { name: /Gearbox Alpha/u })).toHaveTextContent('Also on Tau Cloud');
+      expect(screen.getByRole('row', { name: /Bracket Beta/u })).not.toHaveTextContent('Also on Tau Cloud');
+      const cloudOnly = screen.getByRole('row', { name: /Hinge Delta/u });
+      expect(cloudOnly).toHaveTextContent('Backed up on Tau Cloud. This device does not have it yet.');
+      expect(within(cloudOnly).getByRole('button', { name: 'Open Hinge Delta' })).toBeInTheDocument();
+    });
+
+    it('should never offer a project in this device’s Trash as Tau Cloud’s alone', () => {
+      mockTrashedProjects = [
+        { ...makeProject('proj_ddddddddddddddddddddd', 'Hinge Delta', '/hinge-delta'), deletedAt: 5 },
+      ];
+      cloudListing.current = [{ id: 'proj_ddddddddddddddddddddd', name: 'Hinge Delta', role: 'owner' }];
+      renderLibrary();
+
+      expect(screen.queryByRole('button', { name: 'Open Hinge Delta' })).toBeNull();
+      expect(screen.queryByText('Hinge Delta')).toBeNull();
+    });
+
+    it('should open a Tau-Cloud-only project by cloning it under the remote’s id', async () => {
+      cloudListing.current = [{ id: 'proj_ddddddddddddddddddddd', name: 'Hinge Delta', role: 'owner' }];
+      renderLibrary();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Open Hinge Delta' }));
+
+      await waitFor(() => {
+        expect(mockOpenCloudProject).toHaveBeenCalledWith(
+          expect.objectContaining({ id: 'proj_ddddddddddddddddddddd', name: 'Hinge Delta' }),
+        );
+      });
+    });
+
+    it('should say it is opening, and be busy, while the clone runs', async () => {
+      let finish: () => void = () => undefined;
+      mockOpenCloudProject.mockImplementationOnce(
+        async () =>
+          new Promise<undefined>((resolve) => {
+            finish = () => {
+              resolve(undefined);
+            };
+          }),
+      );
+      cloudListing.current = [{ id: 'proj_ddddddddddddddddddddd', name: 'Hinge Delta', role: 'owner' }];
+      renderLibrary();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Open Hinge Delta' }));
+
+      const opening = await screen.findByRole('button', { name: 'Opening… Hinge Delta' });
+      expect(opening).toHaveAttribute('aria-busy', 'true');
+      expect(opening).toBeDisabled();
+      finish();
+      expect(await screen.findByRole('button', { name: 'Open Hinge Delta' })).toHaveAttribute('aria-busy', 'false');
+    });
+
+    it('should say whose a shared Tau-Cloud-only project is before it is opened', () => {
+      cloudListing.current = [{ id: 'proj_ddddddddddddddddddddd', name: 'Reference Jig', role: 'read' }];
+      renderLibrary();
+
+      mockCookieValues = { [cookieName.projectViewMode]: 'table' };
+      cloudListing.current = [{ id: 'proj_ddddddddddddddddddddd', name: 'Reference Jig', role: 'read' }];
+      renderLibrary();
+
+      const card = screen.getByRole('row', { name: /Reference Jig/u });
+      expect(card).toHaveTextContent('Can view');
+      expect(card).toHaveTextContent('Shared with you. You can open it but not change it.');
+    });
+
+    it('should show a Tau-Cloud-only project instead of the empty state when this device has none', () => {
+      mockUseProjectsResult = { ...createUseProjectsResult(), projects: [] };
+      cloudListing.current = [{ id: 'proj_ddddddddddddddddddddd', name: 'Hinge Delta', role: 'owner' }];
+      renderLibrary();
+
+      expect(screen.getByRole('button', { name: 'Open Hinge Delta' })).toBeInTheDocument();
+      expect(screen.queryByText('No projects yet')).toBeNull();
+    });
+
+    it('should leave Tau-Cloud-only projects out of the table’s selection', () => {
+      mockCookieValues = { [cookieName.projectViewMode]: 'table' };
+      cloudListing.current = [{ id: 'proj_ddddddddddddddddddddd', name: 'Hinge Delta', role: 'owner' }];
+      renderLibrary();
+
+      /* Two local rows can be selected; the Tau Cloud row has nothing here to trash. */
+      expect(screen.getAllByRole('checkbox', { name: 'Select row' })).toHaveLength(2);
+      expect(screen.getByRole('button', { name: 'Open Hinge Delta' })).toBeInTheDocument();
+    });
+
+    it('should select only this device’s projects on Select all', () => {
+      mockCookieValues = { [cookieName.projectViewMode]: 'table' };
+      cloudListing.current = [{ id: 'proj_ddddddddddddddddddddd', name: 'Hinge Delta', role: 'owner' }];
+      renderLibrary();
+
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select all' }));
+
+      expect(screen.getByRole('button', { name: 'Delete 2' })).toBeInTheDocument();
+      expect(within(screen.getByRole('row', { name: /Hinge Delta/u })).queryByRole('checkbox')).toBeNull();
+    });
   });
 
   it('should render the projects heading and every project from useProjects', () => {

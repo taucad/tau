@@ -1214,6 +1214,110 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     ).toMatchObject([{ reused: false }, { reused: false }]);
   });
 
+  it('should keep quiesce pending through a failed close retry', async () => {
+    const quiesced = vi.fn();
+    const { host, workspaceRoot } = await configuredHost({}, { quiesced });
+    const client = connect(host, workspaceRoot);
+    await attachUnwritten(client, 'chat-1');
+    const entered = Promise.withResolvers<void>();
+    const hold = Promise.withResolvers<void>();
+    const { revisions } = servedHosts.at(-1)!;
+    const { release } = revisions;
+    let writes = 0;
+    vi.spyOn(revisions, 'release').mockImplementation(async () => {
+      writes += 1;
+      if (writes === 1) {
+        throw new Error('The first revision write failed.');
+      }
+      entered.resolve();
+      await hold.promise;
+      await release();
+    });
+
+    const quiescence = host.quiesce();
+    try {
+      await entered.promise;
+      await expect(
+        Promise.race([
+          quiescence.then(
+            () => 'settled',
+            () => 'settled',
+          ),
+          new Promise<'pending'>((resolve) => {
+            setTimeout(() => {
+              resolve('pending');
+            }, 50);
+          }),
+        ]),
+      ).resolves.toBe('pending');
+      expect(quiesced).not.toHaveBeenCalled();
+    } finally {
+      hold.resolve();
+    }
+    await expect(quiescence).rejects.toThrow('could not quiesce every accepted operation');
+    expect(writes).toBe(2);
+    host.handleMessage(frame({ type: 'quiesce' }));
+    await vi.waitFor(() => {
+      expect(quiesced).toHaveBeenCalledWith({
+        type: 'quiesce-failed',
+        message: 'The services host could not quiesce every accepted operation.',
+      });
+    });
+  });
+
+  it('should wait for a retired host retry when release failed before quiesce', async () => {
+    const released = vi.fn();
+    const { host, workspaceRoot } = await configuredHost({}, { agentHostReleased: released });
+    const client = connect(host, workspaceRoot);
+    await attachUnwritten(client, 'chat-1');
+    const entered = Promise.withResolvers<void>();
+    const hold = Promise.withResolvers<void>();
+    const { revisions } = servedHosts.at(-1)!;
+    const { release } = revisions;
+    let writes = 0;
+    vi.spyOn(revisions, 'release').mockImplementation(async () => {
+      writes += 1;
+      if (writes === 1) {
+        throw new Error('The first revision write failed.');
+      }
+      entered.resolve();
+      await hold.promise;
+      await release();
+    });
+
+    host.handleMessage(
+      frame({
+        type: 'agent-host-release',
+        requestId: 'release-1',
+        workspaceRoot,
+        projectId: 'proj_test',
+        attachmentGeneration: 1,
+      }),
+    );
+    await entered.promise;
+    expect(released).toHaveBeenCalledWith('release-1', 'The first revision write failed.');
+    const quiescence = host.quiesce();
+    try {
+      await expect(
+        Promise.race([
+          quiescence.then(
+            () => 'settled',
+            () => 'settled',
+          ),
+          new Promise<'pending'>((resolve) => {
+            setTimeout(() => {
+              resolve('pending');
+            }, 50);
+          }),
+        ]),
+      ).resolves.toBe('pending');
+    } finally {
+      hold.resolve();
+    }
+    await expect(quiescence).resolves.toBeUndefined();
+    expect(writes).toBe(2);
+  });
+
   it('keeps one always-on launcher per root across connections', async () => {
     const { host, log, physicalRoot, workspaceRoot } = await configuredHost();
     connect(host, workspaceRoot);

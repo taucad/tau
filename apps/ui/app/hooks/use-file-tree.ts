@@ -79,6 +79,7 @@ export function useFileTreeMap(): Map<string, FileEntry> {
  * Reactive hook for a single file tree entry by path.
  */
 export function useFileTreeEntry(path: string | undefined): FileEntry | undefined {
-  const tree = useFileTreeMap();
-  return path ? tree.get(path) : undefined;
+  return useFileTreeSelector(
+    useCallback((tree: Map<string, FileEntry>) => (path ? tree.get(path) : undefined), [path]),
+  );
 }

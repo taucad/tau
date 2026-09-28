@@ -133,10 +133,29 @@ const editorMachineSnapshot = {
   error: undefined,
 };
 
+let currentEditorSnapshot = editorMachineSnapshot;
+type EditorListener =
+  | ((snapshot: typeof editorMachineSnapshot) => void)
+  | { next: (snapshot: typeof editorMachineSnapshot) => void };
+const editorListeners = new Set<EditorListener>();
+const publishOpenFiles = (openFiles: typeof editorMachineSnapshot.context.openFiles): void => {
+  currentEditorSnapshot = { ...editorMachineSnapshot, context: { ...editorMachineSnapshot.context, openFiles } };
+  for (const listener of editorListeners) {
+    if (typeof listener === 'function') {
+      listener(currentEditorSnapshot);
+    } else {
+      listener.next(currentEditorSnapshot);
+    }
+  }
+};
+
 const mockEditorRef = {
   send: vi.fn(),
-  getSnapshot: () => editorMachineSnapshot,
-  subscribe: () => ({ unsubscribe: vi.fn() }),
+  getSnapshot: () => currentEditorSnapshot,
+  subscribe: (listener: EditorListener) => {
+    editorListeners.add(listener);
+    return { unsubscribe: () => editorListeners.delete(listener) };
+  },
 };
 
 vi.mock('#hooks/use-project.js', () => ({
@@ -405,6 +424,8 @@ describe('FileEditor routing', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     editorMachineSnapshot.context.openFiles = [];
+    currentEditorSnapshot = editorMachineSnapshot;
+    editorListeners.clear();
     mockIsApplyingFilesystemContent.mockReturnValue(false);
     mockSaveEditor.mockResolvedValue(undefined);
     mockContentSaveEditor.mockResolvedValue(undefined);
@@ -422,6 +443,32 @@ describe('FileEditor routing', () => {
     expect(placeholder).toHaveAttribute('data-slot', 'editor-pane-placeholder');
     expect(placeholder).toHaveTextContent('Loading mystery.dat');
     expect(screen.getAllByRole('group', { name: 'File actions for mystery.dat' })).toHaveLength(1);
+  });
+
+  it('does not rerender for unrelated or unchanged open file entries', () => {
+    mockUseMonacoServices.mockReturnValue({ modelService: undefined });
+    mockUseFileContent.mockReturnValue({ kind: 'loading' });
+    editorMachineSnapshot.context.openFiles = [{ paneId: 'pane-1', path: 'image.png' }];
+    render(<FileEditor paneId='pane-1' filePath='image.png' panelApi={mockPanelApi} />);
+    const renders = mockUseFileContent.mock.calls.length;
+
+    act(() => {
+      publishOpenFiles([
+        { paneId: 'pane-1', path: 'image.png' },
+        { paneId: 'other-pane', path: 'other.txt' },
+      ]);
+    });
+    expect(mockUseFileContent).toHaveBeenCalledTimes(renders);
+
+    act(() => {
+      publishOpenFiles([{ paneId: 'pane-1', path: 'image.png', readOnly: true }]);
+    });
+    expect(mockUseFileContent).toHaveBeenCalledTimes(renders + 1);
+
+    act(() => {
+      publishOpenFiles([{ paneId: 'pane-1', path: 'renamed.png', readOnly: true }]);
+    });
+    expect(mockUseFileContent).toHaveBeenLastCalledWith('renamed.png');
   });
 
   /* I3: an editor that mounts before the model is bound creates the model

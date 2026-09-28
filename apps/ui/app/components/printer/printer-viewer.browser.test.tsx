@@ -1,12 +1,20 @@
 import '#styles/global.css';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { commands, page, userEvent } from 'vitest/browser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { useCallback } from 'react';
+import { mock } from 'vitest-mock-extended';
 import { writeBambuContainer } from '@taucad/slicer/container';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
+import { FileContentService } from '@taucad/fs-client/file-content-service';
+import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
+import { RefreshGenerationGuard } from '@taucad/fs-client/refresh-generation-guard';
+import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
+import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
 import type { PrinterFileKind } from '#components/printer/printer-file.js';
 import { fixtureGcode } from '#components/printer/testing/toolpath-fixture.js';
 import type { PrinterLiveState } from '#components/printer/use-printer-live.js';
+import { useFileContent } from '#hooks/use-file-content.js';
 import type { FileViewerPaneContent } from '#routes/w.$workspace.$project/file-viewers/file-viewer.types.js';
 
 /**
@@ -24,9 +32,11 @@ const mocks = vi.hoisted(() => ({
   theme: 'light' as 'light' | 'dark',
   live: undefined as PrinterLiveState | undefined,
 }));
+const fileManager = vi.hoisted(() => ({ contentService: undefined as FileContentService | undefined }));
 
 vi.mock('#hooks/use-theme.js', () => ({ useTheme: () => ({ theme: mocks.theme }) }));
 vi.mock('#components/printer/use-printer-live.js', () => ({ usePrinterLive: () => mocks.live }));
+vi.mock('#hooks/use-file-manager.js', () => ({ useFileManager: () => fileManager }));
 
 const { PrinterViewer } = await import('#components/printer/printer-viewer.js');
 
@@ -53,6 +63,31 @@ const renderPane = ({ actions, body }: FileViewerPaneContent): React.ReactNode =
     <div className='min-h-0 flex-1'>{body}</div>
   </div>
 );
+
+function PrinterFromFileContentService(): React.JSX.Element {
+  const result = useFileContent(name);
+  const service = fileManager.contentService;
+  const readBytes = useCallback(async (): Promise<Uint8Array<ArrayBuffer>> => {
+    if (result.kind !== 'binary' || !service) {
+      throw new Error('Toolpath bytes are unavailable');
+    }
+    return service.readRawBytes(name, { sizeLimit: result.size });
+  }, [result, service]);
+  if (result.kind !== 'binary') {
+    return <span>Loading file…</span>;
+  }
+  return (
+    <TooltipProvider>
+      <PrinterViewer
+        name={name}
+        kind='container'
+        revision={result.revision}
+        readAll={readBytes}
+        renderPane={renderPane}
+      />
+    </TooltipProvider>
+  );
+}
 
 // oxlint-disable-next-line tau-lint/no-hardcoded-color -- the `#RRGGBB` a machine reports for its loaded spool
 const loadedSpoolColor = '#E0523C';
@@ -233,6 +268,71 @@ afterEach(() => {
 });
 
 describe('Printer viewer framing', () => {
+  it('should keep a live .gcode.3mf scene and playback through an unchanged file refresh', async () => {
+    mocks.theme = 'light';
+    mocks.live = idleLive;
+    document.documentElement.classList.remove('dark');
+    globalThis.history.replaceState(undefined, '', '?graphicsBackend=webgl');
+    await page.viewport(1320, 780);
+    const proxy = mock<ComposedViewClient>({
+      stat: vi.fn().mockResolvedValue({ size: container.byteLength }),
+      readFile: vi.fn().mockImplementation(async () => new Uint8Array(container)),
+    });
+    let emitFileChanged: (event: unknown) => void = () => undefined;
+    const channel = new WorkerChangeChannel({
+      transport: {
+        listen: (_event, callback) => {
+          emitFileChanged = callback;
+          return () => undefined;
+        },
+      },
+    });
+    const service = new FileContentService({
+      proxy,
+      paths: new WorkspacePathResolver('/project'),
+      channel,
+      refreshGuard: new RefreshGenerationGuard(),
+    });
+    fileManager.contentService = service;
+    const digest = vi.spyOn(globalThis.crypto.subtle, 'digest');
+    try {
+      const { container: root } = render(<PrinterFromFileContentService />);
+      const frame = await within(root).findByTestId('frame');
+      resize(frame, [570, 720]);
+      const scene = await within(frame).findByRole('img', { name: `Bambu Lab X1 Carbon printing ${name}` });
+      await pauseAt(frame, 0.55, /^6\d \/ 120$/u);
+      const canvas = scene.querySelector('canvas');
+      const before = within(frame).getByRole('slider', { name: 'Time' }).getAttribute('value');
+      const firstOutcome = service.peekOutcome(name);
+
+      emitFileChanged({ type: 'fileWritten', path: name, backend: 'indexeddb' });
+      await waitFor(() => {
+        expect(proxy.readFile).toHaveBeenCalledTimes(3);
+        expect(digest).toHaveBeenCalledTimes(3);
+      });
+      await act(async () => {
+        await digest.mock.results[2]!.value;
+        await new Promise((resolve) => {
+          setTimeout(resolve, 0);
+        });
+      });
+      await nextFrames(6);
+
+      expect(service.peekOutcome(name)).toBe(firstOutcome);
+      expect(within(frame).getByRole('img', { name: `Bambu Lab X1 Carbon printing ${name}` })).toBe(scene);
+      expect(scene.querySelector('canvas')).toBe(canvas);
+      expect(within(frame).getByRole('slider', { name: 'Time' })).toHaveAttribute('value', before);
+      await page.screenshot({
+        element: frame,
+        path: '../../../../../out/research/live-file-pane-stability-blueprint/2026-09-28/I3/printer-noop-refresh.png',
+      });
+    } finally {
+      fileManager.contentService = undefined;
+      service.dispose();
+      channel.dispose();
+    }
+  });
+
   for (const theme of ['light', 'dark'] as const) {
     it(`frames the print wide, then again when the pane narrows to 570 px, in ${theme}`, async () => {
       mocks.live = idleLive;

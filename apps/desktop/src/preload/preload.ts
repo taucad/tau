@@ -35,7 +35,7 @@ import {
   slicersChannels,
 } from '#shared/desktop-bootstrap.js';
 import type { AppIconTheme } from '#shared/desktop-bootstrap.js';
-import { openFilesIpcChannel, quickLookIpcChannels } from '#shared/quick-look.js';
+import { generatedImageIpcChannel, openFilesIpcChannel, quickLookIpcChannels } from '#shared/quick-look.js';
 import type {
   DesktopOpenFile,
   QuickLookPathRequest,
@@ -156,6 +156,13 @@ contextBridge.exposeInMainWorld('tau', {
   openFiles: {
     consume: async (): Promise<DesktopOpenFile[]> =>
       (await ipcRenderer.invoke(openFilesIpcChannel)) as DesktopOpenFile[],
+  },
+  generatedImages: {
+    read: async (path: string): Promise<{ readonly path: string; readonly bytes: Uint8Array<ArrayBuffer> }> =>
+      (await ipcRenderer.invoke(generatedImageIpcChannel, path)) as {
+        readonly path: string;
+        readonly bytes: Uint8Array<ArrayBuffer>;
+      },
   },
   quickLook: {
     directPreviewExtensions: quickLookManifest.directElectronPreviewExtensions,

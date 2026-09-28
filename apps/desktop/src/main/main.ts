@@ -80,6 +80,7 @@ import { createQuickLookController, removeStaleQuickLookSessions } from '#main/q
 import type { QuickLookController } from '#main/quick-look.js';
 import { deepLinkArgument, parseDeepLink } from '#main/deep-links.js';
 import { createOpenFileQueue } from '#main/open-files.js';
+import { readGeneratedImage } from '#main/generated-image.js';
 import { createBambuStudioService } from '#main/bambu-studio-service.js';
 import { readWindowState, writeWindowState } from '#main/window-state.js';
 import {
@@ -95,7 +96,7 @@ import {
   slicersChannels,
 } from '#shared/desktop-bootstrap.js';
 import type { AppIconTheme } from '#shared/desktop-bootstrap.js';
-import { openFilesIpcChannel, quickLookIpcChannels } from '#shared/quick-look.js';
+import { generatedImageIpcChannel, openFilesIpcChannel, quickLookIpcChannels } from '#shared/quick-look.js';
 import type { QuickLookResult } from '#shared/quick-look.js';
 import quickLookManifest from '#macos/quick-look-formats.json' with { type: 'json' };
 
@@ -841,6 +842,12 @@ const bootstrapElectronApp = async (): Promise<void> => {
       log.log('error', 'open-files.failed', error);
       throw error;
     }
+  });
+  ipcMain.handle(generatedImageIpcChannel, async (event, path: unknown) => {
+    if (!trusted(event.senderFrame)) {
+      throw new Error('Untrusted generated image request.');
+    }
+    return readGeneratedImage(path, app.getPath('home'));
   });
 
   /* Test-only, and only in a development build — the same gate `TAU_DESKTOP_TOKEN`

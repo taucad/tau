@@ -19,6 +19,7 @@ import type { AgentLogEvent, JsonObject, ProviderMessage } from '#log/event-type
 import { GatewayModelTransportError } from '#transport/gateway-model-transport.js';
 import type { GatewayModelErrorCode } from '#transport/gateway-model-transport.js';
 import type { HostCompactionError } from '#harness/compaction.js';
+import { fundedFacet } from '#harness/harness.fixture.js';
 
 import {
   tauInternal,
@@ -62,6 +63,52 @@ const appendSettlement = async (
 const orphanedFirstTurn: readonly SeededLogEvent[] = completedFirstTurn.slice(0, 3);
 
 describe('createTauAgentHost', () => {
+  it('should cancel before the first model request while invocation preparation is pending', async () => {
+    const file = createMemoryLogFile();
+    const preparing = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const stream = vi.fn(async function* (): AsyncGenerator<ModelStreamEvent> {
+      yield { type: 'completed', stopReason: 'stop' };
+    });
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: async () => {
+          const log = await file.open();
+          return {
+            ...log,
+            append: async (event: AgentLogEvent) => {
+              if (event.type === 'model.invocation-prepared') {
+                preparing.resolve();
+                await release.promise;
+              }
+              return log.append(event);
+            },
+          };
+        },
+        transport: { funding: fundedFacet(), stream },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: 'pre-request-cancel',
+      }),
+    );
+    const admission = host.admit({
+      chatId: 'chat-pre-request-cancel',
+      runId: 'run-pre-request-cancel',
+      trigger: 'submit',
+      message: { id: 'turn-pre-request-cancel', role: 'user', content: 'Go.' },
+    });
+    await preparing.promise;
+    const cancellation = host.cancel({ runId: 'run-pre-request-cancel' });
+    release.resolve();
+    await Promise.all([admission, cancellation]);
+    expect(stream).not.toHaveBeenCalled();
+    await expect(host.snapshot('chat-pre-request-cancel')).resolves.toMatchObject({ state: 'cancelled' });
+    const events = await readLog(file);
+    expect(events.findLast((event) => event.type === 'run.lifecycle')).toMatchObject({
+      state: 'cancelled',
+    });
+    await host.close();
+  });
+
   it('publishes live deltas before their durable assistant completion', async () => {
     const order: string[] = [];
     const file = createMemoryLogFile();
@@ -981,6 +1028,85 @@ the cancelled tools left the system unchanged.
       'requested',
       'resolved',
     ]);
+    await host.close();
+  });
+
+  it('should replay one real result when interruption overlaps an early tool call', async () => {
+    const file = createMemoryLogFile();
+    const toolStarted = Promise.withResolvers<void>();
+    const toolResult = Promise.withResolvers<{ content: string; isError: false }>();
+    const toolAborted = Promise.withResolvers<void>();
+    const requests: ModelStreamRequest[] = [];
+    const transport: ModelTransport = {
+      funding: { type: 'unfunded' },
+      async *stream(request): AsyncGenerator<ModelStreamEvent> {
+        requests.push(request);
+        if (requests.length === 1) {
+          yield {
+            type: 'tool-input',
+            toolCallId: 'interrupted-read',
+            toolName: 'read_file',
+            input: { targetFile: 'main.ts' },
+          };
+          yield { type: 'completed', stopReason: 'toolUse' };
+          return;
+        }
+        yield { type: 'text-delta', text: 'Recovered.' };
+        yield { type: 'completed', stopReason: 'stop' };
+      },
+    };
+    const invoke = vi.fn(async (invocation: Parameters<ToolRegistry['invoke']>[0]) => {
+      toolStarted.resolve();
+      invocation.signal.addEventListener(
+        'abort',
+        () => {
+          toolAborted.resolve();
+        },
+        { once: true },
+      );
+      return toolResult.promise;
+    });
+    const host = createTauAgentHost(
+      hostOptions({ openEventLog: file.open, transport, toolRegistry: tools(invoke), idPrefix: 'interrupted-tool' }),
+    );
+    const admission = host.admit({
+      chatId: 'chat-interrupted-tool',
+      runId: 'run-interrupted-tool',
+      trigger: 'submit',
+      message: { id: 'turn-interrupted-tool', role: 'user', content: 'Read main.ts.' },
+    });
+    await toolStarted.promise;
+    const interruption = host.interrupt({
+      interruptId: 'interrupt-tool',
+      runId: 'run-interrupted-tool',
+      kind: 'operator',
+      prompt: 'Continue?',
+    });
+    await toolAborted.promise;
+    toolResult.resolve({ content: 'fixture-main', isError: false });
+    await admission;
+    await host.resolveInterrupt({ runId: 'run-interrupted-tool', interruptId: 'interrupt-tool', outcome: 'approved' });
+    await interruption;
+    const resumed = await host.resume('chat-interrupted-tool');
+    const events = await readLog(file);
+    const outputs = resumed.filter(
+      (message) => message.role === 'tool-output' && message.toolCallId === 'interrupted-read',
+    );
+    expect(outputs).toMatchObject([{ content: 'fixture-main', isError: false }]);
+    expect(
+      events.filter(
+        (event) =>
+          event.type === 'message.appended' &&
+          event.message.role === 'tool-output' &&
+          event.message.toolCallId === 'interrupted-read',
+      ),
+    ).toHaveLength(1);
+    expect(
+      requests[1]?.messages.filter(
+        (message) => message.role === 'tool-output' && message.toolCallId === 'interrupted-read',
+      ),
+    ).toHaveLength(1);
+    expect(invoke).toHaveBeenCalledTimes(1);
     await host.close();
   });
 

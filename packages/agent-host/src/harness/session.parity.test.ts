@@ -1320,6 +1320,56 @@ describe('pi full-turn parity fixture', () => {
     expect(events.filter((event) => event.type === 'model.invocation-bound')).toHaveLength(2);
     await session.close();
   });
+
+  it('should cancel funded compaction before its first model request', async () => {
+    const initial: AgentLogEvent[] = Array.from({ length: 8 }, (_, sequence) => ({
+      version: 1,
+      leaderEpoch: 'history-epoch',
+      sequence,
+      recordedAt: '2026-09-01T00:00:00.000Z',
+      runId: 'history-run',
+      type: 'message.appended',
+      message: { id: `history-${sequence}`, role: 'user', content: String(sequence).repeat(4000) },
+    }));
+    const stored = await createMemoryEventLog(initial);
+    const preparing = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const stream = vi.fn(async function* (request: ModelStreamRequest): AsyncGenerator<ModelStreamEvent> {
+      await request.onInvocationBound?.({ operationId: 'should-not-charge' });
+      yield { type: 'text-delta', text: 'Should not summarize.' };
+      yield { type: 'completed', stopReason: 'stop' };
+    });
+    const session = await createAgentSession({
+      chatId: 'chat-cancel-compaction',
+      runId: 'run-cancel-compaction',
+      leaderEpoch: 'cancel-epoch',
+      systemPrompt: 'system',
+      model: { id: 'stub', contextWindow: 8192, providerKind: 'openai' },
+      modelTransport: { funding: fundedFacet(), stream },
+      toolRegistry: { list: () => [], invoke: vi.fn() },
+      eventLog: {
+        ...stored,
+        append: async (event: AgentLogEvent) => {
+          if (event.type === 'model.invocation-prepared' && event.purpose === 'compaction') {
+            preparing.resolve();
+            await release.promise;
+          }
+          return stored.append(event);
+        },
+      },
+    });
+
+    const running = session.prompt({ id: 'cancel-turn', role: 'user', content: 'Stop.' });
+    await preparing.promise;
+    session.abort();
+    release.resolve();
+    await expect(running).resolves.toMatchObject({ outcome: 'aborted' });
+    expect(stream).not.toHaveBeenCalled();
+    const events = await stored.read();
+    expect(events.filter((event) => event.type === 'model.invocation-bound')).toHaveLength(0);
+    expect(events.filter((event) => event.type === 'history.compacted')).toHaveLength(0);
+    await session.close();
+  });
 });
 
 /* W7.r1 finding 11 (RV5-F2): the funding account is read, and checked against every open attempt, before any lookup. */
@@ -1399,6 +1449,37 @@ describe('model attempts another account funded', () => {
 });
 
 describe('transport stream state', () => {
+  it('should stop before requesting a model when cancellation lands during invocation preparation', async () => {
+    const preparing = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<string>();
+    const controller = new AbortController();
+    const stream = vi.fn(async function* (): AsyncGenerator<ModelStreamEvent> {
+      yield { type: 'completed', stopReason: 'stop' };
+    });
+    const output = await createTransportStreamFunction({
+      transport: { funding: fundedFacet(), stream },
+      providerKind: 'openai',
+      identities: new MessageIdentities(() => 'cancel-message'),
+      toolInputIds: new Map(),
+      createId: () => 'cancel-id',
+      prepareInvocation: async () => {
+        preparing.resolve();
+        return release.promise;
+      },
+    })(stubModel, { messages: [] }, { signal: controller.signal });
+    const reading = (async (): Promise<void> => {
+      for await (const event of output) {
+        void event;
+      }
+    })();
+
+    await preparing.promise;
+    controller.abort();
+    release.resolve('attempt-cancelled');
+    await reading;
+    expect(stream).not.toHaveBeenCalled();
+  });
+
   const streamFor = async (
     events: readonly ModelStreamEvent[],
     onLiveDelta?: Parameters<typeof createTransportStreamFunction>[0]['onLiveDelta'],

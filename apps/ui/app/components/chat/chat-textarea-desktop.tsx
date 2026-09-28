@@ -26,6 +26,7 @@ import { ChatTextareaSubmitButton } from '#components/chat/chat-textarea-submit-
 import type { ChatAttachmentAddOptions, ChatTextareaDragKind } from '#components/chat/chat-textarea-types.js';
 import type { DraftAttachment } from '#hooks/draft.machine.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
+import { useAgentHostPlacements } from '#hooks/use-cad-agent-config.js';
 import { ChatEditor } from '#components/chat/tiptap/chat-editor.js';
 import { buildEditorContentJson, extractContent, useChatEditor } from '#components/chat/tiptap/use-chat-editor.js';
 import type { ContextSuggestionItem, SlashCommandItem } from '#components/chat/tiptap/suggestion-types.js';
@@ -591,7 +592,20 @@ export const ChatTextareaBar = memo(function ({
 }): React.JSX.Element {
   const barRef = useRef<HTMLDivElement>(null);
   useBarCollapse(barRef);
-  const agentConfig = useAgentConfig(acpSessionData, status);
+  const { targets: placements } = useAgentHostPlacements();
+  const { execution } = useChatComposer().execution;
+  const discoveredAgent =
+    execution.kind === 'acp'
+      ? placements
+          .find((placement) => placement.hostId === execution.hostId)
+          ?.externalAgents?.find((agent) => agent.id === execution.agentId)
+      : undefined;
+  const selectedModel = execution.kind === 'acp' ? (execution.model ?? discoveredAgent?.defaultModel) : undefined;
+  const discoveredThoughtLevel =
+    selectedModel === undefined
+      ? discoveredAgent?.thoughtLevel
+      : discoveredAgent?.models.find((model) => model.id === selectedModel)?.thoughtLevel;
+  const agentConfig = useAgentConfig(acpSessionData, status, discoveredThoughtLevel);
   /* F6: only the composer being typed in owns ⌘/ and ⌘. — the edit box while
    * focus is inside it, the main composer otherwise. */
   const ownsShortcuts = useCallback(
@@ -626,7 +640,12 @@ export const ChatTextareaBar = memo(function ({
       </div>
       <div data-slot='composer-right' className='flex min-w-0 flex-row items-center gap-1'>
         <ChatContextIndicator />
-        <ChatAgentSheet agentConfig={agentConfig} focusEditor={focusEditor} enableShortcut={ownsShortcuts} />
+        <ChatAgentSheet
+          agentConfig={agentConfig}
+          placements={placements}
+          focusEditor={focusEditor}
+          enableShortcut={ownsShortcuts}
+        />
         <ChatTextareaSubmitButton
           status={status}
           isSubmitting={isSubmitting}

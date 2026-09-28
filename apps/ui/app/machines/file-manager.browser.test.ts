@@ -19,9 +19,10 @@ const verifyPublicReuse = async (
   options: {
     existingStore?: ReturnType<typeof connectComputeStoreChannel>['store'];
     expectedSolves?: number;
+    expectRevoked?: boolean;
   } = {},
 ): Promise<void> => {
-  const { existingStore, expectedSolves = 1 } = options;
+  const { existingStore, expectedSolves = 1, expectRevoked = false } = options;
   let solves = 0;
   let publication: unknown;
   const kernel = defineKernel({
@@ -110,10 +111,10 @@ const verifyPublicReuse = async (
   const rendered = await producer.client.render({
     source: { files: { 'main.compute': 'producer' } },
   });
-  if (!existingStore) {
+  if (!expectRevoked) {
     expect(rendered).toMatchObject({ superseded: false, geometry: { success: true, issues: [] } });
   }
-  if (existingStore) {
+  if (expectRevoked) {
     expect(rendered.superseded || !rendered.geometry.success).toBe(true);
     expect(publication).toBeUndefined();
   } else if (expectedSolves === 1) {
@@ -422,6 +423,9 @@ it('owns durable compute by admitted project and preserves generation across aut
 
     const projectB = `proj_${crypto.randomUUID().replaceAll('-', '').slice(0, 21)}`;
     const oldA = connectComputeStoreChannel(first.ready.context.openComputeStorePort!(projectId));
+    await verifyPublicReuse(() => rawComputePort(first.ready.context.worker!, projectId), 'project-a-before-b', {
+      existingStore: oldA.store,
+    });
     first.ready.context.worker!.postMessage({
       type: 'computeStoreAdmission',
       projectId: projectB,
@@ -429,7 +433,9 @@ it('owns durable compute by admitted project and preserves generation across aut
     await verifyPublicReuse(() => rawComputePort(first.ready.context.worker!, projectB), 'project-b');
     const stillLiveA = await first.ready.context.computeControl!(projectId, 'inspect', {});
     expect(Number(stillLiveA.generation)).toBe(clearedGeneration);
-    await verifyPublicReuse(() => rawComputePort(first.ready.context.worker!, projectId), 'project-a-after-b');
+    await verifyPublicReuse(() => rawComputePort(first.ready.context.worker!, projectId), 'project-a-after-b', {
+      existingStore: oldA.store,
+    });
     first.ready.context.worker!.postMessage({ type: 'computeStoreRelease', projectId });
     await expect(
       rawComputeRequest(first.ready.context.worker!, {
@@ -440,6 +446,7 @@ it('owns durable compute by admitted project and preserves generation across aut
     ).resolves.toEqual({ error: 'Compute control project authority does not match a live project.' });
     await verifyPublicReuse(() => rawComputePort(first.ready.context.worker!, projectId), 'revoked-a', {
       existingStore: oldA.store,
+      expectRevoked: true,
     });
     oldA.dispose();
     await verifyPublicReuse(() => rawComputePort(first.ready.context.worker!, projectB), 'project-b-after-a-release');

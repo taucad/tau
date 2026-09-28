@@ -445,7 +445,7 @@ function ProjectsLabel(): React.JSX.Element {
         {projects > 0 ? <span className='ml-1.5 font-normal tabular-nums'>{`${String(projects)} live`}</span> : null}
       </SidebarGroupLabel>
       {idleProjectIds.length > 0 ? (
-        <span className='hidden group-focus-within/label:flex group-hover/label:flex pointer-coarse:flex'>
+        <span className='hidden group-focus-within/label:flex group-hover/label:flex has-[[aria-haspopup=menu][data-state=open]]:flex pointer-coarse:flex'>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button

@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createTauAgentHost } from '#host/tau-agent-host.js';
+import { createChatRunRegistry } from '#host/chat-run-registry.js';
 import {
   completedFirstTurn,
   createMemoryLogFile,
@@ -30,6 +31,7 @@ import type {
 } from '#waist/ports.js';
 import type { ExternalAgentPort, ExternalAgentTurn, TauAgentHost } from '#host/tau-agent-host.js';
 import type { CommandAnswer } from '#wire/commands.schema.js';
+import { emptyChatLedger } from '#log/chat-ledger.js';
 
 /** A model call that waits until released, as a call binding at the gateway does. */
 const heldTransport = () => {
@@ -168,6 +170,54 @@ describe('the chat-run registry (RA-S3)', () => {
 
     expect(firstDone).toBe(true);
     await first;
+  });
+
+  it('should not reopen an incarnation closed by eviction while its first command waits for serving', async () => {
+    const opening = Promise.withResolvers<void>();
+    const releaseOpen = Promise.withResolvers<void>();
+    let opens = 0;
+    const registry = createChatRunRegistry({
+      createTerm: () => 'term-1',
+      services: {
+        openLog: async () => {
+          opens++;
+          if (opens === 1) {
+            opening.resolve();
+            await releaseOpen.promise;
+          }
+          return { ledger: emptyChatLedger, repair: [] };
+        },
+        append: async () => {
+          throw new Error('Unexpected append');
+        },
+        prepareAdmission: async () => {
+          throw new Error('Unexpected admission');
+        },
+        prepareResume: async () => {
+          throw new Error('Unexpected resume');
+        },
+        startDriver: () => {
+          throw new Error('Unexpected driver');
+        },
+        closeLog: async () => undefined,
+      },
+    });
+    const command = registry.execute({
+      type: 'start',
+      commandId: key(),
+      payload: {
+        chatId: 'chat-evict-opening',
+        runId: 'run-evict-opening',
+        trigger: 'submit',
+        message: { id: 'turn-evict-opening', role: 'user', content: 'Start.' },
+      },
+    });
+    await opening.promise;
+    await registry.evict('chat-evict-opening');
+    await expect(command).resolves.toMatchObject({ status: 'refused', code: 'HOST_CLOSED' });
+    expect(opens).toBe(1);
+    releaseOpen.resolve();
+    await registry.close();
   });
 
   it('should refuse commands with HOST_CLOSED and open no log after close', async () => {

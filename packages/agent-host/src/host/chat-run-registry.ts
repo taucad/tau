@@ -248,7 +248,17 @@ export const createChatRunRegistry = (options: ChatRunRegistryOptions): ChatRunR
       if (fenced.has(chatId)) {
         return refusedAnswer(command.commandId, 'LEADERSHIP_LOST', `This host no longer leads chat ${chatId}.`);
       }
-      /* The claim was fenced by a stale writer: reread under a new incarnation (RA-A9). */
+      if (context.cause === 'close' || context.cause === 'evicted') {
+        return refusedAnswer(command.commandId, 'HOST_CLOSED', 'The Tau agent host is closed.');
+      }
+      if (context.cause !== 'fenced' && context.cause !== 'fault') {
+        return refusedAnswer(
+          command.commandId,
+          'HOST_FAULT',
+          `The incarnation for chat ${chatId} stopped while opening.`,
+        );
+      }
+      /* A stale writer or fault may have fenced the claim: reread under a new incarnation (RA-A9). */
       actor = open(chatId);
       await served(actor);
     }

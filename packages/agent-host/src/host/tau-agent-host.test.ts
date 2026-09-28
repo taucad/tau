@@ -1292,6 +1292,158 @@ the cancelled tools left the system unchanged.
     await host.close();
   });
 
+  it.each([
+    ['close', 'approved'],
+    ['relinquish', 'approved'],
+    ['evictChat', 'denied'],
+  ] as const)(
+    'should read an applied approval before %s closes its log without waiting for the tool',
+    async (verb, outcome) => {
+      const file = createMemoryLogFile();
+      const reading = Promise.withResolvers<void>();
+      const releaseRead = Promise.withResolvers<void>();
+      const logClosed = Promise.withResolvers<void>();
+      const finishHandover = Promise.withResolvers<void>();
+      let holdApprovalRead = false;
+      const answerApproval = vi.fn<NonNullable<ToolRegistry['answerApproval']>>(async () => {
+        await finishHandover.promise;
+      });
+      const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      const host = createTauAgentHost(
+        hostOptions({
+          openEventLog: async () => {
+            const log = await file.open();
+            return {
+              ...log,
+              read: async () => {
+                if (holdApprovalRead) {
+                  holdApprovalRead = false;
+                  reading.resolve();
+                  await releaseRead.promise;
+                }
+                return log.read();
+              },
+              close: async () => {
+                await log.close();
+                logClosed.resolve();
+              },
+            };
+          },
+          transport: new ScriptedParityModelTransport(printResponses),
+          toolRegistry: { ...printTool([]), answerApproval },
+          idPrefix: 'close-approval',
+        }),
+      );
+      await host.admit({
+        chatId: 'chat-close-approval',
+        runId: 'run-close-approval',
+        trigger: 'submit',
+        message: { id: 'turn-close-approval', role: 'user', content: 'Print it.' },
+      });
+      const [pending] = await host.pendingInterrupts('run-close-approval');
+      await host.resolveInterrupt({
+        runId: 'run-close-approval',
+        interruptId: pending!.interruptId,
+        outcome,
+      });
+      holdApprovalRead = true;
+      await reading.promise;
+      const closing =
+        verb === 'close'
+          ? host.close()
+          : verb === 'relinquish'
+            ? host.relinquish('chat-close-approval')
+            : host.evictChat('chat-close-approval');
+      await Promise.race([
+        logClosed.promise,
+        new Promise<void>((resolve) => {
+          setTimeout(resolve, 20);
+        }),
+      ]);
+      releaseRead.resolve();
+      await closing;
+      expect(answerApproval).toHaveBeenCalledExactlyOnceWith({
+        toolName: 'read_file',
+        payload: { kind: 'print-request', requestId: 'request-1' },
+        resolution: { interruptId: pending!.interruptId, outcome },
+      });
+      expect(errors).not.toHaveBeenCalled();
+      finishHandover.resolve();
+      if (verb !== 'close') {
+        await host.close();
+      }
+      errors.mockRestore();
+    },
+  );
+
+  it('should wait for an approval scan before starting a run on an evicting chat', async () => {
+    const file = createMemoryLogFile();
+    const reading = Promise.withResolvers<void>();
+    const releaseRead = Promise.withResolvers<void>();
+    let holdRead = false;
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: async () => {
+          const log = await file.open();
+          return {
+            ...log,
+            read: async () => {
+              if (holdRead) {
+                holdRead = false;
+                reading.resolve();
+                await releaseRead.promise;
+              }
+              return log.read();
+            },
+          };
+        },
+        transport: new ScriptedParityModelTransport(printResponses),
+        toolRegistry: { ...printTool([]), answerApproval: async () => undefined },
+        idPrefix: 'evict-start-race',
+      }),
+    );
+    await host.admit({
+      chatId: 'chat-evict-start-race',
+      runId: 'run-first',
+      trigger: 'submit',
+      message: { id: 'turn-first', role: 'user', content: 'Print it.' },
+    });
+    const [pending] = await host.pendingInterrupts('run-first');
+    await host.resolveInterrupt({ runId: 'run-first', interruptId: pending!.interruptId, outcome: 'denied' });
+    holdRead = true;
+    await reading.promise;
+
+    const evicting = host.evictChat('chat-evict-start-race');
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+    let started = false;
+    const start = async () => {
+      const answer = await host.command({
+        type: 'start',
+        commandId: 'start:run-second',
+        payload: {
+          chatId: 'chat-evict-start-race',
+          runId: 'run-second',
+          trigger: 'submit',
+          message: { id: 'turn-second', role: 'user', content: 'Again.' },
+        },
+      });
+      started = true;
+      return answer;
+    };
+    const starting = start();
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 20);
+    });
+    expect(started).toBe(false);
+
+    releaseRead.resolve();
+    await evicting;
+    await expect(starting).resolves.toMatchObject({ status: 'applied', effect: 'durable' });
+    await host.close();
+  });
+
   it('hands a Stop only the answers its own rows record, never an earlier approval (GM.r2 M2, mutant C)', async () => {
     const file = createMemoryLogFile();
     const answerApproval = vi.fn<NonNullable<ToolRegistry['answerApproval']>>(async () => undefined);

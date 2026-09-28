@@ -876,7 +876,6 @@ export function ProjectLibraryCard({
         />
       </div>
       <ProjectCardMedia
-        name={project.name}
         thumbnailSource={thumbnailSource}
         isPreviewVisible={showPreview}
         onPreviewVisibilityChange={setShowPreview}

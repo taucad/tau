@@ -115,7 +115,6 @@ function CommunityProjectCard(project: BuiltinProjectCardModel): React.JSX.Eleme
       className='flex flex-col pb-0'
     >
       <ProjectCardMedia
-        name={name}
         thumbnailSource={thumbnailSource}
         isPreviewVisible={visible}
         onPreviewVisibilityChange={handlePreviewVisibilityChange}

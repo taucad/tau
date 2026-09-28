@@ -39,7 +39,9 @@ describe('ProjectCard', () => {
 
     const link = screen.getByRole('link', { name: 'Open Project One' });
     expect(link).toHaveAttribute('href', '/projects/project-1');
-    expect(link.parentElement).toHaveClass('hover:border-primary/60');
+    // Neutral, instant hover edge at the owner; the brand hue and the colour transition are gone.
+    expect(link.parentElement).toHaveClass('hover:border-foreground/30');
+    expect(link.parentElement).not.toHaveClass('hover:border-primary/60', 'transition-colors');
 
     link.focus();
     await userEvent.keyboard('{Enter}');
@@ -69,17 +71,15 @@ describe('ProjectCardMedia', () => {
     const onPreviewVisibilityChange = vi.fn();
     const { rerender } = render(
       <TooltipProvider>
-        <ProjectCardMedia
-          name='Project One'
-          isPreviewVisible={false}
-          onPreviewVisibilityChange={onPreviewVisibilityChange}
-        >
+        <ProjectCardMedia isPreviewVisible={false} onPreviewVisibilityChange={onPreviewVisibilityChange}>
           <div data-testid='preview'>Preview</div>
         </ProjectCardMedia>
       </TooltipProvider>,
     );
 
-    const thumbnail = screen.getByRole('img', { name: 'Project One' });
+    // The card link names the card, so the thumbnail is decorative.
+    const thumbnail = screen.getByRole('presentation');
+    expect(thumbnail).toHaveAttribute('alt', '');
     expect(thumbnail).toHaveAttribute('src', '/placeholder.svg');
     expect(thumbnail).toHaveAttribute('loading', 'lazy');
     expect(thumbnail.parentElement).toHaveClass('aspect-4/3');
@@ -93,7 +93,6 @@ describe('ProjectCardMedia', () => {
     rerender(
       <TooltipProvider>
         <ProjectCardMedia
-          name='Project One'
           thumbnailSource='/thumbnail.png'
           isPreviewVisible
           onPreviewVisibilityChange={onPreviewVisibilityChange}
@@ -103,9 +102,13 @@ describe('ProjectCardMedia', () => {
       </TooltipProvider>,
     );
 
-    expect(screen.queryByRole('img', { name: 'Project One' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('presentation')).not.toBeInTheDocument();
     expect(screen.getByTestId('preview').parentElement).not.toHaveAttribute('hidden');
-    expect(screen.getByRole('button', { name: 'Preview model' })).toHaveAttribute('aria-pressed', 'true');
+    const pressed = screen.getByRole('button', { name: 'Preview model' });
+    expect(pressed).toHaveAttribute('aria-pressed', 'true');
+    // Pressed is a neutral fill with a foreground glyph, never hue alone.
+    expect(pressed).toHaveClass('aria-pressed:bg-accent', 'aria-pressed:text-foreground');
+    expect(pressed.querySelector('svg')).not.toHaveClass('text-primary');
   });
 });
 

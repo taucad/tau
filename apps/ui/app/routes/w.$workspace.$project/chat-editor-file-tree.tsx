@@ -385,6 +385,7 @@ export const ChatEditorFileTree = memo(function ({
     overrideUnit,
     contentService,
     readFile,
+    whenServicesReady,
     writeFile,
     renameFile,
     duplicateFile,
@@ -1387,16 +1388,8 @@ export const ChatEditorFileTree = memo(function ({
       } else {
         toast.promise(
           async () => {
-            let content: Awaited<ReturnType<typeof readFile>>;
-            try {
-              content = await readFile(path);
-            } catch (error) {
-              throw createFileTreeDownloadError({
-                code: 'path-not-found',
-                path,
-                cause: error,
-              });
-            }
+            const { contentService } = await whenServicesReady();
+            const content = await contentService.readRawBytes(path, { sizeLimit: Number.MAX_SAFE_INTEGER });
             const blob = new Blob([asBuffer(content.buffer)], {
               type: 'application/octet-stream',
             });
@@ -1418,7 +1411,7 @@ export const ChatEditorFileTree = memo(function ({
         );
       }
     },
-    [readFile, getZippedDirectory, presentationFor],
+    [whenServicesReady, getZippedDirectory, presentationFor],
   );
 
   const handleCopyPath = useCallback(async (path: string): Promise<void> => {

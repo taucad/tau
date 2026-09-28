@@ -16,6 +16,7 @@ import {
   agentWireHelloSchema,
 } from '@taucad/agent-host/wire';
 import type { AgentWireHello } from '@taucad/agent-host/wire';
+import type { AgentLauncher } from '@taucad/agent-host/launcher';
 import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';
 import { z } from 'zod';
@@ -180,6 +181,9 @@ export type AgentHostProjectStatus = {
   readonly capability: AgentHostCapabilityReport;
 };
 
+/** A close prompt's read-only answer from this worker's leadership actor. @public */
+export type AgentHostRunStoppability = ReturnType<AgentLauncher['stoppability']>;
+
 /**
  * The page↔resident-worker control channel (RH-S8). One worker per document serves every project and chat of the
  * tab: `provide` opens a project host, `connect` hands it one `MessagePort` per stream, served with the agent wire
@@ -223,6 +227,10 @@ export type AgentHostWorkerProtocol = {
     readonly status: {
       readonly args: { readonly projectId: string };
       readonly result: AgentHostProjectStatus;
+    };
+    readonly runStoppability: {
+      readonly args: { readonly projectId: string; readonly chatId: string };
+      readonly result: AgentHostRunStoppability;
     };
     /** The page's visibility: a hidden page never queues for a chat's lock (RH-R16). */
     readonly visibility: {
@@ -399,6 +407,10 @@ export const agentHostWorkerProtocolSchemas = {
     status: {
       args: z.strictObject({ projectId: nonEmptyString }),
       result: z.strictObject({ hostId: nonEmptyString.optional(), capability: capabilityReportSchema }),
+    },
+    runStoppability: {
+      args: z.strictObject({ projectId: nonEmptyString, chatId: nonEmptyString }),
+      result: z.enum(['stoppable', 'other-build', 'background-window']),
     },
     visibility: { args: z.strictObject({ visible: z.boolean() }), result: z.unknown() },
   },

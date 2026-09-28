@@ -102,6 +102,8 @@ export type AgentLauncher = {
   execute(command: HostCommand): Promise<CommandAnswer>;
   /** One long-poll read (SC-R14). It never creates a chat, takes no lock and assumes no leadership (RH-R1). */
   read(input: ReadInput): Promise<ReadAnswer>;
+  /** Read the current leadership actor only; never requests a lock or sends a chat command. */
+  stoppability(chatId: string): 'stoppable' | 'other-build' | 'background-window';
   /** Ephemeral model deltas for one chat, bounded per subscriber (SC-R15). */
   liveEvents(input: Readonly<{ chatId: string; signal: AbortSignal }>): AsyncIterable<AgentLiveEvent>;
   /** Unresolved approval requests for one run. */
@@ -712,6 +714,7 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
       requireChatPathSegment(input.chatId);
       return port.read(input, async () => readLocal(input));
     },
+    stoppability: (chatId) => port.stoppability(chatId),
     liveEvents: ({ chatId, signal }) => live.subscribe(signal, chatId),
     admittedRuns: async () => {
       /* A start counted while the last ones were answered is waited for too (W6.r2 L1). */

@@ -57,7 +57,7 @@ describe('ProjectActionDropdown', () => {
     expect(actions.handleDelete).toHaveBeenCalledWith(project);
   });
 
-  it('asks before trashing a project whose agents are running', async () => {
+  it('asks before trashing a project with running work', async () => {
     rowRuns = 2;
     const user = userEvent.setup();
     const actions = createActions();
@@ -67,9 +67,9 @@ describe('ProjectActionDropdown', () => {
     await user.click(screen.getByRole('menuitem', { name: 'Move to Trash' }));
 
     expect(actions.handleDelete).not.toHaveBeenCalled();
-    expect(screen.getByRole('heading', { name: 'Stop 2 agents and close Readable Project?' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Close Readable Project?' })).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Stop and close' }));
+    await user.click(screen.getByRole('button', { name: 'Close' }));
     expect(actions.handleDelete).toHaveBeenCalledExactlyOnceWith(project);
   });
 

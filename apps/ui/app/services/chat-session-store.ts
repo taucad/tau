@@ -38,6 +38,8 @@ import type { Actor, ActorOptions, AnyActorLogic } from 'xstate';
 import type { CadAgentExecution, Chat as ChatEntity, MyUIMessage } from '@taucad/chat';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
+import { chatRecordsPath } from '@taucad/revisions';
+import { getErrno } from '@taucad/utils/error';
 import { sendHostCommand } from '#chat-clients/_internal/host-command.js';
 import type { MachineActors } from '#lib/xstate.lib.js';
 import { waitUnlessGone } from '#lib/xstate.lib.js';
@@ -362,6 +364,7 @@ export class ChatSessionStore {
   readonly #sessions = new Map<string, InternalSession>();
   readonly #observed = new Map<string, ObservedChat>();
   readonly #projectHostConnectors = new Map<string, ProjectHostConnector>();
+  readonly #remoteReadVersions = new Map<string, number>();
   readonly #projectRunKeys = new Map<string, string>();
   readonly #projectRunVersions = new Map<string, number>();
   readonly #chatSessionLogic: typeof chatSessionMachine;
@@ -512,6 +515,7 @@ export class ChatSessionStore {
     if (existing === undefined) {
       this.#observed.set(chatId, observed);
       this.#projectionOf(chatId);
+      void this.#refreshRemoteSegmentsSafely(chatId, projectId);
       this.#startObservedAttachment(chatId, observed);
       this.#notifyMembership();
     }
@@ -530,6 +534,44 @@ export class ChatSessionStore {
   /** IDs whose projection is observed for this project, including unopened chats. @public */
   public observedChatIdsOf(projectId: string): readonly string[] {
     return [...this.#observed].filter(([, chat]) => chat.projectId === projectId).map(([chatId]) => chatId);
+  }
+
+  /** Refold fetched foreign log files into the one transcript projection; never cache their bytes in chat.json. @public */
+  public async refreshRemoteSegments(chatId: string, projectId: string): Promise<void> {
+    if (this.#observed.get(chatId)?.projectId !== projectId && this.#sessions.get(chatId)?.projectId !== projectId) {
+      return;
+    }
+    const version = (this.#remoteReadVersions.get(chatId) ?? 0) + 1;
+    this.#remoteReadVersions.set(chatId, version);
+    const directory = `/projects/${projectId}/${chatRecordsPath(chatId)}/events`;
+    let entries: string[];
+    try {
+      entries = await this.#deps.client.readdir(directory);
+    } catch (error) {
+      if (getErrno(error) !== 'ENOENT' && getErrno(error) !== 'ENOTDIR') {
+        throw error;
+      }
+      entries = [];
+    }
+    const segments = await Promise.all(
+      entries
+        .filter((name) => /^[^/]+\.jsonl$/.test(name))
+        .map(async (name) => ({ deviceId: name, bytes: await this.#deps.client.readFile(`${directory}/${name}`) })),
+    );
+    if (
+      this.#remoteReadVersions.get(chatId) === version &&
+      (this.#observed.get(chatId)?.projectId === projectId || this.#sessions.get(chatId)?.projectId === projectId)
+    ) {
+      this.#projectionOf(chatId).send({ type: 'remote', segments });
+    }
+  }
+
+  async #refreshRemoteSegmentsSafely(chatId: string, projectId: string): Promise<void> {
+    try {
+      await this.refreshRemoteSegments(chatId, projectId);
+    } catch (error) {
+      console.warn('[ChatSessionStore] foreign chat log could not be read', chatId, error);
+    }
   }
 
   /** Publish the active project's real W6 connector to every listed chat. @public */

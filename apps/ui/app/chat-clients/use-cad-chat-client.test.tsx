@@ -938,19 +938,47 @@ describe('useCadChatClient', () => {
       approved: true,
       reason: 'Proceed',
     });
-    expect(actions.setMessages).toHaveBeenCalledWith([
+    expect(actions.setMessages).not.toHaveBeenCalled();
+    expect(chat.addToolApprovalResponse).not.toHaveBeenCalled();
+  });
+
+  it('should retain a resumed host reply that arrives before approval resolution returns', async () => {
+    browserHostHarness.run = { runId: 'run-paused', state: 'paused', eventCount: 4 };
+    let messages = [
       {
-        ...messages[0],
+        id: 'assistant-approval',
+        role: 'assistant',
         parts: [
           {
-            ...messages[0]!.parts[0],
-            state: 'approval-responded',
-            approval: { id: 'interrupt-1', approved: true, reason: 'Proceed' },
+            type: 'tool-request_print',
+            toolCallId: 'call-print',
+            state: 'approval-requested',
+            input: {},
+            approval: { id: 'interrupt-1' },
           },
         ],
       },
-    ]);
-    expect(chat.addToolApprovalResponse).not.toHaveBeenCalled();
+    ] as MyUIMessage[];
+    const chat = mock<Chat<MyUIMessage>>();
+    Object.defineProperty(chat, 'messages', { get: () => messages });
+    useActiveChatInstanceMock.mockReturnValue(chat);
+    useChatSelectorMock.mockReturnValue('streaming');
+    const actions = buildActions();
+    actions.setMessages.mockImplementation((next: MyUIMessage[]) => {
+      messages = next;
+    });
+    installActions(actions);
+    browserHostHarness.resolveInterrupt.mockImplementationOnce(async () => {
+      messages = [
+        ...messages,
+        { id: 'resumed-reply', role: 'assistant', parts: [{ type: 'text', text: 'Print started.' }] },
+      ];
+    });
+
+    const { result } = renderClient();
+    await act(async () => result.current.respondToToolApproval('interrupt-1', true));
+
+    expect(messages.some((message) => message.id === 'resumed-reply')).toBe(true);
   });
 
   it("answers a daemon-placed chat's paused run that no stream follows, then follows what it continued (GM.r1 H1)", async () => {
@@ -961,7 +989,8 @@ describe('useCadChatClient', () => {
     Object.defineProperty(chat, 'messages', { get: () => [] });
     useActiveChatInstanceMock.mockReturnValue(chat);
     useChatSelectorMock.mockReturnValue('ready');
-    installActions(buildActions());
+    const actions = buildActions();
+    installActions(actions);
 
     const { result } = renderClient();
     await act(async () => result.current.respondToToolApproval('interrupt-1', true));
@@ -975,6 +1004,7 @@ describe('useCadChatClient', () => {
       optionId: undefined,
     });
     expect(chat.resumeStream).toHaveBeenCalledOnce();
+    expect(actions.setMessages).not.toHaveBeenCalled();
     expect(chat.addToolApprovalResponse).not.toHaveBeenCalled();
   });
 

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react';
 import type { ChatStatus } from 'ai';
-import { isAnyToolPart } from '@taucad/chat';
 import type { CadAgentConfigInput, MyUIMessage } from '@taucad/chat';
 import { toast } from 'sonner';
 import { useCadAgentConfig } from '#hooks/use-cad-agent-config.js';
@@ -237,20 +236,6 @@ export const useCadChatClient = (): CadChatClient => {
           reason,
           optionId,
         });
-        actions.setMessages(
-          messages.map((message) => ({
-            ...message,
-            parts: message.parts.map((part) =>
-              isAnyToolPart(part) && part.state === 'approval-requested' && part.approval.id === approvalId
-                ? {
-                    ...part,
-                    state: 'approval-responded',
-                    approval: { ...part.approval, approved, ...(reason ? { reason } : {}) },
-                  }
-                : part,
-            ),
-          })),
-        );
         if (detachedRunId !== undefined) {
           void chat.resumeStream();
         }
@@ -279,7 +264,7 @@ export const useCadChatClient = (): CadChatClient => {
         store.endRun(activeChatId);
       }
     },
-    [actions, activeChatId, agent, chat, messages, projectId, requestInFlight, store],
+    [activeChatId, agent, chat, projectId, requestInFlight, store],
   );
 
   return {

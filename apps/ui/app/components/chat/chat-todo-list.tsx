@@ -64,8 +64,8 @@ function TodoRow({ item }: { readonly item: TodoItem }): React.JSX.Element {
       />
       <span className='min-w-0 flex-1 wrap-break-word'>
         <span className='sr-only'>{todoStatusLabels[item.status]}: </span>
-        <span className={cn(item.status === 'done' && 'line-through opacity-70')}>{item.title}</span>
-        {item.note === undefined ? undefined : <span className='block text-muted-foreground/70'>{item.note}</span>}
+        <span className={cn(item.status === 'done' && 'line-through')}>{item.title}</span>
+        {item.note === undefined ? undefined : <span className='block text-muted-foreground'>{item.note}</span>}
       </span>
     </li>
   );
@@ -108,26 +108,39 @@ export function ChatTodoList(): React.JSX.Element | undefined {
   const summary = `${String(done)} of ${String(items.length)} done${current ? ` · ${current.title}` : ''}`;
 
   return (
-    <Collapsible open={isOpen} className='-mb-3 rounded-t-2xl border bg-muted/40 pb-3' onOpenChange={handleOpenChange}>
+    <Collapsible
+      open={isOpen}
+      className='mx-2 -mb-3 rounded-t-lg border border-b-0 bg-muted/40 pb-3'
+      onOpenChange={handleOpenChange}
+    >
       <CollapsibleTrigger asChild>
         <Button
           variant='ghost'
           size='xs'
-          className='flex h-auto min-h-9 w-full min-w-0 items-center justify-start gap-2 overflow-hidden rounded-t-2xl px-3 py-1.5 text-left font-normal text-muted-foreground hover:bg-transparent hover:text-foreground dark:hover:bg-transparent'
+          className='relative flex h-auto min-h-8 w-full min-w-0 items-center justify-start gap-1.5 rounded-t-lg px-2 py-1.5 text-left font-normal text-muted-foreground hover:bg-accent/50 hover:text-foreground focus-visible:z-10'
         >
-          <ListChecks aria-hidden='true' className='size-4 shrink-0' />
+          <ListChecks aria-hidden='true' className='size-3.5 shrink-0' />
           <span className='sr-only'>Tasks: </span>
-          <span className='min-w-0 flex-1 truncate text-xs'>{summary}</span>
+          <span className='flex min-w-0 flex-1 gap-1 text-xs' title={summary}>
+            <span className='shrink-0'>
+              {done} of {items.length} done
+            </span>
+            {current ? <span className='truncate'> · {current.title}</span> : null}
+          </span>
           <ChevronRight
             aria-hidden='true'
-            className={cn('size-4 shrink-0 transition-transform duration-200', isOpen && 'rotate-90')}
+            className={cn(
+              'size-3.5 shrink-0 transition-transform duration-200 motion-reduce:transition-none',
+              isOpen && 'rotate-90',
+            )}
           />
         </Button>
       </CollapsibleTrigger>
       <CollapsibleContent>
         <ul
           aria-label='Tasks'
-          className='flex max-h-[min(12rem,35dvh)] flex-col gap-1 overflow-y-auto border-t px-3 pt-2 pb-3'
+          tabIndex={0}
+          className='flex max-h-[min(12rem,25cqh)] scroll-shadows-y flex-col gap-1 overflow-y-auto overscroll-contain border-t px-2 pt-2 pb-3 focus-visible:focus-outline'
         >
           {items.map((item) => (
             <TodoRow key={item.id} item={item} />

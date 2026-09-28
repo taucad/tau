@@ -431,7 +431,13 @@ export const ChatTextareaDesktop = memo(function ({
         />
 
         {/* Editor */}
-        <div className='max-h-48 min-h-12 min-w-0 overflow-y-auto' onClick={handleEditorAreaClick}>
+        <div
+          className={cn(
+            'max-h-48 min-h-12 min-w-0 overflow-y-auto overscroll-contain',
+            mode === 'main' && 'max-h-[min(12rem,30cqh)]',
+          )}
+          onClick={handleEditorAreaClick}
+        >
           <ChatEditor
             editor={editor}
             className='pt-2'

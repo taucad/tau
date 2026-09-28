@@ -43,6 +43,8 @@ import {
 import type { SidebarRowMenuItems } from '#components/nav/sidebar-row.js';
 import { CloseProjectDialog } from '#components/nav/project-close-dialogs.js';
 import { useLiveProjectIds } from '#hooks/use-sessions.js';
+import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
+import type { ProjectClosePlan } from '#services/chat-session-store.js';
 import {
   pluralize,
   selectProjectFacts,
@@ -255,8 +257,23 @@ function ProjectNavigationItem({
    * chevron, so the control always shows what it does when it is reached. */
   const hasMark = facts.mark !== 'none';
   const { closeProject } = useSidebarCommands();
+  const chatSessions = useChatSessionStore();
   const [askingToClose, setAskingToClose] = useState(false);
   const [askingToDelete, setAskingToDelete] = useState(false);
+  const [closePlan, setClosePlan] = useState<ProjectClosePlan | undefined>();
+  const askToClose = async (deleting: boolean): Promise<void> => {
+    try {
+      const plan = await chatSessions.getProjectClosePlan(project.id);
+      setClosePlan(plan);
+      if (deleting) {
+        setAskingToDelete(true);
+      } else {
+        setAskingToClose(true);
+      }
+    } catch {
+      toast.error(`Couldn’t check running work in ${project.name}. Try closing it again.`);
+    }
+  };
 
   const menuItems: SidebarRowMenuItems = ({ Item, Separator }) => (
     <>
@@ -290,7 +307,7 @@ function ProjectNavigationItem({
           aria-label={`Close ${project.name}`}
           onSelect={() => {
             if (row.runs > 0) {
-              setAskingToClose(true);
+              void askToClose(false);
               return;
             }
             closeProject(project.id);
@@ -305,7 +322,7 @@ function ProjectNavigationItem({
         variant='destructive'
         onSelect={() => {
           if (row.runs > 0) {
-            setAskingToDelete(true);
+            void askToClose(true);
           } else {
             void onDelete();
           }
@@ -411,10 +428,17 @@ function ProjectNavigationItem({
           )}
         </div>
       </SidebarRowContextMenu>
-      <CloseProjectDialog row={row} name={project.name} isOpen={askingToClose} onOpenChange={setAskingToClose} />
       <CloseProjectDialog
         row={row}
         name={project.name}
+        closePlan={closePlan}
+        isOpen={askingToClose}
+        onOpenChange={setAskingToClose}
+      />
+      <CloseProjectDialog
+        row={row}
+        name={project.name}
+        closePlan={closePlan}
         isOpen={askingToDelete}
         onOpenChange={setAskingToDelete}
         onConfirm={() => {

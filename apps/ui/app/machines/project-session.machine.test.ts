@@ -274,14 +274,13 @@ describe('projectSessionMachine', () => {
     const { actor } = harness();
     await settle();
 
-    actor.send({ type: 'runStarted', chatId: 'chat-1' });
-    actor.send({ type: 'runStarted', chatId: 'chat-2' });
+    actor.send({ type: 'projectedRunsChanged', runs: ['chat-1', 'chat-2'], stoppableRuns: ['chat-1', 'chat-2'] });
     expect(actor.getSnapshot().matches({ live: 'busy' })).toBe(true);
 
-    actor.send({ type: 'runSettled', chatId: 'chat-1' });
+    actor.send({ type: 'projectedRunsChanged', runs: ['chat-2'], stoppableRuns: ['chat-2'] });
     expect(actor.getSnapshot().matches({ live: 'busy' })).toBe(true);
 
-    actor.send({ type: 'runSettled', chatId: 'chat-2' });
+    actor.send({ type: 'projectedRunsChanged', runs: [], stoppableRuns: [] });
     expect(actor.getSnapshot().matches({ live: 'idle' })).toBe(true);
     expect(actor.getSnapshot().context.runs).toEqual([]);
     actor.stop();
@@ -384,7 +383,7 @@ describe('projectSessionMachine', () => {
     await settle();
     await vi.advanceTimersByTimeAsync(200);
 
-    actor.send({ type: 'runStarted', chatId: 'chat-1' });
+    actor.send({ type: 'projectedRunsChanged', runs: ['chat-1'], stoppableRuns: ['chat-1'] });
 
     expect(parking).toEqual([true, false]);
     expect(actor.getSnapshot().matches({ live: 'busy' })).toBe(true);
@@ -405,7 +404,7 @@ describe('projectSessionMachine', () => {
   it('asks before closing a project with a live run, and a cancel keeps it live', async () => {
     const { actor } = harness();
     await settle();
-    actor.send({ type: 'runStarted', chatId: 'chat-1' });
+    actor.send({ type: 'projectedRunsChanged', runs: ['chat-1'], stoppableRuns: ['chat-1'] });
 
     actor.send({ type: 'close', reason: 'user' });
     expect(actor.getSnapshot().matches({ closing: 'asking' })).toBe(true);
@@ -419,7 +418,7 @@ describe('projectSessionMachine', () => {
     const parent = recordingParent();
     const { actor, order, live } = harness({ parentRef: parent.ref });
     await settle();
-    actor.send({ type: 'runStarted', chatId: 'chat-1' });
+    actor.send({ type: 'projectedRunsChanged', runs: ['chat-1'], stoppableRuns: ['chat-1'] });
     /* Four regions and no chat: the store owns each chat's root (PV-S5). */
     expect(Object.keys(actor.getSnapshot().children).length).toBe(4);
 
@@ -450,7 +449,7 @@ describe('projectSessionMachine', () => {
   it('never asks on a policy or quit close', async () => {
     const { actor } = harness();
     await settle();
-    actor.send({ type: 'runStarted', chatId: 'chat-1' });
+    actor.send({ type: 'projectedRunsChanged', runs: ['chat-1'], stoppableRuns: ['chat-1'] });
 
     actor.send({ type: 'close', reason: 'quit' });
     await settle();
@@ -529,7 +528,7 @@ describe('projectSessionMachine', () => {
       const parent = recordingParent();
       const { actor, live } = harness({ parentRef: parent.ref, failCloseStep });
       await settle();
-      actor.send({ type: 'runStarted', chatId: 'chat-1' });
+      actor.send({ type: 'projectedRunsChanged', runs: ['chat-1'], stoppableRuns: ['chat-1'] });
       actor.send({ type: 'close', reason: 'quit' });
       await settle();
       await settle();
@@ -624,8 +623,8 @@ describe('projectSessionMachine — the machine contract (PV-S5, MC-R17)', () =>
       { type: 'cancelClose' },
       ...regions.map((region) => ({ type: 'childReady', region }) as const),
       { type: 'childFailed', region: 'runtime', reason: 'x' },
-      { type: 'runStarted', chatId: 'c' },
-      { type: 'runSettled', chatId: 'c' },
+      { type: 'projectedRunsChanged', runs: ['c'], stoppableRuns: ['c'] },
+      { type: 'projectedRunsChanged', runs: [], stoppableRuns: [] },
       { type: 'activity' },
       { type: 'visibilityChanged', visible: true, focused: true },
       { type: 'visibilityChanged', visible: false, focused: false },
@@ -653,8 +652,8 @@ describe('projectSessionMachine — the machine contract (PV-S5, MC-R17)', () =>
     const guard = guardActors({ ignore: { 'project-session': projectSessionIgnoredEvents } });
     const { actor } = harness({ inspect: guard.inspect });
     await settle();
-    actor.send({ type: 'runStarted', chatId: 'chat-1' });
-    actor.send({ type: 'runSettled', chatId: 'chat-1' });
+    actor.send({ type: 'projectedRunsChanged', runs: ['chat-1'], stoppableRuns: ['chat-1'] });
+    actor.send({ type: 'projectedRunsChanged', runs: [], stoppableRuns: [] });
     actor.send({ type: 'close', reason: 'user' });
     await settle();
     await settle();

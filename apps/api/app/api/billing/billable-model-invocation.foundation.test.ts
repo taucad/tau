@@ -453,7 +453,12 @@ describe('BillableModelInvocationService process recovery', () => {
       await database.update(creditAccount).set({ status: 'closed' }).where(eq(creditAccount.id, closed.accountId));
       await expect(
         invoke({ owner, authUserId: closed.authUserId, attemptKey: `closed-${randomUUID()}` }),
-      ).rejects.toThrow();
+      ).rejects.toSatisfy(
+        (error: unknown) =>
+          error instanceof LlmGatewayError &&
+          error.getStatus() === 403 &&
+          (error.getResponse() as { error?: { type?: string } }).error?.type === 'BILLING_ACCOUNT_CLOSED',
+      );
       expect(requests).toBe(0);
 
       const indebted = await createFixture();

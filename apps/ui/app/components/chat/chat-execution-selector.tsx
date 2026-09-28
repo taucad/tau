@@ -291,7 +291,7 @@ export const ChatExecutionSelector = memo(function ({
   return (
     <ComboBoxResponsive
       {...properties}
-      className="data-[slot='popover-content']:w-[320px]"
+      className="data-[slot='popover-content']:w-80"
       popoverProperties={properties.popoverProperties}
       groupedItems={groupedTargets}
       getValue={(target) => target.key}

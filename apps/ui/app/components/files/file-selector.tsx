@@ -719,7 +719,7 @@ export function FileSelector({
     <Command shouldFilter={false} className='flex flex-col'>
       <BreadcrumbNav currentPath={currentPath} onNavigate={handleNavigate} />
       <CommandInput placeholder={searchPlaceholder} value={searchQuery} onValueChange={setSearchQuery} />
-      <CommandList className='max-h-[300px] scroll-shadows-y'>
+      <CommandList className='max-h-75 scroll-shadows-y'>
         {isSearching ? (
           <FileSelectorItemList
             items={displayItems}
@@ -773,7 +773,7 @@ export function FileSelector({
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>{triggerButton}</PopoverTrigger>
-      <PopoverContent {...popoverProperties} className={cn('w-[300px] p-0', popoverProperties?.className)}>
+      <PopoverContent {...popoverProperties} className={cn('w-75 p-0', popoverProperties?.className)}>
         {content}
       </PopoverContent>
     </Popover>

@@ -159,7 +159,7 @@ function CommandList({ className, ...properties }: CommandListProps): React.JSX.
   return (
     <CommandPrimitive.List
       data-slot='command-list'
-      className={cn('flex max-h-[400px] flex-col gap-0.5 overflow-x-hidden overflow-y-auto', className)}
+      className={cn('flex max-h-100 flex-col gap-0.5 overflow-x-hidden overflow-y-auto', className)}
       {...properties}
     />
   );

@@ -160,7 +160,7 @@ export function HeroViewerSkeleton(): React.JSX.Element {
         <Skeleton className='h-4 w-96 max-w-full' />
         <Skeleton className='h-3 w-48' />
       </div>
-      <Skeleton className='h-[300px] w-full rounded-xl md:h-[700px]' />
+      <Skeleton className='h-75 w-full rounded-xl md:h-175' />
     </div>
   );
 }

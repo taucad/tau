@@ -366,7 +366,7 @@ export default function ProjectsNew(): React.JSX.Element {
         <Button variant='outline' disabled={isCreating} onClick={handleCancel}>
           Cancel
         </Button>
-        <Button disabled={isCreateButtonDisabled} className='min-w-[120px]' onClick={handleCreateProject}>
+        <Button disabled={isCreateButtonDisabled} className='min-w-30' onClick={handleCreateProject}>
           {isCreating ? 'Creating…' : `Create Project ${formattedKeyCombination}`}
         </Button>
       </div>

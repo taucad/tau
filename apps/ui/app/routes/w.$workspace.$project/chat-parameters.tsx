@@ -492,7 +492,7 @@ function ParameterGroupSelector({
         shouldCloseOnSelect={shouldCloseOnSelect}
         popoverProperties={{
           align: 'end',
-          className: 'w-[260px]',
+          className: 'w-65',
         }}
         onSelect={handleSelect}
       >

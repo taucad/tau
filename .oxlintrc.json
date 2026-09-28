@@ -1689,7 +1689,11 @@
       "rules": {
         "tau-lint/no-ascii-ellipsis": "error",
         "tau-lint/require-accessible-name": "warn",
-        "tau-lint/no-label-replacing-loader": "warn"
+        "tau-lint/no-label-replacing-loader": "warn",
+        "tau-lint/no-arbitrary-pixel-size": "error",
+        "tau-lint/no-accent-hover": "warn",
+        "tau-lint/no-button-size-override": "warn",
+        "tau-lint/no-raw-page-heading": "warn"
       }
     },
     {

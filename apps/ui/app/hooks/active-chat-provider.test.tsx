@@ -10,7 +10,6 @@ import type { Chat, MyUIMessage } from '@taucad/chat';
 import { resolveKernel } from '@taucad/types/constants';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import type { DraftAttachmentModel } from '#hooks/draft.machine.js';
-import { spyOnSend } from '#lib/xstate-test.utils.js';
 import { lifecycleRow, logRow, publishLogRows, runningRows } from '#machines/chat-projection.fixture.js';
 
 // ---------------------------------------------------------------------------
@@ -259,7 +258,7 @@ const {
   useActiveChatSession,
   useChatComposer,
 } = await import('#hooks/active-chat-provider.js');
-const { ChatSessionStoreProvider } = await import('#hooks/chat-session-store-provider.js');
+const { ChatSessionStoreProvider, useChatSessionStore } = await import('#hooks/chat-session-store-provider.js');
 const { UnloadProvider, useFlushOnClose } = await import('#hooks/use-flush-on-close.js');
 
 const testModel: DraftAttachmentModel = {
@@ -998,24 +997,21 @@ describe('ActiveChatProvider', () => {
         [logRow(3, { type: 'interrupt.recorded', interruptId: 'i1', phase: 'resolved', reason: 'approval' })],
         3,
       );
-      result.current.session.persistenceActorRef.send({ type: 'startRequest', request: { kind: 'continue' } });
       result.current.composer.stop();
     });
     expect(result.current.composer.agentActivity).toBe('stopping');
   });
 
-  it('should dispatch stopRequest on the persistence machine when stop() is called', () => {
-    const { result } = renderHook(() => ({ composer: useChatComposer(), session: useActiveChatSession() }), {
+  it('marks a projected run stopping locally when stop() is called', () => {
+    const { result } = renderHook(() => ({ composer: useChatComposer(), store: useChatSessionStore() }), {
       wrapper: createSessionWrapper('chat_stop'),
     });
-
-    const sendSpy = spyOnSend(result.current.session.persistenceActorRef);
-
     act(() => {
+      publishLogRows('chat_stop', runningRows());
       result.current.composer.stop();
     });
-
-    expect(sendSpy).toHaveBeenCalledWith({ type: 'stopRequest' });
+    expect(result.current.store.isStopping('chat_stop')).toBe(true);
+    expect(result.current.composer.agentActivity).toBe('stopping');
   });
 
   it('should scan messages for the latest data-context-usage part', () => {

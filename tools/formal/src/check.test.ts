@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Fixture names mirror TLA+ modules and environment variables. */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, expect, it } from 'vitest';
@@ -83,4 +83,33 @@ it('should reject an unsafe graph key before deleting simulation output', async 
     await nightlyProject({ root, env: { PATH: '', JAVA_HOME: '/missing/java' } }, projectRoot, () => undefined),
   ).toBe(1);
   expect(readFileSync(victim, 'utf8')).toBe('keep me');
+});
+
+it('should reject a symlinked simulation parent without deleting outside files', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'formal-nightly-'));
+  const outside = mkdtempSync(path.join(tmpdir(), 'formal-outside-'));
+  roots.push(root, outside);
+  const projectRoot = path.join(root, 'packages/example');
+  const specs = path.join(projectRoot, 'specs');
+  const simulationParent = path.join(root, 'out/test-results/formal/packages/example');
+  const victim = path.join(outside, 'simulated/victim.txt');
+  mkdirSync(specs, { recursive: true });
+  mkdirSync(path.dirname(simulationParent), { recursive: true });
+  mkdirSync(path.dirname(victim), { recursive: true });
+  symlinkSync(outside, simulationParent, 'dir');
+  writeFileSync(
+    path.join(specs, 'expected.json'),
+    JSON.stringify({ graphs: { ExampleGraph: { config: 'Example.export.cfg', phase: 'phase' } } }),
+  );
+  writeFileSync(victim, 'keep me');
+  const lines: string[] = [];
+
+  expect(
+    await nightlyProject({ root, env: { PATH: '', JAVA_HOME: '/missing/java' } }, projectRoot, (line) =>
+      lines.push(line),
+    ),
+  ).toBe(1);
+  expect(readFileSync(victim, 'utf8')).toBe('keep me');
+  expect(existsSync(path.join(outside, 'simulated/.skipped'))).toBe(false);
+  expect(lines.some((line) => line.includes('symlink'))).toBe(true);
 });

@@ -22,8 +22,6 @@ const lifecycleScan = /\.(?:findLast|filter|findIndex|find|some)\([^\n]*'run\.li
  * it serves `createAgentLauncher` and reads no log itself.
  */
 const folding = [
-  'apps/ui/app/chat-clients/_internal/browser-agent-host-transport.ts',
-  'apps/ui/app/db/chat-file-storage.ts',
   'packages/host/src/revisions.ts',
   'packages/cli/src/commands/agent/client.ts',
   'apps/ui-e2e/src/support/chat-admission-log.ts',
@@ -35,8 +33,6 @@ const folding = [
  * closed, so a new scan fails this test until it is justified here.
  */
 const pushedRowChecks: Readonly<Record<string, string>> = {
-  // A live-stream wake signal and view reducer; W9's page projection replaces them.
-  'apps/ui/app/chat-clients/_internal/browser-agent-host-transport.ts': 'live wake signal (W9)',
   // Also its attach loop (`replaySnapshot`) follows `nextCursor` without `foldReadAnswer`: a declared W9 deferral, as
   // W9's page projection replaces the loop.
   'apps/ui/app/services/agent-host-client.ts': 'live wake signal and attach loop (W9 deferral)',

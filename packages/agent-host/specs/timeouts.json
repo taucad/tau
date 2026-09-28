@@ -207,37 +207,10 @@
       "fixedBy": "W7"
     },
     {
-      "id": "D6",
-      "bound": "Settlement",
-      "site": "apps/ui/app/chat-clients/_internal/browser-agent-host-transport.ts",
-      "token": "settlementExpiry",
-      "class": "Peer",
-      "owner": "W8",
-      "fixedBy": "W8"
-    },
-    {
-      "id": "D8",
-      "bound": "Registration",
-      "site": "apps/ui/app/chat-clients/_internal/browser-agent-host-transport.ts",
-      "token": "registrationTimeout",
-      "class": "Peer",
-      "owner": "W6",
-      "fixedBy": "W6"
-    },
-    {
       "id": "D9",
       "bound": "Turn service",
       "site": "apps/ui/app/chat-clients/_internal/chat-host-binding.ts",
       "token": "turnServiceWaitTimeout",
-      "class": "Peer",
-      "owner": "W9",
-      "fixedBy": "W9"
-    },
-    {
-      "id": "D11",
-      "bound": "Model catalog poll",
-      "site": "apps/ui/app/chat-clients/_internal/use-turn-admission.ts",
-      "token": "setTimeout(resolve, 100)",
       "class": "Peer",
       "owner": "W9",
       "fixedBy": "W9"
@@ -624,8 +597,32 @@
       "id": "D17",
       "bound": "Observed chat attachment retry after loss (250 ms doubling to a 30 s delay ceiling)",
       "site": "apps/ui/app/services/chat-session-store.ts",
-      "token": "retryDelayMilliseconds",
+      "token": "observed.retry = setTimeout",
       "class": "Backoff",
+      "owner": "W9"
+    },
+    {
+      "id": "D18",
+      "bound": "GeoSpec performance lab cell infrastructure timeout (300 s)",
+      "site": "apps/ui/app/services/geospec-performance.ts",
+      "token": "const cellTimeoutHandle = setTimeout",
+      "class": "External edge",
+      "owner": "GM"
+    },
+    {
+      "id": "D19",
+      "bound": "Host command retry delay (20 ms doubling to 250 ms within its 30 s deadline)",
+      "site": "apps/ui/app/chat-clients/_internal/host-command.ts",
+      "token": "const timer = setTimeout",
+      "class": "Backoff",
+      "owner": "W9"
+    },
+    {
+      "id": "D20",
+      "bound": "Composer predecessor drain over filesystem I/O (30 s)",
+      "site": "apps/ui/app/services/chat-session-store-composer.ts",
+      "token": "const timer = globalThis.setTimeout",
+      "class": "External edge",
       "owner": "W9"
     },
     {

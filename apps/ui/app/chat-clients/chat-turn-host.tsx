@@ -36,10 +36,7 @@ import { readRootedBridgeCapabilities } from '#providers/chat-workspace-authorit
 import { useRevisionClient } from '#hooks/use-revision-status.js';
 import type { BrowserAgentHostRegistration } from '#chat-clients/_internal/browser-agent-host-transport.js';
 import { publishChatHostServices, publishChatTurnAdmission } from '#chat-clients/_internal/chat-host-binding.js';
-import {
-  isBrowserAgentHostPlaced,
-  resumableBrowserAgentHostRunId,
-} from '#chat-clients/_internal/browser-agent-host-transport.js';
+import { isResumableRunFailure } from '@taucad/agent-host';
 import type { ChatRequest, ChatTurn, ChatTurnGesture } from '#machines/chat-session.machine.js';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
@@ -50,14 +47,21 @@ import {
   hostAdmission,
 } from '#chat-clients/_internal/turn-body.js';
 import { useTurnAdmission } from '#chat-clients/_internal/use-turn-admission.js';
-import { turnIntentOf, turnTriggerOf } from '#chat-clients/turn-intent.js';
-import { createAgentHostClient, createBrowserAgentHostClient } from '#services/agent-host-client.js';
+import { commandOf, turnIntentOf, turnTriggerOf } from '#chat-clients/turn-intent.js';
+import {
+  createAgentHostClient,
+  createBrowserAgentHostClient,
+  externalAdmissionConfig,
+  wireAdmissionConfig,
+} from '#services/agent-host-client.js';
 import { createDaemonAgentHostTransport } from '#services/daemon-agent-host-client.js';
 import { daemonPlacementOf } from '#lib/agent-host-placement.js';
 import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import { ENV } from '#environment.config.js';
 import { createUiRuntimeConfig } from '#runtime/ui-runtime.config.js';
+import { buildUserMessage } from '#utils/chat.utils.js';
+import { selectCaughtUp, selectCurrentRun } from '#machines/chat-projection.logic.js';
 
 /**
  * Where a turn with this execution runs.
@@ -335,17 +339,17 @@ export function ChatTurnHost(): ReactNode {
         });
         store.setTurnPlacement(activeChatId, placementOf(execution));
       }
-      /* A placement with no browser host answers its own resume over the wire:
-       * the daemon owns the run, its files and its lease, so there is nothing
-       * to fence here and nothing to derive. */
-      if (gesture.kind === 'continue' && !isBrowserAgentHostPlaced(activeChatId)) {
-        return { runId: undefined, leaseTurnId: undefined, request: { kind: 'continue' } };
-      }
-      /* Resume never changes into a replay after the gesture was taken. */
-      const resumableRunId = gesture.kind === 'continue' ? resumableBrowserAgentHostRunId(activeChatId) : undefined;
+      const projection = store.getProjection(activeChatId);
+      const projectedRun =
+        projection !== undefined && selectCaughtUp(projection) ? selectCurrentRun(projection) : undefined;
       const messages = Array.isArray(chat.messages) ? chat.messages : [];
       try {
-        if (gesture.kind === 'continue' && resumableRunId === undefined) {
+        if (
+          gesture.kind === 'continue' &&
+          (projectedRun === undefined ||
+            (projectedRun.lifecycle !== 'paused' &&
+              !(projectedRun.lifecycle === 'failed' && isResumableRunFailure(projectedRun.failure))))
+        ) {
           throw new Error('This turn cannot be resumed. Choose Try again to replay it.');
         }
         const intent = turnIntentOf(
@@ -360,28 +364,74 @@ export function ChatTurnHost(): ReactNode {
         );
         const target = await admitExecution(execution);
         if (intent.trigger === 'resume') {
-          return { runId: resumableRunId, leaseTurnId: intent.leaseTurnId, request: { kind: 'continue' } };
+          const { runId } = projectedRun!;
+          return {
+            runId,
+            leaseTurnId: intent.leaseTurnId,
+            request: {
+              kind: 'continue',
+              command: commandOf({ kind: 'continue' }, messages, {
+                chatId: activeChatId,
+                commandId: generatePrefixedId(idPrefix.request),
+                runId,
+              }),
+            },
+          };
         }
         /* One id for the host request and the settlement. */
         const runId =
           gesture.kind === 'regenerate' && gesture.requestId !== undefined
             ? gesture.requestId
             : generatePrefixedId(idPrefix.request);
+        const browserHost = hostAdmission({
+          agent: turnAgent,
+          chatId: activeChatId,
+          resolveModel: resolveModelRef.current,
+          trigger: turnTriggerOf(intent),
+        })!(runId);
         const body = createRunBody({
           agent: turnAgent,
           projectId,
           execution: target,
           runId,
-          browserHost: hostAdmission({
-            agent: turnAgent,
-            chatId: activeChatId,
-            resolveModel: resolveModelRef.current,
-            trigger: turnTriggerOf(intent),
-          }),
+          browserHost: () => browserHost,
         });
+        const transcript =
+          gesture.kind === 'send'
+            ? [...messages, gesture.message]
+            : gesture.kind === 'edit'
+              ? (() => {
+                  const index = messages.findIndex((message) => message.id === gesture.messageId);
+                  if (index === -1) {
+                    throw new Error('That message is no longer in this chat, so it cannot be edited.');
+                  }
+                  const original = messages[index]!;
+                  const rebuilt = buildUserMessage({ text: gesture.text, attachments: gesture.attachments });
+                  return [
+                    ...messages.slice(0, index),
+                    { ...rebuilt, id: original.id, metadata: { ...original.metadata, ...rebuilt.metadata } },
+                  ];
+                })()
+              : messages;
+        const command = commandOf(
+          gesture.kind === 'send'
+            ? { kind: 'send', messageId: gesture.message.id }
+            : gesture.kind === 'edit'
+              ? { kind: 'edit', messageId: gesture.messageId }
+              : { kind: 'regenerate' },
+          transcript,
+          {
+            chatId: activeChatId,
+            commandId: runId,
+            config:
+              'config' in browserHost
+                ? wireAdmissionConfig(browserHost.config)
+                : externalAdmissionConfig(browserHost.agent, browserHost.context),
+          },
+        );
         const request: ChatRequest =
           gesture.kind === 'send'
-            ? { kind: 'send', message: gesture.message, body }
+            ? { kind: 'send', message: gesture.message, body, command }
             : gesture.kind === 'edit'
               ? {
                   kind: 'edit',
@@ -389,8 +439,9 @@ export function ChatTurnHost(): ReactNode {
                   content: gesture.text,
                   ...(gesture.attachments === undefined ? {} : { attachments: gesture.attachments }),
                   body,
+                  command,
                 }
-              : { kind: 'regenerate', body };
+              : { kind: 'regenerate', body, command };
         return { runId, leaseTurnId: intent.leaseTurnId, request };
       } catch (error) {
         /* The machine records the reason on the chat's row; the banner is how

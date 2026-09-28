@@ -580,7 +580,7 @@ export function useChatActions(chatId?: string): ChatActions {
         if (!session) {
           return;
         }
-        session.persistenceActorRef.send({ type: 'stopRequest' });
+        store.stopRun(resolvedChatId);
       },
       setMessages(messages: MyUIMessage[]) {
         const session = requireSession('setMessages');

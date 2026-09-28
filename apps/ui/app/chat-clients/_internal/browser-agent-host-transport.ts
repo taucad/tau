@@ -1493,7 +1493,7 @@ export const resolveBrowserAgentHostInterrupt = async (input: {
  * real reason, never a delegation that replaces it with someone else's.
  */
 export class BrowserPlacementChatTransport<Message extends UIMessage> implements ChatTransport<Message> {
-  #watchMode = false;
+  #watchMode = true;
   #armed: ReadableStream<UIMessageChunk> | undefined;
 
   /** Give the next SDK request only this projection watch; it never issues a host command. */

@@ -368,6 +368,7 @@ function publishAdmission(chatId: string, request: () => Promise<ChatRequest> | 
 /** A host whose run ended on the one failure a resume is allowed to continue. */
 function refusedAgentHostClient(chatId: string, runId: string): AgentHostClient {
   return {
+    hostCommand: vi.fn(),
     start: vi.fn(),
     steer: vi.fn(),
     cancel: vi.fn(),
@@ -2084,6 +2085,7 @@ describe('ChatSessionStore', () => {
       const session = store.acquire(chatId, 'project_test');
       session.chat.messages = [userMessage, { id: runId, role: 'assistant', parts: [{ type: 'text', text: 'Done.' }] }];
       const hostClient: AgentHostClient = {
+        hostCommand: vi.fn(),
         start: vi.fn(),
         steer: vi.fn(),
         cancel: vi.fn(),
@@ -2207,6 +2209,7 @@ describe('ChatSessionStore', () => {
       store.acquire(chatId, 'project_test');
       const running = { chatId, runId, turnId: 'turn_stop_reattached', state: 'running', messages: [] } as const;
       const hostClient: AgentHostClient = {
+        hostCommand: vi.fn(),
         start: vi.fn(),
         steer: vi.fn(),
         cancel: vi.fn(async () => ({ ...running, state: 'cancelled' }) as const),

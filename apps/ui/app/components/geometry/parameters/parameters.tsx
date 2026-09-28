@@ -50,7 +50,7 @@ export function Parameters({
   className,
   enableSearch = true,
   filterTerm,
-  searchPlaceholder = 'Filter parameters...',
+  searchPlaceholder = 'Filter parameters…',
   emptyMessage = 'No parameters available',
   emptyDescription = 'Parameters will appear here when they become available for this model',
   units,

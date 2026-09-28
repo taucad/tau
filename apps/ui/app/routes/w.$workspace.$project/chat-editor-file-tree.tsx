@@ -1872,7 +1872,7 @@ export const ChatEditorFileTree = memo(function ({
           >
             <SearchInput
               {...tree.getSearchInputElementProps()}
-              placeholder='Filter files...'
+              placeholder='Filter files…'
               className='h-7 min-w-0 flex-1 bg-background'
               onBlur={undefined}
               onClear={() => {

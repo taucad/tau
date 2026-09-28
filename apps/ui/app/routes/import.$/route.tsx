@@ -588,7 +588,7 @@ export default function ImportRoute(): React.JSX.Element {
     const isCreating = diskState.matches('creating');
 
     const title = isReading ? 'Reading Files' : isExtracting ? 'Extracting ZIP' : 'Creating Project';
-    const statusText = isReading ? 'Reading files...' : isExtracting ? 'Extracting files...' : 'Creating project...';
+    const statusText = isReading ? 'Reading files…' : isExtracting ? 'Extracting files…' : 'Creating project…';
 
     return (
       <ImportProcessingView
@@ -1146,7 +1146,7 @@ export default function ImportRoute(): React.JSX.Element {
                     {gitHubState.matches('downloading') ? (
                       <>
                         <Loader />
-                        <span>Downloading...</span>
+                        <span>Downloading…</span>
                       </>
                     ) : (
                       '✓ Downloaded'
@@ -1183,7 +1183,7 @@ export default function ImportRoute(): React.JSX.Element {
                       ) : (
                         <>
                           <Loader />
-                          <span>Extracting files...</span>
+                          <span>Extracting files…</span>
                         </>
                       )}
                     </span>
@@ -1210,7 +1210,7 @@ export default function ImportRoute(): React.JSX.Element {
                   <div className='flex items-center justify-between text-sm'>
                     <span className='flex items-center gap-2 font-medium'>
                       <Loader />
-                      <span>Creating project...</span>
+                      <span>Creating project…</span>
                     </span>
                   </div>
                   <Progress value={100} className='h-2' />

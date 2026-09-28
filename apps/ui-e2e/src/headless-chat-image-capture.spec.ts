@@ -335,7 +335,7 @@ const dismissCookies = async (): Promise<void> => {
 
 const openCommandPalette = async (query: string): Promise<void> => {
   await target.click(selectors.getByRole('button', { name: 'Search', exact: true }));
-  await target.fill(selectors.getByPlaceholder('Search projects, chats, and actions...'), query);
+  await target.fill(selectors.getByPlaceholder('Search projects, chats, and actions…'), query);
 };
 
 const openScreenshotMenu = async (): Promise<void> => {
@@ -354,7 +354,7 @@ const openScreenshotMenu = async (): Promise<void> => {
 const openSecondaryViewer = async (): Promise<void> => {
   const fileName = 'secondary.ts';
   await target.click(selectors.getByRole('button', { name: 'Search', exact: true }));
-  const commandSearch = selectors.getByPlaceholder('Search projects, chats, and actions...');
+  const commandSearch = selectors.getByPlaceholder('Search projects, chats, and actions…');
   await target.fill(commandSearch, 'Open files');
   await target.click(selectors.getByText('Open files', { exact: true }));
   const source = selectors.getByCss('[data-testid="file-tree-item"][data-file-tree-path="src"]');

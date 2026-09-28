@@ -14,7 +14,7 @@ const isolated = inject('crossOriginIsolation');
 
 const openCommand = async (name: string): Promise<void> => {
   await target.click(selectors.getByRole('button', { name: 'Search', exact: true }));
-  await target.fill(selectors.getByPlaceholder('Search projects, chats, and actions...'), name);
+  await target.fill(selectors.getByPlaceholder('Search projects, chats, and actions…'), name);
   await target.click(selectors.getByRole('option', { name: new RegExp(`^${name}(?:\\s|$)`, 'u') }));
 };
 

@@ -1,4 +1,4 @@
-import { communityGridClassName } from '#components/project-grid.js';
+import { projectGridClassName } from '#components/project-grid.js';
 import { Skeleton } from '@taucad/ui/components/skeleton';
 
 function CardSkeleton(): React.JSX.Element {
@@ -19,7 +19,7 @@ export function CommunityGridSkeleton(): React.JSX.Element {
         <Skeleton className='h-6 w-40' />
         <Skeleton className='h-5 w-16' />
       </div>
-      <div className={communityGridClassName}>
+      <div className={projectGridClassName}>
         {Array.from({ length: 10 }, (_, i) => (
           <CardSkeleton key={i} />
         ))}
@@ -160,7 +160,7 @@ export function HeroViewerSkeleton(): React.JSX.Element {
         <Skeleton className='h-4 w-96 max-w-full' />
         <Skeleton className='h-3 w-48' />
       </div>
-      <Skeleton className='h-[300px] w-full rounded-xl md:h-[700px]' />
+      <Skeleton className='h-75 w-full rounded-xl md:h-175' />
     </div>
   );
 }

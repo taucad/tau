@@ -16,6 +16,7 @@ import { ProjectWorkspaceProvider } from '#routes/w.$workspace.$project/project-
 import { ViewerDockview } from '#routes/w.$workspace.$project/chat-viewer-dockview.js';
 import { WorkbenchDockview } from '#routes/w.$workspace.$project/chat-workbench-dockview.js';
 import { PublicationTopbar } from '#components/share/publication-topbar.js';
+import { ephemeralKernelOptions, ephemeralPreviewStage } from '#constants/ephemeral-kernel-options.js';
 import type { ParsedPublication } from '#components/share/parsed-publication.js';
 
 type SharedProjectFiles = Record<string, { content: Uint8Array<ArrayBuffer> }>;
@@ -177,14 +178,14 @@ const SharedProjectLayout = ({
                 </div>
               </DrawerContent>
             </Drawer>
-            <div className='relative min-h-0 flex-1 bg-background'>
+            <main className='relative min-h-0 flex-1 bg-background'>
               <ViewerDockview profile='shared' />
-            </div>
+            </main>
           </>
         ) : (
           <>
             {topbar}
-            <div className='min-h-0 flex-1 p-2'>
+            <main className='min-h-0 flex-1 p-2'>
               <Allotment
                 separator={false}
                 proportionalLayout={false}
@@ -199,7 +200,7 @@ const SharedProjectLayout = ({
                   </div>
                 </Allotment.Pane>
               </Allotment>
-            </div>
+            </main>
           </>
         )}
       </ChatContextInsertionProvider>
@@ -233,12 +234,19 @@ export const SharedProjectWorkbench = ({
       new Map(Object.entries(hydratedFiles).map(([path, file]) => [path, { filename: path, content: file.content }])),
     [hydratedFiles],
   );
+  // A memory-mounted project is not on disk, so it renders like a preview: on the ephemeral kernel, bytes staged.
+  const projectInput = useMemo(() => ({ stage: ephemeralPreviewStage(hydratedFiles) }), [hydratedFiles]);
 
   return (
     <FileManagerProvider initialBackend='memory' rootDirectory={rootDirectory}>
       <SharedProjectHydrator files={hydratedFiles} rootDirectory={rootDirectory} storageRootKey={storageRootKey}>
         <WebglContextTrackerProvider>
-          <ProjectProvider projectId={projectId} profile='shared'>
+          <ProjectProvider
+            projectId={projectId}
+            profile='shared'
+            kernelOptionsFactory={ephemeralKernelOptions}
+            input={projectInput}
+          >
             <MonacoModelServiceProvider>
               <ProjectWorkspaceProvider>
                 <SharedProjectLayout

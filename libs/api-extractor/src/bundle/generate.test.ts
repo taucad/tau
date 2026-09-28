@@ -178,6 +178,15 @@ describe('every committed bundle', () => {
           .map(({ id }) => id)
           .sort(),
       );
+      if (owner.supplementalApi !== undefined) {
+        const { corpus: loadCorpus, groupBy } = owner.supplementalApi;
+        const supplemental = loadCorpus();
+        expect([...shardIndexById(planShards(supplemental, { groupBy })).keys()].sort()).toEqual(
+          addressableEntries(supplemental)
+            .map(({ id }) => id)
+            .sort(),
+        );
+      }
     },
     120_000,
   );

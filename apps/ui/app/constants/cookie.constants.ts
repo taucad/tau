@@ -66,6 +66,10 @@ export const cookieName = {
   // The last selected project list page size.
   projectPageSize: 'project-page-size',
 
+  /* Community */
+  // The last selected Community example page size.
+  examplePageSize: 'example-page-size',
+
   /* Console */
   // The last selected log level.
   consoleLogLevel: 'console-log-level',

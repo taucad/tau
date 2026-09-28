@@ -220,7 +220,7 @@ export const ChatViewer = memo(function ({
   if (!graphicsActor) {
     return (
       <div className='flex h-full items-center justify-center text-muted-foreground'>
-        <span className='text-sm'>Initializing viewer...</span>
+        <span className='text-sm'>Initializing viewer…</span>
       </div>
     );
   }
@@ -232,11 +232,11 @@ export const ChatViewer = memo(function ({
         <span className='text-sm'>No file selected</span>
         <FileSelector
           selectedFile={undefined}
-          placeholder='Select file to render...'
-          className='h-8 w-[200px]'
+          placeholder='Select file to render…'
+          className='h-8 w-50'
           title='Viewport File'
           description='Choose which file to render in the viewport'
-          searchPlaceholder='Search files...'
+          searchPlaceholder='Search files…'
           emptyMessage='No files found.'
           onSelect={handleFileSelect}
         />
@@ -253,11 +253,11 @@ export const ChatViewer = memo(function ({
         <FileSelector
           selectedFile={undefined}
           initialPath={entryPath}
-          placeholder='Select a file to render...'
-          className='h-8 w-[200px]'
+          placeholder='Select a file to render…'
+          className='h-8 w-50'
           title='Viewport File'
           description='Choose a file to render in the viewport'
-          searchPlaceholder='Search files...'
+          searchPlaceholder='Search files…'
           emptyMessage='No files found.'
           onSelect={handleFileSelect}
         />
@@ -276,11 +276,11 @@ export const ChatViewer = memo(function ({
         </div>
         <FileSelector
           selectedFile={undefined}
-          placeholder='Select a file to render...'
-          className='h-8 w-[200px]'
+          placeholder='Select a file to render…'
+          className='h-8 w-50'
           title='Viewport File'
           description='Choose a file to render in the viewport'
-          searchPlaceholder='Search files...'
+          searchPlaceholder='Search files…'
           emptyMessage='No files found.'
           onSelect={handleFileSelect}
         />

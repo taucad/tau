@@ -72,8 +72,8 @@ export function BranchSelector(properties: BranchSelectorProperties): React.JSX.
       )}
       getValue={(branch) => branch.name}
       value={branches.find((b) => b.name === selectedBranch)}
-      placeholder='Select branch...'
-      searchPlaceHolder='Search branches...'
+      placeholder='Select branch…'
+      searchPlaceHolder='Search branches…'
       title='Select Branch'
       description='Choose a branch to import'
       isDisabled={() => isDisabled ?? false}
@@ -94,7 +94,7 @@ export function BranchSelector(properties: BranchSelectorProperties): React.JSX.
       >
         <div className='flex items-center gap-2'>
           <GitBranch className='size-4' />
-          <span>{selectedBranch || 'Select branch...'}</span>
+          <span>{selectedBranch || 'Select branch…'}</span>
         </div>
         <ChevronDown className='size-4 shrink-0' />
       </Button>

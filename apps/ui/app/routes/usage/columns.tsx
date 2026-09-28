@@ -62,7 +62,7 @@ export const usageColumns: Array<ColumnDef<WireUsageEvent>> = [
       return (
         <div className='flex items-center gap-2'>
           {model.providerId === null ? undefined : <ProviderBadge provider={model.providerId} />}
-          <span className='max-w-[180px] truncate text-sm'>{model.displayName ?? model.id}</span>
+          <span className='max-w-45 truncate text-sm'>{model.displayName ?? model.id}</span>
         </div>
       );
     },

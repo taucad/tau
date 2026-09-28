@@ -291,7 +291,7 @@ export const ChatExecutionSelector = memo(function ({
   return (
     <ComboBoxResponsive
       {...properties}
-      className="data-[slot='popover-content']:w-[320px]"
+      className="data-[slot='popover-content']:w-80"
       popoverProperties={properties.popoverProperties}
       groupedItems={groupedTargets}
       getValue={(target) => target.key}
@@ -304,7 +304,7 @@ export const ChatExecutionSelector = memo(function ({
       value={selectedTarget}
       title='Select an agent'
       description='Choose Tau in this browser, or a Tau Host workspace.'
-      searchPlaceHolder='Search agents...'
+      searchPlaceHolder='Search agents…'
       emptyListMessage='No agents discovered.'
       onClose={onClose}
       onSelect={selectTarget}

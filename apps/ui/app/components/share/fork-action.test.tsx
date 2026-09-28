@@ -4,7 +4,8 @@ import { MemoryRouter } from 'react-router';
 import type * as ReactRouterModule from 'react-router';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { CreatedProject, CreateProjectOptions } from '#hooks/use-project-manager.js';
-import { ForkAction } from '#components/share/fork-action.js';
+import { ForkAction, remixProjectName } from '#components/share/fork-action.js';
+import { toast } from '#components/ui/sonner.js';
 
 const navigateMock = vi.fn();
 
@@ -94,6 +95,10 @@ describe('ForkAction', () => {
     expect(createProject.mock.calls[0]?.[0]).toHaveProperty('location', {
       kind: 'home',
     });
+    // The same name and toast as a Community card's Remix (RemixDialog owns both).
+    expect(createProject.mock.calls[0]?.[0].project.name).toBe(remixProjectName('Shared'));
+    expect(remixProjectName('Shared')).toBe('Shared (fork)');
+    expect(toast.success).toHaveBeenCalledWith('Remixed to your projects', { description: 'Shared' });
   });
 
   it('copies the complete parameter record bytes without rebuilding active values', async () => {

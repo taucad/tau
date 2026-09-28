@@ -1077,6 +1077,7 @@ export function RevisionSyncRegion({
           className='flex items-center gap-2 text-sm'
         >
           {/* The region's own `status` carries the message; the glyph is decoration. */}
+          {/* oxlint-disable-next-line jsx-a11y/aria-role -- `undefined` removes Spinner's default status role; the region announces */}
           <Spinner role={undefined} aria-hidden aria-label={undefined} className='size-4' />
           <span>{connectingCopy(remote)}</span>
           {remote.phase === 'connecting' ? (

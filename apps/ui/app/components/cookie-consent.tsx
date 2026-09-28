@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { CookieIcon } from 'lucide-react';
 import { Link } from 'react-router';
 import { useCookieConsent } from '#hooks/use-cookie-consent.js';
@@ -112,17 +112,41 @@ const CookiePreferencesContent = ({
   );
 };
 
+/**
+ * While the banner is mounted, a focused control scrolls clear of it (WCAG 2.4.11). Scroll margin on the focused
+ * element works in whichever container scrolls, and the rem-based spacing grows with text zoom as the banner does.
+ * `<body>` carries no React-owned class, so toggling it here cannot race the root's theme classes.
+ */
+// ponytail: a control at the very end of its scroller can still sit under the banner; reserve scroller space if that bites.
+const bannerFocusClearanceClass = '[&_:focus]:scroll-mb-48';
+
 export function CookieConsent(): React.JSX.Element | undefined {
   const [consentStatus, setConsentStatus] = useCookieConsent();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const isBannerShown = consentStatus === 'unknown';
 
-  if (consentStatus !== 'unknown') {
+  useEffect(() => {
+    if (!isBannerShown) {
+      return undefined;
+    }
+
+    document.body.classList.add(bannerFocusClearanceClass);
+    return () => {
+      document.body.classList.remove(bannerFocusClearanceClass);
+    };
+  }, [isBannerShown]);
+
+  if (!isBannerShown) {
     return undefined;
   }
 
   return (
     <>
-      <div className='fixed right-2 bottom-2 z-50 max-w-sm animate-in duration-300 fade-in slide-in-from-bottom-4 max-sm:left-2'>
+      <div
+        role='region'
+        aria-label='Cookie preferences'
+        className='fixed right-2 bottom-2 z-50 max-w-sm duration-300 fade-in slide-in-from-bottom-4 motion-safe:animate-in max-sm:left-2'
+      >
         <div className='flex flex-col gap-2 rounded-lg border bg-card p-4 shadow-md'>
           <div className='flex items-start justify-between'>
             <h3 className='font-semibold'>Cookies</h3>

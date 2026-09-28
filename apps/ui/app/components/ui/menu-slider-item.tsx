@@ -272,6 +272,7 @@ export const DropdownMenuSelectItem = <T,>({
         shouldCloseOnSelect={shouldCloseOnSelect}
         onSelect={onValueChange}
       >
+        {/* oxlint-disable-next-line jsx-a11y/role-has-required-aria-props -- the ComboBoxResponsive trigger sets aria-expanded and aria-controls */}
         <Button variant='outline' size='sm' className='h-7 gap-1 px-2 text-xs' role='combobox'>
           {getOptionLabel(value)}
           <ChevronDownIcon className='size-3 opacity-50' />

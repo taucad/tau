@@ -56,7 +56,7 @@ export function FormatsList({
 
             {/* Search */}
             <SearchInput
-              placeholder='Search formats...'
+              placeholder='Search formats…'
               value={searchQuery}
               onClear={() => {
                 setSearchQuery('');

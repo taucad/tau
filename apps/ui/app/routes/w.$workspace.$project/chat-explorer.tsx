@@ -155,7 +155,7 @@ export function ModelPanelBody({ onRequestOpen }: { readonly onRequestOpen?: () 
       <div data-slot='model-filter' className='shrink-0 bg-sidebar px-2 pt-2'>
         <SearchInput
           aria-label='Filter parts'
-          placeholder='Filter parts...'
+          placeholder='Filter parts…'
           value={query}
           className='h-7 min-w-0 bg-background'
           onChange={(event) => {

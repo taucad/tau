@@ -13,7 +13,8 @@ Use the **as-built geometry frame**: `origin` is a point in the model's coordina
 ## Complete hinged model
 
 ```typescript
-import { makeBox, type ShapeConfig } from 'replicad';
+import { makeBox } from 'replicad';
+import type { ShapeConfig } from '@taucad/replicad/model';
 import type { MechanismSource } from '@taucad/kinematics';
 
 export const defaultParams = { width: 60, depth: 40, maxOpen: 110 };

@@ -38,12 +38,19 @@ import { noInlineActorSelectorRule } from './rules/no-inline-actor-selector.js';
 import { noEngineeringVocabularyInCopyRule } from './rules/no-engineering-vocabulary-in-copy.js';
 import { xstateContractRule } from './rules/xstate-contract.js';
 import { xstateOwnerMachineRule } from './rules/xstate-owner-machine.js';
+import { noAsciiEllipsisRule } from './rules/no-ascii-ellipsis.js';
+import { requireAccessibleNameRule } from './rules/require-accessible-name.js';
+import { noLabelReplacingLoaderRule } from './rules/no-label-replacing-loader.js';
+import { noArbitraryPixelSizeRule } from './rules/no-arbitrary-pixel-size.js';
+import { noAccentHoverRule } from './rules/no-accent-hover.js';
+import { noButtonSizeOverrideRule } from './rules/no-button-size-override.js';
+import { noRawPageHeadingRule } from './rules/no-raw-page-heading.js';
 
 /** @type {Plugin} */
 const plugin = {
   meta: {
     name: 'tau-lint',
-    version: '1.23.0',
+    version: '1.25.0',
   },
   rules: {
     'no-abusive-eslint-disable': noAbusiveEslintDisableRule,
@@ -77,6 +84,13 @@ const plugin = {
     'no-engineering-vocabulary-in-copy': noEngineeringVocabularyInCopyRule,
     'xstate-contract': xstateContractRule,
     'xstate-owner-machine': xstateOwnerMachineRule,
+    'no-ascii-ellipsis': noAsciiEllipsisRule,
+    'require-accessible-name': requireAccessibleNameRule,
+    'no-label-replacing-loader': noLabelReplacingLoaderRule,
+    'no-arbitrary-pixel-size': noArbitraryPixelSizeRule,
+    'no-accent-hover': noAccentHoverRule,
+    'no-button-size-override': noButtonSizeOverrideRule,
+    'no-raw-page-heading': noRawPageHeadingRule,
   },
 };
 

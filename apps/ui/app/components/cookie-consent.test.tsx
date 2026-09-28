@@ -32,6 +32,24 @@ describe('CookieConsent', () => {
     expect(screen.queryByRole('heading', { name: 'Cookies' })).toBeNull();
   });
 
+  it('should expose the banner as a named region with a reduced-motion-safe entrance', () => {
+    render(<CookieConsent />);
+
+    const banner = screen.getByRole('region', { name: 'Cookie preferences' });
+    // Jsdom evaluates no media queries, so the contract is that the entrance only runs under motion-safe.
+    expect(banner).toHaveClass('motion-safe:animate-in');
+    expect(banner).not.toHaveClass('animate-in');
+  });
+
+  it('should keep focused controls clear of the banner only while it is shown', () => {
+    const view = render(<CookieConsent />);
+    expect(document.body).toHaveClass('[&_:focus]:scroll-mb-48');
+
+    consent.status = 'declined';
+    view.rerender(<CookieConsent />);
+    expect(document.body).not.toHaveClass('[&_:focus]:scroll-mb-48');
+  });
+
   it('should give accept and decline equivalent controls', () => {
     render(<CookieConsent />);
 

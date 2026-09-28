@@ -293,7 +293,7 @@ export const ensureFilesPane = async (page: Page): Promise<void> => {
       .getByRole('button', { name: /Search/u })
       .first()
       .click();
-    await page.getByPlaceholder('Search projects, chats, and actions...').fill('Open files');
+    await page.getByPlaceholder('Search projects, chats, and actions…').fill('Open files');
     await page.getByText('Open files', { exact: true }).first().click();
   }
   await expectVisible(filesPaneOf(page), 30_000);
@@ -645,7 +645,7 @@ export const expectKernelReparsed = async (page: Page, parameterLabel: string): 
     .getByRole('button', { name: /Search/u })
     .first()
     .click();
-  await page.getByPlaceholder('Search projects, chats, and actions...').fill('Open parameters');
+  await page.getByPlaceholder('Search projects, chats, and actions…').fill('Open parameters');
   await page.getByText('Open parameters', { exact: true }).first().click();
   /* 60 s, not the usual 180: a watched re-parse either lands within a few
    * seconds or the write never reached the kernel at all. */

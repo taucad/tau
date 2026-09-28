@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { ReadAnswer } from '@taucad/agent-host/wire';
+import type { CommandAnswer, HostCommand, ReadAnswer } from '@taucad/agent-host/wire';
 import { ChatSessionStore } from '#services/chat-session-store.js';
 import type { ChatSessionDeps } from '#services/chat-session-store.js';
 import { lifecycleRow } from '#machines/chat-projection.fixture.js';
@@ -12,6 +12,72 @@ const unusedHostCommand = async (): Promise<never> => {
 };
 
 describe('ChatSessionStore.observe', () => {
+  it('answers a reloaded approval from the projected run without acquiring a chat or sending Start', async () => {
+    const store = new ChatSessionStore();
+    const release = store.observe('chat_approval', 'project_1');
+    const hostCommand = vi.fn(
+      async (command: HostCommand): Promise<CommandAnswer> => ({
+        commandId: command.commandId,
+        generation: 1,
+        status: 'applied',
+        effect: 'durable',
+        cursor: 3,
+      }),
+    );
+    const unpublish = store.publishProjectHostConnector('project_1', async () => ({
+      read: vi.fn(),
+      subscribe: (...parameters: Parameters<AgentHostClient['subscribe']>) => {
+        queueMicrotask(() => {
+          parameters[3]?.({
+            status: 'batch',
+            chatId: 'chat_approval',
+            cursor: 0,
+            nextCursor: 4,
+            endCursor: 4,
+            events: [
+              lifecycleRow(0, 'admitted', 'run-reloaded'),
+              lifecycleRow(1, 'running', 'run-reloaded'),
+              {
+                ...lifecycleRow(2, 'paused', 'run-reloaded'),
+                type: 'interrupt.recorded',
+                interruptId: 'interrupt-1',
+                phase: 'requested',
+                reason: 'ask',
+              },
+              lifecycleRow(3, 'paused', 'run-reloaded'),
+            ],
+          });
+        });
+        return () => undefined;
+      },
+      hostCommand,
+      close: async () => undefined,
+    }));
+    await vi.waitFor(() => {
+      expect(store.getProjection('chat_approval')?.ledger.position.cursor).toBe(4);
+    });
+
+    expect(
+      await store.respondToProjectedApproval('chat_approval', 'interrupt-1', { approved: true, optionId: 'once' }),
+    ).toBe(true);
+    expect(hostCommand.mock.calls.map(([command]) => command.type)).toEqual(['resolve-interrupt', 'resume']);
+    expect(hostCommand.mock.calls[0]?.[0]).toMatchObject({
+      payload: {
+        chatId: 'chat_approval',
+        runId: 'run-reloaded',
+        interruptId: 'interrupt-1',
+        outcome: 'approved',
+        optionId: 'once',
+      },
+    });
+    expect(hostCommand.mock.calls[1]?.[0]).toMatchObject({
+      payload: { chatId: 'chat_approval', runId: 'run-reloaded' },
+    });
+    expect(store.get('chat_approval')).toBeUndefined();
+    unpublish();
+    release();
+  });
+
   it('classifies unseen projected runs for Close without acquiring an SDK session', async () => {
     const store = new ChatSessionStore();
     store.setDependencies({
@@ -44,7 +110,9 @@ describe('ChatSessionStore.observe', () => {
       async (chatId) =>
         chatId === 'chat_local' ? 'stoppable' : chatId === 'chat_foreign' ? 'other-build' : 'background-window',
     );
-    await vi.waitFor(() => expect(store.getProjection('chat_background')?.ledger.position.cursor).toBe(2));
+    await vi.waitFor(() => {
+      expect(store.getProjection('chat_background')?.ledger.position.cursor).toBe(2);
+    });
     expect(await store.getProjectClosePlan('project_close')).toEqual({
       stoppableRunCount: 1,
       stoppableChatIds: ['chat_local'],
@@ -64,13 +132,15 @@ describe('ChatSessionStore.observe', () => {
   it('cancels an unopened projected run through its host without acquiring an SDK session', async () => {
     const store = new ChatSessionStore();
     const release = store.observe('chat_unseen', 'project_1');
-    const hostCommand = vi.fn(async (command: { commandId: string }) => ({
-      commandId: command.commandId,
-      generation: 1,
-      status: 'applied' as const,
-      effect: 'durable' as const,
-      cursor: 2,
-    }));
+    const hostCommand = vi.fn(
+      async (command: HostCommand): Promise<CommandAnswer> => ({
+        commandId: command.commandId,
+        generation: 1,
+        status: 'applied',
+        effect: 'durable',
+        cursor: 2,
+      }),
+    );
     const unpublish = store.publishProjectHostConnector('project_1', async () => ({
       read: vi.fn(),
       subscribe: (...parameters: Parameters<AgentHostClient['subscribe']>) => {
@@ -89,15 +159,17 @@ describe('ChatSessionStore.observe', () => {
       hostCommand,
       close: async () => undefined,
     }));
-    await vi.waitFor(() => expect(store.getProjection('chat_unseen')?.ledger.position.cursor).toBe(2));
+    await vi.waitFor(() => {
+      expect(store.getProjection('chat_unseen')?.ledger.position.cursor).toBe(2);
+    });
 
     await store.cancelProjectedRun('chat_unseen');
     expect(store.get('chat_unseen')).toBeUndefined();
-    expect(hostCommand).toHaveBeenCalledWith({
+    expect(hostCommand.mock.calls[0]?.[0]).toMatchObject({
       type: 'cancel',
-      commandId: expect.any(String),
       payload: { chatId: 'chat_unseen', runId: 'run-unseen' },
     });
+    expect(hostCommand.mock.calls[0]?.[0].commandId).toMatch(/^req_/u);
     expect(hostCommand).toHaveBeenCalledOnce();
     unpublish();
     release();
@@ -118,8 +190,12 @@ describe('ChatSessionStore.observe', () => {
       close: async () => undefined,
     }));
     const unpublish = store.publishProjectHostConnector('project_1', connect);
-    await vi.waitFor(() => expect(store.getProjection('chat_unreadable')?.fault).toBeDefined());
-    await new Promise<void>((resolve) => setTimeout(resolve, 350));
+    await vi.waitFor(() => {
+      expect(store.getProjection('chat_unreadable')?.fault).toBeDefined();
+    });
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 350);
+    });
     expect(connect).toHaveBeenCalledOnce();
     unpublish();
     release();

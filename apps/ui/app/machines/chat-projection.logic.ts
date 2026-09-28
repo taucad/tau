@@ -13,11 +13,18 @@
  */
 
 import { createLogic } from 'xstate';
+import { readUIMessageStream } from 'ai';
 import type { UIMessageChunk } from 'ai';
-import { agentLogEventSchema, emptyChatLedger, foldReadAnswer } from '@taucad/agent-host';
-import type { ChatLedger, RowKey, TurnPlacement } from '@taucad/agent-host';
-import { projectAgentHostEvent, runFailureText } from '#services/agent-host-event-projection.js';
+import { agentLogEventSchema, emptyChatLedger, foldReadAnswer, mergeLogSegments } from '@taucad/agent-host';
+import type { AgentLogEvent, ChatLedger, ChatLogSegment, RowKey, TurnPlacement } from '@taucad/agent-host';
+import type { MyUIMessage } from '@taucad/chat';
+import {
+  projectAgentHostEvent,
+  projectAgentHostUserTurn,
+  runFailureText,
+} from '#services/agent-host-event-projection.js';
 import type { AgentHostLiveBlocks } from '#services/agent-host-event-projection.js';
+import { finalizeInterruptedToolParts } from '#utils/chat.utils.js';
 
 /** One read's answer, as the host's `read` and `attach` return it (W3 CL-R13). @public */
 export type ChatProjectionReadAnswer = Parameters<typeof foldReadAnswer>[1];
@@ -27,8 +34,13 @@ export type OpenToolCall = Readonly<{ runId: string; toolName: string }>;
 
 type Block = AgentHostLiveBlocks extends Map<string, infer Value> ? Value : never;
 
-/** One run's durable UI stream, consumed by a detachable watch (PV-S11). @public */
-export type RunView = Readonly<{ chunks: readonly UIMessageChunk[] }>;
+/** One run's durable UI stream and turn, consumed by a watch or transcript reader (PV-S11, PV-S15). @public */
+export type RunView = Readonly<{
+  chunks: readonly UIMessageChunk[];
+  user?: MyUIMessage;
+  admittedAt: string;
+  terminal?: 'completed' | 'failed' | 'cancelled';
+}>;
 
 /** @public */
 export type ChatProjection = Readonly<{
@@ -37,6 +49,8 @@ export type ChatProjection = Readonly<{
   openTools: Readonly<Record<string, OpenToolCall>>;
   /** Durable chunks by run; the watch and transcript materializer share this one projection. */
   views: Readonly<Record<string, RunView>>;
+  /** Other devices' segments, refolded only when their digest changes. Command selects never read these runs. */
+  remote?: Readonly<{ digest: string; views: Readonly<Record<string, RunView>> }>;
   /** Open/closed block identities, stored as a JSON-safe record rather than a live Map. */
   blocks: Readonly<Record<string, Block>>;
   /** The log's end as the last answer stated it; the projection holds the whole log once its cursor reaches it. */
@@ -53,7 +67,9 @@ export type ChatProjection = Readonly<{
 export type ChatProjectionEvent =
   | Readonly<{ type: 'batch'; answer: ChatProjectionReadAnswer }>
   /** The reader starts over from cursor 0 (a refusal, or a new reader). */
-  | Readonly<{ type: 'reset' }>;
+  | Readonly<{ type: 'reset' }>
+  /** Other devices' projected segment files; no own-log cursor applies to them. */
+  | Readonly<{ type: 'remote'; segments: readonly ChatLogSegment[] }>;
 
 /** What the projection tells its reader. @public */
 export type ChatProjectionEmitted =
@@ -168,6 +184,80 @@ const fromCursor = (answer: ChatProjectionReadAnswer, cursor: number): ChatProje
   return { ...answer, cursor, events: answer.events.slice(cursor - answer.cursor) };
 };
 
+/** FNV-1a over every byte; equal sizes and tail keys can still hide a corrected earlier row. */
+const hashSegment = (bytes: Uint8Array<ArrayBuffer>): number => {
+  let hash = 2_166_136_261;
+  for (const byte of bytes) {
+    // oxlint-disable-next-line eslint/no-bitwise -- FNV-1a requires XORing each byte into the hash.
+    hash = Math.imul(hash ^ byte, 16_777_619);
+  }
+  // oxlint-disable-next-line eslint/no-bitwise -- Keep the bounded unsigned 32-bit digest.
+  return hash >>> 0;
+};
+
+/** One bounded digest of the segment bytes that can change the merged transcript. @public */
+export const digestLogSegments = (segments: readonly ChatLogSegment[]): string =>
+  JSON.stringify(
+    segments
+      .map(({ deviceId, bytes }) => ({ deviceId, byteLength: bytes.byteLength, hash: hashSegment(bytes) }))
+      .toSorted((left, right) => (left.deviceId < right.deviceId ? -1 : left.deviceId > right.deviceId ? 1 : 0)),
+  );
+
+const foldRunViews = (
+  rows: readonly AgentLogEvent[],
+  previousViews: ChatProjection['views'],
+  previousBlocks: ChatProjection['blocks'],
+): Readonly<{ views: ChatProjection['views']; blocks: ChatProjection['blocks'] }> => {
+  let views = previousViews;
+  let lastAdmittedAt = Object.values(previousViews).at(-1)?.admittedAt;
+  const blocks: AgentHostLiveBlocks = new Map(
+    Object.entries(previousBlocks).map(([key, block]) => [key, { ...block }]),
+  );
+  for (const row of rows) {
+    const chunks = projectAgentHostEvent(row, blocks);
+    const user = projectAgentHostUserTurn(row);
+    const terminal =
+      row.type === 'run.lifecycle' && (row.state === 'completed' || row.state === 'failed' || row.state === 'cancelled')
+        ? row.state
+        : undefined;
+    const previous = views[row.runId];
+    if (
+      chunks.length === 0 &&
+      user === undefined &&
+      previous !== undefined &&
+      (row.type !== 'run.lifecycle' || terminal === previous.terminal)
+    ) {
+      continue;
+    }
+    if (chunks.length === 0 && user === undefined && terminal === undefined && row.type !== 'run.lifecycle') {
+      continue;
+    }
+    // The merged rows already preserve each device's term order; clamp a backwards clock before sorting runs.
+    const admittedAt =
+      previous?.admittedAt ??
+      (lastAdmittedAt !== undefined && row.recordedAt < lastAdmittedAt ? lastAdmittedAt : row.recordedAt);
+    if (previous === undefined) {
+      lastAdmittedAt = admittedAt;
+    }
+    views = {
+      ...views,
+      [row.runId]: {
+        admittedAt,
+        chunks: chunks.length === 0 ? (previous?.chunks ?? []) : [...(previous?.chunks ?? []), ...chunks],
+        ...(previous?.user === undefined && user === undefined ? {} : { user: user ?? previous?.user }),
+        ...(row.type === 'run.lifecycle'
+          ? terminal === undefined
+            ? {}
+            : { terminal }
+          : previous?.terminal === undefined
+            ? {}
+            : { terminal: previous.terminal }),
+      },
+    };
+  }
+  return { views, blocks: Object.fromEntries(blocks) };
+};
+
 /**
  * The projection's reducer: total, and it never throws (RB1).
  *
@@ -179,6 +269,14 @@ const fromCursor = (answer: ChatProjectionReadAnswer, cursor: number): ChatProje
 export const reduceChatProjection = (state: ChatProjection, event: ChatProjectionEvent): ProjectionStep => {
   if (event.type === 'reset') {
     return { state: initialChatProjection };
+  }
+  if (event.type === 'remote') {
+    const digest = digestLogSegments(event.segments);
+    if (digest === state.remote?.digest) {
+      return { state };
+    }
+    const { views } = foldRunViews(mergeLogSegments(event.segments), {}, {});
+    return { state: { ...state, remote: { digest, views } } };
   }
   /* Any batch states where the log ends, even one this projection already holds or cannot fold yet. */
   const endCursor =
@@ -197,29 +295,28 @@ export const reduceChatProjection = (state: ChatProjection, event: ChatProjectio
       let open: Record<string, OpenToolCall> | undefined;
       let { views } = state;
       /* ponytail: O(open blocks) per batch; a persistent map only if a run keeps hundreds open. */
-      const blocks: AgentHostLiveBlocks = new Map(
-        Object.entries(state.blocks).map(([key, block]) => [key, { ...block }]),
-      );
       let { failure, attentionRow } = state;
       for (const row of answer.events) {
         open = applyToolRow(open ?? { ...state.openTools }, row);
         failure = applyFailureRow(failure, row);
         attentionRow = attentionKeyOf(row) ?? attentionRow;
-        const parsed = agentLogEventSchema.safeParse(row);
-        if (parsed.success) {
-          const chunks = projectAgentHostEvent(parsed.data, blocks);
-          if (chunks.length > 0) {
-            const previous = views[parsed.data.runId]?.chunks ?? [];
-            views = { ...views, [parsed.data.runId]: { chunks: [...previous, ...chunks] } };
-          }
-        }
       }
+      const rendered = foldRunViews(
+        answer.events.flatMap((row) => {
+          const parsed = agentLogEventSchema.safeParse(row);
+          return parsed.success ? [parsed.data] : [];
+        }),
+        views,
+        state.blocks,
+      );
+      views = rendered.views;
       return {
         state: {
           ledger: fold.ledger,
           openTools: open ?? state.openTools,
           views,
-          blocks: Object.fromEntries(blocks),
+          blocks: rendered.blocks,
+          ...(state.remote === undefined ? {} : { remote: state.remote }),
           endCursor,
           ...(failure === undefined ? {} : { failure }),
           ...(attentionRow === undefined ? {} : { attentionRow }),
@@ -255,7 +352,7 @@ export const chatProjectionLogic = createLogic<
   id: 'chatProjection',
   context: initialChatProjection,
   run: ({ context, event }, enq) => {
-    if (event.type !== 'batch' && event.type !== 'reset') {
+    if (event.type !== 'batch' && event.type !== 'reset' && event.type !== 'remote') {
       return undefined;
     }
     const step = reduceChatProjection(context, event as ChatProjectionEvent);
@@ -277,6 +374,60 @@ export const selectCurrentRun = (
   const runId = projection.ledger.currentRunId;
   const run = runId === undefined ? undefined : projection.ledger.runs[runId];
   return runId === undefined || run === undefined ? undefined : { runId, ...run };
+};
+
+/** Ordered run sources for the one SDK transcript, with the own log winning a duplicate run id. @public */
+export const selectTranscriptSource = (
+  projection: ChatProjection,
+): ReadonlyArray<RunView & { readonly runId: string }> =>
+  Object.entries({ ...projection.remote?.views, ...projection.views })
+    .map(([runId, view]) => ({ runId, ...view }))
+    .toSorted((left, right) => left.admittedAt.localeCompare(right.admittedAt));
+
+const messagesByChunks = new WeakMap<RunView['chunks'], Promise<MyUIMessage | undefined>>();
+
+const materializeRun = async (view: RunView): Promise<MyUIMessage | undefined> => {
+  let pending = messagesByChunks.get(view.chunks);
+  if (pending === undefined) {
+    pending = (async () => {
+      if (view.chunks.length === 0) {
+        return undefined;
+      }
+      const stream = new ReadableStream<UIMessageChunk>({
+        start(controller) {
+          for (const chunk of view.chunks) {
+            controller.enqueue(chunk);
+          }
+          controller.close();
+        },
+      });
+      let message: MyUIMessage | undefined;
+      for await (const next of readUIMessageStream<MyUIMessage>({ stream })) {
+        message = next;
+      }
+      return message;
+    })();
+    messagesByChunks.set(view.chunks, pending);
+  }
+  const message = await pending;
+  if (message === undefined || view.terminal === undefined) {
+    return message;
+  }
+  const cause = view.terminal === 'completed' ? 'success' : view.terminal === 'cancelled' ? 'user_stop' : 'error';
+  return finalizeInterruptedToolParts([message], undefined, cause)[0];
+};
+
+/** Materialize one log snapshot; the adapter versions its async result before writing to a ready SDK chat. @public */
+export const materializeTranscript = async (
+  projection: ChatProjection,
+  watchedRunId?: string,
+): Promise<MyUIMessage[]> => {
+  const runs = selectTranscriptSource(projection);
+  const assistants = await Promise.all(runs.map(async (run) => materializeRun(run)));
+  return runs.flatMap((run, index) => [
+    ...(run.user === undefined ? [] : [run.user]),
+    ...(run.runId === watchedRunId || assistants[index] === undefined ? [] : [assistants[index]]),
+  ]);
 };
 
 /** @public */

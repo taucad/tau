@@ -32,13 +32,13 @@
 import type { Chat } from '@ai-sdk/react';
 import type { ChatStatus } from 'ai';
 import { Topic } from '@taucad/events';
-import { z } from 'zod';
 import { createActor, createAsyncLogic } from 'xstate';
 import type { Actor, ActorOptions, AnyActorLogic } from 'xstate';
 import type { CadAgentExecution, Chat as ChatEntity, MyUIMessage } from '@taucad/chat';
-import { isAnyToolPart } from '@taucad/chat';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
+import { chatRecordsPath } from '@taucad/revisions';
+import { getErrno } from '@taucad/utils/error';
 import { sendHostCommand } from '#chat-clients/_internal/host-command.js';
 import type { MachineActors } from '#lib/xstate.lib.js';
 import { waitUnlessGone } from '#lib/xstate.lib.js';
@@ -70,29 +70,15 @@ import type { ComposerBinding, UnreadRecord } from '#services/chat-session-store
 import { resizeImageActor } from '#hooks/resize-image.actor.js';
 import { clearLedger } from '#services/rpc-ledger.js';
 import { parseErrorForPersistence } from '#utils/error.utils.js';
-import { buildUserMessage, finalizeInterruptedToolParts, stampMessageCreatedAt } from '#utils/chat.utils.js';
-import {
-  bindDurableChatRun,
-  createChatInstance,
-  getBoundDurableChatRunId,
-} from '#chat-clients/_internal/shared-chat-transport.js';
+import { buildUserMessage } from '#utils/chat.utils.js';
+import { createChatInstance } from '#chat-clients/_internal/shared-chat-transport.js';
 import {
   BrowserPlacementChatTransport,
-  cancelBrowserAgentHostRun,
-  getBrowserAgentHostRun,
-  isBrowserAgentHostPlaced,
-  registerAgentHostRunReset,
-  requestBrowserAgentHostResume,
   subscribeChatLogAnswers,
 } from '#chat-clients/_internal/browser-agent-host-transport.js';
 import { hostAttachment } from '#chat-clients/_internal/host-attachment.js';
 import type { AgentHostClient } from '#services/agent-host-client.js';
-import {
-  chatHostBinding,
-  chatTurnAdmission,
-  chatTurnSettlement,
-  clearChatTurnServices,
-} from '#chat-clients/_internal/chat-host-binding.js';
+import { chatTurnAdmission, clearChatTurnServices } from '#chat-clients/_internal/chat-host-binding.js';
 import type { CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
 import { ENV } from '#environment.config.js';
 import {
@@ -104,17 +90,24 @@ import {
   selectRunFailure,
   selectRunPhase,
   selectToolsInFlight,
+  materializeTranscript,
 } from '#machines/chat-projection.logic.js';
 import type { ChatProjection, ChatRunPhase as ProjectedRunPhase } from '#machines/chat-projection.logic.js';
 import type { RowKey } from '@taucad/agent-host';
+import type { HostCommand } from '@taucad/agent-host/wire';
+import { sdkWatch } from '#chat-clients/_internal/sdk-watch.js';
+import type { SdkWatchInput } from '#chat-clients/_internal/sdk-watch.js';
 
-/** Run states a browser-placed run never leaves. */
-const terminalBrowserRunStates = new Set(['completed', 'failed', 'cancelled']);
-
-const admissionEnvelopeSchema = z.strictObject({
-  version: z.literal(1),
-  idempotencyKey: z.string().min(1),
-});
+/** Framing can exist even when no assistant content reached the person. */
+const nonOutputChunkTypes: ReadonlySet<string> = new Set([
+  'start',
+  'start-step',
+  'finish-step',
+  'finish',
+  'abort',
+  'message-metadata',
+  'data-acp-session',
+]);
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -197,68 +190,6 @@ function editedMessage(original: MyUIMessage, request: Extract<ChatRequest, { ki
   return { ...built, id: request.messageId, metadata: { ...original.metadata, ...built.metadata } };
 }
 
-function buildDraftFromUserMessage(message: MyUIMessage): MyUIMessage {
-  return {
-    id: 'draft',
-    role: 'user',
-    parts: message.parts.filter((part) => part.type === 'text' || part.type === 'file'),
-    metadata: {
-      createdAt: Date.now(),
-      status: 'pending',
-    },
-  };
-}
-
-function buildPendingTailDraftRestore(messages: readonly MyUIMessage[]):
-  | {
-      userMessage: MyUIMessage;
-      truncatedMessages: MyUIMessage[];
-    }
-  | undefined {
-  const last = messages.at(-1);
-  if (last?.role === 'user' && last.metadata?.status === 'pending') {
-    return {
-      userMessage: last,
-      truncatedMessages: messages.slice(0, -1),
-    };
-  }
-
-  if (last?.role !== 'assistant' || last.parts.length > 0) {
-    return undefined;
-  }
-
-  const userMessage = messages.at(-2);
-  if (userMessage?.role !== 'user' || userMessage.metadata?.status !== 'pending') {
-    return undefined;
-  }
-
-  return {
-    userMessage,
-    truncatedMessages: messages.slice(0, -2),
-  };
-}
-
-function countPersistMilestones(message: MyUIMessage): number {
-  let count = 0;
-  for (const part of message.parts) {
-    if (isAnyToolPart(part) && (part.state === 'output-available' || part.state === 'output-error')) {
-      count += 1;
-      continue;
-    }
-
-    if (part.type === 'text' && 'state' in part && part.state === 'done') {
-      count += 1;
-      continue;
-    }
-
-    if (part.type === 'reasoning' && 'state' in part && part.state === 'done') {
-      count += 1;
-    }
-  }
-
-  return count;
-}
-
 // ---------------------------------------------------------------------------
 // ChatSessionStore
 // ---------------------------------------------------------------------------
@@ -272,33 +203,22 @@ type InternalSession = ChatSession & {
   viewRefcount: number;
   /** Non-view ownership held while one logical run is active. */
   runHeld: boolean;
-  /** Exact server-authoritative run selected by project reload discovery. */
-  durableRunId: string | undefined;
-  durableRunState: 'reattaching' | 'active' | 'terminal' | undefined;
-  /** Host this session has already reattached to; see `reattachHostChat`. */
-  reattachedHostId: string | undefined;
-  /** Host a reattach named while the chat was still loading; see `reattachHostChat`. */
-  pendingReattachHostId: string | undefined;
-  /**
-   * This load dispatched the chat's seeded first turn, so the host stream is
-   * this page's own and there is nothing to reattach to; see
-   * {@link ChatSessionStore.reattachHostChat}.
-   */
+  /** This load dispatched the chat's seeded first turn; clear only after durable Start. */
   seededDispatch: boolean;
-  /** Immutable wire body for the active logical run, including admission. */
-  activeRunBody: Readonly<Record<string, unknown>> | undefined;
+  /** The one command being dispatched, and the SDK watch following its projected run. */
+  activeCommand: HostCommand | undefined;
+  commandAbort: AbortController | undefined;
+  watch: Actor<typeof sdkWatch> | undefined;
+  watchedRunId: string | undefined;
+  materializeVersion: number;
+  commandInFlight: boolean;
+  stopRequested: boolean;
+  restoredStoppedRunId: string | undefined;
   status: ChatStatus;
   /** The project this chat belongs to, from its caller (PV-S4, L3 D9); never from focus. */
   readonly projectId: string;
-  /** Where this chat's next turn runs, as its turn host last said. */
-  placement: string | undefined;
   /** The chat machine's turn emits, subscribed once when its root is created. */
   turnSubscriptions: Array<{ unsubscribe: () => void }>;
-  /** The request facts last handed to `stateActorRef`, so nothing is sent twice; PV-S10 and PV-S12 retire them. */
-  lastState: {
-    durable?: string;
-    lifecycle?: string;
-  };
   /**
    * The chat's record store and project. Known at acquire (PV-S4); a reacquired chat's I/O waits only for its released
    * predecessor's drain (D7).
@@ -388,6 +308,7 @@ type ObservedChat = {
   projectId: string;
   refs: number;
   attachment?: Actor<typeof hostAttachment>;
+  status: 'unknown' | 'attached' | 'lost' | 'refused';
   retry?: ReturnType<typeof setTimeout>;
   attempts: number;
 };
@@ -409,6 +330,7 @@ export class ChatSessionStore {
   readonly #sessions = new Map<string, InternalSession>();
   readonly #observed = new Map<string, ObservedChat>();
   readonly #projectHostConnectors = new Map<string, ProjectHostConnector>();
+  readonly #remoteReadVersions = new Map<string, number>();
   readonly #projectRunKeys = new Map<string, string>();
   readonly #projectRunVersions = new Map<string, number>();
   readonly #chatSessionLogic: typeof chatSessionMachine;
@@ -487,20 +409,16 @@ export class ChatSessionStore {
 
   public constructor(options: ChatSessionStoreOptions = {}) {
     const { chatSession, ...rootOptions } = options;
-    /* The chat session's three owned resources, bound to the route's published services: one host registration,
-     * one admission and one settlement per chat (policy §16). */
+    /* One admission per chat; the project-scoped connector owns log attachment. */
     this.#chatSessionLogic =
       chatSession ??
       chatSessionMachine.provide({
-        actors: { hostBinding: chatHostBinding, admitTurn: chatTurnAdmission, settleTurn: chatTurnSettlement },
+        actors: { admitTurn: chatTurnAdmission },
       });
     this.#rootOptions = rootOptions;
-    // ponytail: the store lives as long as the document, so this subscription does too.
+    /* Temporary test fixture bridge; production host attachment alone publishes batches. */
     subscribeChatLogAnswers(({ chatId, answer }) => {
-      const observed = this.#observed.get(chatId);
-      /* An attached chat has exactly one log reader. The old SDK transport's
-       * replay tap must not race the projection's owned cursor. */
-      if (observed !== undefined && this.#projectHostConnectors.has(observed.projectId)) {
+      if (this.#observed.has(chatId) && this.#projectHostConnectors.has(this.#observed.get(chatId)!.projectId)) {
         return;
       }
       this.#projectionOf(chatId).send({ type: 'batch', answer });
@@ -554,11 +472,12 @@ export class ChatSessionStore {
     if (existing !== undefined && existing.projectId !== projectId) {
       throw new Error(`Chat ${chatId} is already observed in project ${existing.projectId}.`);
     }
-    const observed = existing ?? { projectId, refs: 0, attempts: 0 };
+    const observed: ObservedChat = existing ?? { projectId, refs: 0, attempts: 0, status: 'unknown' };
     observed.refs += 1;
     if (existing === undefined) {
       this.#observed.set(chatId, observed);
       this.#projectionOf(chatId);
+      void this.#refreshRemoteSegmentsSafely(chatId, projectId);
       this.#startObservedAttachment(chatId, observed);
       this.#notifyMembership();
     }
@@ -579,6 +498,44 @@ export class ChatSessionStore {
     return [...this.#observed].filter(([, chat]) => chat.projectId === projectId).map(([chatId]) => chatId);
   }
 
+  /** Refold fetched foreign log files into the one transcript projection; never cache their bytes in chat.json. @public */
+  public async refreshRemoteSegments(chatId: string, projectId: string): Promise<void> {
+    if (this.#observed.get(chatId)?.projectId !== projectId && this.#sessions.get(chatId)?.projectId !== projectId) {
+      return;
+    }
+    const version = (this.#remoteReadVersions.get(chatId) ?? 0) + 1;
+    this.#remoteReadVersions.set(chatId, version);
+    const directory = `/projects/${projectId}/${chatRecordsPath(chatId)}/events`;
+    let entries: string[];
+    try {
+      entries = await this.#deps.client.readdir(directory);
+    } catch (error) {
+      if (getErrno(error) !== 'ENOENT' && getErrno(error) !== 'ENOTDIR') {
+        throw error;
+      }
+      entries = [];
+    }
+    const segments = await Promise.all(
+      entries
+        .filter((name) => /^[^/]+\.jsonl$/.test(name))
+        .map(async (name) => ({ deviceId: name, bytes: await this.#deps.client.readFile(`${directory}/${name}`) })),
+    );
+    if (
+      this.#remoteReadVersions.get(chatId) === version &&
+      (this.#observed.get(chatId)?.projectId === projectId || this.#sessions.get(chatId)?.projectId === projectId)
+    ) {
+      this.#projectionOf(chatId).send({ type: 'remote', segments });
+    }
+  }
+
+  async #refreshRemoteSegmentsSafely(chatId: string, projectId: string): Promise<void> {
+    try {
+      await this.refreshRemoteSegments(chatId, projectId);
+    } catch (error) {
+      console.warn('[ChatSessionStore] foreign chat log could not be read', chatId, error);
+    }
+  }
+
   /** Publish the active project's real W6 connector to every listed chat. @public */
   public publishProjectHostConnector(
     projectId: string,
@@ -594,6 +551,7 @@ export class ChatSessionStore {
         continue;
       }
       this.#stopObservedAttachment(observed);
+      this.#projectionTopics.get(chatId)?.emit();
       observed.attempts = 0;
       this.#startObservedAttachment(chatId, observed);
     }
@@ -608,6 +566,9 @@ export class ChatSessionStore {
         if (observed.projectId === projectId) {
           this.#stopObservedAttachment(observed);
         }
+      }
+      for (const chatId of this.observedChatIdsOf(projectId)) {
+        this.#projectionTopics.get(chatId)?.emit();
       }
     };
   }
@@ -644,8 +605,8 @@ export class ChatSessionStore {
     if (connector === undefined) {
       throw new Error(`Chat ${chatId} has no live host connector.`);
     }
-    const command = {
-      type: 'cancel' as const,
+    const command: HostCommand = {
+      type: 'cancel',
       commandId: generatePrefixedId(idPrefix.request),
       payload: { chatId, runId: run.runId },
     };
@@ -661,6 +622,56 @@ export class ChatSessionStore {
       throw new Error(`Host cancel refused ${answer.code}: ${answer.message}`);
     }
     return 'stopped';
+  }
+
+  /** Answer only an interrupt the caught-up host log still holds, including after reload. @public */
+  public async respondToProjectedApproval(
+    chatId: string,
+    interruptId: string,
+    decision: Readonly<{ approved: boolean; reason?: string; optionId?: string }>,
+  ): Promise<boolean> {
+    const projection = this.#projectionContext(chatId);
+    if (projection === undefined || !selectCaughtUp(projection)) {
+      return false;
+    }
+    const run = selectCurrentRun(projection);
+    if (run === undefined || selectOpenInterrupts(projection)[interruptId] === undefined) {
+      return false;
+    }
+    const projectId = this.#sessions.get(chatId)?.projectId ?? this.#observed.get(chatId)?.projectId;
+    const connector = projectId === undefined ? undefined : this.#projectHostConnectors.get(projectId);
+    if (connector === undefined) {
+      throw new Error(`Chat ${chatId} has no live host connector.`);
+    }
+    const answer = await sendHostCommand(async () => connector.connect(chatId), {
+      type: 'resolve-interrupt',
+      commandId: generatePrefixedId(idPrefix.request),
+      payload: {
+        chatId,
+        runId: run.runId,
+        interruptId,
+        outcome: decision.approved ? 'approved' : 'denied',
+        ...(decision.optionId === undefined ? {} : { optionId: decision.optionId }),
+        ...(decision.reason === undefined ? {} : { payload: { reason: decision.reason } }),
+      },
+    });
+    if (answer.status === 'refused') {
+      throw new Error(`Host approval refused ${answer.code}: ${answer.message}`);
+    }
+    if (answer.effect !== 'durable') {
+      return false;
+    }
+    if (decision.approved && run.kind === 'tau') {
+      const resumed = await sendHostCommand(async () => connector.connect(chatId), {
+        type: 'resume',
+        commandId: generatePrefixedId(idPrefix.request),
+        payload: { chatId, runId: run.runId },
+      });
+      if (resumed.status === 'refused' && resumed.code !== 'INTERRUPT_PENDING') {
+        throw new Error(`Host resume refused ${resumed.code}: ${resumed.message}`);
+      }
+    }
+    return true;
   }
 
   /** Classify every observed live run before Close asks, without sending a command or taking a lock. @public */
@@ -681,7 +692,7 @@ export class ChatSessionStore {
         const reason =
           run.opaque || projection.ledger.newerHistory
             ? 'other-build'
-            : await connector?.stoppability?.(chatId).catch(() => 'background-window' as const);
+            : await connector?.stoppability?.(chatId).catch((): 'background-window' => 'background-window');
         const current = this.#projectionContext(chatId);
         if (
           current === undefined ||
@@ -699,7 +710,7 @@ export class ChatSessionStore {
           chatId,
           runId: run.runId,
           reason: reason ?? 'background-window',
-          label: chat?.name || `Chat ${chatId}`,
+          label: chat?.name.length ? chat.name : `Chat ${chatId}`,
         };
       }),
     );
@@ -758,148 +769,6 @@ export class ChatSessionStore {
     return session;
   }
 
-  /**
-   * Rehydrate an API-discovered durable run without acquiring a React view.
-   * Its non-view hold keeps the session alive while the exact run resumes.
-   */
-  public retainDurableRun(input: {
-    readonly chatId: string;
-    readonly projectId: string;
-    readonly runId: string;
-    readonly state?: 'active' | 'terminal';
-  }): ChatSession {
-    bindDurableChatRun(input.chatId, input.runId);
-    const existing = this.#sessions.get(input.chatId);
-    if (existing) {
-      const runChanged = existing.durableRunId !== input.runId;
-      const priorState = existing.durableRunState;
-      const nextState = !runChanged && priorState === 'terminal' ? 'terminal' : (input.state ?? 'reattaching');
-      const shouldResume =
-        nextState !== 'terminal' &&
-        existing.status === 'ready' &&
-        !existing.persistenceActorRef.getSnapshot().context.isLoadingChat &&
-        (runChanged || priorState === undefined);
-      existing.runHeld = true;
-      existing.durableRunId = input.runId;
-      existing.durableRunState = nextState;
-      if (shouldResume) {
-        queueMicrotask(() => {
-          if (
-            this.#sessions.get(input.chatId) === existing &&
-            existing.durableRunId === input.runId &&
-            existing.durableRunState !== 'terminal'
-          ) {
-            void existing.chat.resumeStream();
-          }
-        });
-      }
-      return existing;
-    }
-    const session = this.#createSession(input.chatId, input.projectId);
-    session.viewRefcount = 0;
-    session.runHeld = true;
-    session.durableRunId = input.runId;
-    session.durableRunState = input.state ?? 'reattaching';
-    this.#sessions.set(input.chatId, session);
-    this.#refreshSnapshot();
-    this.#notifyMembership();
-    return session;
-  }
-
-  /**
-   * Reattach one host-placed chat to its host's durable log.
-   *
-   * Reload discovery substantiates a run from this browser's *workspace claim*
-   * (`ProjectChatRpcBindings` → {@link ChatSessionStore.retainDurableRun}). A
-   * chat placed on a daemon writes no claim — the daemon owns its workspace,
-   * its files and its tools — so nothing ever retained its run, the load-time
-   * resume gate never opened, and a reloaded page rebuilt its transcript from
-   * local storage while the daemon finished the turn unattended.
-   *
-   * The host's log is the authority (PH19) and the transport resolves the run
-   * from it, so the trigger here is the *placement*, not a run id. Idempotent
-   * per host, and there is no second pass: the caller is the host binding,
-   * which composes once per placement. A request that lands while the chat's
-   * row is still being read is therefore held rather than dropped — the chat's
-   * view mounts as soon as it is focused, long before its load settles, and a
-   * dropped one left the durable log unattached for the life of the page (I7).
-   *
-   * A chat whose seeded first turn *this load* dispatched is excluded: that
-   * dispatch is already the host stream, and reattaching over it opened a
-   * second one — on rung 2, a second relay session, refused by a capacity-1
-   * daemon with 409 BUSY before the seeded turn had run at all. `status` alone
-   * does not cover it: the registration effect can observe `ready` in the same
-   * tick the dispatch is queued.
-   *
-   * @param input - The chat and the host it is placed on.
-   */
-  public reattachHostChat(input: { readonly chatId: string; readonly hostId: string }): void {
-    const session = this.#sessions.get(input.chatId);
-    if (!session || session.reattachedHostId === input.hostId || session.seededDispatch) {
-      return;
-    }
-    if (session.persistenceActorRef.getSnapshot().context.isLoadingChat) {
-      /* Held, not dropped. @see flushPendingReattach */
-      session.pendingReattachHostId = input.hostId;
-      return;
-    }
-    session.pendingReattachHostId = undefined;
-    if (session.status !== 'ready') {
-      // A chat already running a turn is already attached to its host; this one
-      // is genuinely nothing to do, and resuming over it opens a second stream.
-      return;
-    }
-    // Marked only when it actually reattaches.
-    session.reattachedHostId = input.hostId;
-    queueMicrotask(() => {
-      if (this.#sessions.get(input.chatId) === session) {
-        void session.chat.resumeStream();
-      }
-    });
-  }
-
-  /** Release reload-discovery ownership after project-wide settlement. */
-  public releaseDurableRun(input: { readonly chatId: string; readonly runId: string }): void {
-    const session = this.#sessions.get(input.chatId);
-    if (!session || session.durableRunId !== input.runId) {
-      return;
-    }
-    session.durableRunId = undefined;
-    session.durableRunState = undefined;
-    this.#disposeIfUnreferenced(session);
-  }
-
-  /** Idempotently restore the canonical user row ahead of its durable assistant run. */
-  public reconcileDurableUserMessage(input: {
-    readonly chatId: string;
-    readonly runId: string;
-    readonly message: MyUIMessage;
-  }): boolean {
-    const session = this.#sessions.get(input.chatId);
-    if (!session || session.durableRunId !== input.runId || input.message.role !== 'user') {
-      return false;
-    }
-    const existingIndex = session.chat.messages.findIndex((message) => message.id === input.message.id);
-    if (existingIndex === -1) {
-      const assistantIndex = session.chat.messages.findIndex(
-        (message) => message.role === 'assistant' && message.id === input.runId,
-      );
-      const insertAt = assistantIndex === -1 ? session.chat.messages.length : assistantIndex;
-      session.chat.messages = [
-        ...session.chat.messages.slice(0, insertAt),
-        input.message,
-        ...session.chat.messages.slice(insertAt),
-      ];
-    } else {
-      if (session.chat.messages[existingIndex] === input.message) {
-        return false;
-      }
-      session.chat.messages = session.chat.messages.with(existingIndex, input.message);
-    }
-    session.persistenceActorRef.send({ type: 'queuePersist', messages: session.chat.messages });
-    return true;
-  }
-
   public release(chatId: string): void {
     const session = this.#sessions.get(chatId);
     if (!session) {
@@ -936,6 +805,11 @@ export class ChatSessionStore {
     return this.#projectionContext(chatId);
   }
 
+  /** The current read-only host attachment's verified state, never a run lifecycle. @public */
+  public getAttachmentStatus(chatId: string): ObservedChat['status'] {
+    return this.#observed.get(chatId)?.status ?? 'unknown';
+  }
+
   /**
    * Wake a reader each time the chat's projection folds a batch.
    *
@@ -946,36 +820,6 @@ export class ChatSessionStore {
    */
   public subscribeProjection(chatId: string, listener: () => void): () => void {
     return this.#addPerChatListener({ bucket: this.#projectionTopics, namePrefix: 'projection', chatId, listener });
-  }
-
-  public getDurableRunState(chatId: string): InternalSession['durableRunState'] {
-    return this.#sessions.get(chatId)?.durableRunState;
-  }
-
-  public getDurableRunId(chatId: string): string | undefined {
-    return this.#sessions.get(chatId)?.durableRunId;
-  }
-
-  /**
-   * Say where this chat's next turn runs.
-   *
-   * The chat's session actor owns its agent-host binding and re-invokes it on
-   * this and on nothing else; a model or prompt change is read when the client
-   * is created, so it must not churn the registration. Published by the chat's
-   * one `ChatTurnHost`, and replayed to the machine when a project session
-   * spawns it.
-   *
-   * @param chatId - The chat whose placement moved.
-   * @param placement - The daemon host id, or the execution kind for a local one.
-   * @public
-   */
-  public setTurnPlacement(chatId: string, placement: string): void {
-    const session = this.#sessions.get(chatId);
-    if (!session || session.placement === placement) {
-      return;
-    }
-    session.placement = placement;
-    session.stateActorRef.send({ type: 'agentConfigChanged', placement });
   }
 
   /**
@@ -1017,35 +861,6 @@ export class ChatSessionStore {
       snapshot !== undefined &&
       (snapshot.context.turn !== undefined || snapshot.matches({ run: { queued: 'admitting' } }))
     );
-  }
-
-  /**
-   * Begin non-view ownership for one logical run and return its immutable,
-   * versioned wire body. Repeated calls while the persistence machine
-   * preempts or retries a run keep one hold but may replace the active body
-   * when a newly admitted user operation supplies its own idempotency key.
-   */
-  public startRun(chatId: string, body: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
-    const session = this.#sessions.get(chatId);
-    if (!session) {
-      throw new Error(`ChatSessionStore: cannot start a run for inactive chat ${chatId}`);
-    }
-
-    const admittedBody = this.#withAdmission(body);
-    session.runHeld = true;
-    session.activeRunBody = admittedBody;
-    return admittedBody;
-  }
-
-  /** Release a direct run that failed before AI SDK could emit `onFinish`. */
-  public endRun(chatId: string): void {
-    const session = this.#sessions.get(chatId);
-    if (!session || !session.runHeld) {
-      return;
-    }
-    session.runHeld = false;
-    session.activeRunBody = undefined;
-    this.#disposeIfUnreferenced(session);
   }
 
   // -------------------------------------------------------------------------
@@ -1162,16 +977,31 @@ export class ChatSessionStore {
   /**
    * Stop this chat's run, through the one dispatcher that owns it (P63).
    *
-   * *Stop* in the sidebar and *Stop* in the composer are the same verb, so
-   * they go to the same place: the persistence machine's `stopRequest`, which
-   * aborts the request, settles the run and releases its lease. The chat's own
-   * machine only records that the person stopped it.
+   * *Stop* in the sidebar and *Stop* in the composer use the same projected run
+   * identity and send a keyed host cancel. The host log confirms its outcome;
+   * stopping a local SDK watch alone never settles the run.
    *
    * @param chatId - The chat whose run should stop.
    * @public
    */
   public stopRun(chatId: string): void {
-    this.#sessions.get(chatId)?.persistenceActorRef.send({ type: 'stopRequest' });
+    const session = this.#sessions.get(chatId);
+    if (session === undefined) {
+      return;
+    }
+    session.stopRequested = true;
+    this.#chatTopics.get(chatId)?.emit();
+    session.watch?.stop();
+    session.watch = undefined;
+    void session.chat.stop();
+    if (!session.commandInFlight) {
+      void this.#cancelSessionRun(session);
+    }
+  }
+
+  /** A user Stop is awaiting its host-confirmed terminal row. @public */
+  public isStopping(chatId: string): boolean {
+    return this.#sessions.get(chatId)?.stopRequested ?? false;
   }
 
   /**
@@ -1339,6 +1169,31 @@ export class ChatSessionStore {
     await binding.record.attachments.retainOnly(referencedAttachments(session.draftActorRef.getSnapshot().context));
   }
 
+  async #cancelSessionRun(session: InternalSession): Promise<void> {
+    const projected = this.#projectionContext(session.chatId);
+    const runId =
+      session.activeCommand?.type === 'start' || session.activeCommand?.type === 'resume'
+        ? session.activeCommand.payload.runId
+        : projected === undefined
+          ? undefined
+          : selectCurrentRun(projected)?.runId;
+    const connector = this.#projectHostConnectors.get(session.projectId);
+    if (runId === undefined || connector === undefined) {
+      return;
+    }
+    const answer = await sendHostCommand(async () => connector.connect(session.chatId), {
+      type: 'cancel',
+      commandId: generatePrefixedId(idPrefix.request),
+      payload: { chatId: session.chatId, runId },
+    });
+    if (answer.status === 'refused') {
+      session.persistenceActorRef.send({
+        type: 'setPersistedError',
+        error: parseErrorForPersistence(new Error(`Host cancel refused ${answer.code}: ${answer.message}`)),
+      });
+    }
+  }
+
   #stopObservedAttachment(observed: ObservedChat): void {
     if (observed.retry !== undefined) {
       clearTimeout(observed.retry);
@@ -1346,6 +1201,7 @@ export class ChatSessionStore {
     observed.retry = undefined;
     observed.attachment?.stop();
     observed.attachment = undefined;
+    observed.status = 'unknown';
   }
 
   #startObservedAttachment(chatId: string, observed: ObservedChat): void {
@@ -1362,6 +1218,13 @@ export class ChatSessionStore {
           if (observed.attachment !== attachment) {
             return;
           }
+          observed.status =
+            event.type === 'attachment.attached'
+              ? 'attached'
+              : event.type === 'attachment.refused'
+                ? 'refused'
+                : 'lost';
+          this.#projectionTopics.get(chatId)?.emit();
           if (event.type === 'attachment.attached') {
             observed.attempts = 0;
             return;
@@ -1521,8 +1384,9 @@ export class ChatSessionStore {
    *
    * @param session - The chat whose composer this is.
    * @param message - The user message coming back.
+   * @param onlyIfEmpty - Do not overwrite text the person entered while a Stop was settling.
    */
-  async #restoreDraftMessage(session: InternalSession, message: MyUIMessage): Promise<void> {
+  async #restoreDraftMessage(session: InternalSession, message: MyUIMessage, onlyIfEmpty = false): Promise<void> {
     const attachments = message.parts.flatMap((part) =>
       part.type === 'file' ? (attachmentReferenceOf(part) ?? []) : [],
     );
@@ -1543,9 +1407,33 @@ export class ChatSessionStore {
         console.warn('[ChatSessionStore] a returned message\u2019s attachments could not be re-retained', error);
       }
     }
+    if (onlyIfEmpty) {
+      const draft = session.draftActorRef.getSnapshot().context;
+      if (draft.draftText !== '' || draft.draftAttachments.length > 0) {
+        return;
+      }
+    }
     /* Wholesale: this replaces the displacing send's text and attachments
      * rather than clearing and then restoring over the top of it. */
     session.draftActorRef.send({ type: 'loadDraftFromMessageTransient', draft: message });
+    const draft = session.draftActorRef.getSnapshot().context;
+    session.composerRecordRef.send({
+      type: 'patch',
+      fields: { draft: buildDraftMessage(draft.draftText, draft.draftAttachments) },
+    });
+  }
+
+  /** Hold the composer through an asynchronously confirmed empty Stop. */
+  async #restoreStoppedDraft(session: InternalSession, message: MyUIMessage): Promise<void> {
+    const restore = this.#restoreDraftMessage(session, message, true);
+    session.composerWork.add(restore);
+    try {
+      await restore;
+    } catch (error) {
+      console.warn('[ChatSessionStore] stopped draft could not be restored', session.chatId, error);
+    } finally {
+      session.composerWork.delete(restore);
+    }
   }
 
   /**
@@ -1573,10 +1461,10 @@ export class ChatSessionStore {
           session.chatId,
           request.kind === 'send' ? (request.message.metadata?.createdAt ?? Date.now()) : Date.now(),
         );
-        session.persistenceActorRef.send({ type: 'startRequest', request });
+        void this.#dispatchTurn(session, request);
       }),
       stateActorRef.on('stopTurnRequest', () => {
-        session.persistenceActorRef.send({ type: 'preemptRequest' });
+        this.stopRun(session.chatId);
       }),
       stateActorRef.subscribe(() => {
         const admits = this.#isAdmittingTurn(session);
@@ -1586,6 +1474,110 @@ export class ChatSessionStore {
         admitting = admits;
       }),
     ];
+  }
+
+  /** Dispatch one admitted command, then let the SDK read only its projected chunks. */
+  async #dispatchTurn(session: InternalSession, request: ChatRequest): Promise<void> {
+    const { command } = request;
+    const connector = this.#projectHostConnectors.get(session.projectId);
+    if (command === undefined || connector === undefined || (command.type !== 'start' && command.type !== 'resume')) {
+      session.persistenceActorRef.send({
+        type: 'setPersistedError',
+        error: parseErrorForPersistence(new Error('This chat has no admitted host command or live connector.')),
+      });
+      session.stateActorRef.send({ type: 'runLifecycle', phase: 'failed' });
+      return;
+    }
+    session.runHeld = true;
+    session.activeCommand = command;
+    session.watchedRunId = command.payload.runId;
+    session.commandInFlight = true;
+    session.stopRequested = false;
+    session.commandAbort?.abort();
+    const abort = new AbortController();
+    session.commandAbort = abort;
+    try {
+      const answer = await sendHostCommand(async () => connector.connect(session.chatId), command, {
+        signal: abort.signal,
+      });
+      session.commandInFlight = false;
+      if (answer.status === 'refused') {
+        throw new Error(`Host ${command.type} refused ${answer.code}: ${answer.message}`);
+      }
+      if (answer.effect !== 'durable' || this.#sessions.get(session.chatId) !== session || abort.signal.aborted) {
+        return;
+      }
+      if (session.seededDispatch && command.type === 'start') {
+        session.seededDispatch = false;
+        void this.#clearAcceptedSeed(session.chatId, command.commandId);
+      }
+      // The Stop callback can flip this while the command awaits its host answer.
+      // oxlint-disable-next-line typescript/no-unnecessary-condition -- Stop mutates from another callback during the awaited command.
+      if (session.stopRequested) {
+        await this.#cancelSessionRun(session);
+        return;
+      }
+      session.watch?.stop();
+      const via =
+        request.kind === 'send' && !session.chat.messages.some((message) => message.id === request.message.id)
+          ? 'send'
+          : request.kind === 'continue'
+            ? 'resume'
+            : 'regenerate';
+      if (request.kind === 'edit') {
+        const index = session.chat.messages.findIndex((message) => message.id === request.messageId);
+        if (index === -1) {
+          throw new Error('That message is no longer in this chat, so it cannot be edited.');
+        }
+        session.chat.messages = [
+          ...session.chat.messages.slice(0, index),
+          editedMessage(session.chat.messages[index]!, request),
+        ];
+      }
+      const watchInput: SdkWatchInput = {
+        runId: command.payload.runId,
+        getProjection: () => this.#projectionContext(session.chatId),
+        subscribe: (listener) => this.subscribeProjection(session.chatId, listener),
+        transport: session.transport,
+        chat: session.chat,
+        ...(via === 'send' && request.kind === 'send'
+          ? { via, message: request.message }
+          : { via: via === 'send' ? 'regenerate' : via }),
+      };
+      const watch = createActor(sdkWatch, {
+        input: watchInput,
+        ...this.#rootOptions,
+      });
+      session.watch = watch;
+      watch.start();
+    } catch (error) {
+      if (abort.signal.aborted) {
+        return;
+      }
+      session.watch?.stop();
+      session.watch = undefined;
+      session.watchedRunId = undefined;
+      session.activeCommand = undefined;
+      session.persistenceActorRef.send({
+        type: 'setPersistedError',
+        error: {
+          ...parseErrorForPersistence(error instanceof Error ? error : new Error(String(error))),
+          requestId: command.commandId,
+        },
+      });
+      session.stateActorRef.send({
+        type: 'runLifecycle',
+        phase: 'failed',
+        runId: command.payload.runId,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      session.commandInFlight = false;
+      if (session.commandAbort === abort) {
+        session.commandAbort = undefined;
+      }
+      this.#scheduleRunReleaseIfTerminal(session);
+    }
   }
 
   /**
@@ -1600,14 +1592,6 @@ export class ChatSessionStore {
     const facts = this.#revisionFacts.get(session.projectId);
     if (facts !== undefined) {
       sendRevisionFacts(session.stateActorRef, facts);
-    }
-    /* A run outlives the view that started it (V5). Navigating away and back
-     * gives this chat a new actor while its run is still in flight, and an
-     * actor that starts `idle` admits a second turn over the live one — which
-     * the host refuses, ending the turn on a banner the page caused itself. */
-    const live = getBrowserAgentHostRun(session.chatId);
-    if (live !== undefined && !terminalBrowserRunStates.has(live.state)) {
-      session.stateActorRef.send({ type: 'adoptRun', runId: live.runId });
     }
     this.#syncProjection(session.chatId, 'open');
   }
@@ -1663,13 +1647,134 @@ export class ChatSessionStore {
     if (session === undefined || projection === undefined) {
       return;
     }
+    if (selectCaughtUp(projection)) {
+      this.#materializeProjectedTranscript(session, projection);
+    }
     this.#syncTools(session, projection);
     const run = selectCaughtUp(projection) ? selectCurrentRun(projection) : undefined;
     const phase = selectRunPhase(projection);
-    if (run === undefined || present === 'none' || (present === 'open' && !opensRun(phase) && phase !== 'paused')) {
+    if (run?.lifecycle === 'cancelled' && session.stopRequested && session.restoredStoppedRunId !== run.runId) {
+      session.restoredStoppedRunId = run.runId;
+      const view = projection.views[run.runId];
+      if (view?.user !== undefined && view.chunks.every((chunk) => nonOutputChunkTypes.has(chunk.type))) {
+        void this.#restoreStoppedDraft(session, view.user);
+      }
+    }
+    if (session.stopRequested && run !== undefined && !opensRun(phase) && phase !== 'paused') {
+      session.stopRequested = false;
+      this.#chatTopics.get(chatId)?.emit();
+    }
+    if (
+      run !== undefined &&
+      opensRun(phase) &&
+      session.watch === undefined &&
+      session.watchedRunId === undefined &&
+      !session.commandInFlight &&
+      !session.persistenceActorRef.getSnapshot().context.isLoadingChat &&
+      session.status === 'ready'
+    ) {
+      void this.#watchProjectedRun(session, projection, run.runId);
+    }
+    if (run !== undefined && present !== 'none' && (present !== 'open' || opensRun(phase) || phase === 'paused')) {
+      this.#presentRun(session, { runId: run.runId, phase, reason: selectRunFailure(projection, run.runId) });
+    }
+    if (
+      session.watchedRunId !== undefined &&
+      session.watchedRunId === run?.runId &&
+      !opensRun(phase) &&
+      phase !== 'paused'
+    ) {
+      session.watch?.stop();
+      session.watch = undefined;
+      session.watchedRunId = undefined;
+      this.#materializeProjectedTranscript(session, projection);
+      this.#scheduleRunReleaseIfTerminal(session);
+    }
+  }
+
+  /** Reattach a viewed live run through its projection, never through the old host stream. */
+  async #watchProjectedRun(session: InternalSession, projection: ChatProjection, runId: string): Promise<void> {
+    session.watchedRunId = runId;
+    const version = ++session.materializeVersion;
+    try {
+      const messages = await materializeTranscript(projection, runId);
+      const current = this.#projectionContext(session.chatId);
+      if (
+        this.#sessions.get(session.chatId) !== session ||
+        session.watchedRunId !== runId ||
+        session.materializeVersion !== version ||
+        session.status !== 'ready' ||
+        current === undefined ||
+        !selectCaughtUp(current) ||
+        selectCurrentRun(current)?.runId !== runId ||
+        !opensRun(selectRunPhase(current))
+      ) {
+        if (session.watchedRunId === runId && session.materializeVersion === version) {
+          session.watchedRunId = undefined;
+          if (current !== undefined && selectCaughtUp(current)) {
+            this.#materializeProjectedTranscript(session, current);
+          }
+        }
+        return;
+      }
+      session.chat.messages = messages;
+      const watch = createActor(sdkWatch, {
+        input: {
+          runId,
+          getProjection: () => this.#projectionContext(session.chatId),
+          subscribe: (listener) => this.subscribeProjection(session.chatId, listener),
+          transport: session.transport,
+          chat: session.chat,
+          via: 'resume',
+        },
+        ...this.#rootOptions,
+      });
+      session.watch = watch;
+      session.runHeld = true;
+      watch.start();
+    } catch (error) {
+      if (session.watchedRunId === runId) {
+        session.watchedRunId = undefined;
+      }
+      console.warn('[ChatSessionStore] projected run could not be watched', session.chatId, error);
+    }
+  }
+
+  /** Version async SDK materialization so only the newest caught-up log can replace a ready transcript. */
+  #materializeProjectedTranscript(session: InternalSession, projection: ChatProjection): void {
+    if (session.status !== 'ready' || session.watchedRunId !== undefined) {
       return;
     }
-    this.#presentRun(session, { runId: run.runId, phase, reason: selectRunFailure(projection, run.runId) });
+    const version = ++session.materializeVersion;
+    void this.#applyProjectedTranscript(session, projection, version);
+  }
+
+  async #applyProjectedTranscript(
+    session: InternalSession,
+    projection: ChatProjection,
+    version: number,
+  ): Promise<void> {
+    try {
+      const messages = await materializeTranscript(projection);
+      if (
+        this.#sessions.get(session.chatId) === session &&
+        session.status === 'ready' &&
+        session.watchedRunId === undefined &&
+        session.materializeVersion === version
+      ) {
+        session.chat.messages = messages;
+      }
+    } catch (error) {
+      console.warn('[ChatSessionStore] projected transcript could not be materialized', session.chatId, error);
+    }
+  }
+
+  async #clearAcceptedSeed(chatId: string, requestId: string): Promise<void> {
+    try {
+      await this.#deps.consumeChatStartupRequest(chatId, requestId);
+    } catch (error) {
+      console.warn('[ChatSessionStore] accepted seed intent could not be cleared', chatId, error);
+    }
   }
 
   /** The machine's tool and approval counts, compared with its own so nothing is sent twice (G03, G04). */
@@ -1719,9 +1824,15 @@ export class ChatSessionStore {
       stoppableRunCount: 0,
       continuingRuns: [],
     });
-    void this.getProjectClosePlan(projectId).catch((error: unknown) => {
+    void this.#classifyProjectRuns(projectId);
+  }
+
+  async #classifyProjectRuns(projectId: string): Promise<void> {
+    try {
+      await this.getProjectClosePlan(projectId);
+    } catch (error) {
       console.warn('[ChatSessionStore] project run classification failed', projectId, error);
-    });
+    }
   }
 
   #publishProjectRunPlan(projectId: string, plan: ProjectClosePlan): void {
@@ -1730,7 +1841,7 @@ export class ChatSessionStore {
       return;
     }
     const { runs } = owner.getSnapshot().context;
-    const stoppableRuns = owner.getSnapshot().context.stoppableRuns ?? [];
+    const { stoppableRuns = [] } = owner.getSnapshot().context;
     if (
       runs.length === plan.liveChatIds.length &&
       runs.every((chatId, index) => chatId === plan.liveChatIds[index]) &&
@@ -1772,39 +1883,6 @@ export class ChatSessionStore {
       phase,
       runId,
       ...(phase === 'failed' && reason !== undefined ? { reason } : {}),
-    });
-  }
-
-  /**
-   * A request that ended before its run's log did: an admission the host never answered, a reattach to a host that is
-   * not there (R1-F1), a stream that broke, a Stop that never reached the host. The log's own terminal row is
-   * presented from the projection and has already ended the run, so this speaks only where the log has not.
-   *
-   * ponytail: the request half of the old SDK status fold; PV-S10's command outcomes replace it.
-   *
-   * @param session - The chat whose SDK request just ended.
-   * @param outcome - How the request ended.
-   */
-  #reportRequestEnd(session: InternalSession, outcome: 'failed' | 'cancelled' | 'completed'): void {
-    const snapshot = session.stateActorRef.getSnapshot();
-    const { turn, activeRunId } = snapshot.context;
-    const runId = turn?.runId ?? activeRunId;
-    const live = runId === undefined ? isLive(snapshot) : endsHere(snapshot, runId);
-    const { error } = session.chat;
-    if (outcome === 'failed') {
-      /* A reattach that fails outright fails the idle chat it was for (R1-F1). */
-      if (error === undefined || !(live || snapshot.matches({ run: 'idle' }))) {
-        return;
-      }
-    } else if (turn === undefined || !live) {
-      /* Only a turn this page placed ends with its request; a watched run ends when its log says so. */
-      return;
-    }
-    session.stateActorRef.send({
-      type: 'runLifecycle',
-      phase: outcome,
-      ...(runId === undefined ? {} : { runId }),
-      ...(outcome === 'failed' && error !== undefined ? { reason: error.message } : {}),
     });
   }
 
@@ -1956,11 +2034,6 @@ export class ChatSessionStore {
               }
 
               if (!loadedChat) {
-                if (session.durableRunId && session.durableRunState !== 'terminal') {
-                  queueMicrotask(() => {
-                    void session.chat.resumeStream();
-                  });
-                }
                 if (session.chat.messages.length === 0) {
                   session.chat.messages = [];
                 }
@@ -1996,113 +2069,35 @@ export class ChatSessionStore {
                   lastMessage?.role === 'user' &&
                   lastMessage.id === startupRequest.messageId &&
                   lastMessage.metadata?.status === 'pending';
-                /* Eligibility is decided *before* the consume: the seed message
-                 * lives only in the chat store's in-memory hold until a host logs
-                 * the turn, so a loader that reloaded in between reads
-                 * `messages: []` — and consuming there burned the request and
-                 * dropped the prompt with no draft restore (F4c). */
                 if (isEligibleStartupRequest) {
-                  /* The consume is one-shot, so from here the session owns the
-                   * request. Home → project navigation remounts the shell under
-                   * the sidebar row that is this chat's only view; without a hold
-                   * across the await the session was disposed mid-dispatch and
-                   * its replacement found the request already gone (F3). The hold
-                   * is freed by `#scheduleRunReleaseIfTerminal` once the request
-                   * settles — including the compose failure below (F4a). */
-                  session.runHeld = true;
-                  /* Nothing else can give this hold back: the request was never
-                   * started, so the lifecycle release never runs. A rejected
-                   * consume — it is a filesystem patch — left the session held
-                   * forever, undisposable and undrained (R1-F2). `retainDurableRun`
-                   * may have taken its own hold during the await; it is the only
-                   * other writer and it always sets `durableRunId` with it, so
-                   * that field tells this path's hold from theirs (R1-F5). */
-                  const releaseSeedHold = (): void => {
-                    if (session.durableRunId === undefined) {
-                      session.runHeld = false;
-                    }
-                    this.#disposeIfUnreferenced(session);
-                  };
-                  const consumedChat = await depsRef()
-                    .consumeChatStartupRequest(input.chatId, startupRequest.id)
-                    .catch((error: unknown) => {
-                      releaseSeedHold();
-                      throw error;
-                    });
-                  if (consumedChat) {
+                  const projection = this.#projectionContext(input.chatId);
+                  const accepted =
+                    projection !== undefined &&
+                    selectCaughtUp(projection) &&
+                    projection.views[startupRequest.id]?.user?.id === startupRequest.messageId;
+                  if (accepted) {
+                    void this.#clearAcceptedSeed(input.chatId, startupRequest.id);
                     session.draftActorRef.send({ type: 'initializeFromChat' });
-                    session.chat.messages = consumedChat.messages;
-
-                    /* This dispatch *is* the host stream for the chat's first turn.
-                     * Marked before it is sent, because the host registration that
-                     * would otherwise reattach lands in the same tick and would open
-                     * a second stream — a second relay session on rung 2, which a
-                     * capacity-1 daemon refuses. */
-                    session.seededDispatch = true;
-                    /* Through the turn's owner, like every other gesture: the
-                     * seeded turn takes a lease and must settle it. The consumed
-                     * row's execution rides with the gesture, because the
-                     * load's answer that assigns it to the machine is
-                     * only returned on the next line and the route's own agent
-                     * config is a render older still — without it the chat's
-                     * `acp` agent (or its pinned Tau host/model) is rebuilt from
-                     * the cookie and the first turn silently runs somewhere
-                     * else. The admission waits for the route to publish, so
-                     * being ahead of it is not a race any more. */
-                    const seedGesture: ChatTurnGesture = {
-                      kind: 'regenerate',
-                      execution: consumedChat.activeExecution,
-                      requestId: startupRequest.id,
-                    };
-                    /* The chat's root exists from acquire, so the seed is taken, never parked (V3a, PV-S5). */
-                    session.stateActorRef.send({ type: 'requestTurn', gesture: seedGesture });
-
-                    return { chat: { ...consumedChat, error: undefined } };
+                    return { chat: { ...loadedChat, error: undefined } };
                   }
-                  releaseSeedHold();
+                  /* Keep the exact intent until Start is durably accepted. A
+                   * reload between this load and host acknowledgement must
+                   * resend the same command id and prompt. */
+                  session.runHeld = true;
+                  session.seededDispatch = true;
+                  session.draftActorRef.send({ type: 'initializeFromChat' });
+                  const seedGesture: ChatTurnGesture = {
+                    kind: 'regenerate',
+                    execution: loadedChat.activeExecution,
+                    requestId: startupRequest.id,
+                  };
+                  session.stateActorRef.send({ type: 'requestTurn', gesture: seedGesture });
+                  return { chat: { ...loadedChat, error: undefined } };
                 }
               }
 
-              /* Healing a pending tail into the composer is for a turn *this load*
-               * found abandoned in the row. A message the live `Chat` was already
-               * carrying belongs to a request in flight right now, and yanking it
-               * back into the draft cancels the turn the person just sent. */
-              const pendingTailRestore =
-                inFlight.length > 0 ? undefined : buildPendingTailDraftRestore(session.chat.messages);
               session.draftActorRef.send({ type: 'initializeFromChat' });
-              if (pendingTailRestore) {
-                session.chat.messages = pendingTailRestore.truncatedMessages;
-                await restoreDraft(pendingTailRestore.userMessage);
-                const restoredChat = await depsRef().commitCancelledDraftRestore(input.chatId, {
-                  messages: pendingTailRestore.truncatedMessages,
-                  clearStartupRequestId: startupRequest?.id,
-                });
-                const healedChat = restoredChat ?? {
-                  ...loadedChat,
-                  messages: pendingTailRestore.truncatedMessages,
-                  startupRequest: undefined,
-                };
-
-                return { chat: healedChat };
-              }
-
-              // Reattach to any admitted queued/running/waiting run after a
-              // reload. The host transport replays the whole durable log from
-              // cursor 0 — nothing persists a cursor — and drops this
-              // transcript's copy of the run it is about to rebuild through the
-              // reset registered above, so the replay cannot double any part it
-              // already applied.
-              if (session.durableRunId && session.durableRunState !== 'terminal') {
-                queueMicrotask(() => {
-                  void session.chat.resumeStream();
-                });
-              }
               return { chat: loadedChat };
-            },
-          }),
-          persistMessagesActor: createAsyncLogic({
-            run: async ({ input }) => {
-              await depsRef().patchChat(input.chatId, 'messages', stampMessageCreatedAt(input.messages));
             },
           }),
           persistErrorActor: createAsyncLogic({
@@ -2145,44 +2140,6 @@ export class ChatSessionStore {
       }),
       { ...this.#rootOptions, input: {} },
     );
-    /**
-     * Put a cancelled turn's message back in the composer, durably.
-     *
-     * The draft shows at once. Its attachments live in the chat's directory, so
-     * each is copied back beside the record (idempotent by hash) before the
-     * record is told to reference it; bytes that are already gone stay a
-     * placeholder (D19) rather than failing the restore.
-     */
-    const restoreDraft = async (userMessage: MyUIMessage): Promise<void> => {
-      const draft = buildDraftFromUserMessage(userMessage);
-      draftActorRef.send({ type: 'loadDraftFromMessageTransient', draft });
-      const work = persistRestoredDraft();
-      session.composerWork.add(work);
-      try {
-        await work;
-      } finally {
-        session.composerWork.delete(work);
-      }
-    };
-    const persistRestoredDraft = async (): Promise<void> => {
-      const binding = await composer;
-      const restored = draftActorRef.getSnapshot().context;
-      await Promise.all(
-        restored.draftAttachments.map(async (attachment) => {
-          try {
-            await binding.chatAttachments.copyTo(binding.record.attachments, attachment);
-          } catch (error) {
-            console.warn('[ChatSessionStore] a restored attachment is not on this device', error);
-          }
-        }),
-      );
-      const current = draftActorRef.getSnapshot().context;
-      composerRecordRef.send({
-        type: 'patch',
-        fields: { draft: buildDraftMessage(current.draftText, current.draftAttachments) },
-      });
-    };
-
     // Subscribed before the record actor starts, so its read cannot resolve unheard (D7).
     const recordLoadedSubscription = composerRecordRef.on('recordLoaded', ({ record }) => {
       draftActorRef.send({ type: 'hydrateDraft', ...draftHydrationOf(record) });
@@ -2192,231 +2149,11 @@ export class ChatSessionStore {
     const chat = createChatInstance({
       chatId,
       transport,
-      onFinish: ({ messages, isAbort, isError, isDisconnect }) => {
-        const durableRunId = getBoundDurableChatRunId(chatId) ?? session.durableRunId;
-        if (durableRunId && !isDisconnect) {
-          session.durableRunId = durableRunId;
-          session.durableRunState = 'terminal';
-        }
-        persistenceActorRef.send({ type: 'requestFinished', messages, isAbort, isError, isDisconnect });
-        this.#scheduleRunReleaseIfTerminal(session);
-      },
-      onError(error) {
-        persistenceActorRef.send({ type: 'handleError', error });
-        persistenceActorRef.send({
-          type: 'setPersistedError',
-          error: parseErrorForPersistence(error),
-        });
-      },
-    });
-
-    const milestonePersistState = {
-      lastPersistedMilestoneIndex: -1,
-      lastPersistedMilestonePartCount: 0,
-    };
-
-    const resetMilestonePersistTracking = (): void => {
-      milestonePersistState.lastPersistedMilestoneIndex = -1;
-      milestonePersistState.lastPersistedMilestonePartCount = 0;
-    };
-
-    // Translate persistence-actor emits into AI SDK side effects on the
-    // store-owned `Chat`. Identical wiring to the prior `<ChatInstance>` —
-    // moved outside React so the listeners outlive any subtree mount cycle.
-    //
-    // The listener body is deferred onto a microtask so that
-    // `chat.sendMessage` / `chat.regenerate` / `chatShim.makeRequest` never
-    // run nested inside another `Chat.makeRequest`'s `finally` block. AI SDK
-    // v6's `makeRequest` clobbers `this.activeResponse = void 0` AFTER its
-    // `onFinish` callback returns; a synchronous re-entry from `onFinish` →
-    // `requestFinished` → `stopping → invoking` → emit `dispatchRequest`
-    // would let the new `makeRequest` assign `this.activeResponse =
-    // activeResponse_B` only to have the outer finally null it back out.
-    // The new `makeRequest`'s own finally would then access
-    // `this.activeResponse.state.message` (no optional chaining in ai@6.0.175)
-    // and throw a TypeError that the surrounding try/catch swallows,
-    // suppressing `onFinish` and stranding the persistence machine in
-    // `invoking`. See docs/research/chat-followup-message-swallow.md.
-    //
-    // The microtask deferral is strictly local to this listener: the
-    // sibling `applyResumedRequest` listener still runs synchronously so
-    // its `chat.messages = sanitized` mutation is observable to the deferred
-    // `chat.sendMessage(B)` call when it fires on the next tick.
-    const dispatchSubscription = persistenceActorRef.on('dispatchRequest', ({ request }) => {
-      /* The turn's owner composed this body; the only bodyless dispatch left is
-       * the persistence machine's own transparent auto-retry, which is a second
-       * *request* in the turn already running and reuses its body. */
-      const requestBody = request.body ? this.startRun(chatId, request.body) : session.activeRunBody;
-
-      queueMicrotask(() => {
-        const dispatch = (): void => {
-          if (this.#sessions.get(chatId) !== session) {
-            // Replaced: its successor owns the chat, and the request lifecycle
-            // went with the actor this session stopped.
-            return;
-          }
-          /* A dispatch that cannot run ends its request. Returning silently
-           * left `requestLifecycle` in `invoking` forever with no banner — and,
-           * since F3, held the session and the turn's lease with it (F4a). */
-          const refuse = (reason: string): void => {
-            persistenceActorRef.send({
-              type: 'setPersistedError',
-              error: parseErrorForPersistence(new Error(reason)),
-            });
-            persistenceActorRef.send({
-              type: 'requestFinished',
-              messages: chat.messages,
-              isAbort: false,
-              isError: true,
-              isDisconnect: false,
-            });
-          };
-          /* A continuation composes no body and needs none: `reconnectToStream`
-           * never reads one, because the host continues the run from its own
-           * durable log. Requiring one refused every *Resume* the person
-           * pressed after a run had ended — `activeRunBody` is the live run's
-           * and the settlement that ended it cleared it — so the turn was
-           * admitted and leased and then silently never dispatched (I1). */
-          if (requestBody === undefined && request.kind !== 'continue') {
-            refuse('No agent configuration is available for this chat.');
-            return;
-          }
-          switch (request.kind) {
-            case 'send': {
-              void chat.sendMessage(request.message, { body: requestBody });
-              return;
-            }
-
-            case 'regenerate': {
-              void chat.regenerate({ body: requestBody });
-              return;
-            }
-
-            case 'edit': {
-              const messageIndex = chat.messages.findIndex((m) => m.id === request.messageId);
-              if (messageIndex === -1) {
-                /* `turnIntentOf` refuses this gesture at admission, so only the
-                 * microtask between `turnAdmitted` and this dispatch can lose
-                 * the message. Kept as a refusal rather than deleted: the
-                 * alternative reads `messages[-1]` and throws inside the
-                 * microtask, which is the wedge this branch existed to avoid. */
-                refuse('That message is no longer in this chat, so it cannot be edited.');
-                return;
-              }
-              const originalMessage = chat.messages[messageIndex]!;
-              chat.messages = [...chat.messages.slice(0, messageIndex), editedMessage(originalMessage, request)];
-              void chat.regenerate({ body: requestBody });
-              return;
-            }
-
-            /* Resume the exact admitted run without slicing chat.messages.
-             * Whether this turn could be resumed at all was decided by the
-             * chat's admission, which is the only owner that knows; reaching a
-             * second verdict here is how one refusal came to be answered with
-             * a replay of the same failure. */
-            case 'continue': {
-              /* The one-shot request is only ever consumed by a browser-host
-               * stream. Arming it on a placement that cannot read it leaves it
-               * set for a later stream this dispatch never asked for. */
-              if (isBrowserAgentHostPlaced(chatId)) {
-                requestBrowserAgentHostResume(chatId);
-              }
-              void chat.resumeStream(requestBody === undefined ? {} : { body: requestBody });
-            }
-          }
-        };
-        dispatch();
-      });
-    });
-
-    const stopSubscription = persistenceActorRef.on('dispatchStop', () => {
-      /* The host's `cancel`, not only the SDK's abort: a reattached stream
-       * carries no abort signal, so the abort alone detached nothing and the
-       * run went on (W0.3, D17). A stream this page admitted is cancelled by
-       * its abort too; the host answers the second cancel with nothing. */
-      void cancelBrowserAgentHostRun(chatId);
-      void chat.stop();
-    });
-
-    const finishedSubscription = persistenceActorRef.on('applyFinishedRequest', ({ messages, cause }) => {
-      resetMilestonePersistTracking();
-      const sanitized = finalizeInterruptedToolParts(messages, chatId, cause);
-      if (sanitized !== messages) {
-        chat.messages = sanitized;
-      }
-      persistenceActorRef.send({ type: 'queuePersist', messages: sanitized });
-    });
-
-    const stoppedSubscription = persistenceActorRef.on('applyStoppedRequest', ({ messages, cause }) => {
-      resetMilestonePersistTracking();
-      let sanitized = finalizeInterruptedToolParts(messages, chatId, cause);
-
-      const last = sanitized.at(-1);
-      if (last?.role === 'user' && last.metadata?.status === 'pending') {
-        sanitized = sanitized.with(-1, {
-          ...last,
-          metadata: { ...last.metadata, status: 'cancelled' },
-        });
-      }
-
-      chat.messages = sanitized;
-      persistenceActorRef.send({ type: 'queuePersist', messages: sanitized });
-    });
-
-    // Empty-cancel companion to `applyStoppedRequest`: commit the truncated
-    // transcript and restored composer draft as one durable chat-row
-    // transition. The draft-machine event is intentionally transient; storage
-    // durability is owned by `commitCancelledDraftRestore`.
-    //
-    // `chat-history.tsx` subscribes to the same emit independently to
-    // refocus the composer in the next animation frame.
-    const restoreSubscription = persistenceActorRef.on(
-      'restoreCancelledDraft',
-      async ({ userMessage, truncatedMessages }) => {
-        resetMilestonePersistTracking();
-        chat.messages = truncatedMessages;
-        try {
-          await restoreDraft(userMessage);
-          await depsRef().commitCancelledDraftRestore(chatId, { messages: truncatedMessages });
-        } catch (error) {
-          const persistenceError =
-            error instanceof Error ? error : new Error('Failed to restore cancelled draft', { cause: error });
-          persistenceActorRef.send({
-            type: 'setPersistedError',
-            error: parseErrorForPersistence(persistenceError),
-          });
-        }
-      },
-    );
-
-    const resumedSubscription = persistenceActorRef.on('applyResumedRequest', ({ messages, cause }) => {
-      resetMilestonePersistTracking();
-      const sanitized = finalizeInterruptedToolParts(messages, chatId, cause);
-      chat.messages = sanitized;
-      persistenceActorRef.send({ type: 'queuePersist', messages: sanitized });
-    });
-
-    /*
-     * A host reattach replays the whole durable log from cursor 0, because the
-     * host may have finished the turn with no client attached. The AI SDK
-     * *continues* a trailing assistant message on a resume instead of starting
-     * a new one, and it keys tool parts by `toolCallId` and data parts by `id`
-     * but keys text and reasoning parts by nothing — so a replay over the
-     * transcript this store restored from local persistence merged the tool
-     * cards in place and appended a second copy of every text block. Each later
-     * turn then froze that doubling into history: the operator's four-run chat
-     * rendered its third turn four times and its first turn twice
-     * (2026-09-03).
-     *
-     * The log is the authority (PH19), so the transport hands over the
-     * transcript the whole log implies and this store splices it in — every run
-     * the log names is replaced, healing whatever earlier reloads left behind.
-     * It is called only once the host has answered `attach`, so a chat whose
-     * log this host does not hold keeps the transcript it had.
-     */
-    const unregisterRunReset = registerAgentHostRunReset(chatId, (rebuild) => {
-      resetMilestonePersistTracking();
-      chat.messages = [...rebuild(chat.messages)];
+      /* The SDK closes a view stream; only the projected host log ends a run. */
+      onFinish: () => undefined,
+      // SDK watch errors are presentation-local. The host log owns durable
+      // run failure; a retired stream callback must not rewrite chat.error.
+      onError: () => undefined,
     });
 
     // Wire the AI SDK Chat's snapshot callbacks into per-chatId subscriber
@@ -2424,46 +2161,22 @@ export class ChatSessionStore {
     // the AI SDK's "internal-but-intended-for-subscribers" marker — see
     // node_modules/@ai-sdk/react/dist/index.d.ts).
     const unregisterMessages = chat['~registerMessagesCallback'](() => {
-      const lastIndex = chat.messages.length - 1;
-      const last = chat.messages[lastIndex];
-      if (last?.role === 'assistant') {
-        const milestoneCount = countPersistMilestones(last);
-        if (
-          lastIndex !== milestonePersistState.lastPersistedMilestoneIndex ||
-          milestoneCount > milestonePersistState.lastPersistedMilestonePartCount
-        ) {
-          milestonePersistState.lastPersistedMilestoneIndex = lastIndex;
-          milestonePersistState.lastPersistedMilestonePartCount = milestoneCount;
-          persistenceActorRef.send({ type: 'queuePersist', messages: chat.messages });
-        }
-      }
-
-      this.#syncChatState(session);
       this.#chatTopics.get(chatId)?.emit();
     });
     const unregisterStatus = chat['~registerStatusCallback'](() => {
       const next = chat.status;
       if (session.status !== next) {
-        if (next === 'ready' && (session.status === 'submitted' || session.status === 'streaming')) {
-          /* The request is over; `stopping` is the last lifecycle it reported when the person stopped it (P63). */
-          this.#reportRequestEnd(session, session.lastState.lifecycle === 'stopping' ? 'cancelled' : 'completed');
-        }
         session.status = next;
-        if (next === 'streaming') {
-          persistenceActorRef.send({ type: 'streamResumed' });
-        }
-        if (session.durableRunId && (next === 'submitted' || next === 'streaming')) {
-          session.durableRunState = 'active';
+        if (next === 'ready') {
+          const projection = this.#projectionContext(chatId);
+          if (projection !== undefined && selectCaughtUp(projection)) {
+            this.#syncProjection(chatId, 'none');
+          }
         }
       }
-      this.#syncChatState(session);
       this.#chatTopics.get(chatId)?.emit();
     });
     const unregisterError = chat['~registerErrorCallback'](() => {
-      if (chat.error !== undefined) {
-        this.#reportRequestEnd(session, 'failed');
-      }
-      this.#syncChatState(session);
       this.#chatTopics.get(chatId)?.emit();
     });
 
@@ -2473,7 +2186,6 @@ export class ChatSessionStore {
 
     // oxlint-disable-next-line eslint/prefer-const -- assigned after `session.dispose` captures it so immediate actor emissions cannot observe a partial session.
     let lifecycleSubscription: { unsubscribe: () => void } | undefined;
-    let requestLifecycleWasActive = false;
     let loading: 'before' | 'loading' | 'loaded' = 'before';
     const chatRoot = createActor(this.#chatSessionLogic, { ...this.#rootOptions, input: { chatId, projectId } });
     session = {
@@ -2483,7 +2195,6 @@ export class ChatSessionStore {
       projectId,
       chatRoot,
       stateActorRef: chatRoot,
-      lastState: {},
       persistenceActorRef,
       draftActorRef,
       composerRecordRef,
@@ -2491,29 +2202,26 @@ export class ChatSessionStore {
       composerWork: new Set(),
       viewRefcount: 1,
       runHeld: false,
-      durableRunId: undefined,
-      durableRunState: undefined,
-      reattachedHostId: undefined,
-      pendingReattachHostId: undefined,
       seededDispatch: false,
-      activeRunBody: undefined,
+      activeCommand: undefined,
+      commandAbort: undefined,
+      watch: undefined,
+      watchedRunId: undefined,
+      materializeVersion: 0,
+      commandInFlight: false,
+      stopRequested: false,
+      restoredStoppedRunId: undefined,
       status: chat.status,
-      placement: undefined,
       turnSubscriptions: [],
       dispose: () => {
         for (const subscription of session.turnSubscriptions) {
           subscription.unsubscribe();
         }
         session.turnSubscriptions = [];
-        dispatchSubscription.unsubscribe();
         recordLoadedSubscription.unsubscribe();
-        stopSubscription.unsubscribe();
-        finishedSubscription.unsubscribe();
-        stoppedSubscription.unsubscribe();
-        restoreSubscription.unsubscribe();
-        resumedSubscription.unsubscribe();
+        session.commandAbort?.abort();
+        session.watch?.stop();
         lifecycleSubscription?.unsubscribe();
-        unregisterRunReset();
         unregisterMessages();
         unregisterStatus();
         unregisterError();
@@ -2527,19 +2235,8 @@ export class ChatSessionStore {
       } else if (loading === 'loading' && !snapshot.context.isLoadingChat) {
         loading = 'loaded';
         this.#replayPersistedFailure(session);
+        this.#syncProjection(session.chatId, 'open');
       }
-      this.#syncChatState(session);
-      this.#flushPendingReattach(session);
-      const idle = snapshot.matches({ requestLifecycle: 'idle' });
-      if (!idle) {
-        requestLifecycleWasActive = true;
-        return;
-      }
-      if (!requestLifecycleWasActive) {
-        return;
-      }
-      requestLifecycleWasActive = false;
-      this.#scheduleRunReleaseIfTerminal(session);
     });
 
     /* The chat's machine is a root this store owns (PV-S5, L3 D10): a chat's fault never reaches its project, and
@@ -2552,51 +2249,6 @@ export class ChatSessionStore {
     persistenceActorRef.send({ type: 'setActiveChatId', chatId });
 
     return session;
-  }
-
-  /**
-   * Hand the chat's machine what changed, and only what changed.
-   *
-   * One place reads the store's facts; the machine owns what they mean. Token
-   * deltas never get here — the message callback fires per part, and what it
-   * sends is a batched count (F8, A38).
-   *
-   * @param session - The chat whose facts moved.
-   */
-  /**
-   * Apply a reattach the chat was still loading for.
-   *
-   * Driven from the persistence actor's own snapshots, which is where the
-   * condition that held the request clears. `reattachHostChat` decides again
-   * from scratch: a chat that is still loading simply holds it once more.
-   *
-   * @param session - The session whose load may have settled.
-   */
-  #flushPendingReattach(session: InternalSession): void {
-    const hostId = session.pendingReattachHostId;
-    if (hostId !== undefined) {
-      this.reattachHostChat({ chatId: session.chatId, hostId });
-    }
-  }
-
-  #syncChatState(session: InternalSession): void {
-    const { lastState, stateActorRef } = session;
-    if (session.durableRunState !== lastState.durable) {
-      lastState.durable = session.durableRunState;
-      if (session.durableRunState !== undefined) {
-        stateActorRef.send({ type: 'durableRunState', state: session.durableRunState });
-      }
-    }
-    const snapshot = session.persistenceActorRef.getSnapshot();
-    const lifecycle = (['invoking', 'retrying', 'stopping'] as const).find((phaseName) =>
-      snapshot.matches({ requestLifecycle: phaseName }),
-    );
-    if (lifecycle !== lastState.lifecycle) {
-      lastState.lifecycle = lifecycle;
-      if (lifecycle !== undefined) {
-        stateActorRef.send({ type: 'requestLifecycle', phase: lifecycle });
-      }
-    }
   }
 
   /**
@@ -2619,27 +2271,13 @@ export class ChatSessionStore {
     session.stateActorRef.send({ type: 'runLifecycle', phase: 'failed', reason: failure.message });
   }
 
-  #withAdmission(body: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
-    if (admissionEnvelopeSchema.safeParse(body['admission']).success) {
-      return body;
-    }
-
-    return Object.freeze({
-      ...body,
-      admission: Object.freeze({
-        version: 1,
-        idempotencyKey: generatePrefixedId(idPrefix.request),
-      }),
-    });
-  }
-
   #scheduleRunReleaseIfTerminal(session: InternalSession): void {
     queueMicrotask(() => {
-      if (!session.runHeld || !session.persistenceActorRef.getSnapshot().matches({ requestLifecycle: 'idle' })) {
+      if (!session.runHeld || session.watchedRunId !== undefined || session.commandInFlight) {
         return;
       }
       session.runHeld = false;
-      session.activeRunBody = undefined;
+      session.activeCommand = undefined;
       this.#disposeIfUnreferenced(session);
     });
   }
@@ -2667,7 +2305,6 @@ export class ChatSessionStore {
     if (
       session.viewRefcount > 0 ||
       session.runHeld ||
-      session.durableRunId !== undefined ||
       this.#isAdmittingTurn(session) ||
       this.#sessions.get(session.chatId) !== session
     ) {

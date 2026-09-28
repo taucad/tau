@@ -11,6 +11,9 @@ import type { CombinedChatState } from '#hooks/use-chat.js';
 import { useChatSelector } from '#hooks/use-chat.js';
 import { chatTurnNotStartedCode } from '#utils/error.utils.js';
 import { ChatError as ChatErrorBanner } from '#routes/w.$workspace.$project/chat-error.js';
+import { chatProjectionLogic, selectCurrentRun, selectRunFailure } from '#machines/chat-projection.logic.js';
+import { lifecycleRow, logRow } from '#machines/chat-projection.fixture.js';
+import { createActor } from 'xstate';
 import { ChatErrorTooLong } from '#routes/w.$workspace.$project/chat-error-too-long.js';
 
 const continueChat = vi.fn();
@@ -89,6 +92,71 @@ describe('ChatError', () => {
   beforeEach(() => {
     resumableFailureOverrides.clear();
     vi.clearAllMocks();
+  });
+
+  it('retires an untyped legacy connection card only after the current host log catches up', () => {
+    const projection = createActor(chatProjectionLogic).start();
+    const legacy: ChatErrorPayload = {
+      category: errorCategory.generic,
+      title: 'Something went wrong',
+      message: 'Channel closed (local)',
+    };
+    let attachmentStatus: CombinedChatState['attachmentStatus'] = 'lost';
+    vi.mocked(useChatSelector).mockImplementation((selector) =>
+      selector({
+        error: undefined,
+        persistedError: legacy,
+        projection: projection.getSnapshot().context,
+        attachmentStatus,
+      } as CombinedChatState),
+    );
+    const { rerender } = render(<ChatErrorBanner />);
+    expect(screen.getByText('Channel closed (local)')).toBeInTheDocument();
+    projection.send({
+      type: 'batch',
+      answer: { status: 'batch', cursor: 0, nextCursor: 0, endCursor: 0, events: [] },
+    });
+    attachmentStatus = 'attached';
+    rerender(<ChatErrorBanner className='recovered' />);
+    expect(screen.queryByText('Channel closed (local)')).not.toBeInTheDocument();
+    projection.stop();
+  });
+
+  it('keeps a current projected run failure visible after a healthy attachment replaces a stale SDK error', () => {
+    const projection = createActor(chatProjectionLogic).start();
+    projection.send({
+      type: 'batch',
+      answer: {
+        status: 'batch',
+        cursor: 0,
+        nextCursor: 3,
+        endCursor: 3,
+        events: [
+          lifecycleRow(0, 'admitted'),
+          lifecycleRow(1, 'running'),
+          logRow(2, {
+            type: 'run.lifecycle',
+            state: 'failed',
+            attempt: 1,
+            detail: { message: 'Current provider failure' },
+          }),
+        ],
+      },
+    });
+    expect(selectCurrentRun(projection.getSnapshot().context)?.lifecycle).toBe('failed');
+    expect(selectRunFailure(projection.getSnapshot().context, 'run_1')).toContain('Current provider failure');
+    vi.mocked(useChatSelector).mockImplementation((selector) =>
+      selector({
+        error: new Error('Old socket failure'),
+        persistedError: undefined,
+        projection: projection.getSnapshot().context,
+        attachmentStatus: 'attached',
+      } as CombinedChatState),
+    );
+    render(<ChatErrorBanner />);
+    expect(screen.getByText(/Current provider failure/u)).toBeInTheDocument();
+    expect(screen.queryByText('Old socket failure')).not.toBeInTheDocument();
+    projection.stop();
   });
 
   /* F5: the rate-limit and service cards are routed by CATEGORY, so each also

@@ -234,7 +234,14 @@ describe('ChatStackTrace — new-chat (shift held) path', () => {
       activeExecution?: CadAgentConfigInput['execution'];
       activeKernel?: string;
       messages?: Array<{ id: string; metadata?: Record<string, unknown> }>;
-      startupRequest?: { id: string; kind: string; messageId: string; source: string; createdAt: number };
+      startupRequest?: {
+        id: string;
+        kind: string;
+        messageId: string;
+        message?: { id: string; metadata?: Record<string, unknown> };
+        source: string;
+        createdAt: number;
+      };
     };
     expect(callArgs.activeExecution).toEqual({ kind: 'tau', model: 'chat-local-model' });
     expect(callArgs.activeKernel).toBe('manifold');
@@ -242,6 +249,7 @@ describe('ChatStackTrace — new-chat (shift held) path', () => {
     expect(callArgs.startupRequest?.id).toMatch(/^req_/);
     expect(callArgs.startupRequest?.kind).toBe('regenerate-tail');
     expect(callArgs.startupRequest?.messageId).toBe(callArgs.messages?.[0]?.id);
+    expect(callArgs.startupRequest?.message).toEqual(callArgs.messages?.[0]);
     expect(callArgs.startupRequest?.source).toBe('fix-with-ai-new-chat');
     expect(typeof callArgs.startupRequest?.createdAt).toBe('number');
   });

@@ -155,7 +155,7 @@ function ProjectSessionBinding({
   readonly isFocused: boolean;
   readonly shouldOpenFromTauCloud?: boolean;
 }): React.JSX.Element {
-  const { fileManagerRef, workspace } = useFileManager();
+  const { fileManagerRef, workerChangeChannel, workspace } = useFileManager();
   const { defaultExecution, resolveModel } = useModels();
   const { kernel: defaultKernel } = useKernel();
   const [testingEnabled] = useCookie(cookieName.chatTestingEnabled, true);
@@ -280,6 +280,31 @@ function ProjectSessionBinding({
       return readBrowserRunStoppability(projectId, chatId);
     });
   }, [chatSessions, client, fileManagerRef, projectId, viewsReady, workspace]);
+  /* Fetch writes name only a foreign segment path. The projection owns the bytes and transcript; a local host
+   * log is still followed exclusively through its cursor. */
+  useEffect(() => {
+    if (workerChangeChannel === undefined) {
+      return;
+    }
+    const prefix = `/projects/${projectId}/.tau/chats/`;
+    const refresh = async (chatId: string): Promise<void> => {
+      try {
+        await chatSessions.refreshRemoteSegments(chatId, projectId);
+      } catch (error) {
+        console.warn('[ProjectSessionBinding] foreign chat log could not be read', chatId, error);
+      }
+    };
+    return workerChangeChannel.onFileWritten({
+      interestedIn: (path) => path.startsWith(prefix) && /\/events\/[^/]+\.jsonl$/.test(path),
+      handler: ({ path }) => {
+        const chatId = path.slice(prefix.length).split('/')[0];
+        if (chatId === undefined || !chatSessions.observedChatIdsOf(projectId).includes(chatId)) {
+          return;
+        }
+        void refresh(chatId);
+      },
+    });
+  }, [chatSessions, projectId, workerChangeChannel]);
   /* RV-W5b2 R2-1: an editor's conflict still being recorded keeps the project open, like a dirty tree. */
   const recording = useSyncExternalStore(
     subscribeEditorConflictRecords,

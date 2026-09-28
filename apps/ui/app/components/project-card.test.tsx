@@ -67,7 +67,7 @@ describe('ProjectCard', () => {
 });
 
 describe('ProjectCardMedia', () => {
-  it('should render a lazy thumbnail and expose preview visibility as native hidden state', async () => {
+  it('should render a lazy thumbnail and mount the preview only while it is visible', async () => {
     const onPreviewVisibilityChange = vi.fn();
     const { rerender } = render(
       <TooltipProvider>
@@ -83,7 +83,7 @@ describe('ProjectCardMedia', () => {
     expect(thumbnail).toHaveAttribute('src', '/placeholder.svg');
     expect(thumbnail).toHaveAttribute('loading', 'lazy');
     expect(thumbnail.parentElement).toHaveClass('aspect-4/3');
-    expect(screen.getByTestId('preview').parentElement).toHaveAttribute('hidden');
+    expect(screen.queryByTestId('preview')).not.toBeInTheDocument();
 
     const toggle = screen.getByRole('button', { name: 'Preview model' });
     expect(toggle).toHaveAttribute('aria-pressed', 'false');
@@ -103,7 +103,7 @@ describe('ProjectCardMedia', () => {
     );
 
     expect(screen.queryByRole('presentation')).not.toBeInTheDocument();
-    expect(screen.getByTestId('preview').parentElement).not.toHaveAttribute('hidden');
+    expect(screen.getByTestId('preview')).toBeVisible();
     const pressed = screen.getByRole('button', { name: 'Preview model' });
     expect(pressed).toHaveAttribute('aria-pressed', 'true');
     // Pressed is a neutral fill with a foreground glyph, never hue alone.

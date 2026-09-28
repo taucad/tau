@@ -32,6 +32,8 @@ export function CommunityProjectGrid({
   featuredLocator,
 }: CommunityProjectGridProperties): React.JSX.Element {
   const displayedProjects = limit ? projects.slice(0, limit) : projects;
+  /* One live preview at a time: opening another card's preview releases this one. */
+  const [previewLocator, setPreviewLocator] = useState<string>();
 
   return (
     <ul role='list' className={cn(projectGridClassName, 'grid-flow-dense')}>
@@ -39,7 +41,12 @@ export function CommunityProjectGrid({
         const isFeatured = project.locator === featuredLocator;
         return (
           <li key={project.id} className={cn(isFeatured && 'col-span-2 lg:row-span-2')}>
-            <CommunityProjectCard project={project} isFeatured={isFeatured} />
+            <CommunityProjectCard
+              project={project}
+              isFeatured={isFeatured}
+              isPreviewVisible={previewLocator === project.locator}
+              onPreviewLocatorChange={setPreviewLocator}
+            />
           </li>
         );
       })}
@@ -50,12 +57,17 @@ export function CommunityProjectGrid({
 type CommunityProjectCardProperties = {
   readonly project: BuiltinProjectCardModel;
   readonly isFeatured: boolean;
+  readonly isPreviewVisible: boolean;
+  readonly onPreviewLocatorChange: (locator: string | undefined) => void;
 };
 
-function CommunityProjectCard({ project, isFeatured }: CommunityProjectCardProperties): React.JSX.Element {
+function CommunityProjectCard({
+  project,
+  isFeatured,
+  isPreviewVisible,
+  onPreviewLocatorChange,
+}: CommunityProjectCardProperties): React.JSX.Element {
   const { id, name, description, thumbnail, kernel, tags, assets, locator } = project;
-  const [activated, setActivated] = useState(false);
-  const [visible, setVisible] = useState(false);
   const [isForking, setIsForking] = useState(false);
   const [files, setFiles] = useState<ProjectFiles>();
   const filesPromise = useRef<Promise<ProjectFiles> | undefined>(undefined);
@@ -99,13 +111,12 @@ function CommunityProjectCard({ project, isFeatured }: CommunityProjectCardPrope
 
   const handlePreviewVisibilityChange = useCallback(
     (isVisible: boolean) => {
-      setActivated(true);
-      setVisible(isVisible);
+      onPreviewLocatorChange(isVisible ? locator : undefined);
       if (isVisible) {
         void ensureFiles();
       }
     },
-    [ensureFiles],
+    [ensureFiles, locator, onPreviewLocatorChange],
   );
 
   return (
@@ -125,10 +136,10 @@ function CommunityProjectCard({ project, isFeatured }: CommunityProjectCardPrope
         <ProjectCardMedia
           shouldFill
           thumbnailSource={thumbnail}
-          isPreviewVisible={visible}
+          isPreviewVisible={isPreviewVisible}
           onPreviewVisibilityChange={handlePreviewVisibilityChange}
         >
-          {activated && files ? (
+          {files ? (
             <CadPreviewProvider projectId={id} mainFile={mainFile} files={files}>
               <ProjectCardCadPreview />
             </CadPreviewProvider>

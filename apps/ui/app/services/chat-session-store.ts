@@ -1772,6 +1772,7 @@ export class ChatSessionStore {
                     const seedGesture: ChatTurnGesture = {
                       kind: 'regenerate',
                       execution: consumedChat.activeExecution,
+                      requestId: startupRequest.id,
                     };
                     /* The chat's root exists from acquire, so the seed is taken, never parked (V3a, PV-S5). */
                     session.stateActorRef.send({ type: 'requestTurn', gesture: seedGesture });

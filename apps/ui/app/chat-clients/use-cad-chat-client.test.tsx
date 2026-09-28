@@ -655,6 +655,21 @@ describe('useCadChatClient', () => {
     expect(admittedTurns).toHaveLength(0);
   });
 
+  it('uses the startup request id as the seeded first turn’s host command id', async () => {
+    const chat = mock<Chat<MyUIMessage>>();
+    Object.defineProperty(chat, 'messages', {
+      get: () => [{ id: 'seed-user', role: 'user', parts: [{ type: 'text', text: 'Build it.' }] }],
+    });
+    useActiveChatInstanceMock.mockReturnValue(chat);
+    installActions(buildActions());
+
+    renderClient();
+    const turn = await composeTurn({ kind: 'regenerate', requestId: 'req_startup-1' });
+
+    expect(turn.runId).toBe('req_startup-1');
+    expect(turn.request.body?.['admission']).toMatchObject({ idempotencyKey: 'req_startup-1' });
+  });
+
   it('places a Tau Host turn on the daemon channel, claiming no browser workspace', async () => {
     mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-5.5', hostId: 'origin' } }));
     const chat = mock<Chat<MyUIMessage>>();

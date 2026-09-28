@@ -900,6 +900,7 @@ const compactionModelsWithTransport = (options: {
           funded && options.prepareInvocation
             ? await options.prepareInvocation('compaction', model.id, signal)
             : options.createId();
+        signal.throwIfAborted();
         const documents = options.documents();
         const stream = options.transport.stream({
           attemptId,

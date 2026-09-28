@@ -342,6 +342,78 @@ function publishAdmission(
 }
 
 describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
+  it('reopens a projected run watch after live delivery drops without another durable row or command', async () => {
+    const store = createStore();
+    const chatId = 'chat_live_drop';
+    const projectId = 'project_live_drop';
+    const hostCommand = vi.fn<AgentHostClient['hostCommand']>();
+    let endLive: (() => void) | undefined;
+    let deliverLive: Parameters<AgentHostClient['subscribeLive']>[1] | undefined;
+    const subscribe = vi.fn((...parameters: Parameters<AgentHostClient['subscribe']>) => {
+      const [{ cursor }] = parameters;
+      queueMicrotask(() =>
+        parameters[3]?.({
+          status: 'batch',
+          chatId,
+          cursor,
+          nextCursor: 2,
+          endCursor: 2,
+          events: cursor === 0 ? runningRows('run_live_drop') : [],
+        }),
+      );
+      return vi.fn();
+    });
+    const connect = vi.fn(async () => ({
+      hostCommand,
+      read: vi.fn<AgentHostClient['read']>(),
+      subscribe,
+      subscribeLive: (
+        _chatId: string,
+        listener: Parameters<AgentHostClient['subscribeLive']>[1],
+        onEnded?: () => void,
+      ) => {
+        deliverLive = listener;
+        endLive = onEnded;
+        return vi.fn();
+      },
+      close: vi.fn(async () => undefined),
+    }));
+    const session = store.acquire(chatId, projectId);
+    const unobserve = store.observe(chatId, projectId);
+    const unpublish = store.publishProjectHostConnector(projectId, connect);
+    const chat = harness.created.find((entry) => entry.id === chatId)!;
+    await vi.waitFor(() => {
+      expect(chat.resumeStream).toHaveBeenCalledTimes(1);
+    });
+    deliverLive?.(chatId, {
+      type: 'text-delta',
+      chatId,
+      runId: 'run_live_drop',
+      messageId: 'assistant-live',
+      contentIndex: 0,
+      delta: 'Preview',
+    });
+    expect(store.getProjection(chatId)?.live?.chunks).toContainEqual(expect.objectContaining({ delta: 'Preview' }));
+    endLive?.();
+    expect(store.getProjection(chatId)?.live).toBeUndefined();
+    await vi.waitFor(
+      () => {
+        expect(connect).toHaveBeenCalledTimes(2);
+      },
+      { timeout: 2000 },
+    );
+    await vi.waitFor(() => {
+      expect(chat.resumeStream).toHaveBeenCalledTimes(2);
+    });
+    expect(subscribe.mock.calls.map(([input]) => input.cursor)).toEqual([0, 2]);
+    expect(store.getProjection(chatId)?.ledger.runs['run_live_drop']?.lifecycle).toBe('running');
+    expect(hostCommand).not.toHaveBeenCalled();
+    expect(session.chat).toBeDefined();
+    unpublish();
+    unobserve();
+    store.release(chatId);
+  });
+
   it('materializes a reopened completed chat from a foreign segment and refreshes changed bytes', async () => {
     const projectId = 'project_remote_transcript';
     const chatId = 'chat_remote_transcript';

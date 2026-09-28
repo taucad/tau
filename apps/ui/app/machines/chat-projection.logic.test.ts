@@ -107,6 +107,45 @@ const pageScan = () => {
 };
 
 describe('chatProjectionLogic (PV-S7)', () => {
+  it('keeps live text in an ephemeral watched overlay and reconciles durable output without doubling it', () => {
+    const running = project([lifecycleRow(0, 'admitted'), lifecycleRow(1, 'running')], 2);
+    const preview = reduceChatProjection(running, {
+      type: 'live',
+      event: {
+        type: 'text-delta',
+        chatId: 'chat_1',
+        runId: 'run_1',
+        messageId: 'assistant-1',
+        contentIndex: 0,
+        delta: 'Partial reply',
+      },
+    }).state;
+    expect(preview.live?.chunks.filter((chunk) => chunk.type === 'text-delta')).toEqual([
+      expect.objectContaining({ delta: 'Partial reply' }),
+    ]);
+    expect(preview.views['run_1']?.chunks.some((chunk) => chunk.type === 'text-delta')).toBe(false);
+
+    const completed = reduceChatProjection(preview, {
+      type: 'batch',
+      answer: batch(
+        [
+          logRow(2, {
+            type: 'message.appended',
+            message: { id: 'assistant-1', role: 'assistant', content: [{ type: 'text', text: 'Partial reply' }] },
+          }),
+          lifecycleRow(3, 'completed'),
+        ],
+        2,
+        4,
+      ),
+    }).state;
+    expect(completed.live?.chunks.filter((chunk) => chunk.type === 'text-delta')).toHaveLength(1);
+    expect(completed.views['run_1']?.chunks.filter((chunk) => chunk.type === 'text-delta')).toHaveLength(1);
+    expect(reduceChatProjection(completed, { type: 'clear-live', runId: 'another-run' }).state.live).toBeDefined();
+    const retired = reduceChatProjection(completed, { type: 'clear-live', runId: 'run_1' }).state;
+    expect(retired.live).toBeUndefined();
+    expect(retired.views['run_1']?.chunks.filter((chunk) => chunk.type === 'text-delta')).toHaveLength(1);
+  });
   it.each(logs)('agrees with the page’s run phase and tool scans at every row of %s', (name) => {
     const rows = readLog(name);
     const scan = pageScan();

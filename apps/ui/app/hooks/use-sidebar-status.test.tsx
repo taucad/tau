@@ -409,15 +409,6 @@ const agentStateRows: ReadonlyArray<{
     sentence: 'Waiting for you',
   },
   {
-    signal: 'durableRunState reattaching',
-    target: 'chat',
-    events: [{ type: 'durableRunState', state: 'reattaching' }],
-    state: 'reconnecting',
-    label: 'Reconnecting…',
-    mark: 'running',
-    sentence: 'Reconnecting…',
-  },
-  {
     /* PV-A7, V5 B1: Done at the terminal row; the revision card alone waits on the settlement row. */
     signal: 'run.lifecycle: completed, settlement row late',
     target: 'chat',

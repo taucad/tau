@@ -101,6 +101,7 @@ import {
   testModelOutputSchema,
 } from '@taucad/chat';
 import { toolName } from '@taucad/chat/constants';
+import { rpcClientErrorCodeSchema } from '@taucad/chat/schemas/rpc';
 import { checkProjectManifestReplacement } from '@taucad/types';
 
 const maskedPath = (message: string): Error => Object.assign(new Error(message), { code: maskedPathCode });
@@ -562,6 +563,19 @@ const tauMcpSchemas = {
   [toolName.exportGeometry]: { input: exportGeometryInputSchema, output: exportGeometryOutputSchema },
 } as const;
 
+/** Tau MCP errors emitted outside the shared business RPC schema. */
+const tauMcpHostErrorCodes = new Set([
+  'AGENT_HOST_ERROR',
+  'MACHINE_TOOL_ERROR',
+  'MCP_RUN_INACTIVE',
+  'RUNTIME_UNAVAILABLE',
+  'STALE_EVALUATION',
+  'TOOL_ERROR',
+  'TOOL_INPUT_VALIDATION_FAILED',
+  'TOOL_NOT_ALLOWED',
+  'TOOL_NOT_FOUND',
+]);
+
 type NormalizedTauMcpCall = {
   readonly toolName: keyof typeof tauMcpSchemas;
   readonly arguments: JsonValue;
@@ -635,8 +649,18 @@ const mcpResult = (
           .flatMap((block) => (typeof block?.['text'] === 'string' ? [block['text']] : []))
           .join('\n')
       : '';
+    /* Codex drops `structuredContent` from every `isError` result (all 134
+     * recorded failures), so the code survives only as the `CODE: message`
+     * text Tau's MCP failure writes; read it back so the category stays. */
+    const coded = /^([A-Z][A-Z\d]*(?:_[A-Z\d]+)*): (.+)$/su.exec(content);
+    const code = coded?.[1];
+    const rpcCode = rpcClientErrorCodeSchema.safeParse(code);
+    const knownCode = rpcCode.success ? rpcCode.data : code && tauMcpHostErrorCodes.has(code) ? code : undefined;
     return {
-      content: { errorCode: 'MCP_TOOL_ERROR', message: content.slice(0, 2000) || `${tool.toolName} failed.` },
+      content:
+        coded && knownCode
+          ? { errorCode: knownCode, message: coded[2]!.slice(0, 2000) }
+          : { errorCode: 'MCP_TOOL_ERROR', message: content.slice(0, 2000) || `${tool.toolName} failed.` },
       isError: true,
     };
   }
@@ -1371,7 +1395,17 @@ export const createTurnProjection = (options: {
       }
       return;
     }
-    const normalized = tauMcp === undefined ? undefined : mcpResult(rawOutput, tauMcp, update.status === 'failed');
+    const result = tauMcp === undefined ? undefined : mcpResult(rawOutput, tauMcp, update.status === 'failed');
+    /* A bare MCP abort follows a stopped turn. A completed tool error remains
+     * authoritative even if Stop races with its projection. */
+    const error = asRecord(result?.content);
+    const bareAbort =
+      error?.['errorCode'] === 'MCP_TOOL_ERROR' &&
+      (error['message'] === 'This operation was aborted' || error['message'] === 'The turn was cancelled.');
+    const normalized =
+      result?.isError === true && turn.signal.aborted && bareAbort
+        ? { content: { errorCode: 'USER_INTERRUPTED', message: 'Interrupted by user.' }, isError: true }
+        : result;
     const { content: _content, ...outputFacts } = facts;
     await append([
       {

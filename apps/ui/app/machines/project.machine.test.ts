@@ -124,6 +124,8 @@ describe('projectMachine', () => {
       ['thumbnail.webp', false],
       ['exports/model.step', false],
       ['.tau/chats/chat-1/events.jsonl', false],
+      ['.tau/workbench/layout.json', false],
+      ['.tau/workbench/views/front.json', false],
       ['.tau/cache/render.bin', false],
       ['.git/HEAD', false],
       ['node_modules', false],

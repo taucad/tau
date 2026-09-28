@@ -21,6 +21,7 @@ import type { RootedContentClient } from '@taucad/fs-client/rooted-content-clien
 import type { FileManagerRef, FileManagerProxy } from '#machines/file-manager.machine.types.js';
 import type { MountConfig, WorkspaceMutationError, WorkspaceScope } from '@taucad/filesystem';
 import type { ContentExportFilter } from '@taucad/filesystem/content-ops';
+import { pathRegistry } from '@taucad/filesystem/path-registry';
 import {
   disconnectWorkspace as disconnectStoredWorkspace,
   getHomeStorageBackend,
@@ -316,16 +317,15 @@ type FileManagerContextType = {
    */
   getZippedDirectory: (path: string, options?: ContentExportFilter) => Promise<Blob>;
   /**
-   * One project's versioned bytes, read through that project's *own* composed
-   * view — the snapshot a duplicate journals (authority Rule 12, charter D11).
+   * One project's versioned bytes and agent-writable records, read through
+   * that project's own composed view — the snapshot a duplicate journals.
    *
    * Not `client.getDirectoryContents`: the project read here is usually not the
-   * one this FM is rooted at, and both the mask and `versionedOnly` classify
-   * project-relative paths — so the read opens that project's own rooted `user`
-   * connection, whose view refuses `.git/**` before provider I/O and whose
-   * filter drops records and cache (authority Rule 16, charter D2).
+   * one this FM is rooted at. The read opens that project's own rooted `user`
+   * connection; the view refuses `.git/**` before provider I/O, while the
+   * registry selects record subtrees without reading chats or cache bytes.
    */
-  readVersionedProjectFiles: (projectRoot: string) => Promise<Record<string, Uint8Array<ArrayBuffer>>>;
+  readDuplicateProjectFiles: (projectRoot: string) => Promise<Record<string, Uint8Array<ArrayBuffer>>>;
   /**
    * The record stores' slice of the root that owns the path (charter D5, D12).
    *
@@ -823,13 +823,33 @@ export function FileManagerProvider({
    * usually *not* rooted at, once per duplication, and the owner would then hold
    * a `'user'` port open for every project ever duplicated this session.
    */
-  const readVersionedProjectFiles = useCallback(
+  const readDuplicateProjectFiles = useCallback(
     async (projectRoot: string): Promise<Record<string, Uint8Array<ArrayBuffer>>> => {
       await whenServicesReady();
       const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
       const proxy = createFileSystemBridgeProxy(openRootedFileSystemBridge(projectRoot, 'user'));
       try {
-        return await proxy.contents('', { versionedOnly: true });
+        const files = await proxy.contents('', { versionedOnly: true });
+        const recordRows = pathRegistry.filter(
+          (row) =>
+            row.class === 'records' && !row.versioned && row.agentAccess === 'read-write' && row.match === 'root',
+        );
+        for (const row of recordRows) {
+          // oxlint-disable-next-line no-await-in-loop -- Each selected subtree is read on this one-shot connection.
+          if (!(await proxy.exists(row.prefix))) {
+            continue;
+          }
+          if (row.directory) {
+            // oxlint-disable-next-line no-await-in-loop -- Read only the selected record subtree.
+            for (const [path, content] of Object.entries(await proxy.contents(row.prefix))) {
+              files[`${row.prefix}/${path}`] = content;
+            }
+          } else {
+            // oxlint-disable-next-line no-await-in-loop -- Read only the selected record file.
+            files[row.prefix] = await proxy.readFile(row.prefix);
+          }
+        }
+        return files;
       } finally {
         proxy.dispose();
       }
@@ -1244,7 +1264,7 @@ export function FileManagerProvider({
       readdir,
       getDirectoryStat,
       getZippedDirectory,
-      readVersionedProjectFiles,
+      readDuplicateProjectFiles,
       recordFiles: workingCopyFiles,
       parameterFiles: workingCopyFiles,
       previewFiles: workingCopyFiles,
@@ -1284,7 +1304,7 @@ export function FileManagerProvider({
       readdir,
       getDirectoryStat,
       getZippedDirectory,
-      readVersionedProjectFiles,
+      readDuplicateProjectFiles,
       workingCopyFiles,
       scopedStorage,
       client,

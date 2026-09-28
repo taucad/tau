@@ -387,6 +387,23 @@ describe('ChatError', () => {
     expect(screen.getByRole('alert')).toBeInTheDocument();
   });
 
+  it('announces a pending model attempt as named busy status, not a failure alert', () => {
+    persisted({
+      category: errorCategory.generic,
+      title: 'Error',
+      message: 'The host is checking the last model attempt.',
+      code: 'MODEL_ATTEMPT_PENDING',
+    });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByRole('status', { name: 'Checking whether the last model call finished' })).toHaveAttribute(
+      'aria-busy',
+      'true',
+    );
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
   it('offers New chat for unreadable history without offering Resume', async () => {
     const user = userEvent.setup();
     persisted({ category: errorCategory.generic, title: 'Error', message: 'Bad history', code: 'HISTORY_INVALID' });

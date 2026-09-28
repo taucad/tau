@@ -228,6 +228,9 @@ function codedErrorCard({
         tone='neutral'
         icon={Bot}
         title='Checking whether the last model call finished'
+        role='status'
+        aria-label='Checking whether the last model call finished'
+        aria-busy='true'
       />
     );
   }

@@ -63,6 +63,9 @@ describe('@taucad/skills', () => {
     expect(await installSkills(directory, ['@taucad/replicad'])).toEqual(['cad-replicad']);
     expect(await readFile(join(directory, 'cad-replicad', 'SKILL.md'), 'utf8')).toContain('name: cad-replicad');
     expect(await readFile(join(directory, 'cad-replicad', 'api-index.md'), 'utf8')).toContain('replicad API index');
+    expect(await readFile(join(directory, 'cad-replicad', 'kinematics-reference.md'), 'utf8')).toContain(
+      '## Joints and degree-of-freedom IDs',
+    );
   });
 
   it('should reject manifest paths that can escape their bundle', () => {

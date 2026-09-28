@@ -1292,8 +1292,10 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('p
 
     const sent = await restart('upload-sending');
     const recoveredSent = await state(sent.client);
+    // A start is planned only after a transferred upload, so an unconfirmed upload settles as nothing started.
     expect(recoveredSent).toMatchObject({
-      state: 'unknown',
+      state: 'failed',
+      failure: { code: 'MACHINE_UPLOAD_UNCONFIRMED' },
       receipt: {
         operationId: 'upload-1',
         kind: 'upload',

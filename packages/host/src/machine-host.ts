@@ -495,6 +495,19 @@ const listenDatagrams = async function* (input: MachineDatagramListenInput): Asy
   }
 };
 
+/**
+ * The artifact as 64 KiB views, without copying. basic-ftp's transfer watchdog reads progress from the data
+ * socket's `bytesWritten`, which counts a chunk the moment it is queued: a whole-file chunk looks stalled for as
+ * long as the printer takes to drain it, so a healthy upload that outlasts the timeout is aborted.
+ * @param bytes - The artifact.
+ * @yields Consecutive views of at most 64 KiB.
+ */
+function* uploadChunks(bytes: Uint8Array<ArrayBuffer>): Generator<Uint8Array<ArrayBuffer>> {
+  for (let offset = 0; offset < bytes.byteLength; offset += 64 * 1024) {
+    yield new Uint8Array(bytes.buffer, bytes.byteOffset + offset, Math.min(64 * 1024, bytes.byteLength - offset));
+  }
+}
+
 const uploadFile = async (
   input: MachineFileUploadInput,
   secrets: MachineSecretStore,
@@ -539,7 +552,7 @@ const uploadFile = async (
       },
     });
     input.signal.throwIfAborted();
-    await client.uploadFrom(Readable.from([Buffer.from(input.bytes)]), input.remoteName);
+    await client.uploadFrom(Readable.from(uploadChunks(input.bytes)), input.remoteName);
     input.signal.throwIfAborted();
     if ((await client.size(input.remoteName)) !== input.bytes.byteLength) {
       throw new Error('MACHINE_UPLOAD_TRANSFER_MISMATCH');

@@ -198,15 +198,6 @@
       "owner": "W6"
     },
     {
-      "id": "D3",
-      "bound": "Run idle",
-      "site": "apps/ui/app/services/agent-host-client.ts",
-      "token": "runIdleTimeout",
-      "class": "Peer",
-      "owner": "W7",
-      "fixedBy": "W7"
-    },
-    {
       "id": "E1",
       "bound": "rpc hello",
       "site": "packages/rpc/src/channel.ts",
@@ -495,14 +486,6 @@
       "token": "driverStopBound",
       "class": "External edge",
       "owner": "W7"
-    },
-    {
-      "id": "W8-R4",
-      "bound": "Re-send of a command refused CHAT_RUN_LIVE{settling} (20 ms doubling to 250 ms, within the 30 s settlement bound; W8.r1 item 6)",
-      "site": "apps/ui/app/services/agent-host-client.ts",
-      "token": "backoffMilliseconds",
-      "class": "Backoff",
-      "owner": "W8"
     },
     {
       "id": "W7-1",

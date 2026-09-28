@@ -2014,6 +2014,29 @@ describe('createGatewayModelTransport', () => {
     });
   });
 
+  it('should preserve a closed-account 403 from the non-OK stream response', async () => {
+    const transport = createGatewayModelTransport({
+      baseUrl: 'https://gateway.example',
+      fetch: vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              type: 'error',
+              error: { type: 'BILLING_ACCOUNT_CLOSED', message: 'This Tau billing account is closed.' },
+            }),
+            { status: 403, headers: { 'content-type': 'application/json' } },
+          ),
+      ),
+    });
+
+    await expect(collect(transport.stream(request()))).rejects.toMatchObject({
+      name: 'GatewayModelTransportError',
+      code: 'BILLING_ACCOUNT_CLOSED',
+      message: 'This Tau billing account is closed.',
+      status: 403,
+    });
+  });
+
   it('should read an oversized request as REQUEST_TOO_LARGE, enveloped or bare', async () => {
     const enveloped = createGatewayModelTransport({
       baseUrl: 'https://gateway.example',

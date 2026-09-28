@@ -465,6 +465,29 @@ describe('createBrowserAgentHostClient', () => {
     await client.close();
   });
 
+  it('keeps the approval and follow-up resume ids minted by the click', async () => {
+    const worker = new FakeResidentWorker();
+    const client = createTestClient(workerOf(worker));
+    await client.start({ chatId: 'chat-approval-id', runId: 'run-approval-id', trigger: 'submit', message: 'Print.' });
+
+    await client.resolveInterrupt('chat-approval-id', 'run-approval-id', {
+      interruptId: 'interrupt-1',
+      outcome: 'approved',
+      commandId: 'answer-1',
+    });
+    await client.resume('chat-approval-id', 'run-approval-id', 'resume-1');
+
+    expect(
+      worker.requests
+        .filter((request) => request.name === 'resolve-interrupt')
+        .map((request) => request.args['commandId']),
+    ).toEqual(['answer-1']);
+    expect(
+      worker.requests.filter((request) => request.name === 'resume').map((request) => request.args['commandId']),
+    ).toEqual(['resume-1']);
+    await client.close();
+  });
+
   it('keeps the capability seam closed when OPFS is unavailable', () => {
     vi.stubGlobal('Worker', vi.fn());
     vi.stubGlobal('BroadcastChannel', vi.fn());

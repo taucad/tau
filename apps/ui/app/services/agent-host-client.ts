@@ -266,8 +266,12 @@ export type AgentHostClient = {
   steer(runId: string, message: string): Promise<HostRunSnapshot>;
   cancel(runId: string): Promise<HostRunSnapshot>;
   /** Continue the chat's current run, `runId`; any other run is refused `RESUME_UNAVAILABLE`. */
-  resume(chatId: string, runId: string): Promise<HostRunSnapshot>;
-  resolveInterrupt(chatId: string, runId: string, resolution: InterruptResolution): Promise<HostRunSnapshot>;
+  resume(chatId: string, runId: string, commandId?: string): Promise<HostRunSnapshot>;
+  resolveInterrupt(
+    chatId: string,
+    runId: string,
+    resolution: InterruptResolution & { readonly commandId?: string },
+  ): Promise<HostRunSnapshot>;
   /** The `attach` command, then one read from `cursor`: the chat's run and its first page of rows. */
   attach(input: AgentHostReadInput): Promise<
     ReadAnswer & {
@@ -671,12 +675,12 @@ export const createAgentHostClient = (
       await execute({ type: 'cancel', commandId: gestureKey(), payload: { chatId, runId } });
       return snapshotOf(chatId);
     },
-    resume: async (chatId, runId) =>
-      runCommand({ type: 'resume', commandId: gestureKey(), payload: { chatId, runId } }, runId),
+    resume: async (chatId, runId, commandId) =>
+      runCommand({ type: 'resume', commandId: commandId ?? gestureKey(), payload: { chatId, runId } }, runId),
     async resolveInterrupt(chatId, runId, resolution) {
       await execute({
         type: 'resolve-interrupt',
-        commandId: gestureKey(),
+        commandId: resolution.commandId ?? gestureKey(),
         payload: {
           chatId,
           runId,

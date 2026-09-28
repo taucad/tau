@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef } from 'react';
 import type { ChatStatus } from 'ai';
 import type { CadAgentConfigInput, MyUIMessage } from '@taucad/chat';
 import { toast } from 'sonner';
+import { generatePrefixedId } from '@taucad/utils/id';
+import { idPrefix } from '@taucad/types/constants';
 import { useCadAgentConfig } from '#hooks/use-cad-agent-config.js';
 import { useActiveChatInstance } from '#chat-clients/_internal/use-active-chat-instance.js';
 import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
@@ -224,6 +226,8 @@ export const useCadChatClient = (): CadChatClient => {
           : undefined;
       const answeredRunId = browserRun?.runId ?? detachedRunId;
       if (answeredRunId !== undefined) {
+        const commandId = generatePrefixedId(idPrefix.request);
+        const resumeCommandId = approved ? generatePrefixedId(idPrefix.request) : undefined;
         await resolveBrowserAgentHostInterrupt({
           chatId: activeChatId,
           runId: answeredRunId,
@@ -231,6 +235,8 @@ export const useCadChatClient = (): CadChatClient => {
           approved,
           reason,
           optionId,
+          commandId,
+          resumeCommandId,
         });
         if (detachedRunId !== undefined) {
           void chat.resumeStream();

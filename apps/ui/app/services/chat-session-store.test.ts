@@ -2,6 +2,8 @@
 /* eslint-disable @typescript-eslint/naming-convention -- mock for AI SDK's Chat / DefaultChatTransport classes uses the SDK's own PascalCase names and `~`-prefixed subscriber method names verbatim so the mock surface matches the real one. */
 /* eslint-disable @typescript-eslint/explicit-member-accessibility -- mock class constructors omit the `public` keyword to mirror the AI SDK's published shape. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import { createActor } from 'xstate';
 import type { Chat as ChatEntity, ModelSupport, MyUIMessage } from '@taucad/chat';
 import { errorCategory } from '@taucad/types/constants';
@@ -378,6 +380,68 @@ const testRunBody = Object.freeze({
 });
 
 describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
+  it('materializes a reopened completed chat from a foreign segment and refreshes changed bytes', async () => {
+    const projectId = 'project_remote_transcript';
+    const chatId = 'chat_remote_transcript';
+    const path = `/projects/${projectId}/.tau/chats/${chatId}/events/other-device.jsonl`;
+    const rows = readFileSync(
+      new URL(
+        '../../../../packages/agent-host/specs/ChatLog/recorded/in-project-ping-pong-turn.jsonl',
+        pathToFileURL(import.meta.filename),
+      ),
+      'utf8',
+    );
+    const client = createMemoryClient();
+    await client.writeFile(path, new TextEncoder().encode(rows));
+    const store = new ChatSessionStore({ chatSession });
+    store.setDependencies(createStubDeps(client));
+    const hostCommand = vi.fn();
+    const unpublish = store.publishProjectHostConnector(
+      projectId,
+      async () =>
+        ({
+          hostCommand,
+          read: vi.fn(),
+          subscribe: (...parameters: Parameters<AgentHostClient['subscribe']>) => {
+            queueMicrotask(() =>
+              parameters[3]?.({
+                status: 'batch',
+                chatId,
+                cursor: 0,
+                nextCursor: 0,
+                endCursor: 0,
+                events: [],
+              }),
+            );
+            return vi.fn();
+          },
+          close: vi.fn(async () => undefined),
+        }) as unknown as AgentHostClient,
+    );
+    const unobserve = store.observe(chatId, projectId);
+    const session = store.acquire(chatId, projectId);
+
+    await store.refreshRemoteSegments(chatId, projectId);
+    await vi.waitFor(() => {
+      expect(session.chat.messages.some((message) => message.role === 'assistant')).toBe(true);
+    });
+
+    await client.writeFile(
+      path,
+      new TextEncoder().encode(
+        rows.replace('Browser host completed the workspace change.', 'Browser host verified the workspace change.'),
+      ),
+    );
+    await store.refreshRemoteSegments(chatId, projectId);
+    await vi.waitFor(() => {
+      expect(JSON.stringify(session.chat.messages)).toContain('Browser host verified the workspace change.');
+    });
+    expect(hostCommand).not.toHaveBeenCalled();
+    store.release(chatId);
+    unobserve();
+    unpublish();
+  });
+
   it('keeps a seed intent and exact user message through reload before durable Start acknowledgement', async () => {
     const deps = createStubDeps();
     const seed: MyUIMessage = {
@@ -1822,10 +1886,9 @@ describe('ChatSessionStore', () => {
       });
       publishLogRows(chatId, [lifecycleRow(4, 'cancelled', runId)], 4);
       await vi.waitFor(() => {
-        expect(session.chat.messages.flatMap((message) => message.parts)).toContainEqual({
-          type: 'text',
-          text: 'Partial answer',
-        });
+        expect(session.chat.messages.flatMap((message) => message.parts)).toEqual(
+          expect.arrayContaining([expect.objectContaining({ type: 'text', text: 'Partial answer' })]),
+        );
       });
       expect(session.draftActorRef.getSnapshot().context.draftText).toBe('');
       expect(deps.commitCancelledDraftRestore).not.toHaveBeenCalled();

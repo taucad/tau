@@ -102,7 +102,8 @@ describe('createTauAgentHost', () => {
     await Promise.all([admission, cancellation]);
     expect(stream).not.toHaveBeenCalled();
     await expect(host.snapshot('chat-pre-request-cancel')).resolves.toMatchObject({ state: 'cancelled' });
-    expect((await readLog(file)).filter((event) => event.type === 'run.lifecycle').at(-1)).toMatchObject({
+    const events = await readLog(file);
+    expect(events.findLast((event) => event.type === 'run.lifecycle')).toMatchObject({
       state: 'cancelled',
     });
     await host.close();

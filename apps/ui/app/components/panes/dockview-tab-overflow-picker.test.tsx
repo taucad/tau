@@ -178,7 +178,7 @@ describe('DockviewTabOverflowPicker', () => {
     expect(comboBoxSpy).not.toHaveBeenCalled();
   });
 
-  it('renders a named 28px action and exposes every group panel with searchable identity', () => {
+  it('renders a named 28px action visible at rest and exposes every group panel with searchable identity', () => {
     const source = createPanel({ id: 'file-1', title: 'main.ts', params: { filePath: 'src/main.ts' } });
     const viewer = createPanel({ id: 'view-2', title: 'assembly.step', params: { entryPath: 'models/assembly.step' } });
     const fallback = createPanel({ id: 'panel-without-title' });
@@ -192,7 +192,10 @@ describe('DockviewTabOverflowPicker', () => {
     renderPicker(properties);
     flushMeasurement();
 
-    expect(screen.getByRole('button', { name: 'Open tabs' })).toHaveClass('size-7', 'dv-pane-action');
+    const trigger = screen.getByRole('button', { name: 'Open tabs' });
+    expect(trigger).toHaveClass('size-7');
+    // Overflowed tabs need a route visible at rest, not the pane actions' hover reveal.
+    expect(trigger).not.toHaveClass('dv-pane-action');
     const comboBox = getComboBoxProperties();
     expect(comboBox.groupedItems).toEqual([{ name: 'Open tabs', items: [source, viewer, fallback] }]);
     expect(comboBox.value).toBe(viewer);
@@ -202,7 +205,7 @@ describe('DockviewTabOverflowPicker', () => {
     expect(comboBox).toMatchObject({
       title: 'Open tabs',
       description: 'Search and activate an open tab in this pane.',
-      searchPlaceHolder: 'Search open tabs...',
+      searchPlaceHolder: 'Search open tabs…',
       emptyListMessage: 'No open tabs found.',
       popoverProperties: { align: 'end' },
     });

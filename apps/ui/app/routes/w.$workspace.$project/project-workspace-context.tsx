@@ -4,11 +4,14 @@ import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import type { MobilePanelId } from '#constants/editor.constants.js';
 import type { PanelState } from '#types/editor.types.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
+import { useLocation } from 'react-router';
+import { useSelector } from '@xstate/react';
 
 export const projectWorkspaceKeyCombinations = {
   files: { key: 'f', ctrlKey: true },
   model: { key: 'a', ctrlKey: true },
   parameters: { key: 'x', ctrlKey: true },
+  kinematics: { key: 'm', ctrlKey: true },
   editor: { key: 'e', ctrlKey: true },
   details: { key: 'i', ctrlKey: true },
   export: { key: 'd', ctrlKey: true },
@@ -16,8 +19,10 @@ export const projectWorkspaceKeyCombinations = {
 
 export type WorkbenchPanelId =
   | 'parameters'
+  | 'kinematics'
   | 'files'
   | 'model'
+  | 'print'
   | 'revisions'
   | 'agents'
   | 'jobs'
@@ -50,17 +55,19 @@ export type WorkspaceLanes = Readonly<{ chat: boolean; workbench: boolean }>;
 
 /**
  * Lane visibility, provided by `ChatInterfaceDesktop`, the one owner that
- * measures the width the compact rule depends on. Mobile has no lanes, so the
- * default is none visible.
+ * measures the width the compact rule depends on. Undefined outside it: mobile
+ * and shared pages have no lanes.
  */
-export const WorkspaceLanesContext = createContext<WorkspaceLanes>({ chat: false, workbench: false });
+export const WorkspaceLanesContext = createContext<WorkspaceLanes | undefined>(undefined);
+
+const noLanes: WorkspaceLanes = { chat: false, workbench: false };
 
 /**
  * Reads which desktop lanes are on screen.
  *
- * @returns Whether the chat and workbench lanes are visible.
+ * @returns Whether the chat and workbench lanes are visible; neither outside the desktop layout.
  */
-export const useWorkspaceLanes = (): WorkspaceLanes => useContext(WorkspaceLanesContext);
+export const useWorkspaceLanes = (): WorkspaceLanes => useContext(WorkspaceLanesContext) ?? noLanes;
 
 export function useProjectWorkspace(): ProjectWorkspaceContextValue;
 export function useProjectWorkspace(options: {
@@ -87,7 +94,9 @@ const mobilePanelByWorkbenchPanel: Partial<Record<WorkbenchPanelId, MobilePanelI
 
 export function ProjectWorkspaceProvider({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
   const { editorRef, mainEntryPath } = useProject();
+  const location = useLocation();
   const isMobile = useIsMobile();
+  const isEditorReady = useSelector(editorRef, (snapshot) => snapshot.matches('ready'));
   const openerRef = useRef<((panelId: WorkbenchPanelId) => void) | undefined>(undefined);
   const queuedPanelRef = useRef<WorkbenchPanelId | undefined>(undefined);
 
@@ -103,6 +112,18 @@ export function ProjectWorkspaceProvider({ children }: { readonly children: Reac
     },
     [editorRef, isMobile],
   );
+
+  const shouldOpenChat = location.state?.openChat === true || location.state?.focusChatComposer === true;
+  const navigationKey = location.key;
+  /* Each sidebar click is its own navigation, even onto the selected chat, so the
+   * pane opens once per navigation and a pane the user closes afterwards stays closed. */
+  const openedForNavigationRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (isEditorReady && shouldOpenChat && openedForNavigationRef.current !== navigationKey) {
+      openedForNavigationRef.current = navigationKey;
+      setChatOpen(true);
+    }
+  }, [isEditorReady, navigationKey, setChatOpen, shouldOpenChat]);
 
   const setWorkbenchOpen = useCallback(
     (open: boolean) => {
@@ -171,6 +192,14 @@ export function ProjectWorkspaceProvider({ children }: { readonly children: Reac
     { enabled: !isMobile },
   );
   useKeybinding(
+    projectWorkspaceKeyCombinations.kinematics,
+    () => {
+      openPanel('kinematics');
+    },
+    // Monaco binds Ctrl+M on Windows and Linux to "Toggle Tab Key Moves Focus", its way out of the Tab trap.
+    { enabled: !isMobile, ignoreInputs: true },
+  );
+  useKeybinding(
     projectWorkspaceKeyCombinations.details,
     () => {
       openPanel('details');
@@ -217,8 +246,12 @@ export function ProjectWorkspaceProvider({ children }: { readonly children: Reac
     const modelSubscription = editorRef.on('modelComponentRevealRequested', () => {
       openPanel('model');
     });
+    const kinematicsSubscription = editorRef.on('kinematicsRevealRequested', () => {
+      openPanel('kinematics');
+    });
     return () => {
       modelSubscription.unsubscribe();
+      kinematicsSubscription.unsubscribe();
     };
   }, [editorRef, openPanel]);
 

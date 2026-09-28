@@ -1,8 +1,9 @@
+import type { MachineActors } from '#lib/xstate.lib.js';
 import { Topic } from '@taucad/events';
 import type { RootedContentClient } from '@taucad/fs-client/rooted-content-client';
 import type { FileOperation, PreparedFileOperation } from '@taucad/fs-client/file-content-service';
-import { createActor, fromCallback, fromPromise, waitFor } from 'xstate';
-import type { ActorRefFrom } from 'xstate';
+import { createActor, createCallbackLogic, createAsyncLogic, waitFor } from 'xstate';
+import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import { fileParameterEntrySchema, parameterEntryPath, parametersDirectory } from '@taucad/types';
 import type { JSONValue } from '@taucad/types';
 import { loadParameterSnapshot, refreshParameterSnapshot, commitParameterChange } from '@taucad/parameters/authority';
@@ -77,7 +78,7 @@ export type ParameterSetService = Readonly<{
   draft(key: ParameterDraftKey): ParameterDraft | undefined;
   /** Retain or clear one row's draft; `undefined` clears it. */
   setDraft(key: ParameterDraftKey, draft: ParameterDraft | undefined): void;
-  /** Observe drafts being discarded elsewhere, so a mounted row re-reads its own. */
+  /** Observe drafts being cleared or discarded (never set), so a mounted row re-reads its own. */
   subscribeDrafts(listener: () => void): () => void;
   /**
    * Commit one field of one group against the authority's current record. `base` scopes the
@@ -273,21 +274,22 @@ export const createParameterSetService = (
     const actor = createActor(
       parameterSetMachine.provide({
         actors: {
-          loadParameterSet: fromPromise(async ({ input, signal }) =>
-            input.current !== undefined && input.current.manifest.revision === manifestRef.current.revision
-              ? refreshParameterSnapshot({ current: input.current, authority, signal })
-              : loadParameterSnapshot({
-                  target,
-                  authority,
-                  manifest: async () => manifestRef.current,
-                  signal,
-                  resolution: input.resolution,
-                }),
-          ),
-          commitParameterSet: fromPromise(async ({ input: change, signal }) =>
-            commitParameterChange({ change, authority, signal }),
-          ),
-          observeParameterSet: fromCallback(({ sendBack }) => {
+          loadParameterSet: createAsyncLogic({
+            run: async ({ input, signal }) =>
+              input.current !== undefined && input.current.manifest.revision === manifestRef.current.revision
+                ? refreshParameterSnapshot({ current: input.current, authority, signal })
+                : loadParameterSnapshot({
+                    target,
+                    authority,
+                    manifest: async () => manifestRef.current,
+                    signal,
+                    resolution: input.resolution,
+                  }),
+          }),
+          commitParameterSet: createAsyncLogic({
+            run: async ({ input: change, signal }) => commitParameterChange({ change, authority, signal }),
+          }),
+          observeParameterSet: createCallbackLogic(({ sendBack }) => {
             try {
               return options.subscribe(parameterEntryPath(filePath), () => {
                 sendBack({ type: 'watch.changed' });
@@ -300,7 +302,7 @@ export const createParameterSetService = (
               return () => undefined;
             }
           }),
-        },
+        } satisfies Partial<MachineActors<typeof parameterSetMachine>>,
       }),
       { input: { target, resolution: manifest.identity.resolution } },
     );
@@ -317,7 +319,7 @@ export const createParameterSetService = (
     if (!matches() && !state.actor.getSnapshot().matches({ open: 'loading' })) {
       state.actor.send({ type: 'resolve', resolution: state.manifestRef.current.identity.resolution });
     }
-    const snapshot = await waitFor(
+    const snapshot: SnapshotFrom<typeof parameterSetMachine> = await waitFor(
       state.actor,
       (snapshot) =>
         snapshot.matches({ open: 'disconnected' }) ||
@@ -603,14 +605,14 @@ export const createParameterSetService = (
     draft: (key) => drafts.get(draftKey(key))?.draft,
     setDraft: (key, draft) => {
       const mapKey = draftKey(key);
-      if (draft === undefined) {
-        if (!drafts.delete(mapKey)) {
-          return;
-        }
-      } else {
+      if (draft !== undefined) {
+        // Listeners act only on a cleared draft, so a keystroke notifies nobody.
         drafts.set(mapKey, { key, draft, label: draftLabel(key.group, key.pointer) });
+        return;
       }
-      draftChanges.emit();
+      if (drafts.delete(mapKey)) {
+        draftChanges.emit();
+      }
     },
     subscribeDrafts: (listener) => draftChanges.subscribe(listener),
     commitValue,

@@ -1,5 +1,6 @@
-import { assign, assertEvent, setup, emit, enqueueActions, fromPromise, sendTo } from 'xstate';
-import type { ActorRefFrom, SnapshotFrom } from 'xstate';
+import { createAsyncLogic, setup, types } from 'xstate';
+import type { ActorRefFrom, EnqueueObject, SnapshotFrom, SystemRegistry } from 'xstate';
+import { eventSchemas } from '#lib/xstate.lib.js';
 import type { GeometryComponentManifest, GridSizes, Geometry } from '@taucad/types';
 import { idPrefix } from '@taucad/types/constants';
 import { getLengthUnit, metersPerLengthUnit } from '#constants/length-units.js';
@@ -14,11 +15,26 @@ import {
   probeWebGpuSupport,
   resolveGraphicsBackendPreference,
 } from '#components/geometry/graphics/graphics-backend.js';
+import {
+  applySectionCutPatch,
+  createDefaultPlaneCut,
+  createDefaultRevolutionCut,
+  maxSectionCuts,
+} from '#components/geometry/graphics/section-cuts.js';
+import type {
+  SectionAxis,
+  SectionCut,
+  SectionCutPatch,
+  SectionPlane,
+  SectionVector,
+} from '#components/geometry/graphics/section-cuts.js';
 import { recordRendererSpan } from '#lib/renderer-telemetry.js';
 import { deriveModelInteractionUnitId, modelInteractionMachine } from '#machines/model-interaction.machine.js';
 import type { ModelInteractionSource, ViewerHoverSuppressionReason } from '#machines/model-interaction.machine.js';
+import { kinematicsMachine } from '#machines/kinematics.machine.js';
 
 export type ModelInteractionRef = ActorRefFrom<typeof modelInteractionMachine>;
+export type KinematicsRef = ActorRefFrom<typeof kinematicsMachine>;
 
 export type ModelPointerClickSuppressionReason = 'measureTool';
 
@@ -89,19 +105,19 @@ const removeSuppressionReason = <T extends string>(reasons: readonly T[], reason
  * - **durable** -- in `GraphicsViewSettings`, seeded once at spawn and restored identically by an
  *   in-app revisit and a page reload: `enableSurfaces`, `enableLines`, `enableGizmo`, `enableGrid`,
  *   `enableAxes`, `enableMatcap`, `enablePostProcessing`, `upDirection`, `graphicsBackendPreference`,
- *   the pinned half of `measurements`, and the section view -- `isSectionViewActive`,
- *   `selectedSectionViewId`, `sectionViewPivot`, `sectionViewRotation`, `sectionViewDirection`
- *   (entry-scoped) with `enableClippingLines`, `enableClippingMesh` and `planeName` (pane-scoped).
+ *   the pinned half of `measurements`, and the section view -- `isSectionViewActive` and the values of
+ *   `sectionCuts` (entry-scoped; the cut ids are made anew at every seed).
  * - **session** -- survives an in-app revisit because this actor is retained, and is lost on reload
  *   by decision: `displayUnits.length` (the grid unit symbol, session-scoped by ruling E4),
  *   `isGridSizeLocked`, `isMeasureActive`, the unpinned half of `measurements`,
- *   `currentMeasurementStart` and `modelInteractionUnitId`.
+ *   `currentMeasurementStart`, `modelInteractionUnitId` and `selectedSectionCutId`.
  * - **ephemeral** -- derived from geometry, the canvas or a pointer on every mount, never seeded:
  *   `gridSizes`, `gridSizesComputed`, `cadUnits`, `cameraVisibleSpan`, `geometryRadius`,
- *   `geometryCenter`, `resolvedGraphicsBackend`, `webGpuAvailable`, `availableSectionViews`,
- *   `hoveredSectionViewId`, `sectionViewVisualization`, `sectionViewTranslation` (the pivot's
- *   projection on the plane axis), `hoveredMeasurementId`, `measureSnapDistance`, every suppression
- *   and interaction flag, `pickableMeshesVersion`, `geometry`, `geometryKey` and `gltfPresentation`.
+ *   `geometryCenter`, `resolvedGraphicsBackend`, `webGpuAvailable`, `hoveredSectionCutId`,
+ *   `committedSectionCuts` and `sectionCertification` (what the caps last certified),
+ *   `hoveredMeasurementId`, `measureSnapDistance`, every
+ *   suppression and interaction flag, `pickableMeshesVersion`, `geometry`, `geometryKey` and
+ *   `gltfPresentation`.
  *
  * No field here stores a copy of a value another actor owns; the camera's field of view and pose
  * belong to the view's camera session, and the render timeout to the entry's CAD actor.
@@ -155,31 +171,21 @@ export type GraphicsContext = {
   /** Active rendering backend consumed by `@react-three/fiber`. */
   resolvedGraphicsBackend: ResolvedGraphicsBackend;
 
-  // Clipping plane state
+  // Section view state
   isSectionViewActive: boolean;
-  availableSectionViews: Array<{
-    id: 'xy' | 'xz' | 'yz';
-    normal: [number, number, number]; // Vector3 as tuple
-    constant: number;
-  }>;
-  selectedSectionViewId: 'xy' | 'xz' | 'yz' | undefined;
-  /** Display naming for planes */
-  planeName: 'cartesian' | 'face';
-  /** Currently hovered section view selector id (including inverse faces) */
-  hoveredSectionViewId?: 'xy' | 'xz' | 'yz' | 'yx' | 'zx' | 'zy';
-  sectionViewVisualization: {
-    stripeColor: string;
-    stripeSpacing: number;
-    stripeWidth: number;
-  };
-  /** Current section translation in physical metres. */
-  sectionViewTranslation: number;
-  sectionViewRotation: [number, number, number]; // Euler rotation as tuple [x, y, z]
-  sectionViewDirection: 1 | -1; // Normal direction multiplier
-  /** Physical Tau-root pivot in metres that the clipping plane passes through. */
-  sectionViewPivot: [number, number, number];
-  enableClippingLines: boolean; // Whether to cut lines
-  enableClippingMesh: boolean; // Whether to cut meshes
+  /** The section's cuts in order, at most `maxSectionCuts`; the removed volume is their union. */
+  sectionCuts: readonly SectionCut[];
+  /** The cut whose editor and handles show. */
+  selectedSectionCutId: string | undefined;
+  /** The cut hovered in the section row or the scene; both highlight it. */
+  hoveredSectionCutId: string | undefined;
+  /** The cut list the clip, caps and raycasts show: the latest one whose every cap face certified. */
+  committedSectionCuts: readonly SectionCut[];
+  /**
+   * Whether the caps certified the latest cut list they drew, or refused it and still show `committedSectionCuts`.
+   * A certified list's caps are complete, though its exact overlap result may still be pending.
+   */
+  sectionCertification: 'certified' | 'rejected';
 
   // Measure state
   isMeasureActive: boolean;
@@ -207,6 +213,8 @@ export type GraphicsContext = {
   modelInteractionRef: ModelInteractionRef;
   ownsModelInteractionRef: boolean;
   modelInteractionUnitId?: string;
+  /** Per-view mechanism pose, keyed by the same unit ids as model interaction. */
+  kinematicsRef: KinematicsRef;
 
   // Geometry data from CAD
   geometry: Geometry | undefined;
@@ -223,7 +231,7 @@ export type GraphicsEvent =
   | { type: 'setGridSizeLocked'; payload: boolean }
   | { type: 'setGridUnit'; payload: { unit: LengthSymbol } }
   // Camera events
-  | { type: 'resetCamera' }
+  | { type: 'fitView' }
   | { type: 'cameraViewChanged'; verticalSpan: number }
   // Visibility events
   | { type: 'setSurfaceVisibility'; payload: boolean }
@@ -235,25 +243,22 @@ export type GraphicsEvent =
   | { type: 'setPostProcessingVisibility'; payload: boolean }
   | { type: 'setUpDirection'; payload: 'x' | 'y' | 'z' }
   | { type: 'setGraphicsBackendPreference'; payload: GraphicsBackendPreference }
-  // Clipping plane events
-  | { type: 'setSectionViewActive'; payload: boolean }
-  | { type: 'selectSectionView'; payload: 'xy' | 'xz' | 'yz' | undefined }
-  | { type: 'setSectionViewTranslation'; payload: number }
-  | { type: 'setSectionViewRotation'; payload: [number, number, number] }
-  | { type: 'toggleSectionViewDirection' }
-  | { type: 'setSectionViewDirection'; payload: 1 | -1 }
-  | { type: 'setSectionViewPivot'; payload: [number, number, number] }
-  | { type: 'setPlaneName'; payload: 'cartesian' | 'face' }
+  // Section view events
+  /** Turning the section on with no cuts adds the default plane, removing the side `viewDirection` faces. */
+  | { type: 'setSectionViewActive'; payload: boolean; viewDirection?: SectionVector }
+  /** Adds a cut with the defaults, selects it and turns the section on. Refused at `maxSectionCuts`. */
+  | { type: 'addSectionCut'; payload: AddSectionCutPayload }
+  /** A patch that changes no value keeps the snapshot. */
+  | { type: 'updateSectionCut'; payload: { id: string; patch: SectionCutPatch } }
+  /** Removing the last cut turns the section off. */
+  | { type: 'removeSectionCut'; payload: string }
+  | { type: 'selectSectionCut'; payload: string | undefined }
+  | { type: 'hoverSectionCut'; payload: string | undefined }
+  /** From the caps, in the frame they certify or refuse a cut list. A repeated value keeps the snapshot. */
   | {
-      type: 'setHoveredSectionView';
-      payload: 'xy' | 'xz' | 'yz' | 'yx' | 'zx' | 'zy' | undefined;
+      type: 'setSectionCertification';
+      payload: { status: 'certified' | 'rejected'; cuts: readonly SectionCut[] };
     }
-  | {
-      type: 'setSectionViewVisualization';
-      payload: Partial<GraphicsContext['sectionViewVisualization']>;
-    }
-  | { type: 'setClippingLinesEnabled'; payload: boolean }
-  | { type: 'setClippingMeshEnabled'; payload: boolean }
   // Measure events
   | { type: 'setMeasureActive'; payload: boolean }
   | { type: 'startMeasurement'; payload: [number, number, number] }
@@ -398,10 +403,19 @@ export type GraphicsEvent =
       centerMeters: [number, number, number];
     };
 
+/**
+ * The cut to add. A plane defaults to the first of XZ, YZ and XY the list lacks, and a cutaway to the up axis;
+ * both pass through the geometry centre. `viewDirection` points from the view's target toward the camera (the camera
+ * view's `direction`): a plane then removes the side facing the camera and a cutaway opens toward it.
+ */
+export type AddSectionCutPayload =
+  | { kind: 'plane'; plane?: SectionPlane; viewDirection?: SectionVector }
+  | { kind: 'revolution'; axis?: SectionAxis; viewDirection?: SectionVector };
+
 // Emitted events
 export type GraphicsEmitted =
   | { type: 'gridUpdated'; sizes: GridSizes }
-  | { type: 'viewResetRequested' }
+  | { type: 'viewFitRequested' }
   | { type: 'geometryRadiusCalculated'; radius: number };
 
 /**
@@ -484,126 +498,135 @@ function calculateGridSizes({
   };
 }
 
-// Clamp a radian angle to the nearest whole degree and return radians
-function clampRadiansToNearestDegree(radians: number): number {
-  const degrees = (radians * 180) / Math.PI;
-  const rounded = Math.round(degrees);
-  return (rounded * Math.PI) / 180;
-}
-
-// Return the fixed base axis for a given plane id. This axis is used for
-// computing the displayed translation from the world-space pivot so that
-// rotation does not change the displayed value.
-function getBaseAxis(planeId: 'xy' | 'xz' | 'yz' | undefined): [number, number, number] {
-  if (planeId === 'xz') {
-    return [0, 1, 0];
-  }
-
-  if (planeId === 'yz') {
-    return [1, 0, 0];
-  }
-
-  // Default and 'xy'
-  return [0, 0, 1];
-}
-
-function dot(a: [number, number, number], b: [number, number, number]): number {
-  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-}
-
 /**
- * Create-only section-view seed (E2). The persisted cut is applied to context directly -- replaying
- * `selectSectionView` would re-derive the pivot and rotation from the geometry centre. The
- * translation is the pivot's projection on the plane axis, so it is derived rather than restored.
+ * Create-only section-view seed. The persisted cuts are applied to context directly, each under a new id, and the
+ * section is on only with a cut to show.
  */
 function createSectionViewSeed(
   sectionView: GraphicsOwnedSettings['sectionView'],
-  sectionDisplay: GraphicsOwnedSettings['sectionDisplay'],
-): Pick<
-  GraphicsContext,
-  | 'isSectionViewActive'
-  | 'selectedSectionViewId'
-  | 'planeName'
-  | 'sectionViewTranslation'
-  | 'sectionViewRotation'
-  | 'sectionViewDirection'
-  | 'sectionViewPivot'
-  | 'enableClippingLines'
-  | 'enableClippingMesh'
-> {
-  const plane = sectionView?.plane;
-  const pivot: [number, number, number] = sectionView?.pivot ?? [0, 0, 0];
+): Pick<GraphicsContext, 'isSectionViewActive' | 'sectionCuts' | 'selectedSectionCutId' | 'hoveredSectionCutId'> {
+  const sectionCuts = (sectionView?.cuts ?? []).map(
+    (cut): SectionCut => ({ ...cut, id: generatePrefixedId(idPrefix.sectionCut) }),
+  );
   return {
-    isSectionViewActive: sectionView?.active ?? false,
-    selectedSectionViewId: plane,
-    planeName: sectionDisplay?.planeName ?? 'face',
-    sectionViewTranslation: plane ? dot(getBaseAxis(plane), pivot) : 0,
-    sectionViewRotation: sectionView?.rotation ?? [0, 0, 0],
-    sectionViewDirection: sectionView?.direction ?? -1,
-    sectionViewPivot: pivot,
-    enableClippingLines: sectionDisplay?.clipLines ?? true,
-    enableClippingMesh: sectionDisplay?.clipMesh ?? true,
+    isSectionViewActive: (sectionView?.active ?? false) && sectionCuts.length > 0,
+    sectionCuts,
+    selectedSectionCutId: undefined,
+    hoveredSectionCutId: undefined,
   };
 }
 
-function scale(v: [number, number, number], s: number): [number, number, number] {
-  return [v[0] * s, v[1] * s, v[2] * s];
-}
+const graphicsActors = {
+  probeWebGpu: createAsyncLogic({ run: async () => probeWebGpuSupport() }),
+  modelInteraction: modelInteractionMachine,
+  kinematics: kinematicsMachine,
+};
 
-function sub(a: [number, number, number], b: [number, number, number]): [number, number, number] {
-  return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
-}
+type GraphicsEnqueue = EnqueueObject<GraphicsEvent, GraphicsEmitted, SystemRegistry, typeof graphicsActors>;
+type GraphicsPatch = Partial<GraphicsContext>;
+type ModelInteractionMessage = Parameters<ModelInteractionRef['send']>[0];
 
-function add(a: [number, number, number], b: [number, number, number]): [number, number, number] {
-  return [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
-}
+/** Every model/component command is the model-interaction actor's to apply. */
+const forwardToModelInteraction = (
+  context: GraphicsContext,
+  enq: GraphicsEnqueue,
+  message: ModelInteractionMessage,
+): void => {
+  enq.sendTo(context.modelInteractionRef, message);
+};
 
-function length(v: [number, number, number]): number {
-  return Math.hypot(v[0], v[1], v[2]);
-}
+const clearViewerHover = (context: GraphicsContext, enq: GraphicsEnqueue, source: ModelInteractionSource): void => {
+  if (context.modelInteractionUnitId) {
+    forwardToModelInteraction(context, enq, {
+      type: 'setHoveredComponent',
+      unitId: context.modelInteractionUnitId,
+      componentId: undefined,
+      source,
+    });
+  }
+};
 
-function normalize(v: [number, number, number]): [number, number, number] {
-  const length_ = length(v) || 1;
-  return [v[0] / length_, v[1] / length_, v[2] / length_];
-}
+const gltfRequestMatches = (context: GraphicsContext, event: Readonly<{ revision: number; key: string }>): boolean =>
+  event.revision === context.gltfPresentation.requestedRevision && event.key === context.gltfPresentation.requestedKey;
 
-// Apply XYZ-order Euler rotation to a vector
-function rotateVectorByEuler(v: [number, number, number], euler: [number, number, number]): [number, number, number] {
-  const [x, y, z] = v;
-  const [rx, ry, rz] = euler;
+const beginMeasureHoverSuppression = (context: GraphicsContext, enq: GraphicsEnqueue): GraphicsPatch => {
+  if (!context.viewerHoverSuppressionReasons.includes('measureTool')) {
+    clearViewerHover(context, enq, 'viewer');
+  }
+  return {
+    modelPointerClickSuppressionReasons: addSuppressionReason(
+      context.modelPointerClickSuppressionReasons,
+      'measureTool',
+    ),
+    viewerHoverSuppressionReasons: addSuppressionReason(context.viewerHoverSuppressionReasons, 'measureTool'),
+  };
+};
 
-  // Rotate around X
-  const cx = Math.cos(rx);
-  const sx = Math.sin(rx);
-  const y1 = y * cx - z * sx;
-  const z1 = y * sx + z * cx;
+const endMeasureHoverSuppression = (context: GraphicsContext): GraphicsPatch => ({
+  modelPointerClickSuppressionReasons: removeSuppressionReason(
+    context.modelPointerClickSuppressionReasons,
+    'measureTool',
+  ),
+  viewerHoverSuppressionReasons: removeSuppressionReason(context.viewerHoverSuppressionReasons, 'measureTool'),
+});
 
-  // Rotate around Y
-  const cy = Math.cos(ry);
-  const sy = Math.sin(ry);
-  const x2 = x * cy + z1 * sy;
-  const y2 = y1;
-  const z2 = -x * sy + z1 * cy;
+/** Appends a cut made with the defaults, selects it and marks the section on; the caller checks the budget. */
+const appendSectionCut = (
+  context: GraphicsContext,
+  payload: AddSectionCutPayload,
+): Pick<GraphicsContext, 'isSectionViewActive' | 'sectionCuts' | 'selectedSectionCutId'> => {
+  const id = generatePrefixedId(idPrefix.sectionCut);
+  const cut =
+    payload.kind === 'plane'
+      ? createDefaultPlaneCut({
+          id,
+          plane: payload.plane,
+          existing: context.sectionCuts,
+          center: context.geometryCenter,
+          viewDirection: payload.viewDirection,
+        })
+      : createDefaultRevolutionCut({
+          id,
+          axis: payload.axis ?? context.upDirection,
+          center: context.geometryCenter,
+          viewDirection: payload.viewDirection,
+        });
+  return { isSectionViewActive: true, sectionCuts: [...context.sectionCuts, cut], selectedSectionCutId: id };
+};
 
-  // Rotate around Z
-  const cz = Math.cos(rz);
-  const sz = Math.sin(rz);
-  const x3 = x2 * cz - y2 * sz;
-  const y3 = x2 * sz + y2 * cz;
-  const z3 = z2;
+/** Drops the cut and the selection and hover that name it; `undefined` when no cut has that id. */
+const withoutSectionCut = (
+  context: GraphicsContext,
+  id: string,
+): Pick<GraphicsContext, 'sectionCuts' | 'selectedSectionCutId' | 'hoveredSectionCutId'> | undefined => {
+  const sectionCuts = context.sectionCuts.filter((cut) => cut.id !== id);
+  if (sectionCuts.length === context.sectionCuts.length) {
+    return undefined;
+  }
+  return {
+    sectionCuts,
+    selectedSectionCutId: context.selectedSectionCutId === id ? undefined : context.selectedSectionCutId,
+    hoveredSectionCutId: context.hoveredSectionCutId === id ? undefined : context.hoveredSectionCutId,
+  };
+};
 
-  return [x3, y3, z3];
-}
+/**
+ * Turning the section off: nothing is cut, so nothing is committed or refused until the caps draw again, and no cut
+ * stays hovered for when it turns back on.
+ */
+const sectionOffContext: Pick<
+  GraphicsContext,
+  'isSectionViewActive' | 'committedSectionCuts' | 'sectionCertification' | 'hoveredSectionCutId'
+> = {
+  isSectionViewActive: false,
+  committedSectionCuts: [],
+  sectionCertification: 'certified',
+  hoveredSectionCutId: undefined,
+};
 
-// Round a translation value to a given number of decimals in the current unit,
-// then convert it back to the metre world unit.
-function roundTranslationToUnitDecimals(valueInBase: number, unitFactor: number, decimals = 2): number {
-  const factor = unitFactor === 0 ? 1 : unitFactor;
-  const valueInUnit = valueInBase / factor;
-  const multiplier = 10 ** decimals;
-  const roundedInUnit = Math.round(valueInUnit * multiplier) / multiplier;
-  return roundedInUnit * factor;
-}
+/** Selecting or hovering names a cut in the list, or none; naming the current one again changes nothing. */
+const isSectionCutReference = (context: GraphicsContext, current: string | undefined, next: string | undefined) =>
+  next !== current && (next === undefined || context.sectionCuts.some((cut) => cut.id === next));
 
 /**
  * Graphics Machine
@@ -616,932 +639,27 @@ function roundTranslationToUnitDecimals(valueInBase: number, unitFactor: number,
  *
  * State Architecture:
  *
- * operational (parent state)
- *   ├── ready (default state)
- *   ├── section-view (modal viewing mode) [mutually exclusive]
- *   │   ├── pending (waiting for plane selection)
- *   │   └── active (plane selected, can manipulate)
- *   └── measure (measurement mode) [mutually exclusive]
- *       ├── selecting (clicking first points)
- *       └── selected (points selected, can add more)
+ * operational (parallel: the tools run together)
+ *   ├── section
+ *   │   ├── off (default; the cuts are kept)
+ *   │   └── on (at least one cut)
+ *   └── measure
+ *       ├── off (default; the measurements are kept)
+ *       └── on
+ *           ├── selecting (clicking first points)
+ *           └── selected (a first point is placed)
  *
- * Future modes can be added as siblings:
- *   ├── annotation (future)
- *
- * Common events (grid, camera, visibility, screenshots) are handled
- * once at the operational parent level to avoid duplication.
+ * Common events (grid, camera, visibility, screenshots) and the cut data events are handled once at
+ * the operational level. A transition that turns a tool on or off lives inside that tool's region, so it
+ * never exits and resets the other region.
  */
 export const graphicsMachine = setup({
-  actors: {
-    probeWebGpu: fromPromise(async () => probeWebGpuSupport()),
-    modelInteraction: modelInteractionMachine,
-  },
-  types: {
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    context: {} as GraphicsContext,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    events: {} as GraphicsEvent,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    input: {} as GraphicsInput,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    emitted: {} as GraphicsEmitted,
-  },
-  actions: {
-    updateGridSize: enqueueActions(({ enqueue, event, context }) => {
-      assertEvent(event, 'updateGridSize');
-
-      if (context.isGridSizeLocked) {
-        enqueue.assign({
-          gridSizesComputed: event.payload,
-        });
-      } else {
-        enqueue.assign({
-          gridSizes: event.payload,
-          gridSizesComputed: event.payload,
-        });
-        enqueue.emit({
-          type: 'gridUpdated',
-          sizes: event.payload,
-        });
-      }
-    }),
-
-    setGridSizeLocked: assign({
-      gridSizes: ({ context }) => context.gridSizesComputed,
-      isGridSizeLocked({ event }) {
-        assertEvent(event, 'setGridSizeLocked');
-        return event.payload;
-      },
-    }),
-
-    setGridUnit: enqueueActions(({ enqueue, event, context }) => {
-      assertEvent(event, 'setGridUnit');
-
-      const unitData = getLengthUnitData(event.payload.unit);
-      const previousUnitData = getLengthUnitData(context.displayUnits.length.symbol);
-
-      const isSystemChange = previousUnitData.system !== unitData.system;
-      const isImperialFactorChange =
-        unitData.system === 'imperial' && context.displayUnits.length.metersPerUnit !== unitData.factor;
-
-      enqueue.assign({
-        displayUnits: {
-          length: {
-            symbol: unitData.symbol,
-            metersPerUnit: unitData.factor,
-            system: unitData.system,
-          },
-        },
-      });
-
-      // Only recalculate grid spacing when:
-      // 1. Switching between si/imperial systems (visual spacing changes)
-      // 2. Changing factor in imperial units (affects visual spacing)
-      // For si units, factor changes only affect display numbers, not visual spacing
-      if (isSystemChange || isImperialFactorChange) {
-        const newGridSizes = calculateGridSizes({
-          visibleSpan: context.cameraVisibleSpan,
-          gridUnitSystem: unitData.system,
-          unitFactor: unitData.factor,
-        });
-
-        enqueue.sendTo(({ self }) => self, {
-          type: 'updateGridSize',
-          payload: newGridSizes,
-        });
-      }
-    }),
-
-    handleCameraViewChange: enqueueActions(({ enqueue, event, context }) => {
-      assertEvent(event, 'cameraViewChanged');
-      if (!Number.isFinite(event.verticalSpan) || event.verticalSpan <= 0) {
-        return;
-      }
-
-      enqueue.assign({
-        cameraVisibleSpan: event.verticalSpan,
-      });
-
-      // Recalculate grid sizes based on new controls state
-      const newGridSizes = calculateGridSizes({
-        visibleSpan: event.verticalSpan,
-        gridUnitSystem: context.displayUnits.length.system,
-        unitFactor: context.displayUnits.length.metersPerUnit,
-      });
-
-      enqueue.sendTo(({ self }) => self, {
-        type: 'updateGridSize',
-        payload: newGridSizes,
-      });
-    }),
-
-    handleControlsInteractionStart: enqueueActions(({ enqueue }) => {
-      enqueue.assign({
-        cameraInteracting: true,
-        cameraInteractionHadMovement: false,
-        suppressNextModelPointerClick: false,
-      });
-    }),
-
-    handleControlsInteractionMoved: enqueueActions(({ enqueue, context }) => {
-      if (!context.cameraInteracting) {
-        return;
-      }
-
-      enqueue.assign({
-        cameraInteractionHadMovement: true,
-        suppressNextModelPointerClick: true,
-        viewerHoverSuppressionReasons: addSuppressionReason(context.viewerHoverSuppressionReasons, 'cameraControls'),
-      });
-      if (!context.viewerHoverSuppressionReasons.includes('cameraControls') && context.modelInteractionUnitId) {
-        enqueue.sendTo(context.modelInteractionRef, {
-          type: 'setHoveredComponent',
-          unitId: context.modelInteractionUnitId,
-          componentId: undefined,
-          source: 'viewer',
-        });
-      }
-    }),
-
-    handleControlsInteractionEnd: enqueueActions(({ enqueue, context }) => {
-      enqueue.assign({
-        cameraInteracting: false,
-        cameraInteractionHadMovement: false,
-        viewerHoverSuppressionReasons: removeSuppressionReason(context.viewerHoverSuppressionReasons, 'cameraControls'),
-      });
-    }),
-
-    beginViewerModelHoverSuppression: enqueueActions(({ enqueue, context, event }) => {
-      assertEvent(event, 'beginViewerModelHoverSuppression');
-      if (context.viewerHoverSuppressionReasons.includes(event.reason)) {
-        return;
-      }
-      enqueue.assign({
-        viewerHoverSuppressionReasons: addSuppressionReason(context.viewerHoverSuppressionReasons, event.reason),
-      });
-      if (context.modelInteractionUnitId) {
-        enqueue.sendTo(context.modelInteractionRef, {
-          type: 'setHoveredComponent',
-          unitId: context.modelInteractionUnitId,
-          componentId: undefined,
-          source: event.source ?? 'viewer',
-        });
-      }
-    }),
-
-    endViewerModelHoverSuppression: assign(({ context, event }) => {
-      assertEvent(event, 'endViewerModelHoverSuppression');
-      return {
-        viewerHoverSuppressionReasons: removeSuppressionReason(context.viewerHoverSuppressionReasons, event.reason),
-      };
-    }),
-
-    markModelPointerGestureMoved: assign({
-      suppressNextModelPointerClick: true,
-    }),
-
-    clearModelPointerClickGuard: assign({
-      suppressNextModelPointerClick: false,
-    }),
-
-    beginMeasureHoverSuppression: enqueueActions(({ enqueue, context }) => {
-      enqueue.assign({
-        modelPointerClickSuppressionReasons: addSuppressionReason(
-          context.modelPointerClickSuppressionReasons,
-          'measureTool',
-        ),
-        viewerHoverSuppressionReasons: addSuppressionReason(context.viewerHoverSuppressionReasons, 'measureTool'),
-      });
-      if (!context.viewerHoverSuppressionReasons.includes('measureTool') && context.modelInteractionUnitId) {
-        enqueue.sendTo(context.modelInteractionRef, {
-          type: 'setHoveredComponent',
-          unitId: context.modelInteractionUnitId,
-          componentId: undefined,
-          source: 'viewer',
-        });
-      }
-    }),
-
-    endMeasureHoverSuppression: enqueueActions(({ enqueue, context }) => {
-      enqueue.assign({
-        modelPointerClickSuppressionReasons: removeSuppressionReason(
-          context.modelPointerClickSuppressionReasons,
-          'measureTool',
-        ),
-        viewerHoverSuppressionReasons: removeSuppressionReason(context.viewerHoverSuppressionReasons, 'measureTool'),
-      });
-    }),
-
-    bumpPickableMeshesVersion: assign({
-      pickableMeshesVersion: ({ context }) => context.pickableMeshesVersion + 1,
-    }),
-
-    updateGeometry: enqueueActions(({ enqueue, event, context }) => {
-      assertEvent(event, 'updateGeometry');
-
-      enqueue.assign({
-        geometry: event.geometry,
-        geometryKey: event.geometry.hash,
-        gltfPresentation:
-          event.geometry.format === 'gltf'
-            ? withGltfPresentationPhase(
-                {
-                  ...context.gltfPresentation,
-                  requestedRevision: context.gltfPresentation.requestedRevision + 1,
-                  requestedKey: event.geometry.hash,
-                },
-                'preparing',
-              )
-            : withGltfPresentationPhase(
-                {
-                  ...context.gltfPresentation,
-                  requestedRevision: context.gltfPresentation.requestedRevision + 1,
-                  requestedKey: undefined,
-                  presentedRevision: context.gltfPresentation.requestedRevision + 1,
-                  presentedKey: undefined,
-                },
-                'idle',
-              ),
-        modelInteractionUnitId:
-          event.geometry.format === 'gltf'
-            ? context.modelInteractionUnitId
-            : event.sourceFile
-              ? deriveModelInteractionUnitId({ sourceFile: event.sourceFile })
-              : undefined,
-        pickableMeshesVersion:
-          event.geometry.format === 'gltf' ? context.pickableMeshesVersion : context.pickableMeshesVersion + 1,
-        cadUnits: {
-          length: {
-            symbol: event.units.length,
-          },
-        },
-      });
-
-      if (event.geometry.format !== 'gltf' && event.sourceFile) {
-        enqueue.sendTo(context.modelInteractionRef, {
-          type: 'clearManifest',
-          unitId: deriveModelInteractionUnitId({
-            sourceFile: event.sourceFile,
-          }),
-          source: 'viewer',
-        });
-      }
-    }),
-
-    beginGltfPreparation: assign({
-      gltfPresentation({ context, event }) {
-        assertEvent(event, 'gltfPreparationStarted');
-        return event.revision === context.gltfPresentation.requestedRevision &&
-          event.key === context.gltfPresentation.requestedKey
-          ? withGltfPresentationPhase(context.gltfPresentation, 'preparing')
-          : context.gltfPresentation;
-      },
-    }),
-
-    recordGltfDisplayReady: assign({
-      gltfPresentation({ context, event }) {
-        assertEvent(event, 'gltfDisplayReady');
-        return event.revision === context.gltfPresentation.requestedRevision &&
-          event.key === context.gltfPresentation.requestedKey
-          ? withGltfPresentationPhase(
-              context.gltfPresentation,
-              event.barrier === 'analysis-ready' ? 'awaiting-analysis' : 'preparing',
-            )
-          : context.gltfPresentation;
-      },
-    }),
-
-    recordGltfAnalysisReady: assign({
-      gltfPresentation({ context, event }) {
-        assertEvent(event, 'gltfAnalysisReady');
-        return event.revision === context.gltfPresentation.requestedRevision &&
-          event.key === context.gltfPresentation.requestedKey
-          ? withGltfPresentationPhase(context.gltfPresentation, 'preparing')
-          : context.gltfPresentation;
-      },
-    }),
-
-    commitGltfPresentation: enqueueActions(({ enqueue, context, event }) => {
-      assertEvent(event, 'gltfPresentationCommitted');
-      if (
-        event.revision !== context.gltfPresentation.requestedRevision ||
-        event.key !== context.gltfPresentation.requestedKey
-      ) {
-        return;
-      }
-      enqueue.assign({
-        gltfPresentation: withGltfPresentationPhase(
-          {
-            ...context.gltfPresentation,
-            presentedRevision: event.revision,
-            presentedKey: event.key,
-          },
-          'presented',
-        ),
-        modelInteractionUnitId: event.unitId,
-        pickableMeshesVersion: context.pickableMeshesVersion + 1,
-      });
-      enqueue.sendTo(context.modelInteractionRef, {
-        type: 'loadManifest',
-        unitId: event.unitId,
-        manifest: event.manifest,
-        source: 'viewer',
-      });
-    }),
-
-    failGltfPresentation: assign({
-      gltfPresentation({ context, event }) {
-        assertEvent(event, 'gltfPresentationFailed');
-        return event.revision === context.gltfPresentation.requestedRevision &&
-          event.key === context.gltfPresentation.requestedKey
-          ? withGltfPresentationPhase(
-              context.gltfPresentation,
-              context.gltfPresentation.presentedKey === undefined ? 'failed' : 'presented',
-            )
-          : context.gltfPresentation;
-      },
-    }),
-
-    /* D21: the presented frame joins the worker spans that produced it, under the renderer's own
-     * producer identity. The durations ride as attributes rather than as invented child spans —
-     * only their total is anchored to a real clock reading, exactly as the kernels report timings. */
-    recordGltfPresentationTelemetry({ event }) {
-      assertEvent(event, 'gltfPresentationMeasured');
-      const { durations, ...attributes } = event.telemetry;
-      const duration = durations.receiptToFirstFrame ?? durations.commitToFirstFrame ?? 0;
-      recordRendererSpan('renderer.presentation', {
-        startTime: performance.now() - duration,
-        duration,
-        attributes: { ...attributes, ...durations },
-      });
-    },
-
-    updateSceneRadius: enqueueActions(({ enqueue, event }) => {
-      assertEvent(event, 'sceneRadiusUpdated');
-      enqueue.assign({
-        geometryRadius: event.radius,
-        geometryCenter: event.centerMeters,
-      });
-      enqueue.emit({
-        type: 'geometryRadiusCalculated',
-        radius: event.radius,
-      });
-    }),
-
-    requestCameraReset: emit(({ event }) => {
-      assertEvent(event, 'resetCamera');
-      return { type: 'viewResetRequested' } satisfies GraphicsEmitted;
-    }),
-
-    setSurfaceVisibility: assign({
-      enableSurfaces({ event }) {
-        assertEvent(event, 'setSurfaceVisibility');
-        return event.payload;
-      },
-    }),
-
-    setLinesVisibility: assign({
-      enableLines({ event }) {
-        assertEvent(event, 'setLinesVisibility');
-        return event.payload;
-      },
-    }),
-
-    setGizmoVisibility: assign({
-      enableGizmo({ event }) {
-        assertEvent(event, 'setGizmoVisibility');
-        return event.payload;
-      },
-    }),
-
-    setGridVisibility: assign({
-      enableGrid({ event }) {
-        assertEvent(event, 'setGridVisibility');
-        return event.payload;
-      },
-    }),
-
-    setAxesVisibility: assign({
-      enableAxes({ event }) {
-        assertEvent(event, 'setAxesVisibility');
-        return event.payload;
-      },
-    }),
-
-    setMatcapVisibility: assign({
-      enableMatcap({ event }) {
-        assertEvent(event, 'setMatcapVisibility');
-        return event.payload;
-      },
-    }),
-
-    setPostProcessingVisibility: assign({
-      enablePostProcessing({ event }) {
-        assertEvent(event, 'setPostProcessingVisibility');
-        return event.payload;
-      },
-    }),
-
-    setUpDirection: assign({
-      upDirection({ event }) {
-        assertEvent(event, 'setUpDirection');
-        return event.payload;
-      },
-    }),
-
-    setGraphicsBackendPreference: assign({
-      graphicsBackendPreference({ event }) {
-        assertEvent(event, 'setGraphicsBackendPreference');
-        return event.payload;
-      },
-      resolvedGraphicsBackend({ context, event }) {
-        assertEvent(event, 'setGraphicsBackendPreference');
-        return resolveGraphicsBackendPreference(event.payload, context.webGpuAvailable);
-      },
-    }),
-
-    recordWebGpuProbeResult: enqueueActions(({ enqueue, context, event }) => {
-      const probeEvent = event as Record<string, unknown>;
-      const outputCandidate = probeEvent['output'];
-      const output = typeof outputCandidate === 'boolean' ? outputCandidate : false;
-
-      enqueue.assign({
-        webGpuAvailable: output,
-        resolvedGraphicsBackend: resolveGraphicsBackendPreference(context.graphicsBackendPreference, output),
-      });
-    }),
-
-    /** Probe actor rejected / threw — pessimistic fallback. */
-    recordWebGpuProbeFailure: enqueueActions(({ enqueue, context }) => {
-      enqueue.assign({
-        webGpuAvailable: false,
-        resolvedGraphicsBackend: resolveGraphicsBackendPreference(context.graphicsBackendPreference, false),
-      });
-    }),
-
-    setSectionViewActive: assign({
-      isSectionViewActive({ event }) {
-        assertEvent(event, 'setSectionViewActive');
-        return event.payload;
-      },
-    }),
-
-    deactivateSectionView: assign({
-      isSectionViewActive: false,
-    }),
-
-    selectSectionView: assign({
-      selectedSectionViewId({ event }) {
-        assertEvent(event, 'selectSectionView');
-        return event.payload;
-      },
-      // Reset translation and pivot when changing planes
-      sectionViewTranslation({ event, context }) {
-        assertEvent(event, 'selectSectionView');
-        if (event.payload === undefined) {
-          return 0;
-        }
-        return dot(getBaseAxis(event.payload), context.geometryCenter);
-      },
-      sectionViewPivot({ event, context }): [number, number, number] {
-        assertEvent(event, 'selectSectionView');
-        return event.payload === undefined ? [0, 0, 0] : [...context.geometryCenter];
-      },
-      // Reset rotation when changing planes
-      sectionViewRotation({ event }): [number, number, number] {
-        assertEvent(event, 'selectSectionView');
-        return event.payload === undefined ? [0, 0, 0] : [0, 0, 0];
-      },
-    }),
-
-    setSectionViewDirection: assign({
-      sectionViewDirection({ event }) {
-        assertEvent(event, 'setSectionViewDirection');
-        return event.payload;
-      },
-    }),
-
-    setSectionViewTranslation: assign({
-      // Move pivot along the CURRENT rotated normal, preserving the component
-      // Perpendicular to that normal so no jump occurs; keep displayed
-      // translation as the rounded requested value.
-      sectionViewPivot({ event, context }): [number, number, number] {
-        assertEvent(event, 'setSectionViewTranslation');
-        // Round the physical metre value at the selected display-unit precision.
-        const desired = roundTranslationToUnitDecimals(event.payload, context.displayUnits.length.metersPerUnit, 2);
-
-        const a = getBaseAxis(context.selectedSectionViewId); // Base axis
-        const r = normalize(rotateVectorByEuler(a, context.sectionViewRotation)); // Rotated normal
-
-        const p = context.sectionViewPivot;
-        const pr = dot(p, r);
-        const pParallelR = scale(r, pr);
-        const pPerpR = sub(p, pParallelR);
-
-        const denom = dot(a, r);
-        const s = Math.abs(denom) > 1e-6 ? (desired - dot(a, pPerpR)) / denom : desired;
-        const newPivot = add(pPerpR, scale(r, s));
-        return newPivot;
-      },
-      sectionViewTranslation({ context }) {
-        const axis = getBaseAxis(context.selectedSectionViewId);
-        const projected = dot(axis, context.sectionViewPivot);
-        // Round the physical metre value at the selected display-unit precision.
-        return roundTranslationToUnitDecimals(projected, context.displayUnits.length.metersPerUnit, 2);
-      },
-    }),
-
-    setSectionViewRotation: assign({
-      sectionViewRotation({ event }): [number, number, number] {
-        assertEvent(event, 'setSectionViewRotation');
-        const [rx, ry, rz] = event.payload;
-        return [clampRadiansToNearestDegree(rx), clampRadiansToNearestDegree(ry), clampRadiansToNearestDegree(rz)];
-      },
-      // Rotation does not change the pivot. Ensure displayed translation stays
-      // consistent with pivot projection onto the base axis.
-      sectionViewTranslation({ context }) {
-        const axis = getBaseAxis(context.selectedSectionViewId);
-        const projected = dot(axis, context.sectionViewPivot);
-        // Round the physical metre value at the selected display-unit precision.
-        return roundTranslationToUnitDecimals(projected, context.displayUnits.length.metersPerUnit, 2);
-      },
-    }),
-
-    toggleSectionViewDirection: assign({
-      sectionViewDirection({ context }) {
-        return context.sectionViewDirection === 1 ? -1 : 1;
-      },
-    }),
-
-    setSectionViewPivot: assign({
-      sectionViewPivot({ event }) {
-        assertEvent(event, 'setSectionViewPivot');
-        return event.payload;
-      },
-      sectionViewTranslation({ event, context }) {
-        assertEvent(event, 'setSectionViewPivot');
-        const axis = getBaseAxis(context.selectedSectionViewId);
-        const projected = dot(axis, event.payload);
-        // Round the physical metre value at the selected display-unit precision.
-        return roundTranslationToUnitDecimals(projected, context.displayUnits.length.metersPerUnit, 2);
-      },
-    }),
-
-    setSectionViewVisualization: assign({
-      sectionViewVisualization({ event, context }) {
-        assertEvent(event, 'setSectionViewVisualization');
-        return {
-          ...context.sectionViewVisualization,
-          ...event.payload,
-        };
-      },
-    }),
-
-    setClippingLinesEnabled: assign({
-      enableClippingLines({ event }) {
-        assertEvent(event, 'setClippingLinesEnabled');
-        return event.payload;
-      },
-    }),
-
-    setClippingMeshEnabled: assign({
-      enableClippingMesh({ event }) {
-        assertEvent(event, 'setClippingMeshEnabled');
-        return event.payload;
-      },
-    }),
-
-    setPlaneName: assign({
-      planeName({ event }) {
-        assertEvent(event, 'setPlaneName');
-        return event.payload;
-      },
-    }),
-
-    setHoveredSectionView: assign({
-      hoveredSectionViewId({ event }) {
-        assertEvent(event, 'setHoveredSectionView');
-        return event.payload;
-      },
-    }),
-
-    setMeasureActive: assign({
-      isMeasureActive({ event }) {
-        assertEvent(event, 'setMeasureActive');
-        return event.payload;
-      },
-    }),
-
-    deactivateMeasure: assign({
-      isMeasureActive: false,
-      measurements: [],
-      currentMeasurementStart: undefined,
-    }),
-
-    // Deactivate measure mode but keep existing measurements in place
-    deactivateMeasurePreserveMeasurements: assign({
-      isMeasureActive: false,
-      currentMeasurementStart: undefined,
-    }),
-
-    startMeasurement: assign({
-      currentMeasurementStart({ event }) {
-        assertEvent(event, 'startMeasurement');
-        return event.payload;
-      },
-    }),
-
-    completeMeasurement: assign({
-      measurements({ event, context }) {
-        assertEvent(event, 'completeMeasurement');
-        if (!context.currentMeasurementStart) {
-          return context.measurements;
-        }
-
-        const start = context.currentMeasurementStart;
-        const end = event.payload;
-        const distance = Math.hypot(end[0] - start[0], end[1] - start[1], end[2] - start[2]);
-
-        return [
-          ...context.measurements,
-          {
-            id: generatePrefixedId(idPrefix.measurement),
-            frameId: 'tau:root',
-            startPoint: start,
-            endPoint: end,
-            distance,
-            isPinned: false,
-          },
-        ];
-      },
-      currentMeasurementStart: undefined,
-    }),
-
-    cancelCurrentMeasurement: assign({
-      currentMeasurementStart: undefined,
-    }),
-
-    clearMeasurement: assign({
-      measurements({ event, context }) {
-        assertEvent(event, 'clearMeasurement');
-        const filtered = context.measurements.filter((m) => m.id !== event.payload);
-        return filtered;
-      },
-    }),
-
-    clearAllMeasurements: assign({
-      measurements: [],
-      currentMeasurementStart: undefined,
-    }),
-
-    clearUnpinnedMeasurements: assign({
-      measurements({ context }) {
-        return context.measurements.filter((m) => m.isPinned);
-      },
-    }),
-
-    setHoveredMeasurement: assign({
-      hoveredMeasurementId({ event }) {
-        assertEvent(event, 'setHoveredMeasurement');
-        return event.payload;
-      },
-    }),
-
-    setMeasurementName: assign({
-      measurements({ event, context }) {
-        assertEvent(event, 'setMeasurementName');
-        return context.measurements.map((m) => (m.id === event.id ? { ...m, name: event.name } : m));
-      },
-    }),
-
-    toggleMeasurementPinned: assign({
-      measurements({ event, context }) {
-        assertEvent(event, 'toggleMeasurementPinned');
-        const updated = context.measurements.map((m) => (m.id === event.id ? { ...m, isPinned: !m.isPinned } : m));
-        return updated;
-      },
-    }),
-
-    loadModelComponentManifest: sendTo(
-      ({ context }) => context.modelInteractionRef,
-      ({ event }) => {
-        assertEvent(event, 'loadModelComponentManifest');
-        return {
-          type: 'loadManifest',
-          unitId: event.unitId,
-          manifest: event.manifest,
-          source: event.source,
-        };
-      },
-    ),
-    clearModelComponentManifest: sendTo(
-      ({ context }) => context.modelInteractionRef,
-      ({ event }) => {
-        assertEvent(event, 'clearModelComponentManifest');
-        return {
-          type: 'clearManifest',
-          unitId: event.unitId,
-          source: event.source,
-        };
-      },
-    ),
-    setHoveredModelComponent: sendTo(
-      ({ context }) => context.modelInteractionRef,
-      ({ event }) => {
-        assertEvent(event, 'setHoveredModelComponent');
-        return {
-          type: 'setHoveredComponent',
-          unitId: event.unitId,
-          componentId: event.componentId,
-          source: event.source,
-        };
-      },
-    ),
-    bindModelInteractionUnit: assign(({ event }) => {
-      assertEvent(event, 'loadModelComponentManifest');
-      return { modelInteractionUnitId: event.unitId };
-    }),
-    toggleModelComponentSelection: sendTo(
-      ({ context }) => context.modelInteractionRef,
-      ({ event }) => {
-        assertEvent(event, 'toggleModelComponentSelection');
-        return {
-          type: 'toggleComponentSelection',
-          unitId: event.unitId,
-          componentId: event.componentId,
-          source: event.source,
-        };
-      },
-    ),
-    selectModelComponent: sendTo(
-      ({ context }) => context.modelInteractionRef,
-      ({ event }) => {
-        assertEvent(event, 'selectModelComponent');
-        return {
-          type: 'selectComponent',
-          unitId: event.unitId,
-          componentId: event.componentId,
-          source: event.source,
-        };
-      },
-    ),
-    clearModelComponentSelection: sendTo(
-      ({ context }) => context.modelInteractionRef,
-      ({ event }) => {
-        assertEvent(event, 'clearModelComponentSelection');
-        return {
-          type: 'clearSelection',
-          unitId: event.unitId,
-          source: event.source,
-        };
-      },
-    ),
-    hideModelComponent: sendTo(
-      ({ context }) => context.modelInteractionRef,
-      ({ event }) => {
-        assertEvent(event, 'hideModelComponent');
-        return {
-          type: 'hideComponent',
-          unitId: event.unitId,
-          componentId: event.componentId,
-          source: event.source,
-        };
-      },
-    ),
-    showModelComponent: sendTo(
-      ({ context }) => context.modelInteractionRef,
-      ({ event }) => {
-        assertEvent(event, 'showModelComponent');
-        return {
-          type: 'showComponent',
-          unitId: event.unitId,
-          componentId: event.componentId,
-          source: event.source,
-        };
-      },
-    ),
-    showHiddenModelComponents: sendTo(
-      ({ context }) => context.modelInteractionRef,
-      ({ event }) => {
-        assertEvent(event, 'showHiddenModelComponents');
-        return {
-          type: 'showHiddenComponents',
-          unitId: event.unitId,
-          source: event.source,
-        };
-      },
-    ),
-    isolateModelComponent: sendTo(
-      ({ context }) => context.modelInteractionRef,
-      ({ event }) => {
-        assertEvent(event, 'isolateModelComponent');
-        return {
-          type: 'isolateComponent',
-          unitId: event.unitId,
-          componentId: event.componentId,
-          source: event.source,
-        };
-      },
-    ),
-    clearModelComponentIsolation: sendTo(
-      ({ context }) => context.modelInteractionRef,
-      ({ event }) => {
-        assertEvent(event, 'clearModelComponentIsolation');
-        return {
-          type: 'clearIsolation',
-          unitId: event.unitId,
-          source: event.source,
-        };
-      },
-    ),
-    setModelComponentOpacity: sendTo(
-      ({ context }) => context.modelInteractionRef,
-      ({ event }) => {
-        assertEvent(event, 'setModelComponentOpacity');
-        return {
-          type: 'setComponentOpacity',
-          unitId: event.unitId,
-          componentId: event.componentId,
-          opacity: event.opacity,
-          source: event.source,
-        };
-      },
-    ),
-    resetModelComponentOpacities: sendTo(
-      ({ context }) => context.modelInteractionRef,
-      ({ event }) => {
-        assertEvent(event, 'resetModelComponentOpacities');
-        return {
-          type: 'resetComponentOpacities',
-          unitId: event.unitId,
-          source: event.source,
-        };
-      },
-    ),
-    focusModelComponent: sendTo(
-      ({ context }) => context.modelInteractionRef,
-      ({ event }) => {
-        assertEvent(event, 'focusModelComponent');
-        return {
-          type: 'focusComponent',
-          unitId: event.unitId,
-          componentId: event.componentId,
-          source: event.source,
-        };
-      },
-    ),
-    clearModelComponentFocus: sendTo(
-      ({ context }) => context.modelInteractionRef,
-      ({ event }) => {
-        assertEvent(event, 'clearModelComponentFocus');
-        return {
-          type: 'clearFocus',
-          unitId: event.unitId,
-          source: event.source,
-        };
-      },
-    ),
-    stopOwnedModelInteraction: enqueueActions(({ enqueue, context }) => {
-      if (context.ownsModelInteractionRef) {
-        enqueue.stopChild(context.modelInteractionRef);
-      }
-    }),
-  },
-  guards: {
-    isActivatingClipping({ event }) {
-      assertEvent(event, 'setSectionViewActive');
-      return event.payload;
-    },
-    isDeactivatingSectionView({ event }) {
-      assertEvent(event, 'setSectionViewActive');
-      return !event.payload;
-    },
-    isSelectingPlane({ event }) {
-      assertEvent(event, 'selectSectionView');
-      return event.payload !== undefined;
-    },
-    isDeselectingPlane({ event }) {
-      assertEvent(event, 'selectSectionView');
-      return event.payload === undefined;
-    },
-    isActivatingMeasure({ event }) {
-      assertEvent(event, 'setMeasureActive');
-      return event.payload;
-    },
-    isDeactivatingMeasure({ event }) {
-      assertEvent(event, 'setMeasureActive');
-      return !event.payload;
-    },
-    hasSelectedPoints({ context }) {
-      return context.measurements.length > 0;
-    },
-    hasSelectedSectionView({ context }) {
-      return context.selectedSectionViewId !== undefined;
-    },
-    isActivatingClippingWithSelection({ event, context }) {
-      assertEvent(event, 'setSectionViewActive');
-      return event.payload && context.selectedSectionViewId !== undefined;
-    },
+  actors: graphicsActors,
+  schemas: {
+    context: types<GraphicsContext>(),
+    events: eventSchemas<GraphicsEvent>(),
+    input: types<GraphicsInput>(),
+    emitted: eventSchemas<GraphicsEmitted>(),
   },
 }).createMachine({
   id: 'graphics',
@@ -1550,17 +668,31 @@ export const graphicsMachine = setup({
     {
       src: 'probeWebGpu',
       id: 'probeWebGpuInvocation',
-      onDone: { actions: 'recordWebGpuProbeResult' },
-      onError: { actions: 'recordWebGpuProbeFailure' },
+      onDone: ({ context, event }) => {
+        const output = typeof event.output === 'boolean' ? event.output : false;
+        return {
+          context: {
+            webGpuAvailable: output,
+            resolvedGraphicsBackend: resolveGraphicsBackendPreference(context.graphicsBackendPreference, output),
+          },
+        };
+      },
+      /** Probe actor rejected / threw — pessimistic fallback. */
+      onError: ({ context }) => ({
+        context: {
+          webGpuAvailable: false,
+          resolvedGraphicsBackend: resolveGraphicsBackendPreference(context.graphicsBackendPreference, false),
+        },
+      }),
     },
   ],
 
-  context: ({ input, spawn }) => {
+  context: ({ input, spawn, actors }) => {
     const preference = input.graphicsBackend ?? 'webgl';
     const ownsModelInteractionRef = input.modelInteractionRef === undefined;
     const modelInteractionRef =
       input.modelInteractionRef ??
-      spawn('modelInteraction', {
+      spawn(actors.modelInteraction, {
         id: 'model-interaction',
         input: {},
       });
@@ -1601,19 +733,10 @@ export const graphicsMachine = setup({
       webGpuAvailable: false,
       resolvedGraphicsBackend: resolveGraphicsBackendPreference(preference, false),
 
-      // Clipping plane state (durable per E2; the cut is entry-scoped, its display pane-scoped)
-      ...createSectionViewSeed(input.sectionView, input.sectionDisplay),
-      availableSectionViews: [
-        { id: 'xy', normal: [0, 0, 1], constant: 0 },
-        { id: 'xz', normal: [0, 1, 0], constant: 0 },
-        { id: 'yz', normal: [1, 0, 0], constant: 0 },
-      ],
-      hoveredSectionViewId: undefined,
-      sectionViewVisualization: {
-        stripeColor: '#00ff00',
-        stripeSpacing: 0.01,
-        stripeWidth: 0.001,
-      },
+      // Section view state (the cuts are durable and entry-scoped)
+      ...createSectionViewSeed(input.sectionView),
+      committedSectionCuts: [],
+      sectionCertification: 'certified',
 
       // Measure state
       isMeasureActive: false,
@@ -1635,6 +758,7 @@ export const graphicsMachine = setup({
       modelInteractionRef,
       ownsModelInteractionRef,
       modelInteractionUnitId: undefined,
+      kinematicsRef: spawn(actors.kinematics, { id: 'kinematics', input: {} }),
 
       // Shapes
       geometry: undefined,
@@ -1646,289 +770,508 @@ export const graphicsMachine = setup({
       },
     };
   },
-  exit: 'stopOwnedModelInteraction',
+  exit: ({ context }, enq) => {
+    if (context.ownsModelInteractionRef) {
+      enq.stop(context.modelInteractionRef);
+    }
+    enq.stop(context.kinematicsRef);
+  },
   initial: 'operational',
   states: {
     operational: {
-      /* A seeded cut sets context directly -- replaying `selectSectionView` would reset the pivot and
-       * rotation to geometry-derived values. This raise only re-enters the matching state node. */
-      entry: enqueueActions(({ enqueue, context }) => {
+      /* Seeded cuts set context directly; this raise only enters the section region's `on` state. */
+      entry: ({ context }, enq) => {
         if (context.isSectionViewActive) {
-          enqueue.raise({ type: 'setSectionViewActive', payload: true });
+          enq.raise({ type: 'setSectionViewActive', payload: true });
         }
-      }),
-      initial: 'ready',
+      },
+      type: 'parallel',
       on: {
         // Grid events
-        updateGridSize: {
-          actions: 'updateGridSize',
+        updateGridSize: ({ context, event }, enq) => {
+          if (context.isGridSizeLocked) {
+            return { context: { gridSizesComputed: event.payload } };
+          }
+          enq.emit({ type: 'gridUpdated', sizes: event.payload });
+          return { context: { gridSizes: event.payload, gridSizesComputed: event.payload } };
         },
-        setGridSizeLocked: {
-          actions: 'setGridSizeLocked',
-        },
-        setGridUnit: {
-          actions: 'setGridUnit',
+        setGridSizeLocked: ({ context, event }) => ({
+          context: { gridSizes: context.gridSizesComputed, isGridSizeLocked: event.payload },
+        }),
+        setGridUnit: ({ context, event, self }, enq) => {
+          const unitData = getLengthUnitData(event.payload.unit);
+          const previousUnitData = getLengthUnitData(context.displayUnits.length.symbol);
+
+          const isSystemChange = previousUnitData.system !== unitData.system;
+          const isImperialFactorChange =
+            unitData.system === 'imperial' && context.displayUnits.length.metersPerUnit !== unitData.factor;
+
+          // Only recalculate grid spacing when:
+          // 1. Switching between si/imperial systems (visual spacing changes)
+          // 2. Changing factor in imperial units (affects visual spacing)
+          // For si units, factor changes only affect display numbers, not visual spacing
+          if (isSystemChange || isImperialFactorChange) {
+            enq.sendTo(self, {
+              type: 'updateGridSize',
+              payload: calculateGridSizes({
+                visibleSpan: context.cameraVisibleSpan,
+                gridUnitSystem: unitData.system,
+                unitFactor: unitData.factor,
+              }),
+            });
+          }
+          return {
+            context: {
+              displayUnits: {
+                length: { symbol: unitData.symbol, metersPerUnit: unitData.factor, system: unitData.system },
+              },
+            },
+          };
         },
 
         // Camera events
-        resetCamera: {
-          actions: 'requestCameraReset',
+        fitView: (_, enq) => {
+          enq.emit({ type: 'viewFitRequested' });
+          return {};
         },
-        cameraViewChanged: {
-          actions: 'handleCameraViewChange',
+        cameraViewChanged: ({ context, event, self }, enq) => {
+          if (!Number.isFinite(event.verticalSpan) || event.verticalSpan <= 0) {
+            return {};
+          }
+          // Recalculate grid sizes based on new controls state
+          enq.sendTo(self, {
+            type: 'updateGridSize',
+            payload: calculateGridSizes({
+              visibleSpan: event.verticalSpan,
+              gridUnitSystem: context.displayUnits.length.system,
+              unitFactor: context.displayUnits.length.metersPerUnit,
+            }),
+          });
+          return { context: { cameraVisibleSpan: event.verticalSpan } };
         },
 
         // Visibility events
         setSurfaceVisibility: {
-          actions: ['setSurfaceVisibility', 'bumpPickableMeshesVersion'],
+          context: ({ context, event }) => ({
+            enableSurfaces: event.payload,
+            pickableMeshesVersion: context.pickableMeshesVersion + 1,
+          }),
         },
-        setLinesVisibility: {
-          actions: 'setLinesVisibility',
-        },
-        setGizmoVisibility: {
-          actions: 'setGizmoVisibility',
-        },
-        setGridVisibility: {
-          actions: 'setGridVisibility',
-        },
-        setAxesVisibility: {
-          actions: 'setAxesVisibility',
-        },
-        setMatcapVisibility: {
-          actions: 'setMatcapVisibility',
-        },
-        setPostProcessingVisibility: {
-          actions: 'setPostProcessingVisibility',
-        },
-        setUpDirection: {
-          actions: 'setUpDirection',
-        },
+        setLinesVisibility: { context: ({ event }) => ({ enableLines: event.payload }) },
+        setGizmoVisibility: { context: ({ event }) => ({ enableGizmo: event.payload }) },
+        setGridVisibility: { context: ({ event }) => ({ enableGrid: event.payload }) },
+        setAxesVisibility: { context: ({ event }) => ({ enableAxes: event.payload }) },
+        setMatcapVisibility: { context: ({ event }) => ({ enableMatcap: event.payload }) },
+        setPostProcessingVisibility: { context: ({ event }) => ({ enablePostProcessing: event.payload }) },
+        setUpDirection: { context: ({ event }) => ({ upDirection: event.payload }) },
         setGraphicsBackendPreference: {
-          actions: 'setGraphicsBackendPreference',
-        },
-
-        // Plane naming and hover are global in operational state
-        setPlaneName: {
-          actions: 'setPlaneName',
-        },
-        setHoveredSectionView: {
-          actions: 'setHoveredSectionView',
+          context: ({ context, event }) => ({
+            graphicsBackendPreference: event.payload,
+            resolvedGraphicsBackend: resolveGraphicsBackendPreference(event.payload, context.webGpuAvailable),
+          }),
         },
 
         // Controls events
         controlsInteractionStart: {
-          actions: 'handleControlsInteractionStart',
+          context: {
+            cameraInteracting: true,
+            cameraInteractionHadMovement: false,
+            suppressNextModelPointerClick: false,
+          },
         },
-        controlsInteractionMoved: {
-          actions: 'handleControlsInteractionMoved',
+        controlsInteractionMoved: ({ context }, enq) => {
+          if (!context.cameraInteracting) {
+            return {};
+          }
+          if (!context.viewerHoverSuppressionReasons.includes('cameraControls')) {
+            clearViewerHover(context, enq, 'viewer');
+          }
+          return {
+            context: {
+              cameraInteractionHadMovement: true,
+              suppressNextModelPointerClick: true,
+              viewerHoverSuppressionReasons: addSuppressionReason(
+                context.viewerHoverSuppressionReasons,
+                'cameraControls',
+              ),
+            },
+          };
         },
         controlsInteractionEnd: {
-          actions: 'handleControlsInteractionEnd',
+          context: ({ context }) => ({
+            cameraInteracting: false,
+            cameraInteractionHadMovement: false,
+            viewerHoverSuppressionReasons: removeSuppressionReason(
+              context.viewerHoverSuppressionReasons,
+              'cameraControls',
+            ),
+          }),
         },
-        beginViewerModelHoverSuppression: {
-          actions: 'beginViewerModelHoverSuppression',
+        beginViewerModelHoverSuppression: ({ context, event }, enq) => {
+          if (context.viewerHoverSuppressionReasons.includes(event.reason)) {
+            return {};
+          }
+          clearViewerHover(context, enq, event.source ?? 'viewer');
+          return {
+            context: {
+              viewerHoverSuppressionReasons: addSuppressionReason(context.viewerHoverSuppressionReasons, event.reason),
+            },
+          };
         },
         endViewerModelHoverSuppression: {
-          actions: 'endViewerModelHoverSuppression',
+          context: ({ context, event }) => ({
+            viewerHoverSuppressionReasons: removeSuppressionReason(context.viewerHoverSuppressionReasons, event.reason),
+          }),
         },
-        markModelPointerGestureMoved: {
-          actions: 'markModelPointerGestureMoved',
-        },
-        clearModelPointerClickGuard: {
-          actions: 'clearModelPointerClickGuard',
-        },
+        // Sent on every step of a gizmo drag; only the first one changes anything.
+        markModelPointerGestureMoved: ({ context }) =>
+          context.suppressNextModelPointerClick ? {} : { context: { suppressNextModelPointerClick: true } },
+        clearModelPointerClickGuard: { context: { suppressNextModelPointerClick: false } },
 
         // Geometry updates
-        updateGeometry: {
-          actions: 'updateGeometry',
+        updateGeometry: ({ context, event }, enq) => {
+          const requestedRevision = context.gltfPresentation.requestedRevision + 1;
+          if (event.geometry.format !== 'gltf' && event.sourceFile) {
+            forwardToModelInteraction(context, enq, {
+              type: 'clearManifest',
+              unitId: deriveModelInteractionUnitId({ sourceFile: event.sourceFile }),
+              source: 'viewer',
+            });
+          }
+          return {
+            context: {
+              geometry: event.geometry,
+              geometryKey: event.geometry.hash,
+              gltfPresentation:
+                event.geometry.format === 'gltf'
+                  ? withGltfPresentationPhase(
+                      { ...context.gltfPresentation, requestedRevision, requestedKey: event.geometry.hash },
+                      'preparing',
+                    )
+                  : withGltfPresentationPhase(
+                      {
+                        ...context.gltfPresentation,
+                        requestedRevision,
+                        requestedKey: undefined,
+                        presentedRevision: requestedRevision,
+                        presentedKey: undefined,
+                      },
+                      'idle',
+                    ),
+              modelInteractionUnitId:
+                event.geometry.format === 'gltf'
+                  ? context.modelInteractionUnitId
+                  : event.sourceFile
+                    ? deriveModelInteractionUnitId({ sourceFile: event.sourceFile })
+                    : undefined,
+              pickableMeshesVersion:
+                event.geometry.format === 'gltf' ? context.pickableMeshesVersion : context.pickableMeshesVersion + 1,
+              cadUnits: { length: { symbol: event.units.length } },
+            },
+          };
         },
         gltfPreparationStarted: {
-          actions: 'beginGltfPreparation',
+          context: ({ context, event }) => ({
+            gltfPresentation: gltfRequestMatches(context, event)
+              ? withGltfPresentationPhase(context.gltfPresentation, 'preparing')
+              : context.gltfPresentation,
+          }),
         },
         gltfDisplayReady: {
-          actions: 'recordGltfDisplayReady',
+          context: ({ context, event }) => ({
+            gltfPresentation: gltfRequestMatches(context, event)
+              ? withGltfPresentationPhase(
+                  context.gltfPresentation,
+                  event.barrier === 'analysis-ready' ? 'awaiting-analysis' : 'preparing',
+                )
+              : context.gltfPresentation,
+          }),
         },
         gltfAnalysisReady: {
-          actions: 'recordGltfAnalysisReady',
+          context: ({ context, event }) => ({
+            gltfPresentation: gltfRequestMatches(context, event)
+              ? withGltfPresentationPhase(context.gltfPresentation, 'preparing')
+              : context.gltfPresentation,
+          }),
         },
-        gltfPresentationCommitted: {
-          actions: 'commitGltfPresentation',
+        gltfPresentationCommitted: ({ context, event }, enq) => {
+          if (!gltfRequestMatches(context, event)) {
+            return {};
+          }
+          forwardToModelInteraction(context, enq, {
+            type: 'loadManifest',
+            unitId: event.unitId,
+            manifest: event.manifest,
+            source: 'viewer',
+          });
+          return {
+            context: {
+              gltfPresentation: withGltfPresentationPhase(
+                { ...context.gltfPresentation, presentedRevision: event.revision, presentedKey: event.key },
+                'presented',
+              ),
+              modelInteractionUnitId: event.unitId,
+              pickableMeshesVersion: context.pickableMeshesVersion + 1,
+            },
+          };
         },
         gltfPresentationFailed: {
-          actions: 'failGltfPresentation',
+          context: ({ context, event }) => ({
+            gltfPresentation: gltfRequestMatches(context, event)
+              ? withGltfPresentationPhase(
+                  context.gltfPresentation,
+                  context.gltfPresentation.presentedKey === undefined ? 'failed' : 'presented',
+                )
+              : context.gltfPresentation,
+          }),
         },
-        gltfPresentationMeasured: {
-          actions: 'recordGltfPresentationTelemetry',
+        /* D21: the presented frame joins the worker spans that produced it, under the renderer's own
+         * producer identity. The durations ride as attributes rather than as invented child spans —
+         * only their total is anchored to a real clock reading, exactly as the kernels report timings. */
+        gltfPresentationMeasured: ({ event }, enq) => {
+          const { durations, ...attributes } = event.telemetry;
+          const duration = durations.receiptToFirstFrame ?? durations.commitToFirstFrame ?? 0;
+          enq(() => {
+            recordRendererSpan('renderer.presentation', {
+              startTime: performance.now() - duration,
+              duration,
+              attributes: { ...attributes, ...durations },
+            });
+          });
+          return {};
         },
-        sceneRadiusUpdated: {
-          actions: 'updateSceneRadius',
+        sceneRadiusUpdated: ({ event }, enq) => {
+          enq.emit({ type: 'geometryRadiusCalculated', radius: event.radius });
+          return { context: { geometryRadius: event.radius, geometryCenter: event.centerMeters } };
         },
 
         // Model/component interaction
-        loadModelComponentManifest: {
-          actions: ['bindModelInteractionUnit', 'loadModelComponentManifest'],
+        loadModelComponentManifest: ({ context, event }, enq) => {
+          forwardToModelInteraction(context, enq, {
+            type: 'loadManifest',
+            unitId: event.unitId,
+            manifest: event.manifest,
+            source: event.source,
+          });
+          return { context: { modelInteractionUnitId: event.unitId } };
         },
-        clearModelComponentManifest: {
-          actions: 'clearModelComponentManifest',
+        clearModelComponentManifest: ({ context, event }, enq) => {
+          forwardToModelInteraction(context, enq, {
+            type: 'clearManifest',
+            unitId: event.unitId,
+            source: event.source,
+          });
+          return {};
         },
-        setHoveredModelComponent: {
-          actions: 'setHoveredModelComponent',
+        setHoveredModelComponent: ({ context, event }, enq) => {
+          forwardToModelInteraction(context, enq, {
+            type: 'setHoveredComponent',
+            unitId: event.unitId,
+            componentId: event.componentId,
+            source: event.source,
+          });
+          return {};
         },
-        toggleModelComponentSelection: {
-          actions: 'toggleModelComponentSelection',
+        toggleModelComponentSelection: ({ context, event }, enq) => {
+          forwardToModelInteraction(context, enq, {
+            type: 'toggleComponentSelection',
+            unitId: event.unitId,
+            componentId: event.componentId,
+            source: event.source,
+          });
+          return {};
         },
-        selectModelComponent: {
-          actions: 'selectModelComponent',
+        selectModelComponent: ({ context, event }, enq) => {
+          forwardToModelInteraction(context, enq, {
+            type: 'selectComponent',
+            unitId: event.unitId,
+            componentId: event.componentId,
+            source: event.source,
+          });
+          return {};
         },
-        clearModelComponentSelection: {
-          actions: 'clearModelComponentSelection',
+        clearModelComponentSelection: ({ context, event }, enq) => {
+          forwardToModelInteraction(context, enq, {
+            type: 'clearSelection',
+            unitId: event.unitId,
+            source: event.source,
+          });
+          return {};
         },
-        hideModelComponent: {
-          actions: 'hideModelComponent',
+        hideModelComponent: ({ context, event }, enq) => {
+          forwardToModelInteraction(context, enq, {
+            type: 'hideComponent',
+            unitId: event.unitId,
+            componentId: event.componentId,
+            source: event.source,
+          });
+          return {};
         },
-        showModelComponent: {
-          actions: 'showModelComponent',
+        showModelComponent: ({ context, event }, enq) => {
+          forwardToModelInteraction(context, enq, {
+            type: 'showComponent',
+            unitId: event.unitId,
+            componentId: event.componentId,
+            source: event.source,
+          });
+          return {};
         },
-        showHiddenModelComponents: {
-          actions: 'showHiddenModelComponents',
+        showHiddenModelComponents: ({ context, event }, enq) => {
+          forwardToModelInteraction(context, enq, {
+            type: 'showHiddenComponents',
+            unitId: event.unitId,
+            source: event.source,
+          });
+          return {};
         },
-        isolateModelComponent: {
-          actions: 'isolateModelComponent',
+        isolateModelComponent: ({ context, event }, enq) => {
+          forwardToModelInteraction(context, enq, {
+            type: 'isolateComponent',
+            unitId: event.unitId,
+            componentId: event.componentId,
+            source: event.source,
+          });
+          return {};
         },
-        clearModelComponentIsolation: {
-          actions: 'clearModelComponentIsolation',
+        clearModelComponentIsolation: ({ context, event }, enq) => {
+          forwardToModelInteraction(context, enq, {
+            type: 'clearIsolation',
+            unitId: event.unitId,
+            source: event.source,
+          });
+          return {};
         },
-        setModelComponentOpacity: {
-          actions: 'setModelComponentOpacity',
+        setModelComponentOpacity: ({ context, event }, enq) => {
+          forwardToModelInteraction(context, enq, {
+            type: 'setComponentOpacity',
+            unitId: event.unitId,
+            componentId: event.componentId,
+            opacity: event.opacity,
+            source: event.source,
+          });
+          return {};
         },
-        resetModelComponentOpacities: {
-          actions: 'resetModelComponentOpacities',
+        resetModelComponentOpacities: ({ context, event }, enq) => {
+          forwardToModelInteraction(context, enq, {
+            type: 'resetComponentOpacities',
+            unitId: event.unitId,
+            source: event.source,
+          });
+          return {};
         },
-        focusModelComponent: {
-          actions: 'focusModelComponent',
+        focusModelComponent: ({ context, event }, enq) => {
+          forwardToModelInteraction(context, enq, {
+            type: 'focusComponent',
+            unitId: event.unitId,
+            componentId: event.componentId,
+            source: event.source,
+          });
+          return {};
         },
-        clearModelComponentFocus: {
-          actions: 'clearModelComponentFocus',
+        clearModelComponentFocus: ({ context, event }, enq) => {
+          forwardToModelInteraction(context, enq, { type: 'clearFocus', unitId: event.unitId, source: event.source });
+          return {};
         },
-        // Section view physical pivot updates.
-        setSectionViewPivot: {
-          actions: 'setSectionViewPivot',
+
+        // Section cuts are data: editing one never changes a region.
+        updateSectionCut: ({ context, event }) => {
+          const cut = context.sectionCuts.find((candidate) => candidate.id === event.payload.id);
+          if (!cut) {
+            return {};
+          }
+          const next = applySectionCutPatch(cut, event.payload.patch, context.geometryCenter);
+          return next === cut
+            ? {}
+            : {
+                context: {
+                  sectionCuts: context.sectionCuts.map((candidate) => (candidate === cut ? next : candidate)),
+                },
+              };
         },
+        selectSectionCut: ({ context, event }) =>
+          isSectionCutReference(context, context.selectedSectionCutId, event.payload)
+            ? { context: { selectedSectionCutId: event.payload } }
+            : {},
+        hoverSectionCut: ({ context, event }) =>
+          isSectionCutReference(context, context.hoveredSectionCutId, event.payload)
+            ? { context: { hoveredSectionCutId: event.payload } }
+            : {},
+        setSectionCertification: ({ context, event }) =>
+          event.payload.cuts === context.committedSectionCuts && event.payload.status === context.sectionCertification
+            ? {}
+            : {
+                context: {
+                  committedSectionCuts: event.payload.cuts,
+                  sectionCertification: event.payload.status,
+                },
+              },
 
         // Measurement events (available in all operational states)
         clearMeasurement: {
-          actions: 'clearMeasurement',
+          context: ({ context, event }) => ({
+            measurements: context.measurements.filter((m) => m.id !== event.payload),
+          }),
         },
-        setHoveredMeasurement: {
-          actions: 'setHoveredMeasurement',
-        },
+        setHoveredMeasurement: { context: ({ event }) => ({ hoveredMeasurementId: event.payload }) },
         setMeasurementName: {
-          actions: 'setMeasurementName',
+          context: ({ context, event }) => ({
+            measurements: context.measurements.map((m) => (m.id === event.id ? { ...m, name: event.name } : m)),
+          }),
         },
         toggleMeasurementPinned: {
-          actions: 'toggleMeasurementPinned',
+          context: ({ context, event }) => ({
+            measurements: context.measurements.map((m) => (m.id === event.id ? { ...m, isPinned: !m.isPinned } : m)),
+          }),
         },
         clearUnpinnedMeasurements: {
-          actions: 'clearUnpinnedMeasurements',
+          context: ({ context }) => ({ measurements: context.measurements.filter((m) => m.isPinned) }),
         },
       },
       states: {
-        ready: {
-          on: {
-            setSectionViewActive: [
-              {
-                guard: 'isActivatingClippingWithSelection',
-                actions: 'setSectionViewActive',
-                target: 'section-view.active',
-              },
-              {
-                guard: 'isActivatingClipping',
-                actions: 'setSectionViewActive',
-                target: 'section-view.pending',
-              },
-            ],
-            setMeasureActive: {
-              guard: 'isActivatingMeasure',
-              actions: ['setMeasureActive', 'beginMeasureHoverSuppression'],
-              target: 'measure.selecting',
-            },
-          },
-        },
-
-        'section-view': {
-          initial: 'pending',
+        section: {
+          initial: 'off',
           states: {
-            pending: {
+            off: {
               on: {
-                setSectionViewActive: {
-                  guard: 'isDeactivatingSectionView',
-                  actions: 'setSectionViewActive',
-                  target: '#graphics.operational.ready',
+                setSectionViewActive: ({ context, event }) => {
+                  if (!event.payload) {
+                    return undefined;
+                  }
+                  return {
+                    target: 'on',
+                    context:
+                      context.sectionCuts.length === 0
+                        ? appendSectionCut(context, { kind: 'plane', viewDirection: event.viewDirection })
+                        : { isSectionViewActive: true },
+                  };
                 },
-                setMeasureActive: {
-                  guard: 'isActivatingMeasure',
-                  actions: ['deactivateSectionView', 'setMeasureActive', 'beginMeasureHoverSuppression'],
-                  target: '#graphics.operational.measure.selecting',
-                },
-                selectSectionView: {
-                  guard: 'isSelectingPlane',
-                  actions: 'selectSectionView',
-                  target: 'active',
-                },
-                setSectionViewVisualization: {
-                  actions: 'setSectionViewVisualization',
-                },
-                setClippingLinesEnabled: {
-                  actions: 'setClippingLinesEnabled',
-                },
-                setClippingMeshEnabled: {
-                  actions: 'setClippingMeshEnabled',
+                addSectionCut: ({ context, event }) =>
+                  context.sectionCuts.length >= maxSectionCuts
+                    ? {}
+                    : { target: 'on', context: appendSectionCut(context, event.payload) },
+                removeSectionCut: ({ context, event }) => {
+                  const patch = withoutSectionCut(context, event.payload);
+                  return patch ? { context: patch } : {};
                 },
               },
             },
 
-            active: {
+            on: {
               on: {
-                setSectionViewActive: {
-                  guard: 'isDeactivatingSectionView',
-                  actions: 'setSectionViewActive',
-                  target: '#graphics.operational.ready',
-                },
-                setMeasureActive: {
-                  guard: 'isActivatingMeasure',
-                  actions: ['deactivateSectionView', 'setMeasureActive', 'beginMeasureHoverSuppression'],
-                  target: '#graphics.operational.measure.selecting',
-                },
-                selectSectionView: [
-                  {
-                    guard: 'isDeselectingPlane',
-                    actions: 'selectSectionView',
-                    target: 'pending',
-                  },
-                  {
-                    actions: 'selectSectionView',
-                  },
-                ],
-                setSectionViewTranslation: {
-                  actions: 'setSectionViewTranslation',
-                },
-                setSectionViewRotation: {
-                  actions: 'setSectionViewRotation',
-                },
-                toggleSectionViewDirection: {
-                  actions: 'toggleSectionViewDirection',
-                },
-                setSectionViewDirection: {
-                  actions: 'setSectionViewDirection',
-                },
-                setSectionViewVisualization: {
-                  actions: 'setSectionViewVisualization',
-                },
-                setClippingLinesEnabled: {
-                  actions: 'setClippingLinesEnabled',
-                },
-                setClippingMeshEnabled: {
-                  actions: 'setClippingMeshEnabled',
+                setSectionViewActive: ({ event }) =>
+                  event.payload ? undefined : { target: 'off', context: { ...sectionOffContext } },
+                addSectionCut: ({ context, event }) =>
+                  context.sectionCuts.length >= maxSectionCuts
+                    ? {}
+                    : { context: appendSectionCut(context, event.payload) },
+                removeSectionCut: ({ context, event }) => {
+                  const patch = withoutSectionCut(context, event.payload);
+                  if (!patch) {
+                    return {};
+                  }
+                  return patch.sectionCuts.length === 0
+                    ? { target: 'off', context: { ...patch, ...sectionOffContext } }
+                    : { context: patch };
                 },
               },
             },
@@ -1936,86 +1279,78 @@ export const graphicsMachine = setup({
         },
 
         measure: {
-          initial: 'selecting',
+          initial: 'off',
           states: {
-            selecting: {
+            off: {
               on: {
-                setMeasureActive: {
-                  guard: 'isDeactivatingMeasure',
-                  actions: ['setMeasureActive', 'endMeasureHoverSuppression'],
-                  target: '#graphics.operational.ready',
-                },
-                setSectionViewActive: [
-                  {
-                    guard: 'isActivatingClippingWithSelection',
-                    actions: [
-                      'deactivateMeasurePreserveMeasurements',
-                      'endMeasureHoverSuppression',
-                      'setSectionViewActive',
-                    ],
-                    target: '#graphics.operational.section-view.active',
-                  },
-                  {
-                    guard: 'isActivatingClipping',
-                    actions: [
-                      'deactivateMeasurePreserveMeasurements',
-                      'endMeasureHoverSuppression',
-                      'setSectionViewActive',
-                    ],
-                    target: '#graphics.operational.section-view.pending',
-                  },
-                ],
-                startMeasurement: {
-                  actions: 'startMeasurement',
-                  target: 'selected',
-                },
-                clearAllMeasurements: {
-                  actions: 'clearAllMeasurements',
-                },
+                setMeasureActive: ({ context, event }, enq) =>
+                  event.payload
+                    ? {
+                        target: 'on',
+                        context: { isMeasureActive: true, ...beginMeasureHoverSuppression(context, enq) },
+                      }
+                    : undefined,
               },
             },
 
-            selected: {
+            on: {
+              initial: 'selecting',
               on: {
-                setMeasureActive: {
-                  guard: 'isDeactivatingMeasure',
-                  actions: ['clearAllMeasurements', 'setMeasureActive', 'endMeasureHoverSuppression'],
-                  target: '#graphics.operational.ready',
-                },
-                setSectionViewActive: [
-                  {
-                    guard: 'isActivatingClippingWithSelection',
-                    actions: [
-                      'deactivateMeasurePreserveMeasurements',
-                      'endMeasureHoverSuppression',
-                      'setSectionViewActive',
-                    ],
-                    target: '#graphics.operational.section-view.active',
-                  },
-                  {
-                    guard: 'isActivatingClipping',
-                    actions: [
-                      'deactivateMeasurePreserveMeasurements',
-                      'endMeasureHoverSuppression',
-                      'setSectionViewActive',
-                    ],
-                    target: '#graphics.operational.section-view.pending',
-                  },
-                ],
-                completeMeasurement: {
-                  actions: 'completeMeasurement',
-                  target: 'selecting',
-                },
-                cancelCurrentMeasurement: {
-                  actions: 'cancelCurrentMeasurement',
-                  target: 'selecting',
-                },
-                clearMeasurement: {
-                  actions: 'clearMeasurement',
-                },
+                // Leaving keeps every measurement; only a half-placed one is dropped.
+                setMeasureActive: ({ context, event }) =>
+                  event.payload
+                    ? undefined
+                    : {
+                        target: 'off',
+                        context: {
+                          isMeasureActive: false,
+                          currentMeasurementStart: undefined,
+                          ...endMeasureHoverSuppression(context),
+                        },
+                      },
                 clearAllMeasurements: {
-                  actions: 'clearAllMeasurements',
-                  target: 'selecting',
+                  target: '.selecting',
+                  context: { measurements: [], currentMeasurementStart: undefined },
+                },
+              },
+              states: {
+                selecting: {
+                  on: {
+                    startMeasurement: {
+                      target: 'selected',
+                      context: ({ event }) => ({ currentMeasurementStart: event.payload }),
+                    },
+                  },
+                },
+
+                selected: {
+                  on: {
+                    completeMeasurement: ({ context, event }) => {
+                      const start = context.currentMeasurementStart;
+                      if (!start) {
+                        return { target: 'selecting', context: { currentMeasurementStart: undefined } };
+                      }
+                      const end = event.payload;
+                      return {
+                        target: 'selecting',
+                        context: {
+                          measurements: [
+                            ...context.measurements,
+                            {
+                              id: generatePrefixedId(idPrefix.measurement),
+                              frameId: 'tau:root',
+                              startPoint: start,
+                              endPoint: end,
+                              distance: Math.hypot(end[0] - start[0], end[1] - start[1], end[2] - start[2]),
+                              isPinned: false,
+                            },
+                          ],
+                          currentMeasurementStart: undefined,
+                        },
+                      };
+                    },
+                    cancelCurrentMeasurement: { target: 'selecting', context: { currentMeasurementStart: undefined } },
+                  },
                 },
               },
             },

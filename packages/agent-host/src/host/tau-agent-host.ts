@@ -21,6 +21,7 @@ import type {
   DurableEventLog,
   HostRunFailure,
   HostRunSnapshot,
+  HostToolApproval,
   InterruptApprovalPort,
   InterruptRequest,
   InterruptResolution,
@@ -1578,6 +1579,95 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         code: 'HOST_MODEL_UNAVAILABLE',
       });
     }
+    /**
+     * The durable approval a tool may ask for mid-turn (D5): `request_print`
+     * pauses the run on the same `interrupt.recorded` the chat banner already
+     * projects and resumes on the answer. Supplied per invocation rather than
+     * per session because one registry serves every run and the pause has to
+     * be recorded under *this* run's log.
+     *
+     * @param signal - The invocation's cancellation.
+     * @returns The approval bound to this run and that invocation.
+     */
+    const approveFor =
+      (signal: AbortSignal): HostToolApproval =>
+      async (request) => {
+        const interruptId = createId();
+        const scope = { chatId: input.chatId, log: input.log, runId: input.runId, leaderEpoch: input.leaderEpoch };
+        await append({
+          ...scope,
+          events: [
+            {
+              type: 'interrupt.recorded',
+              interruptId,
+              phase: 'requested',
+              reason: request.prompt,
+              payload: {
+                kind: 'approval',
+                prompt: request.prompt,
+                ...(request.payload === undefined ? {} : { context: request.payload }),
+              },
+            },
+            { type: 'run.lifecycle', state: 'paused' },
+          ],
+        });
+        const paused = options.interruptPort.pause({
+          interruptId,
+          runId: input.runId,
+          kind: 'approval',
+          prompt: request.prompt,
+          ...(request.payload === undefined ? {} : { payload: request.payload }),
+        });
+        /* Stop is always available: aborting the run — cancel, an operator
+         * interrupt, close — answers the pending request as cancelled, so the
+         * tool withdraws what it asked for instead of the run wedging in a
+         * pause nothing will resolve. Registered after `pause` so the port
+         * already holds the waiter this settles. */
+        const cancelPending = async (): Promise<void> => {
+          try {
+            await options.interruptPort.resume({ interruptId, outcome: 'cancelled' });
+          } catch {
+            /* Already answered by a person; that answer stands. */
+          }
+        };
+        let cancellation: Promise<void> | undefined;
+        const onAbort = (): void => {
+          cancellation = cancelPending();
+        };
+        if (signal.aborted) {
+          onAbort();
+        } else {
+          signal.addEventListener('abort', onAbort, { once: true });
+        }
+        let resolution: InterruptResolution;
+        try {
+          resolution = await paused;
+        } finally {
+          signal.removeEventListener('abort', onAbort);
+          await cancellation;
+        }
+        await append({
+          ...scope,
+          events: [
+            {
+              type: 'interrupt.recorded',
+              interruptId,
+              phase: 'resolved',
+              reason: resolution.outcome,
+              payload: {
+                outcome: resolution.outcome,
+                ...(resolution.optionId === undefined ? {} : { optionId: resolution.optionId }),
+                ...(resolution.payload === undefined ? {} : { response: resolution.payload }),
+              },
+            },
+            /* The turn continues on any answer — a denial is a tool result the
+             * model reads — unless the run itself is being aborted, whose own
+             * teardown records the terminal state. */
+            ...(signal.aborted ? [] : ([{ type: 'run.lifecycle', state: 'running' }] as const)),
+          ],
+        });
+        return resolution;
+      };
     return createAgentSession({
       chatId: input.chatId,
       runId: input.runId,
@@ -1586,7 +1676,11 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       systemPromptBlocks: input.config?.systemPromptBlocks ?? options.systemPromptBlocks,
       model,
       modelTransport: options.modelTransport,
-      toolRegistry: options.toolRegistry,
+      toolRegistry: {
+        list: () => options.toolRegistry.list(),
+        invoke: async (invocation) =>
+          options.toolRegistry.invoke({ ...invocation, approve: approveFor(invocation.signal) }),
+      },
       toolChoice: input.config?.toolChoice,
       allowedTools: input.config?.allowedTools,
       snapshot: input.config?.snapshot,
@@ -2516,9 +2610,10 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       }
       active.session.abort();
       /* No drain here, unlike the external branch: a Tau run is ended by
-       * `interrupt` *before* its durable pause begins, so an active Tau run never
-       * holds a pending interrupt — a paused chat is answered by
-       * `resolveInterrupt`, not by cancel (6-review F2, falsified). */
+       * `interrupt` *before* its durable pause begins, and the one pending
+       * interrupt an active Tau run can hold — a tool's approval — answers
+       * itself `cancelled` on the abort above (`approveFor`). A paused chat is
+       * answered by `resolveInterrupt`, not by cancel (6-review F2, falsified). */
       await (active.completion ?? active.session.agent.waitForIdle());
     },
     snapshot,

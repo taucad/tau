@@ -1,7 +1,6 @@
 import { ArrowDown } from 'lucide-react';
 import { memo, useCallback } from 'react';
 import { Button } from '@taucad/ui/components/button';
-import { cn } from '@taucad/ui/utils/cn';
 
 type ScrollDownButtonProperties = {
   readonly hasContent: boolean;
@@ -18,7 +17,7 @@ export const ScrollDownButton = memo(function ({
     onScrollToBottom();
   }, [onScrollToBottom]);
 
-  if (!hasContent) {
+  if (!hasContent || !isVisible) {
     return null;
   }
 
@@ -26,10 +25,7 @@ export const ScrollDownButton = memo(function ({
     <Button
       size='icon'
       variant='overlay'
-      className={cn(
-        'absolute bottom-28 left-1/2 flex -translate-x-1/2 justify-center rounded-full',
-        !isVisible && 'pointer-events-none opacity-0 select-none',
-      )}
+      className='absolute bottom-full left-1/2 z-10 mb-2 flex -translate-x-1/2 justify-center rounded-full'
       aria-label='Scroll to bottom'
       onClick={handleScrollToBottom}
     >

@@ -149,6 +149,10 @@ export const idPrefix = {
    */
   measurement: 'meas',
   /**
+   * A section view cut ID. Cuts get new IDs on every load, so it never persists.
+   */
+  sectionCut: 'cut',
+  /**
    * An observation ID.
    */
   observation: 'obs',
@@ -163,7 +167,7 @@ export const idPrefix = {
   /**
    * A browser tab ID.
    *
-   * Used by `libs/filesystem/src/cross-tab-coordinator.ts` for
+   * Used by `packages/filesystem/src/cross-tab-coordinator.ts` for
    * cross-tab write coordination via `navigator.locks` + `BroadcastChannel`.
    * Distinct from {@link pane} — see that entry.
    */

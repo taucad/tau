@@ -17,16 +17,19 @@
  */
 
 import {
+  Errors,
   addRemote,
   deleteRef,
   deleteRemote,
-  fetch as fetchFromRemote,
   getConfigAll,
+  getRemoteInfo2,
+  indexPack,
   init,
+  isDescendent,
   listRefs,
   listRemotes,
   listServerRefs,
-  push as pushToRemote,
+  packObjects,
   readBlob,
   readObject,
   readTree,
@@ -46,7 +49,8 @@ import type { RevisionId, RevisionTreeInput } from '#algorithms/index.js';
 import type { RevisionProvenance } from '#revision-authority.js';
 import { decodeCommit, decodeTag, encodeCommit, encodeTag } from '#git-objects.js';
 import type { DecodedCommit } from '#git-objects.js';
-import { digestHex } from '#object-hash.js';
+import { encodeGitIndex } from '#git-index.js';
+import { concatBytes, digestHex } from '#object-hash.js';
 import type { ObjectFormat } from '#object-hash.js';
 import {
   deriveChangeId,
@@ -63,6 +67,8 @@ import { walkRevisionLog } from '#revision-log-order.js';
 import { RevisionPortError } from '#revision-port.js';
 import { assertMaterializableRevisionTree } from '#portable-tree.js';
 import { cleanLargeObjects, lfsObjectPath, readLfsPointer } from '#lfs.js';
+import { createTreeIdMemo } from '#tree-id-memo.js';
+import type { TreeObject } from '#tree-id-memo.js';
 import { createLfsClient, LfsQuotaError, withQuotaPaths } from '#lfs-client.js';
 import {
   isHostLocalRef,
@@ -83,6 +89,8 @@ import type {
   RevisionConflict,
   RevisionDiffEntry,
   RevisionDiffInput,
+  RevisionDivergence,
+  RevisionDivergenceInput,
   RevisionEngineDescriptor,
   RevisionHead,
   RevisionLogEntry,
@@ -181,18 +189,203 @@ const refQueue = new ResourceQueue();
 const frozenChange = (path: string, kind: RevisionDiffEntry['kind']): RevisionDiffEntry =>
   Object.freeze({ path, kind });
 
+const pktEncoder = new TextEncoder();
+const pktDecoder = new TextDecoder();
+
 /**
- * Why the remote — or the library's own pre-flight — refused one ref.
+ * One pkt-line: four hex digits of length, then the payload.
  *
- * Never the URL and never a header: a refusal reaches a toast and a log (I8).
- *
- * @param error - What `push` threw.
- * @returns A safe one-line reason.
+ * @param payload - The line's text.
+ * @returns The encoded line.
  */
-const pushReason = (error: unknown): string | undefined => {
-  const { data } = error as { data?: { result?: { refs?: Record<string, { ok: boolean; error: string }> } } };
-  const refused = Object.values(data?.result?.refs ?? {}).find((status) => !status.ok);
-  return refused?.error;
+const pktLine = (payload: string): Uint8Array<ArrayBuffer> => {
+  const bytes = pktEncoder.encode(payload);
+  return concatBytes(pktEncoder.encode((bytes.byteLength + 4).toString(16).padStart(4, '0')), bytes);
+};
+
+/**
+ * The payloads of a pkt-line stream, flushes dropped.
+ *
+ * @param bytes - The whole stream.
+ * @returns Each line's payload, in order.
+ */
+const pktPayloads = (bytes: Uint8Array<ArrayBuffer>): Array<Uint8Array<ArrayBuffer>> => {
+  const payloads: Array<Uint8Array<ArrayBuffer>> = [];
+  let offset = 0;
+  while (offset + 4 <= bytes.byteLength) {
+    const length = Number.parseInt(pktDecoder.decode(bytes.subarray(offset, offset + 4)), 16);
+    if (Number.isNaN(length)) {
+      throw new TypeError('The remote answered with something that is not git’s pkt-line protocol.');
+    }
+    if (length < 4) {
+      offset += 4;
+      continue;
+    }
+    payloads.push(bytes.subarray(offset + 4, offset + length));
+    offset += length;
+  }
+  return payloads;
+};
+
+/** What one `receive-pack` answered: its per-ref report and its sideband. */
+type ReceivePackReport = Readonly<{
+  /** `ok`/`ng` per remote ref name; an `ng` carries the remote's reason. */
+  refs: ReadonlyMap<string, Readonly<{ ok: boolean; reason: string }>>;
+  /** The server's `remote:` lines, which is where a hook says *why*. */
+  said: readonly string[];
+}>;
+
+/**
+ * Split a `side-band-64k` stream into its data and what the server said.
+ *
+ * @param body - The sideband pkt-lines.
+ * @returns Channel 1's bytes and channel 2's lines; channel 3 is thrown.
+ */
+const demuxSideband = (
+  body: Uint8Array<ArrayBuffer>,
+): Readonly<{ data: Uint8Array<ArrayBuffer>; said: readonly string[] }> => {
+  const data: Array<Uint8Array<ArrayBuffer>> = [];
+  const said: string[] = [];
+  for (const payload of pktPayloads(body)) {
+    switch (payload[0]) {
+      case 1: {
+        data.push(payload.subarray(1));
+        break;
+      }
+      case 2: {
+        said.push(...pktDecoder.decode(payload.subarray(1)).split(/\r?\n|\r/u));
+        break;
+      }
+      case 3: {
+        throw new Error(pktDecoder.decode(payload.subarray(1)));
+      }
+      default: {
+        break;
+      }
+    }
+  }
+  return Object.freeze({
+    data: concatBytes(...data),
+    said: said.map((line) => line.trim()).filter((line) => line !== ''),
+  });
+};
+
+/**
+ * Read a `receive-pack` result: sideband-demuxed when asked for, then the
+ * `report-status` lines.
+ *
+ * @param body - The whole response body.
+ * @param sideband - Whether the request asked for `side-band-64k`.
+ * @returns The per-ref report and what the server said.
+ */
+const readReceivePackReport = (body: Uint8Array<ArrayBuffer>, sideband: boolean): ReceivePackReport => {
+  const { data: status, said } = sideband ? demuxSideband(body) : { data: body, said: [] };
+  const references = new Map<string, { ok: boolean; reason: string }>();
+  for (const payload of pktPayloads(status)) {
+    const line = pktDecoder.decode(payload).replace(/\n$/u, '');
+    const [kind, name = '', ...reason] = line.split(' ');
+    if (kind === 'ok' || kind === 'ng') {
+      references.set(name, { ok: kind === 'ok', reason: reason.join(' ') });
+    }
+  }
+  return Object.freeze({ refs: references, said });
+};
+
+/**
+ * The pack an `upload-pack` answered: past its `ACK`/`NAK` lines, and
+ * sideband-demuxed when asked for.
+ *
+ * @param body - The whole response body.
+ * @param sideband - Whether the request asked for `side-band-64k`.
+ * @returns The packfile's bytes.
+ */
+const readUploadPackPack = (body: Uint8Array<ArrayBuffer>, sideband: boolean): Uint8Array<ArrayBuffer> => {
+  let offset = 0;
+  while (offset + 4 <= body.byteLength) {
+    const length = Number.parseInt(pktDecoder.decode(body.subarray(offset, offset + 4)), 16);
+    if (length === 0) {
+      offset += 4;
+      continue;
+    }
+    /* A raw pack starts `PACK`, a sideband line with its channel byte: either
+     * ends the negotiation's text lines. */
+    if (
+      Number.isNaN(length) ||
+      !/^(?:ACK|NAK|shallow|unshallow)\b/u.test(pktDecoder.decode(body.subarray(offset + 4, offset + length)))
+    ) {
+      break;
+    }
+    offset += length;
+  }
+  const rest = body.subarray(offset);
+  return sideband ? demuxSideband(rest).data : rest;
+};
+
+/** One ref this push sends: its local name, the remote's name, old and new. */
+type PushCommand = Readonly<{ name: string; remoteName: string; old: string | undefined; head: string }>;
+
+const refused = (name: string, reason: string): RevisionPushRefResult =>
+  Object.freeze({ name, status: 'rejected', head: undefined, reason });
+
+/**
+ * One smart-HTTP `POST` to a git service, answered as its body.
+ *
+ * A status other than 200 is thrown as the library's own `HttpError` *with*
+ * the body, so the classifier reads the remote's code and sentence (N1).
+ *
+ * @param http - The client this request goes through.
+ * @param request - The remote's URL, the service and the request body.
+ * @returns The whole response body.
+ */
+const postService = async (
+  http: RevisionHttpClient,
+  {
+    url,
+    service,
+    body,
+  }: Readonly<{ url: string; service: 'git-receive-pack' | 'git-upload-pack'; body: Uint8Array<ArrayBuffer> }>,
+): Promise<Uint8Array<ArrayBuffer>> => {
+  const response = await http.request({
+    method: 'POST',
+    url: `${url}/${service}`,
+    headers: {
+      'content-type': `application/x-${service}-request`,
+      accept: `application/x-${service}-result`,
+    },
+    body: (async function* once(): AsyncGenerator<Uint8Array<ArrayBuffer>> {
+      yield body;
+    })(),
+  });
+  const chunks: Array<Uint8Array<ArrayBuffer>> = [];
+  for await (const chunk of response.body) {
+    chunks.push(new Uint8Array(chunk));
+  }
+  const answered = concatBytes(...chunks);
+  if (response.statusCode !== 200) {
+    throw new Errors.HttpError(response.statusCode, response.statusMessage, pktDecoder.decode(answered));
+  }
+  return answered;
+};
+
+/**
+ * One `receive-pack` request, answered as its per-ref report.
+ *
+ * @param http - The client this push goes through.
+ * @param request - The remote's URL; the commands, a flush and the pack; and
+ *   whether the commands asked for `side-band-64k`.
+ * @returns The per-ref report.
+ */
+const receivePack = async (
+  http: RevisionHttpClient,
+  { url, body, sideband }: Readonly<{ url: string; body: Uint8Array<ArrayBuffer>; sideband: boolean }>,
+): Promise<ReceivePackReport> => {
+  const report = readReceivePackReport(await postService(http, { url, service: 'git-receive-pack', body }), sideband);
+  /* No per-ref report means the remote never got as far as the refs, so it is
+   * not "the remote refused this ref" for any of them (seam 3 of 3, N1). */
+  if (report.refs.size === 0) {
+    throw new Error(report.said.join(' '));
+  }
+  return report;
 };
 
 /**
@@ -221,31 +414,6 @@ const withRefLock = async <T>(name: string, operation: () => Promise<T>): Promis
     }
     return locks.request(`tau:revision-ref:${name}`, { mode: 'exclusive' }, async () => operation());
   });
-
-type TreeDraft = Readonly<{
-  files: Map<string, Readonly<{ content: Uint8Array<ArrayBuffer>; mode: FileMode }>>;
-  directories: Map<string, TreeDraft>;
-}>;
-
-const treeDraft = (): TreeDraft => ({ files: new Map(), directories: new Map() });
-
-const draftOf = (tree: ImmutableRevisionTree): TreeDraft => {
-  const root = treeDraft();
-  for (const entry of tree.entries()) {
-    const segments = entry.path.split('/');
-    let node = root;
-    for (const segment of segments.slice(0, -1)) {
-      let child = node.directories.get(segment);
-      if (child === undefined) {
-        child = treeDraft();
-        node.directories.set(segment, child);
-      }
-      node = child;
-    }
-    node.files.set(segments.at(-1)!, { content: entry.content, mode: entry.mode });
-  }
-  return root;
-};
 
 /**
  * Empty one checkout route.
@@ -279,7 +447,8 @@ const clearProvider = async (provider: FileSystemProvider, path = ''): Promise<v
  * The library needs all ten of its commands present and errors that carry an
  * `errno` code; providers already throw those. `readlink` and `symlink` are the
  * two Tau has no provider for, and nothing in this adapter's call graph reaches
- * them — no index, no working-tree checkout — so they refuse rather than lie.
+ * them — no library index or working-tree command (Tau encodes the index
+ * itself, `#git-index.js`) — so they refuse rather than lie.
  *
  * @param provider - The backing provider.
  * @returns A promise-shaped `FsClient`.
@@ -300,8 +469,8 @@ const fileSystemShim = (provider: FileSystemProvider) => {
   const stats = async (path: string): Promise<Record<string, unknown>> => {
     const stat = await provider.stat(at(path));
     const directory = stat.type === 'dir';
-    /* No `mode`: nothing this adapter calls reads one — there is no index and no
-     * working-tree checkout — and a provider has no file mode to report. */
+    /* No `mode`: nothing this adapter calls reads one — no library index or
+     * working-tree command — and a provider has no file mode to report. */
     return {
       type: stat.type,
       size: stat.size,
@@ -414,6 +583,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       id,
       changeId: commit.changeId ?? '',
       parents: Object.freeze(commit.parents.map((parent) => revisionId(parent))),
+      treeId: commit.tree,
       summary: trailer?.summary ?? { generated: commit.message.split('\n')[0] ?? '' },
       provenance: trailer?.provenance ?? unattributed,
       conflicted: commit.conflictedTrees !== undefined,
@@ -463,25 +633,81 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
     return paths;
   };
 
-  const writeTreeGraph = async (node: TreeDraft): Promise<string> => {
-    const entries: TreeEntry[] = await Promise.all([
-      ...[...node.files].map(
-        async ([path, file]): Promise<TreeEntry> => ({
-          mode: file.mode,
-          path,
-          oid: await writeBlob({ fs, gitdir, blob: file.content }),
-          type: 'blob',
-        }),
-      ),
-      ...[...node.directories].map(
-        async ([path, child]): Promise<TreeEntry> => ({
-          mode: directoryMode,
-          path,
-          oid: await writeTreeGraph(child),
-          type: 'tree',
-        }),
-      ),
-    ]);
+  /**
+   * Point the index at the tree `HEAD`'s branch names (R14).
+   *
+   * Tau never reads the index; stock Git does, on a folder a person opened from
+   * disk, and without this `git status` there shows every Tau revision
+   * reversed. The disk leg runs `git read-tree`; `isomorphic-git` has none, so
+   * the whole file is encoded once and swapped in the way Git swaps its own:
+   * `index.lock`, then a rename. A lock already there is the person's own Git
+   * mid-operation, and it wins.
+   *
+   * One lock so the last refresh reads the last head, and every failure is
+   * swallowed: the ref has already moved. Linked checkouts are plain provider
+   * roots on this leg, with no index of their own.
+   *
+   * @param moved - The fully-qualified branch that moved, or `undefined` for
+   *   whatever `HEAD` names (a switch, or an open that found no index).
+   * @returns Once the index names the new tree, or once the refresh was skipped.
+   */
+  const syncLiveIndex = async (moved?: string): Promise<void> => {
+    try {
+      await withRefLock(`${filesystem.id}:${gitdir}:index`, async () => {
+        const target = await resolveRef({ fs, gitdir, ref: 'HEAD', depth: 1 });
+        if (!target.startsWith(symbolicRefPrefix)) {
+          return;
+        }
+        const named = target.slice(symbolicRefPrefix.length).trim();
+        if (moved !== undefined && named !== moved) {
+          return;
+        }
+        const head = await port.readRef(named);
+        const commit = head === undefined ? undefined : await requireCommit(head);
+        const paths = commit === undefined ? [] : [...(await flatTree(commit.tree))];
+        const lock = `${gitdir}/index.lock`;
+        if (await filesystem.exists(lock)) {
+          return;
+        }
+        await filesystem.writeFile(lock, encodeGitIndex(paths.map(([path, entry]) => ({ path, ...entry }))));
+        await filesystem.rename(lock, `${gitdir}/index`);
+      });
+    } catch {
+      // Advisory: the ref this follows has already moved (see above).
+    }
+  };
+
+  /* Ids of the trees this store writes, kept across mints (E3). */
+  const treeIds = createTreeIdMemo();
+  /*
+   * Whether the store already holds an object, asked the way isomorphic-git's
+   * own loose writer asks before it writes one.
+   *
+   * ponytail: loose objects only — an object that arrived in a fetched pack is
+   * written again loose, which costs one write and stays correct.
+   */
+  const holds = async (oid: string): Promise<boolean> =>
+    filesystem.exists(`${gitdir}/objects/${oid.slice(0, 2)}/${oid.slice(2)}`);
+
+  /*
+   * Store one tree object and whatever under it the store lacks, children
+   * first (B1). A tree is written only after everything it names, so a tree the
+   * store holds proves its whole subtree is held: a mint after a one-file edit
+   * writes that blob and the trees on its path, not the project.
+   */
+  const writeTreeGraph = async (node: TreeObject): Promise<string> => {
+    if (await holds(node.oid)) {
+      return node.oid;
+    }
+    const entries: TreeEntry[] = await Promise.all(
+      node.entries.map(async (entry): Promise<TreeEntry> => {
+        if (entry.type === 'tree') {
+          return { mode: directoryMode, path: entry.name, oid: await writeTreeGraph(entry.tree), type: 'tree' };
+        }
+        const oid = (await holds(entry.oid)) ? entry.oid : await writeBlob({ fs, gitdir, blob: entry.content });
+        return { mode: entry.mode, path: entry.name, oid, type: 'blob' };
+      }),
+    );
     return writeTree({ fs, gitdir, tree: entries });
   };
 
@@ -491,14 +717,17 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       return undefined;
     }
     const stored: unknown = JSON.parse(await filesystem.readFile(path, 'utf8'));
-    const record = stored as Readonly<{ id: string; branch: string; baseRevisionId: string }>;
+    const record = stored as Readonly<{ id: string; branch: string }>;
     return Object.freeze({
       id: record.id,
       projectId: checkouts.projectId,
       root: `/checkouts/${record.id}`,
       kind: 'linked',
       branch: record.branch,
-      baseRevisionId: revisionId(record.baseRevisionId),
+      /* The branch's head, read now — as a native worktree's `HEAD` follows
+       * its branch. A base kept from `addCheckout` went stale the moment a
+       * merge moved the branch, and hid the conflict it moved it onto (S7). */
+      baseRevisionId: await port.readRef(record.branch),
     });
   };
 
@@ -553,6 +782,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       : createLfsClient({
           url: remote.url,
           http: options.http,
+          remote: remote.name,
           ...(remote.kind === 'tau' ? { fetch: globalThis.fetch.bind(globalThis) } : {}),
         });
   };
@@ -607,18 +837,25 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
   };
 
   /**
-   * Large objects reachable from the refs this push offers, by oid.
+   * One large object's bytes for an upload the remote asked for.
    *
-   * @returns The objects, by oid.
+   * Only an object this device authored is sure to be here: one that arrived
+   * with a fetch stays a pointer until somebody reads it. The remote asks for
+   * one only when it is not where it came from (a changed backup, say).
+   *
+   * @param oid - The pointer's object id.
+   * @param path - Where the object is in the pushed history, for the refusal.
+   * @returns The object's bytes.
    */
-  const localLfsObjects = async (oids: Iterable<string>): Promise<ReadonlyMap<string, Uint8Array<ArrayBuffer>>> => {
-    const objects = new Map<string, Uint8Array<ArrayBuffer>>();
-    await Promise.all(
-      [...oids].map(async (oid) => {
-        objects.set(oid, await filesystem.readFile(lfsObjectFile(oid)));
-      }),
-    );
-    return objects;
+  const localLfsObject = async (oid: string, path: string | undefined): Promise<Uint8Array<ArrayBuffer>> => {
+    const file = lfsObjectFile(oid);
+    if (!(await filesystem.exists(file))) {
+      throw new RevisionPortError(
+        'MISSING_LARGE_OBJECT',
+        `${path ?? 'A large file'} is not on this device, and the remote does not have it either.`,
+      );
+    }
+    return filesystem.readFile(file);
   };
 
   /**
@@ -686,8 +923,10 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
     }
   };
 
-  const pointerPaths = async (offered: readonly RevisionPushRef[]): Promise<ReadonlyMap<string, string>> => {
-    const paths = new Map<string, string>();
+  const offeredPointers = async (
+    offered: readonly RevisionPushRef[],
+  ): Promise<ReadonlyMap<string, Readonly<{ path: string; size: number }>>> => {
+    const paths = new Map<string, Readonly<{ path: string; size: number }>>();
     const heads = [] as RevisionId[];
     for (const ref of offered) {
       // eslint-disable-next-line no-await-in-loop -- one ref resolution per offered name.
@@ -711,7 +950,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           const { blob } = await readBlob({ fs, gitdir, oid });
           const pointer = readLfsPointer(new Uint8Array(blob));
           if (pointer !== undefined) {
-            paths.set(pointer.oid, path);
+            paths.set(pointer.oid, { path, size: pointer.size });
           }
         }),
       );
@@ -720,35 +959,199 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
   };
 
   /**
+   * Why one offered ref is refused before anything is sent, if it is.
+   *
+   * The lease (A32, D14) is checked against the advertisement this push already
+   * read: a ref that moved since this host last looked is refused here and never
+   * offered, so nothing on the remote is touched; the command still carries the
+   * advertised value as its old oid, so the server's own compare-and-set
+   * refuses it again if it moves in between. Without a lease the remote's value
+   * must stay reachable and a tag never moves: `git push` refuses both before
+   * sending, and a third-party remote may not refuse them itself.
+   *
+   * @param ref - The offered ref.
+   * @param old - What the remote advertises for it.
+   * @param head - What this store holds for it.
+   * @returns The refusal's reason, or `undefined` to send it.
+   */
+  const refusalBeforeSending = async (
+    ref: RevisionPushRef,
+    old: string | undefined,
+    head: string,
+  ): Promise<string | undefined> => {
+    if ('expected' in ref) {
+      return old === ref.expected ? undefined : 'leaseLost';
+    }
+    if (old === undefined) {
+      return undefined;
+    }
+    if ((ref.remoteName ?? ref.name).startsWith(`${tagRefPrefix}/`)) {
+      return '[rejected] (already exists)';
+    }
+    const forward = await isDescendent({ fs, gitdir, oid: head, ancestor: old, depth: -1 }).catch(() => false);
+    return forward ? undefined : '[rejected] (non-fast-forward)';
+  };
+
+  /**
+   * Which offered refs are sent, and the answer for every one that is not.
+   *
+   * A ref already where the remote has it is up to date; one refused before
+   * sending is answered here; under `atomic` one such refusal refuses the rest
+   * unsent, as `git push --atomic` does.
+   *
+   * @param ordered - The offered refs, branch last.
+   * @param advertised - The remote's refs, by name.
+   * @param atomic - Whether the set lands together or not at all.
+   * @returns The answered refs and the commands to send.
+   */
+  const planPush = async (
+    ordered: readonly RevisionPushRef[],
+    advertised: ReadonlyMap<string, string>,
+    atomic: boolean,
+  ): Promise<{ results: Map<string, RevisionPushRefResult>; commands: PushCommand[] }> => {
+    const results = new Map<string, RevisionPushRefResult>();
+    const commands: PushCommand[] = [];
+    for (const ref of ordered) {
+      const remoteName = ref.remoteName ?? ref.name;
+      // eslint-disable-next-line no-await-in-loop -- one resolution per offered ref.
+      const head = await tryResolve(ref.name);
+      if (head === undefined) {
+        throw new RevisionPortError('ENGINE_FAILED', `${ref.name} names nothing in this store.`);
+      }
+      const old = advertised.get(remoteName);
+      // eslint-disable-next-line no-await-in-loop -- one ancestry check per offered ref.
+      const refusal = old === head ? undefined : await refusalBeforeSending(ref, old, head);
+      if (old === head) {
+        results.set(ref.name, Object.freeze({ name: ref.name, status: 'upToDate', head: revisionId(head) }));
+      } else if (refusal === undefined) {
+        commands.push(Object.freeze({ name: ref.name, remoteName, old, head }));
+      } else {
+        results.set(ref.name, refused(ref.name, refusal));
+      }
+    }
+    if (atomic && [...results.values()].some((result) => result.status === 'rejected')) {
+      for (const command of commands.splice(0)) {
+        results.set(command.name, refused(command.name, '[rejected] (atomic push failed)'));
+      }
+    }
+    return { results, commands };
+  };
+
+  /**
+   * Every object a remote holding `haves` lacks for `tips`.
+   *
+   * Commits are walked from the tips down to the first commit the remote
+   * advertised; each commit's tree is diffed against its first parent's, so
+   * only the paths that changed are read. An unchanged entry is reachable from
+   * that parent, which is either the remote's already or in this same pack —
+   * the same "the remote has it" rule the library's own push used, applied to
+   * every offered ref at once.
+   *
+   * @param tips - The objects the offered refs name.
+   * @param haves - Every object id the remote advertised.
+   * @returns The ids to pack.
+   */
+  const missingObjects = async (tips: readonly string[], haves: ReadonlySet<string>): Promise<readonly string[]> => {
+    const send = new Set<string>();
+    const entriesOf = async (oid: string): Promise<ReadonlyMap<string, TreeEntry>> => {
+      const { tree } = await readTree({ fs, gitdir, oid });
+      return new Map(tree.map((entry) => [entry.path, entry]));
+    };
+    const treeObjects = async (oid: string, base: string | undefined): Promise<void> => {
+      if (oid === base || send.has(oid)) {
+        return;
+      }
+      send.add(oid);
+      const [entries, previous] = await Promise.all([entriesOf(oid), base === undefined ? undefined : entriesOf(base)]);
+      await Promise.all(
+        [...entries.values()].map(async (entry) => {
+          const was = previous?.get(entry.path);
+          if (was?.oid === entry.oid) {
+            return;
+          }
+          if (entry.type === 'tree') {
+            await treeObjects(entry.oid, was?.type === 'tree' ? was.oid : undefined);
+          } else if (entry.type === 'blob') {
+            send.add(entry.oid);
+          }
+        }),
+      );
+    };
+    const visit = async (oid: string): Promise<void> => {
+      if (haves.has(oid) || send.has(oid)) {
+        return;
+      }
+      const tag = await readRaw(oid, 'tag');
+      if (tag !== undefined) {
+        send.add(oid);
+        await visit(decodeTag(tag).object);
+        return;
+      }
+      const commit = await requireCommit(revisionId(oid));
+      send.add(oid);
+      const parent = commit.parents[0] === undefined ? undefined : await commitOf(revisionId(commit.parents[0]));
+      await treeObjects(commit.tree, parent?.tree);
+      for (const next of commit.parents) {
+        // eslint-disable-next-line no-await-in-loop -- depth-first, so a shared ancestor is read once.
+        await visit(next);
+      }
+    };
+    for (const tip of tips) {
+      // eslint-disable-next-line no-await-in-loop -- tips share history; one walk at a time dedupes it.
+      await visit(tip);
+    }
+    return [...send];
+  };
+
+  /**
    * What the remote advertises, read through the client the caller gives.
    *
-   * The client is a parameter because a fetch's advertisement has to carry the
-   * fetch's own deadline: the negotiation is the request most likely to be the
-   * one that hangs (P36).
+   * A fetch reads its own advertisement, which carries the capabilities and
+   * the fetch's own deadline (P36); this one is `listRemoteRefs`'.
    *
    * @param remote - The remote's name in git's config.
-   * @param http - The client this read goes through.
-   * @returns Every advertised ref, peeled tags dropped.
+   * @returns Every advertised ref, `HEAD` and peeled tags dropped.
    */
-  const advertisedReferences = async (remote: string, http: RevisionHttpClient): Promise<readonly RemoteRef[]> => {
+  const advertisedReferences = async (remote: string): Promise<readonly RemoteRef[]> => {
     const url = await remoteUrl(remote);
+    const http = boundBy(requireHttp());
     /* Seam 1 of 3 (N1). The advertisement is the *first* thing every remote
      * verb does, so it is where a 401, a `403 GIT_SYNC_NOT_ENTITLED` and a 404
      * arrive — and until this catch existed the library's own
      * `HTTP Error: 403 Forbidden` escaped verbatim into a `role='alert'`. */
     const advertised = await listServerRefs({ http, url }).catch((error: unknown) => {
-      throw remoteTransportError(error, { remote });
+      throw http.refused(error, remote);
     });
     return Object.freeze(
       advertised
-        .filter((reference) => !reference.ref.endsWith('^{}'))
+        /* `git ls-remote --refs`, as the native leg reads it: no `HEAD`, no peeled tags. */
+        .filter((reference) => reference.ref.startsWith('refs/') && !reference.ref.endsWith('^{}'))
         .map((reference) => Object.freeze({ name: reference.ref, head: revisionId(reference.oid) })),
     );
   };
 
-  /** One client, bounded by one operation's signal. */
-  const boundBy = (client: RevisionHttpClient, signal: AbortSignal | undefined): RevisionHttpClient =>
-    signal === undefined ? client : { request: async (request) => client.request({ ...request, signal }) };
+  /**
+   * One operation's client: bounded by its signal, and keeping a 429's
+   * `Retry-After`, which the library's own `HttpError` drops, for the
+   * classifier (W13d).
+   */
+  const boundBy = (
+    client: RevisionHttpClient,
+    signal?: AbortSignal,
+  ): RevisionHttpClient & Readonly<{ refused: (error: unknown, remote: string) => RevisionPortError }> => {
+    let retryAfter: string | undefined;
+    return {
+      request: async (request) => {
+        const response = await client.request(signal === undefined ? request : { ...request, signal });
+        if (response.statusCode === 429) {
+          retryAfter = response.headers['retry-after'];
+        }
+        return response;
+      },
+      refused: (error, remote) =>
+        remoteTransportError(error, { remote, ...(retryAfter === undefined ? {} : { retryAfter }) }),
+    };
+  };
 
   const requireHttp = (): RevisionHttpClient => {
     if (options.http === undefined) {
@@ -848,6 +1251,12 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       // Only now: the repository is created after the file that decides what a
       // snapshot may ever contain already exists.
       await init({ fs, dir: '', gitdir, defaultBranch });
+      /* Every project an older build recorded has no index at all, so this open
+       * heals it. An existing index is left alone: in a repository Tau adopted
+       * it may hold the person's own staged work. */
+      if (!(await filesystem.exists(`${gitdir}/index`))) {
+        await syncLiveIndex();
+      }
     },
 
     readRevision: async (id: RevisionId): Promise<RevisionRecord | undefined> => {
@@ -892,7 +1301,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           ? { tree: input.tree, objects: new Map<string, Uint8Array<ArrayBuffer>>() }
           : cleanLargeObjects(input.tree);
       await Promise.all([...recorded.objects].map(async ([oid, content]) => storeLfsObject(oid, content)));
-      const treeId = await writeTreeGraph(draftOf(recorded.tree));
+      const treeId = await writeTreeGraph(treeIds.treeObject(recorded.tree, objectFormat));
       const trailer: RevisionTrailer = {
         parents: [...input.parents],
         provenance: input.provenance,
@@ -943,8 +1352,8 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
      * @param input - The ref, the value it must currently hold, and the new one.
      * @returns The publication, or the conflict that refused it.
      */
-    updateRef: async (input: UpdateRevisionRefInput): Promise<UpdateRevisionRefResult> =>
-      withRefLock(`${filesystem.id}:${gitdir}:${input.name}`, async () => {
+    updateRef: async (input: UpdateRevisionRefInput): Promise<UpdateRevisionRefResult> => {
+      const result = await withRefLock(`${filesystem.id}:${gitdir}:${input.name}`, async () => {
         const actualHead = await port.readRef(input.name);
         if (actualHead !== input.expectedHead) {
           return Object.freeze({
@@ -971,7 +1380,12 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           previousHead: actualHead,
           head: input.head,
         });
-      }),
+      });
+      if (result.status === 'updated' && refOf(input.name).startsWith(`${branchRefPrefix}/`)) {
+        await syncLiveIndex(refOf(input.name));
+      }
+      return result;
+    },
 
     /* Symbolic, like Git's own HEAD: the file names a *branch*, so a turn
      * recorded onto that branch moves the head with it and nothing is written
@@ -997,10 +1411,12 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
      * tab, or from the host process beside the renderer, would otherwise be a
      * bare write a concurrent `readHead` can observe half of — and an empty
      * head sends the next direct turn back to the trunk (c2-review S2). */
-    setHead: async (branch: string): Promise<void> =>
-      withRefLock(`${filesystem.id}:${gitdir}:HEAD`, async () => {
+    setHead: async (branch: string): Promise<void> => {
+      await withRefLock(`${filesystem.id}:${gitdir}:HEAD`, async () => {
         await writeRef({ fs, gitdir, ref: 'HEAD', value: refOf(branch), force: true, symbolic: true });
-      }),
+      });
+      await syncLiveIndex();
+    },
 
     listRefs: async (prefix?: string): Promise<readonly RevisionRef[]> => {
       /* Answered in the vocabulary it was asked in: a `refs/`-qualified prefix
@@ -1108,6 +1524,69 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       );
     },
 
+    /*
+     * Paint both heads down in committer-time order, each revision marked with
+     * the heads that reach it, until nothing still queued could change a count: every queued revision
+     * is reachable from both, and none is as new as a one-sided revision it
+     * might yet reach. Below that line the two histories are the same, so
+     * neither log is ever walked (git's merge-base walk, and its assumption of
+     * a non-decreasing committer time from parent to child, as `log`'s bounded
+     * walk makes).
+     *
+     * ponytail: the queue and the one-sided minimum are rescanned per step,
+     * quadratic in the diverged region only; a heap if two lines ever diverge
+     * by thousands of revisions.
+     */
+    divergence: async (input: RevisionDivergenceInput): Promise<RevisionDivergence> => {
+      /* Which head reaches each revision read so far. */
+      const sides = new Map<string, 'head' | 'base' | 'both'>();
+      const nodes = new Map<string, Readonly<{ parents: readonly string[]; seconds: number }>>();
+      const queue = new Set<string>();
+      const paint = async (id: string, side: 'head' | 'base' | 'both'): Promise<void> => {
+        const held = sides.get(id);
+        const joined = held === undefined || held === side ? side : 'both';
+        if (joined === held) {
+          return;
+        }
+        if (!nodes.has(id)) {
+          const commit = await requireCommit(revisionId(id));
+          nodes.set(id, { parents: commit.parents, seconds: commit.committer.seconds });
+        }
+        sides.set(id, joined);
+        queue.add(id);
+      };
+      const secondsOf = (id: string): number => nodes.get(id)?.seconds ?? 0;
+      const unsettled = (): boolean => {
+        let oldestOneSided = Number.POSITIVE_INFINITY;
+        for (const [id, side] of sides) {
+          if (side !== 'both') {
+            oldestOneSided = Math.min(oldestOneSided, secondsOf(id));
+          }
+        }
+        return [...queue].some((id) => sides.get(id) !== 'both' || secondsOf(id) >= oldestOneSided);
+      };
+      await paint(input.head, 'head');
+      await paint(input.base, 'base');
+      while (unsettled()) {
+        let newest: string | undefined;
+        for (const id of queue) {
+          if (newest === undefined || secondsOf(id) > secondsOf(newest)) {
+            newest = id;
+          }
+        }
+        queue.delete(newest!);
+        for (const parent of nodes.get(newest!)?.parents ?? []) {
+          // oxlint-disable-next-line no-await-in-loop -- the walk is the order: each read decides what is read next.
+          await paint(parent, sides.get(newest!)!);
+        }
+      }
+      const sided = [...sides.values()];
+      return Object.freeze({
+        ahead: sided.filter((side) => side === 'head').length,
+        behind: sided.filter((side) => side === 'base').length,
+      });
+    },
+
     diff: async (input: RevisionDiffInput): Promise<readonly RevisionDiffEntry[]> => {
       const toCommit = await requireCommit(input.to);
       const fromCommit = input.from === undefined ? undefined : await requireCommit(input.from);
@@ -1132,8 +1611,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       );
     },
 
-    listRemoteRefs: async (remote: string): Promise<readonly RemoteRef[]> =>
-      advertisedReferences(remote, requireHttp()),
+    listRemoteRefs: async (remote: string): Promise<readonly RemoteRef[]> => advertisedReferences(remote),
 
     /**
      * Bring the remote's refs into `refs/remotes/<remote>/…`.
@@ -1151,8 +1629,17 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
        * abort ends the socket and not only the caller's wait (P36). */
       const http = boundBy(requireHttp(), input.signal);
       const url = await remoteUrl(input.remote);
-      const advertised = await advertisedReferences(input.remote, http);
-      const wanted = (input.refs ?? advertised.map((reference) => reference.name)).filter((ref) => {
+      /* Seam 2 of 3 (N1): every negotiation this fetch makes answers in the
+       * refusal vocabulary, so a pull that the remote refused never reads as a
+       * pull the remote did not answer. */
+      const refused = (error: unknown): never => {
+        throw http.refused(error, input.remote);
+      };
+      /* The one advertisement: `upload-pack`'s own, which carries the
+       * capabilities the request below may use as well as the refs. */
+      const advertisement = await getRemoteInfo2({ http, url, forPush: false, protocolVersion: 1 }).catch(refused);
+      const advertised = new Map((advertisement.refs ?? []).map((reference) => [reference.ref, reference.oid]));
+      const wanted = (input.refs ?? [...advertised.keys()].filter((ref) => ref.startsWith('refs/'))).filter((ref) => {
         if (input.refs !== undefined) {
           guardRef(ref, 'ref');
         }
@@ -1161,16 +1648,6 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       if (wanted.length === 0) {
         return Object.freeze({ refs: Object.freeze([]) });
       }
-      /*
-       * The library's own fetch drops every advertised ref outside
-       * `refs/heads/*` before it translates the refspecs, so one call brings
-       * the history set and the record set arrives one ref at a time.
-       *
-       * ponytail: one round trip per record ref. A project with many chats pays
-       * for it; the upgrade is `listServerRefs` + a single `fetch` over the
-       * library's private `_fetch`, or an upstream fix, and neither is worth
-       * doing before the count hurts.
-       */
       const tagReferences = wanted.filter((ref) => ref.startsWith(`${tagRefPrefix}/`));
       const previousTags = await Promise.all(
         tagReferences.map(async (ref) => {
@@ -1179,31 +1656,55 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           return { local, tracked, localHead: await tryResolve(local), remoteHead: await tryResolve(tracked) };
         }),
       );
-      /* Seam 2 of 3 (N1): every negotiation this fetch makes answers in the
-       * refusal vocabulary, so a pull that the remote refused never reads as a
-       * pull the remote did not answer. */
-      const refused = (error: unknown): never => {
-        throw remoteTransportError(error, { remote: input.remote });
-      };
-      const heads = wanted.filter((ref) => ref.startsWith('refs/heads/'));
-      if (heads.length > 0) {
-        await fetchFromRemote({ fs, http, gitdir, url, remote: input.remote, singleBranch: false, tags: false }).catch(
-          refused,
+      /*
+       * Every wanted ref in one `upload-pack` (W13d): the library's own fetch
+       * keeps only `refs/heads/*`, so it cost a negotiation per record ref.
+       * What this store's refs already name is a `have`, and a tip it already
+       * holds is not wanted, so a fetch with nothing new sends no pack request.
+       */
+      const localTips = await listRefs({ fs, gitdir, filepath: 'refs' });
+      const localHeads = await Promise.all(localTips.map(async (name) => tryResolve(`refs/${name}`)));
+      const haves = new Set(localHeads.filter((oid) => oid !== undefined));
+      const fetchedHeads = wanted.flatMap((ref) => {
+        const oid = advertised.get(ref);
+        return oid === undefined ? [] : [[ref, oid] as const];
+      });
+      const missing = await Promise.all(
+        fetchedHeads.map(async ([, oid]) => (haves.has(oid) || (await holds(oid)) ? undefined : oid)),
+      );
+      const wants = [...new Set(missing.filter((oid) => oid !== undefined))];
+      if (wants.length > 0) {
+        const capabilities = ['side-band-64k', 'ofs-delta'].filter(
+          (capability) => capability in advertisement.capabilities,
         );
+        const body = concatBytes(
+          ...wants.map((oid, index) => pktLine(`want ${oid}${index === 0 ? ` ${capabilities.join(' ')}` : ''}\n`)),
+          pktEncoder.encode('0000'),
+          ...[...haves].map((oid) => pktLine(`have ${oid}\n`)),
+          pktLine('done\n'),
+        );
+        const answered = await postService(http, { url, service: 'git-upload-pack', body }).catch(refused);
+        const pack = (() => {
+          try {
+            return readUploadPackPack(answered, capabilities.includes('side-band-64k'));
+          } catch (error) {
+            return refused(error);
+          }
+        })();
+        /* A pack with no objects has nothing to index. */
+        if (pack.byteLength > 32 && new DataView(pack.buffer, pack.byteOffset + 8, 4).getUint32(0) > 0) {
+          const name = `objects/pack/pack-${[...pack.subarray(-20)].map((byte) => byte.toString(16).padStart(2, '0')).join('')}.pack`;
+          await filesystem.mkdir(`${gitdir}/objects/pack`, { recursive: true });
+          await filesystem.writeFile(`${gitdir}/${name}`, pack);
+          await indexPack({ fs, dir: gitdir, gitdir, filepath: name });
+        }
       }
-      for (const ref of wanted.filter((candidate) => !heads.includes(candidate))) {
-        // eslint-disable-next-line no-await-in-loop -- one negotiation per non-branch ref, see above.
-        await fetchFromRemote({
-          fs,
-          http,
-          gitdir,
-          url,
-          remote: input.remote,
-          singleBranch: true,
-          remoteRef: ref,
-          tags: false,
-        }).catch(refused);
-      }
+      /* Refs after objects: a tracking ref never names what this store lacks. */
+      await Promise.all(
+        fetchedHeads.map(async ([ref, oid]) =>
+          writeRef({ fs, gitdir, ref: remoteTrackingRef(input.remote, ref), value: oid, force: true }),
+        ),
+      );
       await Promise.all(
         previousTags.map(async ({ local, tracked, localHead, remoteHead }) => {
           const fetchedHead = await tryResolve(tracked);
@@ -1234,19 +1735,22 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
     },
 
     /**
-     * Offer refs to the remote, one at a time, with `main` last.
+     * Offer refs to the remote in one `receive-pack`, with `main` last.
      *
-     * `isomorphic-git` pushes a single ref per call and has no `--atomic`, so
-     * the history set is ordered instead: everything else goes first and the
-     * branch that names them lands last, which is the browser half of A39. The
-     * loop never stops on a refusal — a refused record ref is a result, not an
-     * exception (D14).
+     * One advertisement and one request whatever the ref count (E4, EQ8): the
+     * lease, the fast-forward rule and "up to date" are all read from that one
+     * advertisement, and the server's `report-status` is still per ref, so a
+     * refused record ref is a result, not an exception (D14). `atomic` asks
+     * for git's own `atomic` capability when the remote advertises it, and a
+     * refusal decided here refuses the whole atomic set unsent, as
+     * `git push --atomic` does; without it the branch is the last command, the
+     * browser half of A39.
      *
      * @param input - The remote and the refs to offer.
      * @returns One result per offered ref, in the order offered.
      */
     push: async (input: RevisionPushInput): Promise<RevisionPushResult> => {
-      const http = requireHttp();
+      const http = boundBy(requireHttp());
       if (input.refs.length === 0) {
         throw new RevisionPortError('INVALID_TRANSPORT', 'push requires at least one ref.');
       }
@@ -1265,114 +1769,109 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
        */
       const configuredRemotes = await port.listRemotes();
       const configuredRemote = configuredRemotes.find((remote) => remote.name === input.remote);
-      if (!remoteCarriesLargeObjects(configuredRemote ?? input.remote)) {
-        const large = await pointerPaths(input.refs);
+      /* An unconfigured name has no provider to ask, and no URL to push to either. */
+      if (configuredRemote === undefined || !remoteCarriesLargeObjects(configuredRemote)) {
+        const large = await offeredPointers(input.refs);
         if (large.size > 0) {
-          throw new RevisionPortError('LFS_REMOTE_UNSUPPORTED', lfsRemoteUnsupportedMessage([...large.values()]));
+          throw new RevisionPortError(
+            'LFS_REMOTE_UNSUPPORTED',
+            lfsRemoteUnsupportedMessage([...large.values()].map((entry) => entry.path)),
+          );
         }
       }
       const url = await remoteUrl(input.remote);
-      const remoteReferences = await port.listRemoteRefs(input.remote);
-      const advertised = new Map(remoteReferences.map((reference) => [reference.name, reference.head]));
+      /* The one advertisement (E4): `receive-pack`'s own, which carries the
+       * capabilities the request below may use as well as the refs. Seam 1 of 3
+       * (N1), exactly as in `advertisedReferences`. */
+      const advertisement = await getRemoteInfo2({ http, url, forPush: true, protocolVersion: 1 }).catch(
+        (error: unknown) => {
+          throw http.refused(error, input.remote);
+        },
+      );
+      const advertised = new Map((advertisement.refs ?? []).map((reference) => [reference.ref, reference.oid]));
       const ordered = [...input.refs].toSorted(
         (left, right) => Number(left.name === refOf(defaultBranch)) - Number(right.name === refOf(defaultBranch)),
       );
       /* Objects before the refs that name them (A39): a pointer whose object
        * never arrived is a file nobody can open. The batch call skips what the
-       * remote already holds, so this is one upload per object (V13). */
+       * remote already holds, so this is one upload per object (V13) — and only
+       * those are read, because an object fetched from this remote is still a
+       * pointer here until somebody opens it. */
       const client = await lfsClient();
       if (client !== undefined) {
-        const pointers = await pointerPaths(ordered);
-        const objects = await localLfsObjects(pointers.keys());
+        const pointers = await offeredPointers(ordered);
         try {
-          await client.upload(objects);
+          await client.upload({
+            pointers: [...pointers].map(([oid, { size }]) => ({ oid, size })),
+            read: async (oid) => localLfsObject(oid, pointers.get(oid)?.path),
+          });
         } catch (error) {
           /* The server counts in object ids; the person reads paths (D16). */
           if (error instanceof LfsQuotaError) {
-            throw new LfsQuotaError(withQuotaPaths(error.refusal, await pointerPaths(ordered)));
+            throw new LfsQuotaError(
+              withQuotaPaths(error.refusal, new Map([...pointers].map(([oid, { path }]) => [oid, path]))),
+            );
           }
           throw error;
         }
       }
-      const results: RevisionPushRefResult[] = [];
-      for (const ref of ordered) {
-        const remoteName = ref.remoteName ?? ref.name;
-        // eslint-disable-next-line no-await-in-loop -- one ref at a time is the contract (F4).
-        const head = await tryResolve(ref.name);
-        if (head !== undefined && advertised.get(remoteName) === head) {
-          results.push(Object.freeze({ name: ref.name, status: 'upToDate', head: revisionId(head) }));
-          continue;
-        }
-        /* The lease (A32, D14), checked against the advertisement this push
-         * already read: a ref that moved since this host last looked is refused
-         * here and never offered, so nothing on the remote is touched. The wire
-         * carries the advertised value as the old oid, so the server's own
-         * compare-and-set refuses it a second time if it moves in between. */
-        const leased = 'expected' in ref;
-        if (leased && advertised.get(remoteName) !== ref.expected) {
-          results.push(Object.freeze({ name: ref.name, status: 'rejected', head: undefined, reason: 'leaseLost' }));
-          continue;
-        }
-        /* The server's sideband, which is where a `pre-receive` refusal says
-         * *why*: the per-ref report only carries git's `hook declined` (N4). */
-        const said: string[] = [];
-        try {
-          // eslint-disable-next-line no-await-in-loop -- one ref at a time is the contract (F4).
-          await pushToRemote({
-            fs,
-            http,
-            gitdir,
-            url,
-            remote: input.remote,
-            ref: ref.name,
-            remoteRef: remoteName,
-            onMessage: (message: string) => {
-              const line = message.trim();
-              if (line !== '') {
-                said.push(line);
-              }
-            },
-            /* A held lease is what allows the non-fast-forward; without one the
-             * remote's own rule decides, exactly as on the native leg. */
-            ...(leased ? { force: true } : {}),
-          });
-          results.push(
-            Object.freeze({
-              name: ref.name,
-              status: 'updated',
-              head: head === undefined ? undefined : revisionId(head),
-            }),
-          );
-        } catch (error) {
-          const reason = pushReason(error);
-          /*
-           * Seam 3 of 3 (N1). No per-ref report means the *remote* never got as
-           * far as reporting on refs, so this is not "the remote refused this
-           * ref" and reporting it as one would tell W13's scheduler to retry
-           * one record ref while history is just as un-pushed.
-           *
-           * What it is instead is the classifier's question: an HTTP status
-           * means the remote answered and said no — 401, `403
-           * GIT_SYNC_NOT_ENTITLED`, 404, 413 — and only a failure carrying no
-           * status at all is the offline window this used to report for all ten
-           * classes at once.
-           */
-          if (reason === undefined) {
-            throw remoteTransportError(error, { remote: input.remote });
+      const atomic = input.atomic === true;
+      const { results, commands } = await planPush(ordered, advertised, atomic);
+      if (commands.length > 0) {
+        const capabilities = ['report-status', 'side-band-64k', ...(atomic ? ['atomic'] : [])].filter(
+          (capability) => capability in advertisement.capabilities,
+        );
+        const lines = commands.map((command, index) =>
+          pktLine(
+            `${command.old ?? '0'.repeat(command.head.length)} ${command.head} ${command.remoteName}${
+              index === 0 ? `\0${capabilities.join(' ')}` : ''
+            }\n`,
+          ),
+        );
+        const oids = await missingObjects(
+          commands.map((command) => command.head),
+          new Set(advertised.values()),
+        );
+        const { packfile } = await packObjects({ fs, gitdir, oids: [...oids] });
+        const body = concatBytes(...lines, pktEncoder.encode('0000'), packfile ?? new Uint8Array());
+        /* Seam 3 of 3 (N1): the remote answering with a status — 401, `403
+         * GIT_SYNC_NOT_ENTITLED`, 404, 413 — is the classifier's question, and
+         * only a failure with no status at all is the offline window. */
+        const report = await receivePack(http, { url, body, sideband: capabilities.includes('side-band-64k') }).catch(
+          (error: unknown) => {
+            throw http.refused(error, input.remote);
+          },
+        );
+        for (const command of commands) {
+          const answer = report.refs.get(command.remoteName);
+          if (answer?.ok !== true) {
+            results.set(
+              command.name,
+              refused(
+                command.name,
+                answer === undefined
+                  ? 'The remote did not report this ref.'
+                  : remoteRefusalSaid(answer.reason, report.said),
+              ),
+            );
+            continue;
           }
-          results.push(
-            Object.freeze({
-              name: ref.name,
-              status: 'rejected',
-              head: undefined,
-              reason: remoteRefusalSaid(reason, said),
-            }),
+          /* Where `fetch` would have put it, which is where `git push` puts it. */
+          // eslint-disable-next-line no-await-in-loop -- one tracking ref per accepted ref.
+          await writeRef({
+            fs,
+            gitdir,
+            ref: remoteTrackingRef(input.remote, command.remoteName),
+            value: command.head,
+            force: true,
+          });
+          results.set(
+            command.name,
+            Object.freeze({ name: command.name, status: 'updated', head: revisionId(command.head) }),
           );
         }
       }
-      return Object.freeze({
-        refs: Object.freeze(input.refs.map((ref) => results.find((result) => result.name === ref.name)!)),
-      });
+      return Object.freeze({ refs: Object.freeze(input.refs.map((ref) => results.get(ref.name)!)) });
     },
 
     listRemotes: async (): Promise<readonly Remote[]> => {
@@ -1517,7 +2016,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       await Promise.all(tree.entries().map(async (entry) => provider.writeFile(entry.path, entry.content)));
       await filesystem.writeFile(
         `${checkoutsDirectory}/${id}.json`,
-        `${JSON.stringify({ version: 1, id, branch: input.branch, baseRevisionId: base })}\n`,
+        `${JSON.stringify({ version: 1, id, branch: input.branch })}\n`,
       );
       return Object.freeze({
         id,

@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { useCallback, memo, useState, useMemo, useRef, useEffect } from 'react';
 import { useSelector } from '@xstate/react';
-import type { ActorRefFrom } from 'xstate';
+import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import type { PaneviewApi, PaneviewPanelApi } from 'dockview-react';
 import { PaneviewReact } from 'dockview-react';
 import { hasJsonSchemaObjectProperties } from '@taucad/utils/schema';
@@ -59,11 +59,13 @@ import {
   PaneviewHeader,
   PaneviewHeaderAction,
   PaneviewHeaderActionGroup,
-  PaneviewHeaderControls,
   PaneviewHeaderContentActions,
+  PaneviewHeaderControls,
+  paneviewAttachedBodyClassName,
   paneviewAttachedSurfaceStyleOverrides,
   paneviewHeaderSize,
 } from '#components/panes/paneview-header.js';
+import { cn } from '@taucad/ui/utils/cn';
 import { ModifiedIndicator } from '#components/ui/modified-indicator.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
 import { useProject, useMainGraphics, useParameterSetActor } from '#hooks/use-project.js';
@@ -82,11 +84,12 @@ import {
   getInitialPanelOptions,
 } from '#routes/w.$workspace.$project/use-chat-interface-state.js';
 import { projectWorkspaceKeyCombinations } from '#routes/w.$workspace.$project/project-workspace-context.js';
+import type { parameterSetMachine } from '@taucad/parameters/set-machine';
 
 const toggleParametersKeyCombination = projectWorkspaceKeyCombinations.parameters;
 
 type ParameterSetActor = NonNullable<ReturnType<ParameterSetService['actor']>>;
-type ParameterSetState = ReturnType<ParameterSetActor['getSnapshot']>;
+type ParameterSetState = SnapshotFrom<typeof parameterSetMachine>;
 type ParameterGroupState = FileParameterEntry['groups'][string] | undefined;
 
 const currentEntryOf = (state: ParameterSetState | undefined): FileParameterEntry | undefined =>
@@ -482,14 +485,14 @@ function ParameterGroupSelector({
         getValue={getItemValue}
         value={selectedItem}
         placeholder='Select a parameter group'
-        searchPlaceHolder='Search groups...'
+        searchPlaceHolder='Search groups…'
         title='Parameter Groups'
         description='Select a parameter group to apply.'
         isSearchEnabled={groupItems.length > 5}
         shouldCloseOnSelect={shouldCloseOnSelect}
         popoverProperties={{
           align: 'end',
-          className: 'w-[260px]',
+          className: 'w-65',
         }}
         onSelect={handleSelect}
       >
@@ -512,6 +515,45 @@ function ParameterGroupSelector({
   );
 }
 
+/** Longest last render that keeps a drag live on a kernel that cannot cancel a render. Milliseconds. */
+const liveDragRenderBudget = 250;
+
+/**
+ * Whether this unit's last settled render took at most {@link liveDragRenderBudget}.
+ *
+ * Timed from entering `rendering` to reaching `idle` for one request, so a render another request
+ * replaced, one that failed, and one already running at mount are never counted. `false` until the
+ * first render is timed.
+ */
+function useLastRenderWithinBudget(cadRef: ActorRefFrom<typeof cadMachine>): boolean {
+  const [isWithinBudget, setIsWithinBudget] = useState(false);
+
+  useEffect(() => {
+    const initial: SnapshotFrom<typeof cadMachine> = cadRef.getSnapshot();
+    let timed: { requestId: number; startedAt: number | undefined } | undefined = initial.matches('rendering')
+      ? { requestId: initial.context.lastRequestedRenderId, startedAt: undefined }
+      : undefined;
+    const subscription = cadRef.subscribe((snapshot: SnapshotFrom<typeof cadMachine>) => {
+      const { lastRequestedRenderId: requestId } = snapshot.context;
+      if (snapshot.matches('rendering')) {
+        if (timed?.requestId !== requestId) {
+          timed = { requestId, startedAt: performance.now() };
+        }
+        return;
+      }
+      if (timed?.startedAt !== undefined && timed.requestId === requestId && snapshot.matches('idle')) {
+        setIsWithinBudget(performance.now() - timed.startedAt <= liveDragRenderBudget);
+      }
+      timed = undefined;
+    });
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [cadRef]);
+
+  return isWithinBudget;
+}
+
 /**
  * Drag-time dispatch for one geometry unit (D2).
  *
@@ -521,16 +563,20 @@ function ParameterGroupSelector({
  * which is what latest-wins means. Nothing here is persisted; the released value is committed
  * through the ordinary checked write.
  *
- * Returns nothing when the active kernel did not declare cooperative cancellation, which leaves
- * `ParameterCommit.scrub` absent and the row previewing the value on its own.
+ * Cancellation only matters at release, when the commit supersedes the last sample, so a kernel
+ * that cannot cancel stays live while its last render fits the budget. Otherwise `scrub` is absent
+ * and the row previews the value on its own. `endScrub` stays, so a drag that loses the lane
+ * mid-gesture still ends the samples it sent.
  */
 function useScrubDispatch(cadRef: ActorRefFrom<typeof cadMachine>): Pick<ParameterCommit, 'scrub' | 'endScrub'> {
-  const canScrub = useSelector(cadRef, (state) => {
+  const isCooperative = useSelector(cadRef, (state) => {
     const kernelId = state.context.activeKernelId;
     return (
       kernelId !== undefined && state.context.capabilities?.renderCapabilities[kernelId]?.cancellation === 'cooperative'
     );
   });
+  const isLastRenderWithinBudget = useLastRenderWithinBudget(cadRef);
+  const canScrub = isCooperative || isLastRenderWithinBudget;
 
   const pending = useRef<Readonly<{ generation: number; parameters: Record<string, unknown> }> | undefined>(undefined);
   const frame = useRef<number | undefined>(undefined);
@@ -599,7 +645,10 @@ function useScrubDispatch(cadRef: ActorRefFrom<typeof cadMachine>): Pick<Paramet
     };
   }, [lane]);
 
-  return useMemo(() => (canScrub ? { scrub: lane.scrub, endScrub: lane.stop } : {}), [canScrub, lane]);
+  return useMemo(
+    () => (canScrub ? { scrub: lane.scrub, endScrub: lane.stop } : { endScrub: lane.stop }),
+    [canScrub, lane],
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -690,16 +739,22 @@ function GeometryUnitParameters({
 
   if (parameterManifest !== undefined && parameterActor !== undefined && authorityFailure !== undefined) {
     return (
-      <ParameterAuthorityFailure
-        entryPath={entryPath}
-        manifest={parameterManifest}
-        actor={parameterActor}
-        failure={authorityFailure}
-      />
+      <div className={cn(paneviewAttachedBodyClassName, 'max-h-full overflow-y-auto')}>
+        <ParameterAuthorityFailure
+          entryPath={entryPath}
+          manifest={parameterManifest}
+          actor={parameterActor}
+          failure={authorityFailure}
+        />
+      </div>
     );
   }
   if (parameterManifest === undefined || parameterEdit === undefined) {
-    return <div className='p-3 text-sm text-muted-foreground'>Loading parameter metadata…</div>;
+    return (
+      <div className={cn(paneviewAttachedBodyClassName, 'p-3 text-sm text-muted-foreground')}>
+        Loading parameter metadata…
+      </div>
+    );
   }
 
   return (
@@ -711,7 +766,10 @@ function GeometryUnitParameters({
       parameterGroup={parameterGroup}
       parameterEdit={parameterEdit}
       units={units}
-      className='overflow-hidden rounded-b-xl border border-border bg-card [&_[data-slot=parameter-catalog]]:m-0 [&_[data-slot=parameter-catalog]]:rounded-none [&_[data-slot=parameter-catalog]]:border-0 [&_[data-slot=parameter-catalog]]:bg-transparent [&_[data-slot=parameter-catalog]]:p-2'
+      className={cn(
+        paneviewAttachedBodyClassName,
+        '[&_[data-slot=parameter-catalog]]:m-0 [&_[data-slot=parameter-catalog]]:rounded-none [&_[data-slot=parameter-catalog]]:border-0 [&_[data-slot=parameter-catalog]]:bg-transparent [&_[data-slot=parameter-catalog]]:p-2',
+      )}
       enableSearch={false}
       filterTerm={filterTerm}
       isAllExpanded={isAllExpanded}
@@ -1026,7 +1084,7 @@ export function ParametersPanelBody(): React.JSX.Element {
       <div data-slot='parameters-filter' className='shrink-0 bg-sidebar px-2 pt-2'>
         <SearchInput
           aria-label='Filter parameters'
-          placeholder='Filter parameters...'
+          placeholder='Filter parameters…'
           value={filterTerm}
           className='h-7 min-w-0 bg-background'
           onChange={(event) => {

@@ -61,7 +61,7 @@ class ParallelPlaneDistanceEngine implements GeoSpecNativeEngine {
       result: {
         canonicalProfile: 'geospec-jcs-v1',
         protocolVersion: 3,
-        registryVersion: 4,
+        registryVersion: 5,
         configuration: {
           configurationProfile: 'geospec-entry-config-v1',
           defaultWorkUnitBudget: 12_345,

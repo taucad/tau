@@ -39,11 +39,14 @@ export type {
   AddCheckoutInput,
   Checkout,
   CheckoutRecord,
+  ConflictRecord,
   CreateRevisionTagInput,
   InitRevisionStoreInput,
   RevisionConflict,
   RevisionDiffEntry,
   RevisionDiffInput,
+  RevisionDivergence,
+  RevisionDivergenceInput,
   RevisionEngineDescriptor,
   RevisionHead,
   RevisionLogEntry,
@@ -82,7 +85,6 @@ export type { LfsPointer } from '#lfs.js';
  * per machine (P8), which is why `./remote-machine` exists and why no other
  * machine is here either. Keeping them would put `xstate` in the graph of every
  * page that imports a remote *type* from this barrel. */
-export type { RemoteActors, RemoteFacet, RemoteMachineEvent } from '#remote.machine.js';
 export { createLfsClient, LfsQuotaError, withQuotaPaths } from '#lfs-client.js';
 export { createRevisionHttpClient, keepaliveLimitBytes } from '#http-client.js';
 export type { RevisionHttpClient, RevisionHttpRequest, RevisionHttpResponse } from '#http-client.js';
@@ -93,14 +95,13 @@ export type { RevisionHttpClient, RevisionHttpRequest, RevisionHttpResponse } fr
  * so `xstate` is not in the graph of every consumer of this barrel; these are
  * the shapes a *renderer* needs — the Sync row, the header chip and the queue.
  */
-export type { SyncFacet, SyncPushOutcome, SyncQueueEntry, SyncQueueRecord, SyncRefOutcome } from '#sync.machine.js';
 /* The close flush's last POST (W13): a browser host wraps its client with
  * `recordLastPush` and offers that recorded POST again on `pagehide`. */
 export { recordLastPush, sendKeepalivePush } from '#sync-keepalive.js';
 export type { KeepalivePushOutcome, PushRecorder } from '#sync-keepalive.js';
 /* The marker itself stays module-private: nothing outside this package should
    match on the sentence by hand (AC23 would call it an unimported export). */
-export { isCeilingRefusal } from '#refusal-markers.js';
+export { isCeilingRefusal, isStorageRefusal } from '#refusal-markers.js';
 export {
   createGitRemoteTransport,
   gitRemoteUrlProblem,
@@ -110,6 +111,7 @@ export {
   lfsRemoteUnsupportedMessage,
   publishFailureMessage,
   publishOverHttp,
+  readRemoteStorageOverHttp,
   refPatternIsHostLocal,
   registerProjectFailureMessage,
   registerProjectOverHttp,
@@ -121,8 +123,19 @@ export {
   tauRemoteUrl,
 } from '#remotes.js';
 export type { GitRemoteCredential, Remote, RemoteKind, RemoteReauthorizationCode } from '#remotes.js';
-export { conflictLabels, materializeConflict, readConflictTerms } from '#revision-conflict.js';
-export type { RevisionConflictTerms } from '#revision-conflict.js';
+/* D13: the client half of a project's `revision` stream, which both hosts bind to their own auth. */
+export { watchRevisionStream } from '#revision-stream.js';
+export type { RevisionStreamHandlers } from '#revision-stream.js';
+export type { TauCloudAuth } from '#remotes.js';
+export {
+  conflictLabels,
+  conflictLineOf,
+  isReservedBranchName,
+  materializeConflict,
+  parseConflictLine,
+  readConflictTerms,
+} from '#revision-conflict.js';
+export type { ConflictPerspective, RevisionConflictTerms } from '#revision-conflict.js';
 export { readRevisionDiff, readRevisionLog, readRevisionPlace } from '#revision-verbs.js';
 export type { RevisionLogRequest, RevisionPlace, RevisionRow } from '#revision-verbs.js';
 export {
@@ -133,3 +146,35 @@ export {
   isTrackedLargeObjectPath,
   largeObjectThresholdBytes,
 } from '#workspace-config.js';
+
+/* Plain data types of the lifecycle machines, machine-free so the root stays XState-free (K-17 follow-up). */
+export type {
+  SyncFacet,
+  SyncFailureReason,
+  SyncPushOutcome,
+  SyncQueueEntry,
+  SyncQueueRecord,
+  SyncRefOutcome,
+} from '#sync.types.js';
+export type {
+  RemoteFacet,
+  RemoteMachineEvent,
+  RemoteStorage,
+  RemoteStorageSupplier,
+  RevisionChildToast,
+} from '#remote.types.js';
+export type {
+  PublishDraft,
+  PublishFacet,
+  PublishPublicationActorInput,
+  PublishPublicationActorOutput,
+  PublishVisibility,
+} from '#publish.types.js';
+export type {
+  RevisionBranchFacet,
+  RevisionConflictFacet,
+  RevisionLine,
+  RevisionStatusProjection,
+} from '#project-revisions.types.js';
+export type { BranchOperation } from '#branch.types.js';
+export type { ResolutionSide } from '#resolution.types.js';

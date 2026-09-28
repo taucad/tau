@@ -15,6 +15,10 @@ vi.mock('@xstate/react', () => ({
   },
 }));
 
+const noop = (): void => {
+  /* No-op */
+};
+
 const mockCadRef = {
   getSnapshot: vi.fn(() => ({
     context: {
@@ -38,12 +42,16 @@ const mockCadRef = {
       },
     },
     hasTag: () => false,
+    matches: () => false,
   })),
+  subscribe: () => ({ unsubscribe: noop }),
   send: vi.fn(),
 } as unknown as ActorRefFrom<typeof cadMachine>;
 
 const mockCadRef2 = {
+  subscribe: () => ({ unsubscribe: noop }),
   getSnapshot: vi.fn(() => ({
+    matches: () => false,
     context: {
       units: { length: 'm' },
       parameterManifest: {
@@ -63,6 +71,37 @@ const mockCadRef2 = {
     },
   })),
 } as unknown as ActorRefFrom<typeof cadMachine>;
+
+/** A unit whose kernel declares no cancellation, moved through render states by the test. */
+function createUncancellableCadRef() {
+  const listeners = new Set<(snapshot: unknown) => void>();
+  const snapshotOf = (state: 'idle' | 'rendering', requestId: number) => ({
+    context: {
+      ...mockCadRef.getSnapshot().context,
+      activeKernelId: 'openscad',
+      capabilities: { renderCapabilities: { openscad: {} } },
+      lastRequestedRenderId: requestId,
+    },
+    hasTag: () => false,
+    matches: (value: string) => value === state,
+  });
+  let snapshot = snapshotOf('idle', 0);
+  const ref = {
+    getSnapshot: () => snapshot,
+    subscribe: (listener: (next: unknown) => void) => {
+      listeners.add(listener);
+      return { unsubscribe: () => listeners.delete(listener) };
+    },
+    send: vi.fn(),
+  } as unknown as ActorRefFrom<typeof cadMachine>;
+  const enter = (state: 'idle' | 'rendering', requestId: number): void => {
+    snapshot = snapshotOf(state, requestId);
+    for (const listener of listeners) {
+      listener(snapshot);
+    }
+  };
+  return { ref, enter };
+}
 
 let mockGeometryUnits = new Map<string, ActorRefFrom<typeof cadMachine>>();
 const mockMainEntryPath = 'main.ts';
@@ -517,7 +556,7 @@ describe('ChatParameters', () => {
     render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
 
     const filter = screen.getByRole('searchbox', { name: 'Filter parameters' });
-    expect(filter).toHaveAttribute('placeholder', 'Filter parameters...');
+    expect(filter).toHaveAttribute('placeholder', 'Filter parameters…');
     expect(screen.getAllByRole('searchbox', { name: 'Filter parameters' })).toHaveLength(1);
     expect(screen.queryByRole('button', { name: /show search|hide search/iu })).toBeNull();
 
@@ -630,6 +669,45 @@ describe('ChatParameters', () => {
       parameters: { width: '21 in' },
     });
     requestFrame.mockRestore();
+  });
+
+  it('should keep a kernel that cannot cancel off the drag lane until its last render fits the budget', () => {
+    const requestFrame = vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => {
+      callback(0);
+      return 1;
+    });
+    let now = 0;
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now);
+    try {
+      const unit = createUncancellableCadRef();
+      mockGeometryUnits.set('main.ts', unit.ref);
+      const isScrubSent = () => vi.mocked(unit.ref.send).mock.calls.some(([event]) => event.type === 'scrubParameters');
+
+      render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
+      fireEvent.click(screen.getByTestId('scrub-param'));
+      expect(isScrubSent()).toBe(false);
+
+      act(() => {
+        now = 1000;
+        unit.enter('rendering', 1);
+        now = 1400;
+        unit.enter('idle', 1);
+      });
+      fireEvent.click(screen.getByTestId('scrub-param'));
+      expect(isScrubSent()).toBe(false);
+
+      act(() => {
+        now = 2000;
+        unit.enter('rendering', 2);
+        now = 2040;
+        unit.enter('idle', 2);
+      });
+      fireEvent.click(screen.getByTestId('scrub-param'));
+      expect(unit.ref.send).toHaveBeenCalledWith({ type: 'scrubParameters', parameters: { width: '21 in' } });
+    } finally {
+      clock.mockRestore();
+      requestFrame.mockRestore();
+    }
   });
 
   it('should not restore the old record when a cancelled second gesture ends while the first final is committing', async () => {

@@ -55,6 +55,8 @@ export {
   writeGltfJson,
 } from '#utils/glb-writer.js';
 export type { GlbInput, GlbManifoldTopology, GlbMaterial, GlbNode, GlbPrimitive } from '#utils/glb-writer.js';
+export type { GlbImage, GlbResources } from '#utils/glb-material.js';
+export { validateGlbResources } from '#utils/glb-material.js';
 
 // Names
 export {
@@ -62,6 +64,7 @@ export {
   formatNamedComponentId,
   formatNodeSelector,
   formatPrimitiveSelector,
+  uniqueComponentId,
 } from '#utils/component-names.js';
 export { formatShapeName, isLegacyGeneratedShapeName, resolveShapeName, uniqueShapeName } from '#utils/shape-names.js';
 

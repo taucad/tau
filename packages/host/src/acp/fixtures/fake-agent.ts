@@ -15,6 +15,7 @@
  * | (always) | one text chunk echoing `{ cwd, env, model, turn }`, a `usage_update`, then a permission-gated `write_file` tool call; the reply carries `PromptResponse.usage` |
  * | (turn 2 onward) | a second chunk naming the whole transcript, so a later turn provably recalls the earlier ones |
  * | `mcp` | calls `test_model` through the `tau` MCP server and reports the evidence |
+ * | `mcp-screenshot` | writes a cube to `main.scad`, then first calls `screenshot` (`targetFile: main.scad`, `single`) through the same server, which saves the capture as a chat attachment; `mcp` then still runs |
  * | `escape` | tries `fs/write_text_file` above `cwd` and reports the refusal |
  * | `wrong-session` | tries `fs/write_text_file` under another ACP session id and reports the refusal |
  * | `slow` | stops after the first chunk and waits to be cancelled |
@@ -389,16 +390,23 @@ const configOptionsOf = (session: SessionState): readonly unknown[] => {
   ];
 };
 
-const callTauMcp = async (sessionId: string, servers: readonly McpServerEntry[]): Promise<void> => {
+// oxlint-disable-next-line eslint/max-params -- one call's identity, tool and arguments, as the adapter reports them.
+const callTauMcp = async (
+  sessionId: string,
+  servers: readonly McpServerEntry[],
+  tool = 'test_model',
+  args: Record<string, unknown> = {},
+  callId = 'mcp-1',
+): Promise<void> => {
   const tau = servers.find((server) => server.name === 'tau');
   if (!tau?.url) {
     await textChunk(sessionId, 'mcp: no tau server was configured for this session');
     return;
   }
   await toolCall(sessionId, {
-    toolCallId: 'mcp-1',
-    title: 'mcp.tau.test_model',
-    rawInput: { server: 'tau', tool: 'test_model', arguments: {} },
+    toolCallId: callId,
+    title: `mcp.tau.${tool}`,
+    rawInput: { server: 'tau', tool, arguments: args },
     _meta: {
       // eslint-disable-next-line @typescript-eslint/naming-convention -- MCP metadata retains its wire name.
       is_mcp_tool_call: true,
@@ -413,15 +421,15 @@ const callTauMcp = async (sessionId: string, servers: readonly McpServerEntry[])
       ),
     );
     const client = await connectMcpOverFetch({ url: tau.url, headers });
-    const result = await client.callTool('test_model', {});
+    const result = await client.callTool(tool, args);
     await toolCallUpdate(sessionId, {
-      toolCallId: 'mcp-1',
+      toolCallId: callId,
       status: result.isError === true ? 'failed' : 'completed',
       rawOutput: { result, error: null },
     });
   } catch (error) {
     await toolCallUpdate(sessionId, {
-      toolCallId: 'mcp-1',
+      toolCallId: callId,
       status: 'failed',
       rawOutput: { message: error instanceof Error ? error.message : String(error) },
     });
@@ -752,6 +760,11 @@ const runPrompt = async (sessionId: string, blocks: readonly unknown[]): Promise
   }
   if (!(await writeGatedFile(sessionId, session, text))) {
     return 'refusal';
+  }
+  if (text.includes('mcp-screenshot')) {
+    /* A new project's `main.scad` is empty, and an empty model has nothing to frame. */
+    await request('fs/write_text_file', { sessionId, path: 'main.scad', content: 'cube(10);\n' });
+    await callTauMcp(sessionId, session.mcpServers, 'screenshot', { targetFile: 'main.scad', mode: 'single' }, 'mcp-2');
   }
   if (text.includes('mcp')) {
     await callTauMcp(sessionId, session.mcpServers);

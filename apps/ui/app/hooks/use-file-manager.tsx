@@ -459,15 +459,18 @@ export function useSharedFileManagerWorker(): Worker | undefined {
  * not start.
  *
  * @param properties - The root mount's machine, for the failure check and the
- *   retry, and what to show while the worker is still on its way.
+ *   retry, what to show while the worker is still on its way, and whether the
+ *   notice stands in for the whole shell.
  * @returns The notice, or the placeholder.
  */
 function SharedWorkerFallback({
   fileManagerRef,
   placeholder,
+  withShellFrame,
 }: {
   readonly fileManagerRef: FileManagerRef;
   readonly placeholder: ReactNode;
+  readonly withShellFrame: boolean;
 }): React.ReactNode {
   const hasFailed = useSelector(fileManagerRef, (state) => state.matches('error'));
 
@@ -476,7 +479,10 @@ function SharedWorkerFallback({
   }
 
   return (
-    <div role='alert' className='size-full'>
+    /* Above the shell nothing sizes this mount, so it takes the window, as the
+     * skeleton it replaces does; `PanelEmptyState` is size-contained and would
+     * otherwise collapse to nothing. */
+    <div role='alert' className={withShellFrame ? 'h-dvh w-full' : 'size-full'}>
       <PanelEmptyState
         icon={OctagonAlert}
         iconClassName='text-feature'
@@ -504,14 +510,18 @@ function SharedWorkerFallback({
  * @param properties - The gated subtree, and the `placeholder` to show while
  *   the worker connects. A route that knows what it is opening passes its own
  *   loading state; without one the gate waits invisibly, as it always did.
+ *   `withShellFrame` marks a gate above the app shell, whose failure notice
+ *   then takes the window.
  * @returns The children, the placeholder, or the failure notice.
  */
 export function SharedWorkerGate({
   children,
   placeholder,
+  withShellFrame = false,
 }: {
   readonly children: ReactNode;
   readonly placeholder?: ReactNode;
+  readonly withShellFrame?: boolean;
 }): React.ReactNode {
   const worker = useContext(SharedWorkerContext);
   const fileManager = useOptionalFileManager();
@@ -524,7 +534,11 @@ export function SharedWorkerGate({
   return fileManager === undefined ? (
     placeholder
   ) : (
-    <SharedWorkerFallback fileManagerRef={fileManager.fileManagerRef} placeholder={placeholder} />
+    <SharedWorkerFallback
+      fileManagerRef={fileManager.fileManagerRef}
+      placeholder={placeholder}
+      withShellFrame={withShellFrame}
+    />
   );
 }
 

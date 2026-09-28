@@ -36,7 +36,10 @@ beforeAll(async () => {
   token = await seedTauTestUser(account);
 });
 
-afterEach(async () => {
+afterEach(async (context) => {
+  if (context.task.result?.state === 'fail') {
+    await session?.capture(`thumbnail-lifecycle-${context.task.name.includes('GLB') ? 'glb' : 'svg'}-failure`);
+  }
   await session?.close();
   session = undefined;
   await fixture?.close();
@@ -52,7 +55,7 @@ const openCommand = async (desktopSession: DesktopSession, label: string): Promi
     .getByRole('button', { name: /Search/u })
     .first()
     .click();
-  const search = desktopSession.page.getByPlaceholder('Search projects, chats, and actions...');
+  const search = desktopSession.page.getByPlaceholder('Search projects, chats, and actions…');
   await search.fill(label);
   const command = desktopSession.page.getByRole('option', { name: label, exact: true });
   await command.waitFor({ state: 'visible' });

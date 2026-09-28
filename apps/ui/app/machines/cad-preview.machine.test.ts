@@ -4,7 +4,7 @@ import { createActor, waitFor } from 'xstate';
 import { mock } from 'vitest-mock-extended';
 import { createMockRuntimeClient } from '@taucad/runtime-testing';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
-import { stopRootWithRehydration } from '#lib/xstate-test.utils.js';
+import { strictModeRemount } from '#lib/xstate-test.utils.js';
 import { cadMachine } from '#machines/cad.machine.js';
 import { cadPreviewMachine } from '#machines/cad-preview.machine.js';
 import type { PrepareFilesInput } from '#machines/cad-preview.machine.js';
@@ -90,7 +90,49 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     previewRef.stop();
   });
 
-  it('should send initializeModel after Strict Mode stopRootWithRehydration cycle', async () => {
+  it('should forward the preview stage on the first render', async () => {
+    const mockClient = createMockAppRuntimeClient();
+    const cadRef = createActor(
+      cadMachine.provide({
+        actors: {
+          connectKernelActor: fromSafeAsync(async () => ({
+            type: 'kernelConnected',
+            client: mockClient,
+            cleanups: [] as Array<() => void>,
+          })),
+        },
+      }),
+      {
+        input: {
+          shouldInitializeKernelOnStart: false,
+          fileSystemRoot: '/previews/test',
+          kernelOptionsFactory: createKernelOptionsFactory(),
+        },
+      },
+    );
+    const stage = { 'main.ts': new Uint8Array([1, 2, 3]) };
+    const previewRef = createActor(
+      cadPreviewMachine.provide({ actors: { prepareFiles: fromSafeAsync(async () => undefined) } }),
+      { input: { cadRef, projectId: 'proj_test', mainFile: 'main.ts', stage } },
+    );
+
+    cadRef.start();
+    previewRef.start();
+    previewRef.send({ type: 'start' });
+
+    await vi.waitFor(() => {
+      expect(mockClient.render).toHaveBeenCalledWith({
+        source: { path: 'main.ts' },
+        content: { includeEdges: true },
+        stage,
+      });
+    });
+
+    cadRef.stop();
+    previewRef.stop();
+  });
+
+  it('should send initializeModel after a Strict Mode re-mount', async () => {
     const mockClient = createMockAppRuntimeClient();
     let connectDelay = 50;
 
@@ -146,8 +188,8 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     });
 
     // --- Strict Mode cleanup phase (same order as React useEffect cleanup) ---
-    stopRootWithRehydration(cadRef);
-    stopRootWithRehydration(previewRef);
+    strictModeRemount(cadRef);
+    strictModeRemount(previewRef);
 
     // --- Strict Mode re-mount phase ---
     connectDelay = 50; // Fresh connection delay for the restart
@@ -230,8 +272,8 @@ describe('cadPreviewMachine + cadMachine integration', () => {
       setTimeout(resolve, 10);
     });
 
-    stopRootWithRehydration(cadRef);
-    stopRootWithRehydration(previewRef);
+    strictModeRemount(cadRef);
+    strictModeRemount(previewRef);
 
     cadRef.start();
     previewRef.start();
@@ -322,8 +364,8 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     expect(previewRef.getSnapshot().value).toBe('preparingFiles');
 
     // --- Strict Mode cleanup (cadRef first, then previewRef — same as React) ---
-    stopRootWithRehydration(cadRef);
-    stopRootWithRehydration(previewRef);
+    strictModeRemount(cadRef);
+    strictModeRemount(previewRef);
 
     // --- Re-mount ---
     connectDelay = 100;
@@ -444,8 +486,8 @@ describe('cadPreviewMachine + cadMachine integration', () => {
 
     // --- Strict Mode cleanup ---
     // Signal is aborted, but P1 is still awaiting exists() (needs 30ms, only 10ms passed)
-    stopRootWithRehydration(cadRef);
-    stopRootWithRehydration(previewRef);
+    strictModeRemount(cadRef);
+    strictModeRemount(previewRef);
 
     // --- Re-mount ---
     connectDelay = 100;
@@ -541,8 +583,8 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     });
 
     // --- Strict Mode cleanup ---
-    stopRootWithRehydration(cadRef);
-    stopRootWithRehydration(previewRef);
+    strictModeRemount(cadRef);
+    strictModeRemount(previewRef);
 
     // --- Re-mount ---
     cadRef.start();

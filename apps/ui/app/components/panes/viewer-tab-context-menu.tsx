@@ -1,7 +1,8 @@
 import { useCallback, useMemo } from 'react';
 import type { IDockviewPanelHeaderProps } from 'dockview-react';
-import { Columns2, Copy, FileCode, FolderTree, Plus, Rows2, X, XCircle } from 'lucide-react';
+import { Columns2, Copy, FileCode, FolderTree, Plus, Printer, Rows2, X, XCircle } from 'lucide-react';
 import { ContextMenuItem, ContextMenuSeparator } from '@taucad/ui/components/context-menu';
+import { isPrinterFileName } from '#components/printer/printer-file.js';
 import {
   closeOtherPanels,
   closePanelsToTheRight,
@@ -154,10 +155,15 @@ function ViewerTabContextMenu(properties: IDockviewPanelHeaderProps): React.JSX.
  * Viewer tab component with a right-click context menu.
  * Use as `defaultTabComponent` in the viewer Dockview.
  */
-export const getViewerTabIcon: DockviewTabIconRenderer = (properties) =>
-  (properties.params as { mode?: unknown } | undefined)?.mode === 'launcher' ? (
-    <Plus aria-hidden className='size-3 shrink-0' />
+export const getViewerTabIcon: DockviewTabIconRenderer = (properties) => {
+  const params = properties.params as { mode?: unknown; entryPath?: unknown } | undefined;
+  if (params?.mode === 'launcher') {
+    return <Plus aria-hidden className='size-3 shrink-0' />;
+  }
+  return typeof params?.entryPath === 'string' && isPrinterFileName(params.entryPath) ? (
+    <Printer aria-hidden className='size-3 shrink-0' />
   ) : undefined;
+};
 
 export const ViewerDockviewTab = withTabContextMenu(ViewerTabContextMenu, {
   leadingIcon: 'viewer',

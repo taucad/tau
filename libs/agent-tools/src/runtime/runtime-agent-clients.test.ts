@@ -3,9 +3,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { createRuntimeAgentClients, createRuntimeParameterAgentClient } from '#runtime/runtime-agent-clients.js';
 import type { RuntimeAgentClient, RuntimeAgentImageExporter } from '#runtime/runtime-agent-clients.js';
 import type { ExportFile, HashedGeometryResult } from '@taucad/runtime/types';
-import { createActor, fromPromise, waitFor } from 'xstate';
+import { createActor, createAsyncLogic, waitFor } from 'xstate';
 import { parameterSetMachine } from '@taucad/parameters/set-machine';
-import type { ParameterSetLoadInput } from '@taucad/parameters/set-machine';
+import type { ParameterSetActors, ParameterSetLoadInput } from '@taucad/parameters/set-machine';
 import { admitParameterManifest, compileParameterManifest, resolveParameterSnapshot } from '@taucad/parameters';
 import type { ParameterSnapshot } from '@taucad/parameters';
 
@@ -44,6 +44,39 @@ const setup = (geometry: HashedGeometryResult, exportImage?: RuntimeAgentImageEx
 };
 
 describe('createRuntimeAgentClients', () => {
+  it('should preserve an authentication issue through runtime, export, and capture results', async () => {
+    const issue = {
+      code: 'AUTHENTICATION_ERROR',
+      message: 'Authentication timeout',
+      type: 'connection',
+      severity: 'error',
+    } as const;
+    const clients = createRuntimeAgentClients({
+      runtime: {
+        evaluate: vi.fn(async (): Promise<HashedGeometryResult> => ({ success: false, issues: [issue] })),
+        export: vi.fn<RuntimeAgentClient['export']>(async () => ({ success: false, issues: [issue] })),
+      },
+      exportImage: vi.fn<RuntimeAgentImageExporter>(),
+      mapRuntimeError: (error) => ({ success: false, errorCode: 'UNKNOWN', message: String(error) }),
+    });
+
+    await expect(clients.kernelClient.getKernelResult('main.kcl')).resolves.toMatchObject({
+      success: true,
+      status: 'error',
+      kernelIssues: [issue],
+    });
+    await expect(clients.graphics.exportGeometry({ targetFile: 'main.kcl', format: 'stl' })).resolves.toMatchObject({
+      success: false,
+      errorCode: 'AUTHENTICATION_ERROR',
+      message: 'Authentication timeout',
+    });
+    await expect(clients.images.captureImages({ targetFile: 'main.kcl', mode: 'single' })).resolves.toMatchObject({
+      success: false,
+      errorCode: 'AUTHENTICATION_ERROR',
+      message: 'Authentication timeout',
+    });
+  });
+
   it('should keep concurrent captures and exports source-scoped without cross-publishing', async () => {
     const evaluated: string[] = [];
     const previewEntered = Promise.withResolvers<void>();
@@ -518,12 +551,14 @@ describe('createRuntimeParameterAgentClient', () => {
     const actor = createActor(
       parameterSetMachine.provide({
         actors: {
-          loadParameterSet: fromPromise(async () => {
-            loads();
-            return current;
+          loadParameterSet: createAsyncLogic({
+            run: async () => {
+              loads();
+              return current;
+            },
           }),
-          commitParameterSet: fromPromise(async ({ input }) => commit({ input })),
-        },
+          commitParameterSet: createAsyncLogic({ run: async ({ input }) => commit({ input }) }),
+        } satisfies Partial<ParameterSetActors>,
       }),
       { input: { target } },
     );
@@ -739,13 +774,15 @@ describe('createRuntimeParameterAgentClient', () => {
     const actor = createActor(
       parameterSetMachine.provide({
         actors: {
-          loadParameterSet: fromPromise<ParameterSnapshot, ParameterSetLoadInput>(async () => {
-            throw Object.assign(new Error('Saved parameter values are not a valid record.'), {
-              code: 'INVALID_RECORD',
-              applicationState: 'known-not-applied',
-            });
+          loadParameterSet: createAsyncLogic<ParameterSnapshot, ParameterSetLoadInput>({
+            run: async () => {
+              throw Object.assign(new Error('Saved parameter values are not a valid record.'), {
+                code: 'INVALID_RECORD',
+                applicationState: 'known-not-applied',
+              });
+            },
           }),
-        },
+        } satisfies Partial<ParameterSetActors>,
       }),
       { input: { target } },
     );

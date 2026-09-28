@@ -63,6 +63,7 @@ const trailerSchema = z.object({
     turnId: z.string().optional(),
     actor: actorSchema.optional(),
     trigger: z.enum(['turn', 'save', 'idle', 'hidden', 'close', 'merge', 'restore', 'switch']).optional(),
+    restoredFrom: z.string().optional(),
     createdAt: z.number(),
   }),
   summary: z.object({
@@ -89,6 +90,7 @@ const canonicalTrailer = (input: RevisionTrailer): string =>
       ...(input.provenance.turnId === undefined ? {} : { turnId: input.provenance.turnId }),
       ...(input.provenance.actor === undefined ? {} : { actor: input.provenance.actor }),
       ...(input.provenance.trigger === undefined ? {} : { trigger: input.provenance.trigger }),
+      ...(input.provenance.restoredFrom === undefined ? {} : { restoredFrom: input.provenance.restoredFrom }),
       createdAt: input.provenance.createdAt,
     },
     summary: {
@@ -140,8 +142,11 @@ const describeActor = (provenance: RevisionProvenance): string => {
  *
  * Anonymity is applied at write time, so an anonymous actor arrives here with
  * an `anon:` id and no email and gets the `noreply` address git clients already
- * treat as "no mailbox"; nothing about the person is recoverable from the
- * commit afterwards, because nothing about them was ever written.
+ * treat as "no mailbox". Its `anon:` id is a hash of a salt the history never
+ * records (EQ10 option (a)): signed in, the API's per-`(workspace, account)`
+ * salt, an HMAC keyed with a server secret; signed out, the device's random
+ * one. Without that salt the person cannot be recovered from the pseudonym,
+ * even though attributed commits beside it carry user ids.
  *
  * @param provenance - The revision's provenance.
  * @returns The `author` signature for the commit object.
@@ -218,6 +223,7 @@ export const parseRevisionCommitMessage = (message: string): RevisionTrailer | u
       ...(provenance.turnId === undefined ? {} : { turnId: provenance.turnId }),
       ...(provenance.actor === undefined ? {} : { actor: Object.freeze(provenance.actor) }),
       ...(provenance.trigger === undefined ? {} : { trigger: provenance.trigger }),
+      ...(provenance.restoredFrom === undefined ? {} : { restoredFrom: provenance.restoredFrom }),
       createdAt: provenance.createdAt,
     }),
     summary: Object.freeze({

@@ -12,6 +12,7 @@ const bundledWorkspaceDependencies = [
   '@taucad/agent-host',
   '@taucad/agent-tools',
   '@taucad/assimp',
+  '@taucad/bambu',
   '@taucad/brep',
   '@taucad/build123d',
   '@taucad/esbuild',
@@ -26,10 +27,13 @@ const bundledWorkspaceDependencies = [
   '@taucad/opencascade',
   '@taucad/openrscad',
   '@taucad/picogk',
+  '@taucad/picovoxel',
   '@taucad/replicad',
   '@taucad/rhino',
+  '@taucad/rpc',
   '@taucad/runtime',
   '@taucad/skills',
+  '@taucad/slicer',
   '@taucad/zoo',
   'pino-pretty',
   'zod',
@@ -76,6 +80,17 @@ export default defineConfig(
           include: [...desktopExternalizedDependencies],
         },
         outDir: 'dist/main',
+        /* One graph for main and the processes it starts, so the chunks they
+         * share are bundled once. Each input is emitted as `<name>.js` in
+         * `dist/main`, where `main.ts` (bundled into `index.js`) starts it. */
+        rolldownOptions: {
+          input: {
+            index: resolve(import.meta.dirname, 'src/main/index.ts'),
+            'kernel-host': resolve(import.meta.dirname, 'src/tau/kernel-host.entry.ts'),
+            'services-host': resolve(import.meta.dirname, 'src/tau/services-host.entry.ts'),
+            'compute-store.worker': resolve(import.meta.dirname, 'src/main/compute-store.worker.ts'),
+          },
+        },
       },
     },
     preload: {

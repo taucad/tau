@@ -3,10 +3,11 @@ import { esbuild } from '@taucad/esbuild';
 import { image } from '@taucad/image';
 import { jscad } from '@taucad/jscad';
 import { manifold } from '@taucad/manifold';
-import { gltfEdgeDetection, parameterCache, parameterFileResolver, parameterUnits } from '@taucad/middleware';
+import { gltfEdgeDetection, parameterFileResolver, parameterUnits } from '@taucad/middleware';
 import { opencascade } from '@taucad/opencascade';
 import { openrscad } from '@taucad/openrscad';
 import { loadPicogkKernelOptions, picogk } from '@taucad/picogk';
+import { picovoxel } from '@taucad/picovoxel';
 import { replicad } from '@taucad/replicad';
 import type { RuntimeClient } from '@taucad/runtime/client';
 import { createNodeClient } from '@taucad/runtime/node';
@@ -29,8 +30,18 @@ const nativePlugins = resourceRoot
 
 /** Runtime composition used to generate and verify checked-in example thumbnails. @public */
 export const exampleRuntime = defineRuntime({
-  plugins: [replicad(), opencascade(), manifold(), jscad(), openrscad(), esbuild(), image(), ...nativePlugins],
-  middleware: [parameterFileResolver(), parameterCache(), parameterUnits(), gltfEdgeDetection()],
+  plugins: [
+    replicad(),
+    opencascade(),
+    manifold(),
+    picovoxel(),
+    jscad(),
+    openrscad(),
+    esbuild(),
+    image(),
+    ...nativePlugins,
+  ],
+  middleware: [parameterFileResolver(), parameterUnits(), gltfEdgeDetection()],
 });
 
 /** Kernel ids supported by the example-thumbnail runtime. @public */

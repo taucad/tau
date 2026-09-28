@@ -17,6 +17,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createMemoryProvider } from '@taucad/filesystem/backend';
+import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import type { FileSystemProvider } from '@taucad/filesystem';
 import type { RevisionId } from '#algorithms/index.js';
@@ -31,7 +32,7 @@ import type { Checkout, RevisionPort } from '#revision-port.js';
 import { conflictLabels, materializeConflict, readConflictTerms } from '#revision-conflict.js';
 import { readRevisionLog } from '#revision-verbs.js';
 import { startGitHttpBackend } from '#test/git-http-backend.js';
-import { gitOnPath, nativeHarness } from '#test/native-git-harness.js';
+import { gitToolchainOnPath, nativeHarness } from '#test/native-git-harness.js';
 import { generatedIgnorePath } from '#workspace-config.js';
 
 const encoder = new TextEncoder();
@@ -165,18 +166,24 @@ type Adapter = Readonly<{
 
 const adapters: readonly Adapter[] = [
   { name: 'isomorphic-git', create: isomorphicHarness, enabled: true },
-  { name: 'native-git', create: createNativeHarness, enabled: gitOnPath },
+  { name: 'native-git', create: createNativeHarness, enabled: gitToolchainOnPath },
 ];
 
 /* AC23's pin on the table itself: two rows, both live, nothing skipped. `git`
- * on `PATH` is a prerequisite of this suite — the transport rows already spawn
- * `git http-backend` — so a red here means the comparison stopped being one. */
+ * and `git-lfs` on `PATH` are a prerequisite of this suite — the transport rows
+ * already spawn `git http-backend`, and the native port records large objects
+ * through `git lfs` — so a red here means the comparison stopped being one. On
+ * a machine without the toolchain this is the one row that fails, and it says
+ * why, instead of every native row failing product-shaped. */
 describe('the conformance table', () => {
   it('runs at least two enabled adapters', () => {
     /* AC23 says "at least two", and `toHaveLength(2)` said "exactly two"
      * (review R11) — a third adapter row would have failed the pin that exists
      * to keep rows from going dark. */
-    expect(adapters.filter((adapter) => adapter.enabled).length).toBeGreaterThanOrEqual(2);
+    expect(
+      adapters.filter((adapter) => adapter.enabled).length,
+      'the native-git row needs `git` and `git lfs` on PATH (gitToolchainOnPath)',
+    ).toBeGreaterThanOrEqual(2);
   });
 
   it('skips no row', async () => {
@@ -417,8 +424,42 @@ const conformance = (adapter: Adapter): void => {
         'parents',
         'provenance',
         'summary',
+        'treeId',
       ]);
     });
+
+    it("carries each revision's tree id on its log row, the same one readRevision names", async () => {
+      const entries = await port.log({ heads: [child] });
+      const records = await Promise.all([child, base].map(async (id) => port.readRevision(id)));
+      expect(entries.map((entry) => entry.treeId)).toStrictEqual(records.map((record) => record?.treeId));
+      expect(entries[0]?.treeId).toMatch(/^[\da-f]{40}$/u);
+    });
+
+    it('counts what each of two heads has that the other lacks, across a fork and a merge', async () => {
+      const write = async (parents: readonly RevisionId[], content: string): Promise<RevisionId> => {
+        const receipt = await port.writeRevision({
+          parents,
+          tree: tree({ 'a.txt': `${content}\n` }),
+          provenance: provenance('user'),
+          summary: summary(content),
+        });
+        return revisionId(receipt.commitId);
+      };
+      const left1 = await write([child], 'divergence left 1');
+      const left2 = await write([left1], 'divergence left 2');
+      const right1 = await write([child], 'divergence right 1');
+      const merge = await write([left2, right1], 'divergence merge');
+
+      await expect(port.divergence({ head: left2, base: right1 })).resolves.toStrictEqual({ ahead: 2, behind: 1 });
+      await expect(port.divergence({ head: right1, base: left2 })).resolves.toStrictEqual({ ahead: 1, behind: 2 });
+      await expect(port.divergence({ head: left2, base: child })).resolves.toStrictEqual({ ahead: 2, behind: 0 });
+      await expect(port.divergence({ head: child, base: left2 })).resolves.toStrictEqual({ ahead: 0, behind: 2 });
+      await expect(port.divergence({ head: merge, base: right1 })).resolves.toStrictEqual({ ahead: 3, behind: 0 });
+      await expect(port.divergence({ head: left2, base: left2 })).resolves.toStrictEqual({ ahead: 0, behind: 0 });
+      await expect(port.divergence({ head: left2, base: revisionId('0'.repeat(40)) })).rejects.toMatchObject({
+        code: 'UNKNOWN_REVISION',
+      });
+    }, 180_000);
 
     it('never sees a tree whose path collides with a directory (review 4 R27)', () => {
       /* `a` beside `a/b.txt` made `isomorphic-git` write a tree
@@ -738,6 +779,21 @@ const conformance = (adapter: Adapter): void => {
       await expect(port.addCheckout!({ branch })).rejects.toMatchObject({ code: 'CHECKOUT_CONFLICT' });
     }, 180_000);
 
+    it("reports a linked checkout's head as its branch's head after the branch moves (S7)", async () => {
+      /* A merge that does not settle moves the source branch onto a conflicted
+       * revision while its linked checkout stays put. The registry reads the
+       * head from here, so a checkout that kept the base it was added at hid
+       * the conflict: no *Needs resolution*, on the browser leg only (W2d F1). */
+      const branch = 'checkout/moving';
+      await port.updateRef({ name: branch, expectedHead: undefined, head: base });
+      const added = await port.addCheckout!({ branch });
+      await port.updateRef({ name: branch, expectedHead: base, head: child });
+
+      const listed = await port.listCheckouts!();
+      expect(listed.find((checkout) => checkout.id === added.id)).toMatchObject({ branch, baseRevisionId: child });
+      await port.removeCheckout!(added.id);
+    }, 180_000);
+
     it('removes a linked checkout and refuses to remove the live one', async () => {
       const branch = 'checkout/removable';
       await port.updateRef({ name: branch, expectedHead: undefined, head: base });
@@ -778,7 +834,7 @@ for (const adapter of adapters) {
  * this wave is `isomorphic-git` diverging from native Git on identity, and the
  * only thing that can observe it is running the same edits through both.
  */
-describe.runIf(gitOnPath)('cross-adapter identity (I4)', () => {
+describe.runIf(gitToolchainOnPath)('cross-adapter identity (I4)', () => {
   it('names the same tree — and the same revision — from the same scripted edits', async () => {
     const harnesses = await Promise.all([isomorphicHarness(), createNativeHarness()]);
     try {
@@ -979,7 +1035,7 @@ describe('log reads are bounded by the limit (review 4 R28)', () => {
     expect(reads).toBeGreaterThan(0);
   }, 180_000);
 
-  it.runIf(gitOnPath)(
+  it.runIf(gitToolchainOnPath)(
     'spawns a handful of object reads for a limited log on disk',
     async () => {
       const root = await mkdtemp(join(tmpdir(), 'tau-revisions-bound-'));
@@ -1022,7 +1078,7 @@ describe('log reads are bounded by the limit (review 4 R28)', () => {
         const recorded = await readFile(log, 'utf8');
         const commands = recorded.split('\n').filter((line) => line !== '');
         /* Object reads only — no `log`, no `show`, nothing that would read a
-         * tree — and a handful of processes rather than one per revision (B5). */
+         * tree — and a handful of processes rather than one per revision (rule 20's log cost). */
         expect(commands.map((command) => command.split('\t')[0])).toStrictEqual(
           commands.map((command) => (command.startsWith('rev-list') ? 'rev-list' : 'cat-file')),
         );
@@ -1138,7 +1194,7 @@ describe('browser ref publication under a Web Lock (8-review S4)', () => {
  * allowed to adopt it. The port owns the store at its own path or it creates
  * one; it never writes a project's revisions into an enclosing repository.
  */
-describe.runIf(gitOnPath)('native-git store isolation (review 4 R2)', () => {
+describe.runIf(gitToolchainOnPath)('native-git store isolation (review 4 R2)', () => {
   it('creates its own repository inside an enclosing one and writes nothing into it', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tau-revisions-nested-'));
     try {
@@ -1237,7 +1293,7 @@ describe.runIf(gitOnPath)('native-git store isolation (review 4 R2)', () => {
  * that matters most is the refusal: a server that turns down one ref must not
  * be able to stop the branch beside it (A39).
  */
-describe.runIf(gitOnPath)('transport against a git http-backend fixture', () => {
+describe.runIf(gitToolchainOnPath)('transport against a git http-backend fixture', () => {
   for (const adapter of adapters) {
     describe.runIf(adapter.enabled)(adapter.name, () => {
       let harness: Harness;
@@ -1286,6 +1342,7 @@ describe.runIf(gitOnPath)('transport against a git http-backend fixture', () => 
       it('pushes each ref on its own result, and a refused record ref does not stop main', async () => {
         await harness.writeRawRef('refs/tau/chats/refused', head);
         await harness.writeRawRef('refs/tau/chats/kept', head);
+        const before = fixture.trail().length;
 
         const result = await port.push({
           remote: 'tau',
@@ -1303,6 +1360,14 @@ describe.runIf(gitOnPath)('transport against a git http-backend fixture', () => 
           ['refs/tags/v1', 'updated'],
           ['refs/heads/main', 'updated'],
         ]);
+        /* One receive-pack for all four (EQ8): the per-ref report is the
+         * server's `report-status`, not one request per ref. */
+        expect(
+          fixture
+            .trail()
+            .slice(before)
+            .filter((entry) => entry.endsWith('/git-receive-pack')),
+        ).toHaveLength(1);
         // The server is the witness, not the client's own bookkeeping.
         expect(await fixture.git(['rev-parse', 'refs/heads/main'])).toBe(head);
         expect(await fixture.git(['rev-parse', 'refs/tau/chats/kept'])).toBe(head);
@@ -1339,6 +1404,45 @@ describe.runIf(gitOnPath)('transport against a git http-backend fixture', () => 
         }
       }, 180_000);
 
+      /* The browser leg's request count (W13d): every wanted ref — branch,
+       * chat and tag — in one advertisement and one `upload-pack`, and nothing
+       * new costs no pack request. The native leg is `git fetch`'s own. */
+      it.runIf(adapter.name === 'isomorphic-git')(
+        'fetches every wanted ref in one upload-pack, and sends none when nothing is new',
+        async () => {
+          const second = await adapter.create();
+          const requests = (from: number, to?: number): string[] =>
+            fixture
+              .trail()
+              .slice(from, to)
+              .map((entry) => entry.replace(/ \/.*?\.git\//u, ' '));
+          try {
+            const reader = second.withTransport();
+            await reader.init({ author });
+            await reader.setRemote({ name: 'tau', url: fixture.url });
+            const wanted = ['refs/heads/main', 'refs/tau/chats/kept', 'refs/tags/v1'];
+            const first = fixture.trail().length;
+
+            const fetched = await reader.fetch({ remote: 'tau', refs: wanted });
+            const again = fixture.trail().length;
+            await reader.fetch({ remote: 'tau', refs: wanted });
+            const record = await reader.readRevision(head);
+
+            expect(fetched.refs.map((entry) => entry.name)).toStrictEqual([
+              'refs/remotes/tau/main',
+              'refs/remotes/tau/tau/chats/kept',
+              'refs/remotes/tau/tags/v1',
+            ]);
+            expect(record?.summary.generated).toBe('Base revision');
+            expect(requests(first, again)).toStrictEqual(['GET info/refs', 'POST git-upload-pack']);
+            expect(requests(again)).toStrictEqual(['GET info/refs']);
+          } finally {
+            await second.dispose();
+          }
+        },
+        180_000,
+      );
+
       /* The lease, on both legs (A32, S24, D14 `push(expected)`). It runs last
        * because the held half deliberately moves the remote's `main`. */
       it('refuses a stale lease without touching the remote ref, and takes a held one', async () => {
@@ -1371,11 +1475,109 @@ describe.runIf(gitOnPath)('transport against a git http-backend fixture', () => 
         expect(held.refs[0]?.status).toBe('updated');
         expect(await fixture.git(['rev-parse', 'refs/heads/main'])).toBe(moved);
       }, 180_000);
+
+      /* E4 (D10, EQ8): git's floor is one advertisement and one `receive-pack`
+       * per push, whatever the ref count — every extra request is a whole
+       * lease hydrate on the Tau API. Counted off the server's own trail. */
+      it('makes one advertisement and one receive-pack for a three-ref push', async () => {
+        const names = ['refs/heads/w13-a', 'refs/heads/w13-b', 'refs/tau/chats/w13'] as const;
+        const advance = async (parent: RevisionId | undefined, body: string): Promise<RevisionId> => {
+          const receipt = await port.writeRevision({
+            parents: parent === undefined ? [] : [parent],
+            tree: tree({ 'w13.txt': body }),
+            provenance: provenance('user'),
+            summary: summary(body),
+          });
+          const next = revisionId(receipt.commitId);
+          for (const name of names) {
+            // eslint-disable-next-line no-await-in-loop -- three refs, one write each.
+            await harness.writeRawRef(name, next);
+          }
+          return next;
+        };
+        const pushCounted = async (): Promise<{ statuses: string[]; infoRefs: number; receivePacks: number }> => {
+          const before = fixture.trail().length;
+          const pushed = await port.push({ remote: 'tau', refs: names.map((name) => ({ name })) });
+          const trail = fixture.trail().slice(before);
+          return {
+            statuses: pushed.refs.map((entry) => entry.status),
+            infoRefs: trail.filter((entry) => entry === `GET ${new URL(fixture.url).pathname}/info/refs`).length,
+            receivePacks: trail.filter((entry) => entry.endsWith('/git-receive-pack')).length,
+          };
+        };
+
+        const first = await advance(undefined, 'one\n');
+        expect(await pushCounted()).toStrictEqual({
+          statuses: ['updated', 'updated', 'updated'],
+          infoRefs: 1,
+          receivePacks: 1,
+        });
+
+        const second = await advance(first, 'two\n');
+        expect(await pushCounted()).toStrictEqual({
+          statuses: ['updated', 'updated', 'updated'],
+          infoRefs: 1,
+          receivePacks: 1,
+        });
+        for (const name of names) {
+          // eslint-disable-next-line no-await-in-loop -- the server is the witness, one ref at a time.
+          expect(await fixture.git(['rev-parse', name])).toBe(second);
+        }
+
+        expect(await pushCounted()).toStrictEqual({
+          statuses: ['upToDate', 'upToDate', 'upToDate'],
+          infoRefs: 1,
+          receivePacks: 0,
+        });
+      }, 180_000);
+
+      /* One request carries the whole set, so `atomic` means what it means on
+       * the disk leg: one stale lease refuses every ref, and a rewind without a
+       * lease is refused per ref, before anything is sent. */
+      it('refuses an atomic set whole on one stale lease, and a rewind without a lease', async () => {
+        const mint = async (parents: RevisionId[], body: string): Promise<RevisionId> => {
+          const receipt = await port.writeRevision({
+            parents,
+            tree: tree({ 'atomic.txt': body }),
+            provenance: provenance('user'),
+            summary: summary(body),
+          });
+          return revisionId(receipt.commitId);
+        };
+        const x = 'refs/heads/w13-x';
+        const y = 'refs/heads/w13-y';
+        const base = await mint([], 'base\n');
+        await harness.writeRawRef(x, base);
+        await harness.writeRawRef(y, base);
+        await port.push({ remote: 'tau', refs: [{ name: x }, { name: y }] });
+
+        const next = await mint([base], 'next\n');
+        await harness.writeRawRef(x, next);
+        await harness.writeRawRef(y, next);
+        const atomic = await port.push({
+          remote: 'tau',
+          atomic: true,
+          refs: [
+            { name: x, expected: base },
+            { name: y, expected: next },
+          ],
+        });
+
+        expect(atomic.refs.map((entry) => entry.status)).toStrictEqual(['rejected', 'rejected']);
+        expect(await fixture.git(['rev-parse', x])).toBe(base);
+
+        await harness.writeRawRef(x, await mint([], 'unrelated\n'));
+        const rewind = await port.push({ remote: 'tau', refs: [{ name: x }] });
+
+        expect(rewind.refs[0]?.status).toBe('rejected');
+        expect(rewind.refs[0]?.reason).toContain('non-fast-forward');
+        expect(await fixture.git(['rev-parse', x])).toBe(base);
+      }, 180_000);
     });
   }
 });
 
-describe.runIf(gitOnPath)('native remote credential transport', () => {
+describe.runIf(gitToolchainOnPath)('native remote credential transport', () => {
   it('passes the credential only through the child environment', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tau-revisions-credential-'));
     const fixture = await startGitHttpBackend({ root });
@@ -1429,7 +1631,7 @@ describe.runIf(gitOnPath)('native remote credential transport', () => {
  * leg. These rows are the browser leg's `isomorphic-git-adapter.test.ts` table,
  * asked of the binary.
  */
-describe.runIf(gitOnPath)('native remote refusals (N1)', () => {
+describe.runIf(gitToolchainOnPath)('native remote refusals (N1)', () => {
   it.each([
     { status: 401, code: 'REMOTE_UNAUTHORIZED' },
     { status: 403, code: 'REMOTE_FORBIDDEN' },
@@ -1527,6 +1729,53 @@ describe.runIf(gitOnPath)('native remote refusals (N1)', () => {
       await rm(root, { force: true, recursive: true });
     }
   }, 180_000);
+
+  /* RV-W8 F11: the native list reads like the server's — largest first, at most ten. */
+  it('names the largest ten files first when a push is over the storage plan', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-revisions-native-quota-order-'));
+    const fixture = await startGitHttpBackend({
+      root,
+      quotaRefusal: { message: 'Storage quota exceeded.', shortfallBytes: 1, remainingBytes: 0 },
+    });
+    const repositoryPath = join(root, 'project');
+    /* Eleven large files, named so alphabetical order is smallest first: the old sorted list fails this row. */
+    const files = Array.from({ length: 11 }, (_, index) => {
+      const bytes = new Uint8Array(new ArrayBuffer(1024 * 1024 + 1 + index * 4096));
+      for (let offset = 0; offset < bytes.length; offset += 1) {
+        bytes[offset] = (offset * 31 + index) % 256;
+      }
+      return [`models/${String.fromCodePoint(97 + index)}.step`, bytes] as const;
+    });
+    try {
+      await mkdir(repositoryPath, { recursive: true });
+      const port = createNativeGitRevisionPort({
+        repositoryPath,
+        tauCredential: () => ({ apiBaseUrl: fixture.url, authorization: 'Bearer session-token' }),
+      });
+      await port.init({ author });
+      const receipt = await port.writeRevision({
+        parents: [],
+        tree: new ImmutableRevisionTree(files),
+        provenance: provenance('user'),
+        summary: summary('Large objects'),
+      });
+      await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(receipt.commitId) });
+      await port.setRemote({ name: 'tau', url: fixture.url });
+
+      await expect(port.push({ remote: 'tau', refs: [{ name: 'refs/heads/main' }] })).rejects.toMatchObject({
+        name: 'LfsQuotaError',
+        refusal: {
+          paths: files
+            .toReversed()
+            .slice(0, 10)
+            .map(([path]) => path),
+        },
+      });
+    } finally {
+      await fixture.close();
+      await rm(root, { force: true, recursive: true });
+    }
+  }, 180_000);
 });
 
 /**
@@ -1537,7 +1786,7 @@ describe.runIf(gitOnPath)('native remote refusals (N1)', () => {
  * goes up *before* the ref that names it, it goes up *once*, and a second store
  * that only fetched pointers reads the bytes back.
  */
-describe.runIf(gitOnPath)('LFS clients over the batch API', () => {
+describe.runIf(gitToolchainOnPath)('LFS clients over the batch API', () => {
   const large = ((): Uint8Array<ArrayBuffer> => {
     const bytes = new Uint8Array(new ArrayBuffer(5 * 1024 * 1024));
     for (let index = 0; index < bytes.length; index += 1) {
@@ -1607,6 +1856,47 @@ describe.runIf(gitOnPath)('LFS clients over the batch API', () => {
       } finally {
         await nativeReader.dispose();
       }
+      expect(fixture.uploadCount()).toBe(1);
+    } finally {
+      await fixture.close();
+      await writer.dispose();
+      await reader.dispose();
+      await rm(root, { force: true, recursive: true });
+    }
+  }, 180_000);
+
+  /* Live: a linked import of a repository whose history held an LFS file could
+   * never back up — the push read the bytes of every pointer it offered, and a
+   * fetched pointer has none here until somebody opens the file. */
+  it('pushes history whose large objects it only fetched as pointers, without reading them', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-revisions-lfs-pointer-'));
+    const fixture = await startGitHttpBackend({ root });
+    const writer = await isomorphicHarness();
+    const reader = await isomorphicHarness();
+    try {
+      const port = writer.withTransport();
+      await port.init({ author });
+      const receipt = await port.writeRevision({
+        parents: [],
+        tree: tree({ 'models/bracket.step': large }),
+        provenance: provenance('user'),
+        summary: summary('Large object'),
+      });
+      const head = revisionId(receipt.commitId);
+      await port.updateRef({ name: 'main', expectedHead: undefined, head });
+      await port.setRemote({ name: 'tau', url: fixture.url });
+      await port.push({ remote: 'tau', refs: [{ name: 'refs/heads/main' }] });
+
+      const second = reader.withTransport();
+      await second.init({ author });
+      await second.setRemote({ name: 'tau', url: fixture.url });
+      await second.fetch({ remote: 'tau' });
+      await second.updateRef({ name: 'imported', expectedHead: undefined, head });
+
+      const result = await second.push({ remote: 'tau', refs: [{ name: 'refs/heads/imported' }] });
+
+      expect(result.refs[0]?.status).toBe('updated');
+      expect(await fixture.git(['rev-parse', 'refs/heads/imported'])).toBe(head);
       expect(fixture.uploadCount()).toBe(1);
     } finally {
       await fixture.close();
@@ -1686,4 +1976,187 @@ describe.runIf(gitOnPath)('LFS clients over the batch API', () => {
       await rm(root, { force: true, recursive: true });
     }
   }, 180_000);
+});
+
+/*
+ * R14: the live checkout's index names the tree of the branch `HEAD` names.
+ *
+ * Tau never reads the index; stock Git does. Without it `git status` in a
+ * project listed every file as a staged deletion and `git commit -a` committed
+ * the whole project deleted — and in a repository Tau adopted, the person's
+ * stale index reverted Tau's revisions. Both legs over a real directory, read
+ * back with the `git` binary, so one reader judges both writers.
+ */
+describe.runIf(gitToolchainOnPath)('the live index follows HEAD (R14)', () => {
+  // Environment names, not identifiers: assigned rather than spelled as keys.
+  const gitEnvironment: NodeJS.ProcessEnv = { ...process.env };
+  gitEnvironment['GIT_CONFIG_GLOBAL'] = '/dev/null';
+  gitEnvironment['GIT_CONFIG_NOSYSTEM'] = '1';
+  delete gitEnvironment['GIT_DIR'];
+  const git = (cwd: string, args: readonly string[]): string =>
+    execFileSync('git', args, { cwd, env: gitEnvironment }).toString('utf8').trim();
+  /** `mode oid path` per blob, the same spelling for the index and a tree. */
+  const indexEntries = (cwd: string): string =>
+    git(cwd, ['ls-files', '--stage'])
+      .split('\n')
+      .map((line) => line.replace(/ 0\t/u, ' '))
+      .join('\n');
+  const treeEntries = (cwd: string, revision: string): string =>
+    git(cwd, ['ls-tree', '-r', revision])
+      .split('\n')
+      .map((line) => line.replace(/ blob /u, ' ').replace('\t', ' '))
+      .join('\n');
+
+  const legs = [
+    {
+      name: 'native-git',
+      create: (repositoryPath: string): RevisionPort => createNativeGitRevisionPort({ repositoryPath }),
+    },
+    {
+      name: 'isomorphic-git',
+      create: (repositoryPath: string): RevisionPort =>
+        createIsomorphicGitRevisionPort({ filesystem: new NodeFsProvider(repositoryPath) }),
+    },
+  ] as const;
+
+  const roots: string[] = [];
+  afterAll(async () => {
+    await Promise.all(roots.map(async (root) => rm(root, { force: true, recursive: true })));
+  });
+  const project = async (): Promise<string> => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-revisions-live-index-'));
+    roots.push(root);
+    return root;
+  };
+  /** Record `files` onto `branch` the way a mint does: write, then publish. */
+  const mint = async (port: RevisionPort, branch: string, files: Record<string, string>): Promise<RevisionId> => {
+    const parent = await port.readRef(branch);
+    const receipt = await port.writeRevision({
+      parents: parent === undefined ? [] : [parent],
+      tree: tree(files),
+      provenance: provenance('user'),
+      summary: summary(`Mint onto ${branch}`),
+    });
+    const head = revisionId(receipt.commitId);
+    const updated = await port.updateRef({ name: branch, expectedHead: parent, head });
+    expect(updated.status).toBe('updated');
+    return head;
+  };
+
+  describe.each(legs)('$name', ({ create }) => {
+    it('leaves a clean status after a mint of the working copy', async () => {
+      const root = await project();
+      const port = create(root);
+      await port.init({ author });
+      const files = {
+        '.gitignore': await readFile(join(root, generatedIgnorePath), 'utf8'),
+        '.gitattributes': await readFile(join(root, '.gitattributes'), 'utf8'),
+        'main.scad': 'cube(10);\n',
+        'parts/bolt.scad': 'cylinder(3);\n',
+      };
+      await mkdir(join(root, 'parts'), { recursive: true });
+      await writeFile(join(root, 'main.scad'), files['main.scad']);
+      await writeFile(join(root, 'parts/bolt.scad'), files['parts/bolt.scad']);
+
+      await mint(port, 'main', files);
+
+      expect(indexEntries(root)).toBe(treeEntries(root, 'HEAD'));
+      expect(git(root, ['status', '--porcelain'])).toBe('');
+    }, 60_000);
+
+    it('follows HEAD to another branch and ignores a branch HEAD does not name', async () => {
+      const root = await project();
+      const port = create(root);
+      await port.init({ author });
+      await mint(port, 'main', { 'a.txt': 'a\n' });
+      await mint(port, 'side', { 'b.txt': 'b\n' });
+
+      expect(indexEntries(root)).toBe(treeEntries(root, 'main'));
+
+      await port.setHead('side');
+
+      expect(indexEntries(root)).toBe(treeEntries(root, 'side'));
+    }, 60_000);
+
+    it('empties the index when the branch HEAD names is deleted', async () => {
+      const root = await project();
+      const port = create(root);
+      await port.init({ author });
+      const head = await mint(port, 'main', { 'a.txt': 'a\n' });
+
+      expect(git(root, ['ls-files'])).toBe('a.txt');
+
+      await port.updateRef({ name: 'main', expectedHead: head });
+
+      expect(git(root, ['ls-files'])).toBe('');
+    }, 60_000);
+
+    it('heals a store with no index at open and keeps an existing one', async () => {
+      const root = await project();
+      const first = create(root);
+      await first.init({ author });
+      await mint(first, 'main', { 'a.txt': 'a\n' });
+      await rm(join(root, '.git', 'index'));
+
+      await create(root).init({ author });
+
+      expect(indexEntries(root)).toBe(treeEntries(root, 'HEAD'));
+
+      // A staged path the person added survives the next open untouched.
+      await writeFile(join(root, 'staged.txt'), 'mine\n');
+      git(root, ['add', 'staged.txt']);
+      await create(root).init({ author });
+
+      expect(git(root, ['diff', '--cached', '--name-only'])).toBe('staged.txt');
+    }, 60_000);
+
+    it("moves an adopted repository's stale index to Tau's revision", async () => {
+      const root = await project();
+      git(root, ['init', '--quiet', '--initial-branch=main']);
+      await writeFile(join(root, 'main.scad'), 'size = 10;\n');
+      git(root, ['add', 'main.scad']);
+      git(root, ['-c', 'user.name=Ada', '-c', 'user.email=ada@example.com', 'commit', '--quiet', '-m', 'Mine']);
+      const port = create(root);
+      await port.init({ author });
+
+      await mint(port, 'main', { 'main.scad': 'size = 20;\n', 'part.scad': 'cube(1);\n' });
+
+      // Before R14 the index still held the person's commit: `git commit -a`
+      // then deleted `part.scad`, and a plain `git commit` undid the revision.
+      expect(indexEntries(root)).toBe(treeEntries(root, 'HEAD'));
+    }, 60_000);
+
+    it("records the mint and leaves the index to the person's own Git while it holds the lock", async () => {
+      const root = await project();
+      const port = create(root);
+      await port.init({ author });
+      const before = await readFile(join(root, '.git', 'index'));
+      await writeFile(join(root, '.git', 'index.lock'), '');
+      try {
+        const head = await mint(port, 'main', { 'a.txt': 'a\n' });
+
+        expect(await port.readRef('main')).toBe(head);
+        expect(await readFile(join(root, '.git', 'index'))).toStrictEqual(before);
+      } finally {
+        await rm(join(root, '.git', 'index.lock'), { force: true });
+      }
+    }, 60_000);
+  });
+
+  it('refreshes the index of the linked worktree that holds a moved branch (native)', async () => {
+    const harness = await nativeHarness(projectId, 'tau-revisions-linked-index-');
+    try {
+      const { port } = harness;
+      await port.init({ author });
+      const base = await mint(port, 'main', { 'a.txt': 'a\n' });
+      const linked = await port.addCheckout!({ branch: 'side', from: base });
+
+      await mint(port, 'side', { 'a.txt': 'a\n', 'b.txt': 'b\n' });
+
+      expect(indexEntries(linked.root)).toBe(treeEntries(linked.root, 'side'));
+      expect(indexEntries(harness.liveRoot)).toBe(treeEntries(harness.liveRoot, 'main'));
+    } finally {
+      await harness.dispose();
+    }
+  }, 60_000);
 });

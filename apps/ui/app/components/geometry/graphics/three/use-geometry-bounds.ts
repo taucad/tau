@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import * as THREE from 'three';
-import { useFrame } from '@react-three/fiber';
+import { useFrame, useThree } from '@react-three/fiber';
 import { fromThreeRenderBounds } from '@taucad/three/spatial';
-import { useGraphics, useGraphicsSelector, useRenderFrame } from '#hooks/use-graphics.js';
+import { useGraphics, useGraphicsSelector, useKinematicsRef, useRenderFrame } from '#hooks/use-graphics.js';
 import { selectPresentedGeometryKey } from '#machines/graphics.machine.js';
+import type { KinematicsMachineContext } from '#machines/kinematics.machine.js';
 
 // Reusable temporaries for per-frame bounding calculations (avoids GC pressure).
 // Safe for multi-Canvas use because JavaScript is single-threaded and each
@@ -13,6 +14,10 @@ import { selectPresentedGeometryKey } from '#machines/graphics.machine.js';
 const _box3 = new THREE.Box3();
 const _centerPoint = new THREE.Vector3();
 const _sphere = new THREE.Sphere();
+
+/** Whether a drag or a playing clip is still moving a unit's pose. */
+const isPoseMoving = ({ unitsById }: KinematicsMachineContext): boolean =>
+  Object.values(unitsById).some((unit) => unit.drag !== undefined || unit.playback.status === 'playing');
 
 type GeometryBoundsResult = {
   /** The bounding sphere radius of the geometry. */
@@ -30,8 +35,8 @@ type GeometryBoundsResult = {
  *
  * Integrates with the graphics machine's `geometryKey` to avoid expensive
  * scene traversals once bounds have stabilized — they are only recomputed
- * when new geometry loads (key change) and until the radius converges, then
- * skipped entirely during orbit/pan/zoom.
+ * when new geometry loads (key change) or a kinematic pose settles, and until
+ * the radius converges, then skipped entirely during orbit/pan/zoom.
  *
  * Native render-local bounds are inverted through the current render frame;
  * callers therefore always receive physical metres.
@@ -60,6 +65,25 @@ export function useGeometryBounds(
   // then skipped entirely during orbit/pan/zoom.
   const lastGeometryKeyRef = useRef<string | undefined>(undefined);
   const boundsStableRef = useRef(false);
+
+  // A pose moves parts without a new geometry key, so bounds are measured again once it settles. Measuring
+  // mid-drag could re-frame the camera under the pointer, which moves the drag target and feeds the pose.
+  const kinematicsRef = useKinematicsRef();
+  const invalidate = useThree((state) => state.invalidate);
+  useEffect(() => {
+    let measuredRevision = kinematicsRef.getSnapshot().context.revision;
+    const subscription = kinematicsRef.subscribe(({ context }) => {
+      if (context.revision === measuredRevision || isPoseMoving(context)) {
+        return;
+      }
+      measuredRevision = context.revision;
+      boundsStableRef.current = false;
+      invalidate();
+    });
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [invalidate, kinematicsRef]);
 
   useFrame(() => {
     if (!innerRef.current) {

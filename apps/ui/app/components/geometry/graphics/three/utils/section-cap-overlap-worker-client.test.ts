@@ -19,17 +19,19 @@ const minimalRequest = (sequence = 1): SectionCapWorkerRequest => ({
   type: 'compute',
   sequence,
   requestKey: `request-${sequence}`,
-  planeKey: 'plane',
-  sourceSetKey: 'sources',
-  basis: {
-    origin: [0, 0, 0],
-    normal: [0, 0, 1],
-    u: [1, 0, 0],
-    v: [0, 1, 0],
-    planeKey: 'plane',
-    normalizationOffset: [0, 0],
-    normalizationScale: 1,
-  },
+  faceKeys: ['face'],
+  bases: [
+    {
+      origin: [0, 0, 0],
+      normal: [0, 0, 1],
+      u: [1, 0, 0],
+      v: [0, 1, 0],
+      planeKey: 'plane',
+      normalizationOffset: [0, 0],
+      normalizationScale: 1,
+    },
+  ],
+  faceSourceOffsets: new Uint32Array([0, 0]),
   sourceKeys: [],
   ownerKeys: [],
   geometryKeys: [],
@@ -60,8 +62,6 @@ describe('createSectionCapOverlapWorkerClient', () => {
       type: 'error',
       sequence: 1,
       requestKey: 'request',
-      planeKey: 'plane',
-      sourceSetKey: 'sources',
       message: 'expected test response',
     });
     client.dispose();
@@ -100,8 +100,6 @@ describe('createSectionCapOverlapWorkerClient', () => {
       type: 'error',
       sequence: first.sequence,
       requestKey: first.requestKey,
-      planeKey: first.planeKey,
-      sourceSetKey: first.sourceSetKey,
       message: 'expected test response',
     });
 

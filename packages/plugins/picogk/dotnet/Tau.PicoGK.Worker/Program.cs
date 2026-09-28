@@ -8,7 +8,7 @@ namespace Tau.PicoGK.Worker;
 
 internal static class Program
 {
-    private const int ProtocolVersion = 4;
+    private const int ProtocolVersion = 5;
     private const int MaximumRequestCharacters = 1_048_576;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly object ProtocolGate = new();
@@ -144,10 +144,22 @@ internal static class Program
     {
         switch (request.Method)
         {
+            case "resolve":
+            {
+                // The C# files this entry compiles with, which the host watches and hashes as its sources.
+                var entryPath = ValidateEntryPath(request.Params, arguments.Workspace);
+                Write(new
+                {
+                    protocolVersion = ProtocolVersion,
+                    requestId = request.RequestId,
+                    result = new { sources = CompilationService.SelectSources(arguments.Workspace, entryPath) },
+                });
+                return false;
+            }
             case "analyze":
             {
-                ValidateEntryPath(request.Params, arguments.Workspace);
-                var model = CompilationService.Compile(arguments.Workspace);
+                var entryPath = ValidateEntryPath(request.Params, arguments.Workspace);
+                var model = CompilationService.Compile(arguments.Workspace, entryPath);
                 Write(new
                 {
                     protocolVersion = ProtocolVersion,
@@ -163,11 +175,11 @@ internal static class Program
             }
             case "build":
             {
-                ValidateEntryPath(request.Params, arguments.Workspace);
+                var entryPath = ValidateEntryPath(request.Params, arguments.Workspace);
                 var parameters = request.Params.GetProperty("parameters");
                 // A build superseded before it started pays nothing beyond its own frame.
                 cancellation.ThrowIfCancellationRequested();
-                var compiled = CompilationService.Compile(arguments.Workspace);
+                var compiled = CompilationService.Compile(arguments.Workspace, entryPath);
                 var execution = ModelRunner.Execute(compiled, arguments.Artifacts, parameters, cancellation);
                 var result = MeshArtifactWriter.Write(
                     arguments.Artifacts,
@@ -201,7 +213,8 @@ internal static class Program
         }
     }
 
-    internal static void ValidateEntryPath(JsonElement parameters, string workspace)
+    /// <returns>The entry as the workspace-relative, forward-slash path its source is compiled under.</returns>
+    internal static string ValidateEntryPath(JsonElement parameters, string workspace)
     {
         var entryPath = parameters.GetProperty("entryPath").GetString();
         if (string.IsNullOrWhiteSpace(entryPath)) throw new WorkerException(new Issue("PicoGK entryPath is required.", "CS_TAU_PATH", "validation", "error"));
@@ -211,6 +224,7 @@ internal static class Program
         {
             throw new WorkerException(new Issue("PicoGK entryPath must name a C# file inside the workspace.", "CS_TAU_PATH", "validation", "error"));
         }
+        return Path.GetRelativePath(root, path).Replace('\\', '/');
     }
 
     internal static Arguments ParseArguments(string[] args)

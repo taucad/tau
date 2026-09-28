@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { createActor } from 'xstate';
-import type { ActorRefFrom } from 'xstate';
+import type { Actor } from 'xstate';
 import { mock } from 'vitest-mock-extended';
 import type { Chat } from '@ai-sdk/react';
 import type { CadAgentConfigInput, CadAgentExecution, MyUIMessage } from '@taucad/chat';
@@ -128,6 +128,10 @@ vi.mock('#hooks/chat-session-store-provider.js', () => ({
 vi.mock('#hooks/use-models.js', () => ({
   useModels: () => ({
     resolveModel: (id: string) => {
+      /* What the real hook answers while the catalog cannot load: no row, so no provider. */
+      if (id === 'openai-gpt-offline') {
+        return { id, name: id, family: 'unknown', provider: { id: 'unknown', name: 'Unknown' }, isResolved: false };
+      }
       const retry = id === 'openai-gpt-retry';
       const model = {
         id,
@@ -395,7 +399,7 @@ const renderClient = (): ReturnType<typeof renderHook<ReturnType<typeof useCadCh
   });
 
 /** Every binding actor a row started, stopped after it. */
-const bindings: Array<ActorRefFrom<typeof chatHostBinding>> = [];
+const bindings: Array<Actor<typeof chatHostBinding>> = [];
 
 /**
  * Run the chat's real host binding, as its session actor does.
@@ -718,6 +722,29 @@ describe('useCadChatClient', () => {
       id: 'openai-gpt-retry',
       contextWindow: 64_000,
     });
+  });
+
+  /*
+   * Opening a chat attaches it to the host, and that client used to be composed with the full model
+   * row. Offline — or with the API down — the catalog names no provider, the composition threw, and
+   * a chat nothing ever ran in read `Failed`. Attach and replay need no model, and a bodyless resume
+   * runs on the row its log committed, so the client initialises without a default row.
+   */
+  it('creates the attach client without a model row while the catalog cannot name one', async () => {
+    mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-offline' } }));
+    const chat = mock<Chat<MyUIMessage>>();
+    Object.defineProperty(chat, 'messages', { get: () => [] });
+    useActiveChatInstanceMock.mockReturnValue(chat);
+    installActions(buildActions());
+
+    renderClient();
+    await bindChatHost();
+    await browserHostHarness.registration!.createClient();
+
+    const options = browserHostHarness.createClient.mock.calls[0]?.[0];
+    expect(options?.authority).toEqual({ projectId: 'proj_test', workspaceId: 'workspace_test' });
+    expect(options?.systemPrompt).toContain('<role>');
+    expect(options).not.toHaveProperty('model');
   });
 
   it('places a Tau Host turn on the daemon channel, claiming no browser workspace', async () => {

@@ -10,8 +10,7 @@
  */
 
 import { onTestFinished, vi } from 'vitest';
-import type { RevisionStatusProjection } from '@taucad/revisions/project-revisions-machine';
-import type { RevisionDiffEntry, RevisionRow } from '@taucad/revisions';
+import type { RevisionDiffEntry, RevisionLogRequest, RevisionRow, RevisionStatusProjection } from '@taucad/revisions';
 import type { BranchCreated, RevisionToast, RevisionFileComparison } from '#machines/file-manager.worker.revisions.js';
 import type { ProjectAccessRole } from '#hooks/use-cloud-projects.js';
 
@@ -19,14 +18,23 @@ const emptyStatus = (): RevisionStatusProjection => ({
   projectId: 'p',
   checkoutId: 'live',
   checkoutRoot: '/projects/p',
-  branch: 'main',
+  line: { kind: 'branch', name: 'main' },
+  registrySettled: true,
   projectDirty: false,
   dirty: false,
   minting: false,
   headRevisionId: undefined,
   follow: 'chat',
   attention: 0,
-  restore: { asking: false, busy: false, removedPathCount: 0, dirty: false, revisionNumber: undefined },
+  restore: {
+    asking: false,
+    busy: false,
+    removedPathCount: 0,
+    dirty: false,
+    revisionNumber: undefined,
+    undoable: false,
+    canUndo: false,
+  },
   remote: {
     kind: 'none',
     url: undefined,
@@ -67,8 +75,10 @@ export const revisionStatusHarness = {
   diff: [] as readonly RevisionDiffEntry[],
   /** Every revision a surface asked for a diff of, in order (C52). */
   diffRequests: [] as string[],
-  /** Every branch a surface re-walked the graph for, in order (B8). */
+  /** Every branch a surface re-walked the graph for, in order (rule 20's log cost). */
   logRequests: [] as string[],
+  /** Every revision a surface asked for on its own, by id (B4). */
+  rowRequests: [] as string[],
   comparison: emptyComparison(),
   comparisonError: undefined as Error | undefined,
   /** D27: which role the account holds on this project, or none at all. */
@@ -76,8 +86,8 @@ export const revisionStatusHarness = {
   toasts: new Set<(toast: RevisionToast) => void>(),
   commands: {
     restore: vi.fn<(revisionId: string) => void>(),
-    returnToLatest: vi.fn(),
     undo: vi.fn(),
+    undoOperation: vi.fn(),
     confirm: vi.fn(),
     cancel: vi.fn(),
     switchTo: vi.fn<(branch: string) => void>(),
@@ -105,7 +115,7 @@ export const revisionStatusHarness = {
     saveRevision: vi.fn<(trigger?: 'save' | 'hidden' | 'close') => void>(),
     tag: vi.fn(),
     deleteTag: vi.fn(),
-    publishProject: vi.fn<(tag?: string) => void>(),
+    publishProject: vi.fn<(tag?: string, revisionId?: string) => void>(),
     confirmPublish: vi.fn(),
     cancelPublish: vi.fn(),
     resetPublish: vi.fn(),
@@ -120,6 +130,7 @@ export const revisionStatusHarness = {
     this.diff = [];
     this.diffRequests.length = 0;
     this.logRequests.length = 0;
+    this.rowRequests.length = 0;
     this.comparison = emptyComparison();
     this.comparisonError = undefined;
     this.role = undefined;
@@ -172,6 +183,12 @@ export const refuseCreateBranch = (
   };
 };
 
+/** Every scripted history: the selected line's and each branch's. */
+const histories = (): ReadonlyArray<readonly RevisionRow[]> => [
+  revisionStatusHarness.rows,
+  ...revisionStatusHarness.rowsByBranch.values(),
+];
+
 /**
  * The module factory `vi.mock('#hooks/use-revision-status.js', …)` returns.
  *
@@ -181,7 +198,7 @@ export const revisionStatusMock = (): Record<string, unknown> => {
   /* One client object for the whole suite, because the product's
    * `useRevisionClient` is memoized on the worker: a mock that minted a fresh
    * object per render made every downstream `useMemo` miss, which is the very
-   * defect B9 exists to catch. */
+   * defect rule 20's log cost exists to catch. */
   const client = {
     status: () => revisionStatusHarness.status,
     subscribe: () => () => undefined,
@@ -191,15 +208,34 @@ export const revisionStatusMock = (): Record<string, unknown> => {
       return () => revisionStatusHarness.toasts.delete(listener);
     },
     admitTurn: async () => ({ checkoutId: 'live', root: '/projects/p', baseRevisionId: '' }),
-    log: async (request?: { readonly branch?: string }) => {
+    log: async (request?: RevisionLogRequest) => {
+      if (request?.from !== undefined) {
+        revisionStatusHarness.rowRequests.push(request.from);
+        const found = histories()
+          .flat()
+          .find((row) => row.revisionId === request.from);
+        return found === undefined ? [] : [found];
+      }
       revisionStatusHarness.logRequests.push(request?.branch ?? '');
-      return (
+      const rows =
         (request?.branch === undefined ? undefined : revisionStatusHarness.rowsByBranch.get(request.branch)) ??
-        revisionStatusHarness.rows
-      );
+        revisionStatusHarness.rows;
+      return request?.limit === undefined ? rows : rows.slice(0, request.limit);
     },
-    diff: async (revisionId: string) => {
-      revisionStatusHarness.diffRequests.push(revisionId);
+    /* Each scripted history is one line, newest first: a revision's history is its list from it down. */
+    divergence: async (head: string, base: string) => {
+      const below = (id: string): ReadonlySet<string> => {
+        const line = histories().find((rows) => rows.some((row) => row.revisionId === id)) ?? [];
+        return new Set(line.slice(line.findIndex((row) => row.revisionId === id)).map((row) => row.revisionId));
+      };
+      const [ahead, behind] = [below(head), below(base)];
+      return {
+        ahead: [...ahead].filter((id) => !behind.has(id)).length,
+        behind: [...behind].filter((id) => !ahead.has(id)).length,
+      };
+    },
+    diff: async (revisionId: string, from?: string) => {
+      revisionStatusHarness.diffRequests.push(from === undefined ? revisionId : `${from}..${revisionId}`);
       return revisionStatusHarness.diff;
     },
     compare: async () => {

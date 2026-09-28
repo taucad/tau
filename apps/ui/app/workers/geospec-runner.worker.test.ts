@@ -359,7 +359,8 @@ describe('geospec-runner.worker', () => {
       file: 'main.ts',
       parameters: { height: 42 },
       projectPath: '',
-      runtime: workerMocks.runtimeClient,
+      /* oxlint-disable-next-line typescript/no-unsafe-assignment -- the loader receives the worker-owned client through its source-revision proxy; `expect.objectContaining` is typed `any`. */
+      runtime: expect.objectContaining({ terminate: workerMocks.runtimeClient.terminate }),
     });
     expect(workerMocks.runtimeClient.terminate).not.toHaveBeenCalled();
     expect(workerMocks.fsProxy.dispose).not.toHaveBeenCalled();
@@ -443,7 +444,8 @@ describe('geospec-runner.worker', () => {
     expect(workerMocks.loadModel).toHaveBeenCalledWith({
       file: 'main.scad',
       projectPath: '',
-      runtime: workerMocks.runtimeClient,
+      /* oxlint-disable-next-line typescript/no-unsafe-assignment -- the loader receives the worker-owned client through its source-revision proxy; `expect.objectContaining` is typed `any`. */
+      runtime: expect.objectContaining({ terminate: workerMocks.runtimeClient.terminate }),
     });
   });
 

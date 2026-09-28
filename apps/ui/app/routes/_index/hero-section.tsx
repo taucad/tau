@@ -43,7 +43,7 @@ export function HeroSection(): React.JSX.Element {
           </div>
         </div>
 
-        <div className='h-[420px] w-full overflow-hidden rounded-2xl sm:h-[480px] lg:h-[520px]'>
+        <div className='h-105 w-full overflow-hidden rounded-2xl sm:h-120 lg:h-130'>
           <DesignStory />
         </div>
       </div>

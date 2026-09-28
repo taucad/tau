@@ -47,6 +47,11 @@
     // and checks them against a baked evidence digest, so any byte change makes the
     // splash throw "Design story evidence is stale". They are model data, not app code.
     "apps/ui/app/components/geometry/splash/planetary/**",
+    // Same class: PicoVoxel example sources are byte-pinned upstream ports (`provenance.json`
+    // hashes, `picovoxel-provenance.test.ts`). Only Tau's `main.ts` adapters and GeoSpec suites are linted.
+    "libs/tau-examples/src/kernels/picovoxel/*/*.ts",
+    "!libs/tau-examples/src/kernels/picovoxel/*/main.ts",
+    "!libs/tau-examples/src/kernels/picovoxel/*/*.geospec.ts",
     "**/fixtures/scripts/**"
   ],
   "plugins": [
@@ -478,7 +483,20 @@
     "no-restricted-imports": [
       "error",
       {
-        "paths": ["error", "domain", "freelist", "smalloc", "punycode", "sys", "querystring", "colors"],
+        "paths": [
+          "error",
+          "domain",
+          "freelist",
+          "smalloc",
+          "punycode",
+          "sys",
+          "querystring",
+          "colors",
+          {
+            "name": "@nx/vite/plugins/nx-tsconfig-paths.plugin",
+            "message": "nxViteTsPaths applies tsconfig paths to every importer before Vite's resolver. Resolve # through package.json#imports, or add a scoped resolve.alias. See docs/research/scoped-hash-import-resolution.md."
+          }
+        ],
         "patterns": [
           {
             "regex": "^\\.",
@@ -1231,7 +1249,8 @@
         "jsdoc-js/informative-docs": "warn",
         // Catches empty JSDoc blocks (/** */) that satisfy require-jsdoc but carry zero information.
         "jsdoc-js/no-blank-blocks": "warn",
-        // Enforces consistent tag ordering: @template → @param → @returns → @throws → @example → @see.
+        // Enforces eslint-plugin-jsdoc's default tag order, including the visibility tags:
+        // @template → @internal → @param → @returns → @throws → @public → @see → @example.
         // Only checks order, not spacing between groups (formatting is handled by oxfmt).
         "jsdoc-js/sort-tags": [
           "warn",
@@ -1664,6 +1683,38 @@
       }
     },
     {
+      // Page Composition Policy gates (docs/policy/page-composition-policy.md, Enforcement).
+      // Product page components only: tests and `[__e2e]` fixture routes author no product copy.
+      // Autofixable rules are errors; judgment rules warn for one release, then become errors.
+      "files": ["apps/ui/app/**/*.tsx", "packages/ui/src/**/*.tsx"],
+      "excludeFiles": ["**/*.{test,spec}.tsx", "apps/ui/app/routes/?__e2e?.*/**"],
+      "rules": {
+        "tau-lint/no-ascii-ellipsis": "error",
+        "tau-lint/require-accessible-name": "warn",
+        "tau-lint/no-label-replacing-loader": "warn",
+        "tau-lint/no-arbitrary-pixel-size": "error",
+        "tau-lint/no-accent-hover": "warn",
+        "tau-lint/no-button-size-override": "warn",
+        "tau-lint/no-raw-page-heading": "warn",
+        // The jsx-a11y subset that fits Tau's patterns (Page Composition Policy Rules 7 and 13).
+        // Left off: prefer-tag-over-role (codified role="status"), anchor-is-valid (Link `to`),
+        // no-autofocus (UX Policy inline editors), control-has-associated-label and
+        // label-has-associated-control (cannot see Button/SearchInput; require-accessible-name covers them).
+        "jsx-a11y/tabindex-no-positive": "error",
+        "jsx-a11y/no-noninteractive-tabindex": "error",
+        "jsx-a11y/aria-props": "error",
+        "jsx-a11y/aria-proptypes": "error",
+        "jsx-a11y/aria-role": "error",
+        "jsx-a11y/role-has-required-aria-props": "error",
+        "jsx-a11y/role-supports-aria-props": "error",
+        "jsx-a11y/alt-text": "error",
+        "jsx-a11y/heading-has-content": "error",
+        "jsx-a11y/anchor-has-content": "error",
+        "jsx-a11y/iframe-has-title": "error",
+        "jsx-a11y/no-access-key": "error"
+      }
+    },
+    {
       // Static `new URL(literal, import.meta.url)` invariant for the runtime.
       // Computed first arguments silently opt out of
       // bundler asset emission and break downstream consumers.
@@ -1675,6 +1726,16 @@
     }
   ],
   "settings": {
+    // Let jsx-a11y see the design-system primitives as the elements they render.
+    "jsx-a11y": {
+      "components": {
+        "Button": "button",
+        "Input": "input",
+        "SearchInput": "input",
+        "Link": "a",
+        "NavLink": "a"
+      }
+    },
     "jsdoc": {
       "definedTags": ["vitest-environment", "remarks", "internal"]
     }

@@ -39,6 +39,8 @@ const viteBarrelPath = resolve(here, '..', 'src', 'vite', 'index.ts');
  * fail the audit (accidental deletion).
  */
 const allowedMembers: ReadonlySet<string> = new Set([
+  'machines',
+  'jobs',
   'lifecycleState',
   'renderStatus',
   'activeKernelId',

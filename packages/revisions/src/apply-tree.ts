@@ -10,9 +10,7 @@
 import type { FileMode, PathPolicy } from '@taucad/filesystem';
 import { ImmutableRevisionTree } from '#algorithms/index.js';
 import type { RevisionTreeEntry, RevisionTreeInput } from '#algorithms/index.js';
-import { revisionTreeId } from '#git-tree-id.js';
 import { equalBytes } from '#object-hash.js';
-import type { ObjectFormat } from '#object-hash.js';
 import { assertMaterializableRevisionTree } from '#portable-tree.js';
 import { RevisionPortError } from '#revision-port.js';
 import type { Checkout } from '#revision-port.js';
@@ -39,9 +37,8 @@ type MaterializeTreeOptions<Result> = Readonly<{
  * Build the apply/recover/materialize trio over one project's checkout seams.
  *
  * @param dependencies - Every value the group reads from the actor closure:
- *   how to open a checkout, how to capture one, the fence, the recorded-tree
- *   and object-format readers, and the temporary-sibling pair an apply stages
- *   through.
+ *   how to open a checkout, how to capture one, the fence, the checkout's
+ *   tree-id reader, and the temporary-sibling pair an apply stages through.
  * @returns `materializeTree`, and the entry primitives the evidence
  *   reconciliation reads through as well.
  */
@@ -52,8 +49,8 @@ export const createApplyTreeEffects = (
     onApplyingTree: RevisionActorsOptions['onApplyingTree'];
     policy: PathPolicy;
     withCheckoutFence: <Result>(checkoutId: string, operation: () => Promise<Result>) => Promise<Result>;
-    recordedTree: (tree: ImmutableRevisionTree) => Promise<ImmutableRevisionTree>;
-    formatOf: () => Promise<ObjectFormat>;
+    /** The tree id a capture of this checkout records as, through its warm memo (E3). */
+    checkoutTreeId: (checkoutId: string, tree: ImmutableRevisionTree) => Promise<string>;
     temporarySibling: (path: string, role: 'staged' | 'backup') => string;
     unlinkIfPresent: (live: RevisionFileSystem, path: string) => Promise<void>;
   }>,
@@ -78,8 +75,7 @@ export const createApplyTreeEffects = (
     onApplyingTree,
     policy,
     withCheckoutFence,
-    recordedTree,
-    formatOf,
+    checkoutTreeId,
     temporarySibling,
     unlinkIfPresent,
   } = dependencies;
@@ -350,10 +346,7 @@ export const createApplyTreeEffects = (
         try {
           const current = await capture(place, before);
           const recovery = recoveryTree(before, target, current);
-          if (
-            revisionTreeId(await recordedTree(current), await formatOf()) !==
-            revisionTreeId(await recordedTree(recovery), await formatOf())
-          ) {
+          if ((await checkoutTreeId(place.id, current)) !== (await checkoutTreeId(place.id, recovery))) {
             await applyTree(place, recovery, { from: current });
           }
         } catch (recoveryError) {

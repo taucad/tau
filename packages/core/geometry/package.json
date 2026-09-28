@@ -56,10 +56,11 @@
     "#*": "./src/*"
   },
   "dependencies": {
-    "@taucad/spatial": "workspace:*",
     "@gltf-transform/core": "catalog:",
     "@gltf-transform/extensions": "catalog:",
     "@gltf-transform/functions": "catalog:",
+    "@taucad/kinematics": "workspace:*",
+    "@taucad/spatial": "workspace:*",
     "manifold-3d": "catalog:"
   },
   "peerDependencies": {

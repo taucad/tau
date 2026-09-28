@@ -1,121 +1,64 @@
 import * as React from 'react';
 import type * as THREE from 'three';
-import type { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
-import { ClippingGroup } from 'three/webgpu';
 import { useFrame, useThree } from '@react-three/fiber';
-import {
-  collectClippableTargets,
-  enforceMaterialClipping,
-} from '#components/geometry/graphics/three/react/section-view.utils.js';
+import type { SectionPiece } from '#components/geometry/graphics/section-cuts.js';
+import { installSectionClipUnder } from '#components/geometry/graphics/three/react/section-view.utils.js';
+import { getSectionClip, writeSectionClip } from '#components/geometry/graphics/three/materials/section-clip.js';
+import type { SectionClip } from '#components/geometry/graphics/three/materials/section-clip.js';
 import { useThreeGraphicsBackend } from '#components/geometry/graphics/three/three-graphics-backend-context.js';
-import type { SectionViewSafeSnapshotStore } from '#components/geometry/graphics/three/utils/section-view-safe-snapshot.js';
 
 export type SectionClippingGroupProperties = Readonly<{
-  plane: THREE.Plane;
-  enabled: boolean;
-  enableMesh: boolean;
-  enableLines: boolean;
+  /** The pieces to remove, in the render frame; empty when nothing is cut. */
+  pieces: readonly SectionPiece[];
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React refs use null
   innerRef: React.RefObject<THREE.Group | null>;
-  snapshotRef: React.RefObject<SectionViewSafeSnapshotStore>;
   children: React.ReactNode;
 }>;
 
-const setLocalClippingEnabled = (renderer: THREE.WebGLRenderer, enabled: boolean): void => {
-  renderer.localClippingEnabled = enabled;
-};
-
-const resetClippingGroup = (group: ClippingGroup): void => {
-  group.clippingPlanes = [];
-  group.enabled = false;
-  group.clipIntersection = false;
-  group.clipShadows = false;
-};
-
-const applyClippingGroupPlane = (group: ClippingGroup, plane: THREE.Plane | undefined): void => {
-  group.clippingPlanes = plane ? [plane] : [];
-  group.enabled = Boolean(plane);
-};
+/** This viewer's section clip, shared by the model and the emphasis overlay. */
+export function useSectionClip(): SectionClip {
+  const scene = useThree((state) => state.scene);
+  const backend = useThreeGraphicsBackend();
+  return React.useMemo(() => getSectionClip(scene, backend), [backend, scene]);
+}
 
 /**
- * Backend-aware clipping boundary for section view: `THREE.ClippingGroup` on WebGPU
- * (scene-graph clipping context), per-material `clippingPlanes` + `gl.localClippingEnabled` on WebGL.
+ * The section clip around the model: writes the pieces into the clip's uniforms. A cut step writes uniforms only; no
+ * material, program or array changes.
+ *
+ * The model compiles the clip into its materials as it loads, before its pipelines warm up. When the children change,
+ * this group compiles it into whatever they hold that lacks it.
  */
-export function SectionClippingGroup({
-  plane,
-  enabled,
-  enableMesh,
-  enableLines,
-  innerRef,
-  snapshotRef,
-  children,
-}: SectionClippingGroupProperties): React.ReactNode {
-  const backend = useThreeGraphicsBackend();
-  const { gl } = useThree();
-  const [clippingGroup] = React.useState(() => new ClippingGroup());
-  const webGlMeshesRef = React.useRef<readonly THREE.Mesh[]>([]);
-  const webGlLinesRef = React.useRef<ReadonlyArray<THREE.LineSegments | LineSegments2>>([]);
-
-  React.useLayoutEffect(() => {
-    if (backend !== 'webgpu') {
-      return;
-    }
-    resetClippingGroup(clippingGroup);
-  }, [backend, clippingGroup]);
-
-  React.useLayoutEffect(() => {
-    if (backend !== 'webgl' || !innerRef.current || children === undefined || children === null) {
-      webGlMeshesRef.current = [];
-      webGlLinesRef.current = [];
-      return;
-    }
-
-    const { lines, meshes } = collectClippableTargets(innerRef.current, {
-      enableSection: false,
-      enableLines,
-      enableMesh,
-      plane,
-    });
-
-    webGlMeshesRef.current = meshes;
-    webGlLinesRef.current = lines;
-  }, [backend, children, enableLines, enableMesh, innerRef, plane]);
-
-  const applyCommittedSnapshot = React.useCallback((): void => {
-    const committed = enabled ? snapshotRef.current.committed : undefined;
-    const committedPlane = committed?.plane ?? (enabled && !enableMesh && enableLines ? plane : undefined);
-    if (backend === 'webgpu') {
-      applyClippingGroupPlane(clippingGroup, committedPlane);
-      return;
-    }
-    setLocalClippingEnabled(gl, Boolean(committedPlane));
-    enforceMaterialClipping([...webGlMeshesRef.current], committedPlane ?? plane, Boolean(committed && enableMesh));
-    enforceMaterialClipping(
-      [...webGlLinesRef.current],
-      committedPlane ?? plane,
-      Boolean(committedPlane && enableLines),
-    );
-  }, [backend, clippingGroup, enableLines, enableMesh, enabled, gl, plane, snapshotRef]);
-
-  React.useLayoutEffect(() => {
-    if (children !== undefined && children !== null) {
-      applyCommittedSnapshot();
-    }
-  }, [applyCommittedSnapshot, children]);
-  useFrame(applyCommittedSnapshot);
-
-  React.useEffect(
-    () => () => {
-      if (backend === 'webgl') {
-        setLocalClippingEnabled(gl, false);
-      }
-    },
-    [backend, gl],
+export function SectionClippingGroup({ pieces, innerRef, children }: SectionClippingGroupProperties): React.ReactNode {
+  const clip = useSectionClip();
+  const invalidate = useThree((state) => state.invalidate);
+  const writtenRef = React.useRef<Readonly<{ clip: SectionClip; pieces: readonly SectionPiece[] }> | undefined>(
+    undefined,
   );
 
-  if (backend === 'webgpu') {
-    return <primitive object={clippingGroup}>{children}</primitive>;
-  }
+  React.useLayoutEffect(() => {
+    if (!innerRef.current || children === undefined || children === null) {
+      return;
+    }
+    installSectionClipUnder(innerRef.current, clip);
+  }, [children, clip, innerRef]);
+
+  // Pieces are immutable values, so their identity is their key.
+  useFrame(() => {
+    if (writtenRef.current?.clip === clip && writtenRef.current.pieces === pieces) {
+      return;
+    }
+    writeSectionClip(clip, pieces);
+    writtenRef.current = { clip, pieces };
+  });
+
+  // A changed list is written as it commits and a frame is asked for, so a demand loop that is idle, as when Section
+  // turns off, still draws it. The frame loop's write then finds it written.
+  React.useLayoutEffect(() => {
+    writeSectionClip(clip, pieces);
+    writtenRef.current = { clip, pieces };
+    invalidate();
+  }, [clip, invalidate, pieces]);
 
   return children;
 }

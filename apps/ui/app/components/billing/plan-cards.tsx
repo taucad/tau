@@ -183,6 +183,7 @@ export function PlanCards({
                 isFeatureListScrollable &&
                   'max-h-80 scroll-shadows-y overscroll-contain pr-2 focus-visible:focus-outline',
               )}
+              // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a scrollable list must be keyboard reachable (WCAG 2.1.1)
               tabIndex={isFeatureListScrollable ? 0 : undefined}
             >
               {entry.features.map((feature) => (

@@ -14,22 +14,28 @@ import { NodeFsProviderClient } from '@taucad/filesystem/backend';
 import { acquireNodeAuthorityWriter } from '@taucad/filesystem/backend/node';
 import type { NodeFsWatchEvent } from '@taucad/filesystem/backend/node';
 import { tauRemoteUrl } from '@taucad/revisions';
+import { defineConfiguration } from '@taucad/runtime/configuration';
+import { connectMachineChannel, defineMachine } from '@taucad/runtime/machine';
+import type { MachineArtifactReference } from '@taucad/runtime/machine';
 import type { RuntimeClient } from '@taucad/runtime/client';
 import { createFileSystemBridgeProxy } from '@taucad/runtime/filesystem';
 import type { FileSystemBridgeConnection } from '@taucad/runtime/filesystem';
+import type * as RuntimeFileSystem from '@taucad/runtime/filesystem';
+import { z } from 'zod';
 
 import { startHostDaemon } from '#host-daemon.js';
 import type { HostDaemonEvent } from '#host-daemon.js';
 import { writeHostCredential } from '#credential-store.js';
 import * as revisions from '#revisions.js';
 import * as agentTools from '#agent-tools.js';
+import * as machineHost from '#machine-host.js';
 import type { HostJobWorkerFactory } from '#job-worker.js';
 
 /* Observe the filesystem the daemon binds to its runtime child, without changing
  * it: the captured thunk is the connection that child's bridge opens. */
 const runtimeFileSystemOpens = vi.hoisted(() => [] as Array<() => FileSystemBridgeConnection>);
 vi.mock('@taucad/runtime/filesystem', async (importOriginal) => {
-  const original = await importOriginal<typeof import('@taucad/runtime/filesystem')>();
+  const original = await importOriginal<typeof RuntimeFileSystem>();
   return {
     ...original,
     fromFileSystemBridge: (open: () => FileSystemBridgeConnection) => {
@@ -41,6 +47,8 @@ vi.mock('@taucad/runtime/filesystem', async (importOriginal) => {
 
 /* Observe the tool-surface decision the daemon forwards, without changing it. */
 const registrySpy = vi.spyOn(agentTools, 'createHostToolRegistry');
+/* Observe the artifact reader the daemon hands its machine runtime, without changing it. */
+const machineRuntimeSpy = vi.spyOn(machineHost, 'createNodeMachineRuntime');
 /* Captured before the spy replaces it: a case that counts subscriptions still
  * has to build the real revision tree around the real launcher. */
 const realCreateProjectRevisions = revisions.createProjectRevisions;
@@ -52,6 +60,7 @@ const resources: Array<{ close(): void }> = [];
 
 afterEach(async () => {
   delete process.env['TAU_CONFIG_DIR'];
+  delete process.env['TAU_SECRET_VAULT'];
   process.chdir(originalWorkingDirectory);
   for (const resource of resources.splice(0)) {
     resource.close();
@@ -63,6 +72,89 @@ afterEach(async () => {
 });
 
 const agentToken = 'daemon-agent-token-with-at-least-32-characters';
+
+const fixtureConfiguration = defineConfiguration({
+  id: 'fixture.configuration',
+  version: '1',
+  schema: z.strictObject({}),
+  ui: { version: 1, rjsf: {} },
+});
+
+/* The daemon only lists what `--machines` admitted; the host names no real provider. */
+const fixtureMachine = defineMachine({
+  id: 'fixture-printer',
+  name: 'Fixture printer',
+  version: '1',
+  protocolVersion: 1,
+  vendor: 'fixture',
+  technologies: ['additive.fff'],
+  accepts: [
+    {
+      contract: { id: 'fixture.gcode', version: 1 },
+      mediaType: 'text/x.gcode',
+      requiredMembers: [],
+      payloadSelection: 'single',
+      technology: 'additive.fff',
+    },
+  ],
+  manifest: {
+    version: 1,
+    identity: { vendor: 'fixture', model: 'fixture-printer', displayName: 'Fixture printer', qualifiedFirmware: [] },
+    technology: 'additive.fff',
+    geometry: {
+      unit: 'mm',
+      buildVolume: { x: 200, y: 200, z: 200 },
+      enclosure: { outer: { x: 300, y: 300, z: 400 }, enclosed: false, doors: [] },
+      kinematics: 'cartesian-bedslinger',
+      bedMotion: 'y',
+      origin: 'front-left',
+      toolheadHome: { x: 1, y: 1, z: 200 },
+      materialSystemMount: 'none',
+    },
+    toolhead: {
+      filamentDiameter: { value: 1.75, unit: 'mm' },
+      nozzles: [
+        {
+          id: 'nozzle-0.4',
+          diameter: { value: 0.4, unit: 'mm' },
+          maximumTemperature: { value: 260, unit: 'Cel' },
+          material: 'stainless',
+        },
+      ],
+    },
+    bed: { maximumTemperature: { value: 100, unit: 'Cel' }, plates: [{ id: 'smooth', label: 'Smooth plate' }] },
+    chamber: { enclosed: false, heated: false, light: false, fans: [] },
+    materialSystem: { units: 0, slotsPerUnit: 0, externalSpool: true, drying: false },
+    camera: { stills: false },
+    storage: { removable: false },
+    network: { lanMode: true, cloud: false },
+    speedProfiles: [],
+    actions: [],
+    observations: [],
+    slicing: {
+      recommended: {
+        layerHeight: { value: 0.2, unit: 'mm' },
+        walls: 2,
+        infillPercent: 15,
+        nozzleTemperature: { value: 210, unit: 'Cel' },
+        bedTemperature: { value: 60, unit: 'Cel' },
+      },
+      presets: [
+        { id: 'fast', label: 'Fast', layerHeight: { value: 0.28, unit: 'mm' } },
+        { id: 'standard', label: 'Standard', layerHeight: { value: 0.2, unit: 'mm' } },
+        { id: 'fine', label: 'Fine', layerHeight: { value: 0.12, unit: 'mm' } },
+      ],
+    },
+  },
+  bindingConfiguration: fixtureConfiguration,
+  submissionConfiguration: fixtureConfiguration,
+  async *discover() {
+    yield* [];
+  },
+  async connect() {
+    throw new Error('The fixture printer does not connect.');
+  },
+});
 
 /** A machine with no `git` records nothing, so the native rows sit out. */
 const hasGit = ((): boolean => {
@@ -79,6 +171,8 @@ type StubRelay = {
   readonly control: Promise<WebSocket>;
   /** Every control frame the daemon has sent, parsed. */
   readonly controlFrames: unknown[];
+  /** Every plain HTTP request the daemon made: method, path and query, and its `authorization`. */
+  readonly requests: Array<{ readonly line: string; readonly authorization: string | undefined }>;
   /** The route socket the daemon spliced onto `pathname`. */
   route(pathname: string): Promise<WebSocket>;
   /** The first frame the daemon pushed *through* that route. */
@@ -97,6 +191,7 @@ const startRelay = async (): Promise<StubRelay> => {
   resources.push(socketServer);
   const control = Promise.withResolvers<WebSocket>();
   const controlFrames: unknown[] = [];
+  const requests: StubRelay['requests'] = [];
   const routeSockets = new Map<string, PromiseWithResolvers<WebSocket>>();
   const routeFrames = new Map<string, PromiseWithResolvers<WebSocket.RawData>>();
   const slotFor = <T>(slots: Map<string, PromiseWithResolvers<T>>, key: string): PromiseWithResolvers<T> => {
@@ -111,7 +206,11 @@ const startRelay = async (): Promise<StubRelay> => {
   /* Anything that is not an upgrade is refused rather than left hanging: this
    * origin is also the Tau API, so a daemon may ask it for a Git advertisement,
    * and a socket that never answers would hold the close cut open. */
-  httpServer.on('request', (_request, response) => {
+  httpServer.on('request', (request, response) => {
+    requests.push({
+      line: `${request.method ?? ''} ${request.url ?? ''}`,
+      authorization: request.headers.authorization,
+    });
     response.statusCode = 404;
     response.end();
   });
@@ -145,6 +244,7 @@ const startRelay = async (): Promise<StubRelay> => {
     url: new URL(`http://127.0.0.1:${String(address.port)}`),
     control: control.promise,
     controlFrames,
+    requests,
     route: async (pathname) => slotFor(routeSockets, pathname).promise,
     firstFrame: async (pathname) => slotFor(routeFrames, pathname).promise,
   };
@@ -613,6 +713,171 @@ describe('startHostDaemon', () => {
     expect(await daemon.closed).toEqual({ cause: 'requested' });
   }, 20_000);
 
+  it("should open the machine store under the config directory, serve the machines route and read only its own project's artifacts by digest", async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-machines-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    /* The daemon picks the keychain on macOS; no test may touch a person's keychain. */
+    process.env['TAU_SECRET_VAULT'] = 'memory';
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    await writeHostCredential({
+      v: 1,
+      deviceId: 'device-1',
+      credential: 'secret-credential-value-that-never-enters-a-url',
+    });
+
+    const events: HostDaemonEvent[] = [];
+    const agentOptions = await agentOptionsIn(temporaryDirectory);
+    const projectId = 'proj_000000000000000000001';
+    await writeFile(join(agentOptions.workspaceRoot, 'tau.json'), JSON.stringify({ id: projectId }));
+    machineRuntimeSpy.mockClear();
+    const daemon = startHostDaemon({
+      relayUrl: new URL('http://127.0.0.1:1'),
+      runtimeHost: { modulePath: fileURLToPath(new URL('fixtures/runtime-host-failing-child.mjs', import.meta.url)) },
+      agent: { ...agentOptions, machines: { providers: [fixtureMachine()] } },
+      onEvent: (event) => events.push(event),
+    });
+    await daemon.ready;
+    const agentReady = events.find(
+      (event): event is Extract<HostDaemonEvent, { readonly type: 'agent' }> => event.type === 'agent',
+    );
+    const origin = new URL(agentReady?.url ?? 'http://127.0.0.1:0');
+    /* The per-user store every Tau host on this computer shares, not a workspace's. */
+    expect(JSON.parse(await readFile(join(temporaryDirectory, 'machines', 'store.json'), 'utf8'))).toMatchObject({
+      version: 1,
+    });
+
+    /* `tau serve --machines`: the probe answers, the socket upgrades, the host
+     * lists what the flag admitted — and the tool registry was offered the
+     * same facet, with the served project's id for `request_print`. */
+    const probe = await fetch(new URL('/machines', origin), { headers: { authorization: `Bearer ${agentToken}` } });
+    expect(probe.status).toBe(204);
+    const socket = new WebSocket(new URL('/machines', origin).href.replace('http:', 'ws:'), {
+      headers: { authorization: `Bearer ${agentToken}` },
+    });
+    /* Wrapped before `open`, as the browser transport does: the host greets
+     * the socket the instant the upgrade completes, and `ws` drops a frame
+     * that lands with no listener. */
+    const client = connectMachineChannel(socket);
+    try {
+      const providers = await client.listProviders({});
+      expect(providers.map((provider) => provider.id)).toEqual(['fixture-printer']);
+      await expect(client.list({})).resolves.toMatchObject({ entries: [] });
+    } finally {
+      client.close();
+    }
+    expect(registrySpy.mock.calls.at(-1)?.[0]).toMatchObject({ projectId, machines: { available: true } });
+
+    const readArtifact = machineRuntimeSpy.mock.calls.at(-1)?.[0].readArtifact;
+    if (readArtifact === undefined) {
+      throw new Error('The daemon composed no machine runtime.');
+    }
+    const digestOf = (bytes: Uint8Array<ArrayBuffer>): string =>
+      `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+    const plate = new TextEncoder().encode('sliced plate');
+    await writeFile(join(agentOptions.workspaceRoot, 'plate.gcode.3mf'), plate);
+    /* A candidate turn slices into its checkout, which this daemon keeps under its config directory. */
+    const candidateSlice = new TextEncoder().encode('candidate slice');
+    const candidateArtifacts = join(
+      temporaryDirectory,
+      'checkouts',
+      'workspace',
+      'candidate-1',
+      '.tau',
+      'artifacts',
+      'a1',
+    );
+    await mkdir(candidateArtifacts, { recursive: true });
+    await writeFile(join(candidateArtifacts, 'slice.gcode.3mf'), candidateSlice);
+    const artifact = (overrides: Partial<Record<'projectId' | 'path' | 'digest', string>>): MachineArtifactReference =>
+      // oxlint-disable-next-line typescript-eslint/consistent-type-assertions -- plain fixture data; the reader reads only the project, path and digest.
+      ({
+        projectId,
+        path: 'plate.gcode.3mf',
+        digest: digestOf(plate),
+        length: plate.byteLength,
+        ...overrides,
+      }) as MachineArtifactReference;
+    const { signal } = new AbortController();
+    const read = await readArtifact(artifact({}), signal);
+    expect(Buffer.from(read).toString('utf8')).toBe('sliced plate');
+    const fromCheckout = await readArtifact(
+      artifact({ path: '.tau/artifacts/a1/slice.gcode.3mf', digest: digestOf(candidateSlice) }),
+      signal,
+    );
+    expect(Buffer.from(fromCheckout).toString('utf8')).toBe('candidate slice');
+    await expect(readArtifact(artifact({ digest: `sha256:${'0'.repeat(64)}` }), signal)).rejects.toThrow(
+      'MACHINE_ARTIFACT_NOT_FOUND',
+    );
+    await expect(readArtifact(artifact({ path: 'missing.gcode.3mf' }), signal)).rejects.toThrow(
+      'MACHINE_ARTIFACT_NOT_FOUND',
+    );
+    /* The same path and bytes, named by another project, are never this root's to hand out. */
+    await expect(readArtifact(artifact({ projectId: 'proj_000000000000000000002' }), signal)).rejects.toThrow(
+      'MACHINE_ARTIFACT_NOT_FOUND',
+    );
+
+    await daemon.close();
+    expect(await daemon.closed).toEqual({ cause: 'requested' });
+  }, 20_000);
+
+  it('should warn and keep serving without machines while another Tau app owns the machine store', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-machines-owned-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.env['TAU_SECRET_VAULT'] = 'memory';
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    await writeHostCredential({
+      v: 1,
+      deviceId: 'device-1',
+      credential: 'secret-credential-value-that-never-enters-a-url',
+    });
+    /* The desktop app, say, already holds the store's writer lock. */
+    const authorityRoot = join(temporaryDirectory, 'machines', 'authority');
+    await mkdir(authorityRoot, { recursive: true, mode: 0o700 });
+    const owner = await acquireNodeAuthorityWriter({ authorityRoot });
+    try {
+      const events: HostDaemonEvent[] = [];
+      registrySpy.mockClear();
+      const daemon = startHostDaemon({
+        relayUrl: new URL('http://127.0.0.1:1'),
+        runtimeHost: { modulePath: fileURLToPath(new URL('fixtures/runtime-host-failing-child.mjs', import.meta.url)) },
+        agent: { ...(await agentOptionsIn(temporaryDirectory)), machines: { providers: [fixtureMachine()] } },
+        onEvent: (event) => events.push(event),
+      });
+      await daemon.ready;
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: 'warning',
+          code: 'MACHINE_STORE_OWNED_ELSEWHERE',
+          message: expect.stringContaining('machines.unavailable (owned-elsewhere)') as string,
+        }),
+      );
+      const agentReady = events.find(
+        (event): event is Extract<HostDaemonEvent, { readonly type: 'agent' }> => event.type === 'agent',
+      );
+      const origin = new URL(agentReady?.url ?? 'http://127.0.0.1:0');
+      /* No machines route and no machine tools; the agent channel still answers. */
+      const probe = await fetch(new URL('/machines', origin), { headers: { authorization: `Bearer ${agentToken}` } });
+      expect(probe.status).toBe(404);
+      expect(registrySpy.mock.calls.at(-1)?.[0].machines).toBeUndefined();
+      const agent = new WebSocket(new URL('/agent', origin).href.replace('http:', 'ws:'), {
+        headers: { authorization: `Bearer ${agentToken}` },
+      });
+      const hello = once(agent, 'message');
+      try {
+        await once(agent, 'open');
+        await expect(Promise.race([hello, delay(5000, 'no-hello')])).resolves.not.toBe('no-hello');
+      } finally {
+        agent.close();
+      }
+      await expect(Promise.race([daemon.closed, delay(50).then(() => 'still-running')])).resolves.toBe('still-running');
+
+      await daemon.close();
+      expect(await daemon.closed).toEqual({ cause: 'requested' });
+    } finally {
+      await owner.release();
+    }
+  }, 20_000);
+
   it('forwards testModel as the host-owned geospecRunner decision, defaulting to on', async () => {
     temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-test-model-'));
     process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
@@ -952,6 +1217,51 @@ describe('startHostDaemon', () => {
   );
 
   /*
+   * D21: a cloud host serves the clone its entrypoint made, as the project that
+   * clone is, and backs it up with the push credential it was provisioned —
+   * over that project's git routes, from the remote the clone already has,
+   * without the *Connect Tau Cloud* registration a push credential cannot make.
+   */
+  it.runIf(hasGit)(
+    'syncs a cloned Tau Cloud project over its own git route with the push credential',
+    async () => {
+      temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-cloud-clone-'));
+      process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+      process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+      const relay = await startRelay();
+      const projectId = 'proj-cloud';
+      const pushCredential = 'taugit_push-credential-for-proj-cloud';
+      const workspaceRoot = join(temporaryDirectory, projectId);
+      await mkdir(workspaceRoot);
+      execFileSync('git', ['init', '--quiet', '--initial-branch=main'], { cwd: workspaceRoot });
+      execFileSync('git', ['remote', 'add', 'tau', tauRemoteUrl(relay.url.origin, projectId)], { cwd: workspaceRoot });
+      await writeHostCredential({ v: 1, deviceId: 'agent_cloud', credential: 'device-credential-for-the-relay-only' });
+
+      const agentOptions = await agentOptionsIn(temporaryDirectory);
+      const daemon = startHostDaemon({
+        relayUrl: relay.url,
+        runtimeHost: { modulePath: fileURLToPath(new URL('fixtures/runtime-host-proof-child.mjs', import.meta.url)) },
+        agent: { ...agentOptions, workspaceRoot, tauApiToken: pushCredential },
+      });
+      await daemon.ready;
+
+      await expect
+        .poll(() => relay.requests.find((request) => request.line.includes('/info/refs')), { timeout: 15_000 })
+        .toEqual({
+          line: `GET /v1/git/${projectId}.git/info/refs?service=git-upload-pack`,
+          authorization: `Bearer ${pushCredential}`,
+        });
+      expect(relay.requests.filter((request) => request.line.startsWith('PUT /v1/projects'))).toEqual([]);
+      expect(relay.requests.map((request) => request.authorization)).not.toContain(
+        'Bearer device-credential-for-the-relay-only',
+      );
+
+      await daemon.close();
+    },
+    30_000,
+  );
+
+  /*
    * C70: R13's pattern on the leg R13 did not cover.
    *
    * The close cut is the last thing that records what a served project changed,
@@ -1224,6 +1534,45 @@ describe('startHostDaemon', () => {
     expect(await daemon.closed).toEqual({ cause: 'requested' });
   });
 
+  /*
+   * FX7 D3: a provisioned (cloud) host was never paired, so a refused device
+   * credential means it was revoked. It exits rather than offering a pairing
+   * code from a container that still holds a clone; a paired laptop keeps
+   * re-pairing as before.
+   */
+  const revokeAndClose = async (pair: boolean | undefined) => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-revoked-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    await writeHostCredential({ v: 1, deviceId: 'device-1', credential: 'revoked-credential-value-32-chars-min' });
+    const relay = await startRelay();
+    const daemon = startHostDaemon({
+      relayUrl: relay.url,
+      runtimeHost: { modulePath: fileURLToPath(new URL('fixtures/runtime-host-proof-child.mjs', import.meta.url)) },
+      ...(pair === undefined ? {} : { pair }),
+    });
+    await daemon.ready;
+    const control = await relay.control;
+    control.close(4401, 'device revoked');
+    const closed = await daemon.closed;
+    await daemon.close().catch(() => undefined);
+    return { closed, pairingRequests: relay.requests.filter(({ line }) => line.includes('/v1/agents/pairings')) };
+  };
+
+  it('should exit on a refused credential and never pair when it is a provisioned host', async () => {
+    const { closed, pairingRequests } = await revokeAndClose(false);
+
+    expect(closed.cause).toBe('fatal');
+    expect(closed.cause === 'fatal' ? closed.error.message : '').toContain('revoked');
+    expect(pairingRequests).toEqual([]);
+  }, 15_000);
+
+  it('should still start pairing on a refused credential when it is a paired host', async () => {
+    const { pairingRequests } = await revokeAndClose(undefined);
+
+    expect(pairingRequests.map(({ line }) => line)).toEqual(['POST /v1/agents/pairings']);
+  }, 15_000);
+
   it('keeps control alive across a child crash and reconnects after relay loss', async () => {
     temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-'));
     process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
@@ -1342,10 +1691,20 @@ describe('startHostDaemon', () => {
       sessionId: 'session-2',
     });
 
+    const secondRuntimeRoute = '/v1/agents/sessions/session-2/host/runtime';
+    await vi.waitFor(() => {
+      expect(routes.has(secondRuntimeRoute)).toBe(true);
+    });
+
     firstControl.close(1012, 'relay restarting');
     const secondControl = await reconnectedControl.promise;
     const [secondReadyFrame] = (await once(secondControl, 'message')) as [Uint8Array<ArrayBuffer>];
     expect(JSON.parse(Buffer.from(secondReadyFrame).toString())).toMatchObject({ type: 'ready', deviceId: 'device-1' });
+    // Its relay lives on its own socket, so losing control to a restart does not end the session.
+    expect(events).not.toContainEqual(
+      expect.objectContaining({ type: 'session', sessionId: 'session-2', state: 'disconnected' }),
+    );
+    expect(routes.get(secondRuntimeRoute)?.readyState).toBe(WebSocket.OPEN);
 
     const daemonClosing = daemon.close();
     await drainStarted.promise;

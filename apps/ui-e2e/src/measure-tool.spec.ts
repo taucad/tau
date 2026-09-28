@@ -90,7 +90,7 @@ async function measureState(): Promise<MeasureState> {
 }
 
 async function enableMeasure(): Promise<void> {
-  await target.click(selectors.getByRole('button', { name: /enable measuring tool/i }));
+  await target.click(selectors.getByRole('button', { name: /^measure$/i, pressed: false }));
   await expect
     .poll(
       async () => {

@@ -7,9 +7,12 @@
  * `process.parentPort`, which Electron exposes as a process global rather than
  * through the `electron` module, so the invariant survives the transport.
  *
- * It hosts three concerns, one dedicated port each. Renderer filesystem,
+ * It hosts four concerns, one dedicated port each. Renderer filesystem,
  * runtime filesystem, agent tools, and revision preparation all derive rooted
- * clients from one internal authority channel. The agent host is ruling C3's
+ * clients from one internal authority channel. The machines concern serves
+ * the node machine host — the real Bambu provider beside the simulator — over
+ * the same broker, from the per-user machine store every Tau host on this
+ * computer shares; it needs no project. The agent host is ruling C3's
  * **launcher 2**: `createNodeAgentLauncher` from `@taucad/agent-host`, bound to
  * main's `MessagePortMain` by the port-agnostic `serveAgentChannel` the daemon's
  * WebSocket route also calls. Same host, same T0 vocabulary, different wire —
@@ -23,7 +26,7 @@
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import type { Server } from 'node:http';
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
@@ -37,18 +40,40 @@ import type { EmitterPort } from '@taucad/filesystem/backend/node';
 import { createNodeAgentLauncher, serveAgentChannel } from '@taucad/agent-host/node-launcher';
 import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
 import { createGatewayModelTransport, createTauCloudGatewayModelTransport } from '@taucad/agent-host';
+import { bambuMachine, bambuSimulatorMachine } from '@taucad/bambu';
 import {
+  completeMachineBinding,
   createAcpExternalAgentPort,
   createHostMcpEndpoint,
+  createMachineSecretStore,
+  createNodeMachineRuntime,
   createProjectRevisions,
   hostRevisionActor,
+  localMachineFacet,
+  machineRouteGrants,
+  openMachineHostIdentity,
+  openSecretVault,
+  readProjectId,
 } from '@taucad/host';
-import type { AcpAdapter, HostMcpEndpoint, ProjectRevisions, TurnCheckout } from '@taucad/host';
+import type {
+  AcpAdapter,
+  HostMcpEndpoint,
+  MachineHostIdentity,
+  MachineSecretStore,
+  ProjectRevisions,
+  TurnCheckout,
+} from '@taucad/host';
 import {
   createHostGeoSpecRunner,
   createHostNativeGeoSpecRunner,
   createHostToolRegistry,
 } from '@taucad/host/agent-tools';
+import { createChannelServer, wrapMessagePortMain } from '@taucad/rpc';
+import { createHostAdmissionAuthority } from '@taucad/runtime/host';
+import type { HostAdmissionAuthority } from '@taucad/runtime/host';
+import { createNodeMachineHost } from '@taucad/runtime/host/node';
+import type { NodeMachineHost } from '@taucad/runtime/host/node';
+import type { MachineArtifactReference, MachineBindingOutcome } from '@taucad/runtime/machine';
 import type { HostGeoSpecRuntimeClient, HostToolFileSystem } from '@taucad/host/agent-tools';
 import { createRuntimeClient } from '@taucad/runtime/client';
 import { electronUtilityMainTransport } from '@taucad/runtime/electron/renderer';
@@ -93,6 +118,14 @@ export const refusedRuntimePortMessage = (reason: unknown): string =>
   typeof reason === 'string' && reason.length > 0
     ? `Main refused the desktop runtime-port request: ${reason}`
     : 'Main refused the desktop runtime-port request.';
+
+/** The machine host and the trusted seams only this utility may call. */
+type MachineHostServices = Readonly<{
+  host: NodeMachineHost;
+  admission: HostAdmissionAuthority;
+  identity: MachineHostIdentity;
+  secrets: MachineSecretStore;
+}>;
 
 /** What `createAcpExternalAgentPort` is handed to offer an agent the `tau` server. */
 type McpBinding = NonNullable<Parameters<typeof createAcpExternalAgentPort>[0]['mcp']>;
@@ -197,6 +230,14 @@ export type ServicesHostOptions = {
   /** Host-owned authority metadata directory, outside every authored root. */
   readonly authorityDirectory?: string;
   /**
+   * The per-user machine store, `<config>/machines`: printers, their
+   * operations and requests, the store's identity and the file vault. Absent,
+   * the `machines` concern is refused.
+   */
+  readonly machinesDirectory?: string;
+  /** The app's old machine directory, imported once into the store when it is another directory. */
+  readonly legacyMachinesDirectory?: string;
+  /**
    * Diagnostics sink; defaults to stdout, which main forwards to
    * `userData/logs`. `level` is omitted for the ordinary informational trace
    * and named only where a line is a refusal an operator has to find.
@@ -241,6 +282,11 @@ export type ServicesHostOptions = {
   readonly quiesced?: (outcome: ServicesHostQuiesceOutcome) => void;
   /** Reply to main once one project launcher has fully stopped. */
   readonly agentHostReleased?: (requestId: string, error?: string) => void;
+  /** Reply to main with one binding ceremony's outcome, or why it failed. */
+  readonly machineBindingCompleted?: (
+    requestId: string,
+    result: Readonly<{ outcome: MachineBindingOutcome }> | Readonly<{ error: string }>,
+  ) => void;
   /** Tell main this project can record nothing, so a person is told (W5). */
   readonly onRevisionsUnavailable?: (
     workspaceRoot: string,
@@ -293,6 +339,9 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     agentHostReleased,
     authorityDirectory,
     gitExecutable,
+    legacyMachinesDirectory,
+    machineBindingCompleted,
+    machinesDirectory,
     onRevisionsUnavailable,
     quiesced,
     requestRuntimePort,
@@ -321,6 +370,8 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
    * point of the portable host. */
   const launchers = new Map<string, NodeAgentLauncher>();
   const launcherGenerations = new Map<string, number>();
+  /** The machines facet each project's tool registry was offered, closed with its launcher. */
+  const machineFacets = new Map<string, ReturnType<typeof localMachineFacet>>();
   const launcherProjectIds = new Map<string, string>();
   const launcherGeoSpecEngines = new Map<string, 'legacy' | 'native'>();
   const revisionRoots = new Map<string, ProjectRevisions>();
@@ -333,6 +384,12 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
   let quiescence: Promise<void> | undefined;
   let authToken: string | undefined;
   let agentHostConfig: AgentHostConfig | undefined;
+  /* One machine host per utility lifetime: opened on the first machines
+   * concern or ceremony, surviving every renderer reload, closed on quiesce.
+   * A print request names its project by `tau.json` id; these are the project
+   * roots each id was last found at. */
+  let machineHost: Promise<MachineHostServices> | undefined;
+  let projectRoots = new Map<string, readonly string[]>();
   /** Connections parked until main's `agentHost` frame lands. @see serveAgentHost */
   const agentHostConfigWaiters = new Set<() => void>();
   let internalAuthorityStopped: Promise<void> | undefined;
@@ -400,6 +457,8 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     const endpoint = createHostMcpEndpoint({
       secret: randomBytes(32).toString('base64url'),
       registry,
+      /* The chat attachments a screenshot or an oversized GeoSpec report is saved as live under this root. */
+      workspaceRoot,
     });
     const route = `/mcp/${randomUUID()}`;
     mcpEndpoints.set(route, endpoint);
@@ -490,6 +549,231 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     return internalAuthorityStopped;
   };
 
+  /**
+   * The folders directly inside `directory`, skipping dot folders such as
+   * `.tau`; none when it is missing or no longer admitted.
+   *
+   * @param directory - An absolute directory under an admitted root.
+   * @returns Their absolute paths.
+   */
+  const childDirectories = async (directory: string): Promise<string[]> => {
+    try {
+      const entries = await providerForAgentRoot(directory).readdirWithStats('');
+      return entries
+        .filter((entry) => entry.type === 'dir' && !entry.name.startsWith('.'))
+        .map((entry) => join(directory, entry.name));
+    } catch {
+      return [];
+    }
+  };
+
+  /**
+   * Find every project the admitted roots hold, by the `tau.json` id of each
+   * immediate child, and keep the answer for the next lookup.
+   *
+   * @returns Project roots by id; an id two folders share names both.
+   */
+  const scanProjectRoots = async (): Promise<ReadonlyMap<string, readonly string[]>> => {
+    const children = await Promise.all([...trustedRoots].map(async (root) => childDirectories(root)));
+    const found = new Map<string, string[]>();
+    for (const [root, id] of await Promise.all(
+      children.flat().map(async (root) => [root, await readProjectId(providerForAgentRoot(root))] as const),
+    )) {
+      if (id !== undefined) {
+        found.set(id, [...(found.get(id) ?? []), root]);
+      }
+    }
+    projectRoots = found;
+    return found;
+  };
+
+  /**
+   * Read a print request's file from the project it names: each of the
+   * project's roots, then its checkouts under the workspace's
+   * `.tau/checkouts/<projectId>`, where a candidate turn's slice lands. Every
+   * read goes through the internal authority, which refuses an unadmitted root.
+   *
+   * @param artifact - The request's reference.
+   * @param roots - The project's roots.
+   * @returns The first file whose digest matches, or `undefined`.
+   */
+  const readProjectArtifact = async (
+    artifact: MachineArtifactReference,
+    roots: readonly string[],
+  ): Promise<Uint8Array<ArrayBuffer> | undefined> => {
+    const checkouts = await Promise.all(
+      roots.map(async (root) => childDirectories(join(dirname(root), '.tau', 'checkouts', artifact.projectId))),
+    );
+    for (const candidate of [...roots, ...checkouts.flat()]) {
+      try {
+        // oxlint-disable-next-line eslint/no-await-in-loop -- the project first, then its checkouts; the first digest match wins.
+        const bytes = await providerForAgentRoot(candidate).readFile(artifact.path);
+        if (`sha256:${createHash('sha256').update(bytes).digest('hex')}` === artifact.digest) {
+          return bytes;
+        }
+      } catch {
+        /* Not in this tree. */
+      }
+    }
+    return undefined;
+  };
+
+  const openMachineHost = async (storeRoot: string): Promise<MachineHostServices> => {
+    const identity = await openMachineHostIdentity(storeRoot);
+    const admission = createHostAdmissionAuthority({ hostId: identity.hostId });
+    /* Main's allowlist forwards `TAU_SECRET_VAULT`, so automated runs keep
+     * codes out of the person's keychain. Codes saved before the vault stay
+     * readable from this directory's `secrets.json`. */
+    const vault = openSecretVault({ directory: storeRoot, env: process.env });
+    const secrets = createMachineSecretStore({ vault, legacyDirectory: storeRoot });
+    log('machines.vault', { kind: vault.kind });
+    const host = await createNodeMachineHost({
+      storeRoot,
+      ...(legacyMachinesDirectory === undefined ? {} : { legacyStoreRoots: [legacyMachinesDirectory] }),
+      ...identity,
+      admission,
+      providers: [bambuMachine(), bambuSimulatorMachine()],
+      runtime: createNodeMachineRuntime({
+        secrets,
+        /* The last scan's roots first; a miss, or roots that no longer hold
+         * the file, rescans once, since projects appear, move and go. */
+        readArtifact: async (artifact) => {
+          const cached = projectRoots.get(artifact.projectId);
+          let bytes = cached === undefined ? undefined : await readProjectArtifact(artifact, cached);
+          if (bytes === undefined) {
+            const scanned = await scanProjectRoots();
+            bytes = await readProjectArtifact(artifact, scanned.get(artifact.projectId) ?? []);
+          }
+          if (bytes === undefined) {
+            throw new Error('MACHINE_ARTIFACT_NOT_FOUND');
+          }
+          return bytes;
+        },
+        log: (entry) => {
+          log('machines.provider', entry, entry.level === 'error' || entry.level === 'warning' ? 'warn' : undefined);
+        },
+      }),
+      onError: (error) => {
+        log('machines.error', error instanceof Error ? error.message : String(error), 'warn');
+      },
+    });
+    log('machine-host-opened', { hostId: identity.hostId });
+    return { host, admission, identity, secrets };
+  };
+
+  // oxlint-disable-next-line typescript/promise-function-async -- Promise identity is the once-per-utility contract.
+  const ensureMachineHost = (): Promise<MachineHostServices> => {
+    if (machinesDirectory === undefined) {
+      return Promise.reject(new Error('The desktop services host has no machine directory.'));
+    }
+    machineHost ??= (async (): Promise<MachineHostServices> => {
+      try {
+        return await openMachineHost(machinesDirectory);
+      } catch (error) {
+        /* A failed open is forgotten, so the next concern retries rather than
+         * inheriting a rejection for the rest of the utility's life. */
+        machineHost = undefined;
+        throw error;
+      }
+    })();
+    return machineHost;
+  };
+
+  const closeMachineHost = async (): Promise<void> => {
+    const pending = machineHost;
+    machineHost = undefined;
+    if (pending === undefined) {
+      return;
+    }
+    const { host } = await pending;
+    await host.close();
+    log('machine-host-closed');
+  };
+
+  /**
+   * Answer a machines connection the store cannot serve: every call and stream
+   * rejects with `reason`, so the renderer can say why, and the channel closes
+   * a moment after its first refusal, so the next call dials again and retries
+   * the store.
+   *
+   * ponytail: repeats the machines protocol's hello literal, which the client
+   * checks; if that protocol's version moves, a refusal reads as a failed
+   * handshake instead of its code.
+   *
+   * @param port - The utility's leg of main's `MessageChannelMain`.
+   * @param reason - Why the store is unavailable; its `code`, when it has one, travels with it.
+   */
+  const refuseMachines = (port: UtilityPort, reason: Error): void => {
+    let closing: ReturnType<typeof setTimeout> | undefined;
+    const refusal = (): Error => {
+      if (closing === undefined) {
+        /* Long enough for calls made together to read the same refusal. */
+        closing = setTimeout(() => {
+          server.dispose(reason.message);
+          port.close();
+        }, 1000);
+        closing.unref();
+      }
+      return reason;
+    };
+    const server = createChannelServer({
+      port: wrapMessagePortMain(port),
+      sessionKey: 'machines-refused',
+      hello: { server: 'machines', protocolVersion: 1 },
+      impl: {
+        call: async () => {
+          throw refusal();
+        },
+        listen: () => {
+          throw refusal();
+        },
+      },
+    });
+  };
+
+  /**
+   * Bind one renderer or agent connection to the machine host over the transferred port.
+   *
+   * A machines connection names no project: printers belong to the store, and a
+   * print request names its own project. While another Tau app owns the store,
+   * the connection is answered `MACHINE_STORE_OWNED_ELSEWHERE`.
+   *
+   * @param port - The utility's leg of main's `MessageChannelMain`.
+   */
+  const serveMachines = async (port: UtilityPort): Promise<void> => {
+    let services: MachineHostServices;
+    try {
+      services = await ensureMachineHost();
+    } catch (error) {
+      const ownedElsewhere = (error as { readonly code?: unknown }).code === 'AUTHORITY_ALREADY_OWNED';
+      const reason = error instanceof Error ? error.message : String(error);
+      log('machines.unavailable', { reason: ownedElsewhere ? 'owned-elsewhere' : reason }, 'warn');
+      if (quiescing || disposed) {
+        port.close();
+        return;
+      }
+      refuseMachines(
+        port,
+        ownedElsewhere
+          ? Object.assign(new Error('MACHINE_STORE_OWNED_ELSEWHERE'), { code: 'MACHINE_STORE_OWNED_ELSEWHERE' })
+          : new Error(reason),
+      );
+      return;
+    }
+    if (quiescing || disposed) {
+      port.close();
+      return;
+    }
+    const session = services.host.issueSession({ actor: { kind: 'user', id: 'desktop' }, grants: machineRouteGrants });
+    /* `@taucad/rpc` reports the port's death to the channel server, which
+     * closes itself; the session is revoked with it. */
+    const channel = services.host.serve({ port: wrapMessagePortMain(port), session });
+    channel.onClose(() => {
+      services.admission.revoke(session);
+    });
+    log('machines-served');
+  };
+
   /** Stop one project's launcher and every utility resource rooted beneath it. */
   const releaseAgentHost = async (
     workspaceRoot: string,
@@ -511,6 +795,8 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     }
     launchers.delete(workspaceRoot);
     launcherGenerations.delete(workspaceRoot);
+    machineFacets.get(workspaceRoot)?.close();
+    machineFacets.delete(workspaceRoot);
     launcherProjectIds.delete(workspaceRoot);
     launcherGeoSpecEngines.delete(workspaceRoot);
     revisionRoots.delete(workspaceRoot);
@@ -582,6 +868,36 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         for (const waiting of agentHostConfigWaiters) {
           waiting();
         }
+        return;
+      }
+      case 'machine-binding-complete': {
+        /* The secret half of the ceremony, and the only frame that carries a
+         * code: pinned from the endpoint the provider connects to, never the
+         * `address` an older renderer still sends. */
+        const { requestId, ceremonyId, accessCode } = frame;
+        if (typeof requestId !== 'string' || typeof ceremonyId !== 'string') {
+          return;
+        }
+        // async-iife: bootstrap -- a control frame has no caller to await the ceremony.
+        void (async () => {
+          try {
+            const { host, secrets } = await ensureMachineHost();
+            const outcome = await completeMachineBinding({
+              host,
+              secrets,
+              ceremonyId,
+              ...(typeof accessCode === 'string' ? { accessCode } : {}),
+              onEvent: ({ type, providerId }) => {
+                log(`machines.${type}`, { providerId }, type === 'rollback-failed' ? 'warn' : undefined);
+              },
+            });
+            machineBindingCompleted?.(requestId, { outcome });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            log('machines.binding-failed', message, 'warn');
+            machineBindingCompleted?.(requestId, { error: message });
+          }
+        })();
         return;
       }
       case 'agent-host-release': {
@@ -931,11 +1247,20 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         });
         projectRevisions = revisions;
         revisionRoots.set(workspaceRoot, revisions);
+        /* The agent's own machines facet: served by this utility's machine host
+         * over an in-process channel once it opens, on a session of its own
+         * beside the window's. */
+        const machines = localMachineFacet(async (port) => serveMachines(port));
+        machineFacets.set(workspaceRoot, machines);
         const toolRegistry = createHostToolRegistry({
           workspaceRoot,
           checkouts,
           systemSkillBundles,
           revisions: revisions.history,
+          machines,
+          /* The renderer's project id is the project's `tau.json` id: every
+           * slice `request_print` records names it. */
+          projectId,
           ...(internalChannel === undefined ? {} : { filesystem: providerForAgentRoot }),
           /* Rooted per run, exactly as the daemon does it: a candidate turn's kernel
            * and GeoSpec tools read the checkout its file tools write, because the
@@ -1057,6 +1382,9 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       ),
     );
     await settleAll(closingLaunchers, failures);
+    /* After the launchers: a print in flight is the host's own journaled
+     * effect, and closing drains its queue before the writer lock is released. */
+    await settleAll([closeMachineHost()], failures);
     await settleAll([stopAuthority()], failures);
     if (failures.length > 0) {
       throw new AggregateError(failures, 'The services host could not quiesce every accepted operation.');
@@ -1113,6 +1441,13 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
        * up until these closes finish. */
       const closingLaunchers = [...launchers.values()].map(async (launcher) => closeForDispose(launcher));
       launchers.clear();
+      const closingMachines = (async (): Promise<void> => {
+        try {
+          await closeMachineHost();
+        } catch (error) {
+          log('machine-host-close-failed', error instanceof Error ? error.message : String(error));
+        }
+      })();
       for (const disposeFileSystem of nodeFileSystemDisposers) {
         closingFileSystems.push(reportForcedFileSystemDisposal(disposeFileSystem));
       }
@@ -1138,8 +1473,8 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       const settleForcedCleanup = async (): Promise<void> => {
         await Promise.allSettled(
           gracefulSettlement === undefined
-            ? [...closingFileSystems, ...closingLaunchers]
-            : [gracefulSettlement, ...closingFileSystems, ...closingLaunchers],
+            ? [...closingFileSystems, ...closingLaunchers, closingMachines]
+            : [gracefulSettlement, ...closingFileSystems, ...closingLaunchers, closingMachines],
         );
         try {
           await stopAuthority();
@@ -1288,6 +1623,11 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
           // async-iife: bootstrap -- a port that outran main's config frame
           // parks inside; a control frame has no caller to return to.
           void serveAgentHost(port, context);
+          return;
+        }
+        case 'machines': {
+          // async-iife: bootstrap -- the host opens on first use; a control frame has no caller to return to.
+          void serveMachines(port);
           return;
         }
         default: {

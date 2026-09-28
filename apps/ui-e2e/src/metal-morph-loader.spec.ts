@@ -89,6 +89,8 @@ const webgpuValidationPatterns: readonly RegExp[] = [
 const stageName = /liquid metal loader showcase/i;
 /** Icosphere at detail 5: `10 * 4^5 + 2`. */
 const expectedVertexCount = 40_962;
+/** Spinners the showcase mounts before any toggle: the working chat-row sample. */
+const chatRowSpinnerCount = 1;
 
 const readState = async (): Promise<LoaderState | undefined> =>
   target.evaluate(() => (globalThis as LoaderWindow).__TAU_METAL_MORPH__?.getState());
@@ -427,9 +429,10 @@ test.describe('metal morph loader', () => {
     test(`shares one renderer across the inline spinners through ${backend}`, async () => {
       await target.navigate(`/loader?graphicsBackend=${backend}`);
       await waitForReady();
+      // The showcase's working chat-row sample is a spinner of its own, mounted from the start.
       await expect
         .poll(async () => readSpinnerDiagnostics().then((diagnostics) => diagnostics?.subscriberCount))
-        .toBe(0);
+        .toBe(chatRowSpinnerCount);
 
       // Force the toggle: the switch sits below a stage that never stops moving, so the harness would wait
       // for a stability the page does not offer.
@@ -438,14 +441,18 @@ test.describe('metal morph loader', () => {
         timeout: 15_000,
       });
 
-      // Two spinners, one renderer: the count the browser's sixteen-context cap makes matter.
+      // Three spinners, one renderer: the count the browser's sixteen-context cap makes matter.
       await expect
-        .poll(async () => readSpinnerDiagnostics().then((diagnostics) => diagnostics?.rendererCount), {
-          timeout: readyTimeout,
-        })
-        .toBe(1);
+        .poll(
+          async () =>
+            readSpinnerDiagnostics().then((diagnostics) => ({
+              rendererCount: diagnostics?.rendererCount,
+              subscriberCount: diagnostics?.subscriberCount,
+            })),
+          { timeout: readyTimeout },
+        )
+        .toEqual({ rendererCount: 1, subscriberCount: chatRowSpinnerCount + 2 });
       const diagnostics = await readSpinnerDiagnostics();
-      expect(diagnostics?.subscriberCount).toBe(2);
       expect(diagnostics?.sourceSize).toBeGreaterThanOrEqual(32);
 
       // Pixel evidence read from a spinner's own 2D canvas, which needs no adapter that can present.

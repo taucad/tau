@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { logLevels } from '@taucad/types/constants';
 import { coordinateSystemSchema, unitSchema } from '#types/export-option-schemas.js';
 import type { OnWorkerLog } from '@taucad/types';
+import type { JSONSchema7 } from '@taucad/json-schema';
 import type { WatchEvent } from '@taucad/filesystem';
 import type {
   CapabilitiesManifest,
@@ -38,6 +39,8 @@ import {
 } from '../../test/support/kernel-worker.fixture.js';
 /* oxlint-enable no-restricted-imports, import/extensions */
 import { defineMiddleware } from '#middleware/runtime-middleware.js';
+import { createKernelSuccess } from '#kernels/kernel-helpers.js';
+import { createKernelParameterDeclaration } from '#kernels/kernel-module-helpers.js';
 import { attachRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
 import { checkAbort } from '#framework/cooperative-abort.js';
 import type { RuntimeStateChangedArgs } from '#types/runtime-protocol.types.js';
@@ -446,44 +449,59 @@ describe('KernelWorker lifecycle', () => {
     );
   });
 
-  it('drops stale values that a changed closed parameter schema no longer declares', async () => {
-    const capturedParameters: Array<Record<string, unknown>> = [];
-    class ClosedParameterWorker extends MockKernelWorker {
-      protected override async onGetParameters(): Promise<GetParameterDeclarationsResult> {
-        return createParameterDeclaration(
-          {},
-          {
-            properties: { accepted: { type: 'string' } },
-            additionalProperties: false,
-          },
-        );
+  // The producer projection drops an empty `properties` map, as PicoGK emits for a source without `Params`.
+  it.each([
+    {
+      declares: 'other parameters',
+      declaration: () =>
+        createParameterDeclaration({}, { properties: { accepted: { type: 'string' } }, additionalProperties: false }),
+    },
+    {
+      declares: 'no parameters',
+      declaration: () =>
+        createKernelSuccess(
+          createKernelParameterDeclaration(
+            {},
+            { type: 'object', properties: {}, additionalProperties: false },
+            { id: 'urn:taucad:test:closed', name: 'Closed' },
+          ),
+        ),
+    },
+  ])(
+    'drops stale values that a changed closed schema declaring $declares no longer declares',
+    async ({ declaration }) => {
+      const capturedParameters: Array<Record<string, unknown>> = [];
+      class ClosedParameterWorker extends MockKernelWorker {
+        protected override async onGetParameters(): Promise<GetParameterDeclarationsResult> {
+          return declaration();
+        }
+
+        protected override async onCreateGeometry(
+          input: CreateGeometryInput,
+          runtime: KernelRuntime,
+        ): Promise<CreateGeometryResult> {
+          capturedParameters.push(input.parameters);
+          return super.onCreateGeometry(input, runtime);
+        }
       }
 
-      protected override async onCreateGeometry(
-        input: CreateGeometryInput,
-        runtime: KernelRuntime,
-      ): Promise<CreateGeometryResult> {
-        capturedParameters.push(input.parameters);
-        return super.onCreateGeometry(input, runtime);
-      }
-    }
+      const restorePersistedParameters = defineMiddleware({
+        id: 'restorePersistedParameters',
+        name: 'RestorePersistedParameters',
+        async wrapCreateGeometry(input, handler) {
+          return handler({ ...input, parameters: { ...input.parameters, RadiusMm: 16 } });
+        },
+      });
+      const worker = new ClosedParameterWorker({ middleware: [restorePersistedParameters()], onLog: noopLog });
+      const file = createGeometryFile('main.cs');
+      const parameters = { RadiusMm: 16 };
+      await worker.render({ file, parameters });
+      await openAndWaitForRender(worker, file, parameters);
+      await worker.exportModel({ file, parameters, format: 'gltf' });
 
-    const restorePersistedParameters = defineMiddleware({
-      id: 'restorePersistedParameters',
-      name: 'RestorePersistedParameters',
-      async wrapCreateGeometry(input, handler) {
-        return handler({ ...input, parameters: { ...input.parameters, RadiusMm: 16 } });
-      },
-    });
-    const worker = new ClosedParameterWorker({ middleware: [restorePersistedParameters()], onLog: noopLog });
-    const file = createGeometryFile('main.cs');
-    const parameters = { RadiusMm: 16 };
-    await worker.render({ file, parameters });
-    await openAndWaitForRender(worker, file, parameters);
-    await worker.exportModel({ file, parameters, format: 'gltf' });
-
-    expect(capturedParameters).toEqual([{}, {}, {}]);
-  });
+      expect(capturedParameters).toEqual([{}, {}, {}]);
+    },
+  );
 
   afterEach(() => {
     vi.useRealTimers();
@@ -2259,6 +2277,57 @@ describe('KernelWorker lifecycle', () => {
       expect(filesystem.mocks.mkdir).toHaveBeenCalledWith('sub', { recursive: true });
     });
 
+    it('should observe staged bytes the filesystem already holds without writing them again', async () => {
+      const stored = new Uint8Array([7, 8, 9]);
+      const filesystem = createMockFileSystem({ readFileResult: stored });
+      filesystem.mocks.readFiles.mockResolvedValue({ 'sub/main.ts': stored });
+      let watchHandler: ((event: WatchEvent) => void) | undefined;
+      Object.assign(filesystem, {
+        watch: vi.fn((_request: unknown, handler: (event: WatchEvent) => void) => {
+          watchHandler = handler;
+          return vi.fn();
+        }),
+      });
+      const worker = new MockKernelWorker({ middleware: [], onLog: noopLog, filesystem });
+      // @ts-expect-error - install the watch-capable proxy seam exercised by production initialization
+      worker.fileSystem = filesystem;
+      const file = createGeometryFile('sub/main.ts');
+
+      try {
+        await worker.handleStageAndOpenFile({ renderId: previewId(201), stage: {}, file, parameters: {} });
+        await vi.waitFor(() => {
+          expect(watchHandler).toBeDefined();
+        });
+        const staged = new Uint8Array(stored);
+        await worker.handleStageAndOpenFile({
+          renderId: previewId(202),
+          stage: { 'sub/main.ts': staged },
+          file,
+          parameters: {},
+        });
+
+        expect(filesystem.mocks.writeFile).not.toHaveBeenCalled();
+        expect(filesystem.mocks.mkdir).not.toHaveBeenCalled();
+        // @ts-expect-error - white-box: the staged bytes are the path's observed revision.
+        expect(worker.fileContentCache.get('sub/main.ts')).toBe(staged);
+        expect(worker.createGeometryCalls).toBe(2);
+
+        const states: string[] = [];
+        worker.onStateChanged = ({ state }) => states.push(state);
+        const reads = filesystem.mocks.readFile.mock.calls.length;
+        watchHandler!({ type: 'change', path: 'sub/main.ts' });
+        await vi.waitFor(() => {
+          expect(filesystem.mocks.readFile.mock.calls.length).toBeGreaterThan(reads);
+        });
+        await flushMicrotasks();
+
+        expect(states).toEqual([]);
+        expect(worker.createGeometryCalls).toBe(2);
+      } finally {
+        await worker.cleanup();
+      }
+    });
+
     it('opens the entry without staging when the stage map is empty', async () => {
       const filesystem = createMockFileSystem();
       filesystem.mocks.readFiles.mockResolvedValue({
@@ -3265,7 +3334,8 @@ describe('preview admission invariants', () => {
       await stageWriteEntered.promise;
       await flushMicrotasks();
 
-      expect(filesystem.mocks.readFile).not.toHaveBeenCalled();
+      // Staging reads once to learn whether storage already holds the bytes; the write's own watch echo reads nothing.
+      expect(filesystem.mocks.readFile).toHaveBeenCalledTimes(1);
       releaseStageWrite.resolve();
       await expect(result).resolves.toMatchObject({ success: true });
       // @ts-expect-error - wait for the production watch reconciliation lane to settle
@@ -4739,15 +4809,17 @@ describe('transcoder loading', () => {
 
     const { routes, renderCapabilities } = worker.capabilitiesManifest;
     expect(routes.some((route) => route.targetFormat === 'stl' && route.transcoderId !== undefined)).toBe(true);
-    const schemas = [
-      ...routes.flatMap((route) => [
-        [`${route.targetFormat} export options`, route.exportOptions.schema],
-        ...(route.content ? [[`${route.targetFormat} content`, route.content.schema] as const] : []),
-      ]),
+    const schemas: Array<readonly [string, JSONSchema7]> = [
+      ...routes.flatMap(
+        (route): Array<readonly [string, JSONSchema7]> => [
+          [`${route.targetFormat} export options`, route.exportOptions.schema],
+          ...(route.content ? [[`${route.targetFormat} content`, route.content.schema] as const] : []),
+        ],
+      ),
       ...Object.entries(renderCapabilities).flatMap(([kernelId, capability]) =>
         capability ? [[`${kernelId} render options`, capability.renderOptions.schema] as const] : [],
       ),
-    ] as ReadonlyArray<readonly [string, Readonly<Record<string, unknown>>]>;
+    ];
     for (const [label, schema] of schemas) {
       expect(Reflect.ownKeys(schema), label).toEqual(Object.keys(schema));
       expect(Object.values(schema).includes(undefined), label).toBe(false);

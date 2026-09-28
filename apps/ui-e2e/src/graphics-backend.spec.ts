@@ -1,4 +1,4 @@
-import { expect, test } from 'vitest';
+import { beforeEach, expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 
@@ -122,6 +122,13 @@ type CanvasFrameDifference = Readonly<{
   meanAbsoluteChannelDifference: number;
   changedPixelRatio: number;
   totalSampled: number;
+}>;
+
+/** Displayed overlay brightness: the grid's darkest line pixel and each axis's summed ink. */
+type OverlayBrightness = Readonly<{
+  gridMinimumLuminance: number;
+  gridLineMeanLuminance: number;
+  axisInk: Readonly<Record<'x' | 'y' | 'z', number>>;
 }>;
 
 type GridFadeRowProfile = Readonly<{
@@ -369,18 +376,18 @@ async function sampleGridFadeRows(pngBase64: string): Promise<GridFadeRowProfile
       const index = (y * canvas.width + x) * 4;
       return data[index]! * 0.2126 + data[index + 1]! * 0.7152 + data[index + 2]! * 0.0722;
     };
-    let backgroundTotal = 0;
-    let backgroundSamples = 0;
+    // The median ignores a debug overlay in these rows, such as the WebGPU inspector's FPS panel.
+    const backgroundSamples: number[] = [];
     const backgroundRows = Math.max(1, Math.floor(canvas.height * 0.08));
     for (let y = 0; y < backgroundRows; y += 1) {
       for (const [start, end] of bands) {
         for (let x = Math.floor(canvas.width * start); x < Math.floor(canvas.width * end); x += 1) {
-          backgroundTotal += luminanceAt(x, y);
-          backgroundSamples += 1;
+          backgroundSamples.push(luminanceAt(x, y));
         }
       }
     }
-    const background = backgroundTotal / backgroundSamples;
+    backgroundSamples.sort((a, b) => a - b);
+    const background = backgroundSamples[Math.floor(backgroundSamples.length / 2)]!;
     const rawRows = Array.from({ length: canvas.height }, (_, y) => {
       let total = 0;
       let samples = 0;
@@ -440,6 +447,108 @@ async function sampleGridFadeRows(pngBase64: string): Promise<GridFadeRowProfile
       rowDetail,
     };
   }, pngBase64);
+}
+
+/**
+ * Measure the overlays as displayed: grid lines in a band left of the model, and each axis's ink
+ * (hue excess, summed) over the pixels whose dominant channel is that axis's hue.
+ */
+async function sampleOverlayBrightness(pngBase64: string): Promise<OverlayBrightness> {
+  return target.evaluate(async (png) => {
+    const image = new Image();
+    image.src = `data:image/png;base64,${png}`;
+    await image.decode();
+    const canvas = document.createElement('canvas');
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
+    const context = canvas.getContext('2d');
+    if (!context) {
+      throw new Error('2d context unavailable');
+    }
+    context.drawImage(image, 0, 0);
+    const { data, width, height } = context.getImageData(0, 0, canvas.width, canvas.height);
+    const luminanceAt = (index: number): number =>
+      data[index]! * 0.2126 + data[index + 1]! * 0.7152 + data[index + 2]! * 0.0722;
+
+    let gridMinimumLuminance = 255;
+    let lineTotal = 0;
+    let lineSamples = 0;
+    for (let y = Math.floor(height * 0.45); y < Math.floor(height * 0.55); y += 1) {
+      for (let x = Math.floor(width * 0.02); x < Math.floor(width * 0.25); x += 1) {
+        const luminance = luminanceAt((y * width + x) * 4);
+        gridMinimumLuminance = Math.min(gridMinimumLuminance, luminance);
+        if (luminance < 252) {
+          lineTotal += luminance;
+          lineSamples += 1;
+        }
+      }
+    }
+
+    // Hue excess (the dominant channel over the mean of the others) is linear in coverage over a
+    // neutral background, and neutral grid and model pixels add nothing. A darkness sum over
+    // pixels past a hue threshold instead flickers with where each backend puts its fringe.
+    const axisInk = { x: 0, y: 0, z: 0 };
+    for (let index = 0; index < data.length; index += 4) {
+      const channels = [data[index]!, data[index + 1]!, data[index + 2]!];
+      const dominant = Math.max(...channels);
+      const excess = dominant - (channels[0]! + channels[1]! + channels[2]! - dominant) / 2;
+      if (excess < 3) {
+        continue;
+      }
+      axisInk[(['x', 'y', 'z'] as const)[channels.indexOf(dominant)]!] += excess;
+    }
+
+    return {
+      gridMinimumLuminance,
+      gridLineMeanLuminance: lineSamples > 0 ? lineTotal / lineSamples : 255,
+      axisInk,
+    };
+  }, pngBase64);
+}
+
+/**
+ * Compare two captures' central half at full resolution: mean luminance difference and the share
+ * of pixels differing by more than 12 levels. A downsampled comparison aliases thin edge lines.
+ */
+async function compareCentreLuminance(
+  firstPngBase64: string,
+  secondPngBase64: string,
+): Promise<Readonly<{ meanLuminanceDifference: number; differingPixelRatio: number }>> {
+  return target.evaluate(
+    async ({ first, second }) => {
+      const read = async (png: string): Promise<ImageData> => {
+        const image = new Image();
+        image.src = `data:image/png;base64,${png}`;
+        await image.decode();
+        const canvas = document.createElement('canvas');
+        canvas.width = image.naturalWidth;
+        canvas.height = image.naturalHeight;
+        const context = canvas.getContext('2d');
+        if (!context) {
+          throw new Error('2d context unavailable');
+        }
+        context.drawImage(image, 0, 0);
+        return context.getImageData(0, 0, canvas.width, canvas.height);
+      };
+      const [a, b] = await Promise.all([read(first), read(second)]);
+      const luminanceAt = ({ data }: ImageData, index: number): number =>
+        data[index]! * 0.2126 + data[index + 1]! * 0.7152 + data[index + 2]! * 0.0722;
+      let total = 0;
+      let differing = 0;
+      let samples = 0;
+      for (let y = Math.floor(a.height * 0.25); y < Math.floor(a.height * 0.75); y += 1) {
+        for (let x = Math.floor(a.width * 0.25); x < Math.floor(a.width * 0.75); x += 1) {
+          const index = (y * a.width + x) * 4;
+          const difference = Math.abs(luminanceAt(a, index) - luminanceAt(b, index));
+          total += difference;
+          differing += difference > 12 ? 1 : 0;
+          samples += 1;
+        }
+      }
+      return { meanLuminanceDifference: total / samples, differingPixelRatio: differing / samples };
+    },
+    { first: firstPngBase64, second: secondPngBase64 },
+  );
 }
 
 async function driveEdgeOcclusionCamera({
@@ -775,6 +884,18 @@ function expectRearEdgesStayOccluded(stats: EdgeOcclusionSampleStats, context: s
 }
 
 test.describe('Graphics backend regression guard', () => {
+  // The consent banner overlaps the sampled canvas bands; a stored decision keeps it closed.
+  beforeEach(async () => {
+    await target.addCookies([
+      {
+        domain: 'localhost',
+        name: 'tau-cookie-consent',
+        path: '/',
+        value: encodeURIComponent(JSON.stringify({ status: 'declined', version: 1 })),
+      },
+    ]);
+  });
+
   for (const backend of ['webgl', 'webgpu'] as const satisfies readonly GraphicsBackend[]) {
     test(`FOV changes preserve projected size through CameraControls on ${backend}`, async () => {
       await target.navigate(`${edgeOcclusionFixturePath}&graphicsBackend=${backend}`);
@@ -1250,6 +1371,60 @@ test.describe('Graphics backend regression guard', () => {
 
     const failures = await webGpuValidationFailures(messageStart);
     expect(failures, `WebGPU validation errors leaked to the console:\n${failures.join('\n')}`).toEqual([]);
+  });
+
+  test('grid, axes and model shading display the same on WebGL and WebGPU, with and without post-processing', async () => {
+    const samples: Record<string, OverlayBrightness> = {};
+    const screenshots: Record<string, string> = {};
+    /* oxlint-disable no-await-in-loop -- each capture must observe the backend and post-processing state set before it. */
+    for (const backend of ['webgl', 'webgpu'] as const satisfies readonly GraphicsBackend[]) {
+      await target.navigate(`${birdhouseFixturePath}?graphicsBackend=${backend}`);
+      await waitForGraphicsViewer();
+      await waitForGraphicsTestBridge();
+      for (const postProcessing of [false, true]) {
+        await target.evaluate((enabled) => {
+          const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
+          bridge.setPostProcessingEnabled(enabled);
+          bridge.setCamera({
+            position: [0.12857841861747968, -0.12857841861747965, 0.15198383757294057],
+            target: [0, 0, 0.047],
+            fov: 60,
+          });
+        }, postProcessing);
+        await target.delay(750);
+        const label = `${backend}${postProcessing ? '-post' : ''}`;
+        const canvas = selectors.getByCss(previewCanvasSelector).first();
+        screenshots[label] = await target.screenshot(canvas, `overlay-brightness-${label}.png`);
+        samples[label] = await sampleOverlayBrightness(screenshots[label]);
+      }
+      await target.evaluate(() => {
+        (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!.setPostProcessingEnabled(false);
+      });
+    }
+    /* oxlint-enable no-await-in-loop -- sequential captures end. */
+
+    // The model's shading matches too. WebGPU once sampled the camera-rotated environment through
+    // a flipped PMREM lookup and lit faces from the wrong side (mean 22.8, 42% differing); matched,
+    // edge anti-aliasing leaves about 3.7 and 4%. With post-processing on, the backends run
+    // different AO, so only the plain render is compared.
+    const modelDifference = await compareCentreLuminance(screenshots['webgl']!, screenshots['webgpu']!);
+    expect(modelDifference.meanLuminanceDifference, JSON.stringify(modelDifference)).toBeLessThan(8);
+    expect(modelDifference.differingPixelRatio, JSON.stringify(modelDifference)).toBeLessThan(0.15);
+
+    const reference = samples['webgl']!;
+    // The 0.3-opacity grey grid over white bottoms out at 213 when blended in sRGB space; a
+    // straight-alpha canvas drew it at 189 and WebGPU's linear blend with AO at 164.
+    expect(reference.gridMinimumLuminance, JSON.stringify(samples)).toBeGreaterThanOrEqual(208);
+    for (const [label, sample] of Object.entries(samples)) {
+      expect(Math.abs(sample.gridMinimumLuminance - reference.gridMinimumLuminance), label).toBeLessThanOrEqual(3);
+      expect(Math.abs(sample.gridLineMeanLuminance - reference.gridLineMeanLuminance), label).toBeLessThanOrEqual(3);
+      for (const axis of ['x', 'y', 'z'] as const) {
+        // WebGPU once drew the axes at half their WebGL ink, and near black before that. The sum
+        // covers the whole canvas, so it includes the gizmo cube's axis lines in their sub-viewport.
+        expect(sample.axisInk[axis] / reference.axisInk[axis], `${label} ${axis} axis ink`).toBeGreaterThan(0.85);
+        expect(sample.axisInk[axis] / reference.axisInk[axis], `${label} ${axis} axis ink`).toBeLessThan(1.15);
+      }
+    }
   });
 
   test('canvas pixel histogram detects "render went invisible" regressions', async () => {

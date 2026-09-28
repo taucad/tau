@@ -11,6 +11,12 @@ export const searchParameterName = {
   // Whether the project library also lists trashed projects.
   trash: 'trash',
 
+  /* Community */
+  // The Community search text, absent when empty.
+  query: 'q',
+  // The Community kernel filter, absent for every kernel.
+  kernel: 'kernel',
+
   /* Dialogs */
   // The open settings dialog section, absent when the dialog is closed.
   settings: 'settings',

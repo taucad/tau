@@ -27,7 +27,7 @@
 import { createContext, useContext, useEffect } from 'react';
 import { act, render, screen } from '@testing-library/react';
 import { Link, MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router';
-import { createActor, fromCallback, fromPromise } from 'xstate';
+import { createActor, createCallbackLogic, createAsyncLogic } from 'xstate';
 import type { ActorRefFrom, EventObject } from 'xstate';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -59,6 +59,7 @@ const {
   installedCheckoutRoutes,
   revisionClientLifecycle,
   projectProviderInputs,
+  flushProducers,
 } = vi.hoisted(() => {
   const frames: Array<{ type: string; projectId?: string }> = [];
   const calls: string[] = [];
@@ -74,7 +75,7 @@ const {
   const revisionListeners = new Set<() => void>();
   let revisionStatus = {
     dirty: false,
-    branch: 'main',
+    line: { kind: 'branch', name: 'main' } as const,
     sync: { state: 'noRemote' as 'backedUp' | 'checking' | 'noRemote', pendingCount: 0 },
   };
   const editorSnapshot = (): unknown => ({
@@ -132,6 +133,8 @@ const {
     mounted: live,
     workerRef: { current: undefined as Worker | undefined },
     getProjectRouteAccess: vi.fn(),
+    /** `UnloadProvider`'s producer stage, as the quit hold reaches it; a test holds it open. */
+    flushProducers: vi.fn(async (): Promise<void> => undefined),
 
     chatStore: {
       get: () => ({
@@ -146,7 +149,11 @@ const {
     },
     revision: {
       reset: () => {
-        revisionStatus = { dirty: false, branch: 'main', sync: { state: 'noRemote', pendingCount: 0 } };
+        revisionStatus = {
+          dirty: false,
+          line: { kind: 'branch', name: 'main' } as const,
+          sync: { state: 'noRemote', pendingCount: 0 },
+        };
         revisionListeners.clear();
       },
       setSync: (state: typeof revisionStatus.sync.state, pendingCount = 0) => {
@@ -331,7 +338,10 @@ vi.mock('#filesystem/handle-store.js', async (importOriginal) => ({
   },
 }));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({ useChatSessionStore: () => chatStore }));
-vi.mock('#hooks/use-flush-on-close.js', () => ({ useFlushOnClose: () => undefined }));
+vi.mock('#hooks/use-flush-on-close.js', () => ({
+  useFlushOnClose: () => undefined,
+  useFlushProducers: () => flushProducers,
+}));
 vi.mock('#hooks/use-monaco-model-service.js', () => ({
   MonacoModelServiceProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
@@ -542,6 +552,13 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  /* A row that failed with the editor busy leaves its flush owed, and the
+   * registry is a singleton: release it here, or the next row's `settle`
+   * times out on the wedged session and reports a failure that is not its own. */
+  await act(async () => {
+    editor.setIdle(true);
+    await Promise.resolve();
+  });
   /* A refused open is remembered until somebody makes room (R8); drop it so
    * one test's refusal cannot open a project inside the next one. */
   if (sessionsActor.getSnapshot().status === 'active') {
@@ -775,7 +792,7 @@ describe('sessions composition', () => {
    * silently stops persisting what its own actors hold, with every other row still green. */
   it('keeps writing the view settings of a live project that is not focused', async () => {
     const graphicsRef = createActor(
-      graphicsMachine.provide({ actors: { probeWebGpu: fromPromise(async () => false) } }),
+      graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
       { input: {} },
     ).start();
     viewGraphicsOf('pin-unfocused-1').set('view-1', graphicsRef);
@@ -934,19 +951,26 @@ describe('sessions composition', () => {
     view.unmount();
   });
 
-  it('flushes the focused project before showing a non-project route', async () => {
+  it('flushes the focused project before releasing a non-project route', async () => {
     const view = await renderRouteFamily('route-flush-a');
     editor.setIdle(false);
 
     await view.navigate('/projects');
 
+    /* Since 8451a6dca the shell stays in the document while the flush is owed
+     * (no frame without a sidebar), so "not shown yet" is: inert behind the
+     * overlay, and released only once the editor has stored. */
     expect(serviceCalls).toEqual(['editor:flushNow']);
-    expect(screen.queryByText('Project library')).not.toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Opening project' })).toBeInTheDocument();
+    expect(screen.getByText('Project library').closest('[inert]')).not.toBeNull();
     await act(async () => {
       editor.setIdle(true);
       await Promise.resolve();
     });
-    await screen.findByText('Project library');
+    await vi.waitFor(() => {
+      expect(screen.getByText('Project library').closest('[inert]')).toBeNull();
+    });
+    expect(screen.queryByRole('status', { name: 'Opening project' })).not.toBeInTheDocument();
     view.unmount();
   });
 
@@ -1169,7 +1193,7 @@ describe('sessions composition — the idle window (S48(6))', () => {
    * up. Everything else — the timer, the policy, the close — is the real pair
    * of machines. */
   const readyChild = (region: string) =>
-    fromCallback<EventObject, { projectId: string }>(({ sendBack }) => {
+    createCallbackLogic<EventObject, { projectId: string }>(({ sendBack }) => {
       sendBack({ type: 'childReady', region });
       return undefined;
     });
@@ -1380,6 +1404,65 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     delete (globalThis as { tau?: unknown }).tau;
+    flushProducers.mockReset();
+  });
+
+  /*
+   * W15: a Home draft still inside its debounce lives only in memory, and its
+   * write goes through the services utility main disposes once this renderer
+   * answers. `hidden` comes at window teardown — after that — so the quit hold
+   * runs the unload producers itself, before any session closes (A38's order).
+   */
+  it('should flush every producer before it closes a session or answers main', async () => {
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    const asks: Array<() => void> = [];
+    const order: string[] = [];
+    (globalThis as { tau?: unknown }).tau = {
+      quit: {
+        onAsk: (handler: () => void) => {
+          asks.push(handler);
+          return () => undefined;
+        },
+        reportQuiesced: () => order.push('quiesced'),
+      },
+    };
+    const producers = Promise.withResolvers<void>();
+    flushProducers.mockImplementationOnce(async () => {
+      order.push('producers');
+      await producers.promise;
+    });
+
+    vi.resetModules();
+    const freshSessions = await import('#hooks/use-sessions.js');
+    const freshStore = await import('#services/sessions-store.js');
+
+    const view = render(
+      <QueryClientProvider client={queryClient}>
+        <freshSessions.SessionsProvider>
+          <span>app</span>
+        </freshSessions.SessionsProvider>
+      </QueryClientProvider>,
+    );
+    await settle();
+
+    await act(async () => {
+      asks[0]?.();
+      await Promise.resolve();
+    });
+    await settle();
+
+    expect(order).toEqual(['producers']);
+    expect(freshStore.sessionsActor.getSnapshot().matches('ready')).toBe(true);
+
+    await act(async () => {
+      producers.resolve();
+      await Promise.resolve();
+    });
+    await settle(() => order.length === 2);
+
+    expect(order).toEqual(['producers', 'quiesced']);
+    expect(freshStore.sessionsActor.getSnapshot().matches('quiesced')).toBe(true);
+    view.unmount();
   });
 
   it('answers a quit ask buffered before the renderer mounted', async () => {

@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { mock } from 'vitest-mock-extended';
 import type { ActorRefFrom } from 'xstate';
-import type { GeometryComponentManifest, GeometryComponentNode } from '@taucad/types';
+import type { GeometryComponentAppearance, GeometryComponentManifest, GeometryComponentNode } from '@taucad/types';
 import {
   buildModelComponentGeometryReference,
   ModelComponentActionDropdown,
@@ -33,6 +33,10 @@ vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
 
 const componentId = 'component:first';
 const unitId = 'file:src/main.ts';
+// oxlint-disable-next-line tau-lint/no-hardcoded-color -- Fixture data verifies the user's authored material value as text, not UI styling.
+const carrierBaseColor = '#285e88';
+// oxlint-disable-next-line tau-lint/no-hardcoded-color -- The glTF default is source-data evidence, not a UI palette choice.
+const defaultBaseColor = '#ffffff';
 
 const capabilities: GeometryComponentManifest['capabilities'] = {
   canHide: true,
@@ -113,10 +117,13 @@ afterEach(() => {
 
 function renderViewerModelComponentActionMenu({
   isFocused = false,
+  appearance,
 }: {
   readonly isFocused?: boolean;
-} = {}): void {
+  readonly appearance?: GeometryComponentAppearance;
+} = {}): ActorRefFrom<typeof graphicsMachine> {
   const node = createNode();
+  node.appearance = appearance;
   const manifest = createManifest(node, 'src/main.ts');
   const graphicsRef = mock<ActorRefFrom<typeof graphicsMachine>>();
 
@@ -139,9 +146,96 @@ function renderViewerModelComponentActionMenu({
       onOpenChange={vi.fn()}
     />,
   );
+  return graphicsRef;
 }
 
 describe('model component action menu', () => {
+  it.each(['explorer', 'viewer'] as const)(
+    'should expose source material factors as read-only text in the %s menu',
+    async (source) => {
+      const user = userEvent.setup();
+      const appearance: GeometryComponentAppearance = {
+        materials: [{ materialIndex: 0, color: carrierBaseColor, metalness: 0.65, roughness: 0.32 }],
+      };
+      let graphicsRef: ActorRefFrom<typeof graphicsMachine>;
+      if (source === 'viewer') {
+        graphicsRef = renderViewerModelComponentActionMenu({ appearance });
+      } else {
+        const node = { ...createNode(), appearance };
+        graphicsRef = mock<ActorRefFrom<typeof graphicsMachine>>();
+        render(
+          <ModelComponentActionDropdown
+            manifest={createManifest(node)}
+            node={node}
+            graphicsRef={graphicsRef}
+            unitId={unitId}
+            source='explorer'
+            isFocused={false}
+            isIsolated={false}
+            hasHiddenComponents={false}
+            hasOpacityOverrides={false}
+            opacity={1}
+            actionButtonClassName=''
+          />,
+        );
+        await user.click(screen.getByRole('button', { name: 'Actions for Planetary housing' }));
+      }
+
+      // The menu opens on its part: a collapsed row with the name and a swatch; the factors wait inside.
+      const partRow = screen.getByRole('menuitem', { name: 'Planetary housing' });
+      expect(screen.getByRole('menu')).toHaveTextContent(/^Planetary housing/);
+      expect(partRow).toHaveAttribute('aria-expanded', 'false');
+      expect(partRow.querySelector('[data-slot="material-swatch"]')).toBeInTheDocument();
+      expect(screen.queryByRole('group', { name: 'Material for Planetary housing' })).not.toBeInTheDocument();
+      await user.click(partRow);
+      expect(partRow).toHaveAttribute('aria-expanded', 'true');
+      const summary = within(screen.getByRole('group', { name: 'Material for Planetary housing' }));
+      expect(summary.getByText(carrierBaseColor)).toBeVisible();
+      expect(summary.getByText('0.65')).toBeVisible();
+      expect(summary.getByText('0.32')).toBeVisible();
+      expect(summary.queryByRole('slider')).not.toBeInTheDocument();
+      expect(summary.queryByRole('spinbutton')).not.toBeInTheDocument();
+      expect(summary.queryByRole('textbox')).not.toBeInTheDocument();
+      await user.click(summary.getByText('0.65'));
+      expect(screen.getByRole('menuitem', { name: 'Focus on part' })).toBeVisible();
+      expect(graphicsRef.send).not.toHaveBeenCalled();
+    },
+  );
+
+  it('should show mixed values without hiding equal values or their format-default provenance', async () => {
+    renderViewerModelComponentActionMenu({
+      appearance: {
+        materials: [
+          { materialIndex: 0, metalness: 0.2, roughness: 1 },
+          { materialIndex: 1, color: defaultBaseColor, metalness: 0.8 },
+        ],
+      },
+    });
+
+    await userEvent.setup().click(screen.getByRole('menuitem', { name: 'Planetary housing' }));
+    const summary = within(screen.getByRole('group', { name: 'Material for Planetary housing' }));
+    expect(summary.getByText('Mixed: 0.2, 0.8')).toBeVisible();
+    expect(summary.getByText('1 (includes glTF default)')).toBeVisible();
+    expect(summary.getByText('#ffffff (includes glTF default)')).toBeVisible();
+  });
+
+  it('should distinguish glTF defaults, unavailable factors and unlit shading', async () => {
+    renderViewerModelComponentActionMenu({
+      appearance: {
+        materials: [
+          {},
+          { materialIndex: 0, color: 'unavailable', metalness: 'unavailable', roughness: 'unavailable' },
+          { materialIndex: 1, isUnlit: true },
+        ],
+      },
+    });
+
+    await userEvent.setup().click(screen.getByRole('menuitem', { name: 'Planetary housing' }));
+    const summary = within(screen.getByRole('group', { name: 'Material for Planetary housing' }));
+    expect(summary.getByText('Mixed: #ffffff (glTF default), Unavailable')).toBeVisible();
+    expect(summary.getAllByText('Mixed: 1 (glTF default), Unavailable, Not used (unlit)')).toHaveLength(2);
+  });
+
   it('should build a geometry reference from manifest metadata when the node has no explicit reference', () => {
     const node = createNode();
     const manifest = createManifest(node, 'src/main.ts');
@@ -276,7 +370,7 @@ describe('model component action menu', () => {
       />,
     );
 
-    const input = screen.getByRole('textbox', { name: 'Opacity' });
+    const input = screen.getByRole('spinbutton', { name: 'Opacity' });
     expect(input).toHaveValue('100');
     expect(screen.getByText('%')).toBeInTheDocument();
     await user.click(input);
@@ -372,6 +466,58 @@ describe('model component action menu', () => {
     expect(screen.queryByText('Reveal in Explorer')).not.toBeInTheDocument();
   });
 
+  it('should reveal the joint that moves a part in the Kinematics pane only for parts in a mechanism link', async () => {
+    const user = userEvent.setup();
+    const node = createNode();
+    const data = {
+      node,
+      graphicsRef: mock<ActorRefFrom<typeof graphicsMachine>>(),
+      unitId,
+      source: 'viewer',
+      isFocused: false,
+      isIsolated: false,
+      hasHiddenComponents: false,
+      hasOpacityOverrides: false,
+      opacity: 1,
+    } as const;
+    const { rerender } = render(
+      <ViewerModelComponentActionMenu
+        isOpen
+        point={{ clientX: 120, clientY: 160 }}
+        data={{ ...data, manifest: createManifest(node) }}
+        onOpenChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('menuitem', { name: 'Show kinematics' })).toBeDisabled();
+
+    const mechanism: GeometryComponentManifest['mechanism'] = {
+      schemaVersion: 1,
+      units: { length: 'm', angle: 'rad' },
+      root: 'base',
+      links: { base: { components: ['root'] }, arm: { components: [componentId] } },
+      joints: { hinge: { type: 'revolute', parent: 'base', child: 'arm', origin: [0, 0, 0], axis: [0, 0, 1] } },
+    };
+    rerender(
+      <ViewerModelComponentActionMenu
+        isOpen
+        point={{ clientX: 120, clientY: 160 }}
+        data={{ ...data, manifest: { ...createManifest(node, 'src/main.ts'), mechanism } }}
+        onOpenChange={vi.fn()}
+      />,
+    );
+    await user.click(screen.getByRole('menuitem', { name: 'Show kinematics' }));
+
+    expect(mocks.openPanel).toHaveBeenCalledWith('kinematics');
+    expect(mocks.editorSend).toHaveBeenCalledWith({
+      type: 'revealModelComponentInKinematics',
+      entryPath: 'src/main.ts',
+      unitId,
+      componentId,
+    });
+    expect(mocks.openPanel.mock.invocationCallOrder[0]!).toBeLessThan(mocks.editorSend.mock.invocationCallOrder[0]!);
+  });
+
   it('should enable and dispatch unit-wide visibility and opacity recovery actions', async () => {
     const user = userEvent.setup();
     const node = createNode();
@@ -414,6 +560,15 @@ describe('model component action menu', () => {
       unitId,
       source: 'explorer',
     });
+  });
+
+  it('should focus the coordinate-anchored viewer menu itself on open, not its first row', () => {
+    // Materials make the part-name row a focusable first row.
+    renderViewerModelComponentActionMenu({
+      appearance: { materials: [{ materialIndex: 0, color: carrierBaseColor }] },
+    });
+
+    expect(document.activeElement).toBe(screen.getByRole('menu'));
   });
 
   it('should move coordinate-anchored viewer menu focus to enabled items on pointer hover', async () => {

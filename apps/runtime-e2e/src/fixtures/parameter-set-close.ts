@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import { createActor, fromPromise, waitFor } from 'xstate';
+import { createActor, createAsyncLogic, waitFor } from 'xstate';
 import { compileParameterManifest, resolveParameterSnapshot } from '@taucad/parameters';
 import type { ParameterChange, ParameterSetRequest } from '@taucad/parameters';
 import { parameterSetMachine, submitParameterRequest } from '@taucad/parameters/set-machine';
+import type { ParameterSetActors } from '@taucad/parameters/set-machine';
 
 const target = { authority: 'process-fixture', root: '/project', entry: 'main.ts' };
 const digest = `sha256:${'1'.repeat(64)}` as Parameters<typeof compileParameterManifest>[0]['dependency'];
@@ -43,13 +44,15 @@ const delayedInvalidDraftClose = async () => {
   const actor = createActor(
     parameterSetMachine.provide({
       actors: {
-        loadParameterSet: fromPromise(async () => initial),
-        commitParameterSet: fromPromise(async ({ input }) => {
-          started.resolve();
-          await release.promise;
-          return { status: 'applied', content: input.proposed.bytes! };
+        loadParameterSet: createAsyncLogic({ run: async () => initial }),
+        commitParameterSet: createAsyncLogic({
+          run: async ({ input }) => {
+            started.resolve();
+            await release.promise;
+            return { status: 'applied', content: input.proposed.bytes! };
+          },
         }),
-      },
+      } satisfies Partial<ParameterSetActors>,
     }),
     { input: { target } },
   );
@@ -83,23 +86,27 @@ const uncertainWriteClose = async () => {
   const actor = createActor(
     parameterSetMachine.provide({
       actors: {
-        loadParameterSet: fromPromise(async () => {
-          if (change === undefined) {
-            return initial;
-          }
-          reads += 1;
-          recoveryStarted.resolve();
-          await releaseRecovery.promise;
-          return change.proposed;
+        loadParameterSet: createAsyncLogic({
+          run: async () => {
+            if (change === undefined) {
+              return initial;
+            }
+            reads += 1;
+            recoveryStarted.resolve();
+            await releaseRecovery.promise;
+            return change.proposed;
+          },
         }),
-        commitParameterSet: fromPromise(async ({ input }) => {
-          writes += 1;
-          change = input;
-          started.resolve();
-          await release.promise;
-          throw new Error('Checked write reply lost.');
+        commitParameterSet: createAsyncLogic({
+          run: async ({ input }) => {
+            writes += 1;
+            change = input;
+            started.resolve();
+            await release.promise;
+            throw new Error('Checked write reply lost.');
+          },
         }),
-      },
+      } satisfies Partial<ParameterSetActors>,
     }),
     { input: { target } },
   );

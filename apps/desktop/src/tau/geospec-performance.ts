@@ -34,7 +34,17 @@ export const serveGeoSpecPerformance = (port: UtilityPort): (() => Promise<void>
       const result = await runPerformanceLabCell(
         { ...input, cache: 'host-module-cache' },
         {
-          native: async () => import('@taucad/geospec-engine-native/node'),
+          native: async () => {
+            const module = await import('@taucad/geospec-engine-native/node');
+            // The lab passes a WASM execution choice to Engine; native uses its own cache options.
+            class NativeLabEngine extends module.Engine {
+              public constructor() {
+                super();
+              }
+            }
+            // eslint-disable-next-line @typescript-eslint/naming-convention -- Mirrors the injected engine module contract.
+            return { ...module, Engine: NativeLabEngine };
+          },
         },
       );
       channel.postMessage({ id, type: 'result', result });

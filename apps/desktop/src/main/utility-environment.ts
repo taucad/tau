@@ -11,6 +11,7 @@
  */
 
 import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
@@ -136,6 +137,13 @@ export const utilityEnvironmentNames = [
   'TAU_DEBUG',
   'TAU_BUILD123D_RESOURCE_ROOT',
   'TAU_PICOGK_RESOURCE_ROOT',
+  /* Where the person's Bambu Studio lives when it is not at the platform default;
+   * the kernel utility slices with it, main reads its presets (blueprint D12). */
+  'TAU_BAMBU_STUDIO_PATH',
+  /* Where the services utility keeps printer access codes: `keychain` (the macOS
+   * default), `file` or `memory`. Automated runs set `file` so they never touch
+   * a person's keychain. */
+  'TAU_SECRET_VAULT',
 ] as const;
 
 /**
@@ -211,4 +219,34 @@ export const packagedEsbuildEnvironment = (
         ),
       }
     : {};
+};
+
+/**
+ * Point the services utility at the `git` this build ships, when it ships one (OQ3, C68, X2).
+ *
+ * One binary, not two: the bundled git's own exec path carries `git-lfs`, so
+ * `git lfs` resolves through it and nothing has to name a second executable.
+ * Absent — a development tree, or a platform whose payload is not built — the
+ * toolchain comes from `PATH`, which on a Finder launch is
+ * `/usr/bin:/bin:/usr/sbin:/sbin`; a machine that has neither is told once, by
+ * name, through `revision.unavailable`.
+ *
+ * @param resourceRoot - `process.resourcesPath` in a packaged app; `apps/desktop/resources` in a development tree.
+ * @param target - Operating system and CPU architecture the payload was prepared for.
+ * @returns `TAU_GIT_EXECUTABLE` naming the payload's `git`, or nothing when there is no payload.
+ */
+export const bundledGitEnvironment = (
+  resourceRoot: string,
+  target?: Readonly<{ architecture: string; platform: NodeJS.Platform }>,
+): Readonly<Record<string, string>> => {
+  const { architecture, platform } = target ?? { architecture: process.arch, platform: process.platform };
+  const executable = join(
+    resourceRoot,
+    'git',
+    `${platform}-${architecture}`,
+    'bin',
+    platform === 'win32' ? 'git.exe' : 'git',
+  );
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
+  return existsSync(executable) ? { TAU_GIT_EXECUTABLE: executable } : {};
 };

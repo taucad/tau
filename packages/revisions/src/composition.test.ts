@@ -12,7 +12,6 @@
  * @see docs/research/workspace-filesystem-north-star-blueprint.md S48
  */
 
-import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -46,6 +45,7 @@ import {
   recordEmitted,
 } from '#test/fake-actors.js';
 import type { FakeCallbackActors, FakePromiseActors, ManualClock } from '#test/fake-actors.js';
+import { gitToolchainOnPath } from '#test/native-git-harness.js';
 
 /** Let every queued microtask and the actors' promise handlers run. */
 const flush = async (): Promise<void> => {
@@ -162,7 +162,8 @@ const startTree = (options: Readonly<{ scheduler?: boolean }> = {}): Tree => {
                 },
               }),
             }
-          : {}),
+          : /* The default children, named: v6's `provide` rejects an optional slot. */
+            { publish: publishMachine, sync: syncMachine }),
       },
     }),
     { clock, input: { projectId: 'project-1', liveCheckoutId: 'checkout-live' } },
@@ -176,7 +177,7 @@ const startTree = (options: Readonly<{ scheduler?: boolean }> = {}): Tree => {
 const openRegistry = async (tree: Tree, checkouts: readonly CheckoutRecord[] = [live]): Promise<void> => {
   tree.promises.settle('sweepLeases', { output: { retiredRunIds: [] } });
   await flush();
-  tree.promises.settle('listCheckouts', { output: { checkouts } });
+  tree.promises.settle('listCheckouts', { output: { checkouts, conflicts: [] } });
   await flush();
 };
 
@@ -253,9 +254,12 @@ describe('revision machine composition (S48 Node set)', () => {
     await flush();
 
     expect(names(tree.promises.calls)).toEqual([
+      /* XState v6 starts invoked children after the root's entry effects, so
+       * the registry's `open` reaches it before `remote` and `sync` start; v5
+       * started every child first. The three startup reads are independent. */
+      'sweepLeases',
       'readRemote',
       'readPending',
-      'sweepLeases',
       'listCheckouts',
       'syncReadRemote',
       'syncFetch',
@@ -342,8 +346,8 @@ describe('revision machine composition (S48 Node set)', () => {
     expect(tree.promises.inputsFor('writeRevision')).toEqual([]);
   });
 
-  /* 7 — the conflict path (AC14, W22 G4). A merge that collides mints on the
-   * source branch and leaves the target alone; what a person must then see is
+  /* 7 — the conflict path (AC14, W22 G4). A merge that collides records its
+   * revision on the conflict line and moves neither branch (D14); what a person must then see is
    * the *Needs resolution* card, **without reopening the project**. That makes
    * the registry re-read — and therefore the wire from `branch.machine`'s
    * `conflicted` state back to the root — the load-bearing link, and it is the
@@ -368,23 +372,24 @@ describe('revision machine composition (S48 Node set)', () => {
     tree.promises.settle('checkBranch', { output: { needsConfirmation: false } });
     await flush();
     tree.promises.settle('mergeBranch', {
-      output: { status: 'conflicted', revisionId: 'rev-conflicted', paths: ['src/bracket.ts'] },
+      output: { status: 'conflicted', paths: ['src/bracket.ts'] },
     });
     await flush();
 
-    /* The registry is re-read because the merge moved the source branch, and it
-       now answers with the conflicted head — the only record-derived fact the
-       card needs to exist (I3). */
+    /* The registry is re-read because the merge recorded on the conflict line,
+       and it now lists the undecided revision by ancestry — the only
+       record-derived fact the card needs to exist (I3, D14). */
     tree.promises.settle('listCheckouts', {
       output: {
-        checkouts: [live, { ...branched, headRevisionId: 'rev-conflicted', conflicted: true }],
+        checkouts: [live, branched],
+        conflicts: [{ revisionId: 'rev-conflicted', line: 'conflicts/main/device-a', into: 'main', foreign: false }],
       },
     });
     await flush();
 
     const status = selectRevisionStatus(tree.actor.getSnapshot());
     expect(status.conflicts).toEqual([
-      expect.objectContaining({ revisionId: 'rev-conflicted', branch: 'bracket-fillet' }),
+      expect.objectContaining({ revisionId: 'rev-conflicted', branch: 'conflicts/main/device-a', into: 'main' }),
     ]);
     expect(status.attention).toBe(1);
     expect(types(tree.emitted)).toContain('mergeConflicted');
@@ -545,15 +550,6 @@ describe('revision machine composition (S48 Node set)', () => {
  * divergence in the substrate, not in the script.
  * ------------------------------------------------------------------------ */
 
-const gitOnPath = ((): boolean => {
-  try {
-    execFileSync('git', ['--version'], { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-})();
-
 const temporaryRoots: string[] = [];
 
 afterAll(async () => {
@@ -712,6 +708,13 @@ const runScriptedTurn = async (set: ActorSet): Promise<Dump> => {
     }
     return answer !== undefined;
   }, `${set}: the close revision`);
+  /* *Undo*'s availability is re-read from the operation log once a revision is
+   * minted on the line (D15): the close revision added `late.ts`, so its
+   * inverse is not empty and *Undo* is offered — a moment after the mint. */
+  await until(
+    () => selectRevisionStatus(actor.getSnapshot()).restore.canUndo === true,
+    `${set}: the operation log to offer Undo`,
+  );
 
   const status = selectRevisionStatus(actor.getSnapshot());
   const closeRevisionId = status.headRevisionId;
@@ -742,6 +745,12 @@ const runScriptedTurn = async (set: ActorSet): Promise<Dump> => {
     () => rehydrated.actor.getSnapshot().context.registrySettled,
     `${set}: the replacement registry to settle`,
   );
+  /* *Undo*'s availability is read from the operation log after the registry
+   * settles (D15): a record like the rest, answered a moment later. */
+  await until(
+    () => selectRevisionStatus(rehydrated.actor.getSnapshot()).restore.canUndo === true,
+    `${set}: the replacement to read the operation log`,
+  );
   const rehydratedStatus = selectRevisionStatus(rehydrated.actor.getSnapshot());
   rehydrated.actor.stop();
   await rehydrated.settled();
@@ -768,68 +777,71 @@ const runScriptedTurn = async (set: ActorSet): Promise<Dump> => {
   };
 };
 
-describe.runIf(gitOnPath)('S48(8) — identical sequences over the browser and native actor sets (AC28, I4)', () => {
-  /* Both runs are done once and shared: the native leg spawns a `git` process
-   * per command, so running the script twice to ask two questions about it
-   * would double the slowest thing in this file. */
-  let browser: Dump;
-  let native: Dump;
+describe.runIf(gitToolchainOnPath)(
+  'S48(8) — identical sequences over the browser and native actor sets (AC28, I4)',
+  () => {
+    /* Both runs are done once and shared: the native leg spawns a `git` process
+     * per command, so running the script twice to ask two questions about it
+     * would double the slowest thing in this file. */
+    let browser: Dump;
+    let native: Dump;
 
-  beforeAll(async () => {
-    browser = await runScriptedTurn('browser');
-    native = await runScriptedTurn('native');
-  }, 600_000);
+    beforeAll(async () => {
+      browser = await runScriptedTurn('browser');
+      native = await runScriptedTurn('native');
+    }, 600_000);
 
-  it('runs the same scripted turn to the same ordered facts and the same projection (AC28)', () => {
-    expect(native.facts).toStrictEqual(browser.facts);
-    expect(native.emitted).toStrictEqual(browser.emitted);
-    expect(native.status).toStrictEqual(browser.status);
-  });
+    it('runs the same scripted turn to the same ordered facts and the same projection (AC28)', () => {
+      expect(native.facts).toStrictEqual(browser.facts);
+      expect(native.emitted).toStrictEqual(browser.emitted);
+      expect(native.status).toStrictEqual(browser.status);
+    });
 
-  it.each<ActorSet>(['browser', 'native'])(
-    'rehydrates the whole tree from records alone, with no persisted XState snapshot (%s)',
-    (set) => {
-      const dump = set === 'browser' ? browser : native;
-      const { branches: beforeBranches, ...before } = dump.status;
-      const { branches: afterBranches, ...after } = dump.rehydratedStatus;
-      expect(after).toStrictEqual(before);
-      expect(beforeBranches).toHaveLength(1);
-      expect(afterBranches).toEqual([
-        {
-          name: 'main',
-          head: dump.head.revisionId,
-          checkoutId: dump.status.checkoutId,
-          checkoutRoot: dump.status.checkoutRoot,
-          leaseChatIds: [],
-        },
-      ]);
-      expect(
-        dump.storedJson.filter(
-          ({ path, text }) =>
-            /snapshot/iu.test(path) ||
-            (/"value"\s*:/u.test(text) && /"context"\s*:/u.test(text) && /"children"\s*:/u.test(text)),
-        ),
-      ).toEqual([]);
-    },
-  );
+    it.each<ActorSet>(['browser', 'native'])(
+      'rehydrates the whole tree from records alone, with no persisted XState snapshot (%s)',
+      (set) => {
+        const dump = set === 'browser' ? browser : native;
+        const { branches: beforeBranches, ...before } = dump.status;
+        const { branches: afterBranches, ...after } = dump.rehydratedStatus;
+        expect(after).toStrictEqual(before);
+        expect(beforeBranches).toHaveLength(1);
+        expect(afterBranches).toEqual([
+          {
+            name: 'main',
+            head: dump.head.revisionId,
+            checkoutId: dump.status.checkoutId,
+            checkoutRoot: dump.status.checkoutRoot,
+            leaseChatIds: [],
+          },
+        ]);
+        expect(
+          dump.storedJson.filter(
+            ({ path, text }) =>
+              /snapshot/iu.test(path) ||
+              (/"value"\s*:/u.test(text) && /"context"\s*:/u.test(text) && /"children"\s*:/u.test(text)),
+          ),
+        ).toEqual([]);
+      },
+    );
 
-  /* W11b-a3 closed the former I4 divergence by making both initializers write
-   * the same generated attributes. Raw revision identity stays in this dump. */
-  it('names the same revision for the same edits on both actor sets (I4)', () => {
-    expect(native.head).toStrictEqual(browser.head);
-  });
+    /* W11b-a3 closed the former I4 divergence by making both initializers write
+     * the same generated attributes. Raw revision identity stays in this dump. */
+    it('names the same revision for the same edits on both actor sets (I4)', () => {
+      expect(native.head).toStrictEqual(browser.head);
+    });
 
-  it.each<[ActorSet]>([['browser'], ['native']])(
-    'records the edit buffered after the last turn inside the close revision (%s)',
-    async (set) => {
-      const dump = await runScriptedTurn(set);
+    it.each<[ActorSet]>([['browser'], ['native']])(
+      'records the edit buffered after the last turn inside the close revision (%s)',
+      async (set) => {
+        const dump = await runScriptedTurn(set);
 
-      /* The generated workspace config (`.gitignore`, `.gitattributes`) is in
-       * the tree too — S16's files are versioned; the two the row is about are
-       * the turn's edit and the one buffered after it. */
-      expect(dump.closeRevisionFiles).toContain('main.ts=export const size = 2;\n');
-      expect(dump.closeRevisionFiles).toContain('late.ts=export const late = true;\n');
-    },
-    300_000,
-  );
-});
+        /* The generated workspace config (`.gitignore`, `.gitattributes`) is in
+         * the tree too — S16's files are versioned; the two the row is about are
+         * the turn's edit and the one buffered after it. */
+        expect(dump.closeRevisionFiles).toContain('main.ts=export const size = 2;\n');
+        expect(dump.closeRevisionFiles).toContain('late.ts=export const late = true;\n');
+      },
+      300_000,
+    );
+  },
+);

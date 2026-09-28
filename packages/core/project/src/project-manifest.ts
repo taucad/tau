@@ -44,10 +44,18 @@ export const projectManifestSchema = z
      * nothing exists for a push to offer (D25, A30, W17). It lives here rather
      * than in a host store because it is a property of the project: a clone
      * inherits the decision instead of quietly re-enabling it. */
-    syncChats: z.boolean().optional(),
+    syncChats: z
+      .boolean()
+      .optional()
+      .describe(
+        "Whether this project's chats sync with its remotes. Absent means on; false keeps the project files-only, and no refs/tau/chats/* is written for it.",
+      ),
     /* Generated exports are large, reproducible records. They stay device-local
      * unless the project explicitly opts into their dedicated evidence ref. */
-    syncLargeExports: z.boolean().optional(),
+    syncLargeExports: z
+      .boolean()
+      .optional()
+      .describe('Whether generated exports and evidence sync on refs/tau/evidence/exports. Absent means off.'),
   })
   .strict();
 

@@ -65,8 +65,14 @@ describe('generateBundles', () => {
       const committed = join(workspaceRoot, packageDirectory, 'agent');
       const regenerated = join(scratch, packageDirectory, 'agent');
 
-      // `doctrine.md` is authored, so it is read from the workspace and never written.
-      const expected = filesUnder(committed).filter((file) => file !== 'doctrine.md');
+      // Authored files are read from the workspace, not regenerated in the agent root.
+      const expected = filesUnder(committed).filter(
+        (file) =>
+          file !== 'doctrine.md' &&
+          !bundleOwners.some(
+            (owner) => owner.packageDirectory === packageDirectory && owner.authoredReferences?.includes(file),
+          ),
+      );
       expect(filesUnder(regenerated)).toStrictEqual(expected);
 
       for (const file of expected) {
@@ -172,6 +178,15 @@ describe('every committed bundle', () => {
           .map(({ id }) => id)
           .sort(),
       );
+      if (owner.supplementalApi !== undefined) {
+        const { corpus: loadCorpus, groupBy } = owner.supplementalApi;
+        const supplemental = loadCorpus();
+        expect([...shardIndexById(planShards(supplemental, { groupBy })).keys()].sort()).toEqual(
+          addressableEntries(supplemental)
+            .map(({ id }) => id)
+            .sort(),
+        );
+      }
     },
     120_000,
   );

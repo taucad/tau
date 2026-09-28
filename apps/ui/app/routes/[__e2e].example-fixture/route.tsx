@@ -1,6 +1,8 @@
 import * as React from 'react';
 import { useLocation, useNavigate } from 'react-router';
+import { findBuiltinExample } from '@taucad/tau-examples/builtin';
 import { findTestFixture } from '@taucad/tau-examples/test-fixtures';
+import { isKernelId } from '@taucad/types/constants';
 import { Loader } from '#components/ui/loader.js';
 import { getEnvironment } from '#environment.config.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
@@ -30,7 +32,8 @@ const ExampleFixtureDebugRoute = (): React.JSX.Element => {
     started.current = true;
     const parameters = new URLSearchParams(search);
     const locator = parameters.get('locator');
-    const fixture = locator ? findTestFixture(locator) : undefined;
+    // Builtin model examples share the test-fixture shape, so either seeds an editor project.
+    const fixture = locator ? (findTestFixture(locator) ?? findBuiltinExample(locator)) : undefined;
     parameters.delete('locator');
 
     const seed = async (): Promise<void> => {
@@ -52,7 +55,7 @@ const ExampleFixtureDebugRoute = (): React.JSX.Element => {
             tags: fixture.manifest.tags,
             assets: { main: { entryPath: fixture.manifest.assets.main.entryPath } },
           },
-          activeKernel: fixture.kernel === 'jscad' ? 'jscad' : 'replicad',
+          activeKernel: isKernelId(fixture.kernel) ? fixture.kernel : 'replicad',
           location: homeProjectCreationLocation,
           files,
         });

@@ -45,6 +45,10 @@ export const mimeTypes = {
   x3db: 'model/x3d+fastinfoset',
   x3dv: 'model/x3d-vrml',
 
+  // Manufacturing toolpaths (slicer output; the two-part extension is one Bambu print-ready container)
+  gcode: 'text/x.gcode',
+  'gcode.3mf': 'application/vnd.bambulab.gcode-3mf',
+
   // USD
   usda: 'model/vnd.usda',
   usdc: 'model/vnd.usd',

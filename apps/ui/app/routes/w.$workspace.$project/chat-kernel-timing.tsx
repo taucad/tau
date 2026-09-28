@@ -92,7 +92,7 @@ function TraceHistorySelector({
       groupedItems={[{ name: 'Trace history', items }]}
       getValue={(item) => item.id}
       value={selectedItem}
-      searchPlaceHolder='Filter traces...'
+      searchPlaceHolder='Filter traces…'
       isSearchEnabled={items.length > 8}
       renderLabel={(item, selected) => (
         <span className='flex w-full items-center justify-between gap-3'>

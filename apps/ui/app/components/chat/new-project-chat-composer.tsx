@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useRef } from 'react';
-import { useNavigate } from 'react-router';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useLocation, useNavigate } from 'react-router';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
 import type { ChatTextareaHandle, ChatTextareaProperties } from '#components/chat/chat-textarea-types.js';
 import { KernelSelector } from '#components/chat/kernel-selector.js';
@@ -38,6 +38,37 @@ export function NewProjectChatComposer({
   const focusComposer = useCallback((): void => {
     textareaRef.current?.focus();
   }, []);
+
+  /* Mount autofocus alone misses a return to an already-mounted Home
+   * ("New Project" or ⌃N while on `/`), so honour the navigation request too. */
+  const { key: locationKey, state: locationState } = useLocation() as { key: string; state: unknown };
+  // Each navigation that asks for focus is its own request, identified by its location key.
+  const focusRequestKey =
+    (locationState as { focusChatComposer?: unknown } | undefined)?.focusChatComposer === true
+      ? locationKey
+      : undefined;
+  useEffect(() => {
+    if (enableAutoFocus && focusRequestKey !== undefined) {
+      focusComposer();
+    }
+  }, [enableAutoFocus, focusComposer, focusRequestKey]);
+
+  /* Returning to the window restores the last focused element; when that is
+   * nothing, the draft is what the user came back for. */
+  useEffect(() => {
+    if (!enableAutoFocus) {
+      return undefined;
+    }
+    const handleWindowFocus = (): void => {
+      if (document.activeElement === null || document.activeElement === document.body) {
+        focusComposer();
+      }
+    };
+    globalThis.addEventListener('focus', handleWindowFocus);
+    return () => {
+      globalThis.removeEventListener('focus', handleWindowFocus);
+    };
+  }, [enableAutoFocus, focusComposer]);
 
   const creationLocationControl = useMemo(
     () =>

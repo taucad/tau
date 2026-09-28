@@ -1,6 +1,12 @@
-import { AtSign, Eye, EyeOff, FileBox, Focus, EllipsisVertical, RotateCcw, Target } from 'lucide-react';
+import { AtSign, Eye, EyeOff, FileBox, Focus, EllipsisVertical, Rotate3d, RotateCcw, Target } from 'lucide-react';
+import { findLinkByComponent } from '@taucad/kinematics';
 import type { ActorRefFrom } from 'xstate';
-import type { GeometryComponentManifest, GeometryComponentNode, GeometryComponentReference } from '@taucad/types';
+import type {
+  GeometryComponentAppearance,
+  GeometryComponentManifest,
+  GeometryComponentNode,
+  GeometryComponentReference,
+} from '@taucad/types';
 import { geometryReferenceToToken, useChatContextInsertion } from '#components/chat/chat-context-insertion.js';
 import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from '@taucad/ui/components/context-menu';
 import {
@@ -19,6 +25,12 @@ import {
   MenuSliderItem,
   preventMenuSliderEscapeDismissal,
 } from '#components/ui/menu-slider-item.js';
+import {
+  ContextMenuDisclosureItem,
+  DropdownMenuDisclosureItem,
+  MenuDisclosureItem,
+} from '#components/ui/menu-disclosure-item.js';
+import type { MenuDisclosureItemProperties } from '#components/ui/menu-disclosure-item.js';
 import { menuItemVariants, menuSeparatorVariants } from '@taucad/ui/components/menu.variants';
 import { cn } from '@taucad/ui/utils/cn';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
@@ -51,6 +63,7 @@ type ModelComponentActionContextContentProperties = ModelComponentActionMenuData
 type ModelComponentActions = {
   readonly addToChat: () => void;
   readonly revealInExplorer: () => void;
+  readonly showKinematics: () => void;
   readonly focusComponent: () => void;
   readonly hideComponent: () => void;
   readonly toggleIsolation: () => void;
@@ -62,7 +75,15 @@ type ModelComponentActions = {
 type ModelComponentActionDescriptor =
   | {
       readonly type: 'item';
-      readonly id: 'focus' | 'addToChat' | 'revealInExplorer' | 'hide' | 'isolate' | 'showAll' | 'resetOpacity';
+      readonly id:
+        | 'focus'
+        | 'addToChat'
+        | 'revealInExplorer'
+        | 'showKinematics'
+        | 'hide'
+        | 'isolate'
+        | 'showAll'
+        | 'resetOpacity';
       readonly label: string;
       readonly icon: React.ReactNode;
       readonly isDisabled?: boolean;
@@ -78,7 +99,7 @@ type ModelComponentActionDescriptor =
       readonly min: number;
       readonly max: number;
       readonly step: number;
-      readonly trailingAdornment: React.ReactNode;
+      readonly trailingAdornment: string;
       readonly onValueChange: (value: number) => void;
     };
 
@@ -108,6 +129,28 @@ export function buildModelComponentGeometryReference(
     label: node.name,
     kind: node.kind,
   };
+}
+
+/**
+ * The part, or the first part inside it, that belongs to a link of the unit's mechanism: what "Show kinematics"
+ * reveals. `undefined` disables the item.
+ */
+export function findModelComponentKinematicsTarget(
+  manifest: GeometryComponentManifest,
+  node: GeometryComponentNode,
+): string | undefined {
+  const { mechanism } = manifest;
+  if (!mechanism) {
+    return undefined;
+  }
+  const pending = [node.id];
+  for (let id = pending.shift(); id !== undefined; id = pending.shift()) {
+    if (findLinkByComponent({ mechanism, componentId: id })) {
+      return id;
+    }
+    pending.push(...(manifest.nodesById[id]?.childIds ?? []));
+  }
+  return undefined;
 }
 
 export function ModelComponentActionDropdown({
@@ -147,13 +190,23 @@ export function ModelComponentActionContextContent({
 function ModelComponentDropdownItems(data: ModelComponentActionMenuData): React.JSX.Element {
   const descriptors = useModelComponentActionDescriptors(data);
 
-  return <>{descriptors.map((descriptor) => renderDropdownActionDescriptor(descriptor))}</>;
+  return (
+    <>
+      <ModelComponentMenuHeader node={data.node} Row={DropdownMenuDisclosureItem} />
+      {descriptors.map((descriptor) => renderDropdownActionDescriptor(descriptor))}
+    </>
+  );
 }
 
 function ModelComponentContextMenuItems(data: ModelComponentActionMenuData): React.JSX.Element {
   const descriptors = useModelComponentActionDescriptors(data);
 
-  return <>{descriptors.map((descriptor) => renderContextActionDescriptor(descriptor))}</>;
+  return (
+    <>
+      <ModelComponentMenuHeader node={data.node} Row={ContextMenuDisclosureItem} />
+      {descriptors.map((descriptor) => renderContextActionDescriptor(descriptor))}
+    </>
+  );
 }
 
 export function ModelComponentViewerMenuItems({
@@ -162,7 +215,140 @@ export function ModelComponentViewerMenuItems({
 }: ModelComponentActionMenuData & { readonly onRequestClose: () => void }): React.JSX.Element {
   const descriptors = useModelComponentActionDescriptors(data);
 
-  return <>{descriptors.map((descriptor) => renderViewerActionDescriptor(descriptor, onRequestClose))}</>;
+  return (
+    <>
+      <ModelComponentMenuHeader node={data.node} Row={MenuDisclosureItem} />
+      {descriptors.map((descriptor) => renderViewerActionDescriptor(descriptor, onRequestClose))}
+    </>
+  );
+}
+
+type SurfaceMaterials = NonNullable<GeometryComponentAppearance['materials']>;
+// oxlint-disable-next-line tau-lint/no-hardcoded-color -- This text reports the glTF format's material default; it is not a UI palette or style.
+const gltfDefaultBaseColorLabel = '#ffffff';
+
+function formatMaterialValues(materials: SurfaceMaterials, factor: 'color' | 'metalness' | 'roughness'): string {
+  const values = new Map<string, { explicit: number; defaulted: number }>();
+  for (const material of materials) {
+    const value = material[factor];
+    const isUnused = factor !== 'color' && material.isUnlit;
+    const label = isUnused
+      ? 'Not used (unlit)'
+      : value === 'unavailable'
+        ? 'Unavailable'
+        : String(value ?? (factor === 'color' ? gltfDefaultBaseColorLabel : 1));
+    const counts = values.get(label) ?? { explicit: 0, defaulted: 0 };
+    if (!isUnused && value === undefined) {
+      counts.defaulted++;
+    } else {
+      counts.explicit++;
+    }
+    values.set(label, counts);
+  }
+  const labels = [...values].map(([value, counts]) => {
+    if (counts.defaulted === 0) {
+      return value;
+    }
+    return `${value} (${counts.explicit > 0 ? 'includes glTF default' : 'glTF default'})`;
+  });
+  return labels.length === 1 ? labels[0]! : `Mixed: ${labels.join(', ')}`;
+}
+
+const numericFactor = (value: number | 'unavailable' | undefined): number => (typeof value === 'number' ? value : 1);
+
+/**
+ * A small lit sphere of a part's surface materials, so the menu row reads as that part at a glance:
+ * the base colour (a pie of colours when the surfaces differ), a highlight that tightens as
+ * roughness drops, and a darker rim as metalness rises.
+ */
+export function MaterialSwatch({ materials }: { readonly materials: SurfaceMaterials }): React.JSX.Element {
+  const colors = [
+    ...new Set(
+      materials.map(({ color }) =>
+        color === undefined || color === 'unavailable' ? gltfDefaultBaseColorLabel : color,
+      ),
+    ),
+  ];
+  const fill =
+    colors.length === 1
+      ? colors[0]!
+      : `conic-gradient(${colors.map((color, index) => `${color} ${(index * 100) / colors.length}% ${((index + 1) * 100) / colors.length}%`).join(', ')})`;
+  const roughness = numericFactor(materials[0]?.roughness);
+  const metalness = numericFactor(materials[0]?.metalness);
+  // oxlint-disable-next-line tau-lint/no-hardcoded-color -- Light and shadow on a rendered material preview, not UI palette colours.
+  const highlight = `radial-gradient(circle at 32% 30%, rgb(255 255 255 / ${0.85 * (1 - roughness)}) 0, transparent ${35 + 35 * roughness}%)`;
+  // oxlint-disable-next-line tau-lint/no-hardcoded-color -- Light and shadow on a rendered material preview, not UI palette colours.
+  const rim = `radial-gradient(circle, transparent 50%, rgb(0 0 0 / ${0.1 + 0.3 * metalness}) 100%)`;
+  return (
+    <span
+      aria-hidden
+      data-slot='material-swatch'
+      className='size-4 shrink-0 rounded-full ring-1 ring-border'
+      style={{ background: `${highlight}, ${rim}, ${fill}` }}
+    />
+  );
+}
+
+/**
+ * The menu opens on the part it acts on: a row with its name and a material swatch that discloses
+ * the material factors, collapsed to keep the menu lean.
+ */
+function ModelComponentMenuHeader({
+  node,
+  Row,
+}: {
+  readonly node: GeometryComponentNode;
+  readonly Row: React.ComponentType<MenuDisclosureItemProperties>;
+}): React.JSX.Element {
+  const materials = node.appearance?.materials;
+  return (
+    <>
+      {materials?.length ? (
+        <Row label={node.name} trailing={<MaterialSwatch materials={materials} />}>
+          <ModelComponentMaterialSummary node={node} />
+        </Row>
+      ) : (
+        <Row label={node.name} />
+      )}
+      <div role='separator' className={menuSeparatorVariants()} />
+    </>
+  );
+}
+
+export function ModelComponentMaterialSummary({
+  node,
+}: {
+  readonly node: GeometryComponentNode;
+}): React.JSX.Element | undefined {
+  const materials = node.appearance?.materials;
+  if (!materials?.length) {
+    return undefined;
+  }
+
+  return (
+    <div role='group' aria-label={`Material for ${node.name}`}>
+      <dl className='space-y-1 pt-1 pr-3 pb-2 pl-8.5 text-xs text-foreground'>
+        <div className='flex justify-between gap-4'>
+          <dt className='text-muted-foreground'>Base color</dt>
+          <dd className='max-w-48 text-right font-mono wrap-break-word tabular-nums'>
+            {formatMaterialValues(materials, 'color')}
+          </dd>
+        </div>
+        <div className='flex justify-between gap-4'>
+          <dt className='text-muted-foreground'>Metalness</dt>
+          <dd className='max-w-48 text-right font-mono wrap-break-word tabular-nums'>
+            {formatMaterialValues(materials, 'metalness')}
+          </dd>
+        </div>
+        <div className='flex justify-between gap-4'>
+          <dt className='text-muted-foreground'>Roughness</dt>
+          <dd className='max-w-48 text-right font-mono wrap-break-word tabular-nums'>
+            {formatMaterialValues(materials, 'roughness')}
+          </dd>
+        </div>
+      </dl>
+    </div>
+  );
 }
 
 function useModelComponentActionDescriptors(
@@ -200,6 +386,14 @@ function useModelComponentActionDescriptors(
       onSelect: actions.addToChat,
     },
     ...revealInExplorerDescriptor,
+    {
+      type: 'item',
+      id: 'showKinematics',
+      label: 'Show kinematics',
+      icon: <Rotate3d className='size-3.5' />,
+      isDisabled: findModelComponentKinematicsTarget(data.manifest, data.node) === undefined,
+      onSelect: actions.showKinematics,
+    },
     { type: 'separator', id: 'primary' },
     {
       type: 'item',
@@ -410,6 +604,22 @@ function useModelComponentActions({
           entryPath: manifest.sourceFile!,
           unitId,
           componentId: node.id,
+        });
+      });
+    },
+    showKinematics: () => {
+      const componentId = findModelComponentKinematicsTarget(manifest, node);
+      if (componentId === undefined || !manifest.sourceFile || !project) {
+        return;
+      }
+      workspace?.openPanel('kinematics');
+      // The pane listens once mounted; a frame lets a newly opened pane subscribe, as Reveal in Explorer does.
+      requestAnimationFrame(() => {
+        project.editorRef.send({
+          type: 'revealModelComponentInKinematics',
+          entryPath: manifest.sourceFile!,
+          unitId,
+          componentId,
         });
       });
     },

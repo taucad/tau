@@ -130,14 +130,19 @@ describe('rehypeAtReferences', () => {
     expect(markText.value).toBe('@.tau/chats/abc-123/events.jsonl');
   });
 
-  it('should leave /command text untouched in markdown without catalog context', () => {
-    const root = tree(element('p', text('/create-policy')));
+  it('should mark /command and $skill tokens for the chip to resolve against the chat', () => {
+    const root = tree(element('p', text('/create-policy then $imagegen')));
 
     runPlugin(root);
 
     const p = root.children[0] as ElementNode;
-    expect(p.children).toHaveLength(1);
-    expect((p.children[0] as TextNode).value).toBe('/create-policy');
+    expect(p.children).toHaveLength(3);
+    const [slash, gap, dollar] = p.children as [ElementNode, TextNode, ElementNode];
+    expect(slash.tagName).toBe('mark');
+    expect(slash.properties['data-invocation']).toBe('/create-policy');
+    expect((slash.children[0] as TextNode).value).toBe('/create-policy');
+    expect(gap.value).toBe(' then ');
+    expect(dollar.properties['data-invocation']).toBe('$imagegen');
   });
 
   it('should handle mixed @path and /command in same text node', () => {
@@ -148,7 +153,7 @@ describe('rehypeAtReferences', () => {
     const p = root.children[0] as ElementNode;
     expect(p.children).toHaveLength(3);
 
-    expect((p.children[0] as TextNode).value).toBe('/create-policy');
+    expect((p.children[0] as ElementNode).properties['data-invocation']).toBe('/create-policy');
     expect((p.children[1] as TextNode).value).toBe(' check ');
 
     const atMark = p.children[2] as ElementNode;
@@ -177,13 +182,13 @@ describe('rehypeAtReferences', () => {
     expect((code.children[0] as TextNode).value).toBe('/create-policy');
   });
 
-  it('should leave unknown /command as plain text', () => {
-    const root = tree(element('p', text('/unknown-command')));
+  it('should leave paths as plain text', () => {
+    const root = tree(element('p', text('/usr/bin/env')));
 
     runPlugin(root);
 
     const p = root.children[0] as ElementNode;
     expect(p.children).toHaveLength(1);
-    expect((p.children[0] as TextNode).value).toBe('/unknown-command');
+    expect((p.children[0] as TextNode).value).toBe('/usr/bin/env');
   });
 });

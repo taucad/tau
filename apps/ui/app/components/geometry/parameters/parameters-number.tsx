@@ -2,6 +2,7 @@ import * as React from 'react';
 import type { ParameterFieldProjection } from '@taucad/parameters';
 import { convert, createQuantity } from '@taucad/units/quantity';
 import { formatQuantity, parseInput } from '@taucad/units/input';
+import { createRafCoalescer } from '#components/geometry/graphics/three/utils/raf-coalescer.js';
 import { ParametersNumberField } from '#components/geometry/parameters/parameters-number-field.js';
 import { validateParameterInputValue } from '#components/geometry/parameters/parameter-field.js';
 import type { ParameterFieldBinding } from '#components/geometry/parameters/parameter-field.js';
@@ -97,7 +98,9 @@ const fieldBinding = (fieldProjection: ParameterFieldProjection): ParameterField
 /** The authority value this row last showed, which a commit proves it was still editing. */
 type EditBase = Readonly<{ value: number; binding: ParameterFieldBinding; authorityValue: number }>;
 
-export function ParametersNumber({
+/* Memoised: the section panel re-renders on every step of the field being dragged, and its other
+ * rows pass stable props, so only the dragged row re-renders. */
+export const ParametersNumber = React.memo(function ParametersNumber({
   value,
   defaultValue,
   fieldProjection,
@@ -130,12 +133,24 @@ export function ParametersNumber({
   const [localValue, setLocalValue] = React.useState<Readonly<{ value: number; authorityValue: number }>>();
   const [inputDiagnostic, setInputDiagnostic] = React.useState<string>();
   const [base, setBase] = React.useState<EditBase>(() => ({ value: authorityValue, binding, authorityValue }));
+  /* Final edits this row submitted that have not settled. While any is in flight, an authority move
+   * is most likely this row's own earlier edit landing, so the row keeps its own base and shown value:
+   * the next step then builds on the newest submitted value instead of an intermediate one the
+   * authority is about to replace. */
+  const [pendingFinals, setPendingFinals] = React.useState(0);
+  /* A local value answers the authority it was entered against; once the authority moves, a later
+   * return to that same value (a reset after a transient edit) must not bring the old entry back. */
+  const [enteredAgainst, setEnteredAgainst] = React.useState(authorityValue);
+  if (!Object.is(enteredAgainst, authorityValue) && pendingFinals === 0) {
+    setEnteredAgainst(authorityValue);
+    setLocalValue(undefined);
+  }
 
   const isDirty = draftText !== '';
   const currentBase: EditBase = { value: authorityValue, binding, authorityValue };
-  const editBase = isDirty || Object.is(base.authorityValue, authorityValue) ? base : currentBase;
+  const editBase = isDirty || pendingFinals > 0 || Object.is(base.authorityValue, authorityValue) ? base : currentBase;
   const draftValue =
-    localValue !== undefined && Object.is(localValue.authorityValue, authorityValue)
+    localValue !== undefined && (pendingFinals > 0 || Object.is(localValue.authorityValue, authorityValue))
       ? localValue.value
       : displayValue(authorityValue, binding, displayUnit);
   /* An authority value that arrived while this row was being edited: the draft is kept, and the row
@@ -169,6 +184,22 @@ export function ParametersNumber({
     [commit, instancePointer],
   );
 
+  /* A continual row previews a drag through `onChange`, which can arrive faster than frames: at most one
+   * value per animation frame is sent, the latest. The row shows each value at once. Release sends a value
+   * still waiting before its own, which it skips when the drag ends where it started; cancel and unmount
+   * drop a waiting value, so nothing lands after the final one. */
+  const [continualChange] = React.useState(() =>
+    createRafCoalescer<() => void>((send) => {
+      send();
+    }),
+  );
+  React.useEffect(
+    () => () => {
+      continualChange.cancel();
+    },
+    [continualChange],
+  );
+
   const toNative = (next: number): number => {
     if (displayUnit === undefined || binding.nativeUnit === undefined || displayUnit === binding.nativeUnit) {
       return binding.representation === 'safe-integer' ? Math.round(next) : next;
@@ -191,6 +222,11 @@ export function ParametersNumber({
     // It does report a refusal: a transient value is superseded by design, and so is a final one a
     // newer edit displaced before it was applied, but anything else the authority refused must not
     // look entered.
+    const isFinal = pressure === 'final';
+    if (isFinal) {
+      setPendingFinals((count) => count + 1);
+      globalThis.performance.mark('tau:parameter-edit', { detail: { pointer: instancePointer } });
+    }
     const settle = async (): Promise<boolean> => {
       try {
         const outcome = await commit.commit({
@@ -211,9 +247,10 @@ export function ParametersNumber({
             },
           },
         });
-        if (pressure === 'final' && outcome !== undefined) {
+        if (isFinal && outcome !== undefined) {
+          /* The shown value follows the authority once nothing of this row's is in flight (the
+           * `enteredAgainst` reset above), so a settled edit never flashes the previous value. */
           if (outcome.status === 'committed' || outcome.status === 'cancelled-before-apply') {
-            setLocalValue(undefined);
             return true;
           }
           const authority = authorityRef.current;
@@ -228,6 +265,10 @@ export function ParametersNumber({
         }
       } catch (error) {
         setInputDiagnostic(error instanceof Error ? error.message : 'The parameter could not be saved.');
+      } finally {
+        if (isFinal) {
+          setPendingFinals((count) => count - 1);
+        }
       }
       return false;
     };
@@ -347,6 +388,9 @@ export function ParametersNumber({
       }
       rangeMin={rangeMin}
       rangeMax={rangeMax}
+      // Without a declared bound, that end of the range is only a scrub window.
+      hasMinimum={min !== undefined}
+      hasMaximum={max !== undefined}
       step={currentStep}
       id={id}
       shouldAutoFocus={autoFocus}
@@ -368,10 +412,13 @@ export function ParametersNumber({
             value: sourceUnit === undefined ? native : `${String(Number(next.toPrecision(12)))} ${sourceUnit}`,
           });
         } else if (commit === undefined && enableContinualOnChange) {
-          onChange(native);
+          continualChange.schedule(() => {
+            onChange(native);
+          });
         }
       }}
       onSliderRelease={(next) => {
+        continualChange.flush();
         const final = commitValue(next);
         if (final === undefined) {
           void commit?.endScrub?.();
@@ -380,6 +427,7 @@ export function ParametersNumber({
         }
       }}
       onSliderCancel={() => {
+        continualChange.cancel();
         void commit?.endScrub?.();
         revert();
       }}
@@ -388,7 +436,7 @@ export function ParametersNumber({
       }}
       onTextChange={(text) => {
         if (draftRef.current === '' && text !== '') {
-          setBase(currentBase);
+          setBase(editBase);
         }
         retainDraft(
           text,
@@ -418,4 +466,4 @@ export function ParametersNumber({
       }}
     />
   );
-}
+});

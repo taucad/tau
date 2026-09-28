@@ -86,12 +86,17 @@ export const gltfEdgeSelectedColor = gltfEdgeHoverColor;
  * desaturated slightly so they read as orientation cues rather than primary geometry.
  * Consumed verbatim by `THREE.Color`; valid in any {@linkcode @react-three/drei} `<Line>`,
  * `Line2NodeMaterial`, or other Three.js color slot.
+ *
+ * Axis lines are drawn untone-mapped on both backends (WebGL `toneMapped={false}`; WebGPU
+ * tone-maps only its scene pass), so these are the display colours: the ACES rendering of the
+ * original `rgb(125, 56, 50)` / `rgb(64, 115, 63)` / `rgb(37, 78, 136)` tints, which the axes
+ * showed before the default tone mapping became Neutral.
  */
 export const axesHelperColors = {
   /* oxlint-disable tau-lint/no-hardcoded-color -- Three.js viewport axis tints */
-  x: 'rgb(125, 56, 50)',
-  y: 'rgb(64, 115, 63)',
-  z: 'rgb(37, 78, 136)',
+  x: 'rgb(130, 41, 37)',
+  y: 'rgb(53, 122, 56)',
+  z: 'rgb(0, 70, 145)',
   /* oxlint-enable tau-lint/no-hardcoded-color */
 } as const;
 

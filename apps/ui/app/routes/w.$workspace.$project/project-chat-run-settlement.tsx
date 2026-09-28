@@ -26,6 +26,8 @@ import type { ChatSessionStore } from '#services/chat-session-store.js';
 import { useChatWorkspaceAuthority, usePreparedChatWorkspace } from '#providers/chat-workspace-authority-provider.js';
 import { publishChatTurnSettlement } from '#chat-clients/_internal/chat-host-binding.js';
 import type { ChatTurnSettlementInput } from '#machines/chat-session.machine.js';
+import type { TauAgentHostId } from '@taucad/chat';
+import { daemonPlacementOf, localAgentHostId } from '#lib/agent-host-placement.js';
 import {
   getBrowserAgentHostRun,
   getHostFinalizedTurns,
@@ -48,6 +50,20 @@ const retireUnsubstantiatedRun = async (input: {
 }): Promise<void> => {
   await input.retireClaim(input.chatId, input.runId);
   input.store.releaseDurableRun({ chatId: input.chatId, runId: input.runId });
+};
+
+/**
+ * The daemon a chat's turns run on, or `undefined` for this page's own worker.
+ *
+ * Read from the chat's execution rather than the run, so a run adopted after a
+ * reload answers like one this page admitted. A chat that never chose an
+ * execution runs the build's default Tau placement.
+ * ponytail: per chat, not per run; record the host on the run if a chat can
+ * change placement mid-turn or its default execution stops being a Tau one.
+ */
+const daemonHostOf = (store: Pick<ChatSessionStore, 'get'>, chatId: string): TauAgentHostId | undefined => {
+  const execution = store.get(chatId)?.persistenceActorRef.getSnapshot().context.activeExecution;
+  return execution === undefined ? localAgentHostId() : daemonPlacementOf(execution);
 };
 
 /**
@@ -234,6 +250,17 @@ function SingleChatRunSettlement({ chatId }: { readonly chatId: string }): React
        * the durable settlement, the hold release and the run record, after
        * which the one retry repeated the same deterministic throw. */
       const held = await workspaceAuthority.reclaim(chatId);
+      /* A daemon's run leased nothing here: the daemon leased its own checkout
+       * and settles every run it hosts, after the `completed` this runs on, so
+       * `attested` is still false. Re-leasing it asked this page's authority for
+       * a placement it cannot root (desktop's revisions are the host's), and a
+       * `turn.failed` written here would take the one settlement the host is
+       * about to record. Only this page's bookkeeping is released. */
+      if (held === undefined && daemonHostOf(store, chatId) !== undefined) {
+        store.releaseDurableRun({ chatId, runId });
+        retireBrowserAgentHostRun(chatId, runId);
+        return;
+      }
       const adopted = held?.runId !== runId;
       const rolledOn = held !== undefined && adopted;
       /* Publish only a run this page saw complete and the host has not already

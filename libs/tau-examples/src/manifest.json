@@ -5,7 +5,9 @@
     "kernel": "build123d",
     "name": "v8-engine-brep",
     "mainFile": "main.py",
-    "files": ["main.py"]
+    "files": [
+      "main.py"
+    ]
   },
   {
     "kind": "model",
@@ -13,7 +15,10 @@
     "kernel": "jscad",
     "name": "cube",
     "mainFile": "main.ts",
-    "files": ["main.ts", "tau.json"]
+    "files": [
+      "main.ts",
+      "tau.json"
+    ]
   },
   {
     "kind": "test-fixture",
@@ -21,7 +26,10 @@
     "kernel": "jscad",
     "name": "cube-cylinder-section-fixture",
     "mainFile": "main.ts",
-    "files": ["main.ts", "tau.json"]
+    "files": [
+      "main.ts",
+      "tau.json"
+    ]
   },
   {
     "kind": "model",
@@ -29,7 +37,10 @@
     "kernel": "jscad",
     "name": "cylinder",
     "mainFile": "main.ts",
-    "files": ["main.ts", "tau.json"]
+    "files": [
+      "main.ts",
+      "tau.json"
+    ]
   },
   {
     "kind": "test-fixture",
@@ -37,7 +48,10 @@
     "kernel": "jscad",
     "name": "edge-occlusion-fixture",
     "mainFile": "main.ts",
-    "files": ["main.ts", "tau.json"]
+    "files": [
+      "main.ts",
+      "tau.json"
+    ]
   },
   {
     "kind": "model",
@@ -45,7 +59,10 @@
     "kernel": "jscad",
     "name": "gear",
     "mainFile": "main.ts",
-    "files": ["main.ts", "tau.json"]
+    "files": [
+      "main.ts",
+      "tau.json"
+    ]
   },
   {
     "kind": "test-fixture",
@@ -53,7 +70,22 @@
     "kernel": "jscad",
     "name": "non-manifold-section-fixture",
     "mainFile": "main.ts",
-    "files": ["main.ts", "tau.json"]
+    "files": [
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "jscad",
+    "name": "planetary-gear-system",
+    "mainFile": "main.ts",
+    "files": [
+      "main.geospec.ts",
+      "main.ts",
+      "tau.json"
+    ]
   },
   {
     "kind": "test-fixture",
@@ -61,7 +93,10 @@
     "kernel": "jscad",
     "name": "section-cap-fixture",
     "mainFile": "main.ts",
-    "files": ["main.ts", "tau.json"]
+    "files": [
+      "main.ts",
+      "tau.json"
+    ]
   },
   {
     "kind": "test-fixture",
@@ -69,7 +104,10 @@
     "kernel": "jscad",
     "name": "section-overlap-fixture",
     "mainFile": "main.ts",
-    "files": ["main.ts", "tau.json"]
+    "files": [
+      "main.ts",
+      "tau.json"
+    ]
   },
   {
     "kind": "test-fixture",
@@ -77,7 +115,10 @@
     "kernel": "jscad",
     "name": "section-overlap-heavy-planetary-fixture",
     "mainFile": "main.ts",
-    "files": ["main.ts", "tau.json"]
+    "files": [
+      "main.ts",
+      "tau.json"
+    ]
   },
   {
     "kind": "test-fixture",
@@ -85,7 +126,10 @@
     "kernel": "jscad",
     "name": "section-overlap-heavy-v8-fixture",
     "mainFile": "main.ts",
-    "files": ["main.ts", "tau.json"]
+    "files": [
+      "main.ts",
+      "tau.json"
+    ]
   },
   {
     "kind": "test-fixture",
@@ -93,7 +137,10 @@
     "kernel": "jscad",
     "name": "section-picking-fixture",
     "mainFile": "main.ts",
-    "files": ["main.ts", "tau.json"]
+    "files": [
+      "main.ts",
+      "tau.json"
+    ]
   },
   {
     "kind": "model",
@@ -101,7 +148,12 @@
     "kernel": "manifold",
     "name": "manifold-logo",
     "mainFile": "main.ts",
-    "files": ["README.md", "generate-logo.ts", "main.ts", "manifold.svg"]
+    "files": [
+      "README.md",
+      "generate-logo.ts",
+      "main.ts",
+      "manifold.svg"
+    ]
   },
   {
     "kind": "reference",
@@ -109,7 +161,11 @@
     "kernel": "occt",
     "name": "v8-engine-brep",
     "mainFile": "main.cpp",
-    "files": ["Makefile", "main.cpp", "v8-engine-brep-native"]
+    "files": [
+      "Makefile",
+      "main.cpp",
+      "v8-engine-brep-native"
+    ]
   },
   {
     "kind": "model",
@@ -117,7 +173,156 @@
     "kernel": "opencascade",
     "name": "v8-engine-brep",
     "mainFile": "main.ts",
-    "files": ["main.ts"]
+    "files": [
+      "main.ts"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "openscad",
+    "name": "arq5-racing-quadcopter",
+    "mainFile": "main.scad",
+    "files": [
+      "lib/assy/airframe-assy.geospec.ts",
+      "lib/assy/airframe_assy.scad",
+      "lib/assy/arm-assy.geospec.ts",
+      "lib/assy/arm_assy.scad",
+      "lib/assy/avionics-assy.geospec.ts",
+      "lib/assy/avionics_assy.scad",
+      "lib/assy/camera-assy.geospec.ts",
+      "lib/assy/camera_assy.scad",
+      "lib/assy/gimbal-assy.geospec.ts",
+      "lib/assy/gimbal_assy.scad",
+      "lib/assy/motor-assy.geospec.ts",
+      "lib/assy/motor_assy.scad",
+      "lib/assy/power-assy.geospec.ts",
+      "lib/assy/power_assy.scad",
+      "lib/assy/propeller-assy.geospec.ts",
+      "lib/assy/propeller_assy.scad",
+      "lib/assy/propulsion-unit.geospec.ts",
+      "lib/assy/propulsion_unit.scad",
+      "lib/naca.geospec.ts",
+      "lib/naca.scad",
+      "lib/params.scad",
+      "lib/parts/antenna-fairing.geospec.ts",
+      "lib/parts/antenna.geospec.ts",
+      "lib/parts/antenna.scad",
+      "lib/parts/antenna_fairing.scad",
+      "lib/parts/arm-spar.geospec.ts",
+      "lib/parts/arm_spar.scad",
+      "lib/parts/battery-latch.geospec.ts",
+      "lib/parts/battery-pack.geospec.ts",
+      "lib/parts/battery_latch.scad",
+      "lib/parts/battery_pack.scad",
+      "lib/parts/camera-body.geospec.ts",
+      "lib/parts/camera-lens.geospec.ts",
+      "lib/parts/camera_body.scad",
+      "lib/parts/camera_lens.scad",
+      "lib/parts/esc-stack.geospec.ts",
+      "lib/parts/esc_stack.scad",
+      "lib/parts/flight-controller.geospec.ts",
+      "lib/parts/flight_controller.scad",
+      "lib/parts/fuselage-canopy.geospec.ts",
+      "lib/parts/fuselage-keel.geospec.ts",
+      "lib/parts/fuselage_canopy.scad",
+      "lib/parts/fuselage_keel.scad",
+      "lib/parts/gimbal-damper.geospec.ts",
+      "lib/parts/gimbal-pitch-cradle.geospec.ts",
+      "lib/parts/gimbal-pitch-motor.geospec.ts",
+      "lib/parts/gimbal-roll-motor.geospec.ts",
+      "lib/parts/gimbal-roll-ring.geospec.ts",
+      "lib/parts/gimbal_damper.scad",
+      "lib/parts/gimbal_pitch_cradle.scad",
+      "lib/parts/gimbal_pitch_motor.scad",
+      "lib/parts/gimbal_roll_motor.scad",
+      "lib/parts/gimbal_roll_ring.scad",
+      "lib/parts/heat-insert.geospec.ts",
+      "lib/parts/heat_insert.scad",
+      "lib/parts/landing-skid.geospec.ts",
+      "lib/parts/landing_skid.scad",
+      "lib/parts/m3-shcs.geospec.ts",
+      "lib/parts/m3_shcs.scad",
+      "lib/parts/motor-base.geospec.ts",
+      "lib/parts/motor-bearing.geospec.ts",
+      "lib/parts/motor-bell.geospec.ts",
+      "lib/parts/motor-magnet-ring.geospec.ts",
+      "lib/parts/motor-pod.geospec.ts",
+      "lib/parts/motor-shaft.geospec.ts",
+      "lib/parts/motor-spinner.geospec.ts",
+      "lib/parts/motor-stator.geospec.ts",
+      "lib/parts/motor_base.scad",
+      "lib/parts/motor_bearing.scad",
+      "lib/parts/motor_bell.scad",
+      "lib/parts/motor_magnet_ring.scad",
+      "lib/parts/motor_pod.scad",
+      "lib/parts/motor_shaft.scad",
+      "lib/parts/motor_spinner.scad",
+      "lib/parts/motor_stator.scad",
+      "lib/parts/naca.scad",
+      "lib/parts/nose-fairing.geospec.ts",
+      "lib/parts/nose_fairing.scad",
+      "lib/parts/optical-window.geospec.ts",
+      "lib/parts/optical_window.scad",
+      "lib/parts/params.scad",
+      "lib/parts/prop-blade.geospec.ts",
+      "lib/parts/prop-hub.geospec.ts",
+      "lib/parts/prop-nut.geospec.ts",
+      "lib/parts/prop_blade.scad",
+      "lib/parts/prop_hub.scad",
+      "lib/parts/prop_nut.scad",
+      "lib/parts/receiver.geospec.ts",
+      "lib/parts/receiver.scad",
+      "lib/parts/vtx-module.geospec.ts",
+      "lib/parts/vtx_module.scad",
+      "main.geospec.ts",
+      "main.scad",
+      "sysml/racing_quad.sysml",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "openscad",
+    "name": "cyber-chess-set",
+    "mainFile": "main.scad",
+    "files": [
+      "main.geospec.ts",
+      "main.scad",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "openscad",
+    "name": "dollhouse",
+    "mainFile": "main.scad",
+    "files": [
+      "lib/chimney.scad",
+      "lib/common.scad",
+      "lib/door.scad",
+      "lib/foundation.scad",
+      "lib/roof.scad",
+      "lib/walls.scad",
+      "lib/window.scad",
+      "main.geospec.ts",
+      "main.scad",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "openscad",
+    "name": "fluted-vase",
+    "mainFile": "main.scad",
+    "files": [
+      "main.geospec.ts",
+      "main.scad",
+      "tau.json"
+    ]
   },
   {
     "kind": "model",
@@ -125,7 +330,10 @@
     "kernel": "openscad",
     "name": "kitchen-sink",
     "mainFile": "main.scad",
-    "files": ["main.scad", "tau.json"]
+    "files": [
+      "main.scad",
+      "tau.json"
+    ]
   },
   {
     "kind": "model",
@@ -133,7 +341,9 @@
     "kernel": "picogk",
     "name": "boolean-shell",
     "mainFile": "main.cs",
-    "files": ["main.cs"]
+    "files": [
+      "main.cs"
+    ]
   },
   {
     "kind": "model",
@@ -141,7 +351,11 @@
     "kernel": "picogk",
     "name": "multifile-asset",
     "mainFile": "main.cs",
-    "files": ["ShapeFactory.cs", "main.cs", "radius-scale.txt"]
+    "files": [
+      "ShapeFactory.cs",
+      "main.cs",
+      "radius-scale.txt"
+    ]
   },
   {
     "kind": "model",
@@ -149,7 +363,457 @@
     "kernel": "picogk",
     "name": "parameterized-sphere",
     "mainFile": "main.cs",
-    "files": ["main.cs"]
+    "files": [
+      "main.cs"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "picovoxel",
+    "name": "base-box",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-base-box.ts",
+      "example-spline.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "picovoxel",
+    "name": "base-cylinder",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-base-cylinder.ts",
+      "example-spline.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "picovoxel",
+    "name": "base-lens",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-base-lens.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "picovoxel",
+    "name": "base-pipe",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-base-pipe.ts",
+      "example-spline.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "picovoxel",
+    "name": "base-pipe-segment",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-base-pipe-segment.ts",
+      "ex-base-pipe.ts",
+      "example-spline.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "picovoxel",
+    "name": "base-ring",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-base-ring.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "picovoxel",
+    "name": "base-sphere",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-base-sphere.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "picovoxel",
+    "name": "basic-lattices",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-basic-lattices.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "picovoxel",
+    "name": "boolean-showcase",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "boolean-showcase.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "picovoxel",
+    "name": "gear",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "gear.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "picovoxel",
+    "name": "gyroid-sdf",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "reference",
+    "geometry": "3d",
+    "kernel": "picovoxel",
+    "name": "helix-heat-x",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "helixHeatX.ts",
+      "helpers.ts",
+      "main.ts",
+      "run.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "picovoxel",
+    "name": "hello-world",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "hello-world.ts",
+      "main.geospec.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "reference",
+    "geometry": "3d",
+    "kernel": "picovoxel",
+    "name": "implicit-gyroid-genus",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-implicit-gyroid-genus.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "picovoxel",
+    "name": "implicit-gyroid-sphere",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-implicit-gyroid-sphere.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "reference",
+    "geometry": "3d",
+    "kernel": "picovoxel",
+    "name": "implicit-logic-split",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-implicit-logic-split.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "reference",
+    "geometry": "3d",
+    "kernel": "picovoxel",
+    "name": "implicit-modular",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-implicit-modular.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "reference",
+    "geometry": "3d",
+    "kernel": "picovoxel",
+    "name": "implicit-radial",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-implicit-radial.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "reference",
+    "geometry": "3d",
+    "kernel": "picovoxel",
+    "name": "implicit-random",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-implicit-random.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "picovoxel",
+    "name": "implicit-regular",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-implicit-regular.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "reference",
+    "geometry": "3d",
+    "kernel": "picovoxel",
+    "name": "implicit-super-ellipsoid",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-implicit-super-ellipsoid.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "picovoxel",
+    "name": "lattice-conformal",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-lattice-conformal.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "picovoxel",
+    "name": "lattice-manifold",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-lattice-manifold.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "picovoxel",
+    "name": "lattice-pipe",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-lattice-pipe.ts",
+      "example-spline.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "picovoxel",
+    "name": "lattice-regular",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-lattice-regular.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "picovoxel",
+    "name": "mesh-painter",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-mesh-painter.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "picovoxel",
+    "name": "mesh-trafo",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-mesh-trafo.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "picovoxel",
+    "name": "over-offset",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-over-offset.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "test-fixture",
+    "geometry": "3d",
+    "kernel": "picovoxel",
+    "name": "quasicrystal",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "icosahedralFace.ts",
+      "main.ts",
+      "quasiCrystal.ts",
+      "quasiTile.ts",
+      "quasiTileInflation.ts",
+      "run.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "test-fixture",
+    "geometry": "3d",
+    "kernel": "picovoxel",
+    "name": "rover-wheel",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "main.ts",
+      "randomWheel.ts",
+      "run.ts",
+      "tau.json",
+      "treadPatterns.ts",
+      "wheelContext.ts",
+      "wheelElements.ts",
+      "wheelTread.ts",
+      "wheels.ts"
+    ]
+  },
+  {
+    "kind": "test-fixture",
+    "geometry": "3d",
+    "kernel": "picovoxel",
+    "name": "simple-fluid-simulation",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "main.ts",
+      "run.ts",
+      "simpleFlowDevice.ts",
+      "simpleFluidSimulationInput.ts",
+      "simpleFluidSimulationOutput.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "picovoxel",
+    "name": "sphere-minus-beams",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "picovoxel",
+    "name": "torus-knot-round-trip",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "main.ts",
+      "tau.json"
+    ]
   },
   {
     "kind": "model",
@@ -157,7 +821,23 @@
     "kernel": "replicad",
     "name": "bambu-plate",
     "mainFile": "main.ts",
-    "files": ["main.ts"]
+    "files": [
+      "main.ts"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "replicad",
+    "name": "bench-vise",
+    "mainFile": "main.ts",
+    "files": [
+      "DESIGN.md",
+      "main.geospec.ts",
+      "main.ts",
+      "tau.json",
+      "vice.sysml"
+    ]
   },
   {
     "kind": "model",
@@ -165,7 +845,10 @@
     "kernel": "replicad",
     "name": "birdhouse",
     "mainFile": "main.ts",
-    "files": ["main.ts", "tau.json"]
+    "files": [
+      "main.ts",
+      "tau.json"
+    ]
   },
   {
     "kind": "model",
@@ -173,7 +856,10 @@
     "kernel": "replicad",
     "name": "bottle",
     "mainFile": "main.ts",
-    "files": ["main.ts", "tau.json"]
+    "files": [
+      "main.ts",
+      "tau.json"
+    ]
   },
   {
     "kind": "model",
@@ -200,7 +886,10 @@
     "kernel": "replicad",
     "name": "card-holder",
     "mainFile": "main.ts",
-    "files": ["main.ts", "tau.json"]
+    "files": [
+      "main.ts",
+      "tau.json"
+    ]
   },
   {
     "kind": "model",
@@ -208,7 +897,21 @@
     "kernel": "replicad",
     "name": "chair",
     "mainFile": "main.ts",
-    "files": ["main.ts", "tau.json"]
+    "files": [
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "replicad",
+    "name": "copper-lampshade",
+    "mainFile": "main.ts",
+    "files": [
+      "main.ts",
+      "tau.json"
+    ]
   },
   {
     "kind": "model",
@@ -216,7 +919,10 @@
     "kernel": "replicad",
     "name": "cycloidal-gear",
     "mainFile": "main.ts",
-    "files": ["main.ts", "tau.json"]
+    "files": [
+      "main.ts",
+      "tau.json"
+    ]
   },
   {
     "kind": "model",
@@ -224,7 +930,10 @@
     "kernel": "replicad",
     "name": "decorated-box",
     "mainFile": "main.ts",
-    "files": ["main.ts", "tau.json"]
+    "files": [
+      "main.ts",
+      "tau.json"
+    ]
   },
   {
     "kind": "model",
@@ -232,7 +941,10 @@
     "kernel": "replicad",
     "name": "drinking-glass",
     "mainFile": "main.ts",
-    "files": ["main.ts", "tau.json"]
+    "files": [
+      "main.ts",
+      "tau.json"
+    ]
   },
   {
     "kind": "test-fixture",
@@ -240,7 +952,10 @@
     "kernel": "replicad",
     "name": "flower-attachment-section-outline-fixture",
     "mainFile": "main.ts",
-    "files": ["main.ts", "tau.json"]
+    "files": [
+      "main.ts",
+      "tau.json"
+    ]
   },
   {
     "kind": "model",
@@ -248,7 +963,22 @@
     "kernel": "replicad",
     "name": "gridfinity-box",
     "mainFile": "main.ts",
-    "files": ["main.ts", "tau.json"]
+    "files": [
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "replicad",
+    "name": "heat-exchanger",
+    "mainFile": "main.ts",
+    "files": [
+      "main.geospec.ts",
+      "main.ts",
+      "tau.json"
+    ]
   },
   {
     "kind": "model",
@@ -256,7 +986,9 @@
     "kernel": "replicad",
     "name": "helical-gear",
     "mainFile": "main.ts",
-    "files": ["main.ts"]
+    "files": [
+      "main.ts"
+    ]
   },
   {
     "kind": "model",
@@ -264,7 +996,10 @@
     "kernel": "replicad",
     "name": "hex-screwdriver",
     "mainFile": "main.ts",
-    "files": ["main.ts", "tau.json"]
+    "files": [
+      "main.ts",
+      "tau.json"
+    ]
   },
   {
     "kind": "model",
@@ -272,7 +1007,10 @@
     "kernel": "replicad",
     "name": "hollow-box",
     "mainFile": "main.ts",
-    "files": ["main.ts", "tau.json"]
+    "files": [
+      "main.ts",
+      "tau.json"
+    ]
   },
   {
     "kind": "model",
@@ -280,7 +1018,10 @@
     "kernel": "replicad",
     "name": "ibeam",
     "mainFile": "main.ts",
-    "files": ["main.ts", "tau.json"]
+    "files": [
+      "main.ts",
+      "tau.json"
+    ]
   },
   {
     "kind": "model",
@@ -288,7 +1029,85 @@
     "kernel": "replicad",
     "name": "jscad-logo",
     "mainFile": "main.ts",
-    "files": ["README.md", "generate-logo.ts", "jscad.svg", "main.ts"]
+    "files": [
+      "README.md",
+      "generate-logo.ts",
+      "jscad.svg",
+      "main.ts"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "replicad",
+    "name": "kestrel-240-quadcopter",
+    "mainFile": "main.ts",
+    "files": [
+      "DESIGN.md",
+      "assemblies/airframe.ts",
+      "assemblies/arm-module.ts",
+      "assemblies/avionics.ts",
+      "assemblies/camera-cartridge.ts",
+      "assemblies/gimbal.ts",
+      "assemblies/motor-module.ts",
+      "assemblies/propulsion.ts",
+      "lib/airframe-geometry.ts",
+      "lib/naca-math.ts",
+      "lib/naca.ts",
+      "main.geospec.ts",
+      "main.ts",
+      "parts/airframe/arm.ts",
+      "parts/airframe/battery-saddle.ts",
+      "parts/airframe/battery-strap.ts",
+      "parts/airframe/heat-set-insert.ts",
+      "parts/airframe/lower-shell.ts",
+      "parts/airframe/motor-pad.ts",
+      "parts/airframe/root-clamp.ts",
+      "parts/airframe/shell-screw.ts",
+      "parts/airframe/spar.ts",
+      "parts/airframe/upper-shell.ts",
+      "parts/avionics/antenna.ts",
+      "parts/avionics/battery.ts",
+      "parts/avionics/board-isolator.ts",
+      "parts/avionics/board-screw.ts",
+      "parts/avionics/esc.ts",
+      "parts/avionics/flight-controller.ts",
+      "parts/avionics/power-connector.ts",
+      "parts/avionics/power-wire.ts",
+      "parts/avionics/receiver.ts",
+      "parts/avionics/standoff.ts",
+      "parts/gimbal/actuator-body.ts",
+      "parts/gimbal/actuator-shaft.ts",
+      "parts/gimbal/bearing.ts",
+      "parts/gimbal/camera-front.ts",
+      "parts/gimbal/camera-pcb.ts",
+      "parts/gimbal/camera-rear.ts",
+      "parts/gimbal/fixed-mount.ts",
+      "parts/gimbal/lens-retainer.ts",
+      "parts/gimbal/mount-screw.ts",
+      "parts/gimbal/optical-dome.ts",
+      "parts/gimbal/pitch-yoke.ts",
+      "parts/gimbal/shell-nut.ts",
+      "parts/gimbal/shell-screw.ts",
+      "parts/gimbal/shoulder-axle.ts",
+      "parts/gimbal/threaded-insert.ts",
+      "parts/propulsion/motor-base.ts",
+      "parts/propulsion/motor-bearing.ts",
+      "parts/propulsion/motor-bell.ts",
+      "parts/propulsion/motor-screw.ts",
+      "parts/propulsion/motor-shaft.ts",
+      "parts/propulsion/motor-stator.ts",
+      "parts/propulsion/prop-nut.ts",
+      "parts/propulsion/propeller.ts",
+      "system/quadcopter.sysml",
+      "tau.json",
+      "tests/airframe.geospec.ts",
+      "tests/arm-module.geospec.ts",
+      "tests/avionics.geospec.ts",
+      "tests/gimbal.geospec.ts",
+      "tests/naca.geospec.ts",
+      "tests/propulsion.geospec.ts"
+    ]
   },
   {
     "kind": "model",
@@ -296,7 +1115,10 @@
     "kernel": "replicad",
     "name": "lego",
     "mainFile": "main.ts",
-    "files": ["main.ts", "tau.json"]
+    "files": [
+      "main.ts",
+      "tau.json"
+    ]
   },
   {
     "kind": "model",
@@ -326,7 +1148,12 @@
     "kernel": "replicad",
     "name": "logo",
     "mainFile": "main.ts",
-    "files": ["README.md", "generate-logo.ts", "logo.svg", "main.ts"]
+    "files": [
+      "README.md",
+      "generate-logo.ts",
+      "logo.svg",
+      "main.ts"
+    ]
   },
   {
     "kind": "model",
@@ -334,7 +1161,12 @@
     "kernel": "replicad",
     "name": "logo-keychain",
     "mainFile": "main.ts",
-    "files": ["assets/logo.svg", "logo-keychain.geospec.ts", "main.ts", "params.ts"]
+    "files": [
+      "assets/logo.svg",
+      "logo-keychain.geospec.ts",
+      "main.ts",
+      "params.ts"
+    ]
   },
   {
     "kind": "model",
@@ -342,7 +1174,14 @@
     "kernel": "replicad",
     "name": "nanoraster-logo",
     "mainFile": "main.ts",
-    "files": ["README.md", "banner.svg", "generate-logo.ts", "main.ts", "nanoraster.svg", "wordmark.ts"]
+    "files": [
+      "README.md",
+      "banner.svg",
+      "generate-logo.ts",
+      "main.ts",
+      "nanoraster.svg",
+      "wordmark.ts"
+    ]
   },
   {
     "kind": "model",
@@ -350,7 +1189,25 @@
     "kernel": "replicad",
     "name": "picovoxel-logo",
     "mainFile": "main.ts",
-    "files": ["README.md", "generate-logo.ts", "main.ts", "picovoxel.svg"]
+    "files": [
+      "README.md",
+      "generate-logo.ts",
+      "main.ts",
+      "picovoxel.svg"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "replicad",
+    "name": "planetary-gear-system",
+    "mainFile": "main.ts",
+    "files": [
+      "DESIGN.md",
+      "main.geospec.ts",
+      "main.ts",
+      "tau.json"
+    ]
   },
   {
     "kind": "model",
@@ -358,7 +1215,10 @@
     "kernel": "replicad",
     "name": "pot-plant",
     "mainFile": "main.ts",
-    "files": ["main.ts", "tau.json"]
+    "files": [
+      "main.ts",
+      "tau.json"
+    ]
   },
   {
     "kind": "model",
@@ -366,7 +1226,9 @@
     "kernel": "replicad",
     "name": "projection-test",
     "mainFile": "main.ts",
-    "files": ["main.ts"]
+    "files": [
+      "main.ts"
+    ]
   },
   {
     "kind": "model",
@@ -374,7 +1236,9 @@
     "kernel": "replicad",
     "name": "rao-nozzle",
     "mainFile": "main.ts",
-    "files": ["main.ts"]
+    "files": [
+      "main.ts"
+    ]
   },
   {
     "kind": "model",
@@ -382,7 +1246,12 @@
     "kernel": "replicad",
     "name": "replicad-logo",
     "mainFile": "main.ts",
-    "files": ["README.md", "generate-logo.ts", "main.ts", "replicad.svg"]
+    "files": [
+      "README.md",
+      "generate-logo.ts",
+      "main.ts",
+      "replicad.svg"
+    ]
   },
   {
     "kind": "model",
@@ -390,7 +1259,35 @@
     "kernel": "replicad",
     "name": "simple-tray",
     "mainFile": "main.ts",
-    "files": ["main.ts", "tau.json"]
+    "files": [
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "replicad",
+    "name": "six-axis-arm",
+    "mainFile": "main.ts",
+    "files": [
+      "DESIGN.md",
+      "main.geospec.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "replicad",
+    "name": "spur-gearbox",
+    "mainFile": "main.ts",
+    "files": [
+      "main.geospec.ts",
+      "main.ts",
+      "tau.json"
+    ]
   },
   {
     "kind": "model",
@@ -398,7 +1295,23 @@
     "kernel": "replicad",
     "name": "staircase",
     "mainFile": "main.ts",
-    "files": ["main.ts", "tau.json"]
+    "files": [
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "replicad",
+    "name": "standing-fan",
+    "mainFile": "main.ts",
+    "files": [
+      "DESIGN.md",
+      "main.geospec.ts",
+      "main.ts",
+      "tau.json"
+    ]
   },
   {
     "kind": "model",
@@ -406,7 +1319,9 @@
     "kernel": "replicad",
     "name": "stress-test",
     "mainFile": "main.ts",
-    "files": ["main.ts"]
+    "files": [
+      "main.ts"
+    ]
   },
   {
     "kind": "model",
@@ -414,7 +1329,10 @@
     "kernel": "replicad",
     "name": "t-slot-rail",
     "mainFile": "main.ts",
-    "files": ["main.ts", "tau.json"]
+    "files": [
+      "main.ts",
+      "tau.json"
+    ]
   },
   {
     "kind": "model",
@@ -422,7 +1340,10 @@
     "kernel": "replicad",
     "name": "table",
     "mainFile": "main.ts",
-    "files": ["main.ts", "tau.json"]
+    "files": [
+      "main.ts",
+      "tau.json"
+    ]
   },
   {
     "kind": "model",
@@ -430,7 +1351,12 @@
     "kernel": "replicad",
     "name": "tau-wordmark",
     "mainFile": "main.ts",
-    "files": ["README.md", "generate-wordmark.ts", "main.ts", "wordmark.svg"]
+    "files": [
+      "README.md",
+      "generate-wordmark.ts",
+      "main.ts",
+      "wordmark.svg"
+    ]
   },
   {
     "kind": "model",
@@ -438,7 +1364,38 @@
     "kernel": "replicad",
     "name": "tray",
     "mainFile": "main.ts",
-    "files": ["main.ts", "tau.json"]
+    "files": [
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "replicad",
+    "name": "turbofan",
+    "mainFile": "main.ts",
+    "files": [
+      "DESIGN.md",
+      "layout.ts",
+      "main.geospec.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "replicad",
+    "name": "v8-engine",
+    "mainFile": "main.ts",
+    "files": [
+      "DESIGN.md",
+      "layout.ts",
+      "main.geospec.ts",
+      "main.ts",
+      "tau.json"
+    ]
   },
   {
     "kind": "spec-fixture",
@@ -499,7 +1456,10 @@
     "kernel": "replicad",
     "name": "vase",
     "mainFile": "main.ts",
-    "files": ["main.ts", "tau.json"]
+    "files": [
+      "main.ts",
+      "tau.json"
+    ]
   },
   {
     "kind": "model",
@@ -507,7 +1467,10 @@
     "kernel": "replicad",
     "name": "wavy-vase",
     "mainFile": "main.ts",
-    "files": ["main.ts", "tau.json"]
+    "files": [
+      "main.ts",
+      "tau.json"
+    ]
   },
   {
     "kind": "model",
@@ -515,7 +1478,22 @@
     "kernel": "replicad",
     "name": "wedge-door-stopper",
     "mainFile": "main.ts",
-    "files": ["main.ts", "tau.json"]
+    "files": [
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "replicad",
+    "name": "wheelbarrow",
+    "mainFile": "main.ts",
+    "files": [
+      "main.geospec.ts",
+      "main.ts",
+      "tau.json"
+    ]
   },
   {
     "kind": "model",
@@ -523,6 +1501,12 @@
     "kernel": "replicad",
     "name": "worm-gear-system",
     "mainFile": "main.ts",
-    "files": ["MANUFACTURING.md", "main.geospec.ts", "main.ts", "tau.json", "tooth-profile.ts"]
+    "files": [
+      "MANUFACTURING.md",
+      "main.geospec.ts",
+      "main.ts",
+      "tau.json",
+      "tooth-profile.ts"
+    ]
   }
 ]

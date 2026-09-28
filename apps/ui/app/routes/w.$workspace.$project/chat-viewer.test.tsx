@@ -1,15 +1,16 @@
 import type { MockInstance } from 'vitest';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import type { RefObject } from 'react';
+import { createActor, createAsyncLogic } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import type { DockviewPanelApi } from 'dockview-react';
 import type { Geometry, GeometryComponentManifest } from '@taucad/types';
 import type { KernelIssue } from '@taucad/runtime';
 import { defaultGraphicsSettings, defaultRenderTimeout } from '#constants/editor.constants.js';
-import type { GraphicsViewSettings } from '#constants/editor.constants.js';
+import type { GraphicsViewSettings, PinnedMeasurement } from '#constants/editor.constants.js';
 import type { cadMachine } from '#machines/cad.machine.js';
-import type { graphicsMachine } from '#machines/graphics.machine.js';
+import { graphicsMachine } from '#machines/graphics.machine.js';
 import type { ModelInteractionContext } from '#machines/model-interaction.machine.js';
 
 // =============================================================================
@@ -42,6 +43,7 @@ let mockUnitSettings: Record<string, { renderTimeout: number }> = {};
 let mockFileTree: Map<string, { type: 'file' | 'dir'; name: string }>;
 let mockFileContent: { kind: string; text?: string };
 let mockHoveredComponentId: string | undefined;
+let mockAreToolsRunning = false;
 let mockCadViewerSecondaryPointerMode: 'component-hit' | 'suppressed';
 let mockCadViewerProps:
   | {
@@ -259,7 +261,7 @@ vi.mock('#hooks/use-project.js', () => ({
 // =============================================================================
 
 vi.mock('#hooks/use-file-tree.js', () => ({
-  useFileTreeMap: () => mockFileTree,
+  useFileTreeSelector: <T,>(select: (tree: typeof mockFileTree) => T): T => select(mockFileTree),
 }));
 
 vi.mock('#hooks/use-file-content.js', () => ({
@@ -330,19 +332,11 @@ vi.mock('#routes/w.$workspace.$project/chat-viewer-status.js', () => ({
 }));
 
 vi.mock('#routes/w.$workspace.$project/chat-viewer-controls.js', () => ({
-  ChatViewerControls: () => null,
-}));
-
-vi.mock('#routes/w.$workspace.$project/chat-interface-graphics.js', () => ({
-  ChatInterfaceGraphics: () => null,
-}));
-
-vi.mock('#routes/w.$workspace.$project/chat-interface-status.js', () => ({
-  ChatInterfaceStatus: () => null,
+  ChatViewerControls: () => <div role='group' aria-label='Viewer controls' />,
 }));
 
 vi.mock('#components/cad/ar-button.js', () => ({
-  ArButton: () => null,
+  ArButton: () => <button type='button' aria-label='View in AR' />,
 }));
 
 // `use-graphics` drags in three.js via screenshot/camera capability machines, so
@@ -364,10 +358,16 @@ vi.mock('#hooks/use-graphics.js', () => ({
         enableAxes: true,
         enableMatcap: false,
         upDirection: 'z',
+        isSectionViewActive: mockAreToolsRunning,
+        isMeasureActive: mockAreToolsRunning,
+        measurements: [],
       },
     }),
   useModelInteractionSelector: (selector: (state: { context: ModelInteractionContext }) => unknown) =>
     selector({ context: createModelInteractionContext() }),
+  useKinematicsSelector: (
+    selector: (state: { context: { unitsById: Record<string, never>; revision: number } }) => unknown,
+  ) => selector({ context: { unitsById: {}, revision: 0 } }),
 }));
 
 const { ChatViewer } = await import('./chat-viewer.js');
@@ -392,6 +392,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
     mockFileContent = { kind: 'text', text: 'cube();' };
     mockUnitSettings = {};
     mockHoveredComponentId = undefined;
+    mockAreToolsRunning = false;
     mockCadViewerSecondaryPointerMode = 'component-hit';
     mockCadViewerProps = undefined;
     mockViewGraphics.set('view-1', mockGraphicsActor);
@@ -620,7 +621,31 @@ describe('ChatViewer reopen-renderer overlay', () => {
     });
   });
 
-  it('clears geometry-dependent camera state when the pane switches files', () => {
+  it('should clear the camera pose, every cut and every measurement when the pane switches files', () => {
+    const pinned = {
+      id: 'measurement-pinned',
+      frameId: 'tau:root',
+      startPoint: [0, 0, 0],
+      endPoint: [0.02, 0, 0],
+      distance: 0.02,
+    } satisfies PinnedMeasurement;
+    const graphics = createActor(
+      graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
+      { input: { pinnedMeasurements: [pinned] } },
+    ).start();
+    onTestFinished(() => {
+      graphics.stop();
+    });
+    graphics.send({ type: 'setSectionViewActive', payload: true });
+    graphics.send({ type: 'addSectionCut', payload: { kind: 'plane', plane: 'xy' } });
+    expect(graphics.getSnapshot().context.sectionCuts).toHaveLength(2);
+    // Measuring, with one unpinned measurement and a point placed toward the next.
+    graphics.send({ type: 'setMeasureActive', payload: true });
+    graphics.send({ type: 'startMeasurement', payload: [0, 0, 0] });
+    graphics.send({ type: 'completeMeasurement', payload: [0, 0.01, 0] });
+    graphics.send({ type: 'startMeasurement', payload: [0, 0, 0.01] });
+    expect(graphics.getSnapshot().context.measurements).toHaveLength(2);
+    mockViewGraphics.set('view-1', graphics);
     const cameraView = {
       frameId: 'tau:root',
       target: [3, 4, 5],
@@ -636,7 +661,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
           ...defaultGraphicsSettings,
           cameraFovAngle: 42,
           cameraView,
-          sectionView: { active: true, plane: 'xz', pivot: [1, 2, 3], rotation: [0, 0, 0], direction: -1 },
+          sectionView: { active: true, cuts: [{ kind: 'plane', plane: 'xz', offset: 2, isFlipped: true }] },
         },
       },
     };
@@ -659,19 +684,66 @@ describe('ChatViewer reopen-renderer overlay', () => {
         },
       },
     });
-    /* Without this the retained actor keeps the cut, and the next publish writes it -- pivoted on
-     * geometry that is no longer open -- straight back into the record the clear just emptied. */
-    expect(mockGraphicsSend).toHaveBeenCalledWith({ type: 'setSectionViewActive', payload: false });
+    /* The retained actor must drop the cuts and measurements too: Section off alone keeps the cuts, the
+     * pinned measurement still draws, and the next persist writes both -- placed on geometry that is no
+     * longer open -- into the record the clear just emptied. */
+    expect(graphics.getSnapshot().context).toMatchObject({
+      sectionCuts: [],
+      isSectionViewActive: false,
+      measurements: [],
+      currentMeasurementStart: undefined,
+    });
   });
 
-  it('lets empty bottom-control overlay space pass pointer events through to the canvas', () => {
+  it('should centre the bar on the last line of a strip that passes pointer events to the canvas, never past its left edge', () => {
     mockGeometryUnits.set(helperEntryPath, createMockCadActor());
 
     render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
 
-    const overlay = screen.getByTestId('chat-viewer-bottom-controls-overlay');
-    expect(overlay.className).toContain('pointer-events-none');
-    expect(overlay.className).toContain('[&>*]:pointer-events-auto');
+    const bar = screen.getByRole('group', { name: 'Viewer controls' });
+    const strip = bar.parentElement!;
+    expect(strip).toHaveClass(
+      'pointer-events-none',
+      'absolute',
+      'inset-x-2',
+      'bottom-2',
+      'flex-col',
+      'items-center-safe',
+    );
+    expect(strip).not.toHaveClass('items-center');
+    expect(strip.lastElementChild).toBe(bar);
+  });
+
+  it('should keep the issues card and the AR button on the line above the bar, so the bar never covers them', () => {
+    mockGeometryUnits.set(helperEntryPath, createMockCadActor());
+
+    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+
+    const line = screen.getByTestId('chat-stack-trace').parentElement!;
+    expect(line).toContainElement(screen.getByRole('button', { name: 'View in AR' }));
+    expect(line).toHaveClass('[&>*]:pointer-events-auto');
+    expect(line.nextElementSibling).toBe(screen.getByRole('group', { name: 'Viewer controls' }));
+  });
+
+  it('should make the viewer root the frame the shortcuts target and the container the bar sizes to', () => {
+    mockGeometryUnits.set(helperEntryPath, createMockCadActor());
+
+    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+
+    const root = screen.getByTestId('chat-viewer-layout');
+    expect(root).toHaveAttribute('data-viewer-frame');
+    expect(root).toHaveClass('@container/viewer');
+    expect(root).toContainElement(screen.getByRole('group', { name: 'Viewer controls' }));
+  });
+
+  it('should leave running tools to the bar, with no status chip or tool panel', () => {
+    mockAreToolsRunning = true;
+    mockGeometryUnits.set(helperEntryPath, createMockCadActor());
+
+    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+
+    expect(screen.getByRole('group', { name: 'Viewer controls' })).toBeInTheDocument();
+    expect(screen.queryByText(/section view|measur/i)).not.toBeInTheDocument();
   });
 
   it('anchors the gizmo to the clipped canvas region', () => {
@@ -729,6 +801,26 @@ describe('ChatViewer reopen-renderer overlay', () => {
       '--viewer-hover-label-x': '150px',
       '--viewer-hover-label-y': '160px',
     });
+  });
+
+  it('should flip the hover badge above the pointer as the pointer nears the top of a grown bar', () => {
+    mockHoveredComponentId = rightRimComponentId;
+    mockGeometryUnits.set(helperEntryPath, createMockCadActor());
+
+    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+
+    // The viewer spans y 20–320; with three rows open the bottom controls start 150 px above its bottom edge.
+    const bottomControls = screen.getByRole('group', { name: 'Viewer controls' }).parentElement!;
+    // An own method: the prototype is already spied for every element.
+    bottomControls.getBoundingClientRect = () => new DOMRect(18, 170, 484, 142);
+    const canvasRegion = screen.getByTestId('cad-viewer-canvas-region');
+    const layout = screen.getByTestId('chat-viewer-layout');
+
+    fireCanvasPointerMove(canvasRegion, { clientX: 74, clientY: 150 });
+    expect(layout).toHaveStyle({ '--viewer-hover-label-translate-y': 'calc(-100% - 10px)' });
+
+    fireCanvasPointerMove(canvasRegion, { clientX: 74, clientY: 100 });
+    expect(layout).toHaveStyle({ '--viewer-hover-label-translate-y': '10px' });
   });
 
   it('should hide the hovered component label when the pointer leaves the canvas region', () => {
@@ -808,7 +900,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
     expect(screen.getByText('Hide')).toBeInTheDocument();
     expect(screen.getByText('Isolate')).toBeInTheDocument();
     expect(screen.getByText('Opacity')).toBeInTheDocument();
-    expect(screen.getByRole('textbox', { name: 'Opacity' })).toHaveValue('100');
+    expect(screen.getByRole('spinbutton', { name: 'Opacity' })).toHaveValue('100');
 
     fireEvent.click(screen.getByText('Reveal in Explorer'));
 

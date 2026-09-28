@@ -52,6 +52,8 @@ import { assertRootedPath } from '@taucad/utils/path';
  * as an external import. */
 import type { ExportFile, RuntimeFileSystemBase, SourceRevision } from '@taucad/runtime/types';
 import type { RuntimeClient } from '@taucad/runtime/client';
+import type { MachineClient } from '@taucad/runtime/machine';
+import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
 import type { ActorRefFrom } from 'xstate';
 import type { parameterSetMachine } from '@taucad/parameters/set-machine';
 
@@ -144,13 +146,13 @@ const issueMessage = (issues: ReadonlyArray<{ readonly message: string }>, fallb
 const runtimeFailure = (
   error: unknown,
   targetFile: string,
-): { readonly success: false; readonly errorCode: 'UNKNOWN'; readonly message: string } => {
+): { readonly success: false; readonly errorCode: 'UNKNOWN' | 'RESULT_TOO_LARGE'; readonly message: string } => {
   const reason = error instanceof Error ? error.message : String(error);
-  const isUnavailable =
-    error instanceof Error && (error as Error & { readonly code?: unknown }).code === 'RUNTIME_UNAVAILABLE';
+  const code = error instanceof Error ? (error as Error & { readonly code?: unknown }).code : undefined;
+  const isUnavailable = code === 'RUNTIME_UNAVAILABLE';
   return {
     success: false,
-    errorCode: rpcClientErrorCode.unknown,
+    errorCode: code === 'RESULT_TOO_LARGE' ? rpcClientErrorCode.resultTooLarge : rpcClientErrorCode.unknown,
     /* `RUNTIME_UNAVAILABLE` already reads as a sentence about this host — the
      * supervisor's own failure, verbatim — so it is not wrapped twice. */
     message: isUnavailable ? reason : `This Tau Host could not render ${targetFile}: ${reason}`,
@@ -378,6 +380,23 @@ export type HostToolRegistryOptions = {
    * client here follows.
    */
   readonly revisions?: ProjectRevisions['history'] | undefined;
+  /**
+   * The machines facet this host serves its machine tools over, once the
+   * composition has negotiated and granted it — the daemon under
+   * `tau serve --machines`, the desktop services utility. Omit it and no
+   * machine tool is offered rather than offered-and-failing (the same rule
+   * every other client here follows); a facet that is present but not
+   * `available` offers none either.
+   */
+  readonly machines?: RuntimeTransportFacet<MachineClient> | undefined;
+  /**
+   * The `tau.json` id of the project `workspaceRoot` holds: the desktop's
+   * attached project, or the daemon's served root. Every artifact `request_print`
+   * slices names it, which is how a machine host finds the file again. Omit it
+   * and `request_print` is not offered: a host that cannot name its project
+   * never guesses one.
+   */
+  readonly projectId?: string | undefined;
 };
 
 /**
@@ -481,7 +500,18 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
           signal: job.signal,
         });
         if (!result.success) {
-          throw new Error(issueMessage(result.issues, 'Image capture failed'));
+          const message = issueMessage(result.issues, 'Image capture failed');
+          const overLimit = result.issues.some(
+            (issue) =>
+              issue.details !== null &&
+              typeof issue.details === 'object' &&
+              'type' in issue.details &&
+              issue.details.type === 'render' &&
+              'code' in issue.details &&
+              issue.details.code === 'parse' &&
+              /accessor \d+ count \d+ exceeds \d+|declared accessor values exceed \d+/u.test(issue.message),
+          );
+          throw Object.assign(new Error(message), overLimit ? { code: 'RESULT_TOO_LARGE' } : {});
         }
         return result.data;
       },
@@ -525,10 +555,16 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
      * worker returns — the only host-specific part is which runner ran.
      */
     const geospec: RpcGeoSpecClient | undefined = runnerFactory && {
-      async runTests(args) {
+      async runTests(args, context) {
         try {
+          context?.signal?.throwIfAborted();
           const runner = await runnerFactory(workspaceRoot);
+          const abortRunner = (): void => {
+            runner.abort('test_model request cancelled');
+          };
+          context?.signal?.addEventListener('abort', abortRunner, { once: true });
           try {
+            context?.signal?.throwIfAborted();
             const output = await runGeoSpecTests({
               discovery: {
                 readdir: async (path) => readdir(path),
@@ -544,8 +580,10 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
               // resolves its own sources, and an unproven verdict must not claim a revision.
               ...(runner.sourceRevisions === undefined ? {} : { sourceRevisions: runner.sourceRevisions }),
             });
+            context?.signal?.throwIfAborted();
             return { success: true, ...output };
           } finally {
+            context?.signal?.removeEventListener('abort', abortRunner);
             await runner.close();
           }
         } catch (error) {
@@ -554,6 +592,12 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
       },
     };
 
+    /* `request_print` needs every leg of the print path: the project id here
+     * names the artifact's project, and the registry offers the tool only when
+     * a runtime to slice with and a machine to ask are attached too. A
+     * candidate turn's slice lands in its checkout, which the machine host
+     * finds through the same project id. */
+    const { revisions, machines, projectId } = options;
     return createChatToolRegistry({
       fileSystemFor: (signal) => createProviderRpcFileSystem({ provider: view, mutations, signal }),
       recordFileSystemFor: (signal) => createProviderRpcFileSystem({ provider: recordView, mutations, signal }),
@@ -561,7 +605,21 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
       ...(parameters === undefined ? {} : { parameters }),
       ...(geospec === undefined ? {} : { geospec }),
       geospecAuthoringMode: options.geospecAuthoringMode,
-      ...(options.revisions === undefined ? {} : { revisions: options.revisions }),
+      ...(revisions === undefined ? {} : { revisions }),
+      ...(projectId === undefined
+        ? {}
+        : {
+            print: {
+              projectId,
+              readArtifact: async ({ path, signal }) => {
+                signal.throwIfAborted();
+                const bytes = await recordView.readFile(assertRootedPath(path));
+                signal.throwIfAborted();
+                return bytes;
+              },
+            },
+          }),
+      ...(machines === undefined ? {} : { machines }),
       skillResolver,
       testingEnabled: geospec !== undefined,
     });

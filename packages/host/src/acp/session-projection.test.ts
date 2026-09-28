@@ -403,7 +403,18 @@ describe('the ACP turn projection', () => {
     [
       'screenshot',
       { targetFile: 'main.ts', mode: 'single' },
-      { images: [{ view: 'isometric', dataUrl: 'data:image/webp;base64,AQ==' }] },
+      {
+        images: [
+          {
+            view: 'isometric',
+            path: `attachments/${'0'.repeat(64)}.webp`,
+            absolutePath: '/tmp/capture.webp',
+            mimeType: 'image/webp',
+            byteLength: 1,
+            sha256: '0'.repeat(64),
+          },
+        ],
+      },
     ],
     [
       'export_geometry',
@@ -502,8 +513,96 @@ describe('the ACP turn projection', () => {
     expect(messages[1]).toMatchObject({
       role: 'tool-output',
       isError: true,
-      content: { errorCode: 'MCP_TOOL_ERROR', message: 'RENDER_TIMEOUT: Renderer did not settle.' },
+      content: { errorCode: 'RENDER_TIMEOUT', message: 'Renderer did not settle.' },
     });
+  });
+
+  it('projects a persisted screenshot and names clipped MCP output precisely', async () => {
+    const sha256 = 'a'.repeat(64);
+    const image = {
+      view: 'isometric',
+      path: `attachments/${sha256}.webp`,
+      absolutePath: `/tmp/tau-capture/${sha256}.webp`,
+      mimeType: 'image/webp',
+      byteLength: 3,
+      sha256,
+    };
+    const input = {
+      sessionUpdate: 'tool_call',
+      toolCallId: 'capture',
+      title: 'mcp.tau.screenshot',
+      kind: 'execute',
+      status: 'pending',
+      rawInput: { server: 'tau', tool: 'screenshot', arguments: { targetFile: 'main.ts', mode: 'single' } },
+      _meta: { is_mcp_tool_call: true },
+    } as const;
+    const valid = await project(
+      [
+        input,
+        {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'capture',
+          status: 'completed',
+          rawOutput: {
+            result: {
+              content: [{ type: 'resource_link', uri: `file://${image.absolutePath}`, name: 'isometric screenshot' }],
+              structuredContent: { images: [image] },
+            },
+          },
+        },
+      ] as SessionUpdate[],
+      'codex',
+      undefined,
+      'tau',
+    );
+    expect(valid[1]).toMatchObject({ role: 'tool-output', isError: false, content: { images: [image] } });
+
+    const clipped = await project(
+      [
+        input,
+        {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'capture',
+          status: 'completed',
+          rawOutput: {
+            result: { content: [{ type: 'text', text: `{"images":"${'a'.repeat(128)}…4146 chars truncated…"}` }] },
+          },
+        },
+      ] as SessionUpdate[],
+      'codex',
+      undefined,
+      'tau',
+    );
+    expect(clipped[1]).toMatchObject({
+      role: 'tool-output',
+      isError: true,
+      content: { errorCode: 'MCP_RESULT_TRUNCATED' },
+    });
+
+    await Promise.all(
+      (
+        [
+          [undefined, 'MCP_RESULT_MISSING'],
+          [{ images: [{ view: 'isometric', path: 'missing.webp' }] }, 'MCP_RESULT_INVALID'],
+        ] as const
+      ).map(async ([structuredContent, errorCode]) => {
+        const messages = await project(
+          [
+            input,
+            {
+              sessionUpdate: 'tool_call_update',
+              toolCallId: 'capture',
+              status: 'completed',
+              rawOutput: { result: { content: [], structuredContent } },
+            },
+          ] as SessionUpdate[],
+          'codex',
+          undefined,
+          'tau',
+        );
+        expect(messages[1]).toMatchObject({ role: 'tool-output', isError: true, content: { errorCode } });
+      }),
+    );
   });
 
   it('trusts the terminal ACP status when an adapter omits MCP isError', async () => {
@@ -536,7 +635,138 @@ describe('the ACP turn projection', () => {
     expect(messages[1]).toMatchObject({
       role: 'tool-output',
       isError: true,
-      content: { errorCode: 'MCP_TOOL_ERROR', message: 'UNKNOWN: Renderer returned no finite bounds.' },
+      content: { errorCode: 'UNKNOWN', message: 'Renderer returned no finite bounds.' },
+    });
+  });
+
+  describe('keeps each audited failure category (L1)', () => {
+    const call = {
+      sessionUpdate: 'tool_call',
+      toolCallId: 'l1',
+      title: 'mcp.tau.screenshot',
+      kind: 'execute',
+      status: 'pending',
+      rawInput: { server: 'tau', tool: 'screenshot', arguments: { targetFile: 'main.kcl', mode: 'single' } },
+      _meta: { is_mcp_tool_call: true },
+    } as const satisfies SessionUpdate;
+    /** A failed Codex MCP call as its rollout records it: text only, no `structuredContent`. */
+    const failed = (text: string): SessionUpdate => ({
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'l1',
+      status: 'failed',
+      rawOutput: { result: { content: [{ type: 'text', text }], isError: true }, error: null },
+    });
+    const outputOf = async (update: SessionUpdate, signal = new AbortController().signal): Promise<unknown> => {
+      const appended: ExternalAgentLogEvent[] = [];
+      let nextId = 0;
+      const projection = createTurnProjection({
+        turn: { ...stubTurn(appended), signal },
+        createId: () => {
+          nextId += 1;
+          return `id-${String(nextId)}`;
+        },
+        agentId: 'codex',
+        tauMcpServerName: 'tau',
+      });
+      projection.update(call);
+      projection.update(update);
+      await projection.flush();
+      const output = appended.find(
+        (event) => event.type === 'message.appended' && event.message.role === 'tool-output',
+      );
+      return output?.type === 'message.appended' && output.message.role === 'tool-output'
+        ? { content: output.message.content, isError: output.message.isError }
+        : undefined;
+    };
+
+    it.each([
+      {
+        shape: 'a kernel authentication timeout',
+        errorCode: 'AUTHENTICATION_ERROR',
+        message: 'Authentication timeout',
+      },
+      {
+        shape: 'a model or SDK error',
+        errorCode: 'UNKNOWN',
+        message: 'You need a previous curve to sketch a tangent arc',
+      },
+      {
+        shape: 'a tool execution error',
+        errorCode: 'IO_ERROR',
+        message: 'Main refused the desktop runtime-port request.',
+      },
+    ])('projects $shape with its own code, never MCP_RESULT_INVALID', async ({ errorCode, message }) => {
+      await expect(outputOf(failed(`${errorCode}: ${message}`))).resolves.toEqual({
+        content: { errorCode, message },
+        isError: true,
+      });
+    });
+
+    it.each(['TOOL_INPUT_VALIDATION_FAILED', 'TOOL_NOT_ALLOWED', 'MCP_RUN_INACTIVE'])(
+      'preserves the Tau MCP host code %s from a text-only result',
+      async (errorCode) => {
+        await expect(outputOf(failed(`${errorCode}: Tool refused.`))).resolves.toEqual({
+          content: { errorCode, message: 'Tool refused.' },
+          isError: true,
+        });
+      },
+    );
+
+    it('keeps an MCP SDK refusal that carries no Tau code a generic tool failure', async () => {
+      const message = 'MCP error -32602: Invalid arguments for tool test_model';
+      await expect(outputOf(failed(message))).resolves.toEqual({
+        content: { errorCode: 'MCP_TOOL_ERROR', message },
+        isError: true,
+      });
+    });
+
+    it('keeps an unrecognized uppercase prefix as a generic tool failure', async () => {
+      const message = 'SERVICE_FELL_OVER: Runtime error';
+      await expect(outputOf(failed(message))).resolves.toEqual({
+        content: { errorCode: 'MCP_TOOL_ERROR', message },
+        isError: true,
+      });
+    });
+
+    it('keeps a Codex transport timeout a transport failure', async () => {
+      await expect(
+        outputOf({
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'l1',
+          status: 'failed',
+          rawOutput: {
+            result: null,
+            error: { message: 'tool call error: tool call failed for `tau/test_model`\n\nCaused by:\n    timed out' },
+          },
+        }),
+      ).resolves.toMatchObject({ content: { errorCode: 'MCP_TRANSPORT_ERROR' }, isError: true });
+    });
+
+    it.each(['This operation was aborted', 'The turn was cancelled.'])(
+      'records the abort failure %s of a stopped turn as the user interruption',
+      async (message) => {
+        await expect(outputOf(failed(message), AbortSignal.abort())).resolves.toEqual({
+          content: { errorCode: 'USER_INTERRUPTED', message: 'Interrupted by user.' },
+          isError: true,
+        });
+      },
+    );
+
+    it('preserves a completed tool failure when Stop races with its result', async () => {
+      await expect(
+        outputOf(failed('WRITE_VERIFICATION_FAILED: The file changed.'), AbortSignal.abort()),
+      ).resolves.toEqual({
+        content: { errorCode: 'WRITE_VERIFICATION_FAILED', message: 'The file changed.' },
+        isError: true,
+      });
+    });
+
+    it('does not call an unrelated MCP failure a user interruption after Stop', async () => {
+      const message = 'MCP error -32602: Invalid arguments for tool test_model';
+      await expect(outputOf(failed(message), AbortSignal.abort())).resolves.toEqual({
+        content: { errorCode: 'MCP_TOOL_ERROR', message },
+        isError: true,
+      });
     });
   });
 

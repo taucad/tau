@@ -259,6 +259,12 @@ const memberOrdering = [
 const moduleBoundaryOptions = {
   allowCircularSelfDependency: true,
   /*
+   * The Quick Look extensions are a nested app project (`desktop-quick-look`,
+   * `apps/desktop/macos`) that owns its format manifest. The desktop shell reads
+   * that one JSON contract; nothing else crosses the app-to-app boundary.
+   */
+  allow: ['#macos/quick-look-formats.json'],
+  /*
    * Libraries that are deliberately lazy-loaded in one consumer and
    * statically imported in another: the UI keeps the runtime and the
    * filesystem bridge out of its initial bundle, and the CLI client
@@ -383,6 +389,11 @@ const config = [
       // and checks them against a baked evidence digest, so any byte change makes the splash
       // throw. They are model data outside every tsconfig, so the project service cannot parse them.
       'apps/ui/app/components/geometry/splash/planetary/**',
+      // Same class: byte-pinned PicoVoxel upstream ports (`provenance.json` hashes); only Tau's
+      // `main.ts` adapters and GeoSpec suites are linted.
+      'libs/tau-examples/src/kernels/picovoxel/*/*.ts',
+      '!libs/tau-examples/src/kernels/picovoxel/*/main.ts',
+      '!libs/tau-examples/src/kernels/picovoxel/*/*.geospec.ts',
       '**/content/docs/**/props/**',
       '**/vitest.integration.config.ts',
       'experiments/**',
@@ -409,6 +420,9 @@ const config = [
       // text: their imports deliberately name packages that do not resolve,
       // and they live in no tsconfig project.
       'scripts/src/fixtures/**',
+      // Same class: a bundler fixture whose asset queries, JSX and untyped modules
+      // the bundler suites check; it is outside the tau-examples tsconfig.
+      'libs/tau-examples/src/kernels/replicad/bundler-feature-matrix/**',
       // Opt-in benchmark experiments: engine-internal, unpublished, and outside
       // the package tsconfig until PE2 rebuilds what they measure.
       'packages/geospec-engine/experiments/**',

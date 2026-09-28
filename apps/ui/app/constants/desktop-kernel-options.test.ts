@@ -40,9 +40,31 @@ const installRuntimeBridge = (): void => {
   vi.stubGlobal('taucad', { requestRuntimePort, releaseRuntimeHost, relayTag });
 };
 
-const installDesktopBridge = (): void => {
+const requestServicesPort = vi.fn();
+
+/**
+ * The preload shell, optionally answering the services relay the way main does;
+ * without `services` every services connect fails. A kernel must ask for none.
+ */
+const installDesktopBridge = (options: { services?: boolean } = {}): void => {
   vi.stubEnv('TAU_TARGET', 'desktop');
+  const relayTag = 'tau:services-port';
+  requestServicesPort.mockImplementation((requestId: string) => {
+    if (!options.services) {
+      throw new Error('services unavailable');
+    }
+    globalThis.window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { taucadRelay: relayTag, requestId },
+        origin: globalThis.location.origin,
+        source: globalThis.window,
+        ports: [new MessageChannel().port1],
+      }),
+    );
+  });
   vi.stubGlobal('tau', {
+    relayTag,
+    requestServicesPort,
     nodeFs: { homeRoot, connect: async () => new MessageChannel().port1 },
     dialog: { selectDirectory: async () => undefined },
   });
@@ -71,6 +93,7 @@ afterEach(() => {
   vi.unstubAllEnvs();
   vi.resetModules();
   requestRuntimePort.mockReset();
+  requestServicesPort.mockReset();
 });
 
 describe('desktopKernelOptions', () => {
@@ -100,6 +123,27 @@ describe('desktopKernelOptions', () => {
       });
       expect(options.transport).toBeDefined();
       expect(options.config).toBeDefined();
+    },
+    moduleGraphTimeout,
+  );
+
+  it(
+    'should open no machines connection for a kernel, since the app holds the one machines facet (D6)',
+    async () => {
+      installDesktopBridge({ services: true });
+      installRuntimeBridge();
+      const { desktop, handleStore } = await loadModules();
+      await handleStore.setProjectFileSystemConfig({ projectId, backend: 'node', providerBasePath: 'widget' });
+      const fileSystem = {
+        get fileSystem(): never {
+          throw new Error('host-local runtime must not read the renderer filesystem');
+        },
+      };
+
+      const options = (await desktop.desktopKernelOptions(projectId, undefined, 'off')())(fileSystem);
+
+      expect(requestServicesPort).not.toHaveBeenCalled();
+      expect(options.transport.materialize().machines).toEqual({ available: false, reason: 'unsupported' });
     },
     moduleGraphTimeout,
   );

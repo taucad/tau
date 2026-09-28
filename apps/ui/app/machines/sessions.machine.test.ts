@@ -1,7 +1,7 @@
 /* eslint-disable no-await-in-loop -- settling is sequential by nature: each
    microtask turn has to land before the next one starts. */
 
-import { createActor, fromCallback } from 'xstate';
+import { createActor, createCallbackLogic } from 'xstate';
 import type { EventObject } from 'xstate';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
@@ -26,13 +26,13 @@ const harness = (options?: { readonly budget?: number; readonly closeNever?: boo
   const started: string[] = [];
   const stopped: string[] = [];
   const readyChild = (region: ProjectSessionRegion) =>
-    fromCallback<EventObject, { projectId: string }>(({ sendBack }) => {
+    createCallbackLogic<EventObject, { projectId: string }>(({ sendBack }) => {
       sendBack({ type: 'childReady', region });
       return () => undefined;
     });
   /* The compute child is this session's liveness probe: its cleanup runs when
    * — and only when — the session stops its children. */
-  const computeChild = fromCallback<EventObject, { projectId: string }>(({ input, sendBack }) => {
+  const computeChild = createCallbackLogic<EventObject, { projectId: string }>(({ input, sendBack }) => {
     started.push(input.projectId);
     sendBack({ type: 'childReady', region: 'compute' });
     return () => stopped.push(input.projectId);
@@ -162,6 +162,42 @@ describe('sessionsMachine', async () => {
     expect(started).toContain('projNinth');
     expect(actor.getSnapshot().context.closed['proj0']?.reason).toBe('budget');
     expect(Object.keys(actor.getSnapshot().context.refs)).toHaveLength(browserLiveProjectBudget);
+    actor.stop();
+  });
+
+  it('never evicts a project whose editor conflict is being recorded, and refuses when every one is (RV-W5b2 R2-1)', async () => {
+    const { actor, emitted, stopped } = harness();
+    for (let index = 0; index < browserLiveProjectBudget; index += 1) {
+      await openIdle(actor, `proj${index}`);
+    }
+    for (let index = 1; index < browserLiveProjectBudget; index += 1) {
+      actor.send({ type: 'touch', projectId: `proj${index}` });
+    }
+    const recording = (projectId: string): void => {
+      actor.getSnapshot().context.refs[projectId]?.send({
+        type: 'revisionState',
+        dirty: false,
+        pushed: true,
+        recording: true,
+      });
+    };
+    /* The least recently touched project is the one recording. */
+    recording('proj0');
+
+    actor.send({ type: 'open', projectId: 'projNinth' });
+    await settle();
+
+    expect(stopped).toEqual(['proj1']);
+    expect(actor.getSnapshot().context.refs['proj0']).toBeDefined();
+
+    for (const projectId of Object.keys(actor.getSnapshot().context.refs)) {
+      recording(projectId);
+    }
+    actor.send({ type: 'open', projectId: 'projTenth' });
+    await settle();
+
+    expect(emitted.find((event) => event.type === 'budgetRefused')?.projectId).toBe('projTenth');
+    expect(stopped).toEqual(['proj1']);
     actor.stop();
   });
 

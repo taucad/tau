@@ -31,6 +31,8 @@ import {
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 
+import { picogkRuntimeManifestSchema } from '@taucad/picogk';
+
 import quickLookManifest from '#macos/quick-look-formats.json' with { type: 'json' };
 
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
@@ -44,6 +46,8 @@ const appExecutable = resolve(appPath, 'Contents/MacOS/Tau');
 const brandingRoot = resolve(appPath, 'Contents/Resources/branding');
 const extensionTemporaryRoot = resolve(tmpdir(), 'tau-quick-look');
 const { release, unsigned } = parseMacosPackageMode(process.argv.slice(2));
+/** The PicoGK worker protocol, which the prepared resource manifest also records. */
+const picoGkWireProtocol = picogkRuntimeManifestSchema.shape.protocolVersion.value;
 
 if (process.platform !== 'darwin') {
   throw new Error('The macOS package can only be verified on macOS.');
@@ -300,7 +304,7 @@ const verifyPicoGkResource = (): string => {
     manifest.picoGkArchiveSha256 !== '6e188832832241ce5fad3639e2cab63982e4b392eaea367c49a32aac361f4ca5' ||
     !/^[\da-f]{64}$/u.test(manifest.picoGkHostedPatchSha256) ||
     manifest.hostApiVersion !== 1 ||
-    manifest.protocolVersion !== 3 ||
+    manifest.protocolVersion !== picoGkWireProtocol ||
     manifest.sceneArtifactVersion !== 3
   ) {
     throw new Error(`Invalid PicoGK resource manifest for ${target}`);
@@ -539,9 +543,19 @@ Library.Go(1f, () =>
 `,
 );
 const picoGkInput = [
-  { protocolVersion: 3, requestId: 'verify-analyze', method: 'analyze', params: { entryPath: 'main.cs' } },
-  { protocolVersion: 3, requestId: 'verify-build', method: 'build', params: { entryPath: 'main.cs', parameters: {} } },
-  { protocolVersion: 3, requestId: 'verify-shutdown', method: 'shutdown', params: {} },
+  {
+    protocolVersion: picoGkWireProtocol,
+    requestId: 'verify-analyze',
+    method: 'analyze',
+    params: { entryPath: 'main.cs' },
+  },
+  {
+    protocolVersion: picoGkWireProtocol,
+    requestId: 'verify-build',
+    method: 'build',
+    params: { entryPath: 'main.cs', parameters: {} },
+  },
+  { protocolVersion: picoGkWireProtocol, requestId: 'verify-shutdown', method: 'shutdown', params: {} },
 ]
   .map((request) => JSON.stringify(request))
   .join('\n');
@@ -582,7 +596,7 @@ const picoGkResult = picoGkBuild?.['result'] as
   | undefined;
 const picoGkArtifact = typeof picoGkResult?.artifactPath === 'string' ? resolve(picoGkResult.artifactPath) : '';
 if (
-  picoGkReady?.['protocolVersion'] !== 3 ||
+  picoGkReady?.['protocolVersion'] !== picoGkWireProtocol ||
   !picoGkArtifact.startsWith(`${picoGkArtifacts}/`) ||
   typeof picoGkResult?.byteLength !== 'number' ||
   picoGkResult.byteLength <= 0 ||

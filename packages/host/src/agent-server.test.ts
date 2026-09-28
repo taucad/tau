@@ -17,6 +17,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 
 import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
+import type { HostSessionHandle } from '@taucad/runtime/host';
+import type { NodeMachineHost } from '@taucad/runtime/host/node';
 import type { ComputeGeneration, ComputeStoreControl } from '@taucad/runtime/types';
 
 import { hostSessionCookieName, startAgentServer } from '#agent-server.js';
@@ -164,6 +166,79 @@ describe('startAgentServer', () => {
     await expect(
       upgrade(origin, { headers: { authorization: `Bearer ${token}`, origin: origin.href.replace(/\/$/u, '') } }),
     ).resolves.toBeUndefined();
+  });
+
+  it('probes and upgrades an exact admitted machines route', async () => {
+    const closed = Promise.withResolvers<void>();
+    const closeHandlers = new Set<() => void>();
+    const dispose = vi.fn(() => {
+      for (const handler of closeHandlers) {
+        handler();
+      }
+      closed.resolve();
+    });
+    const session = Object.freeze({}) as HostSessionHandle;
+    const host: NodeMachineHost = {
+      issueSession: () => session,
+      admitRoute: () => ({
+        hostId: 'host',
+        actor: { kind: 'user', id: 'user' },
+        authorityId: 'authority',
+        workspaceId: 'workspace',
+        route: 'machines',
+        signal: new AbortController().signal,
+        assertCurrent() {
+          /* Admission remains current for this route fixture. */
+        },
+      }),
+      serve: vi.fn(() => ({
+        closed: closed.promise,
+        dispose,
+        onClose(handler: () => void) {
+          closeHandlers.add(handler);
+          return () => closeHandlers.delete(handler);
+        },
+      })),
+      async completeBinding() {
+        return { status: 'bound', machineId: 'fixture' };
+      },
+      describeBinding: () => undefined,
+      async removeBinding({ machineId }) {
+        return { status: 'removed', machineId };
+      },
+      close: vi.fn(async () => undefined),
+    };
+    server = startAgentServer({
+      launcher: stubLauncher(),
+      token,
+      workspaceRoot,
+      machines: { host, session },
+    });
+    await server.ready;
+    const origin = server.url();
+
+    const missingCredential = await fetch(new URL('/machines', origin));
+    expect(missingCredential.status).toBe(401);
+    const foreignOrigin = await fetch(new URL('/machines', origin), {
+      headers: { authorization: `Bearer ${token}`, origin: 'https://evil.example' },
+    });
+    expect(foreignOrigin.status).toBe(403);
+    const admitted = await fetch(new URL('/machines', origin), {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(admitted.status).toBe(204);
+
+    const socket = new WebSocket(new URL('/machines', origin).href.replace('http:', 'ws:'), {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    await new Promise<void>((resolve, reject) => {
+      socket.once('open', resolve);
+      socket.once('error', reject);
+    });
+    expect(host.serve).toHaveBeenCalledOnce();
+    socket.close();
+    await closed.promise;
+    expect(dispose).toHaveBeenCalledOnce();
   });
 
   it('keeps bounded compute controls behind the existing admission secret', async () => {

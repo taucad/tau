@@ -2,7 +2,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { isValidElement } from 'react';
 import { createPortal } from 'react-dom';
+import { Printer } from 'lucide-react';
 import type {
   DockviewApi,
   DockviewDidDropEvent,
@@ -279,6 +281,7 @@ const {
   WorkbenchEmptyGroupWatermark,
   WorkbenchDockviewTab,
   WorkbenchLeftActions,
+  getWorkbenchTabIcon,
   WorkbenchPlaceholderPanel,
   WorkbenchRightHeaderActions,
   workbenchSurfaces,
@@ -352,6 +355,19 @@ const mockPanelApi = {
   updateParameters: vi.fn(),
   setTitle: vi.fn(),
 } as unknown as IDockviewPanelProps['api'];
+
+describe('getWorkbenchTabIcon', () => {
+  it('should mark printer files with the printer icon, as the viewer tab does, and leave other files to their extension', () => {
+    const icon = (id: string, params: Record<string, unknown>): React.ReactNode =>
+      getWorkbenchTabIcon(createTabProperties({ id, title: id, params }));
+    for (const filePath of ['exports/main.gcode.3mf', 'prints/bracket.gcode']) {
+      const element = icon('file-1', { filePath });
+      expect(isValidElement(element) && element.type).toBe(Printer);
+    }
+    expect(icon('file-2', { filePath: 'main.scad' })).toBeUndefined();
+    expect(icon('file-3', { filePath: 'exports/main.3mf' })).toBeUndefined();
+  });
+});
 
 describe('WorkbenchRightHeaderActions', () => {
   beforeEach(() => {
@@ -1399,6 +1415,8 @@ describe('Workbench file reconciliation', () => {
     expect(workbenchSurfaces.map(({ id }) => id)).toEqual([
       'parameters',
       'model',
+      'print',
+      'kinematics',
       'revisions',
       'agents',
       'jobs',
@@ -1420,6 +1438,8 @@ describe('Workbench file reconciliation', () => {
     expect(isWorkbenchSurfaceAllowed('jobs', 'editor')).toBe(true);
     expect(isWorkbenchSurfaceAllowed('jobs', 'shared')).toBe(false);
     expect(isWorkbenchSurfaceAllowed('export', 'shared')).toBe(true);
+    // Posing is transient view state, so shared and builtin example pages offer it too.
+    expect(isWorkbenchSurfaceAllowed('kinematics', 'shared')).toBe(true);
   });
 
   it('clears corrupt layouts and removes restored debug panels when the flag is off', () => {
@@ -1447,6 +1467,19 @@ describe('Workbench file reconciliation', () => {
     restoreWorkbenchLayout({ api: dockview.api, layout: {} as SerializedDockview, isTauDebugEnabled: true });
 
     expect(dockview.removePanel).toHaveBeenCalledExactlyOnceWith(legacyFiles);
+  });
+
+  it('replaces a legacy Machines utility with the Print pane in its group', () => {
+    const legacyMachines = panel('workbench:machines');
+    const dockview = createTestDockview([legacyMachines]);
+
+    restoreWorkbenchLayout({ api: dockview.api, layout: {} as SerializedDockview, isTauDebugEnabled: true });
+
+    expect(dockview.addPanel).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ id: workbenchPanels.print.id, component: 'print', title: 'Print' }),
+    );
+    expect(dockview.removePanel).toHaveBeenCalledExactlyOnceWith(legacyMachines);
+    expect(dockview.panels.map(({ id }) => id)).toEqual([workbenchPanels.print.id]);
   });
 
   it('keeps Share in a restored editor layout', () => {

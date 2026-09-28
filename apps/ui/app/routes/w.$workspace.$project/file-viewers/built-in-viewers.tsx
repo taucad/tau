@@ -10,6 +10,8 @@ import { createViewerRouter } from '#routes/w.$workspace.$project/file-viewers/c
 import type { FileViewerRenderRequest } from '#routes/w.$workspace.$project/file-viewers/file-viewer.types.js';
 import { sniffNativeImageFormat } from '#routes/w.$workspace.$project/file-viewers/native-image-format.js';
 import { NativeImageViewer } from '#routes/w.$workspace.$project/file-viewers/native-image-viewer.js';
+import { printerFileKind } from '#components/printer/printer-file.js';
+import { PrinterViewer } from '#components/printer/printer-viewer.js';
 
 const textViewerProperties = (request: FileViewerRenderRequest): ChatEditorViewerProps => {
   if (request.resource.outcome.kind !== 'text' || request.textEditor === undefined) {
@@ -72,6 +74,21 @@ const nativeImageViewer = createViewer({
   ),
 });
 
+const printerViewer = createViewer({
+  id: 'printer',
+  match: (probe) =>
+    printerFileKind(probe.name, probe.content.kind === 'text' ? probe.content.bytes : probe.content.head),
+  render: (request, kind) => (
+    <PrinterViewer
+      name={request.name}
+      kind={kind}
+      revision={request.resource.outcome.kind === 'binary' ? request.resource.outcome.revision : 0}
+      readAll={request.resource.readAll}
+      renderPane={request.renderPane}
+    />
+  ),
+});
+
 const codeViewer = createViewer({
   id: 'code',
   requestsFiles: true,
@@ -97,6 +114,7 @@ export const fileViewerRouter = createViewerRouter([
   planViewer,
   markdownViewer,
   nativeImageViewer,
+  printerViewer,
   codeViewer,
   binaryViewer,
 ]);

@@ -3,11 +3,23 @@ import { once } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
 import { serveGeoSpecPerformance } from '#tau/geospec-performance.js';
 
-const lab = vi.hoisted(() => ({
-  parse: vi.fn(),
-  run: vi.fn(),
-  native: { marker: 'actual-node-import-route' },
-}));
+const lab = vi.hoisted(() => {
+  const construct = vi.fn();
+  return {
+    parse: vi.fn(),
+    run: vi.fn(),
+    construct,
+    native: {
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Mock of the native module export.
+      Engine: class {
+        public constructor(...args: unknown[]) {
+          construct(...args);
+        }
+      },
+      canonicalize: vi.fn(),
+    },
+  };
+});
 vi.mock('../../../../packages/geospec-engine-native/bench/performance-lab-runner.js', () => ({
   parsePerformanceLabRunInput: lab.parse,
   runPerformanceLabCell: lab.run,
@@ -26,13 +38,23 @@ describe('desktop GeoSpec performance concern', () => {
     const started = Promise.withResolvers<void>();
     const finish = Promise.withResolvers<void>();
     lab.parse.mockResolvedValue(input);
-    lab.run.mockImplementation(async (actual: unknown, modules: { native(): Promise<unknown> }) => {
-      expect(actual).toEqual({ ...input, cache: 'host-module-cache' });
-      expect(await modules.native()).toEqual(lab.native);
-      started.resolve();
-      await finish.promise;
-      return result;
-    });
+    lab.run.mockImplementation(
+      async (
+        actual: unknown,
+        modules: {
+          native(): Promise<{ Engine: new (...args: unknown[]) => unknown; canonicalize: unknown }>;
+        },
+      ) => {
+        expect(actual).toEqual({ ...input, cache: 'host-module-cache' });
+        const native = await modules.native();
+        expect(native.canonicalize).toBe(lab.native.canonicalize);
+        new native.Engine({ variant: 'st' });
+        expect(lab.construct).toHaveBeenCalledExactlyOnceWith();
+        started.resolve();
+        await finish.promise;
+        return result;
+      },
+    );
     const close = serveGeoSpecPerformance(port1);
     try {
       const reply = once(port2, 'message');

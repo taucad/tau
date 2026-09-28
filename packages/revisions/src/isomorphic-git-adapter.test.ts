@@ -35,6 +35,7 @@ const tree = (content: string): ImmutableRevisionTree =>
 const refusingClient = (
   statusCode: number,
   body: string,
+  headers: Readonly<Record<string, string>> = {},
 ): Readonly<{ http: RevisionHttpClient; requested: readonly string[] }> => {
   const requested: string[] = [];
   const chunks = async function* (): AsyncIterableIterator<Uint8Array<ArrayBuffer>> {
@@ -52,7 +53,7 @@ const refusingClient = (
         return {
           url: request.url,
           method: request.method ?? 'GET',
-          headers: { 'content-type': 'application/json' },
+          headers: { 'content-type': 'application/json', ...headers },
           body: chunks(),
           statusCode,
           statusMessage: 'Refused',
@@ -210,6 +211,19 @@ describe('isomorphic-git remote refusals (N1)', () => {
     const port = await storeWithRemote(http, 'github-22');
 
     await expect(push(port, 'github-22')).rejects.toMatchObject({ code: 'REMOTE_REAUTHORIZATION_REQUIRED' });
+  });
+
+  /* W13d: the library's own `HttpError` drops the headers, so the leg keeps the wait itself. */
+  it('carries a 429’s Retry-After on every remote verb', async () => {
+    const { http } = refusingClient(429, '{"code":"GIT_RATE_LIMITED","message":"Too many requests; retry shortly."}', {
+      'retry-after': '17',
+    });
+    const port = await storeWithRemote(http, 'tau');
+    const limited = { code: 'REMOTE_UNAVAILABLE', retryAfterMilliseconds: 17_000 };
+
+    await expect(push(port, 'tau')).rejects.toMatchObject(limited);
+    await expect(port.listRemoteRefs('tau')).rejects.toMatchObject(limited);
+    await expect(port.fetch({ remote: 'tau', refs: ['refs/heads/main'] })).rejects.toMatchObject(limited);
   });
 
   it('keeps `could not be reached` for the one failure that really is unreachable', async () => {

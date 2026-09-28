@@ -154,7 +154,7 @@ const startHarness = async (
   roots.push(workspaceRoot);
   await writeFile(join(workspaceRoot, 'main.scad'), 'cube(10);\n', 'utf8');
   const api = await startStubApi();
-  const mcp = createHostMcpEndpoint({ secret: randomBytes(32).toString('base64url'), registry });
+  const mcp = createHostMcpEndpoint({ secret: randomBytes(32).toString('base64url'), registry, workspaceRoot });
   closers.push(async () => mcp.close());
 
   const launcherRef: { current?: NodeAgentLauncher } = {};
@@ -280,6 +280,10 @@ const messagesOf = (events: readonly AgentLogEvent[]): readonly ProviderMessage[
 
 const lifecycleOf = (events: readonly AgentLogEvent[]): readonly string[] =>
   events.flatMap((event) => (event.type === 'run.lifecycle' ? [event.state] : []));
+
+/** Whether the runner refused a turn whose outcome ACP cannot prove. */
+const recoveryUnknown = (events: readonly AgentLogEvent[]): boolean =>
+  events.some((event) => event.type === 'run.lifecycle' && event.detail?.code === 'EXTERNAL_AGENT_RECOVERY_UNKNOWN');
 
 /** One run's own last lifecycle record, in a chat that holds several runs. */
 const stopOf = (events: readonly AgentLogEvent[], runId: string): AgentLogEvent | undefined =>
@@ -804,15 +808,27 @@ describe('the external agent run kind', () => {
 
     const attached = await launcher.execute({ type: 'attach', chatId, cursor: 0, limit: 16 });
 
+    /* Recorded, not resumed (I4): the reconnect asks the vendor for nothing. */
     expect(attached).toMatchObject({ type: 'attach', takeover: true });
+    const abandoned = await readLog(workspaceRoot, chatId);
+    expect(abandoned.at(-1)).toMatchObject({
+      type: 'run.lifecycle',
+      state: 'failed',
+      detail: { code: 'RUN_ABANDONED' },
+    });
+    expect(sent(frames, 'session/resume')).toBe(0);
+
+    await launcher.execute({ type: 'resume', chatId });
     await until(
-      async () => lifecycleOf(await readLog(workspaceRoot, chatId)).includes('failed'),
+      async () => recoveryUnknown(await readLog(workspaceRoot, chatId)),
       'the ambiguous resumed run to fail',
       { dump: async () => readLog(workspaceRoot, chatId) },
     );
-    /* The vendor session is resumed, not recreated, but ACP exposes no
-     * idempotency key or turn-status query that could prove this turn's result. */
+    /* The person's Resume reattaches the vendor session rather than recreating
+     * it, but ACP exposes no idempotency key or turn-status query that could
+     * prove this turn's result. */
     expect(sent(frames, 'session/resume')).toBe(1);
+    expect(sent(frames, 'session/prompt')).toBe(0);
     expect(sent(frames, 'session/new')).toBe(0);
     const resumedEvents = await readLog(workspaceRoot, chatId);
     expect(lifecycleOf(resumedEvents).at(-1)).toBe('failed');
@@ -1074,18 +1090,20 @@ describe('the external agent run kind', () => {
             details: { agentId: 'codex', failure: { category: 'limit', title: 'rate', actions: ['retry'] } },
           },
         },
-        { ...base, sequence: 4, type: 'run.lifecycle', state: 'admitted' },
+        /* A resume reopens the run it already has: `running`, never a second `admitted` (I1)… */
+        { ...base, sequence: 4, type: 'run.lifecycle', state: 'running' },
         /* …and the daemon died here, with that resume still in flight. */
-        { ...base, sequence: 5, type: 'run.lifecycle', state: 'running' },
       ]
         .map((event) => JSON.stringify(event))
         .join('\n'),
       'utf8',
     );
 
+    /* The restart is recorded on reattach (I4); the person resumes again. */
     await launcher.execute({ type: 'attach', chatId, cursor: 0, limit: 16 });
+    await launcher.execute({ type: 'resume', chatId });
     await until(
-      async () => lifecycleOf(await readLog(workspaceRoot, chatId)).at(-1) === 'failed',
+      async () => recoveryUnknown(await readLog(workspaceRoot, chatId)),
       'the ambiguous resumed run to fail again',
       { dump: async () => readLog(workspaceRoot, chatId) },
     );
@@ -2336,6 +2354,8 @@ describe('authentication, initialize and prompt content', () => {
     await runTurn(harness, { chatId: 'chat-context', runId: 'run-context-2', text: 'second noask', config });
 
     const [first, second] = promptFrames(harness.frames);
+    /* The user's words lead, so a vendor titles its mirrored thread from them. */
+    expect(first?.indexOf('noask')).toBeLessThan(first?.indexOf('tau://agent-guidance') ?? -1);
     expect(first).toContain('tau://agent-guidance');
     expect(first).toContain('native skill loader');
     expect(first).not.toContain('tau://system-prompt');
@@ -2653,6 +2673,37 @@ describe('external turns through the revision port', () => {
       changedPaths: ['hello.txt'],
     });
   }, 60_000);
+
+  /* Manifest recovery blueprint R8: a second model is just another source file.
+   * An agent that registers it in `tau.json` hears why, instead of the project
+   * becoming unreachable at its next discovery. */
+  it('refuses an fs/write_text_file that would break tau.json and accepts a valid edit', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'tau-acp-manifest-'));
+    roots.push(cwd);
+    const manifest = {
+      $schema: 'https://tau.new/schemas/tau-schema-v1.json',
+      id: 'proj_0123456789ABCDEFGHIJK',
+      name: 'Relief',
+      description: '',
+      tags: [],
+      assets: { main: { entryPath: 'main.cs' } },
+    };
+    const original = `${JSON.stringify(manifest, undefined, 2)}\n`;
+    await writeFile(join(cwd, 'tau.json'), original, 'utf8');
+
+    const secondAsset = { ...manifest, assets: { ...manifest.assets, second: { entryPath: 'second.cs' } } };
+    await expect(
+      writeSessionTextFile(cwd, { path: 'tau.json', content: JSON.stringify(secondAsset) }),
+    ).rejects.toMatchObject({
+      code: 'VALIDATION_ERROR',
+      /* oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- `expect.stringContaining` is typed `any` by vitest. */
+      message: expect.stringContaining('assets: Unrecognized key: "second"'),
+    });
+    expect(await readSessionTextFile(cwd, { path: 'tau.json' })).toBe(original);
+
+    await writeSessionTextFile(cwd, { path: 'tau.json', content: JSON.stringify({ ...manifest, name: 'Renamed' }) });
+    expect(JSON.parse(await readSessionTextFile(cwd, { path: 'tau.json' }))).toMatchObject({ name: 'Renamed' });
+  });
 
   it('refuses an agent write under Tau’s own control metadata and still serves the read', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'tau-acp-mask-'));

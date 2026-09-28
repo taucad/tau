@@ -73,7 +73,6 @@ vi.mock('#hooks/use-models.js', () => ({
 }));
 
 vi.mock('#hooks/use-cad-agent-config.js', () => ({
-  useAgentHostPlacements: () => ({ targets: state.placements, loading: false }),
   useBrowserAgentHostProjectAvailability: () => ({ status: 'available' }),
 }));
 
@@ -116,7 +115,7 @@ const codex = (refusal?: ExternalAgentDescriptor['refusal']): AgentHostPlacement
 const renderSheet = (focusEditor = vi.fn(), agentConfig: AgentConfig = noConfig) => {
   render(
     <TooltipProvider>
-      <ChatAgentSheet agentConfig={agentConfig} focusEditor={focusEditor} />
+      <ChatAgentSheet agentConfig={agentConfig} placements={state.placements} focusEditor={focusEditor} />
     </TooltipProvider>,
   );
   return { focusEditor };
@@ -182,14 +181,52 @@ describe('ChatAgentSheet', () => {
     expect(screen.getByRole('button', { name: 'Model: Fable 5.1. Change' })).toBeInTheDocument();
   });
 
+  it('offers no Agent row when Tau is the only agent', async () => {
+    renderSheet();
+    await userEvent.click(screen.getByRole('button', { name: /^Agent and model/u }));
+
+    expect(screen.queryByRole('button', { name: /^Agent: /u })).toBeNull();
+  });
+
+  it('chooses the agent in a row of its own, listing each host’s agents under that host', async () => {
+    state.placements = [
+      codex(),
+      { ...codex('EXTERNAL_AGENT_AUTH_REQUIRED'), hostId: 'studio', label: 'studio', rung: 2 },
+    ];
+    renderSheet();
+    await userEvent.click(screen.getByRole('button', { name: /^Agent and model/u }));
+    const agentRow = screen.getByRole('button', { name: 'Agent: Tau. Change' });
+    await userEvent.click(agentRow);
+
+    expect(screen.getByPlaceholderText('Search agents…')).toHaveFocus();
+    expect(screen.getAllByRole('option').map((option) => option.getAttribute('aria-label'))).toEqual([
+      'Tau, in use',
+      'Codex · This Mac',
+      'Codex · studio, unavailable',
+    ]);
+    /* The host is the heading, so each row keeps the agent's own name. */
+    expect(within(screen.getByRole('group', { name: 'On this computer' })).getByRole('option')).toHaveTextContent(
+      /^Codex$/u,
+    );
+    expect(within(screen.getByRole('group', { name: 'On studio' })).getByRole('option')).toHaveTextContent(
+      "CodexCan't start",
+    );
+    expect(within(screen.getByRole('option', { name: 'Tau, in use' })).getByText('Fable 5.1')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Back to settings' }));
+    expect(screen.getByRole('button', { name: 'Agent: Tau. Change' })).toHaveFocus();
+  });
+
   it('moves the chat to another agent at its own defaults when one of its models is chosen', async () => {
     state.placements = [codex()];
     renderSheet();
     await userEvent.click(screen.getByRole('button', { name: /^Agent and model/u }));
-    await userEvent.click(screen.getByRole('button', { name: 'Model: Fable 5.1. Change' }));
-    await userEvent.click(screen.getByRole('tab', { name: 'Codex' }));
-    /* Browsing a tab changes nothing. */
+    await userEvent.click(screen.getByRole('button', { name: 'Agent: Tau. Change' }));
+    await userEvent.click(screen.getByRole('option', { name: 'Codex' }));
+    /* Browsing an agent changes nothing, and the way back is to the agents. */
     expect(setActiveExecution).not.toHaveBeenCalled();
+    expect(screen.getByPlaceholderText('Search Codex models…')).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Back to agents' })).toBeInTheDocument();
     await userEvent.click(screen.getByRole('option', { name: 'GPT-5.6-Sol' }));
 
     expect(setActiveExecution).toHaveBeenCalledWith({
@@ -205,8 +242,8 @@ describe('ChatAgentSheet', () => {
     state.placements = [{ ...placement, externalAgents: [{ id: 'codex', displayName: 'Codex', models: [] }] }];
     renderSheet();
     await userEvent.click(screen.getByRole('button', { name: /^Agent and model/u }));
-    await userEvent.click(screen.getByRole('button', { name: 'Model: Fable 5.1. Change' }));
-    await userEvent.click(screen.getByRole('tab', { name: 'Codex' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Agent: Tau. Change' }));
+    await userEvent.click(screen.getByRole('option', { name: 'Codex' }));
     await userEvent.click(screen.getByRole('option', { name: 'Default model' }));
 
     expect(setActiveExecution).toHaveBeenCalledWith({ kind: 'acp', hostId: 'desktop', agentId: 'codex' });
@@ -216,8 +253,8 @@ describe('ChatAgentSheet', () => {
     state.placements = [codex('EXTERNAL_AGENT_AUTH_REQUIRED')];
     renderSheet();
     await userEvent.click(screen.getByRole('button', { name: /^Agent and model/u }));
-    await userEvent.click(screen.getByRole('button', { name: 'Model: Fable 5.1. Change' }));
-    await userEvent.click(screen.getByRole('tab', { name: 'Codex, unavailable' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Agent: Tau. Change' }));
+    await userEvent.click(screen.getByRole('option', { name: 'Codex, unavailable' }));
 
     expect(screen.getByText("Codex can't start on this computer")).toBeInTheDocument();
     expect(screen.getByText('codex login')).toBeInTheDocument();
@@ -250,6 +287,100 @@ describe('ChatAgentSheet', () => {
     renderSheet(vi.fn(), agentConfig);
 
     expect(screen.getByRole('button', { name: 'Agent and model: Codex, GPT-5.6-Sol, Fast mode' })).toBeInTheDocument();
+  });
+
+  it('shows and changes a discovered ACP reasoning option before the first session', async () => {
+    state.execution = { kind: 'acp', hostId: 'desktop', agentId: 'codex' };
+    state.placements = [codex()];
+    const select = vi.fn();
+    renderSheet(vi.fn(), {
+      options: [
+        {
+          type: 'select',
+          id: 'thought_level',
+          name: 'Thinking',
+          category: 'thought_level',
+          currentValue: 'medium',
+          options: [
+            { value: 'low', name: 'Low' },
+            { value: 'medium', name: 'Medium' },
+            { value: 'high', name: 'High' },
+          ],
+        },
+      ],
+      valueOf: (option) => option.currentValue,
+      select,
+    });
+    await userEvent.click(screen.getByRole('button', { name: /Codex.*reasoning Medium/u }));
+    await userEvent.click(
+      within(screen.getByRole('tablist', { name: /Reasoning for Codex/u })).getByRole('tab', { name: 'High' }),
+    );
+    expect(select).toHaveBeenCalledWith('thought_level', 'high');
+  });
+
+  it('clears a previous model’s reasoning choice when choosing another ACP model', async () => {
+    state.execution = {
+      kind: 'acp',
+      hostId: 'desktop',
+      agentId: 'codex',
+      model: 'gpt-5.6-sol',
+      config: { reasoning_effort: 'ultra' },
+    };
+    const placement = codex();
+    state.placements = [
+      {
+        ...placement,
+        externalAgents: [
+          {
+            id: 'codex',
+            displayName: 'Codex',
+            defaultModel: 'gpt-5.6-sol',
+            models: [
+              { id: 'gpt-5.6-sol', name: 'GPT-5.6-Sol' },
+              { id: 'gpt-5.5', name: 'GPT-5.5' },
+            ],
+          },
+        ],
+      },
+    ];
+    renderSheet(vi.fn(), {
+      options: [
+        {
+          type: 'select',
+          id: 'reasoning_effort',
+          name: 'Reasoning effort',
+          category: 'thought_level',
+          currentValue: 'medium',
+          options: [{ value: 'ultra', name: 'Ultra' }],
+        },
+      ],
+      valueOf: (option) => option.currentValue,
+      select: vi.fn(),
+    });
+    await userEvent.click(screen.getByRole('button', { name: /^Agent and model/u }));
+    await userEvent.click(screen.getByRole('button', { name: /^Model: .*Change$/u }));
+    await userEvent.click(screen.getByRole('option', { name: 'GPT-5.5' }));
+
+    expect(setActiveExecution).toHaveBeenCalledWith({
+      kind: 'acp',
+      hostId: 'desktop',
+      agentId: 'codex',
+      model: 'gpt-5.5',
+    });
+  });
+
+  it('steps back one view on Escape, and closes only from the settings', async () => {
+    const { focusEditor } = renderSheet();
+    await userEvent.click(screen.getByRole('button', { name: /^Agent and model/u }));
+    await userEvent.click(screen.getByRole('button', { name: /^Model: .*Change$/u }));
+    expect(screen.getByRole('button', { name: 'Back to settings' })).toBeInTheDocument();
+
+    await userEvent.keyboard('{Escape}');
+    expect(screen.getByRole('button', { name: /^Model: .*Change$/u })).toHaveFocus();
+    expect(focusEditor).not.toHaveBeenCalled();
+
+    await userEvent.keyboard('{Escape}');
+    expect(focusEditor).toHaveBeenCalled();
   });
 
   it('hands focus back to the editor when it closes, and opens from its shortcut', async () => {

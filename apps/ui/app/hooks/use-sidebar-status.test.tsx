@@ -6,8 +6,8 @@ import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createActor } from 'xstate';
 import type { Chat } from '@taucad/chat';
-import type { RevisionStatusProjection } from '@taucad/revisions/project-revisions-machine';
-import type { ProjectListItem } from '#types/project.types.js';
+import type { RevisionStatusProjection } from '@taucad/revisions';
+import type { ProjectListItem } from '#types/project-library.types.js';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
 import type { ChatSessionActorRef, ChatSessionMachineEvent } from '#machines/chat-session.machine.js';
 import type { ProjectSessionActorRef, ProjectSessionCloseReason } from '#machines/project-session.machine.js';
@@ -28,6 +28,8 @@ import {
   useSidebarCommands,
 } from '#hooks/use-sidebar-status.js';
 import type { ProjectSidebarRow, useLiveNow } from '#hooks/use-sidebar-status.js';
+import { toSnapshotCallback } from '#lib/xstate-test.utils.js';
+import type { SnapshotListener } from '#lib/xstate-test.utils.js';
 
 /* The registry and the revision clients are the hooks' two inputs; the chat
  * machines below are real, because the pins are about what they say. */
@@ -141,7 +143,7 @@ const sidebarChats: readonly Chat[] = [sidebarChat];
 const { ProjectChatList } = await import('#components/nav/project-chat-list.js');
 const { ProjectNavigation } = await import('#components/nav/project-navigation.js');
 
-type RevisionOverrides = Partial<Pick<RevisionStatusProjection, 'branch' | 'dirty'>> & {
+type RevisionOverrides = Readonly<{ branch?: string; dirty?: boolean }> & {
   readonly sync?: Partial<RevisionStatusProjection['sync']>;
 };
 
@@ -159,8 +161,8 @@ type FakeRegistry = {
   chatReferences: Record<string, Record<string, ChatSessionActorRef>>;
   /** What the session recorded about a region that did not come up (R4). */
   failures: Record<string, Record<string, string>>;
-  registryListeners: Set<() => void>;
-  sessionListeners: Set<() => void>;
+  registryListeners: Set<(snapshot?: unknown) => void>;
+  sessionListeners: Set<(snapshot?: unknown) => void>;
 };
 
 /** The registry, the session and the revision clients, as thin as the hooks read them. */
@@ -185,11 +187,12 @@ const sessionRefFor = (projectId: string): ProjectSessionActorRef =>
       },
     }),
     send: sessionSend,
-    subscribe: (listener: () => void) => {
-      fakeRegistry.sessionListeners.add(listener);
+    subscribe: (listener: SnapshotListener<unknown>) => {
+      const callback = toSnapshotCallback(listener);
+      fakeRegistry.sessionListeners.add(callback);
       return {
         unsubscribe: () => {
-          fakeRegistry.sessionListeners.delete(listener);
+          fakeRegistry.sessionListeners.delete(callback);
         },
       };
     },
@@ -214,11 +217,12 @@ const resetRegistry = (): void => {
         idleWindowMilliseconds,
       },
     }),
-    subscribe: (listener: () => void) => {
-      fakeRegistry.registryListeners.add(listener);
+    subscribe: (listener: SnapshotListener<unknown>) => {
+      const callback = toSnapshotCallback(listener);
+      fakeRegistry.registryListeners.add(callback);
       return {
         unsubscribe: () => {
-          fakeRegistry.registryListeners.delete(listener);
+          fakeRegistry.registryListeners.delete(callback);
         },
       };
     },
@@ -241,7 +245,7 @@ const closeProject = (projectId: string, reason: ProjectSessionCloseReason): voi
 const revisions = (projectId: string, overrides: RevisionOverrides = {}): void => {
   const projection = {
     projectId,
-    branch: overrides.branch ?? 'main',
+    line: { kind: 'branch', name: overrides.branch ?? 'main' },
     dirty: overrides.dirty ?? false,
     sync: {
       state: 'noRemote',
@@ -485,7 +489,7 @@ const agentStateRows: ReadonlyArray<{
     events: [],
     label: undefined,
     mark: 'attention',
-    sentence: 'Live · 1 needs you · needs resolution',
+    sentence: 'Live · 1 needs you · Needs your decision',
     revision: { sync: { state: 'conflicted', pendingCount: 0 } },
     conflictedChats: 3,
     attention: 1,
@@ -895,7 +899,7 @@ describe('use-sidebar-status — pin (R3/R4): the bind key carries what the row 
       revisions('enclosure', { sync: { state: 'conflicted', pendingCount: 0 } });
       notifyRegistry();
     });
-    expect(screen.getByText('Live · 1 needs you · needs resolution')).toBeTruthy();
+    expect(screen.getByText('Live · 1 needs you · Needs your decision')).toBeTruthy();
   });
 
   it('leaves `opening` when the registry says the project is live, with no chat spawned (W19-b)', () => {
@@ -989,6 +993,7 @@ const compiledHooks = await (async () => {
     '#hooks/use-revision-status.js': await import('#hooks/use-revision-status.js'),
     '#hooks/use-sessions.js': await import('#hooks/use-sessions.js'),
     '#hooks/chat-session-store-provider.js': await import('#hooks/chat-session-store-provider.js'),
+    '#lib/xstate.lib.js': await import('#lib/xstate.lib.js'),
   };
   const linked = compiled.code
     .replaceAll(

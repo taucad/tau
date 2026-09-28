@@ -6,10 +6,28 @@ import type { BuiltinProjectCardModel } from '#constants/project-examples.js';
 import { CommunityProjectGrid } from '#components/project-grid.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
-const { createProjectMock, presentLocationErrorMock } = vi.hoisted(() => ({
+const { createProjectMock, presentLocationErrorMock, toastMock } = vi.hoisted(() => ({
   createProjectMock: vi.fn(),
   presentLocationErrorMock: vi.fn(() => false),
+  toastMock: { success: vi.fn(), error: vi.fn() },
 }));
+
+vi.mock('#hooks/use-project-creation-location.js', () => ({
+  useProjectCreationLocation: () => ({
+    phase: 'ready',
+    value: { kind: 'home' },
+    canCreate: true,
+    shouldShowPicker: false,
+    hasWebAccessCapability: false,
+    refresh: vi.fn(),
+  }),
+}));
+
+vi.mock('#components/filesystem/workspace-selector.js', () => ({
+  WorkspaceSelector: () => <p>Home in this browser</p>,
+}));
+
+vi.mock('#components/ui/sonner.js', () => ({ toast: toastMock }));
 
 vi.mock('#hooks/use-project-manager.js', () => ({
   useProjectManager: () => ({ createProject: createProjectMock }),
@@ -62,10 +80,8 @@ const project: BuiltinProjectCardModel = {
   id: 'community-project',
   name: 'Community Demo',
   description: 'Description retained for Remix payload only',
-  author: { name: 'Tau Team', avatar: '/avatar.png' },
   tags: ['community'],
   thumbnail: '/thumbnail.png',
-  createdAt: 1,
   assets: { main: { entryPath: mainFile } },
   fileAssets: [
     { path: mainFile, load: async () => files[mainFile].content },
@@ -78,11 +94,19 @@ function LocationProbe(): React.JSX.Element {
   return <output data-testid='location'>{location.pathname}</output>;
 }
 
-function renderGrid(): void {
+const secondProject: BuiltinProjectCardModel = {
+  ...project,
+  locator: 'openscad.second-demo',
+  kernel: 'openscad',
+  id: 'second-project',
+  name: 'Second Demo',
+};
+
+function renderGrid(properties: Partial<React.ComponentProps<typeof CommunityProjectGrid>> = {}): void {
   render(
     <MemoryRouter initialEntries={['/community']}>
       <TooltipProvider>
-        <CommunityProjectGrid projects={[project]} />
+        <CommunityProjectGrid projects={[project]} {...properties} />
       </TooltipProvider>
       <LocationProbe />
     </MemoryRouter>,
@@ -107,20 +131,42 @@ describe('CommunityProjectGrid', () => {
     });
   });
 
-  it('should compose a single whole-card link without rendering the description', () => {
+  it('should render a list of cards named by an Open link, an h2 title and the kernel only', () => {
     renderGrid();
 
+    expect(screen.getByRole('list')).toHaveClass('grid', 'grid-flow-dense');
+    expect(screen.getAllByRole('listitem')).toHaveLength(1);
     expect(screen.getAllByRole('link')).toHaveLength(1);
-    const cardLink = screen.getByRole('link', { name: 'Preview Community Demo' });
+    const cardLink = screen.getByRole('link', { name: 'Open Community Demo' });
     expect(cardLink).toHaveAttribute('href', '/s/builtin~replicad.community-demo');
-    expect(cardLink.parentElement).toHaveClass('hover:border-primary/60');
-    expect(screen.getByText('Community Demo')).toBeInTheDocument();
-    expect(screen.getByText('Tau Team')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Remix' })).toBeInTheDocument();
+    expect(cardLink.parentElement).toHaveClass('hover:border-foreground/30');
+    expect(screen.getByRole('heading', { level: 2, name: 'Community Demo' })).toBeInTheDocument();
+    expect(screen.getByText('Replicad')).toBeInTheDocument();
+    expect(screen.queryByText('Tau Team')).not.toBeInTheDocument();
+    expect(screen.queryByText('Featured')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Remix Community Demo' })).toBeInTheDocument();
     expect(screen.queryByText('Description retained for Remix payload only')).not.toBeInTheDocument();
   });
 
-  it('should mount the preview once and preserve it while hidden', async () => {
+  it('should span the featured card over two columns with a badge and its description', () => {
+    renderGrid({ projects: [project, secondProject], featuredLocator: project.locator });
+
+    const [featured, plain] = screen.getAllByRole('listitem');
+    expect(featured).toHaveClass('col-span-2', 'lg:row-span-2');
+    expect(plain).not.toHaveClass('col-span-2');
+    expect(screen.getByText('Featured')).toBeInTheDocument();
+    expect(screen.getByText('Description retained for Remix payload only')).toBeInTheDocument();
+    expect(screen.getByText('OpenSCAD')).toBeInTheDocument();
+  });
+
+  it('should cap the landing strip at its limit', () => {
+    renderGrid({ projects: [project, secondProject], limit: 1 });
+
+    expect(screen.getAllByRole('listitem')).toHaveLength(1);
+    expect(screen.queryByRole('link', { name: 'Open Second Demo' })).not.toBeInTheDocument();
+  });
+
+  it('should unmount the preview pipeline when its eye is toggled off', async () => {
     renderGrid();
 
     const previewToggle = screen.getByRole('button', { name: 'Preview model' });
@@ -134,42 +180,85 @@ describe('CommunityProjectGrid', () => {
     expect(screen.getByTestId('location')).toHaveTextContent('/community');
 
     await userEvent.click(previewToggle);
-    expect(screen.getByTestId('cad-preview-provider')).toBeInTheDocument();
-    expect(screen.getByTestId('cad-preview-provider').parentElement).toHaveAttribute('hidden');
-    expect(screen.getByRole('img', { name: 'Community Demo' })).toBeInTheDocument();
+    expect(screen.queryByTestId('cad-preview-provider')).not.toBeInTheDocument();
+    expect(previewToggle).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('presentation')).toHaveAttribute('alt', '');
     expect(screen.getByTestId('location')).toHaveTextContent('/community');
+
+    await userEvent.click(previewToggle);
+    expect(await screen.findByTestId('cad-preview-provider')).toBeInTheDocument();
   });
 
-  it('should Remix with the portable project payload without opening the preview route', async () => {
+  it('should keep one live preview: opening a second eye releases the first', async () => {
+    renderGrid({ projects: [project, secondProject] });
+
+    const [firstToggle, secondToggle] = screen.getAllByRole('button', { name: 'Preview model' });
+    if (!firstToggle || !secondToggle) {
+      throw new Error('Expected two preview toggles');
+    }
+    await userEvent.click(firstToggle);
+    expect(await screen.findByTestId('cad-preview-provider')).toHaveAttribute('data-project-id', 'community-project');
+
+    await userEvent.click(secondToggle);
+    await waitFor(() => {
+      expect(screen.getAllByTestId('cad-preview-provider')).toHaveLength(1);
+    });
+    expect(screen.getByTestId('cad-preview-provider')).toHaveAttribute('data-project-id', 'second-project');
+    expect(firstToggle).toHaveAttribute('aria-pressed', 'false');
+    expect(secondToggle).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('should Remix through the example page flow: location dialog, fork suffix and toast', async () => {
     renderGrid();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Remix' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Remix Community Demo' }));
+    expect(createProjectMock).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog', { name: 'Remix Community Demo' })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Create remix' }));
 
     expect(createProjectMock).toHaveBeenCalledWith({
       project: {
-        name: 'Community Demo (Remixed)',
+        name: 'Community Demo (fork)',
         description: 'Description retained for Remix payload only',
         tags: ['community'],
         assets: project.assets,
       },
       files,
+      location: { kind: 'home' },
     });
     await waitFor(() => {
       expect(screen.getByTestId('location')).toHaveTextContent('/w/tau-workspace/remixed-project');
     });
+    expect(toastMock.success).toHaveBeenCalledWith('Remixed to your projects', { description: 'Community Demo' });
   });
 
-  it('retains the card and resets Remix after a creation-location failure', async () => {
+  it('should keep the dialog and re-enable Remix after a creation-location failure', async () => {
     const error = new Error('disconnected');
     createProjectMock.mockRejectedValue(error);
     presentLocationErrorMock.mockReturnValue(true);
     renderGrid();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Remix' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Remix Community Demo' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Create remix' }));
 
-    expect(presentLocationErrorMock).toHaveBeenCalledWith(error);
-    expect(screen.getByRole('button', { name: 'Remix' })).toBeEnabled();
-    expect(screen.getByText('Community Demo')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(presentLocationErrorMock).toHaveBeenCalledWith(error);
+    });
+    expect(screen.getByRole('button', { name: 'Create remix' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Remix Community Demo', hidden: true })).toBeEnabled();
     expect(screen.getByTestId('location')).toHaveTextContent('/community');
+  });
+
+  it('should name the example when a remix fails for another reason', async () => {
+    createProjectMock.mockRejectedValue(new Error('quota exceeded'));
+    renderGrid();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Remix Community Demo' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Create remix' }));
+
+    await waitFor(() => {
+      expect(toastMock.error).toHaveBeenCalledWith('Could not remix Community Demo', { description: 'quota exceeded' });
+    });
   });
 });

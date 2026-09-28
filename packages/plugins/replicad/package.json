@@ -38,7 +38,8 @@
     "./agent": "./agent/skills.json",
     "./agent/*": "./agent/*",
     "./annotations": "./src/annotations/index.ts",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./model": "./src/model.ts"
   },
   "publishConfig": {
     "access": "public",
@@ -55,7 +56,12 @@
         "import": "./dist/annotations/index.mjs",
         "default": "./dist/annotations/index.mjs"
       },
-      "./package.json": "./package.json"
+      "./package.json": "./package.json",
+      "./model": {
+        "types": "./dist/model.d.mts",
+        "import": "./dist/model.mjs",
+        "default": "./dist/model.mjs"
+      }
     },
     "imports": {}
   },
@@ -68,6 +74,7 @@
     "@gltf-transform/extensions": "catalog:",
     "@taucad/cache-core": "workspace:*",
     "@taucad/geometry-core": "workspace:*",
+    "@taucad/kinematics": "workspace:*",
     "@taucad/occt-core": "workspace:*",
     "@taucad/parameters": "workspace:*",
     "culori": "catalog:",
@@ -80,6 +87,7 @@
     "zod": "^4.0.0"
   },
   "devDependencies": {
+    "@msgpack/msgpack": "catalog:",
     "@taucad/esbuild": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/runtime-testing": "workspace:*",

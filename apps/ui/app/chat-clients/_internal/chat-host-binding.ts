@@ -1,4 +1,4 @@
-import { fromCallback } from 'xstate';
+import { createCallbackLogic } from 'xstate';
 import type { EventObject } from 'xstate';
 import { Topic } from '@taucad/events';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
@@ -71,36 +71,37 @@ export const resetChatHostServices = (): void => {
  *
  * @public
  */
-export const chatHostBinding = fromCallback<EventObject, { readonly chatId: string; readonly placement: string }>(
-  ({ input }) => {
-    let unregister: (() => void) | undefined;
-    const bind = (): void => {
-      const services = chatHostServices(input.chatId);
-      if (services === undefined || services.placement !== input.placement) {
-        /* The route has not published for this placement yet — or has published
-         * for a newer one, whose own re-invocation is already on its way. */
-        return;
-      }
-      const registration = services.compose();
-      if (registration === undefined) {
-        return;
-      }
-      unregister?.();
-      unregister = registerAgentHost(input.chatId, registration);
-    };
-    bind();
-    const unsubscribe = servicesTopic.subscribe({
-      handler: () => {
-        bind();
-      },
-      interestedIn: (event) => event.chatId === input.chatId,
-    });
-    return () => {
-      unsubscribe();
-      unregister?.();
-    };
-  },
-);
+export const chatHostBinding = createCallbackLogic<
+  EventObject,
+  { readonly chatId: string; readonly placement: string }
+>(({ input }) => {
+  let unregister: (() => void) | undefined;
+  const bind = (): void => {
+    const services = chatHostServices(input.chatId);
+    if (services === undefined || services.placement !== input.placement) {
+      /* The route has not published for this placement yet — or has published
+       * for a newer one, whose own re-invocation is already on its way. */
+      return;
+    }
+    const registration = services.compose();
+    if (registration === undefined) {
+      return;
+    }
+    unregister?.();
+    unregister = registerAgentHost(input.chatId, registration);
+  };
+  bind();
+  const unsubscribe = servicesTopic.subscribe({
+    handler: () => {
+      bind();
+    },
+    interestedIn: (event) => event.chatId === input.chatId,
+  });
+  return () => {
+    unsubscribe();
+    unregister?.();
+  };
+});
 
 /**
  * Take one chat's next turn: derive its rewind point, wait out host

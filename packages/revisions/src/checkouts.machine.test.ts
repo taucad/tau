@@ -36,6 +36,8 @@ import type { FakePromiseActors } from '#test/fake-actors.js';
  * 19  a turn that ended without ever writing a lease retires nothing (R23)
  * 20  a settlement or a stale-lease report that arrives before the registry
  *     finished loading still retires its lease (R30)
+ * 21  `turnConflicted` retires the lease exactly as `turnFinalized` does, so a
+ *     sync parked behind it resumes (rule 9, RV-W5b F1)
  * --  a removable record offers removal; `open` rehydrates from records again;
  *     start and stop, serializable snapshot, one exported machine value
  */
@@ -196,6 +198,82 @@ describe('checkoutsMachine', () => {
     actor.stop();
   });
 
+  /* No verb may wait out its caller's bound because the registry was busy or
+   * not loaded yet: it is queued and run, in order, as the registry goes idle (W4 a3c). */
+  it('queues verbs that arrive before it loaded or while it is busy, and runs them in order', async () => {
+    const harness = start();
+    const { actor, promises } = harness;
+
+    actor.send({ type: 'addCheckout', branch: 'agent/c', from: 'rev-1' });
+    actor.send({ type: 'removeCheckout', id: 'checkout-live' });
+    await toReady(harness);
+
+    expect(promises.inputsFor('addCheckout')).toEqual([{ projectId: 'project-1', branch: 'agent/c', from: 'rev-1' }]);
+    expect(promises.inputsFor('removeCheckout')).toEqual([]);
+    promises.settle('addCheckout', { output: { checkout: { ...live, id: 'checkout-c', branch: 'agent/c' } } });
+    await flush();
+
+    expect(promises.inputsFor('removeCheckout')).toEqual([{ projectId: 'project-1', id: 'checkout-live' }]);
+    promises.settle('removeCheckout', { output: undefined });
+    await flush();
+    expect(actor.getSnapshot().context.pendingVerbs).toEqual([]);
+
+    actor.stop();
+  });
+
+  /* An `open` cancels a running add; the add may still have landed, and its
+   * rerun then finds that very checkout (W4 a3d). */
+  it.each([
+    ['counts the rerun as done when the checkout it asked for is already there', 'rev-1', undefined],
+    ['still refuses when another checkout holds that branch', 'rev-other', 'CHECKOUT_CONFLICT'],
+  ])('%s', async (_label, head, refusal) => {
+    const harness = start();
+    const { actor, promises, parent } = harness;
+    await toReady(harness);
+    actor.send({ type: 'addCheckout', branch: 'agent/c', from: 'rev-1' });
+    actor.send({ type: 'open' });
+    const landed: CheckoutRecord = {
+      ...linked,
+      id: 'checkout-c',
+      branch: 'agent/c',
+      leaseRunIds: [],
+      headRevisionId: head,
+    };
+    promises.settle('listCheckouts', { output: { checkouts: [live, linked, landed] } });
+    await flush();
+
+    expect(promises.inputsFor('addCheckout')).toHaveLength(1);
+    expect(actor.getSnapshot().context.pendingVerbs).toEqual([]);
+    expect(parent.events.find((event) => event.type === 'checkoutFailed')).toEqual(
+      refusal === undefined ? undefined : expect.objectContaining({ operation: 'add', code: refusal }),
+    );
+
+    actor.stop();
+  });
+
+  it('refuses verbs at once after a failed open, and never runs one queued before it', async () => {
+    const harness = start();
+    const { actor, promises, parent } = harness;
+
+    actor.send({ type: 'open' });
+    actor.send({ type: 'addCheckout', branch: 'agent/c', from: 'rev-1' });
+    promises.settle('sweepLeases', { error: new Error('no runs directory') });
+    await flush();
+    const failures = parent.events.filter((event) => event.type === 'checkoutFailed').length;
+
+    actor.send({ type: 'removeCheckout', id: 'checkout-live' });
+
+    expect(parent.events.filter((event) => event.type === 'checkoutFailed')).toHaveLength(failures + 1);
+    expect(parent.events.at(-1)).toMatchObject({ type: 'checkoutFailed', operation: 'remove' });
+
+    /* The open's own refusal answered the queued add; a later open must not replay it. */
+    await toReady(harness);
+    expect(promises.inputsFor('addCheckout')).toEqual([]);
+    expect(promises.inputsFor('removeCheckout')).toEqual([]);
+
+    actor.stop();
+  });
+
   it('refuses a second checkout on one branch', async () => {
     const harness = start();
     const { actor, promises, emitted } = harness;
@@ -315,6 +393,35 @@ describe('checkoutsMachine', () => {
     actor.stop();
   });
 
+  it('retires a conflicted turn lease, so a sync parked behind it resumes (rule 9, RV-W5b F1)', async () => {
+    const harness = start();
+    const { actor, promises, emitted } = harness;
+
+    await toReady(harness);
+    actor.send({
+      type: 'turnConflicted',
+      turnId: 'turn-1',
+      chatId: 'chat-1',
+      checkoutId: 'checkout-b',
+      runId: 'run-7',
+      revisionId: 'rev-2',
+      trigger: 'turn',
+      branch: 'main',
+      runIds: ['run-7'],
+    });
+
+    expect(actor.getSnapshot().matches({ ready: 'retiring' })).toBe(true);
+    promises.settle('retireLease', { output: undefined });
+    await flush();
+
+    expect(actor.getSnapshot().context.checkouts[1]?.leaseRunIds).toEqual([]);
+    expect(emitted.filter((event) => event.type === 'leaseRetired')).toEqual([
+      { type: 'leaseRetired', runId: 'run-7' },
+    ]);
+
+    actor.stop();
+  });
+
   it('retires a stale lease reported by a preparing turn', async () => {
     const harness = start();
     const { actor, promises } = harness;
@@ -352,17 +459,21 @@ describe('checkoutsMachine', () => {
     actor.stop();
   });
 
-  it('stays ready when retiring a lease rejects', async () => {
+  it('stays ready when retiring a lease rejects, and still drops that lease (L2-F11)', async () => {
     const harness = start();
     const { actor, promises, emitted } = harness;
 
-    await toReady(harness);
+    await toReady(harness, { checkouts: [live, { ...linked, leaseRunIds: ['run-7'] }] });
     actor.send({ type: 'leaseStale', runId: 'run-7' });
     promises.settle('retireLease', { error: new Error('lease file gone') });
     await flush();
 
     expect(actor.getSnapshot().matches({ ready: 'idle' })).toBe(true);
     expect(types(emitted)).toContain('checkoutFailed');
+    /* Not pinned as leased for the rest of the session: Discard and the switch
+     * guard read this set. */
+    expect(selectLeaseSet(actor.getSnapshot())[linked.id]).toEqual([]);
+    expect(emitted.find((event) => event.type === 'leaseRetired')).toEqual({ type: 'leaseRetired', runId: 'run-7' });
 
     actor.stop();
   });

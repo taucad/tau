@@ -24,9 +24,11 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve as resolvePath } from 'node:path';
 import { promisify } from 'node:util';
+import type { SessionConfigOption } from '@agentclientprotocol/sdk';
 
 import { modelChoice, openAcpSession } from '#acp/session.js';
 import type { AcpSession } from '#acp/session.js';
+import { externalAgentDescriptorSchema } from '@taucad/agent-host';
 import type { ExternalAgentDescriptor, ExternalAgentRefusalCode } from '@taucad/agent-host';
 
 const execFileAsync = promisify(execFile);
@@ -39,13 +41,14 @@ export const acpCliProbeTimeout = 10_000;
  *
  * Its own budget, spent in parallel with {@link acpCliProbeTimeout}'s: the
  * version probe measures a CLI that answers in milliseconds, while this one
- * opens a real vendor session (Claude measured at 1.9 s on an M-series host),
+ * opens a real vendor session (Codex took 6.1 s through a cold packaged
+ * app.asar adapter on an M-series host),
  * and folding them into one number would either kill the model probe or make
  * every boot wait on the slower question (EQ1 A).
  *
  * @public
  */
-export const acpModelProbeTimeout = 5000;
+export const acpModelProbeTimeout = 15_000;
 
 /** One reviewed external agent: its adapter pin and everything Tau knows about it. @public */
 export type AcpAgentProfile = {
@@ -159,9 +162,11 @@ export const acpAgentProfiles: readonly AcpAgentProfile[] = [
 /** A resolved adapter, ready to spawn. @public */
 export type AcpAdapter = AcpAgentProfile & {
   /** Models the discovery probe read; empty when it failed (V5). */
-  readonly models?: ReadonlyArray<{ readonly id: string; readonly name: string }> | undefined;
+  readonly models?: ExternalAgentDescriptor['models'] | undefined;
   /** The model select's `currentValue`: what a turn naming no model runs. */
   readonly defaultModel?: string | undefined;
+  /** The agent's own reasoning choices from the same discovery session. */
+  readonly thoughtLevel?: ExternalAgentDescriptor['thoughtLevel'];
 } & (
     | {
         readonly package: string;
@@ -388,7 +393,7 @@ export const probeAcpAgents = async (
  *
  * @param adapter - The resolved adapter to interrogate.
  * @param modelProbeTimeout - Milliseconds before the probe is abandoned.
- * @returns The adapter, with `models`/`defaultModel` when the probe answered.
+ * @returns The adapter, with models and reasoning choices when the probe answered.
  */
 const probeAgentModels = async (adapter: AcpAdapter, modelProbeTimeout: number): Promise<AcpAdapter> => {
   const cwd = await mkdtemp(join(tmpdir(), 'tau-acp-probe-'));
@@ -401,6 +406,14 @@ const probeAgentModels = async (adapter: AcpAdapter, modelProbeTimeout: number):
   /* Its own clock: an adapter that answers `--version` in 10 ms can still hang
    * its handshake, and the boot must not wait on one that will not settle. */
   let probeExpiry: NodeJS.Timeout | undefined;
+  let isExpired = false;
+  const expired = new Promise<undefined>((resolve) => {
+    probeExpiry = setTimeout(() => {
+      isExpired = true;
+      resolve(undefined);
+    }, modelProbeTimeout);
+    probeExpiry.unref();
+  });
   /**
    * Close a session that opened after the deadline.
    *
@@ -418,29 +431,50 @@ const probeAgentModels = async (adapter: AcpAdapter, modelProbeTimeout: number):
     }
   };
   try {
-    const session = await Promise.race([
-      opening,
-      new Promise<undefined>((resolve) => {
-        probeExpiry = setTimeout(() => {
-          resolve(undefined);
-        }, modelProbeTimeout);
-        probeExpiry.unref();
-      }),
-    ]);
+    const session = await Promise.race([opening, expired]);
     if (!session) {
       // async-iife: bootstrap -- the probe's deadline has passed; the late close is cleanup, not an answer.
       void closeLate(opening);
       return adapter;
     }
     const choice = modelChoice(session.configOptions);
+    const thoughtOption = session.configOptions?.find(
+      (option): option is Extract<SessionConfigOption, { type: 'select' }> =>
+        option.category === 'thought_level' && option.type === 'select',
+    );
+    const thoughtLevelOf = (option: Extract<SessionConfigOption, { type: 'select' }> | undefined) =>
+      option === undefined
+        ? undefined
+        : externalAgentDescriptorSchema.shape.thoughtLevel.safeParse({ ...option, category: 'thought_level' }).data;
+    const thoughtLevel = thoughtLevelOf(thoughtOption);
+    const models: ExternalAgentDescriptor['models'][number][] = [];
+    for (const model of choice?.models ?? []) {
+      if (isExpired) {
+        models.push(model);
+        continue;
+      }
+      const options =
+        model.id === choice?.currentValue
+          ? session.configOptions
+          : await Promise.race([session.probeModel(model.id).catch(() => undefined), expired]);
+      const offered = options?.find(
+        (option): option is Extract<SessionConfigOption, { type: 'select' }> =>
+          option.category === 'thought_level' && option.type === 'select',
+      );
+      const modelThoughtLevel = thoughtLevelOf(offered);
+      models.push({ ...model, ...(modelThoughtLevel === undefined ? {} : { thoughtLevel: modelThoughtLevel }) });
+    }
     await session.close();
-    return choice === undefined
-      ? adapter
-      : {
-          ...adapter,
-          models: choice.models,
-          ...(choice.currentValue === undefined ? {} : { defaultModel: choice.currentValue }),
-        };
+    return {
+      ...adapter,
+      ...(choice === undefined
+        ? {}
+        : {
+            models,
+            ...(choice.currentValue === undefined ? {} : { defaultModel: choice.currentValue }),
+          }),
+      ...(thoughtLevel === undefined ? {} : { thoughtLevel }),
+    };
   } catch {
     return adapter;
   } finally {
@@ -456,7 +490,7 @@ const probeAgentModels = async (adapter: AcpAdapter, modelProbeTimeout: number):
 };
 
 /**
- * Probe every resolved adapter's model list, in parallel.
+ * Probe every resolved adapter's model and reasoning choices, in parallel.
  *
  * @param discovery - Resolved adapters.
  * @param options - Probe timeout override.
@@ -504,6 +538,7 @@ export const externalAgentDescriptors = (
     displayName: adapter.displayName,
     models: [...(adapter.models ?? [])],
     ...(adapter.defaultModel === undefined ? {} : { defaultModel: adapter.defaultModel }),
+    ...(adapter.thoughtLevel === undefined ? {} : { thoughtLevel: adapter.thoughtLevel }),
   })),
   ...discovery.refused.map((refusal) => ({
     id: refusal.id,

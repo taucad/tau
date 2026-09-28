@@ -23,6 +23,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/t
 import {
   ModelComponentActionContextContent,
   ModelComponentActionDropdown,
+  MaterialSwatch,
 } from '#components/geometry/cad/model-component-action-menu.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
 import { useProject } from '#hooks/use-project.js';
@@ -36,6 +37,7 @@ import {
   PaneviewHeader,
   PaneviewHeaderAction,
   PaneviewHeaderControls,
+  paneviewAttachedBodyClassName,
   paneviewAttachedSurfaceStyleOverrides,
   paneviewHeaderSize,
 } from '#components/panes/paneview-header.js';
@@ -153,7 +155,7 @@ export function ModelPanelBody({ onRequestOpen }: { readonly onRequestOpen?: () 
       <div data-slot='model-filter' className='shrink-0 bg-sidebar px-2 pt-2'>
         <SearchInput
           aria-label='Filter parts'
-          placeholder='Filter parts...'
+          placeholder='Filter parts…'
           value={query}
           className='h-7 min-w-0 bg-background'
           onChange={(event) => {
@@ -431,7 +433,7 @@ function ModelPaneviewPanelSurface({
   readonly children?: React.ReactNode;
 }): React.JSX.Element {
   return (
-    <div data-slot='model-unit-surface' className='h-full overflow-hidden rounded-b-xl border border-border bg-card'>
+    <div data-slot='model-unit-surface' className={cn('h-full', paneviewAttachedBodyClassName)}>
       <div
         ref={contentRef}
         data-slot='model-unit-scroller'
@@ -697,9 +699,9 @@ export function ComponentRow({
   /* The sidebar row's action: 24 px with the nested-action tone (nested-action surfaces R5). */
   const actionButtonClassName = nestedActionVariants({
     className: cn(
-      'flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-[opacity,color,background-color] duration-150',
+      'flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0',
       'focus-visible:bg-nested-action-hover focus-visible:text-foreground focus-visible:opacity-100 focus-visible:focus-outline',
-      'group-hover/part:opacity-100 group-focus-within/part:opacity-100 data-[state=open]:opacity-100 [@media(hover:none)]:opacity-100 motion-reduce:transition-none',
+      'group-hover/part:opacity-100 group-focus-within/part:opacity-100 data-[state=open]:opacity-100 [@media(hover:none)]:opacity-100',
       (isHovered || isIsolated) && 'opacity-100',
     ),
   });
@@ -726,7 +728,7 @@ export function ComponentRow({
           data-model-component-id={node.id}
           className={cn(
             // The sidebar row's lit states and inset: `pr-0.5` gives a 24 px action the 2 px it has above and below.
-            'group/part relative flex h-7 w-full items-center justify-between rounded-md py-1 pr-0.5 pl-2 text-sm leading-5 transition-colors',
+            'group/part relative flex h-7 w-full items-center justify-between rounded-md py-1 pr-0.5 pl-2 text-sm leading-5',
             'focus-within:bg-sidebar-accent focus-within:text-sidebar-accent-foreground has-[[aria-haspopup=menu][data-state=open]]:bg-sidebar-accent',
             isSelected ? 'bg-primary/10 text-primary' : 'text-sidebar-foreground',
             !isSelected && isFocused
@@ -751,7 +753,7 @@ export function ComponentRow({
               key={depth}
               aria-hidden='true'
               className={cn(
-                'pointer-events-none absolute inset-y-0 w-px bg-border/60 transition-opacity group-hover/part:opacity-100 group-focus-within/part:opacity-100',
+                'pointer-events-none absolute inset-y-0 w-px bg-border/60 group-hover/part:opacity-100 group-focus-within/part:opacity-100',
                 isSelected || isFocused ? 'opacity-100' : 'opacity-45',
               )}
               style={{ left: `${8 + depth * 12}px` }}
@@ -764,12 +766,16 @@ export function ComponentRow({
             aria-pressed={isSelected}
             onClick={toggleSelection}
           >
-            <Box
-              aria-hidden='true'
-              data-testid='component-color-icon'
-              className='size-3.5 shrink-0'
-              style={node.appearance?.color ? { fill: node.appearance.color } : undefined}
-            />
+            {node.appearance?.materials?.length ? (
+              <MaterialSwatch materials={node.appearance.materials} />
+            ) : (
+              <Box
+                aria-hidden='true'
+                data-testid='component-color-icon'
+                className='size-3.5 shrink-0'
+                style={node.appearance?.color ? { fill: node.appearance.color } : undefined}
+              />
+            )}
             <span className='truncate'>
               <HighlightText text={node.name} searchTerm={query} />
             </span>

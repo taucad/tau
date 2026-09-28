@@ -110,7 +110,12 @@ export type AgentHostWorkerInitializeRequest = {
   readonly systemPromptBlocks:
     | readonly [ModelSystemPromptBlock, ModelSystemPromptBlock]
     | readonly [ModelSystemPromptBlock, ModelSystemPromptBlock, ModelSystemPromptBlock];
-  readonly model: AgentHostModel;
+  /**
+   * The host's default row, for a bodyless resume of a run whose log committed none. Absent while
+   * the model catalog cannot name a provider (offline): attach, replay and a resume on the log's
+   * committed row still work, and a turn names its own row in its admission.
+   */
+  readonly model?: AgentHostModel | undefined;
   readonly runtimeConfig: UiRuntimeConfigInput;
   readonly geoSpecEngine?: 'legacy' | 'native' | undefined;
   readonly testingEnabled?: boolean | undefined;
@@ -534,7 +539,7 @@ const initializeRequestSchema = z.strictObject({
       agentChannelSystemPromptBlockSchema,
     ]),
   ]),
-  model: agentChannelModelSchema,
+  model: agentChannelModelSchema.optional(),
   runtimeConfig: z.strictObject({ tauApiUrl: z.url(), tauWebSocketUrl: z.url() }),
   geoSpecEngine: z.enum(['legacy', 'native']).optional(),
   testingEnabled: z.boolean().optional(),

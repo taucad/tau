@@ -11,6 +11,10 @@ describe('rpcClientErrorCodeSchema', () => {
     expect(rpcClientErrorCodeSchema.parse('RENDER_TIMEOUT')).toBe('RENDER_TIMEOUT');
   });
 
+  it('should parse AUTHENTICATION_ERROR for runtime authentication failures', () => {
+    expect(rpcClientErrorCodeSchema.parse('AUTHENTICATION_ERROR')).toBe('AUTHENTICATION_ERROR');
+  });
+
   it('should parse VALIDATION_ERROR for handler-level input rejections', () => {
     expect(rpcClientErrorCodeSchema.parse('VALIDATION_ERROR')).toBe('VALIDATION_ERROR');
   });

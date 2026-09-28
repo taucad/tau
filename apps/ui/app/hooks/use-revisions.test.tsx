@@ -2,19 +2,27 @@
 /**
  * `useRevisions` reads the host-attested graph and nothing else (S10, I3).
  *
- * The number, "Current", dirty and *Return to latest* are all answers the
+ * The number, "Current", dirty and the line are all answers the
  * revision root already gave — the first-parent ordinal on the selected branch,
  * the checkout's head, the checkout machine's own state — so this suite scripts
  * that root and asserts what the hook makes of its answers.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, onTestFinished } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
-import type { RevisionRow } from '@taucad/revisions';
+import type { RevisionLogRequest, RevisionRow } from '@taucad/revisions';
 import type { TurnFinalizedEvent } from '@taucad/revisions/revision-effects';
-import { useRevisionChanges, useRevisionFileComparison, useRevisions } from '#hooks/use-revisions.js';
+import {
+  revisionPageSize,
+  useRevisionCards,
+  useRevisionChanges,
+  useRevisionChangesSince,
+  useRevisionFileComparison,
+  useRevisions,
+  useTurnRevision,
+} from '#hooks/use-revisions.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 import { setRevisionSessionUser } from '#lib/revision-actor.js';
@@ -62,20 +70,21 @@ describe('useRevisions', () => {
       row({ revisionId: 'rev-2', revisionNumber: 2, turnId: 'u2' }),
       row({ revisionId: 'rev-1', revisionNumber: 1, turnId: 'u1' }),
     ];
-    revisionStatusHarness.status = { ...revisionStatusHarness.status, branch: 'main', headRevisionId: 'rev-2' };
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      line: { kind: 'branch', name: 'main' },
+      headRevisionId: 'rev-2',
+    };
 
     const { result } = renderHook(() => useRevisions(), { wrapper });
 
     await waitFor(() => {
       expect(result.current.revisions).toHaveLength(2);
     });
-    expect(result.current.branch).toBe('main');
+    expect(result.current.line).toEqual({ kind: 'branch', name: 'main' });
     expect(result.current.headRevisionId).toBe('rev-2');
     expect(result.current.revisions.map((revision) => revision.n)).toEqual([2, 1]);
     expect(result.current.byTurnId.get('u1')?.revisionId).toBe('rev-1');
-    /* The head *is* the newest revision on the branch, so there is nothing to
-     * return to — the control stays hidden rather than offering a no-op. */
-    expect(result.current.canReturnToLatest).toBe(false);
   });
 
   it('settles an empty branch instead of treating its disabled history query as loading', async () => {
@@ -87,17 +96,66 @@ describe('useRevisions', () => {
     expect(result.current.revisions).toEqual([]);
   });
 
-  it('offers Return to latest only while the checkout sits behind the branch tip', async () => {
+  /*
+   * T7: the transition the restore blackout lived in.
+   *
+   * A restore is a revision on the line (D1), so the head moves *forward* and
+   * the history grows by one row. Every row stays on screen while the log is
+   * re-read — no empty pane, no loading state, no remount — and the answer is
+   * the log read at the new head, never one cached at an earlier head (D3).
+   */
+  it('keeps every row through a restore and adds the restore row, never serving a log read at an older head (T7)', async () => {
+    const five = [5, 4, 3, 2, 1].map((n) => row({ revisionId: `rev-${n}`, revisionNumber: n, turnId: `u${n}` }));
+    revisionStatusHarness.rows = five;
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      line: { kind: 'branch', name: 'main' },
+      headRevisionId: 'rev-5',
+    };
+    const { result, rerender } = renderHook(() => useRevisions(), { wrapper });
+    await waitFor(() => {
+      expect(result.current.revisions).toHaveLength(5);
+    });
+
+    const restored = row({ revisionId: 'rev-6', revisionNumber: 6, summary: 'Restored Rev 2', source: 'restore' });
+    revisionStatusHarness.rows = [restored, ...five];
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-6' };
+    rerender();
+
+    /* The same line, and the rows it had, on the very next render. */
+    expect(result.current.line).toEqual({ kind: 'branch', name: 'main' });
+    expect(result.current.revisions).toHaveLength(5);
+    expect(result.current.isLoading).toBe(false);
+    await waitFor(() => {
+      expect(result.current.revisions.map((revision) => revision.n)).toEqual([6, 5, 4, 3, 2, 1]);
+    });
+    expect(result.current.revisions[0]?.summary).toBe('Restored Rev 2');
+    expect(result.current.byTurnId.get('u2')?.revisionId).toBe('rev-2');
+  });
+
+  it('re-reads a log cached at another head instead of serving it (D3)', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData(['revision-log', 'p', 'main'], {
+      head: 'rev-1',
+      rows: [row({ revisionId: 'rev-1', revisionNumber: 1 })],
+    });
     revisionStatusHarness.rows = [
       row({ revisionId: 'rev-2', revisionNumber: 2 }),
       row({ revisionId: 'rev-1', revisionNumber: 1 }),
     ];
-    revisionStatusHarness.status = { ...revisionStatusHarness.status, branch: 'main', headRevisionId: 'rev-1' };
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      line: { kind: 'branch', name: 'main' },
+      headRevisionId: 'rev-2',
+    };
+    const cachedWrapper = ({ children }: { readonly children: ReactNode }): React.JSX.Element => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
 
-    const { result } = renderHook(() => useRevisions(), { wrapper });
+    const { result } = renderHook(() => useRevisions(), { wrapper: cachedWrapper });
 
     await waitFor(() => {
-      expect(result.current.canReturnToLatest).toBe(true);
+      expect(result.current.revisions.map((revision) => revision.revisionId)).toEqual(['rev-2', 'rev-1']);
     });
   });
 
@@ -105,7 +163,7 @@ describe('useRevisions', () => {
     revisionStatusHarness.rows = [row({ revisionId: 'rev-1', revisionNumber: 1 })];
     revisionStatusHarness.status = {
       ...revisionStatusHarness.status,
-      branch: 'main',
+      line: { kind: 'branch', name: 'main' },
       headRevisionId: 'rev-1',
       dirty: true,
     };
@@ -123,7 +181,7 @@ describe('useRevisions', () => {
     revisionStatusHarness.rowsByBranch.set('feature', [row({ revisionId: 'feature-2', revisionNumber: 2 }), base]);
     revisionStatusHarness.status = {
       ...revisionStatusHarness.status,
-      branch: 'main',
+      line: { kind: 'branch', name: 'main' },
       headRevisionId: 'main-2',
       branches: [
         { name: 'main', head: 'main-2', checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
@@ -137,6 +195,45 @@ describe('useRevisions', () => {
       expect(result.current.branchFacts?.get('feature')).toEqual({ revisionNumber: 2, ahead: 1, behind: 1 });
     });
     expect(result.current.branchFacts?.get('main')).toEqual({ revisionNumber: 2, ahead: 0, behind: 0 });
+    /* B4: the other branch costs its head's row and one count, never a walk of its history. */
+    expect(revisionStatusHarness.logRequests).toEqual(['main']);
+    expect(revisionStatusHarness.rowRequests).toEqual(['feature-2']);
+  });
+
+  it('opens History on its page while another branch is still being counted (B4)', async () => {
+    const base = row({ revisionId: 'base', revisionNumber: 1 });
+    revisionStatusHarness.rows = [row({ revisionId: 'main-2', revisionNumber: 2 }), base];
+    revisionStatusHarness.rowsByBranch.set('feature', [row({ revisionId: 'feature-2', revisionNumber: 2 }), base]);
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      line: { kind: 'branch', name: 'main' },
+      headRevisionId: 'main-2',
+      branches: [
+        { name: 'main', head: 'main-2', checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
+        { name: 'feature', head: 'feature-2', checkoutId: 'co-2', checkoutRoot: '/checkouts/co-2', leaseChatIds: [] },
+      ],
+    };
+    const { useRevisionClient } = await import('#hooks/use-revision-status.js');
+    const client = (useRevisionClient as () => { divergence: (head: string, base: string) => Promise<unknown> })();
+    /* A count over a long line that has not answered yet. */
+    const divergence = vi.spyOn(client, 'divergence').mockReturnValue(
+      new Promise(() => {
+        /* Never answers. */
+      }),
+    );
+    onTestFinished(() => {
+      divergence.mockRestore();
+    });
+
+    const { result } = renderHook(() => useRevisions(), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+    expect(result.current.revisions.map((card) => card.revisionId)).toEqual(['main-2', 'base']);
+    expect(divergence).toHaveBeenCalledWith('feature-2', 'main-2');
+    /* No count shown rather than a wrong one. */
+    expect(result.current.branchFacts?.get('feature')).toMatchObject({ ahead: 0, behind: 0 });
   });
 
   it('carries a card for a turn a remote host settled, which this graph does not hold', async () => {
@@ -153,7 +250,11 @@ describe('useRevisions', () => {
       trigger: 'turn',
       runIds: ['run-9'],
     });
-    revisionStatusHarness.status = { ...revisionStatusHarness.status, branch: 'main', headRevisionId: 'rev-remote' };
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      line: { kind: 'branch', name: 'main' },
+      headRevisionId: 'rev-remote',
+    };
 
     const { result } = renderHook(() => useRevisions(), { wrapper });
 
@@ -179,7 +280,11 @@ describe('useRevisions', () => {
       runIds: ['run-1'],
     });
     revisionStatusHarness.rows = [row({ revisionId: 'rev-1', revisionNumber: 1, turnId: 'u1' })];
-    revisionStatusHarness.status = { ...revisionStatusHarness.status, branch: 'main', headRevisionId: 'rev-1' };
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      line: { kind: 'branch', name: 'main' },
+      headRevisionId: 'rev-1',
+    };
 
     const { result } = renderHook(() => useRevisions(), { wrapper });
 
@@ -197,7 +302,11 @@ describe('useRevisions', () => {
       row({ revisionId: 'rev-2', revisionNumber: 2, turnId: 'u1', createdAt: 1_788_220_900_000 }),
       row({ revisionId: 'rev-1', revisionNumber: 1, turnId: 'u1', createdAt: 1_788_220_800_000 }),
     ];
-    revisionStatusHarness.status = { ...revisionStatusHarness.status, branch: 'main', headRevisionId: 'rev-2' };
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      line: { kind: 'branch', name: 'main' },
+      headRevisionId: 'rev-2',
+    };
 
     const { result } = renderHook(() => useRevisions(), { wrapper });
 
@@ -224,7 +333,11 @@ describe('useRevisions', () => {
       row({ revisionId: 'rev-2', revisionNumber: 2, turnId: 'u1', createdAt: 1_788_220_900_000 }),
       row({ revisionId: 'rev-1', revisionNumber: 1, turnId: 'u1', createdAt: 1_788_220_800_000 }),
     ];
-    revisionStatusHarness.status = { ...revisionStatusHarness.status, branch: 'main', headRevisionId: 'rev-2' };
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      line: { kind: 'branch', name: 'main' },
+      headRevisionId: 'rev-2',
+    };
 
     const { result } = renderHook(() => useRevisions(), { wrapper });
 
@@ -258,7 +371,7 @@ describe('useRevisions', () => {
     revisionStatusHarness.rowsByBranch.set('isolated-run', [candidate]);
     revisionStatusHarness.status = {
       ...revisionStatusHarness.status,
-      branch: 'main',
+      line: { kind: 'branch', name: 'main' },
       branches: [
         { name: 'main', head: 'rev-2', checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
         {
@@ -271,10 +384,10 @@ describe('useRevisions', () => {
       ],
     };
 
-    const { result } = renderHook(() => useRevisions(), { wrapper });
+    const { result } = renderHook(() => useTurnRevision('u3'), { wrapper });
 
     await waitFor(() => {
-      expect(result.current.byTurnId.get('u3')).toMatchObject({
+      expect(result.current).toMatchObject({
         revisionId: 'rev-3',
         n: 3,
         createdAt: 1_788_307_200_000,
@@ -303,7 +416,7 @@ describe('useRevisions', () => {
     ]);
     revisionStatusHarness.status = {
       ...revisionStatusHarness.status,
-      branch: 'main',
+      line: { kind: 'branch', name: 'main' },
       branches: [
         { name: 'main', head: 'rev-2', checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
         {
@@ -321,19 +434,320 @@ describe('useRevisions', () => {
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     );
 
-    const { result } = renderHook(() => useRevisions(), { wrapper: cachedWrapper });
+    const { result } = renderHook(() => useTurnRevision('u3'), { wrapper: cachedWrapper });
 
     await waitFor(() => {
-      expect(result.current.byTurnId.get('u3')?.n).toBe(3);
+      expect(result.current?.n).toBe(3);
     });
   });
 
-  it('reads nothing at all until the root has answered with a branch', () => {
+  it('reads nothing at all until the root has answered with a line, and says the line is unknown (D3)', () => {
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, line: { kind: 'unknown' } };
     const { result } = renderHook(() => useRevisions(), { wrapper });
-    revisionStatusHarness.status = { ...revisionStatusHarness.status, branch: undefined };
 
     expect(result.current.revisions).toEqual([]);
-    expect(result.current.canReturnToLatest).toBe(false);
+    expect(result.current.line).toEqual({ kind: 'unknown' });
+    /* I6 (RV-W0 M2): an unknown line is History on its way, never an empty History. */
+    expect(result.current.isLoading).toBe(true);
+    expect(revisionStatusHarness.logRequests).toEqual([]);
+  });
+
+  it('names an unborn line without reading a history it does not have yet (D3)', () => {
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, line: { kind: 'unborn', name: 'main' } };
+    const { result } = renderHook(() => useRevisions(), { wrapper });
+
+    expect(result.current.line).toEqual({ kind: 'unborn', name: 'main' });
+    expect(result.current.isLoading).toBe(false);
+    expect(revisionStatusHarness.logRequests).toEqual([]);
+  });
+
+  it('takes dirty from the checkout on an unborn line too, so the first edit reads Not saved yet', () => {
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      line: { kind: 'unborn', name: 'main' },
+      dirty: true,
+    };
+    const { result } = renderHook(() => useRevisions(), { wrapper });
+
+    expect(result.current.line).toEqual({ kind: 'unborn', name: 'main' });
+    expect(result.current.isDirty).toBe(true);
+  });
+});
+
+describe('useRevisions after a mint (E6)', () => {
+  const history = [
+    row({ revisionId: 'rev-2', revisionNumber: 2, parent: 'rev-1' }),
+    row({ revisionId: 'rev-1', revisionNumber: 1 }),
+  ];
+  const mounted = async () => {
+    revisionStatusHarness.rows = history;
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      line: { kind: 'branch', name: 'main' },
+      headRevisionId: 'rev-2',
+      branches: [{ name: 'main', head: 'rev-2', checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] }],
+    };
+    const { useRevisionClient } = await import('#hooks/use-revision-status.js');
+    const client = (
+      useRevisionClient as () => { log: (request?: RevisionLogRequest) => Promise<readonly RevisionRow[]> }
+    )();
+    /* One cache across renders, as the app has: an append lands in the cache it was read from. */
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const stableWrapper = ({ children }: { readonly children: ReactNode }): React.JSX.Element => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+    const rendered = renderHook(() => useRevisions(), { wrapper: stableWrapper });
+    await waitFor(() => {
+      expect(rendered.result.current.revisions).toHaveLength(2);
+    });
+    /* The harness's client is one object for the suite, so the spy is cleared and restored per row. */
+    const log = vi.spyOn(client, 'log');
+    log.mockClear();
+    onTestFinished(() => {
+      log.mockRestore();
+    });
+    return { ...rendered, log };
+  };
+
+  it('appends the minted row from a one-row read instead of re-reading the history', async () => {
+    const { result, rerender, log } = await mounted();
+
+    revisionStatusHarness.rows = [row({ revisionId: 'rev-3', revisionNumber: 3, parent: 'rev-2' }), ...history];
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      headRevisionId: 'rev-3',
+      branches: [{ name: 'main', head: 'rev-3', checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] }],
+    };
+    rerender();
+
+    await waitFor(() => {
+      expect(result.current.revisions.map((card) => card.n)).toEqual([3, 2, 1]);
+    });
+    expect(log.mock.calls.map(([request]) => request)).toEqual([{ branch: 'main', limit: 1 }]);
+    expect(result.current.branchFacts?.get('main')).toEqual({ revisionNumber: 3, ahead: 0, behind: 0 });
+  });
+
+  it('keeps one page when a mint lands on a full page: the oldest row moves behind Show more (B4)', async () => {
+    const line = (top: number) =>
+      Array.from({ length: top }, (_, index) => {
+        const n = top - index;
+        return row({
+          revisionId: `rev-${String(n)}`,
+          revisionNumber: n,
+          ...(n === 1 ? {} : { parent: `rev-${String(n - 1)}` }),
+        });
+      });
+    const { result, rerender } = await mounted();
+    /* A head that is not one mint on top of the log re-reads one page. */
+    revisionStatusHarness.rows = line(revisionPageSize + 1);
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      headRevisionId: `rev-${String(revisionPageSize + 1)}`,
+    };
+    rerender();
+    await waitFor(() => {
+      expect(result.current.revisions).toHaveLength(revisionPageSize);
+    });
+
+    revisionStatusHarness.rows = line(revisionPageSize + 2);
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      headRevisionId: `rev-${String(revisionPageSize + 2)}`,
+    };
+    rerender();
+
+    await waitFor(() => {
+      expect(result.current.revisions[0]?.n).toBe(revisionPageSize + 2);
+    });
+    expect(result.current.revisions).toHaveLength(revisionPageSize);
+    expect(result.current.revisions.at(-1)?.n).toBe(3);
+    expect(result.current.hasOlder).toBe(true);
+  });
+
+  /*
+   * A head this store does not hold yet: the root named a host's revision
+   * before its objects arrived. When they land the head does not move, so
+   * only the report of their arrival can bring its row in (W10-L D1).
+   */
+  it('reads a head the store did not hold again once the root reports anything new', async () => {
+    const { result, rerender } = await mounted();
+
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-3' };
+    rerender();
+    await waitFor(() => {
+      expect(result.current.headRevisionId).toBe('rev-3');
+    });
+    await act(async () => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+    });
+    expect(result.current.revisions.map((card) => card.n)).toEqual([2, 1]);
+
+    /* The fetch lands: same head, a new report. */
+    revisionStatusHarness.rows = [row({ revisionId: 'rev-3', revisionNumber: 3, parent: 'rev-2' }), ...history];
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      branches: [{ name: 'main', head: 'rev-3', checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] }],
+    };
+    rerender();
+
+    await waitFor(() => {
+      expect(result.current.revisions.map((card) => card.n)).toEqual([3, 2, 1]);
+    });
+  });
+
+  it('re-reads the whole history when the new head is a merge, whose other side lands further down', async () => {
+    const { result, rerender, log } = await mounted();
+
+    const side = row({ revisionId: 'side-1', revisionNumber: undefined, parent: 'rev-1' });
+    const merge = row({ revisionId: 'merge-3', revisionNumber: 3, parent: 'rev-2', otherParents: ['side-1'] });
+    revisionStatusHarness.rows = [merge, history[0]!, side, history[1]!];
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'merge-3' };
+    rerender();
+
+    await waitFor(() => {
+      expect(result.current.revisions.map((card) => card.revisionId)).toEqual(['merge-3', 'rev-2', 'side-1', 'rev-1']);
+    });
+    expect(log.mock.calls.map(([request]) => request)).toEqual([
+      { branch: 'main', limit: 1 },
+      { branch: 'main', limit: revisionPageSize },
+    ]);
+  });
+});
+
+describe('useRevisions over a long history (B4)', () => {
+  /* 500 revisions on one line, newest first; every tenth one a turn. */
+  const long = Array.from({ length: 500 }, (_, index) => {
+    const n = 500 - index;
+    return row({
+      revisionId: `rev-${String(n)}`,
+      revisionNumber: n,
+      turnId: n % 10 === 0 ? `u${String(n)}` : undefined,
+      ...(n === 1 ? {} : { parent: `rev-${String(n - 1)}` }),
+    });
+  });
+  const onLongLine = (): void => {
+    revisionStatusHarness.rows = long;
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      line: { kind: 'branch', name: 'main' },
+      headRevisionId: 'rev-500',
+      branches: [{ name: 'main', head: 'rev-500', checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] }],
+    };
+  };
+
+  it('reads one page first, then the next page under it on Show more, and says when nothing older is left', async () => {
+    onLongLine();
+    const { useRevisionClient } = await import('#hooks/use-revision-status.js');
+    const client = (
+      useRevisionClient as () => { log: (request?: RevisionLogRequest) => Promise<readonly RevisionRow[]> }
+    )();
+    const log = vi.spyOn(client, 'log');
+    onTestFinished(() => {
+      log.mockRestore();
+    });
+    /* One cache across renders, as the app has: a page lands in the cache it was read from. */
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result } = renderHook(() => useRevisions(), {
+      wrapper: ({ children }: { readonly children: ReactNode }) => (
+        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      ),
+    });
+
+    await waitFor(() => {
+      expect(result.current.revisions).toHaveLength(50);
+    });
+    expect(log.mock.calls.map(([request]) => request)).toEqual([{ branch: 'main', limit: 50 }]);
+    expect(result.current.revisions.at(-1)?.n).toBe(451);
+    expect(result.current.hasOlder).toBe(true);
+
+    await act(async () => {
+      await result.current.loadOlder();
+    });
+    await waitFor(() => {
+      expect(result.current.revisions).toHaveLength(100);
+    });
+    expect(result.current.revisions.at(-1)?.n).toBe(401);
+    expect(log.mock.calls.at(-1)?.[0]).toEqual({ branch: 'main', limit: 100 });
+
+    for (let page = 3; page <= 10; page += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- each page is read under the one before it.
+      await act(async () => {
+        await result.current.loadOlder();
+      });
+      // oxlint-disable-next-line no-await-in-loop -- as above.
+      await waitFor(() => {
+        expect(result.current.revisions).toHaveLength(page * 50);
+      });
+    }
+    expect(result.current.revisions.at(-1)?.n).toBe(1);
+    expect(result.current.hasOlder).toBe(false);
+  });
+
+  it('keeps the Rev N card of a turn recorded 450 revisions ago after a reload, read by the id its settlement names', async () => {
+    onLongLine();
+    /* After a reload the chat's durable log replays its `turn.finalized` records; the page holds Rev 500…451. */
+    settlements.push({
+      type: 'turn.finalized',
+      turnId: 'u50',
+      runId: 'run-50',
+      chatId: 'chat-1',
+      projectId: 'p',
+      checkoutId: 'live',
+      revisionId: 'rev-50',
+      branch: 'main',
+      changedPaths: ['main.scad'],
+      trigger: 'turn',
+      runIds: ['run-50'],
+    });
+
+    const { result } = renderHook(() => useTurnRevision('u50'), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current).toMatchObject({ revisionId: 'rev-50', n: 50 });
+    });
+    expect(revisionStatusHarness.rowRequests).toEqual(['rev-50']);
+    expect(revisionStatusHarness.logRequests).toEqual(['main']);
+  });
+
+  it('reads a card by id only for a revision the page does not hold', async () => {
+    onLongLine();
+    const { result } = renderHook(() => useRevisionCards(['rev-7']), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current.get('rev-7')).toMatchObject({ n: 7, parent: 'rev-6' });
+    });
+    expect(revisionStatusHarness.rowRequests).toEqual(['rev-7']);
+  });
+});
+
+describe('useRevisionChangesSince', () => {
+  /* Canvas round 4b: *Compare with current* reads the whole revision against the head the checkout is at. */
+  it('asks which paths differ between a revision and the head, and nothing before the head is known', async () => {
+    const card: RevisionCard = {
+      revisionId: 'rev-1',
+      n: 1,
+      createdAt: 0,
+      summary: '',
+      actor: '',
+      turnId: undefined,
+      conflicted: false,
+      trigger: 'save',
+    };
+    revisionStatusHarness.diff = [{ path: 'main.scad', kind: 'modified' }];
+    const { result, rerender } = renderHook(() => useRevisionChangesSince(card), { wrapper });
+    expect(result.current.isLoaded).toBe(false);
+    expect(revisionStatusHarness.diffRequests).toStrictEqual([]);
+
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-3' };
+    rerender();
+
+    await waitFor(() => {
+      expect(result.current.isLoaded).toBe(true);
+    });
+    expect(result.current.changes).toStrictEqual([{ path: 'main.scad', kind: 'modified' }]);
+    expect(revisionStatusHarness.diffRequests).toStrictEqual(['rev-1..rev-3']);
   });
 });
 
@@ -403,7 +817,7 @@ describe('useRevisionChanges', () => {
   });
 
   /*
-   * B9/C51: the view is one object until the graph moves.
+   * Rule 20's log cost, C51: the view is one object until the graph moves.
    *
    * `useQueries` without `combine` hands back a fresh array on every render, so
    * the memo below it never hit and the whole view — `revisions`, `byTurnId`,
@@ -413,8 +827,14 @@ describe('useRevisionChanges', () => {
   it('returns the same view across renders while the store has not moved', async () => {
     revisionStatusHarness.rows = [row({ revisionId: 'rev-1', revisionNumber: 1, turnId: 'u1' })];
     revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-1' };
+    /* The app's one root client (apps/ui AGENTS): a fresh client per render is a store that moved. */
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
-    const { result, rerender } = renderHook(() => useRevisions(), { wrapper });
+    const { result, rerender } = renderHook(() => useRevisions(), {
+      wrapper: ({ children }: { readonly children: ReactNode }) => (
+        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      ),
+    });
     await waitFor(() => {
       expect(result.current.revisions).toHaveLength(1);
     });
@@ -427,17 +847,21 @@ describe('useRevisionChanges', () => {
   });
 
   /*
-   * B8: a marker flips to *Saved* on the settlement, without re-walking the graph.
+   * Rule 20's log cost: a marker flips to *Saved* on the settlement, without re-walking the graph.
    *
    * The host attests the turn it just recorded, and that card is enough for the
    * marker. Asking the graph again would cost a `log` per settled turn — which
    * is what the budget forbids — so the pin counts the walks rather than the
-   * render: the revision-log query key carries the head, and a settlement on the
-   * branch already loaded moves neither.
+   * render: the revision-log answer remembers the head it was read at, and a
+   * settlement on the branch already loaded moves neither.
    */
-  it('flips a turn to its revision on the settlement alone, with no graph re-walk (B8)', async () => {
+  it('flips a turn to its revision on the settlement alone, with no graph re-walk (rule 20’s log cost)', async () => {
     revisionStatusHarness.rows = [row({ revisionId: 'rev-1', revisionNumber: 1 })];
-    revisionStatusHarness.status = { ...revisionStatusHarness.status, branch: 'main', headRevisionId: 'rev-1' };
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      line: { kind: 'branch', name: 'main' },
+      headRevisionId: 'rev-1',
+    };
 
     const { result, rerender } = renderHook(() => useRevisions(), { wrapper });
     await waitFor(() => {
@@ -502,7 +926,8 @@ describe('useRevisionChanges', () => {
     expect(result.current.revisions[2]?.summary).toBe('Tapered wall');
     /* The pseudonym stays stable and per workspace; the scheme is not copy. */
     expect(result.current.revisions[1]?.actor).toBe('Anonymous · 2722de98');
-    expect(result.current.revisions[0]?.actor).toBe('tau-browser-agent-host');
+    /* An agent turn's actor id is a model id; the person reads who did it. */
+    expect(result.current.revisions[0]?.actor).toBe('Tau agent');
   });
 
   /* F4: the session is a store the hook subscribes to, not a value it read once. */
@@ -520,6 +945,45 @@ describe('useRevisionChanges', () => {
       setRevisionSessionUser({ id: 'user-1', name: 'Ada' });
     });
 
-    expect(result.current.revisions[0]?.actor).toBe('Ada');
+    /* HQ4: your own revisions say You, never your own name. */
+    expect(result.current.revisions[0]?.actor).toBe('You');
+  });
+
+  /* A9: the Restored row is named by what it restored, never by its trigger. */
+  it('carries restoredFrom on the row a restore minted and on no other', async () => {
+    revisionStatusHarness.rows = [
+      row({
+        revisionId: 'rev-3',
+        revisionNumber: 3,
+        source: 'restore',
+        actor: 'user-1',
+        trigger: 'restore',
+        restoredFrom: 'rev-1',
+      }),
+      row({ revisionId: 'rev-2', revisionNumber: 2, source: 'user', actor: 'user-1', trigger: 'restore' }),
+    ];
+
+    const { result } = renderHook(() => useRevisions(), { wrapper });
+    await waitFor(() => {
+      expect(result.current.revisions).toHaveLength(2);
+    });
+
+    expect(result.current.revisions[0]?.restoredFrom).toBe('rev-1');
+    expect(result.current.revisions[1]?.restoredFrom).toBeUndefined();
+  });
+
+  /* W1 Details: the Parent row reads the first parent the graph named. */
+  it('carries the first parent onto each card, and none onto a first revision', async () => {
+    revisionStatusHarness.rows = [
+      row({ revisionId: 'rev-2', revisionNumber: 2, parent: 'rev-1' }),
+      row({ revisionId: 'rev-1', revisionNumber: 1 }),
+    ];
+
+    const { result } = renderHook(() => useRevisions(), { wrapper });
+    await waitFor(() => {
+      expect(result.current.revisions).toHaveLength(2);
+    });
+
+    expect(result.current.revisions.map((card) => card.parent)).toStrictEqual(['rev-1', undefined]);
   });
 });

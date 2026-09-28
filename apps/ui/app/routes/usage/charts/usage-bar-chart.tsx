@@ -48,7 +48,7 @@ function UsageBarChartComponent({
           <CardTitle>{title}</CardTitle>
           {description ? <CardDescription>{description}</CardDescription> : undefined}
         </CardHeader>
-        <CardContent className='flex h-[300px] items-center justify-center'>
+        <CardContent className='flex h-75 items-center justify-center'>
           <p className='text-sm text-muted-foreground'>No usage in this range</p>
         </CardContent>
       </Card>
@@ -62,7 +62,7 @@ function UsageBarChartComponent({
         {description ? <CardDescription>{description}</CardDescription> : undefined}
       </CardHeader>
       <CardContent className='min-w-0'>
-        <ChartContainer config={chartConfig} className='h-[300px] w-full min-w-0'>
+        <ChartContainer config={chartConfig} className='h-75 w-full min-w-0'>
           <BarChart data={chartData} layout='vertical' margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
             <XAxis type='number' tickFormatter={(value: number) => `${value} cr`} tickLine={false} axisLine={false} />
             <YAxis

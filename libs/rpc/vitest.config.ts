@@ -1,8 +1,6 @@
 import { defineConfig } from 'vitest/config';
-import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 
 export default defineConfig({
-  plugins: [nxViteTsPaths()],
   test: {
     environment: 'node',
     // Vitest's typecheck uses TypeScript 5.9.3, which crashes (TS internal bug in

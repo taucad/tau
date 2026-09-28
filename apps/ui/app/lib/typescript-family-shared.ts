@@ -149,9 +149,8 @@ async function loadScopedStaticTypes(proxy: DependencyReader, scopeName: string)
 
 /**
  * Read kernel static type definitions from the FM worker's `/node_modules`
- * mount, through the composed client's dependency arm. The mount is populated
- * eagerly during FM worker init (see `apps/ui/app/machines/file-manager.worker.ts`)
- * so by the time the client exists, every package's `index.d.ts` is on disk.
+ * mount, through the composed client's dependency arm. The first dependency
+ * read waits for the FM worker to finish installing the declarations.
  *
  * @public
  */
@@ -165,8 +164,11 @@ export async function loadKernelStaticTypesFromMount(
   let packageNames: readonly string[];
   try {
     packageNames = await proxy.readdir(dependencyRoot);
-  } catch {
-    return [];
+  } catch (error) {
+    if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ROOT_UNAVAILABLE') {
+      return [];
+    }
+    throw error;
   }
 
   const definitions = await Promise.all(

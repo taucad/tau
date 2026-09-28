@@ -10,7 +10,10 @@
       "dependsOn": ["^build"],
       "options": {
         "command": "tsdown --config-loader=tsx",
-        "cwd": "{projectRoot}"
+        "cwd": "{projectRoot}",
+        "env": {
+          "NODE_OPTIONS": "--max-old-space-size=8192"
+        }
       }
     }
   }

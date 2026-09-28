@@ -46,26 +46,35 @@ const customConstructors = new Set([
   'EffectComposer',
   'N8AOPostPass',
 ]);
-const controlAssignments = new Set(['onBeforeCompile', 'colorNode', 'positionNode', 'depthNode', 'outputNode']);
+const controlAssignments = new Set([
+  'onBeforeCompile',
+  'colorNode',
+  'positionNode',
+  'depthNode',
+  'outputNode',
+  'maskNode',
+]);
 
-for (const path of productionFiles) {
-  const source = ts.createSourceFile(path, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest, true);
+/** Whether a module authors shader control, and whether it escapes to raw WGSL or GLSL. */
+const discover = (path: string, text: string): { control: boolean; raw: boolean } => {
+  const found = { control: false, raw: false };
+  const source = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true);
   const visit = (node: ts.Node): void => {
     if (ts.isNewExpression(node)) {
       const name = ts.isPropertyAccessExpression(node.expression)
         ? node.expression.name.text
         : node.expression.getText(source);
       if (customConstructors.has(name)) {
-        discoveredControlModules.add(aliasFor(path));
+        found.control = true;
       }
       if (name === 'RawShaderMaterial') {
-        rawShaderModules.add(aliasFor(path));
+        found.raw = true;
       }
     }
     if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
       const { left } = node;
       if (ts.isPropertyAccessExpression(left) && controlAssignments.has(left.name.text)) {
-        discoveredControlModules.add(aliasFor(path));
+        found.control = true;
       }
     }
     if (
@@ -73,18 +82,29 @@ for (const path of productionFiles) {
       ts.isIdentifier(node.expression) &&
       (node.expression.text === 'wgslFn' || node.expression.text === 'glslFn')
     ) {
-      rawShaderModules.add(aliasFor(path));
+      found.raw = true;
     }
     if (ts.isClassDeclaration(node)) {
       const base =
         node.heritageClauses?.flatMap(({ types }) => types.map(({ expression }) => expression.getText(source))) ?? [];
       if (base.includes('Pass') || base.includes('ThreeLine2NodeMaterial')) {
-        discoveredControlModules.add(aliasFor(path));
+        found.control = true;
       }
     }
     ts.forEachChild(node, visit);
   };
   visit(source);
+  return found;
+};
+
+for (const path of productionFiles) {
+  const { control, raw } = discover(path, readFileSync(path, 'utf8'));
+  if (control) {
+    discoveredControlModules.add(aliasFor(path));
+  }
+  if (raw) {
+    rawShaderModules.add(aliasFor(path));
+  }
 }
 
 describe('shader policy inventory', () => {
@@ -93,6 +113,10 @@ describe('shader policy inventory', () => {
     expect([...discoveredControlModules].sort()).toEqual(
       registeredModules.filter((module) => module !== '#components/geometry/graphics/three/scene-overlay.tsx').sort(),
     );
+  });
+
+  it('should discover a module whose only shader control is a mask node', () => {
+    expect(discover('mask.ts', 'material.maskNode = clip.mask;')).toEqual({ control: true, raw: false });
   });
 
   it('resolves every registered module', () => {

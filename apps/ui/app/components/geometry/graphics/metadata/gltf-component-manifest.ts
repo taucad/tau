@@ -1,3 +1,4 @@
+import type { GLTF } from '@gltf-transform/core';
 import { tauCadTopologyExtension } from '@taucad/types/constants';
 import type {
   GeometryComponentAppearance,
@@ -9,6 +10,7 @@ import type {
   GeometryComponentPrimitiveRef,
   JSONObject,
 } from '@taucad/types';
+import { admitMechanism } from '@taucad/kinematics';
 import type { TauCadTopologyComponent } from '@taucad/geometry-core';
 
 type JsonObject = JSONObject;
@@ -56,7 +58,7 @@ type GltfScene = {
 };
 
 /** The glTF JSON chunk, narrowed to what the manifest and the in-place update path read. @public */
-export type GltfJson = {
+export type GltfJson = Pick<GLTF.IGLTF, 'images' | 'textures' | 'samplers'> & {
   scene?: number;
   scenes?: GltfScene[];
   nodes?: GltfNode[];
@@ -71,8 +73,13 @@ type GltfMaterial = {
   name?: string;
   pbrMetallicRoughness?: {
     baseColorFactor?: number[];
+    metallicFactor?: number;
+    roughnessFactor?: number;
   };
+  extensions?: Record<string, JsonObject>;
 };
+
+type SurfaceMaterial = NonNullable<GeometryComponentAppearance['materials']>[number];
 
 type TopologyComponent = Partial<TauCadTopologyComponent> & { readonly kind?: GeometryComponentKind };
 
@@ -199,30 +206,62 @@ function createCapabilities(hasPreciseTopology: boolean): GeometryComponentCapab
   };
 }
 
-function readTopologyComponents(json: GltfJson, bin: Uint8Array<ArrayBuffer>): TopologyComponent[] {
+type TopologyPayload = { components?: TopologyComponent[]; mechanism?: unknown };
+
+function readTopologyPayload(json: GltfJson, bin: Uint8Array<ArrayBuffer>): TopologyPayload {
   const extension = json.extensions?.[tauCadTopologyExtension];
   if (!extension) {
-    return [];
+    return {};
   }
 
   if (Array.isArray(extension['components'])) {
-    return extension['components'] as TopologyComponent[];
+    return extension as TopologyPayload;
   }
 
   const { topologyBufferView } = extension;
   if (typeof topologyBufferView !== 'number') {
-    return [];
+    return {};
   }
 
   const bufferView = json.bufferViews?.[topologyBufferView];
   if (!bufferView) {
-    return [];
+    return {};
   }
 
   const start = bufferView.byteOffset ?? 0;
   const payloadBytes = bin.slice(start, start + bufferView.byteLength);
-  const payload = JSON.parse(new TextDecoder().decode(payloadBytes)) as { components?: TopologyComponent[] };
-  return payload.components ?? [];
+  return JSON.parse(new TextDecoder().decode(payloadBytes)) as TopologyPayload;
+}
+
+/**
+ * Re-admit the payload's mechanism: the GLB is untrusted input, so a mechanism the viewer cannot
+ * use, because admission rejects it or a link names a component the payload does not declare, is
+ * dropped with a warning rather than failing the manifest.
+ */
+function readMechanism(payload: TopologyPayload): GeometryComponentManifest['mechanism'] {
+  if (payload.mechanism === undefined) {
+    return undefined;
+  }
+
+  const outcome = admitMechanism(payload.mechanism);
+  if (outcome.status === 'invalid') {
+    const [issue] = outcome.issues;
+    console.warn(`Ignoring the TAU_cad_topology mechanism: ${issue?.path} ${issue?.message}`, outcome.issues);
+    return undefined;
+  }
+
+  const componentIds = new Set(payload.components?.map((component) => component.id));
+  const undeclared = Object.values(outcome.mechanism.links)
+    .flatMap((link) => link.components)
+    .filter((id) => !componentIds.has(id));
+  if (undeclared.length > 0) {
+    console.warn(
+      `Ignoring the TAU_cad_topology mechanism: its links name undeclared components ${undeclared.join(', ')}`,
+    );
+    return undefined;
+  }
+
+  return outcome.mechanism;
 }
 
 function combineBounds(bounds: GeometryComponentBounds[]): GeometryComponentBounds | undefined {
@@ -356,6 +395,89 @@ function getComponentAppearance(
     ...(colors.length > 0 ? { colors } : {}),
     ...(materialNames.length > 0 ? { materialNames } : {}),
   };
+}
+
+function readMaterialFactor(value: number | undefined): number | 'unavailable' | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  return isFiniteNumber(value) && value >= 0 && value <= 1 ? value : 'unavailable';
+}
+
+function getSurfaceMaterial(json: GltfJson, materialIndex: number | undefined): SurfaceMaterial {
+  if (materialIndex === undefined) {
+    return {};
+  }
+  const material = json.materials?.[materialIndex];
+  if (!material) {
+    return { materialIndex, color: 'unavailable', metalness: 'unavailable', roughness: 'unavailable' };
+  }
+  const factors = material.pbrMetallicRoughness;
+  const baseColor = factors?.baseColorFactor;
+  const color =
+    baseColor === undefined
+      ? undefined
+      : baseColor.length === 4 && baseColor.every((value) => readMaterialFactor(value) !== 'unavailable')
+        ? baseColorFactorToCssColor(baseColor)
+        : 'unavailable';
+  return {
+    materialIndex,
+    ...(color === undefined ? {} : { color }),
+    ...(factors?.metallicFactor === undefined ? {} : { metalness: readMaterialFactor(factors.metallicFactor) }),
+    ...(factors?.roughnessFactor === undefined ? {} : { roughness: readMaterialFactor(factors.roughnessFactor) }),
+    ...(material.extensions?.['KHR_materials_unlit'] ? { isUnlit: true } : {}),
+  };
+}
+
+/** Attach immutable-source factors once, independently of legacy color swatches and live renderer overrides. */
+function attachComponentSurfaceMaterials(
+  json: GltfJson,
+  manifest: GeometryComponentManifest,
+): GeometryComponentManifest {
+  const materials = new Map<number | undefined, SurfaceMaterial>();
+  const resolved = new Map<string, Set<number | undefined>>();
+  const visiting = new Set<string>();
+  const visit = (id: string): Set<number | undefined> => {
+    const previous = resolved.get(id);
+    if (previous) {
+      return previous;
+    }
+    const indices = new Set<number | undefined>();
+    const node = manifest.nodesById[id];
+    if (!node || visiting.has(id)) {
+      return indices;
+    }
+    visiting.add(id);
+    for (const reference of node.primitiveRefs ?? []) {
+      const primitive = json.meshes?.[reference.meshIndex]?.primitives?.[reference.primitiveIndex];
+      if (primitive && [4, 5, 6].includes(primitive.mode ?? 4)) {
+        indices.add(primitive.material);
+      }
+    }
+    for (const childId of node.childIds) {
+      for (const index of visit(childId)) {
+        indices.add(index);
+      }
+    }
+    if (indices.size > 0) {
+      node.appearance = {
+        ...node.appearance,
+        materials: [...indices].map((index) => {
+          let material = materials.get(index);
+          if (!material) {
+            material = getSurfaceMaterial(json, index);
+            materials.set(index, material);
+          }
+          return material;
+        }),
+      };
+    }
+    visiting.delete(id);
+    resolved.set(id, indices);
+    return indices;
+  };
+  visit(manifest.rootId);
+  return manifest;
 }
 
 function toGeometryKind(value: unknown): GeometryComponentKind {
@@ -580,10 +702,20 @@ export function buildGltfComponentManifest(
   options: { sourceFile?: string; geometryHash?: string } = {},
 ): GeometryComponentManifest {
   const { json, bin } = parseGltfBytes(content);
-  const topologyComponents = readTopologyComponents(json, bin);
+  const payload = readTopologyPayload(json, bin);
+  const manifest = buildComponentManifest(json, payload.components ?? [], options);
+  const mechanism = readMechanism(payload);
+  return mechanism ? { ...manifest, mechanism } : manifest;
+}
+
+function buildComponentManifest(
+  json: GltfJson,
+  topologyComponents: readonly TopologyComponent[],
+  options: { sourceFile?: string; geometryHash?: string },
+): GeometryComponentManifest {
   const topologyManifest = createTopologyComponentManifest(json, topologyComponents, options);
   if (topologyManifest) {
-    return topologyManifest;
+    return attachComponentSurfaceMaterials(json, topologyManifest);
   }
 
   const topologyByNodeIndex = new Map<number, TopologyComponent>();
@@ -726,7 +858,7 @@ export function buildGltfComponentManifest(
   const rootCapabilities = createCapabilities(hasPreciseTopology);
   nodesById[rootId] = createRootNode(childIds, rootCapabilities);
 
-  return {
+  return attachComponentSurfaceMaterials(json, {
     schemaVersion: 1,
     sourceFile: options.sourceFile,
     geometryHash: options.geometryHash,
@@ -735,5 +867,5 @@ export function buildGltfComponentManifest(
     nodesById,
     capabilities: rootCapabilities,
     extensionUsed: json.extensions?.[tauCadTopologyExtension] ? tauCadTopologyExtension : undefined,
-  };
+  });
 }

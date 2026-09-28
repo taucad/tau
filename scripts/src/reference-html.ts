@@ -34,7 +34,8 @@ const maximumAggregateBytes = 100 * 1024 * 1024;
 const maximumInteractionStates = 100;
 const maximumCanvasFrames = 100;
 const maximumCanvasImageBytes = 20 * 1024 * 1024;
-const maximumLazyScrollSteps = 100;
+/** Lazy loads (height growth after a scroll) a page may perform before capture gives up; a long static page scrolls to its end regardless. */
+const maximumLazyGrowths = 100;
 const navigationTimeoutMilliseconds = 30_000;
 const captureTimeoutMilliseconds = 60_000;
 const idleTimeoutMilliseconds = 10_000;
@@ -276,6 +277,24 @@ const safeResolvedLink = (value: string | undefined, baseUrl: string): string | 
   }
 };
 
+const blockCellTags = new Set(['blockquote', 'dl', 'figure', 'ol', 'pre', 'table', 'ul']);
+
+/** A cell with list, code or nested-table content cannot become a GFM pipe-table cell; Pandoc drops the whole table as `[TABLE]`. */
+const holdsBlockContent = (cell: Extract<RawDomNode, { type: 'element' }>): boolean => {
+  let paragraphs = 0;
+  const blocks = (node: RawDomNode): boolean => {
+    if (node.type !== 'element') {
+      return false;
+    }
+    const tag = node.tag.toLowerCase();
+    if (tag === 'p') {
+      paragraphs += 1;
+    }
+    return blockCellTags.has(tag) || paragraphs > 1 || node.children.some(blocks);
+  };
+  return cell.children.some(blocks);
+};
+
 const lowerComplexTable = (node: Extract<RawDomNode, { type: 'element' }>, baseUrl: string): SemanticNode[] => {
   const rows = elementChildren(node, 'tr');
   const cells = rows.map((row) =>
@@ -289,6 +308,7 @@ const lowerComplexTable = (node: Extract<RawDomNode, { type: 'element' }>, baseU
   const complex =
     cells.length === 0 ||
     cells.some((row) => row.some((cell) => cell.attributes['colspan'] !== undefined || cell.attributes['rowspan'])) ||
+    cells.some((row) => row.some((cell) => holdsBlockContent(cell))) ||
     new Set(cells.map((row) => row.length)).size > 1;
   if (!complex) {
     return [];
@@ -351,7 +371,18 @@ const semanticFromRaw = (node: RawDomNode, baseUrl: string, preformatted: boolea
   const childPreformatted = preformatted || tag === 'pre' || tag === 'code';
   let children = node.children.flatMap((child) => semanticFromRaw(child, baseUrl, childPreformatted));
   if (tag === 'pre') {
-    children = children.filter((child) => child.kind !== 'text' || child.value.trim() !== '');
+    // Trim only the edges: whitespace between highlighted token spans is code.
+    const blank = (child: SemanticNode | undefined): boolean => child?.kind === 'text' && child.value.trim() === '';
+    while (blank(children[0])) {
+      children = children.slice(1);
+    }
+    while (blank(children.at(-1))) {
+      children = children.slice(0, -1);
+    }
+    // Pandoc reads a bare <pre> (GitHub's highlighted markup) as a paragraph.
+    if (!children.some((child) => child.kind === 'element' && child.tag === 'code')) {
+      children = [{ kind: 'element', tag: 'code', attributes: { class: 'language-text' }, children }];
+    }
   }
   if (tag === 'img') {
     const alt = node.attributes['alt']?.replaceAll(/\s+/gu, ' ').trim();
@@ -950,7 +981,7 @@ const settlePage = async (options: {
 }): Promise<void> => {
   const failedImages = await withDeadline(
     options.page.evaluate(
-      async ({ lazyScroll, maximumSteps }) => {
+      async ({ lazyScroll, maximumGrowths }) => {
         await document.fonts.ready;
         const visibleImages = [...document.images].filter((image) => {
           const style = getComputedStyle(image);
@@ -987,8 +1018,16 @@ const settlePage = async (options: {
         }
         let previousHeight = 0;
         let stableBottomSamples = 0;
-        for (let step = 0; step < maximumSteps; step += 1) {
+        let growths = 0;
+        for (let step = 0; ; step += 1) {
           const height = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+          if (previousHeight !== 0 && height > previousHeight) {
+            growths += 1;
+            if (growths > maximumGrowths) {
+              window.scrollTo(0, 0);
+              throw new Error(`lazy content did not settle after ${maximumGrowths} loads`);
+            }
+          }
           const next = Math.min(height, (step + 1) * window.innerHeight);
           window.scrollTo(0, next);
           await new Promise<void>((resolve) => {
@@ -1004,10 +1043,8 @@ const settlePage = async (options: {
             return failedImages;
           }
         }
-        window.scrollTo(0, 0);
-        throw new Error('lazy content did not settle within 100 viewport steps');
       },
-      { lazyScroll: options.lazyScroll, maximumSteps: maximumLazyScrollSteps },
+      { lazyScroll: options.lazyScroll, maximumGrowths: maximumLazyGrowths },
     ),
     { deadline: options.deadline, now: options.now, label: 'page settlement' },
   );

@@ -111,7 +111,7 @@ describe('deriveTurnRevisionState', () => {
   });
 
   it('should route conflicted and failed outcomes to their own labels', () => {
-    expect(turnRevisionLabel(deriveTurnRevisionState(facts({ outcome: 'conflicted' })), 0)).toBe('Changes need review');
+    expect(turnRevisionLabel(deriveTurnRevisionState(facts({ outcome: 'conflicted' })), 0)).toBe('Needs your decision');
     expect(turnRevisionLabel(deriveTurnRevisionState(facts({ outcome: 'failed' })), 0)).toBe('Revision not saved');
   });
 

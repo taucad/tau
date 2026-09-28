@@ -48,6 +48,14 @@ export function ViewerModelComponentActionMenu({
             menuContentVariants(),
             'max-h-[min(24rem,calc(100vh-1rem))] w-auto min-w-56 overflow-x-hidden overflow-y-auto',
           )}
+          onOpenAutoFocus={(event) => {
+            // Only a pointer opens this menu, so it takes focus itself, as Radix menus do, instead of
+            // the popover focusing and highlighting its first row.
+            event.preventDefault();
+            if (event.currentTarget instanceof HTMLElement) {
+              event.currentTarget.focus({ preventScroll: true });
+            }
+          }}
           onCloseAutoFocus={(event) => {
             event.preventDefault();
           }}

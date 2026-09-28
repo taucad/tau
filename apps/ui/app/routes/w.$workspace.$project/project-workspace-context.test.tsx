@@ -1,7 +1,15 @@
-import { act, render } from '@testing-library/react';
+import { act, fireEvent, render } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type * as KeyboardModule from '#hooks/use-keyboard.js';
 
-const state = vi.hoisted(() => ({ isMobile: false }));
+const state = vi.hoisted(() => ({ isMobile: false, isEditorReady: true }));
+const route = vi.hoisted<{
+  key: string;
+  state: { openChat?: boolean; focusChatComposer?: boolean } | undefined;
+}>(() => ({
+  key: 'initial',
+  state: undefined,
+}));
 const send = vi.fn();
 type EditorOutputEvent = {
   readonly type: string;
@@ -27,10 +35,21 @@ vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ editorRef, mainEntryPath: 'main.ts' }),
 }));
 vi.mock('@taucad/ui/hooks/use-mobile', () => ({ useIsMobile: () => state.isMobile }));
-vi.mock('#hooks/use-keyboard.js', () => ({ useKeybinding: vi.fn(() => ({ formattedKeyCombination: '' })) }));
+vi.mock('react-router', () => ({ useLocation: () => route }));
+vi.mock('@xstate/react', () => ({
+  useSelector: (_actor: unknown, selector: (snapshot: { matches: () => boolean }) => unknown) =>
+    selector({ matches: () => state.isEditorReady }),
+}));
+const stubKeybinding = (): ReturnType<typeof KeyboardModule.useKeybinding> => ({ formattedKeyCombination: '' });
+const keyboard = vi.hoisted(() => ({ useKeybinding: vi.fn<typeof KeyboardModule.useKeybinding>() }));
+vi.mock('#hooks/use-keyboard.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof KeyboardModule>()),
+  useKeybinding: keyboard.useKeybinding,
+}));
 
 const { ProjectWorkspaceProvider, resolveCompactAuxiliary, useProjectWorkspace } =
   await import('./project-workspace-context.js');
+const keyboardActual = await vi.importActual<typeof KeyboardModule>('#hooks/use-keyboard.js');
 type Workspace = NonNullable<ReturnType<typeof useProjectWorkspace>>;
 
 let workspace: Workspace;
@@ -43,8 +62,12 @@ function Probe(): React.JSX.Element {
 describe('ProjectWorkspaceProvider', () => {
   beforeEach(() => {
     state.isMobile = false;
+    state.isEditorReady = true;
+    route.key = 'initial';
+    route.state = undefined;
     send.mockClear();
     listeners.clear();
+    keyboard.useKeybinding.mockImplementation(stubKeybinding);
   });
 
   it('routes Files through the connected Workbench opener', () => {
@@ -72,6 +95,51 @@ describe('ProjectWorkspaceProvider', () => {
       workspace.connectWorkbench(opener);
     });
     expect(opener).toHaveBeenCalledExactlyOnceWith('files');
+  });
+
+  it('should reopen the chat pane on a sidebar chat navigation, including the selected chat', () => {
+    const rendered = render(
+      <ProjectWorkspaceProvider>
+        <Probe />
+      </ProjectWorkspaceProvider>,
+    );
+    expect(send).not.toHaveBeenCalled();
+
+    route.key = 'clicked-chat';
+    route.state = { openChat: true };
+    rendered.rerender(
+      <ProjectWorkspaceProvider>
+        <Probe />
+      </ProjectWorkspaceProvider>,
+    );
+
+    expect(send).toHaveBeenCalledExactlyOnceWith({
+      type: 'setPanelState',
+      panelState: { desktopLayout: { chatOpen: true, compactAuxiliary: 'chat' } },
+    });
+  });
+
+  it('should wait for the destination project editor before opening its chat pane', () => {
+    state.isEditorReady = false;
+    route.state = { openChat: true };
+    const rendered = render(
+      <ProjectWorkspaceProvider>
+        <Probe />
+      </ProjectWorkspaceProvider>,
+    );
+    expect(send).not.toHaveBeenCalled();
+
+    state.isEditorReady = true;
+    rendered.rerender(
+      <ProjectWorkspaceProvider>
+        <Probe />
+      </ProjectWorkspaceProvider>,
+    );
+
+    expect(send).toHaveBeenCalledExactlyOnceWith({
+      type: 'setPanelState',
+      panelState: { desktopLayout: { chatOpen: true, compactAuxiliary: 'chat' } },
+    });
   });
 
   it('opens Share in the desktop Workbench', () => {
@@ -191,6 +259,40 @@ describe('ProjectWorkspaceProvider', () => {
 
     expect(listeners.has('fileRevealRequested')).toBe(false);
     expect(listeners.has('modelComponentRevealRequested')).toBe(true);
+  });
+
+  it('should leave Ctrl+M to a focused code editor and open Kinematics everywhere else', () => {
+    keyboard.useKeybinding.mockImplementation(keyboardActual.useKeybinding);
+    render(
+      <keyboardActual.KeyboardProvider>
+        <ProjectWorkspaceProvider>
+          <Probe />
+        </ProjectWorkspaceProvider>
+      </keyboardActual.KeyboardProvider>,
+    );
+    const opener = vi.fn();
+    act(() => {
+      workspace.connectWorkbench(opener);
+    });
+    // Monaco 0.55 types into a role="textbox" EditContext div, or its textarea fallback, and binds Ctrl+M there
+    // on Windows and Linux ("Toggle Tab Key Moves Focus").
+    const editContext = document.createElement('div');
+    editContext.setAttribute('role', 'textbox');
+    editContext.tabIndex = 0;
+    const textArea = document.createElement('textarea');
+    textArea.setAttribute('role', 'textbox');
+    document.body.append(editContext, textArea);
+
+    for (const input of [editContext, textArea]) {
+      // `fireEvent` returns false once a listener has prevented the default action.
+      expect(fireEvent.keyDown(input, { key: 'm', ctrlKey: true })).toBe(true);
+    }
+    expect(opener).not.toHaveBeenCalled();
+
+    expect(fireEvent.keyDown(document.body, { key: 'm', ctrlKey: true })).toBe(false);
+    expect(opener).toHaveBeenCalledExactlyOnceWith('kinematics');
+    editContext.remove();
+    textArea.remove();
   });
 });
 

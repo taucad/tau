@@ -50,7 +50,7 @@ export function Parameters({
   className,
   enableSearch = true,
   filterTerm,
-  searchPlaceholder = 'Filter parameters...',
+  searchPlaceholder = 'Filter parameters…',
   emptyMessage = 'No parameters available',
   emptyDescription = 'Parameters will appear here when they become available for this model',
   units,
@@ -123,20 +123,23 @@ export function Parameters({
     setLocalFilterTerm('');
   }, []);
 
+  /* The term invalidates every field, so the search box paints first and the row pass follows as
+   * interruptible work that later keystrokes coalesce. */
+  const deferredFilterTerm = useDeferredValue(activeFilterTerm);
   const formContext = useMemo<RJSFContext>(
     () => ({
       idPrefix: rjsfIdPrefix,
       rootPresentation: 'catalog',
       allExpanded,
-      searchTerm: activeFilterTerm,
+      searchTerm: deferredFilterTerm,
       resetSingleParameter,
       defaultParameters,
       shouldShowField(text) {
-        if (!activeFilterTerm) {
+        if (!deferredFilterTerm) {
           return true;
         }
 
-        return text.toLowerCase().includes(activeFilterTerm.toLowerCase());
+        return text.toLowerCase().includes(deferredFilterTerm.toLowerCase());
       },
       units,
       parameterManifest,
@@ -145,7 +148,7 @@ export function Parameters({
     }),
     [
       allExpanded,
-      activeFilterTerm,
+      deferredFilterTerm,
       resetSingleParameter,
       defaultParameters,
       units,
@@ -199,6 +202,7 @@ export function Parameters({
             <div className='flex w-full flex-row gap-1.5 border-b bg-sidebar px-2 py-1.5'>
               <SearchInput
                 ref={searchInputReference}
+                aria-label={searchPlaceholder}
                 placeholder={searchPlaceholder}
                 value={localFilterTerm}
                 className='h-6 w-full bg-background text-sm'

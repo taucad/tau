@@ -11,6 +11,17 @@ export async function hashCodeSecure(input: string): Promise<string> {
 }
 
 /**
+ * SHA-256 of some bytes in the `sha256:<hex>` form artifact digests use.
+ *
+ * @param bytes - The bytes to digest.
+ * @returns The digest.
+ */
+export const digestBytes = async (bytes: Uint8Array<ArrayBuffer>): Promise<`sha256:${string}`> => {
+  const hash = await globalThis.crypto.subtle.digest('SHA-256', bytes);
+  return `sha256:${[...new Uint8Array(hash)].map((byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+};
+
+/**
  * Generate a cryptographically secure random string
  * Useful for IDs, tokens, and nonces
  */

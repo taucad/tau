@@ -39,6 +39,23 @@ const fakeChannel = (options: { readonly hold?: Promise<void> } = {}): FakeChann
       throw Object.assign(new Error('closed'), { code: 'CHANNEL_CLOSED' });
     }
   };
+  const waitForHold = async (signal?: AbortSignal): Promise<void> => {
+    if (!options.hold) {
+      return;
+    }
+    await Promise.race([
+      options.hold,
+      new Promise<never>((_resolve, reject) => {
+        signal?.addEventListener(
+          'abort',
+          () => {
+            reject(new Error('Read aborted.'));
+          },
+          { once: true },
+        );
+      }),
+    ]);
+  };
 
   const stream = <Event>(sinks: Set<(event: Event) => void>, signal?: AbortSignal): AsyncIterable<Event> => {
     const pending: Event[] = [];
@@ -95,12 +112,12 @@ const fakeChannel = (options: { readonly hold?: Promise<void> } = {}): FakeChann
       }
       closeHandlers.clear();
     },
-    execute: async (command: AgentChannelCommand): Promise<AgentChannelResponse> => {
+    execute: async (command: AgentChannelCommand, signal?: AbortSignal): Promise<AgentChannelResponse> => {
       seen.push(command);
       /* Checked on both sides of the hold: a wire that dies with a command in
        * flight is the window a re-dial has to cover. */
       refuseIfDead();
-      await options.hold;
+      await waitForHold(signal);
       refuseIfDead();
       if (command.type === 'tail' || command.type === 'attach') {
         const batch = { cursor: command.cursor, nextCursor: command.cursor, endCursor: command.cursor, events: [] };
@@ -310,6 +327,29 @@ describe('createDaemonAgentHostTransport re-dial', () => {
     await client.close();
   });
 
+  it('should re-dial a silent channel after a read deadline', async () => {
+    const channels: FakeChannel[] = [];
+    const client = createAgentHostClient(
+      createDaemonAgentHostTransport(
+        async () => {
+          const channel = fakeChannel(channels.length === 0 ? { hold: Promise.withResolvers<void>().promise } : {});
+          channels.push(channel);
+          return channel;
+        },
+        { redialBackoff: 0 },
+      ),
+      { commandTimeout: 10 },
+    );
+
+    await expect(client.attach({ chatId: 'chat-1', cursor: 4, limit: 16 })).rejects.toMatchObject({
+      code: 'COMMAND_TIMEOUT',
+    });
+    await expect(client.attach({ chatId: 'chat-1', cursor: 4, limit: 16 })).resolves.toMatchObject({ cursor: 4 });
+    expect(channels).toHaveLength(2);
+    expect(channels[1]?.seen).toEqual([{ type: 'attach', chatId: 'chat-1', cursor: 4, limit: 16 }]);
+    await client.close();
+  });
+
   it('reports the death once the bounded re-dials are spent', async () => {
     let dials = 0;
     const first = fakeChannel();
@@ -376,13 +416,20 @@ describe('createDaemonAgentHostTransport re-dial', () => {
       await vi.advanceTimersByTimeAsync(1);
       expect(dials).toBe(3);
 
-      // ...and the third waits double it.
+      // ...and each one after it waits double the last.
       await vi.advanceTimersByTimeAsync(499);
       expect(dials).toBe(3);
       await vi.advanceTimersByTimeAsync(1);
       expect(dials).toBe(4);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(dials).toBe(5);
+      // The last lands 3.75 s after the death: past a daemon's 1 to 1.25 s reconnect to another API Machine.
+      await vi.advanceTimersByTimeAsync(1999);
+      expect(dials).toBe(5);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(dials).toBe(6);
 
-      // Three re-dials, then the same typed death — the bound did not change.
+      // Five re-dials, then the same typed death.
       await failed;
       transport.close();
     } finally {

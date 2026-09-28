@@ -36,7 +36,7 @@ const readActiveEditorText = async (): Promise<string> => {
 const ensureFilesPane = async (): Promise<void> => {
   if (!(await target.isVisible(filesPane()))) {
     await target.click(selectors.getByRole('button', { name: /Search/u }));
-    const search = selectors.getByPlaceholder('Search projects, chats, and actions...');
+    const search = selectors.getByPlaceholder('Search projects, chats, and actions…');
     await target.fill(search, 'Open files');
     await target.click(selectors.getByText('Open files', { exact: true }));
   }

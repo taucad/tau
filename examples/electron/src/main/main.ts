@@ -9,7 +9,10 @@ import { join } from 'node:path';
 
 import { app, BrowserWindow } from 'electron';
 import { installElectronRuntimeHeaders, registerElectronRuntimeMain } from '@taucad/runtime/electron/main';
-import utilityEntry from '../tau/kernel-host?modulePath';
+
+/* `electron.vite.config.ts` emits the utility entry beside `index.js`, the
+ * bundle this module lands in. */
+const utilityEntry = join(import.meta.dirname, 'kernel-host.js');
 
 process.on('uncaughtException', (error) => {
   console.error('[tau-electron:main] uncaughtException', error);

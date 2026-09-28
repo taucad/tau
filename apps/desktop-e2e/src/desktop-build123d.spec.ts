@@ -69,6 +69,19 @@ export default function main(params = defaultParams) {
 `;
 
 const failureSentinel = 'desktop CAD failure parity sentinel';
+
+/**
+ * Wait for a preview's runtime alert to carry `text`. The runtime message sits
+ * in the overlay's closed `<details>`, so it is read as `textContent`, not
+ * matched as visible text.
+ */
+const expectAlertText = async (scope: Locator, text: string): Promise<void> => {
+  const alert = scope.getByRole('alert', { name: 'CAD runtime error' });
+  await expect
+    .poll(async () => ((await alert.count()) > 0 ? alert.first().textContent() : ''), { timeout: 120_000 })
+    .toContain(text);
+};
+
 const failingBuild123dSource = `from dataclasses import dataclass
 
 @dataclass(frozen=True)
@@ -411,7 +424,7 @@ test('[completed-artifact] runs the Build123d filesystem, parameter, topology, w
     await expectVisible(page.getByTestId('cad-viewer-canvas-region').locator('canvas'), 30_000);
 
     const card = await openFirstProjectCardPreview(page);
-    await expectVisible(card.getByRole('alert', { name: 'CAD runtime error' }).getByText(failureSentinel), 120_000);
+    await expectAlertText(card, failureSentinel);
     writeFileSync(sourcePath, build123dSource, 'utf8');
     await expectVisible(card.locator('canvas'), 120_000);
     await expectCount(card.getByRole('alert', { name: 'CAD runtime error' }), 0, 120_000);
@@ -732,10 +745,7 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
     await expectCount(compileFailure, 1);
     await expectCount(page.getByText(/ShapeFactory\.cs:\d+:\d+/u), 1);
     const card = await openFirstProjectCardPreview(page);
-    await expectVisible(
-      card.getByRole('alert', { name: 'CAD runtime error' }).getByText('MissingPicoGkSymbol'),
-      120_000,
-    );
+    await expectAlertText(card, 'MissingPicoGkSymbol');
     writeFileSync(join(projectRoot, 'ShapeFactory.cs'), picogkHelperSource(3), 'utf8');
     await expectVisible(card.locator('canvas'), 120_000);
     await expectCount(card.getByRole('alert', { name: 'CAD runtime error' }), 0, 120_000);

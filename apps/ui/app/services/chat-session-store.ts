@@ -1558,10 +1558,12 @@ export class ChatSessionStore {
       session.watch = undefined;
       session.watchedRunId = undefined;
       session.activeCommand = undefined;
+      const parsed = parseErrorForPersistence(error instanceof Error ? error : new Error(String(error)));
       session.persistenceActorRef.send({
         type: 'setPersistedError',
         error: {
-          ...parseErrorForPersistence(error instanceof Error ? error : new Error(String(error))),
+          ...parsed,
+          details: { ...parsed.details, runId: command.payload.runId, commandType: command.type },
           requestId: command.commandId,
         },
       });
@@ -2229,12 +2231,10 @@ export class ChatSessionStore {
     };
 
     lifecycleSubscription = persistenceActorRef.subscribe((snapshot) => {
-      /* A failure the record still holds from an earlier session is said once, when the load lands (P59). */
       if (loading === 'before' && snapshot.context.isLoadingChat) {
         loading = 'loading';
       } else if (loading === 'loading' && !snapshot.context.isLoadingChat) {
         loading = 'loaded';
-        this.#replayPersistedFailure(session);
         this.#syncProjection(session.chatId, 'open');
       }
     });
@@ -2249,26 +2249,6 @@ export class ChatSessionStore {
     persistenceActorRef.send({ type: 'setActiveChatId', chatId });
 
     return session;
-  }
-
-  /**
-   * Preserve a refused command's persisted error when it has no durable log row.
-   *
-   * Host-logged failures come from the projection. A command refused before it
-   * reaches that log still leaves a chat-record error; loading the chat shows
-   * that error without inventing a settled run.
-   *
-   * @param session - The chat that just got its machine.
-   */
-  #replayPersistedFailure(session: InternalSession): void {
-    if (session.status === 'streaming' || session.status === 'submitted') {
-      return;
-    }
-    const failure = session.chat.error ?? session.persistenceActorRef.getSnapshot().context.persistedError;
-    if (failure === undefined) {
-      return;
-    }
-    session.stateActorRef.send({ type: 'runLifecycle', phase: 'failed', reason: failure.message });
   }
 
   #scheduleRunReleaseIfTerminal(session: InternalSession): void {

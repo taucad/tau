@@ -20,6 +20,7 @@ const chatState = vi.hoisted(() => ({
   status: 'ready' as string,
   error: undefined as Error | undefined,
   persistedError: undefined as unknown,
+  attachmentStatus: 'unknown' as 'unknown' | 'attached',
 }));
 const continueChat = vi.hoisted(() => vi.fn());
 const openPanel = vi.hoisted(() => vi.fn());
@@ -29,7 +30,8 @@ const chatLog = vi.hoisted(() => ({ projection: undefined as unknown, listeners:
 
 vi.mock('#hooks/use-chat.js', () => ({
   useChatContext: () => ({ activeChatId: 'chat-1' }),
-  useChatSelector: (selector: (state: typeof chatState) => unknown) => selector(chatState),
+  useChatSelector: (selector: (state: typeof chatState & { projection: unknown }) => unknown) =>
+    selector({ ...chatState, projection: chatLog.projection }),
   useChatActions: () => ({ continueChat }),
 }));
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'p' }) }));
@@ -141,6 +143,7 @@ beforeEach(() => {
   chatState.status = 'ready';
   chatState.error = undefined;
   chatState.persistedError = undefined;
+  chatState.attachmentStatus = 'unknown';
   chatLog.projection = undefined;
   chatLog.listeners.clear();
   setRun(undefined);
@@ -358,5 +361,16 @@ describe('ChatRevisionMarker', () => {
     expect(screen.getByText(/Rev 4 is the last confirmed revision/)).not.toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     expect(continueChat).toHaveBeenCalledOnce();
+  });
+
+  it('does not turn a caught-up healthy run into an unconfirmed save because of a legacy error', () => {
+    setLog([...placed(), lifecycleRow(3, 'completed')]);
+    setRevisions({ revisions: [revision({ revisionId: 'rev-4', n: 4, turnId: undefined })] });
+    chatState.persistedError = { category: 'generic', title: 'Error', message: 'Old channel closed', code: 'ERR' };
+    chatState.attachmentStatus = 'attached';
+    render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
+
+    expect(screen.queryByText('Save not confirmed')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
   });
 });

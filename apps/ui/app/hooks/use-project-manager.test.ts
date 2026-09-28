@@ -444,6 +444,8 @@ vi.mock('#db/chat-file-storage.js', () => ({
     putChatRecord: mockPutChatRecord,
     getChatsForResource: vi.fn(async () => []),
     getAllChats: vi.fn(async () => []),
+    getChatRecordsForResource: vi.fn(async () => []),
+    getAllChatRecords: vi.fn(async () => []),
     getChat: vi.fn(async () => undefined),
     createChat: vi.fn(async () => activityChat),
     createNavigationRepairChat: vi.fn(async () => activityChat),

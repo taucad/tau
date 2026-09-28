@@ -11,6 +11,7 @@ import { createChatFileStore } from '#db/chat-file-storage.js';
 import { IndexedDbStorageProvider } from '#db/indexeddb-storage.js';
 import type { ChatStorage } from '#types/storage.types.js';
 import type { ProjectLibraryState } from '#types/project-library.types.js';
+import { getChatRecencyAt } from '#utils/chat-recency.utils.js';
 
 /**
  * The chat store's behaviour, re-pointed from `indexeddb-storage.test.ts`.
@@ -38,6 +39,8 @@ const createStoreWithFiles = (): {
   store: ReturnType<typeof createChatFileStore>;
   write: (path: string, content: string) => Promise<void>;
   exists: (path: string) => Promise<boolean>;
+  reads: string[];
+  directoriesRead: string[];
 } => {
   let filesystem: FileSystemProvider | undefined;
   const provider = async (): Promise<FileSystemProvider> => {
@@ -46,6 +49,8 @@ const createStoreWithFiles = (): {
   };
   const rooted = (path: string): string => path.replace(/^\/+/u, '');
   const seen = new Set<string>();
+  const reads: string[] = [];
+  const directoriesRead: string[] = [];
   /* Only a project path names a project; a composer record lives in the Home
    * workspace and must never be mistaken for one. */
   const noteProject = (path: string): void => {
@@ -71,6 +76,7 @@ const createStoreWithFiles = (): {
   async function readFile(path: string, options: 'utf8'): Promise<string>;
   async function readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
   async function readFile(path: string, options?: 'utf8'): Promise<string | Uint8Array<ArrayBuffer>> {
+    reads.push(path);
     const filesystem = await provider();
     const bytes = await filesystem.readFile(rooted(path));
     return options === 'utf8' ? decoder.decode(bytes) : bytes;
@@ -84,6 +90,7 @@ const createStoreWithFiles = (): {
         await filesystem.writeFile(rooted(path), data);
       },
       readdir: async (path) => {
+        directoriesRead.push(path);
         const filesystem = await provider();
         return filesystem.readdir(rooted(path));
       },
@@ -104,6 +111,8 @@ const createStoreWithFiles = (): {
   });
   return {
     store,
+    reads,
+    directoriesRead,
     /* Seed the checkout the way a fetch's projection does: files appear, and
      * nothing the store wrote put them there. */
     write: async (path, content) => {
@@ -178,6 +187,12 @@ describe('chat file store', () => {
 
     await expect(store.getAllChats()).resolves.toMatchObject([{ id: first.id }]);
     await expect(store.getAllChats({ includeDeleted: true })).resolves.toHaveLength(2);
+    await expect(store.getAllChatRecords()).resolves.toMatchObject([{ id: first.id }]);
+    await expect(store.getAllChatRecords({ includeDeleted: true })).resolves.toHaveLength(2);
+    await expect(store.getChatRecordsForResource('proj_two')).resolves.toEqual([]);
+    await expect(store.getChatRecordsForResource('proj_two', { includeDeleted: true })).resolves.toMatchObject([
+      { id: second.id },
+    ]);
   });
 
   describe('chat draft resurrection — disjoint-field writes preserve every field', () => {
@@ -817,6 +832,60 @@ describe('chat file store — the transcript the log implies', () => {
     );
 
     expect(texts(await store.getChat(chatId))).toEqual(['From here', 'From there']);
+  });
+
+  it('lists modern metadata without reading either local or foreign log segments', async () => {
+    const { store, write, reads, directoriesRead } = createStoreWithFiles();
+    const modernRecord = JSON.stringify({
+      id: chatId,
+      resourceId: projectId,
+      name: 'Modern chat',
+      createdAt: 1,
+      updatedAt: 2,
+      recencyAt: 3,
+    });
+    await write(`/projects/${projectId}/.tau/chats/${chatId}/chat.json`, modernRecord);
+    await write(
+      `/projects/${projectId}/.tau/chats/${chatId}/events.jsonl`,
+      logLine({ sequence: 0, role: 'user', text: 'Local' }),
+    );
+    await write(
+      `/projects/${projectId}/.tau/chats/${chatId}/events/device-b.jsonl`,
+      logLine({ sequence: 1, role: 'user', text: 'Remote', epoch: 'epoch-two', runId: 'run-two' }),
+    );
+
+    expect(await store.getChatRecordsForResource(projectId)).toEqual([
+      expect.objectContaining({ id: chatId, name: 'Modern chat', recencyAt: 3 }),
+    ]);
+    expect(reads).toEqual([`/projects/${projectId}/.tau/chats/${chatId}/chat.json`]);
+    expect(directoriesRead).toEqual([`/projects/${projectId}/.tau/chats`]);
+
+    const fullChats = await store.getChatsForResource(projectId);
+    expect(texts(fullChats[0])).toEqual(['Local', 'Remote']);
+  });
+
+  it('keeps log-only chats visible and preserves legacy message-derived recency in metadata lists', async () => {
+    const { store, write } = createStoreWithFiles();
+    const logOnlyId = 'chat_log_only';
+    await write(`/projects/${projectId}/.tau/chats/${chatId}/chat.json`, record);
+    await write(
+      `/projects/${projectId}/.tau/chats/${chatId}/events.jsonl`,
+      logLine({ sequence: 0, role: 'user', text: 'Legacy' }),
+    );
+    await write(
+      `/projects/${projectId}/.tau/chats/${logOnlyId}/events.jsonl`,
+      logLine({ sequence: 1, role: 'user', text: 'Log only' }),
+    );
+
+    const full = await store.getChatsForResource(projectId);
+    const metadata = await store.getChatRecordsForResource(projectId);
+    expect(metadata.map((chat) => chat.id).sort((left, right) => left.localeCompare(right))).toEqual(
+      full.map((chat) => chat.id).sort((left, right) => left.localeCompare(right)),
+    );
+    expect(metadata.map((chat) => chat.recencyAt).sort((left, right) => (left ?? 0) - (right ?? 0))).toEqual(
+      full.map((chat) => getChatRecencyAt(chat)).sort((left, right) => left - right),
+    );
+    expect(metadata.find((chat) => chat.id === logOnlyId)?.name).toBe('New chat');
   });
 
   it("refreshes a cached transcript when another device's segment changes", async () => {

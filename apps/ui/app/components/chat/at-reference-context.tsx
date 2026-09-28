@@ -1,10 +1,10 @@
 import { createContext, use, useMemo } from 'react';
-import type { Chat } from '@taucad/chat';
+import type { ChatRecord } from '@taucad/chat/schemas';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 
 type AtReferenceContextValue = {
   treeService: FileTreeService | undefined;
-  chatsById: Map<string, Chat>;
+  chatsById: Map<string, ChatRecord>;
   /** Invocation tokens rendered as skill chips: Tau skills and the chat's agent commands. */
   knownTokens: ReadonlySet<string>;
 };
@@ -19,7 +19,7 @@ const AtReferenceContext = createContext<AtReferenceContextValue>({
 
 type AtReferenceProviderProps = {
   readonly treeService: FileTreeService | undefined;
-  readonly chats: Chat[];
+  readonly chats: ChatRecord[];
   readonly knownTokens?: ReadonlySet<string>;
   readonly children: React.ReactNode;
 };

@@ -17,22 +17,19 @@ vi.mock('#hooks/use-project.js', () => ({
 }));
 vi.mock('#hooks/use-chats.js', () => ({
   useChats: () => ({
-    chats: [
-      {
-        id: 'chat_active',
-        resourceId: 'proj_one',
-        name: 'Bracket design',
-        messages: [],
-        createdAt: 1,
-        updatedAt: 1,
-      },
-    ],
     createChat,
     updateChatName,
     applyGeneratedChatName: vi.fn(),
     isLoading: false,
   }),
 }));
+vi.mock('#hooks/use-chat-records.js', () => ({
+  useChatRecords: () => ({
+    chats: [{ id: 'chat_active', resourceId: 'proj_one', name: 'Bracket design', createdAt: 1, updatedAt: 1 }],
+    isLoading: false,
+  }),
+}));
+vi.mock('#hooks/use-chat.js', () => ({ useChatSelector: () => undefined }));
 vi.mock('@xstate/react', () => ({
   useSelector: (actor: { readonly kind: string }, selector: (state: { context: Record<string, unknown> }) => unknown) =>
     selector({ context: actor.kind === 'editor' ? { focusedChatId: 'chat_active' } : { isLoading: false } }),

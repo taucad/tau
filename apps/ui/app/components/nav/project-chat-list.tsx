@@ -1,9 +1,10 @@
 import { Fragment, useMemo, useState } from 'react';
-import type { Chat } from '@taucad/chat';
+import type { ChatRecord } from '@taucad/chat/schemas';
 import { Pencil, Square, Trash2 } from 'lucide-react';
 import { useLocation, useNavigate, useNavigation } from 'react-router';
 import type { ProjectListItem } from '#types/project-library.types.js';
 import { useChats } from '#hooks/use-chats.js';
+import { useChatRecords } from '#hooks/use-chat-records.js';
 import { SidebarMenuButton, SidebarMenuSub, SidebarMenuSubItem } from '#components/ui/sidebar.js';
 import { InlineTextEditor } from '#components/inline-text-editor.js';
 import { pickNextFocusedChatId } from '#routes/w.$workspace.$project/chat-navigation.utils.js';
@@ -33,7 +34,7 @@ const startOfToday = (): number => {
   return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
 };
 
-export const sortProjectChats = (chats: readonly Chat[]): Chat[] => [...chats].sort(compareChatsByRecency);
+export const sortProjectChats = (chats: readonly ChatRecord[]): ChatRecord[] => [...chats].sort(compareChatsByRecency);
 
 export function ProjectChatList({
   project,
@@ -42,7 +43,8 @@ export function ProjectChatList({
   readonly project: ProjectListItem;
   readonly isProjectActive: boolean;
 }): React.JSX.Element {
-  const { chats, isLoading, error, updateChatName, deleteChat } = useChats(project.id);
+  const { chats, isLoading, error } = useChatRecords(project.id);
+  const { updateChatName, deleteChat } = useChats(project.id, { enabled: false });
   const location = useLocation();
   const navigate = useNavigate();
   const navigation = useNavigation();
@@ -158,7 +160,7 @@ function ProjectChatItem({
   onEditingChange,
   onDelete,
 }: {
-  readonly chat: Chat;
+  readonly chat: ChatRecord;
   readonly project: ProjectListItem;
   readonly isActive: boolean;
   readonly isPending: boolean;

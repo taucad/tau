@@ -1036,8 +1036,7 @@ function Sheet({
         : { kind: 'acp', hostId: agent.hostId, agentId: agent.agentId };
       const thoughtId = configOptionOf(agentConfig, 'thought_level')?.id;
       if (isSameAgent && execution.model !== modelId && thoughtId && base.config) {
-        const config = { ...base.config };
-        delete config[thoughtId];
+        const config = Object.fromEntries(Object.entries(base.config).filter(([id]) => id !== thoughtId));
         base.config = Object.keys(config).length === 0 ? undefined : config;
       }
       setActiveExecution(modelId === undefined ? base : { ...base, model: modelId });

@@ -7,6 +7,7 @@ import { kernelConfigurations } from '@taucad/types/constants';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { ChatComposerContextValue } from '#hooks/active-chat-provider.js';
 import type { AgentHostPlacementTarget } from '#lib/agent-host-placement.js';
+import type { AgentConfig } from '#components/chat/use-agent-config.js';
 
 const manifoldKernel = kernelConfigurations.find((k) => k.id === 'manifold')!;
 const execution: { current: ChatComposerContextValue['execution']['execution'] } = {
@@ -42,11 +43,7 @@ vi.mock('#hooks/use-keyboard.js', () => ({
 /* The sheet has its own suite; here it only has to sit beside Send. */
 vi.mock('#components/chat/chat-agent-sheet.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  ChatAgentSheet: ({
-    agentConfig,
-  }: {
-    readonly agentConfig: import('#components/chat/use-agent-config.js').AgentConfig;
-  }) => (
+  ChatAgentSheet: ({ agentConfig }: { readonly agentConfig: AgentConfig }) => (
     <button
       type='button'
       data-slot='agent-trigger'

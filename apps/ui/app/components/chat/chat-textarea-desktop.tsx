@@ -1,7 +1,8 @@
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef } from 'react';
 import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
 import { AtSign, Paperclip, Plus } from 'lucide-react';
-import type { AcpSessionData, Chat } from '@taucad/chat';
+import type { AcpSessionData } from '@taucad/chat';
+import type { ChatRecord } from '@taucad/chat/schemas';
 import type { FileEntry } from '@taucad/types';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import { ChatAgentSheet, ghostPillClass } from '#components/chat/chat-agent-sheet.js';
@@ -67,7 +68,7 @@ type ChatTextareaDesktopProperties = {
 
   // Context data for Tiptap editor
   readonly treeService: FileTreeService | undefined;
-  readonly chats: Chat[];
+  readonly chats: ChatRecord[];
   readonly actionItems?: ContextSuggestionItem[];
   readonly setDraftText: (text: string) => void;
   readonly acpAgentId?: string;

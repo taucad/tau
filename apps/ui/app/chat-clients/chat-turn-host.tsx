@@ -300,7 +300,7 @@ export function ChatTurnHost(): ReactNode {
    *
    * The chat's session actor invokes this from `run.queued`; it is the only
    * place a turn's request is composed. The host places the attempt (W8 TS-S5).
-   * Every route — an explicit send, an edit, *Try again*, the auto-retry and
+   * Every route — an explicit send, an edit, *Try again* and
    * the homepage-seeded first turn — arrives here as one gesture, and
    * `turnIntentOf` is the one derivation of the rewind point (V7).
    *
@@ -331,21 +331,20 @@ export function ChatTurnHost(): ReactNode {
       if (gesture.kind === 'continue' && !isBrowserAgentHostPlaced(activeChatId)) {
         return { runId: undefined, leaseTurnId: undefined, request: { kind: 'continue' } };
       }
-      /* A run the host can still continue is the *same* turn, and rewinding it
-       * would charge a second time for tool work the customer already paid for
-       * — but continuing it is still an *attempt*, which the host places and
-       * settles as its own (I1, TS-A12). A turn nothing can continue is a new
-       * turn, so it falls through to the rewind below. */
+      /* Resume never changes into a replay after the gesture was taken. */
       const resumableRunId = gesture.kind === 'continue' ? resumableBrowserAgentHostRunId(activeChatId) : undefined;
       const messages = Array.isArray(chat.messages) ? chat.messages : [];
       try {
+        if (gesture.kind === 'continue' && resumableRunId === undefined) {
+          throw new Error('This turn cannot be resumed. Choose Try again to replay it.');
+        }
         const intent = turnIntentOf(
           messages,
           gesture.kind === 'send'
             ? { kind: 'send', messageId: gesture.message.id }
             : gesture.kind === 'edit'
               ? { kind: 'edit', messageId: gesture.messageId }
-              : gesture.kind === 'continue' && resumableRunId !== undefined
+              : gesture.kind === 'continue'
                 ? { kind: 'continue' }
                 : { kind: 'regenerate' },
         );

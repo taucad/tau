@@ -89,7 +89,11 @@ export const ChatErrorPausedTurn = memo(function ({
             variant={resumable && canTryAgain ? 'default' : 'outline'}
             size='sm'
             onClick={() => {
-              continueChat();
+              if (resumable) {
+                continueChat();
+              } else {
+                regenerate();
+              }
             }}
           >
             {resumable ? <Play className='size-3.5' /> : <RefreshCcw className='size-3.5' />}

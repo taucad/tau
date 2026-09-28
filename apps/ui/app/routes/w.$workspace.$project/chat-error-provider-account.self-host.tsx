@@ -64,7 +64,7 @@ export const ChatErrorProviderAccount = memo(function ({
   description,
   details,
 }: ChatErrorProviderAccountProps): React.JSX.Element {
-  const { continueChat } = useChatActions();
+  const { regenerate } = useChatActions();
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const { name, billing } = providerEntryFrom(details);
   const providerCode = text(details?.['providerCode']);
@@ -103,7 +103,7 @@ export const ChatErrorProviderAccount = memo(function ({
             variant='outline'
             size='sm'
             onClick={() => {
-              continueChat();
+              regenerate();
             }}
           >
             <RefreshCcw className='size-3.5' />

@@ -3,10 +3,9 @@ import type { MyUIMessage } from '@taucad/chat';
 /**
  * The gesture a turn is admitted for, as the page's verbs express it.
  *
- * Four, not five: startup hydration and the transport's auto-retry are both
+ * Four gestures: startup hydration and an explicit Try again are both
  * `regenerate` — they differ in what dispatches them, never in what they rewind
- * to. *Try again* arrives as `continue` when the host can still continue the
- * run and as `regenerate` when it cannot; only the admission knows which.
+ * to. Resume is only `continue` and never falls through to `regenerate`.
  *
  * @public
  */

@@ -63,7 +63,8 @@ describe('ChatErrorPausedTurn', () => {
     expect(screen.queryByRole('button', { name: /resume/iu })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Try again' }));
 
-    expect(continueChat).toHaveBeenCalledTimes(1);
+    expect(regenerate).toHaveBeenCalledTimes(1);
+    expect(continueChat).not.toHaveBeenCalled();
   });
 
   it('should offer a model switch ahead of Resume when the request itself was refused', () => {

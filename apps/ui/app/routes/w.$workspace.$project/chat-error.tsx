@@ -302,7 +302,7 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
 
     return state.persistedError;
   });
-  const { continueChat, regenerate } = useChatActions();
+  const { regenerate } = useChatActions();
   const { openNewChat, isReady: canOpenNewChat } = useOpenNewChat();
 
   // R7: hide the banner during transparent auto-retry; the reconnecting affordance
@@ -319,12 +319,10 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
     return null;
   }
 
-  // Generic fallback recovery must preserve partial assistant parts the user
-  // already saw. Specialized components own auth, credits, rate-limit, and
-  // tool-error actions. Credits remain the account-state "Resume" exception.
-  const handleTryAgain = (): void => {
-    continueChat();
-  };
+  // Try again is an explicit replay. Specialized components own auth,
+  // credits, rate-limit, and tool-error actions. Credits remain the
+  // account-state "Resume" exception.
+  const handleTryAgain = regenerate;
 
   // Render the generic/server error view with collapsible details
   const renderGenericError = (): React.ReactNode => {

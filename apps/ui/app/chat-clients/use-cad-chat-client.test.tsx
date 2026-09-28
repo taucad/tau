@@ -1354,14 +1354,8 @@ describe('useCadChatClient', () => {
     });
   });
 
-  /*
-   * Moved here from `chat-session-store.test.ts` with C3: whether *Try again*
-   * resumes the stream or runs a new turn is the admission's call, because only
-   * it knows whether the host can still continue the run. A turn the gateway
-   * refused at admission leaves a terminal run and no live stream, so resuming
-   * it replayed the same failure and the banner's Try again looked inert.
-   */
-  it('re-runs the turn when a browser-placed chat has no resumable run, and resumes when it has', async () => {
+  /* Resume never changes kind into a replay after its gesture was taken. */
+  it('refuses a browser resume with no resumable run, and resumes when it has one', async () => {
     const chat = mock<Chat<MyUIMessage>>();
     /* One user message, because a continuation leases it: a transcript with
      * none has no turn to continue and `turnIntentOf` refuses it (W10-B). */
@@ -1372,7 +1366,7 @@ describe('useCadChatClient', () => {
 
     browserHostHarness.placed = true;
     browserHostHarness.resumable = false;
-    await expect(composeTurn({ kind: 'continue' })).resolves.toMatchObject({ request: { kind: 'regenerate' } });
+    await expect(composeTurn({ kind: 'continue' })).rejects.toThrow('This turn cannot be resumed.');
 
     browserHostHarness.resumable = true;
     browserHostHarness.run = { runId: 'run_live' };

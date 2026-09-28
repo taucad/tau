@@ -1384,7 +1384,7 @@ describe('fileManagerMachine', () => {
       actor.stop();
     });
 
-    it('should dispose post-open services when initialization is cancelled', async () => {
+    it('should dispose opened bridges when the root listing is cancelled', async () => {
       let releaseListing = (): void => undefined;
       let markListingStarted = (): void => undefined;
       const listingGate = new Promise<void>((resolve) => {
@@ -1393,7 +1393,7 @@ describe('fileManagerMachine', () => {
       const listingStarted = new Promise<void>((resolve) => {
         markListingStarted = resolve;
       });
-      const listDirectory = vi.spyOn(FileTreeService.prototype, 'listDirectory').mockImplementation(async () => {
+      mockViewReaddirWithStats.mockImplementationOnce(async () => {
         markListingStarted();
         await listingGate;
         return [];
@@ -1418,21 +1418,33 @@ describe('fileManagerMachine', () => {
         releaseListing();
 
         await vi.waitFor(() => {
-          expect(disposeContent).toHaveBeenCalledOnce();
-          expect(disposeTree).toHaveBeenCalledOnce();
           expect(disposeChannel).toHaveBeenCalledOnce();
           expect(workerTestState.rootedProxyDisposals.slice(-2).map((dispose) => dispose.mock.calls.length)).toEqual([
             1, 1,
           ]);
         });
+        expect(disposeContent).not.toHaveBeenCalled();
+        expect(disposeTree).not.toHaveBeenCalled();
       } finally {
         releaseListing();
         actor.stop();
-        listDirectory.mockRestore();
         disposeContent.mockRestore();
         disposeTree.mockRestore();
         disposeChannel.mockRestore();
       }
+    });
+
+    it('should reach ready without expanding bundled type directories', async () => {
+      const actor = createActor(fileManagerMachine, {
+        input: { rootDirectory: '/projects/proj-a', shouldInitializeOnStart: true, projectId: 'proj-a' },
+      });
+      actor.start();
+
+      await vi.waitFor(() => {
+        expect(actor.getSnapshot().value).toBe('ready');
+      });
+      expect(mockViewReaddirWithStats).not.toHaveBeenCalledWith(expect.stringContaining('node_modules'));
+      actor.stop();
     });
   });
 

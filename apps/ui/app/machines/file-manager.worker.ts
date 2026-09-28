@@ -7,7 +7,7 @@
  * conflict paths; independent authority subtrees can still run in parallel.
  */
 
-/* eslint-disable tau-lint/no-direct-indexeddb -- This worker is the browser compute-store authority. */
+/* oxlint-disable tau-lint/no-direct-indexeddb -- This worker is the browser compute-store authority. */
 
 import { exposeFileSystem, workerReadyMessageType, workspaceBridgeService } from '@taucad/fs-bridge';
 import { composeView } from '@taucad/filesystem/composed-view';
@@ -34,14 +34,15 @@ import {
   WorkspaceFileService,
 } from '@taucad/filesystem';
 import { SharedPool } from '@taucad/memory';
-import { authoringTypeMaps } from '@taucad/api-extractor/authoring-types';
-import { kernelTypePackageMaps } from '@taucad/api-extractor/kernel-types';
+import type { kernelTypePackageMaps as KernelTypePackageMaps } from '@taucad/api-extractor/kernel-types';
+import type { authoringTypeMaps as AuthoringTypeMaps } from '@taucad/api-extractor/authoring-types';
 import type { SyncFsWorkspaceAdapter } from '@taucad/lsp-fs/sync';
 import { attachSyncFsServer } from '@taucad/lsp-fs/sync';
 import { metaConfig } from '#constants/meta.constants.js';
 import { populateBundledTypesMount } from '#machines/bundled-types-mount.js';
 import type { BundledTypesMountEntry, BundledTypesRoot } from '#machines/bundled-types-mount.js';
 import { ensureBundledTypesMount } from '#machines/bundled-types-sentinel.js';
+import { createLazyBundledTypesReads } from '#machines/bundled-types-lazy.js';
 import { homeBackendFromWorkerName } from '#machines/file-manager-worker-name.js';
 import { listWorkspaceDirectories } from '#machines/file-manager-sync-fs-adapter.js';
 import {
@@ -198,7 +199,10 @@ async function createNodeModulesMount(): Promise<BundledTypesRoot | undefined> {
   }
 }
 
-const buildBundledTypesPayload = (): readonly BundledTypesMountEntry[] =>
+const buildBundledTypesPayload = (
+  kernelTypePackageMaps: typeof KernelTypePackageMaps,
+  authoringTypeMaps: typeof AuthoringTypeMaps,
+): readonly BundledTypesMountEntry[] =>
   [...kernelTypePackageMaps, ...authoringTypeMaps].flatMap((typesMap) =>
     Object.entries(typesMap).map(
       ([packageName, entry]): BundledTypesMountEntry => ({
@@ -264,27 +268,25 @@ try {
 // Fail-soft by contract: the route is either mounted and writable, or absent.
 const nodeModules = await createNodeModulesMount();
 
-try {
-  const outcome =
-    nodeModules === undefined
-      ? 'unavailable'
-      : await ensureBundledTypesMount(fileService, buildBundledTypesPayload(), {
-          populate: async (payload) => populateBundledTypesMount(nodeModules, payload),
-          // Vite substitutes this define inside worker bundles too (verified against
-          // vite 8.0.10); a realm without it falls back to the payload digest.
-          buildIdentity: typeof tauBuildId === 'number' ? String(tauBuildId) : undefined,
-        });
-  const populationLabel =
-    outcome === 'unavailable'
-      ? 'bundled types skipped, /node_modules unavailable'
-      : outcome === 'skipped'
-        ? 'bundled types current, skipped'
-        : 'bundled types populated';
-  console.debug(`[FM-Worker] ${populationLabel} +${(performance.now() - t0).toFixed(1)}ms`);
-} catch (error) {
-  postWorkerInitError('populateBundledTypesMount', error);
-  throw error;
-}
+const installBundledTypes = async (): Promise<void> => {
+  if (nodeModules === undefined) {
+    return;
+  }
+  const [{ kernelTypePackageMaps }, { authoringTypeMaps }] = await Promise.all([
+    import('@taucad/api-extractor/kernel-types'),
+    import('@taucad/api-extractor/authoring-types'),
+  ]);
+  const outcome = await ensureBundledTypesMount(
+    fileService,
+    buildBundledTypesPayload(kernelTypePackageMaps, authoringTypeMaps),
+    {
+      populate: async (payload) => populateBundledTypesMount(nodeModules, payload),
+      buildIdentity: typeof tauBuildId === 'number' ? String(tauBuildId) : undefined,
+    },
+  );
+  console.debug(`[FM-Worker] bundled types ${outcome} +${(performance.now() - t0).toFixed(1)}ms`);
+};
+const withLazyBundledTypesReads = createLazyBundledTypesReads(installBundledTypes);
 
 exposeFileSystem(workspaceBridgeService(fileService), {
   /*
@@ -310,7 +312,8 @@ exposeFileSystem(workspaceBridgeService(fileService), {
      * `writeFiles` and the four preflights — which the pipeline executes as one
      * batch and the view mask-checks before any provider I/O (D4).
      */
-    return withReadContentOps(view, policy);
+    const handlers = withReadContentOps(view, policy);
+    return root === dependencyMountRoot ? withLazyBundledTypesReads(handlers) : handlers;
   },
   /* The same layout the views above enforce, so a masked connection is not told
    * about a path it may not read (CI1). */

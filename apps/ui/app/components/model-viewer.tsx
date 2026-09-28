@@ -41,7 +41,7 @@ export type RuntimeErrorOverlayProps = {
 };
 
 /** What a preview says when it fails; the runtime text stays one disclosure away. */
-const previewFailureSummary = 'Preview could not load. Open the example to see it.';
+const previewFailureSummary = 'Preview could not load. Open the project to see the error.';
 
 /** Shared accessible presentation for CAD runtime failures. With a summary, colour marks only the glyph. */
 export function RuntimeErrorOverlay({ message, summary, className }: RuntimeErrorOverlayProps): React.JSX.Element {

@@ -26,7 +26,6 @@ describe('generated example artifacts', () => {
   it('enables one unit-inference middleware after parameter declarations resolve', () => {
     expect(exampleRuntime.middleware.map(({ id }) => id)).toEqual([
       'parameterFileResolver',
-      'parameterCache',
       'parameterUnits',
       'gltfEdgeDetection',
     ]);
@@ -78,10 +77,10 @@ describe('generated example artifacts', () => {
     expect(manifest.find((entry) => entry.kernel === 'picogk')?.mainFile).toBe('main.cs');
     expect(manifest.find((entry) => entry.name === 'v8-engine-rev2')?.mainFile).toBeUndefined();
 
-    expect(manifest.filter((entry) => entry.kind === 'model')).toHaveLength(44);
-    expect(manifest.filter((entry) => entry.kind === 'test-fixture')).toHaveLength(9);
+    // PicoVoxel adds three test fixtures, the helix-heat-x heavy reference and six implicit references (D36).
+    expect(manifest.filter((entry) => entry.kind === 'test-fixture')).toHaveLength(12);
     expect(manifest.filter((entry) => entry.kind === 'spec-fixture')).toHaveLength(1);
-    expect(manifest.filter((entry) => entry.kind === 'reference')).toHaveLength(2);
+    expect(manifest.filter((entry) => entry.kind === 'reference')).toHaveLength(9);
 
     for (const entry of manifest) {
       expect(entry.files.some((path) => path === 'thumbnail.webp')).toBe(false);

@@ -78,6 +78,15 @@ const createContext = () => ({
   },
 });
 
+/**
+ * The worker methods a session fake was asked for, in order.
+ *
+ * @param request - The session's `request` spy.
+ * @returns Each call's `method`.
+ */
+const requestedMethods = (request: ReturnType<typeof vi.fn>): string[] =>
+  request.mock.calls.map(([call]) => (call as { readonly method: string }).method);
+
 const workerError = (type: 'syntax' | 'validation' | 'runtime' | 'kernel' = 'syntax') =>
   new Build123dWorkerError([
     {
@@ -131,6 +140,29 @@ describe('Build123d kernel lifecycle errors', () => {
     );
 
     expect(context.session.request).not.toHaveBeenCalledWith(expect.objectContaining({ method: 'analyze' }));
+  });
+
+  it('analyzes the entry once per runtime operation and scopes each mirror sync to it', async () => {
+    const context = createContext();
+    context.session.request.mockImplementation(async ({ method }: { method: string }) =>
+      method === 'analyze'
+        ? { declaration: parameterDeclaration, resolved: ['main.py'], unresolved: [] }
+        : { handleId: 'shape', observedDependencies: ['main.py'] },
+    );
+    const render = { ...runtime, operationId: 1 };
+    const input = { entryPath: 'main.py' };
+
+    await definition.getDependencies(input, render, context);
+    await definition.getParameters(input, render, context);
+    await definition.createGeometry({ ...input, parameters: {}, options: renderOptions }, render, context);
+
+    // The mirror reuses its own walk per operation id.
+    expect(context.mirror.sync.mock.calls.map((call): unknown => call[2])).toEqual([1, 1, 1]);
+    expect(requestedMethods(context.session.request)).toEqual(['analyze', 'build']);
+
+    // The next operation observes the workspace afresh.
+    await definition.getParameters(input, { ...runtime, operationId: 2 }, context);
+    expect(requestedMethods(context.session.request)).toEqual(['analyze', 'build', 'analyze']);
   });
 
   it('spans the native analyze so its wire time is attributed', async () => {

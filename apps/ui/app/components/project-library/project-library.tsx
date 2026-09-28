@@ -20,7 +20,9 @@ import {
 } from '@tanstack/react-table';
 import type { VisibilityState, SortingState } from '@tanstack/react-table';
 import type { ProjectLocator } from '@taucad/filesystem';
-import type { ProjectListItem } from '#types/project.types.js';
+import { describeProjectManifestIssue } from '@taucad/types';
+import type { ProjectManifestParseIssue } from '@taucad/types';
+import type { ProjectListItem } from '#types/project-library.types.js';
 import type { PendingProjectRecovery } from '#types/pending-project-operation.types.js';
 import { createColumns } from '#components/project-library/columns.js';
 import { Button, buttonVariants } from '@taucad/ui/components/button';
@@ -75,10 +77,22 @@ import { InteractiveHoverButton } from '#components/magicui/interactive-hover-bu
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useSidebarCommands } from '#hooks/use-sidebar-status.js';
 import { Skeleton } from '@taucad/ui/components/skeleton';
-import type { WorkspaceBindingRepairGroup } from '#hooks/use-project-manager.js';
+import type { ProjectDiscoveryConflict, WorkspaceBindingRepairGroup } from '#hooks/use-project-manager.js';
 import { ProjectCard, ProjectCardCadPreview, ProjectCardMedia } from '#components/project-card.js';
+import { PageHeader } from '#components/layout/page-header.js';
 import { projectSlugOf, projectUrlOr } from '#utils/project-url.utils.js';
 import { projectLocationDescriptor, projectLocationFullLabel } from '#utils/project-creation-location.utils.js';
+import { useCloudProjects } from '#hooks/use-cloud-projects.js';
+import type { CloudProject } from '#hooks/use-cloud-projects.js';
+import { useOpenCloudProject } from '#hooks/use-open-cloud-project.js';
+import {
+  CloudProjectCard,
+  OnTauCloudMark,
+  isCloudOnly,
+  toLibraryRows,
+  useMaterializeCloudProjects,
+} from '#routes/projects_/cloud-projects.js';
+import type { LibraryRow } from '#routes/projects_/cloud-projects.js';
 
 // Note: useCookie is still used for projectViewMode (user preference, not per-build state)
 
@@ -94,6 +108,62 @@ export type ProjectActions = {
 const recoveryDirectoryName = (recovery: PendingProjectRecovery): string =>
   recovery.storage.providerBasePath.split('/').findLast(Boolean) ?? recovery.storage.providerBasePath;
 
+/** Why a discovered directory does not open, and what gets it open again. */
+const conflictSummary = (conflict: ProjectDiscoveryConflict): string => {
+  switch (conflict.status) {
+    case 'adoption-required': {
+      return conflict.issue.code === 'manifest-missing'
+        ? 'tau.json is missing. Adopt writes a new one so this folder opens as a project again.'
+        : 'This project needs a Tau identity before it can be opened.';
+    }
+    case 'duplicate-id': {
+      return 'This copied project shares an identity with another directory. Choose which folder Tau opens.';
+    }
+    case 'route-blocked': {
+      return 'This project’s workspace is not connected. Reconnect the folder to open it.';
+    }
+    case 'invalid': {
+      switch (conflict.issue.code) {
+        case 'manifest-unreadable': {
+          return 'This project directory could not be read.';
+        }
+        case 'manifest-too-large': {
+          return 'tau.json is too large to be a Tau manifest, so the project was not opened.';
+        }
+        case 'manifest-unknown-schema': {
+          return 'tau.json uses a format this version of Tau does not support. Update Tau to open it.';
+        }
+        default: {
+          return 'The tau.json manifest is invalid and was not opened.';
+        }
+      }
+    }
+  }
+};
+
+const maxIssueLines = 4;
+
+/** The exact manifest defects, so a person or an agent can fix the right key. */
+function ManifestIssueLines({ issue }: { readonly issue: ProjectManifestParseIssue }): React.JSX.Element {
+  const lines = [...new Set(describeProjectManifestIssue(issue))];
+  return (
+    <ul className='mt-1 space-y-0.5 font-mono text-xs text-muted-foreground'>
+      {lines.slice(0, maxIssueLines).map((line) => (
+        <li key={line} className='truncate'>
+          {line}
+        </li>
+      ))}
+      {lines.length > maxIssueLines ? <li>…and {lines.length - maxIssueLines} more</li> : null}
+    </ul>
+  );
+}
+
+/**
+ * The project library: this device's projects and the account's Tau Cloud
+ * projects in one list, each with the glyphs of where it is (charter D20).
+ *
+ * @returns The library.
+ */
 export function ProjectLibrary(): React.JSX.Element {
   const [viewMode, setViewMode] = useCookie<'grid' | 'table'>(cookieName.projectViewMode, 'grid');
   /*
@@ -105,6 +175,9 @@ export function ProjectLibrary(): React.JSX.Element {
   const [showDeleted, setShowDeleted] = useSearchParameter(searchParameterName.trash, flagParameter);
   const [permanentDeleteTarget, setPermanentDeleteTarget] = useState<ProjectListItem | undefined>();
   const [repairTarget, setRepairTarget] = useState<WorkspaceBindingRepairGroup | undefined>();
+  /* Everything this device holds, the Trash included — one listing under the
+     same query key — so a trashed project is never offered as Tau Cloud's alone. */
+  const { projects: heldProjects } = useProjects({ includeDeleted: true });
   const {
     projects,
     conflicts,
@@ -117,11 +190,37 @@ export function ProjectLibrary(): React.JSX.Element {
     restoreProject,
     permanentlyDeleteProject: deleteProjectPermanently,
     adoptProject,
+    repairProject,
+    chooseProjectDirectory,
     updateName,
     isLoading,
   } = useProjects({ includeDeleted: showDeleted });
+  const degradedProjects = projects.filter(
+    (project) => project.manifestIssue !== undefined && project.deletedAt === undefined,
+  );
   const navigate = useNavigate();
   const projectManager = useProjectManager();
+  const { projects: cloudProjects, isSettled: isCloudSettled, isFetching: isCloudFetching } = useCloudProjects();
+  const openCloudProject = useOpenCloudProject();
+  useMaterializeCloudProjects({
+    cloud: cloudProjects,
+    isSettled: isCloudSettled,
+    isFetching: isCloudFetching,
+    held: heldProjects,
+    isLoading,
+  });
+  const handleOpenCloudProject = useCallback(
+    async (entry: CloudProject): Promise<void> => {
+      try {
+        await openCloudProject(entry);
+      } catch (error) {
+        toast.error(`Could not open ${entry.name} from Tau Cloud`, {
+          description: error instanceof Error ? error.message : undefined,
+        });
+      }
+    },
+    [openCloudProject],
+  );
   const { closeProject } = useSidebarCommands();
 
   const handleToggleDeleted = useCallback(
@@ -187,6 +286,36 @@ export function ProjectLibrary(): React.JSX.Element {
       }
     },
     [adoptProject],
+  );
+
+  const handleRepair = useCallback(
+    async (project: ProjectListItem): Promise<void> => {
+      try {
+        await repairProject(project.id);
+        toast.success(`Repaired ${project.name}`);
+      } catch (error) {
+        toast.error(`Could not repair ${project.name}`, {
+          description: error instanceof Error ? error.message : undefined,
+        });
+        console.error('Error repairing project manifest:', error);
+      }
+    },
+    [repairProject],
+  );
+
+  const handleChooseDirectory = useCallback(
+    async (locator: ProjectLocator, projectId: string, name: string): Promise<void> => {
+      try {
+        await chooseProjectDirectory(locator, projectId);
+        toast.success(`Tau now opens ${name} from this folder`);
+      } catch (error) {
+        toast.error(`Could not open ${name} from this folder`, {
+          description: error instanceof Error ? error.message : undefined,
+        });
+        console.error('Error choosing project directory:', error);
+      }
+    },
+    [chooseProjectDirectory],
   );
 
   const confirmPermanentDelete = useCallback(async () => {
@@ -272,7 +401,9 @@ export function ProjectLibrary(): React.JSX.Element {
         await updateName(projectId, newName);
         toast.success(`Renamed to ${newName}`);
       } catch (error) {
-        toast.error('Failed to rename project');
+        toast.error('Failed to rename project', {
+          description: error instanceof Error ? error.message : undefined,
+        });
         console.error('Error renaming project:', error);
       }
     },
@@ -289,12 +420,22 @@ export function ProjectLibrary(): React.JSX.Element {
 
   return (
     <div className='container mx-auto px-4 py-8'>
-      <div className='mb-6 flex items-center justify-between'>
-        <h1 className='text-3xl font-bold'>Projects</h1>
-        <Button asChild>
-          <NavLink to='/'>{({ isPending }) => (isPending ? <Loader /> : 'New Project')}</NavLink>
-        </Button>
-      </div>
+      <PageHeader
+        title='Projects'
+        className='mb-6'
+        action={
+          <Button asChild>
+            <NavLink to='/'>
+              {({ isPending }) => (
+                <>
+                  New project
+                  {isPending ? <Loader /> : null}
+                </>
+              )}
+            </NavLink>
+          </Button>
+        }
+      />
 
       {workspaceBindingRepairs.length > 0 && (
         <div className='mb-6 space-y-2' aria-label='Workspace link repair'>
@@ -338,17 +479,12 @@ export function ProjectLibrary(): React.JSX.Element {
                 <AlertCircle className='size-4 shrink-0 text-warning' />
                 <div className='min-w-0 flex-1'>
                   <div className='truncate font-medium'>{label}</div>
-                  <div className='text-sm text-muted-foreground'>
-                    {conflict.status === 'adoption-required'
-                      ? 'This project needs a Tau identity before it can be opened.'
-                      : conflict.status === 'duplicate-id'
-                        ? 'This copied project shares an identity with another directory.'
-                        : conflict.status === 'route-blocked'
-                          ? 'This project’s workspace is not connected. Reconnect the folder to open it.'
-                          : conflict.issue.code === 'manifest-unreadable'
-                            ? 'This project directory could not be read.'
-                            : 'The tau.json manifest is invalid and was not opened.'}
-                  </div>
+                  <div className='text-sm text-muted-foreground'>{conflictSummary(conflict)}</div>
+                  {/* A missing manifest has nothing to add to its summary. */}
+                  {(conflict.status === 'invalid' || conflict.status === 'adoption-required') &&
+                  conflict.issue.code !== 'manifest-missing' ? (
+                    <ManifestIssueLines issue={conflict.issue} />
+                  ) : null}
                 </div>
                 {conflict.status === 'adoption-required' && (
                   <Button
@@ -359,9 +495,44 @@ export function ProjectLibrary(): React.JSX.Element {
                     Adopt
                   </Button>
                 )}
+                {conflict.status === 'duplicate-id' && (
+                  <Button
+                    size='sm'
+                    variant='outline'
+                    onClick={async () =>
+                      handleChooseDirectory(conflict.locator, conflict.manifest.id, conflict.manifest.name)
+                    }
+                  >
+                    Use this folder
+                  </Button>
+                )}
               </div>
             );
           })}
+        </div>
+      )}
+
+      {degradedProjects.length > 0 && (
+        <div className='mb-6 space-y-2' aria-label='Projects needing repair'>
+          {degradedProjects.map((project) => (
+            <div key={project.id} className='flex items-center gap-3 rounded-md border border-warning/40 p-3'>
+              <AlertCircle className='size-4 shrink-0 text-warning' />
+              <div className='min-w-0 flex-1'>
+                <div className='truncate font-medium'>{project.name}</div>
+                <div className='text-sm text-muted-foreground'>
+                  {project.manifestIssue?.code === 'manifest-invalid-json'
+                    ? 'tau.json has a syntax error. The project opens; fix tau.json in its editor.'
+                    : 'tau.json has problems. The project opens, and Tau won’t change tau.json until it is repaired.'}
+                </div>
+                {project.manifestIssue ? <ManifestIssueLines issue={project.manifestIssue} /> : null}
+              </div>
+              {project.manifestIssue?.code === 'manifest-invalid-json' ? null : (
+                <Button size='sm' variant='outline' onClick={async () => handleRepair(project)}>
+                  Repair
+                </Button>
+              )}
+            </div>
+          ))}
         </div>
       )}
 
@@ -479,7 +650,12 @@ export function ProjectLibrary(): React.JSX.Element {
           ))}
         </div>
       ) : (
-        <UnifiedProjectList projects={projects} viewMode={viewMode} actions={actions} />
+        <UnifiedProjectList
+          rows={toLibraryRows({ projects, held: heldProjects, cloud: cloudProjects, includeCloudOnly: !showDeleted })}
+          viewMode={viewMode}
+          actions={actions}
+          onOpenCloudProject={handleOpenCloudProject}
+        />
       )}
       <AlertDialog
         open={repairTarget !== undefined}
@@ -538,16 +714,17 @@ export function ProjectLibrary(): React.JSX.Element {
 }
 
 type UnifiedProjectListProps = {
-  readonly projects: ProjectListItem[];
+  readonly rows: LibraryRow[];
   readonly viewMode: 'grid' | 'table';
   readonly actions: ProjectActions;
+  readonly onOpenCloudProject: (entry: CloudProject) => Promise<void>;
 };
 
 // Page size options, shared by both view modes so the remembered choice survives a view switch.
 const defaultPageSize = 20;
 const pageSizeOptions = [defaultPageSize, 50, 100, 150, 200];
 
-function UnifiedProjectList({ projects, viewMode, actions }: UnifiedProjectListProps) {
+function UnifiedProjectList({ rows, viewMode, actions, onOpenCloudProject }: UnifiedProjectListProps) {
   'use no memo';
 
   const [sorting, setSorting] = useState<SortingState>([{ id: 'lastActivityAt', desc: true }]);
@@ -559,8 +736,12 @@ function UnifiedProjectList({ projects, viewMode, actions }: UnifiedProjectListP
 
   // oxlint-disable-next-line react/incompatible-library -- This component is explicitly opted out because TanStack Table returns mutable functions that cannot be compiler-memoized safely.
   const table = useReactTable({
-    data: projects,
-    columns: createColumns(actions),
+    data: rows,
+    columns: createColumns(actions, onOpenCloudProject),
+    /* Stable across the cloud listing arriving, so a selection follows its project. */
+    getRowId: (row) => row.id,
+    /* A project this device does not hold has nothing here to trash (D20). */
+    enableRowSelection: (row) => !isCloudOnly(row.original),
     getCoreRowModel: getCoreRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     onSortingChange: setSorting,
@@ -584,12 +765,12 @@ function UnifiedProjectList({ projects, viewMode, actions }: UnifiedProjectListP
   });
 
   // Show empty state if no projects at all
-  if (projects.length === 0) {
+  if (rows.length === 0) {
     return (
       <CollectionEmptyState className='min-h-[60vh]'>
         {/* Empty-library CTA — composer-only, no chat session to attach to. */}
         <ChatComposerProvider surface='library'>
-          <div className='mx-auto max-w-2xl space-y-6'>
+          <div className='mx-auto w-full max-w-2xl space-y-6'>
             <div className='flex flex-col items-center space-y-4 text-center'>
               <PackageX className='size-16 text-muted-foreground' strokeWidth={1} />
               <div className='space-y-2'>
@@ -597,7 +778,7 @@ function UnifiedProjectList({ projects, viewMode, actions }: UnifiedProjectListP
                 <p className='text-sm'>Start by describing what you want to build, or create from code</p>
               </div>
             </div>
-            <NewProjectChatComposer className='pt-1 shadow-none' />
+            <NewProjectChatComposer enableAutoFocus={false} className='pt-1 shadow-none' />
             <div className='flex items-center justify-center gap-4 text-sm text-muted-foreground'>
               <div className='h-px flex-1 bg-border' />
               <span>or</span>
@@ -618,11 +799,11 @@ function UnifiedProjectList({ projects, viewMode, actions }: UnifiedProjectListP
     );
   }
 
-  const columns = createColumns(actions);
+  const columns = createColumns(actions, onOpenCloudProject);
   return (
     <div className='space-y-4'>
       <div className='flex items-center justify-between gap-2'>
-        <DataTableSearch table={table} placeholder='Search projects...' containerClassName='grow' />
+        <DataTableSearch table={table} placeholder='Search projects…' containerClassName='grow' />
         <div className='flex items-center gap-2'>
           {/* Add bulk actions when rows are selected */}
           {table.getFilteredSelectedRowModel().rows.length > 0 && (
@@ -639,17 +820,22 @@ function UnifiedProjectList({ projects, viewMode, actions }: UnifiedProjectListP
       ) : (
         // Grid View
         <div className='grid grid-cols-2 gap-3 sm:gap-6 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5'>
-          {table.getRowModel().rows.map((row) => (
-            <ProjectLibraryCard
-              key={row.original.id}
-              project={row.original}
-              actions={actions}
-              isSelected={row.getIsSelected()}
-              onSelect={() => {
-                row.toggleSelected();
-              }}
-            />
-          ))}
+          {table.getRowModel().rows.map((row) => {
+            const { original } = row;
+            return isCloudOnly(original) ? (
+              <CloudProjectCard key={original.id} entry={original} onOpen={onOpenCloudProject} />
+            ) : (
+              <ProjectLibraryCard
+                key={original.id}
+                project={original}
+                actions={actions}
+                isSelected={row.getIsSelected()}
+                onSelect={() => {
+                  row.toggleSelected();
+                }}
+              />
+            );
+          })}
         </div>
       )}
 
@@ -659,7 +845,7 @@ function UnifiedProjectList({ projects, viewMode, actions }: UnifiedProjectListP
 }
 
 type ProjectLibraryCardProps = {
-  readonly project: ProjectListItem;
+  readonly project: ProjectListItem & { readonly onCloud?: boolean };
   readonly actions: ProjectActions;
   readonly isSelected?: boolean;
   readonly onSelect?: () => void;
@@ -701,7 +887,6 @@ export function ProjectLibraryCard({
         />
       </div>
       <ProjectCardMedia
-        name={project.name}
         thumbnailSource={thumbnailSource}
         isPreviewVisible={showPreview}
         onPreviewVisibilityChange={setShowPreview}
@@ -731,6 +916,7 @@ export function ProjectLibraryCard({
               >
                 <LocationIcon className='size-3 shrink-0' />
                 <span className='truncate'>{slugPath}</span>
+                {project.onCloud === true ? <OnTauCloudMark /> : undefined}
               </div>
             </TooltipTrigger>
             <TooltipContent side='right'>{fullLocationLabel}</TooltipContent>
@@ -754,7 +940,7 @@ export function ProjectLibraryCard({
 }
 
 type BulkActionsProps = {
-  readonly table: ReturnType<typeof useReactTable<ProjectListItem>>;
+  readonly table: ReturnType<typeof useReactTable<LibraryRow>>;
   readonly deleteProject: (project: ProjectListItem) => void;
 };
 
@@ -776,6 +962,10 @@ function BulkActions({ table, deleteProject }: BulkActionsProps) {
     for (const row of selectedRows) {
       try {
         const project = row.original;
+        /* Never selectable (D20): a Tau-Cloud-only row has nothing here to trash. */
+        if (isCloudOnly(project)) {
+          continue;
+        }
         deleteProject(project);
         successCount++;
       } catch (error) {

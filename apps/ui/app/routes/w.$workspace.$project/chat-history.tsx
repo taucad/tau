@@ -11,6 +11,7 @@ import { ScrollDownButton } from '#routes/w.$workspace.$project/scroll-down-butt
 import { ChatError } from '#routes/w.$workspace.$project/chat-error.js';
 import type { ChatTextareaProperties, ChatTextareaHandle } from '#components/chat/chat-textarea-types.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
+import { ChatTodoList } from '#components/chat/chat-todo-list.js';
 import { useChatContext, useChatSelector } from '#hooks/use-chat.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import { ChatTitleBar } from '#routes/w.$workspace.$project/chat-title-bar.js';
@@ -31,22 +32,36 @@ import { ChatAttachmentDirectoriesContext, chatAttachmentDirectories } from '#co
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useChats } from '#hooks/use-chats.js';
 import { useProject } from '#hooks/use-project.js';
+import { useSkillsCatalog } from '#hooks/use-skills-catalog.js';
+import { commandInvocation } from '#utils/at-reference.utils.js';
+import type { MyUIMessage } from '@taucad/chat';
+
+/** Every command any ACP agent advertised in this chat, one invocation per line (a stable selector value). */
+function agentInvocationsKey(messages: readonly MyUIMessage[]): string {
+  const invocations = new Set<string>();
+  for (const message of messages) {
+    for (const part of message.parts) {
+      if (part.type === 'data-acp-session') {
+        for (const command of part.data.commands) {
+          invocations.add(commandInvocation(command.name));
+        }
+      }
+    }
+  }
+  return [...invocations].join('\n');
+}
 
 // Component-local CSS variable. Declared here (rather than in global.css)
 // to keep the chat-history pinning system self-contained — the only
 // consumer is `TurnGroup` (`min-h-(--chat-live-turn-min-h)`). Applied as
 // inline style on `ChatScroller` so it cascades to every Virtuoso item.
 //
-// `--chat-live-turn-min-h` is the min-height for the last turn group so the
-// user message stays pinned at the scroller top while the assistant reply
-// streams in. The min-height is intentionally approximate — `min-height` is
-// elastic, so a slight over/under just affects how much breathing room sits
-// below the assistant reply before content grows past it. Composition: page
-// header (--header-height) + chat panel chrome (~10.25rem: panel header +
-// status bar + chat input + margins).
+// Reserve exactly the transcript viewport for the last turn, including when
+// the pane is resized or the composer/adornments grow. ChatScroller establishes
+// the size container; a window-height estimate creates phantom overflow.
 // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- React.CSSProperties does not type custom-property keys
 const chatScrollerCssVariables = {
-  '--chat-live-turn-min-h': 'calc(100dvh - var(--header-height, 64px) - 10.25rem)',
+  '--chat-live-turn-min-h': '100cqh',
 } as React.CSSProperties;
 
 // Virtuoso's `scrollToIndex` types restrict `behavior` to `'auto' | 'smooth'`,
@@ -103,7 +118,14 @@ const TurnGroup = memo(function ({
 // `<Virtuoso className=...>`), but the public type omits it. We widen here.
 const ChatScroller = forwardRef<HTMLDivElement, ScrollerProps & { className?: string }>(function (props, ref) {
   return (
-    <div {...props} ref={ref} style={{ ...props.style, ...chatScrollerCssVariables }} className={cn(props.className)} />
+    <div
+      {...props}
+      ref={ref}
+      role='region'
+      aria-label='Chat history'
+      style={{ ...props.style, ...chatScrollerCssVariables }}
+      className={cn('[container-type:size] [scrollbar-gutter:stable]', props.className)}
+    />
   );
 });
 
@@ -131,6 +153,13 @@ export const ChatHistory = memo(function (props: {
   const { projectId } = useProject();
   const { chats } = useChats(projectId);
   const { activeChatId, persistenceActorRef } = useChatContext();
+  const skillsCatalog = useSkillsCatalog();
+  const agentInvocations = useChatSelector((state) => agentInvocationsKey(state.messages));
+  const skillInvocations = skillsCatalog.map((skill) => `/${skill.name}`).join('\n');
+  const knownTokens = useMemo(
+    () => new Set(`${skillInvocations}\n${agentInvocations}`.split('\n').filter(Boolean)),
+    [skillInvocations, agentInvocations],
+  );
   const attachmentDirectories = useMemo(
     () => chatAttachmentDirectories(projectId, activeChatId),
     [activeChatId, projectId],
@@ -263,7 +292,7 @@ export const ChatHistory = memo(function (props: {
       <FloatingPanel isOpen={isExpanded} side='right' className={className} onOpenChange={setIsExpanded}>
         <FloatingPanelContent
           // `ph-no-capture`: session replay never records chat transcripts.
-          className={cn('ph-no-capture', !isExpanded && 'hidden')}
+          className={cn('ph-no-capture min-h-0 overflow-hidden [container-type:size]', !isExpanded && 'hidden')}
           errorFallback={(errorProps) => (
             <FloatingPanelErrorContent
               {...errorProps}
@@ -291,7 +320,7 @@ export const ChatHistory = memo(function (props: {
           </FloatingPanelContentHeader>
 
           {/* Main chat content area */}
-          <AtReferenceProvider treeService={treeService} chats={chats}>
+          <AtReferenceProvider treeService={treeService} chats={chats} knownTokens={knownTokens}>
             <Virtuoso
               ref={virtuosoRef}
               data={groups}
@@ -303,12 +332,6 @@ export const ChatHistory = memo(function (props: {
               components={virtuosoComponents}
             />
           </AtReferenceProvider>
-          <ScrollDownButton
-            hasContent={messageIds.length > 0}
-            isVisible={!atBottom}
-            onScrollToBottom={scrollToBottom}
-          />
-
           {/*
           A refusal on an empty chat has to land somewhere (I12, W19-b).
 
@@ -319,8 +342,19 @@ export const ChatHistory = memo(function (props: {
           at a time: while there are turns, the group above owns it.
         */}
           {groups.length === 0 ? <ChatError className='mx-4 mb-1 shrink-0' /> : null}
-          {/* Chat input area */}
-          <div className='relative mx-auto mb-2 w-[calc(100%_-_1rem)] max-w-xl shrink-0'>
+          {/* Chat input area. The agent's task list sits directly above the
+              composer, keyed by chat so its fold never carries across chats (D8). */}
+          <div
+            role='region'
+            aria-label='Chat composer'
+            className='relative mx-auto mb-2 w-[calc(100%_-_1rem)] max-w-xl shrink-0'
+          >
+            <ScrollDownButton
+              hasContent={messageIds.length > 0}
+              isVisible={!atBottom}
+              onScrollToBottom={scrollToBottom}
+            />
+            <ChatTodoList key={activeChatId} />
             <ChatTextarea ref={chatTextareaRef} mode='main' enableAutoFocus={false} onSubmit={onSubmit} />
           </div>
         </FloatingPanelContent>

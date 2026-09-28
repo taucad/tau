@@ -45,7 +45,12 @@ import {
 import type { ChatRequest, ChatTurn, ChatTurnGesture } from '#machines/chat-session.machine.js';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
-import { agentHostConfig, createRunBody, dialAgentHost, hostAdmission } from '#chat-clients/_internal/turn-body.js';
+import {
+  agentHostClientConfig,
+  createRunBody,
+  dialAgentHost,
+  hostAdmission,
+} from '#chat-clients/_internal/turn-body.js';
 import { useTurnAdmission } from '#chat-clients/_internal/use-turn-admission.js';
 import { turnIntentOf, turnTriggerOf } from '#chat-clients/turn-intent.js';
 import { useFeature } from '#flags/use-feature.js';
@@ -242,10 +247,10 @@ export function ChatTurnHost(): ReactNode {
            * `hostId`, so a same-kind execution is free to bring its own model. */
           const liveExecution =
             agentRef.current.execution.kind === execution.kind ? agentRef.current.execution : execution;
-          const config = agentHostConfig({
+          /* No catalog, no default row: opening a chat offline still attaches and replays it. */
+          const config = agentHostClientConfig({
             agent: { ...agentRef.current, execution: liveExecution },
             chatId: activeChatId,
-            runId: activeChatId,
             resolvedModel: resolveModelRef.current(liveExecution.model),
           });
           return createBrowserAgentHostClient({
@@ -263,12 +268,9 @@ export function ChatTurnHost(): ReactNode {
             durability: capabilities.durability,
             authority: { projectId, workspaceId: prepared.execution.workspaceId },
             gatewayBaseUrl: ENV.TAU_API_URL,
-            systemPrompt: config.systemPrompt,
-            systemPromptBlocks: config.systemPromptBlocks,
-            model: config.model,
+            ...config,
             runtimeConfig: createUiRuntimeConfig(ENV),
             geoSpecEngine: nativeGeoSpec ? 'native' : 'legacy',
-            testingEnabled: config.testingEnabled,
           });
         },
       };
@@ -283,17 +285,19 @@ export function ChatTurnHost(): ReactNode {
 
   const placement = placementOf(agent.execution);
   /* The binding actor calls `compose` when it binds and never again on its own.
-   * The revision root connects after this component's first render, so the
-   * first composition would be the one that cannot prepare — re-publishing on
-   * the flip is what makes the actor compose a working registration. */
-  const authorityReady = workspaceAuthority?.ready ?? false;
+   * The revision root connects after this component's first render, and a
+   * browser-placed registration cannot prepare before it does — so the services
+   * are re-published when they become composable, which is what makes the actor
+   * compose a working registration. A daemon placement claims no workspace
+   * authority and is composable at once. */
+  const composable = daemonPlacementOf(agent.execution) !== undefined || (workspaceAuthority?.ready ?? false);
   useEffect(
     () =>
       publishChatHostServices(activeChatId, {
         placement,
-        compose: () => composeRef.current(boundExecutionRef.current),
+        compose: () => (composable ? composeRef.current(boundExecutionRef.current) : undefined),
       }),
-    [activeChatId, authorityReady, placement],
+    [activeChatId, composable, placement],
   );
   /* The chat session actor holds the binding; it re-invokes it when — and only
    * when — the placement it was given moves. */

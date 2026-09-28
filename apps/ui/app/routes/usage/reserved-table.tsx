@@ -77,7 +77,7 @@ export function ReservedTable(): React.JSX.Element | undefined {
             <TableBody>
               {holds.holds.map((hold) => (
                 <TableRow key={hold.operationId}>
-                  <TableCell className='max-w-[220px] truncate'>{hold.model.displayName ?? hold.model.id}</TableCell>
+                  <TableCell className='max-w-55 truncate'>{hold.model.displayName ?? hold.model.id}</TableCell>
                   <TableCell className='font-mono tabular-nums'>
                     {formatCreditAtomsDisplay(BigInt(hold.heldCreditAtoms))}
                   </TableCell>

@@ -70,6 +70,7 @@ describe('parseErrorForPersistence', () => {
     ['SUMMARY_REQUIRED', 'This chat hit a problem while Tau was tidying its history.'],
     ['NO_EVICTABLE_HISTORY', 'Tau could not make room for the next step.'],
     ['CIRCUIT_BREAKER_OPEN', 'Tau could not make room for the next step.'],
+    ['REQUEST_TOO_LARGE', 'Tau could not make room for the next step.'],
   ])('should replace the raw %s host sentence with actionable copy', (code, message) => {
     const rawMessage = `Internal host sentence for ${code}`;
     const parsed = parseErrorForPersistence(

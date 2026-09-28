@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { describe, it, expect } from 'vitest';
 import { NodeIO } from '@gltf-transform/core';
 import { EXTManifold } from 'manifold-3d/manifold-gltf';
@@ -27,11 +28,13 @@ function createTrianglePrimitive(
     normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
     indices: new Uint32Array([0, 1, 2]),
     material: {
-      baseColorFactor: options.color ?? ([0.8, 0.8, 0.8, 1] as [number, number, number, number]),
-      metallicFactor: 0,
-      roughnessFactor: 0.35,
       doubleSided: true,
       alphaMode: options.alphaMode ?? 'OPAQUE',
+      pbrMetallicRoughness: {
+        baseColorFactor: options.color ?? ([0.8, 0.8, 0.8, 1] as [number, number, number, number]),
+        metallicFactor: 0,
+        roughnessFactor: 0.35,
+      },
     },
   };
 }
@@ -68,11 +71,13 @@ function createLinesInput(): GlbInput {
             positions: new Float32Array([0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0]),
             indices: new Uint32Array([0, 1, 2, 3]),
             material: {
-              baseColorFactor: [0, 0, 0, 1] as [number, number, number, number],
-              metallicFactor: 0,
-              roughnessFactor: 1,
               doubleSided: true,
               alphaMode: 'OPAQUE',
+              pbrMetallicRoughness: {
+                baseColorFactor: [0, 0, 0, 1] as [number, number, number, number],
+                metallicFactor: 0,
+                roughnessFactor: 1,
+              },
             },
           },
         ],
@@ -99,7 +104,16 @@ function createManifoldInput(): GlbInput {
         name: 'Surface',
         primitives: [
           { mode: 4, positions, normals, indices: first, material },
-          { mode: 4, positions, normals, indices: second, material: { ...material, baseColorFactor: [1, 0, 0, 1] } },
+          {
+            mode: 4,
+            positions,
+            normals,
+            indices: second,
+            material: {
+              ...material,
+              pbrMetallicRoughness: { ...material.pbrMetallicRoughness, baseColorFactor: [1, 0, 0, 1] },
+            },
+          },
         ],
         manifoldTopology: { indices: exact },
       },
@@ -196,11 +210,9 @@ describe('writeGlb', () => {
               normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
               indices: new Uint32Array([0, 1, 2]),
               material: {
-                baseColorFactor: [1, 1, 1, 1],
-                metallicFactor: 0,
-                roughnessFactor: 1,
                 doubleSided: true,
                 alphaMode: 'OPAQUE',
+                pbrMetallicRoughness: { baseColorFactor: [1, 1, 1, 1], metallicFactor: 0, roughnessFactor: 1 },
               },
             },
           ],
@@ -234,11 +246,9 @@ describe('writeGlb', () => {
               normals: new Float32Array([0.577, 0.577, 0.577, 0, 1, 0, 1, 0, 0]),
               indices: new Uint32Array([0, 1, 2]),
               material: {
-                baseColorFactor: [1, 1, 1, 1],
-                metallicFactor: 0,
-                roughnessFactor: 1,
                 doubleSided: true,
                 alphaMode: 'OPAQUE',
+                pbrMetallicRoughness: { baseColorFactor: [1, 1, 1, 1], metallicFactor: 0, roughnessFactor: 1 },
               },
             },
           ],
@@ -267,11 +277,9 @@ describe('writeGlb', () => {
               normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]),
               indices: new Uint32Array([0, 1, 2, 1, 3, 2]),
               material: {
-                baseColorFactor: [1, 1, 1, 1],
-                metallicFactor: 0,
-                roughnessFactor: 1,
                 doubleSided: true,
                 alphaMode: 'OPAQUE',
+                pbrMetallicRoughness: { baseColorFactor: [1, 1, 1, 1], metallicFactor: 0, roughnessFactor: 1 },
               },
             },
           ],
@@ -298,11 +306,9 @@ describe('writeGlb', () => {
               positions: new Float32Array([-1, -2, -3, 4, 5, 6, 0, 0, 0]),
               indices: new Uint32Array([0, 1, 2]),
               material: {
-                baseColorFactor: [1, 1, 1, 1],
-                metallicFactor: 0,
-                roughnessFactor: 1,
                 doubleSided: true,
                 alphaMode: 'OPAQUE',
+                pbrMetallicRoughness: { baseColorFactor: [1, 1, 1, 1], metallicFactor: 0, roughnessFactor: 1 },
               },
             },
           ],
@@ -429,11 +435,13 @@ describe('writeGlb', () => {
               positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
               indices: new Uint32Array([0, 1, 2]),
               material: {
-                baseColorFactor: [0.5, 0.5, 0.5, 1],
-                metallicFactor: 0.8,
-                roughnessFactor: 0.2,
                 doubleSided: true,
                 alphaMode: 'OPAQUE',
+                pbrMetallicRoughness: {
+                  baseColorFactor: [0.5, 0.5, 0.5, 1],
+                  metallicFactor: 0.8,
+                  roughnessFactor: 0.2,
+                },
               },
             },
           ],
@@ -503,11 +511,9 @@ describe('writeGlb', () => {
               positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
               indices: new Uint32Array([0, 1, 2]),
               material: {
-                baseColorFactor: [1, 1, 1, 1],
-                metallicFactor: 0,
-                roughnessFactor: 1,
                 doubleSided: true,
                 alphaMode: 'OPAQUE',
+                pbrMetallicRoughness: { baseColorFactor: [1, 1, 1, 1], metallicFactor: 0, roughnessFactor: 1 },
               },
             },
           ],
@@ -538,11 +544,13 @@ describe('writeGlb', () => {
               positions: new Float32Array([0, 0, 0, 1, 0, 0]),
               indices: new Uint32Array([0, 1]),
               material: {
-                baseColorFactor: [0, 0, 0, 1] as [number, number, number, number],
-                metallicFactor: 0,
-                roughnessFactor: 1,
                 doubleSided: true,
                 alphaMode: 'OPAQUE',
+                pbrMetallicRoughness: {
+                  baseColorFactor: [0, 0, 0, 1] as [number, number, number, number],
+                  metallicFactor: 0,
+                  roughnessFactor: 1,
+                },
               },
             },
           ],
@@ -748,5 +756,126 @@ describe('empty GLB helpers', () => {
 
     expect(geometry.format).toBe('gltf');
     expect(document.getRoot().listMeshes()).toHaveLength(0);
+  });
+});
+
+// =============================================================================
+// Single-copy layout (byte identity)
+// =============================================================================
+
+const onePixelPng = Uint8Array.from(
+  Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1EAAAAASUVORK5CYII=', 'base64'),
+);
+
+function createPaddedResourceInput(): GlbInput {
+  // Positions viewed at a non-zero offset inside a larger buffer: the writer must honour byteOffset.
+  const backing = new Float32Array([9, 9, 9, 0, 0, 0, 1, 0, 0, 0, 1, 0, 9]);
+  const primitive = createTrianglePrimitive();
+  return {
+    nodes: [
+      {
+        name: 'Textured',
+        primitives: [
+          {
+            ...primitive,
+            positions: backing.subarray(3, 12),
+            texCoords: [new Float32Array([0, 0, 1, 0, 0, 1])],
+            material: {
+              ...primitive.material,
+              pbrMetallicRoughness: { ...primitive.material.pbrMetallicRoughness, baseColorTexture: { index: 0 } },
+            },
+          },
+        ],
+      },
+    ],
+    // Odd byte lengths exercise the four-byte padding between views.
+    extraBufferViews: [{ key: 'odd', data: new Uint8Array([1, 2, 3, 4, 5]) }],
+    images: [{ data: onePixelPng, mimeType: 'image/png' }],
+    textures: [{ source: 0, sampler: 0 }],
+    samplers: [{ wrapS: 10_497, wrapT: 33_071, minFilter: 9987, magFilter: 9729 }],
+  };
+}
+
+const layoutFixtures: ReadonlyArray<readonly [string, () => GlbInput]> = [
+  ['empty scene', () => ({ nodes: [] })],
+  ['single triangle', createSingleTriangleInput],
+  ['multiple nodes', createMultiNodeInput],
+  ['lines', createLinesInput],
+  ['manifold topology with sparse merges', createManifoldInput],
+  ['padded extra views, images and offset views', createPaddedResourceInput],
+];
+
+const sha256 = (bytes: Uint8Array<ArrayBuffer>): string => createHash('sha256').update(bytes).digest('hex');
+
+/** Split a GLB into its JSON (generator redacted, so a version bump never moves the digest) and BIN chunks. */
+function splitGlb(glb: Uint8Array<ArrayBuffer>): { json: string; bin: Uint8Array<ArrayBuffer> } {
+  const view = new DataView(glb.buffer, glb.byteOffset, glb.byteLength);
+  const jsonLength = view.getUint32(12, true);
+  const json = new TextDecoder().decode(glb.subarray(20, 20 + jsonLength)).replace(expectedGenerator, '<generator>');
+  const binOffset = 20 + jsonLength;
+  const binLength = binOffset < glb.byteLength ? view.getUint32(binOffset, true) : 0;
+  return { json, bin: glb.subarray(binOffset + 8, binOffset + 8 + binLength) };
+}
+
+/** Assemble a GLB the plain way (JSON chunk, then BIN chunk) from the self-contained glTF's JSON and buffer. */
+function assembleReferenceGlb(input: GlbInput): Uint8Array<ArrayBuffer> {
+  const json = JSON.parse(new TextDecoder().decode(writeGltfJson(input))) as { buffers: Array<{ uri?: string }> };
+  const bin = Uint8Array.from(Buffer.from(json.buffers[0]!.uri!.split(',')[1]!, 'base64'));
+  delete json.buffers[0]!.uri;
+  const jsonBytes = new TextEncoder().encode(JSON.stringify(json));
+  const jsonLength = Math.ceil(jsonBytes.byteLength / 4) * 4;
+  const binLength = Math.ceil(bin.byteLength / 4) * 4;
+  const glb = new Uint8Array(28 + jsonLength + binLength);
+  const view = new DataView(glb.buffer);
+  view.setUint32(0, 0x46_54_6c_67, true);
+  view.setUint32(4, 2, true);
+  view.setUint32(8, glb.byteLength, true);
+  view.setUint32(12, jsonLength, true);
+  view.setUint32(16, 0x4e_4f_53_4a, true);
+  glb.set(jsonBytes, 20);
+  glb.fill(0x20, 20 + jsonBytes.byteLength, 20 + jsonLength);
+  view.setUint32(20 + jsonLength, binLength, true);
+  view.setUint32(24 + jsonLength, 0x00_4e_49_42, true);
+  glb.set(bin, 28 + jsonLength);
+  return glb;
+}
+
+describe('writeGlb single-copy layout', () => {
+  // Digests recorded from the three-copy writer this layout replaced (geospec aebaf91c4).
+  const recorded: Record<string, { json: string; bin: string }> = {
+    'empty scene': {
+      json: 'fe8baa00555e16c4a945230ce0223b936e6524dc96683d942a925b81bedd099b',
+      bin: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+    },
+    'single triangle': {
+      json: '5f3b073e26d063eed381de5e5b6ef19757a836ceb865effc73a3d36a94a974a3',
+      bin: '754bbf6a4e2b9e9f1e311a31d508337c560177fb20fbde81348dcc93527d8508',
+    },
+    'multiple nodes': {
+      json: 'd5077df54fe64c4a68053aa60dae0c6c6e416db3898974a9d8818913b94ed43d',
+      bin: '41a06a09fb2081c248fd7e1e4f33b8a707a408fe9857ada2acbf619f5798b776',
+    },
+    lines: {
+      json: '78bc4a23830a95d528810705606092638717272ed39acf31c75881255821aec7',
+      bin: 'db740eb029986ab3f57670063eb89265b9ea8a3d930614152e77680f1de00fee',
+    },
+    'manifold topology with sparse merges': {
+      json: 'ff3a2500760d5f699d98a9ebf5a89bb6eef5fe81467935ff5903f5d8c4cc11d4',
+      bin: 'cae69e2f02f3ae1f0dec0df69d3e0d461504c333cadafd1d844cb179fc31f526',
+    },
+    'padded extra views, images and offset views': {
+      json: '67ab3620d0de739f719a0b9178b87feff697957b2a3dd5237d5b846168bcba50',
+      bin: 'd3caee732bdef671ef3bba543ff4d90656991182a565a3699eb9d66d2e042f3f',
+    },
+  };
+
+  it.each(layoutFixtures)('should write %s byte-identically to the plain assembly', (_name, create) => {
+    const input = create();
+    expect(writeGlb(input)).toEqual(assembleReferenceGlb(input));
+  });
+
+  it.each(layoutFixtures)('should keep the recorded bytes for %s', (name, create) => {
+    const { json, bin } = splitGlb(writeGlb(create()));
+    expect({ json: sha256(new TextEncoder().encode(json)), bin: sha256(bin) }).toEqual(recorded[name]);
   });
 });

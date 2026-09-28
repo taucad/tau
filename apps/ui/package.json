@@ -4,6 +4,11 @@
   "type": "module",
   "private": true,
   "license": "Apache-2.0",
+  "imports": {
+    "#package.json": "./package.json",
+    "#scripts/*": "./scripts/*",
+    "#*": "./app/*"
+  },
   "dependencies": {
     "@base-ui/react": "catalog:",
     "@better-auth-ui/core": "1.6.15",
@@ -17,6 +22,7 @@
     "@taucad/agent-tools": "workspace:*",
     "@taucad/api-extractor": "workspace:*",
     "@taucad/assimp": "workspace:*",
+    "@taucad/bambu": "workspace:*",
     "@taucad/billing": "workspace:*",
     "@taucad/brep": "workspace:*",
     "@taucad/build123d": "workspace:*",
@@ -35,6 +41,7 @@
     "@taucad/image": "workspace:*",
     "@taucad/jscad": "workspace:*",
     "@taucad/json-schema": "workspace:*",
+    "@taucad/kinematics": "workspace:*",
     "@taucad/lsp": "workspace:*",
     "@taucad/lsp-fs": "workspace:*",
     "@taucad/manifold": "workspace:*",
@@ -44,6 +51,7 @@
     "@taucad/openrscad": "workspace:*",
     "@taucad/parameters": "workspace:*",
     "@taucad/picogk": "workspace:*",
+    "@taucad/picovoxel": "workspace:*",
     "@taucad/react": "workspace:*",
     "@taucad/replicad": "workspace:*",
     "@taucad/revisions": "workspace:*",
@@ -51,6 +59,7 @@
     "@taucad/runtime": "workspace:*",
     "@taucad/share": "workspace:*",
     "@taucad/skills": "workspace:*",
+    "@taucad/slicer": "workspace:*",
     "@taucad/tau-examples": "workspace:*",
     "@taucad/telemetry": "workspace:*",
     "@taucad/three": "workspace:*",

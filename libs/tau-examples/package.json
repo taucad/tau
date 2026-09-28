@@ -28,15 +28,19 @@
     "@taucad/opencascade": "workspace:*",
     "@taucad/openrscad": "workspace:*",
     "@taucad/picogk": "workspace:*",
+    "@taucad/picovoxel": "workspace:*",
     "@taucad/replicad": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/types": "workspace:*"
   },
   "devDependencies": {
     "@jscad/modeling": "catalog:",
+    "@taucad/geometry-core": "workspace:*",
+    "@taucad/kinematics": "workspace:*",
     "geospec": "workspace:*",
     "libcascade": "catalog:",
     "manifold-3d": "catalog:",
+    "picovoxel": "catalog:",
     "replicad": "catalog:",
     "replicad-opencascadejs": "catalog:",
     "sharp": "^0.34.5"

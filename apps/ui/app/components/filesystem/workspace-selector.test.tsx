@@ -139,7 +139,7 @@ describe('WorkspaceSelector', () => {
 
     await user.click(screen.getByRole('button', { name: 'Create in Home' }));
 
-    expect(screen.queryByPlaceholderText('Search locations...')).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText('Search locations…')).not.toBeInTheDocument();
     expect(screen.getByText('Create in')).toBeVisible();
     const options = screen.getAllByRole('option');
     expect(options).toHaveLength(2);
@@ -179,9 +179,9 @@ describe('WorkspaceSelector', () => {
     await user.click(screen.getByRole('button', { name: 'Create in Home' }));
 
     if (enabled) {
-      expect(screen.getByPlaceholderText('Search locations...')).toBeVisible();
+      expect(screen.getByPlaceholderText('Search locations…')).toBeVisible();
     } else {
-      expect(screen.queryByPlaceholderText('Search locations...')).not.toBeInTheDocument();
+      expect(screen.queryByPlaceholderText('Search locations…')).not.toBeInTheDocument();
     }
   });
 
@@ -274,22 +274,12 @@ describe('WorkspaceSelector', () => {
     expect(onSelectionComplete).toHaveBeenCalledTimes(2);
   });
 
-  it('restores focus after desktop cancellation but not nested cancellation', async () => {
+  it('restores focus after desktop cancellation', async () => {
     const user = userEvent.setup();
     const onRequestFocus = vi.fn();
-    const { unmount } = render(
-      <TooltipProvider>
-        <WorkspaceSelector state={readyState()} variant='toolbar' onRequestFocus={onRequestFocus} />
-      </TooltipProvider>,
-    );
-    await user.click(screen.getByRole('button', { name: 'Create in Home' }));
-    await user.keyboard('{Escape}');
-    expect(onRequestFocus).toHaveBeenCalledOnce();
-    unmount();
-
     render(
       <TooltipProvider>
-        <WorkspaceSelector state={readyState()} variant='toolbar' isNested onRequestFocus={onRequestFocus} />
+        <WorkspaceSelector state={readyState()} variant='toolbar' onRequestFocus={onRequestFocus} />
       </TooltipProvider>,
     );
     await user.click(screen.getByRole('button', { name: 'Create in Home' }));

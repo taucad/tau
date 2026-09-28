@@ -70,6 +70,10 @@ const revisionRoot = vi.hoisted(() => ({
   eventListeners: new Set<(event: WorkerRevisionEvent) => void>(),
   /** Listeners waiting on the registry's own projection; a test publishes one. */
   statusListeners: new Set<() => void>(),
+  /** Set by a test while the root has not yet answered its first projection. */
+  unanswered: false,
+  absent: false,
+  unsettled: false,
 }));
 
 vi.mock('#hooks/use-file-manager.js', () => ({
@@ -103,14 +107,21 @@ const revisionClient = vi.hoisted(() => {
     },
   };
 });
-vi.mock('#hooks/use-revision-status.js', () => ({
-  useRevisionClient: () =>
+vi.mock('#hooks/use-revision-status.js', () => {
+  const stableClient = (): unknown =>
     revisionClient.stable({
-      status: () => ({
-        checkoutId: 'checkout-durable',
-        checkoutRoot: '/projects/project_test',
-        branches: revisionRoot.branches,
-      }),
+      status: () =>
+        revisionRoot.unanswered
+          ? undefined
+          : revisionRoot.unsettled
+            ? /* The root's first projections name the checkout before the registry says where it is. */
+              { checkoutId: 'checkout-durable', checkoutRoot: undefined, branches: [], registrySettled: false }
+            : {
+                checkoutId: 'checkout-durable',
+                checkoutRoot: '/projects/project_test',
+                branches: revisionRoot.branches,
+                registrySettled: true,
+              },
       subscribe: (listener: () => void) => {
         revisionRoot.statusListeners.add(listener);
         return () => revisionRoot.statusListeners.delete(listener);
@@ -132,8 +143,13 @@ vi.mock('#hooks/use-revision-status.js', () => ({
       },
       send: (command: WorkerRevisionCommand) => revisionRoot.commands.push(command),
       close: () => undefined,
-    }),
-}));
+    });
+  return {
+    /* `absent`: the file manager has no worker yet, so the hook has no client (D41). */
+    useRevisionClient: () => (revisionRoot.absent ? undefined : stableClient()),
+    getRevisionClient: () => stableClient(),
+  };
+});
 
 const client = (exists: ReturnType<typeof vi.fn>): FileSystemClientFacade =>
   ({ exists }) as unknown as FileSystemClientFacade;
@@ -268,6 +284,9 @@ beforeEach(() => {
   revisionRoot.admitted.length = 0;
   revisionRoot.refuse = undefined;
   revisionRoot.placement = undefined;
+  revisionRoot.unanswered = false;
+  revisionRoot.absent = false;
+  revisionRoot.unsettled = false;
   revisionRoot.branches = [
     {
       name: 'main',
@@ -361,6 +380,61 @@ describe('ChatWorkspaceAuthorityProvider (north star W3d)', () => {
       workspaceId: 'checkout-durable',
     });
     expect(result.current.get('chat_1')).toBeUndefined();
+  });
+
+  it('should wait for the root’s first projection rather than attach to no checkout', async () => {
+    const { project } = fixture();
+    bindFileManager(project);
+    const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: wrapper() });
+    /* The route opens the root only once the GitHub credential is minted (D36). */
+    revisionRoot.unanswered = true;
+
+    const attaching = result.current.attachment('chat_1');
+    await act(async () => {
+      /* Long enough for the attach to reach its status read. */
+      await new Promise<void>((resolve) => {
+        globalThis.setTimeout(resolve, 0);
+      });
+      revisionRoot.unanswered = false;
+      for (const listener of revisionRoot.statusListeners) {
+        listener();
+      }
+    });
+
+    const attached = await attaching;
+    expect(attached?.execution.workspaceId).toBe('checkout-durable');
+  });
+
+  it('should wait for the checkout registry rather than read an unsettled root as no checkout (D41)', async () => {
+    const { project } = fixture();
+    bindFileManager(project);
+    revisionRoot.unsettled = true;
+    const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: wrapper() });
+
+    const attaching = result.current.attachment('chat_1');
+    await act(async () => {
+      await new Promise<void>((resolve) => {
+        globalThis.setTimeout(resolve, 0);
+      });
+      revisionRoot.unsettled = false;
+      for (const listener of revisionRoot.statusListeners) {
+        listener();
+      }
+    });
+
+    const attached = await attaching;
+    expect(attached?.execution.workspaceId).toBe('checkout-durable');
+  });
+
+  it('should attach through the worker-backed client when the hook has none yet (D41)', async () => {
+    const { project } = fixture();
+    bindFileManager(project);
+    revisionRoot.absent = true;
+    const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: wrapper() });
+
+    const attached = await act(async () => result.current.attachment('chat_1'));
+
+    expect(attached?.execution.workspaceId).toBe('checkout-durable');
   });
 
   it('should hand an attach the claim its chat already holds', async () => {

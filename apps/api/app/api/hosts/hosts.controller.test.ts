@@ -1,28 +1,25 @@
-import { createHash } from 'node:crypto';
-
-import { UnauthorizedException } from '@nestjs/common';
+import { ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 
 import { HostsController } from '#api/hosts/hosts.controller.js';
 import type { HostsService } from '#api/hosts/hosts.service.js';
 
-const expectedOwnerAffinity = (ownerId: string): string =>
-  `sha256:${createHash('sha256').update(`tau-owner-affinity-v1\0${ownerId}`).digest('hex')}`;
-
 describe('HostsController worker affinity', () => {
-  it('authenticates the paired device and returns an opaque owner-bound label', async () => {
+  it('authenticates the paired device before returning stable scheduler unavailability', async () => {
     const authenticateDevice = vi.fn(async () => ({ ownerId: 'owner-a' }));
     const controller = new HostsController({ authenticateDevice } as unknown as HostsService);
 
-    await expect(controller.getWorkerAffinity('Bearer paired-credential')).resolves.toEqual({
-      runtimeAffinity: { kind: 'owner', value: expectedOwnerAffinity('owner-a') },
-    });
+    try {
+      await controller.getWorkerAffinity('Bearer paired-credential');
+      expect.fail('Worker affinity should be unavailable.');
+    } catch (error) {
+      expect(error).toBeInstanceOf(ServiceUnavailableException);
+      if (!(error instanceof ServiceUnavailableException)) {
+        throw error;
+      }
+      expect(error.getResponse()).toMatchObject({ code: 'JOB_SCHEDULER_UNAVAILABLE' });
+    }
     expect(authenticateDevice).toHaveBeenCalledWith('Bearer paired-credential');
-    const ownerB = await new HostsController({
-      authenticateDevice: vi.fn(async () => ({ ownerId: 'owner-b' })),
-    } as unknown as HostsService).getWorkerAffinity('Bearer another-credential');
-    expect(ownerB.runtimeAffinity.value).not.toBe(expectedOwnerAffinity('owner-a'));
-    expect(ownerB.runtimeAffinity.value).not.toContain('owner-b');
   });
 
   it('rejects an invalid or revoked paired-device credential', async () => {

@@ -191,6 +191,7 @@ describe('plugin generator', () => {
       'src/image-backend.ts',
       'src/image-export-options.test.ts',
       'src/image-export-options.ts',
+      'src/image-export-units.test.ts',
       'src/image-import-failure.test.ts',
       'src/image-label.test.ts',
       'src/image-label.ts',
@@ -206,8 +207,17 @@ describe('plugin generator', () => {
       'src/svg.ts',
       'src/svg.vite-build.test.ts',
     ]);
-    const reference = readdirSync(referenceRoot, { encoding: 'utf8', recursive: true })
-      .filter((path) => !path.startsWith('dist/') && !path.startsWith('node_modules/') && !path.startsWith('out-tsc/'))
+    // Prune output and install directories before recursing: walking `node_modules` alone takes seconds.
+    const unscaffolded = new Set(['dist', 'node_modules', 'out-tsc']);
+    const reference = readdirSync(referenceRoot)
+      .filter((entry) => !unscaffolded.has(entry))
+      .flatMap((entry) =>
+        statSync(join(referenceRoot, entry)).isDirectory()
+          ? readdirSync(join(referenceRoot, entry), { encoding: 'utf8', recursive: true }).map(
+              (path) => `${entry}/${path}`,
+            )
+          : [entry],
+      )
       .filter((path) => statSync(join(referenceRoot, path)).isFile() && !packageSpecific.has(path))
       .sort();
 
@@ -282,6 +292,8 @@ describe('plugin generator', () => {
     expect(machine).toContain("from 'zod'");
     expect(machine).toContain('input.configuration.logicalId');
     expect(machine).toContain('TODO: implement manufacturing-fixture machine connection');
+    expect(machine).toContain('const manifest: MachineManifest = {');
+    expect(machine).toContain('  manifest,\n  bindingConfiguration,');
 
     const readme = readText(tree, `${root}/README.md`);
     expect(readme).toContain("import { defineRuntime } from '@taucad/runtime/host';");
@@ -329,6 +341,7 @@ describe('plugin generator', () => {
       expect(plugin).toContain(`'${role}s.default'`);
       expect(typeTest).toContain(projection);
       expect(typeTest).toContain(`ReturnType<typeof ${factory}>`);
+      expect(typeTest.match(/from '#index\.js';/g)).toHaveLength(1);
       expect(typeTest).toContain(role === 'job' ? 'invalidJobConfiguration' : 'invalidMachineBinding');
       const readme = readText(tree, `${root}/README.md`);
       expect(readme).toContain("import { defineRuntime } from '@taucad/runtime/host';");

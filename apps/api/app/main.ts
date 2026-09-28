@@ -1,6 +1,5 @@
 import '#telemetry/otel.js'; // oxlint-disable-line eslint-plugin-import/no-unassigned-import -- OTEL SDK must initialize before any other module
 
-import process from 'node:process';
 import { Logger, VersioningType } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
@@ -16,12 +15,12 @@ import { AppModule } from '#app.module.js';
 import { getEnvironment } from '#config/environment.config.js';
 import type { Environment } from '#config/environment.config.js';
 import { getFastifyLoggingConfig } from '#logger/fastify.logger.js';
+import { redactUrlQuery } from '#logger/logger-factory.js';
 import { corsBaseConfiguration } from '#constants/cors.constant.js';
 import { createTauCorsOriginValidator } from '#utils/cors.utils.js';
 import { httpBodyLimit } from '#constants/http-body.constant.js';
-import { RedisService } from '#redis/redis.service.js';
-import { RedisIoAdapter } from '#api/websocket/redis-io.adapter.js';
 import { installApiUnhandledRejectionHandler } from '#api-unhandled-rejection-handler.js';
+import { closeGracefullyOnSignal, drainingServerOptions } from '#lifecycle/graceful-shutdown.js';
 
 async function createApiApp() {
   const fastifyAdapter = new FastifyAdapter({
@@ -29,6 +28,7 @@ async function createApiApp() {
     genReqId: () => generatePrefixedId(idPrefix.request),
     disableRequestLogging: true, // Disables automatic 'incoming request'/'request completed' logs - these are handled by custom loggers.
     logger: getFastifyLoggingConfig(),
+    ...drainingServerOptions,
   });
 
   const app = await NestFactory.create<NestFastifyApplication>(AppModule.forRoot(getEnvironment()), fastifyAdapter, {
@@ -62,7 +62,12 @@ async function createApiApp() {
   });
 
   const fastifyInstance = app.getHttpAdapter().getInstance();
-  const fastifyOtel = new FastifyOtelInstrumentation();
+  const fastifyOtel = new FastifyOtelInstrumentation({
+    // The request span records `url.path` with its query; OAuth callbacks carry `code` and `state` there.
+    requestHook: (span, request) => {
+      span.setAttribute('url.path', redactUrlQuery(request.url));
+    },
+  });
   await fastifyInstance.register(fastifyOtel.plugin());
 
   const viewCookieSecret = appConfig.get('TAU_VIEW_COOKIE_SECRET', { infer: true });
@@ -81,15 +86,7 @@ async function startStandaloneApiApp(app: NestFastifyApplication): Promise<void>
   await app.init();
   await fastifyInstance.ready();
 
-  app.enableShutdownHooks();
-
-  if (process.env.NODE_ENV === 'production') {
-    // Set up Socket.IO with Redis adapter for horizontal scaling
-    const redisService = app.get(RedisService);
-    const redisIoAdapter = new RedisIoAdapter(app, redisService);
-    await redisIoAdapter.connectToRedis();
-    app.useWebSocketAdapter(redisIoAdapter);
-  }
+  closeGracefullyOnSignal(app);
 
   const port = appConfig.get('PORT', { infer: true });
   await app.listen(port, '0.0.0.0'); // Listen on all network interfaces

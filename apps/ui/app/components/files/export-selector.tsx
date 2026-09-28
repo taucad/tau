@@ -155,7 +155,7 @@ function GeometryUnitPicker({
         getValue={getCuValue}
         value={defaultValue}
         placeholder='Select file'
-        searchPlaceHolder='Filter files...'
+        searchPlaceHolder='Filter files…'
         title='Select geometry unit'
         description='Choose which file to export geometry from.'
         isSearchEnabled={entries.length > 5}

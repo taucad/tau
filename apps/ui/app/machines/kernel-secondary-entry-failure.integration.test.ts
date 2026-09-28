@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { createActor, setup, waitFor } from 'xstate';
+import { createActor, setup, types, waitFor } from 'xstate';
 import { describe, expect, it, vi } from 'vitest';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
 import { composeView } from '@taucad/filesystem/composed-view';
@@ -46,11 +46,9 @@ type FileManagerProbeContext = {
 };
 
 const fileManagerProbe = setup({
-  types: {
-    // oxlint-disable-next-line typescript/consistent-type-assertions -- XState setup requires type witnesses.
-    context: {} as FileManagerProbeContext,
-    // oxlint-disable-next-line typescript/consistent-type-assertions -- XState setup requires type witnesses.
-    input: {} as FileManagerProbeContext,
+  schemas: {
+    context: types<FileManagerProbeContext>(),
+    input: types<FileManagerProbeContext>(),
   },
 }).createMachine({
   initial: 'ready',

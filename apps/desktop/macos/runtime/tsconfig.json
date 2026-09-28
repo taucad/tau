@@ -5,10 +5,7 @@
     "declaration": false,
     "declarationMap": false,
     "incremental": false,
-    "noEmit": true,
-    "paths": {
-      "#quick-look-manifest": ["../quick-look-formats.json"]
-    }
+    "noEmit": true
   },
   "include": ["src/**/*.ts", "vite.config.ts"]
 }

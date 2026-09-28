@@ -3,6 +3,7 @@ import { createEventLogAppender } from '#log/event-log-appender.js';
 import type { EventLogStorage } from '#log/event-log-appender.js';
 import type {
   InterruptApprovalPort,
+  InterruptResolution,
   ModelStreamEvent,
   ModelStreamRequest,
   ModelTransport,
@@ -726,6 +727,8 @@ describe('createTauAgentHost', () => {
       ORIGIN_NOT_ALLOWED: false,
       PROVIDER_ACCOUNT_EXHAUSTED: false,
       RATE_LIMITED: true,
+      // The resumed run re-sends the same history, which meets the same bound.
+      REQUEST_TOO_LARGE: false,
       UNAUTHENTICATED: true,
       INVALID_REQUEST: true,
       PROVIDER_UNAVAILABLE: true,
@@ -1025,6 +1028,135 @@ the cancelled tools left the system unchanged.
       'requested',
       'resolved',
     ]);
+    await host.close();
+  });
+
+  it('pauses a Tau run on a tool approval and resumes it on the answer', async () => {
+    const file = createMemoryLogFile();
+    let pending: Parameters<InterruptApprovalPort['pause']>[0] | undefined;
+    const settled = Promise.withResolvers<InterruptResolution>();
+    const interruptPort: InterruptApprovalPort = {
+      pause: async (request) => {
+        pending = request;
+        return settled.promise;
+      },
+      pending: async ({ runId }) => (pending?.runId === runId ? [pending] : []),
+      resume: async (resolution) => {
+        pending = undefined;
+        settled.resolve(resolution);
+      },
+    };
+    const outcomes: string[] = [];
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport: new ScriptedParityModelTransport(scriptedParityResponses.slice(0, 2)),
+        toolRegistry: tools(async (invocation) => {
+          const resolution = await invocation.approve!({
+            prompt: 'Print main.gcode.3mf on Workshop X1C?',
+            payload: { kind: 'print-request', requestId: invocation.toolCallId },
+          });
+          outcomes.push(resolution.outcome);
+          return { content: { approval: resolution.outcome }, isError: false };
+        }),
+        interruptPort,
+        idPrefix: 'approval',
+      }),
+    );
+
+    const admission = host.admit({
+      chatId: 'chat-approval',
+      runId: 'run-approval',
+      trigger: 'submit',
+      message: { id: 'turn-approval', role: 'user', content: 'Print it.' },
+    });
+    await vi.waitFor(() => {
+      expect(pending).toBeDefined();
+    });
+    expect(pending).toMatchObject({
+      runId: 'run-approval',
+      kind: 'approval',
+      prompt: 'Print main.gcode.3mf on Workshop X1C?',
+      payload: { kind: 'print-request', requestId: 'fixture-call-read' },
+    });
+    await expect(host.snapshot('chat-approval')).resolves.toMatchObject({ state: 'paused' });
+    await expect(host.pendingInterrupts('run-approval')).resolves.toHaveLength(1);
+
+    await host.resolveInterrupt({ runId: 'run-approval', interruptId: pending!.interruptId, outcome: 'approved' });
+    await admission;
+
+    const eventLog = await file.open();
+    const events = await eventLog.read();
+    expect(outcomes).toEqual(['approved']);
+    expect(events.filter((event) => event.type === 'run.lifecycle').map((event) => event.state)).toEqual([
+      'admitted',
+      'running',
+      'paused',
+      'running',
+      'completed',
+    ]);
+    const recorded = events.filter((event) => event.type === 'interrupt.recorded');
+    expect(recorded.map((event) => event.phase)).toEqual(['requested', 'resolved']);
+    expect(recorded[0]?.payload).toEqual({
+      kind: 'approval',
+      prompt: 'Print main.gcode.3mf on Workshop X1C?',
+      context: { kind: 'print-request', requestId: 'fixture-call-read' },
+    });
+    expect(recorded[1]?.payload).toEqual({ outcome: 'approved' });
+    await host.close();
+  });
+
+  it('answers a pending tool approval as cancelled when the run is cancelled', async () => {
+    const file = createMemoryLogFile();
+    let pending: Parameters<InterruptApprovalPort['pause']>[0] | undefined;
+    const settled = Promise.withResolvers<InterruptResolution>();
+    const interruptPort: InterruptApprovalPort = {
+      pause: async (request) => {
+        pending = request;
+        return settled.promise;
+      },
+      pending: async ({ runId }) => (pending?.runId === runId ? [pending] : []),
+      resume: async (resolution) => {
+        pending = undefined;
+        settled.resolve(resolution);
+      },
+    };
+    const outcomes: string[] = [];
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport: new ScriptedParityModelTransport(scriptedParityResponses.slice(0, 2)),
+        toolRegistry: tools(async (invocation) => {
+          const resolution = await invocation.approve!({ prompt: 'Print?' });
+          outcomes.push(resolution.outcome);
+          return { content: { approval: resolution.outcome }, isError: false };
+        }),
+        interruptPort,
+        idPrefix: 'stop',
+      }),
+    );
+    const admission = host.admit({
+      chatId: 'chat-stop',
+      runId: 'run-stop',
+      trigger: 'submit',
+      message: { id: 'turn-stop', role: 'user', content: 'Print it.' },
+    });
+    await vi.waitFor(() => {
+      expect(pending).toBeDefined();
+    });
+
+    await host.cancel({ runId: 'run-stop' });
+    await admission;
+
+    const eventLog = await file.open();
+    const events = await eventLog.read();
+    expect(outcomes).toEqual(['cancelled']);
+    expect(pending).toBeUndefined();
+    expect(events.filter((event) => event.type === 'interrupt.recorded').map((event) => event.reason)).toEqual([
+      'Print?',
+      'cancelled',
+    ]);
+    expect(events.findLast((event) => event.type === 'run.lifecycle')?.state).toBe('cancelled');
     await host.close();
   });
 

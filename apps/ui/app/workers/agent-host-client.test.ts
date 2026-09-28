@@ -440,6 +440,38 @@ describe('createBrowserAgentHostClient', () => {
     expect(initializeRequest.projectRootPort).toBeInstanceOf(MessagePort);
   });
 
+  /* Offline the catalog names no model; opening a chat still attaches and replays its log. */
+  it('initializes the worker without a default model row while the catalog is unavailable', async () => {
+    vi.stubGlobal('Worker', vi.fn());
+    vi.stubGlobal('BroadcastChannel', vi.fn());
+    vi.stubGlobal('navigator', { locks: {}, storage: { getDirectory: vi.fn() } });
+    const worker = new FakeAgentHostWorker();
+    const channel = new MessageChannel();
+    const projectRootChannel = new MessageChannel();
+    const client = createBrowserAgentHostClient({
+      openFileSystemBridge: () => ({ port: channel.port1, dispose: vi.fn() }) as unknown as FileSystemBridgeConnection,
+      openProjectRootBridge: () =>
+        ({ port: projectRootChannel.port1, dispose: vi.fn() }) as unknown as FileSystemBridgeConnection,
+      projectStorage: { projectId: 'project-one', backend: 'opfs', providerBasePath: 'project-one' },
+      durability: 'exclusive-append',
+      authority: { projectId: 'project-one', workspaceId: 'workspace-one' },
+      gatewayBaseUrl: 'https://api.tau.test',
+      systemPrompt: 'Build CAD.',
+      systemPromptBlocks: [
+        { type: 'text', text: 'static' },
+        { type: 'text', text: 'dynamic' },
+      ],
+      runtimeConfig: { tauApiUrl: 'https://api.tau.test', tauWebSocketUrl: 'wss://api.tau.test' },
+      createWorker: () => worker as unknown as Worker,
+    });
+
+    await expect(client.close()).resolves.toBeUndefined();
+    const initializeRequest = worker.requests[0];
+    expect(initializeRequest?.type).toBe('initialize');
+    expect(initializeRequest).toMatchObject({ authority: { projectId: 'project-one', workspaceId: 'workspace-one' } });
+    expect(initializeRequest).not.toHaveProperty('model', expect.anything());
+  });
+
   it('transfers workspace and project-root ports and drives start, steer, cancel, resume, events, and close', async () => {
     vi.stubGlobal('Worker', vi.fn());
     vi.stubGlobal('BroadcastChannel', vi.fn());
@@ -616,22 +648,10 @@ describe('createBrowserAgentHostClient', () => {
       message: 'Build it.',
     });
     const attachAttempt = client.attach({ chatId: 'chat-timeout-two', cursor: 0, limit: 16 });
-    const outcomes = await Promise.all(
-      [startAttempt, attachAttempt].map(async (attempt) =>
-        Promise.race([
-          attempt.then(
-            () => 'resolved',
-            (error: unknown) => (error instanceof Error && 'code' in error ? error.code : 'rejected'),
-          ),
-          new Promise<'pending'>((resolve) => {
-            globalThis.setTimeout(() => {
-              resolve('pending');
-            }, 50);
-          }),
-        ]),
-      ),
-    );
-    expect(outcomes).toEqual(['COMMAND_TIMEOUT', 'COMMAND_TIMEOUT']);
+    await expect(Promise.allSettled([startAttempt, attachAttempt])).resolves.toMatchObject([
+      { status: 'rejected', reason: { code: 'COMMAND_TIMEOUT' } },
+      { status: 'rejected', reason: { code: 'COMMAND_TIMEOUT' } },
+    ]);
     worker.dropCommands = false;
     await client.close();
     await startAttempt.catch(() => undefined);
@@ -653,7 +673,7 @@ describe('createBrowserAgentHostClient', () => {
   it('renews the run idle lease from live activity and settles through terminal replay', async () => {
     const worker = new FakeAgentHostWorker();
     worker.deferRunCompletion = true;
-    const client = createTestClient(worker, { commandTimeout: 10, runIdleTimeout: 30 });
+    const client = createTestClient(worker, { commandTimeout: 100, runIdleTimeout: 30 });
     const completion = client.start({
       chatId: 'chat-live-lease',
       runId: 'run-live-lease',
@@ -713,6 +733,50 @@ describe('createBrowserAgentHostClient', () => {
 
     await expect(completion).resolves.toMatchObject({ runId: 'run-lost-terminal', state: 'completed' });
     expect(worker.requests.filter((request) => request.type === 'attach').length).toBeGreaterThan(1);
+    await client.close();
+  });
+
+  it('should keep a run alive when one liveness read times out', async () => {
+    const worker = new FakeAgentHostWorker();
+    worker.deferRunCompletion = true;
+    worker.dropRunningAttach = true;
+    const client = createTestClient(worker, { commandTimeout: 50, runIdleTimeout: 5 });
+    const completion = client.start({
+      chatId: 'chat-transient-probe',
+      runId: 'run-transient-probe',
+      trigger: 'submit',
+      message: 'Build slowly.',
+    });
+    await vi.waitFor(
+      () => {
+        expect(worker.requests.filter((request) => request.type === 'attach').length).toBeGreaterThan(0);
+      },
+      { interval: 1 },
+    );
+    worker.dropRunningAttach = false;
+    worker.complete('chat-transient-probe', false);
+
+    await expect(completion).resolves.toMatchObject({ runId: 'run-transient-probe', state: 'completed' });
+    expect(worker.requests.filter((request) => request.type === 'start')).toHaveLength(1);
+    expect(worker.requests.filter((request) => request.type === 'attach').length).toBeGreaterThan(1);
+    await client.close();
+  });
+
+  it('should fail after three unanswered liveness reads', async () => {
+    const worker = new FakeAgentHostWorker();
+    worker.deferRunCompletion = true;
+    worker.dropRunningAttach = true;
+    const client = createTestClient(worker, { commandTimeout: 5, runIdleTimeout: 5 });
+
+    await expect(
+      client.start({
+        chatId: 'chat-dead-probe',
+        runId: 'run-dead-probe',
+        trigger: 'submit',
+        message: 'Build slowly.',
+      }),
+    ).rejects.toMatchObject({ code: 'RUN_IDLE_TIMEOUT' });
+    expect(worker.requests.filter((request) => request.type === 'attach')).toHaveLength(3);
     await client.close();
   });
 

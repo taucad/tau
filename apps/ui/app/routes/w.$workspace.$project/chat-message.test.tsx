@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { MyUIMessage, SkillMetadata } from '@taucad/chat';
 import { ChatMessage } from '#routes/w.$workspace.$project/chat-message.js';
+import { AtReferenceProvider } from '#components/chat/at-reference-context.js';
 
 const { mockMessagesById, mockMessageOrder, mockStatus, mockSkillsCatalog } = vi.hoisted(() => ({
   mockMessagesById: new Map<string, MyUIMessage>(),
@@ -167,6 +168,11 @@ vi.mock('#routes/w.$workspace.$project/chat-message-tool-screenshot.js', () => (
 }));
 vi.mock('#routes/w.$workspace.$project/chat-message-tool-unknown.js', () => ({
   ChatMessagePartUnknown: () => <div data-testid='tool-unknown' />,
+}));
+vi.mock('#routes/w.$workspace.$project/chat-message-tool-request-print.js', () => ({
+  ChatMessageToolRequestPrint: ({ part }: { readonly part: { readonly state: string } }) => (
+    <div data-testid='tool-request-print' data-state={part.state} />
+  ),
 }));
 
 vi.mock('#components/chat/chat-textarea.js', () => ({
@@ -525,6 +531,50 @@ describe('ChatMessage source part rendering', () => {
   });
 });
 
+describe('ChatMessage agent media', () => {
+  it("renders an agent's image in place, between its words, and not in the user attachment strip", () => {
+    const message: MyUIMessage = {
+      id: 'msg-render',
+      role: 'assistant',
+      parts: [
+        { type: 'text', text: 'Here is the render.' },
+        { type: 'file', mediaType: 'image/png', url: 'data:image/png;base64,iVBORw0K' },
+        { type: 'text', text: 'Saved beside the project.' },
+      ],
+    };
+    setMessages([message]);
+
+    render(<ChatMessage messageId='msg-render' />);
+
+    const article = screen.getByRole('article');
+    const image = within(article).getByRole('img', { name: 'Agent image' });
+    const [before, after] = within(article).getAllByTestId('chat-message-text');
+    // eslint-disable-next-line no-bitwise -- compareDocumentPosition returns a bitmask.
+    expect(before!.compareDocumentPosition(image) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // eslint-disable-next-line no-bitwise -- compareDocumentPosition returns a bitmask.
+    expect(image.compareDocumentPosition(after!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByTestId('chat-message-file-attachments')).not.toBeInTheDocument();
+  });
+
+  it("keeps a user's attachments in the strip above their message", () => {
+    setMessages([
+      {
+        id: 'msg-user-file',
+        role: 'user',
+        parts: [
+          { type: 'file', mediaType: 'image/png', url: 'data:image/png;base64,iVBORw0K' },
+          { type: 'text', text: 'Render this' },
+        ],
+      },
+    ]);
+
+    render(<ChatMessage messageId='msg-user-file' />);
+
+    expect(screen.getByTestId('chat-message-file-attachments')).toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: 'Agent image' })).not.toBeInTheDocument();
+  });
+});
+
 describe('ChatMessage ACP session state', () => {
   it('renders the current ACP plan as one read-only plan surface', () => {
     const message: MyUIMessage = {
@@ -672,20 +722,26 @@ describe('ChatMessage slash command rendering', () => {
   const longMessageWith = (line: string): string =>
     [line, ...Array.from({ length: 10 }, (_, index) => `filler line ${index}`)].join('\n');
 
-  it('should render /create-skill as a skill chip when rehydrating message text', () => {
-    mockSkillsCatalog.push({
-      name: 'create-skill',
-      description: 'Create or update a skill',
-      resourceUri: 'system:skills/create-skill/SKILL.md',
-      source: 'system',
-      version: '1.0.0',
-      fingerprint: 'test-create-skill',
-      enabled: true,
-      shadowedSources: [],
-    });
+  const renderWithTokens = (messageId: string, knownTokens: ReadonlySet<string>): void => {
+    render(
+      <AtReferenceProvider treeService={undefined} chats={[]} knownTokens={knownTokens}>
+        <ChatMessage messageId={messageId} />
+      </AtReferenceProvider>,
+    );
+  };
+
+  it('should render /create-skill as a skill chip when the chat knows the token', () => {
     setMessages([userMessage('msg-1', longMessageWith('Use /create-skill now'))]);
 
-    render(<ChatMessage messageId='msg-1' />);
+    renderWithTokens('msg-1', new Set(['/create-skill']));
+
+    expect(screen.getByTestId('context-chip')).toBeInTheDocument();
+  });
+
+  it('should render a Codex $skill as a skill chip when the agent advertised it', () => {
+    setMessages([userMessage('msg-1', longMessageWith('Make a render of this using $imagegen'))]);
+
+    renderWithTokens('msg-1', new Set(['$imagegen']));
 
     expect(screen.getByTestId('context-chip')).toBeInTheDocument();
   });
@@ -772,6 +828,60 @@ describe('ChatMessage article wrapper — no sticky positioning (regression guar
 
     const textarea = screen.getByTestId('chat-textarea');
     expect(article.contains(textarea)).toBe(true);
+  });
+});
+
+describe('ChatMessage print tools', () => {
+  it('should render request_print on its own card, never as an unknown part', () => {
+    const message: MyUIMessage = {
+      id: 'msg-request-print',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'tool-request_print',
+          toolCallId: 'call-print',
+          state: 'input-available',
+          input: { targetFile: 'main.scad' },
+        },
+      ],
+    };
+    setMessages([message], 'streaming');
+
+    render(<ChatMessage messageId={message.id} />);
+
+    expect(screen.getByTestId('tool-request-print')).toHaveAttribute('data-state', 'input-available');
+    expect(screen.queryByTestId('tool-unknown')).toBeNull();
+  });
+
+  it('should render the other print tools on the generic card under their own names', () => {
+    const message: MyUIMessage = {
+      id: 'msg-print-reads',
+      role: 'assistant',
+      parts: [
+        { type: 'tool-get_machine', toolCallId: 'call-machine', state: 'input-available', input: {} },
+        {
+          type: 'tool-get_print_request',
+          toolCallId: 'call-read',
+          state: 'input-available',
+          input: { requestId: 'call-print' },
+        },
+        { type: 'tool-list_print_requests', toolCallId: 'call-list', state: 'input-available', input: {} },
+        {
+          type: 'tool-cancel_print',
+          toolCallId: 'call-cancel',
+          state: 'input-available',
+          input: { requestId: 'call-print' },
+        },
+      ],
+    };
+    setMessages([message], 'streaming');
+
+    render(<ChatMessage messageId={message.id} />);
+
+    for (const name of ['get_machine', 'get_print_request', 'list_print_requests', 'cancel_print']) {
+      expect(screen.getByText(name)).toBeInTheDocument();
+    }
+    expect(screen.queryByTestId('tool-unknown')).toBeNull();
   });
 });
 

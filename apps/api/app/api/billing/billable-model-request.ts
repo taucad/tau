@@ -2,10 +2,15 @@
 import { z } from 'zod';
 import type { BillableProviderWire } from '#api/billing/billable-model-invocation.types.js';
 
-/* R1: a request may carry one maximal PDF (16 MiB, 22,369,624 base64 characters)
+/**
+ * UTF-8 bytes one serialized funded model request may carry (R1).
+ *
+ * A request may carry one maximal PDF (16 MiB, 22,369,624 base64 characters)
  * plus its turn. The agent host evicts older attachments past 24,000,000 base64
- * characters, and 32 MB is the request size the largest provider documents. */
-const maximumBytes = 32_000_000;
+ * characters, and 32 MB is the request size the largest provider documents. The
+ * invocation owner's digest boundary reads this same bound.
+ */
+export const maximumModelRequestBytes = 32_000_000;
 const maximumDepth = 64;
 /* Text, signatures and identifiers stay bounded per string; attachment bytes carry their own bounds. */
 const maximumStringLength = 4_000_000;
@@ -589,7 +594,7 @@ export const safeParseBillableModelRequest = (
   } catch {
     return { success: false, error: new z.ZodError([]) };
   }
-  if (typeof serialized !== 'string' || new TextEncoder().encode(serialized).byteLength > maximumBytes) {
+  if (typeof serialized !== 'string' || new TextEncoder().encode(serialized).byteLength > maximumModelRequestBytes) {
     return { success: false, error: new z.ZodError([]) };
   }
   const parsed = billableModelRequestSchema.safeParse(body);

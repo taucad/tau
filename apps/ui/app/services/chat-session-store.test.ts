@@ -1,6 +1,7 @@
 // @vitest-environment node
 /* eslint-disable @typescript-eslint/naming-convention -- mock for AI SDK's Chat / DefaultChatTransport classes uses the SDK's own PascalCase names and `~`-prefixed subscriber method names verbatim so the mock surface matches the real one. */
 /* eslint-disable @typescript-eslint/explicit-member-accessibility -- mock class constructors omit the `public` keyword to mirror the AI SDK's published shape. */
+import type { Actor } from 'xstate';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { createActor } from 'xstate';
@@ -15,6 +16,7 @@ import { uint8ArrayToBase64 } from 'uint8array-extras';
 import type { ChatRequest, ChatSessionActorRef, ChatTurnSettlementInput } from '#machines/chat-session.machine.js';
 import type { ProjectSessionActorRef } from '#machines/project-session.machine.js';
 import { projectSessionMachine } from '#machines/project-session.machine.js';
+import { spyOnSend } from '#lib/xstate-test.utils.js';
 import {
   chatTurnAdmission,
   chatTurnSettlement,
@@ -54,6 +56,19 @@ type FakeChatInstance = {
   '~registerStatusCallback': (onChange: () => void) => () => void;
   '~registerErrorCallback': (onChange: () => void) => () => void;
 };
+
+/**
+ * Finish a run that streamed a reply: the status walk the AI SDK makes before `onFinish`.
+ *
+ * @param chat - The chat whose request ends.
+ */
+function finishRun(chat: FakeChatInstance): void {
+  for (const status of ['submitted', 'streaming', 'ready'] as const) {
+    chat.status = status;
+    chat.emitStatusChange();
+  }
+  chat.finish();
+}
 
 const harness = vi.hoisted(() => ({
   created: [] as FakeChatInstance[],
@@ -650,7 +665,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
 
     const realSession = (projectId: string) => {
       const heard: Array<{ type: string; chatId?: string }> = [];
-      const chatReferences = new Map<string, ChatSessionActorRef>();
+      const chatReferences = new Map<string, Actor<typeof chatSessionMachine>>();
       const ref = mock<ProjectSessionActorRef>();
       const snapshot = mock<ReturnType<ProjectSessionActorRef['getSnapshot']>>();
       Object.defineProperty(snapshot, 'context', {
@@ -1199,8 +1214,9 @@ describe('ChatSessionStore', () => {
     it('marks unattended terminal success and error, but not abort or disconnect', async () => {
       const { store, deps } = storeInProject();
 
+      store.retainDurableRun({ chatId: 'chat_success', runId: 'run_chat_success' });
+      finishRun(harness.created.at(-1)!);
       for (const [chatId, options] of [
-        ['chat_success', {}],
         ['chat_error', { isError: true }],
         ['chat_abort', { isAbort: true }],
         ['chat_disconnect', { isDisconnect: true }],
@@ -1275,6 +1291,30 @@ describe('ChatSessionStore', () => {
       expect(store.isUnread('chat_active')).toBe(false);
     });
 
+    /* An opened chat resumes, and a host holding no run for it closes the stream without a chunk. Its
+     * `onFinish` lands after focus has moved on, and marking it left a chat nothing ran in unread. */
+    it('should not mark a chat unread when its resume ends without output after focus moved away', async () => {
+      const { store, deps } = storeInProject();
+      store.acquire('chat_opened');
+      store.focusChat('chat_opened');
+      store.focusChat('chat_next');
+      store.blurChat('chat_opened');
+      const chat = harness.created[0]!;
+
+      for (const status of ['submitted', 'ready'] as const) {
+        chat.status = status;
+        chat.emitStatusChange();
+      }
+      chat.finish();
+
+      await vi.waitFor(() => {
+        expect(deps.getChat).toHaveBeenCalledWith('chat_opened');
+      });
+      await settle();
+      expect(deps.client.json(unreadPath)).toBeUndefined();
+      expect(store.isUnread('chat_opened')).toBe(false);
+    });
+
     /* R3: every sidebar row holds a view of its chat, so a view alone is not the person reading it. */
     it('should mark a chat that finishes while another chat is focused in an active document', async () => {
       const { store, deps } = storeInProject();
@@ -1282,7 +1322,7 @@ describe('ChatSessionStore', () => {
       store.acquire('chat_focused');
       store.focusChat('chat_focused');
 
-      harness.created[0]!.finish();
+      finishRun(harness.created[0]!);
 
       await vi.waitFor(() => {
         expect(deps.client.json(unreadPath)).toEqual({ version: 1, unread: { chat_listed: true } });
@@ -1297,7 +1337,7 @@ describe('ChatSessionStore', () => {
       store.focusChat('chat_next');
       store.blurChat('chat_left');
 
-      harness.created[0]!.finish();
+      finishRun(harness.created[0]!);
 
       await vi.waitFor(() => {
         expect(deps.client.json(unreadPath)).toEqual({ version: 1, unread: { chat_left: true } });
@@ -1309,7 +1349,7 @@ describe('ChatSessionStore', () => {
       const { store, deps } = storeInProject();
       store.acquire('chat_hidden');
 
-      harness.created[0]!.finish();
+      finishRun(harness.created[0]!);
 
       await vi.waitFor(() => {
         expect(deps.client.json(unreadPath)).toEqual({ version: 1, unread: { chat_hidden: true } });
@@ -1863,6 +1903,56 @@ describe('ChatSessionStore', () => {
     });
 
     /*
+     * Replaying a completed host log retains its run id so the transport can
+     * rebuild that run's transcript. The AI SDK still reports `submitted`
+     * while it opens the replay, but that transport status is not a new turn:
+     * treating the retained id as liveness revives the terminal run and leaves
+     * the row waiting in `finishing` for a second settlement.
+     */
+    it('should not revive a terminal run while its host log reattaches', async () => {
+      const store = new ChatSessionStore();
+      const deps = createStubDeps();
+      const chatId = 'chat_reattach_terminal';
+      deps.getChat.mockResolvedValue(chatRow(chatId, 'project_reattach', { name: 'Completed ACP chat' }));
+      store.setDependencies(deps);
+      const actor = createActor(chatSessionMachine, {
+        input: { chatId, projectId: 'project_reattach' },
+      }).start();
+      const heard: string[] = [];
+      const projectRef = {
+        send: (event: { type: string }) => {
+          heard.push(event.type);
+        },
+        getSnapshot: () => ({ context: { chatRefs: { [chatId]: actor } } }),
+      } as unknown as ProjectSessionActorRef;
+
+      try {
+        store.setFocusedProject('project_reattach');
+        store.setProjectSession('project_reattach', projectRef);
+        const session = store.acquire(chatId);
+        await vi.waitFor(() => {
+          expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+        });
+
+        bindDurableChatRun(chatId, 'run_already_terminal');
+        store.reattachHostChat({ chatId, hostId: 'origin' });
+        const fake = harness.created.findLast((entry) => entry.id === chatId)!;
+        fake.status = 'submitted';
+        fake.emitStatusChange();
+        fake.status = 'ready';
+        fake.emitStatusChange();
+
+        expect(heard).not.toContain('runStarted');
+        expect(heard).not.toContain('runSettled');
+        expect(actor.getSnapshot().matches({ run: 'idle' })).toBe(true);
+      } finally {
+        store.release(chatId);
+        store.setProjectSession('project_reattach', undefined);
+        actor.stop();
+      }
+    });
+
+    /*
      * The same reattach, refused. An unreachable host drives the SDK
      * `submitted → error` before any run binds, so the "no run identity"
      * suppression above was still armed on the error tick: the row stayed idle
@@ -1898,9 +1988,11 @@ describe('ChatSessionStore', () => {
         const fake = harness.created.findLast((entry) => entry.id === chatId)!;
         fake.status = 'submitted';
         fake.emitStatusChange();
-        fake.error = new Error('host unreachable');
+        /* The AI SDK's `setStatus` order: `status` (and its callbacks) first, `error` after. */
         fake.status = 'error';
         fake.emitStatusChange();
+        fake.error = new Error('host unreachable');
+        fake.emitErrorChange();
 
         expect(heard).toContain('runSettled');
         expect(actor.getSnapshot().matches({ run: 'failed' })).toBe(true);
@@ -1974,9 +2066,10 @@ describe('ChatSessionStore', () => {
      * to append a second copy of every text block to it (tool and data parts
      * are keyed and merge; text parts are keyed by nothing). The log is the
      * authority: the transport names the run once `attach` has answered, and
-     * the store drops that run's own message so the replay rebuilds it.
+     * the store drops that run's own message so the replay rebuilds it. Only a
+     * run still going streams; a settled one is rebuilt in place from the log.
      */
-    it('drops the run a host reattach is about to rebuild from its transcript', async () => {
+    it('drops the live run a host reattach is about to rebuild from its transcript', async () => {
       const store = createStore();
       const chatId = 'chat_reattach_rebuild';
       const runId = 'run_reattach_rebuild';
@@ -1998,7 +2091,7 @@ describe('ChatSessionStore', () => {
           nextCursor: 0,
           endCursor: 0,
           events: [],
-          snapshot: { chatId, runId, turnId: userMessage.id, state: 'completed', messages: [] } as const,
+          snapshot: { chatId, runId, turnId: userMessage.id, state: 'running', messages: [] } as const,
         })),
         tail: vi.fn(async () => ({ cursor: 0, nextCursor: 0, endCursor: 0, events: [] })),
         subscribe: vi.fn(() => () => undefined),
@@ -4183,7 +4276,7 @@ describe('ChatSessionStore', () => {
       const store = createStore();
       const session = store.acquire('chat_r6');
       const fake = harness.created.find((entry) => entry.id === 'chat_r6')!;
-      const sendSpy = vi.spyOn(session.persistenceActorRef, 'send');
+      const sendSpy = spyOnSend(session.persistenceActorRef);
 
       const countStreamResumed = (): number =>
         sendSpy.mock.calls.filter((call) => call[0].type === 'streamResumed').length;
@@ -4302,7 +4395,7 @@ describe('ChatSessionStore — composer records (W7)', () => {
     const client = createMemoryClient();
     const first = openStore(client);
     first.store.acquire(chatId);
-    harness.created.at(-1)!.finish();
+    finishRun(harness.created.at(-1)!);
     await vi.waitFor(() => {
       expect(client.json(unreadPath)).toEqual({ version: 1, unread: { [chatId]: true } });
     });
@@ -4543,7 +4636,7 @@ describe('ChatSessionStore — composer records (W7)', () => {
     store.unreadRecordRef(projectId).on('writeFailed', failed);
     vi.spyOn(client, 'writeFile').mockRejectedValueOnce(Object.assign(new Error('EACCES'), { code: 'EACCES' }));
 
-    harness.created.at(-1)!.finish();
+    finishRun(harness.created.at(-1)!);
 
     await vi.waitFor(() => {
       expect(failed).toHaveBeenCalledOnce();
@@ -4633,7 +4726,7 @@ describe('ChatSessionStore — unread restore and live-record deletion (W8)', ()
     const client = createMemoryClient();
     const first = openStore(client);
     first.store.acquire(chatId, projectId);
-    harness.created.at(-1)!.finish();
+    finishRun(harness.created.at(-1)!);
     await vi.waitFor(() => {
       expect(client.json(unreadPath)).toEqual({ version: 1, unread: { [chatId]: true } });
     });
@@ -4691,7 +4784,7 @@ describe('ChatSessionStore — unread restore and live-record deletion (W8)', ()
     await settle();
 
     await store.removeProject(projectId);
-    harness.created.at(-1)!.finish();
+    finishRun(harness.created.at(-1)!);
     await settle();
 
     expect(client.json(unreadPath)).toBeUndefined();

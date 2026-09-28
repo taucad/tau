@@ -1,5 +1,5 @@
-import { readUIMessageStream } from 'ai';
-import type { ChatTransport, UIMessage, UIMessageChunk } from 'ai';
+import { consumeStream, createUIMessageStream, readUIMessageStream } from 'ai';
+import type { ChatTransport, InferUIMessageChunk, UIMessage, UIMessageChunk } from 'ai';
 import { z } from 'zod';
 import { isRecord } from '@taucad/utils/schema';
 import { isAttachmentUrl } from '#utils/attachment.utils.js';
@@ -496,8 +496,11 @@ export const registerAgentHost = (chatId: string, registration: BrowserAgentHost
  * whatever was there. One AI SDK request can only ever build one message
  * (`processUIMessageStream`'s second `start` renames the message it is already
  * filling), so the runs this stream will not carry are rebuilt here, through
- * the same chunk projection and the same SDK reducer, and only the trailing
- * run streams.
+ * the same chunk projection and the same SDK reducer, and only a run still
+ * going streams. A settled run is rebuilt with the others and its replay
+ * carries only its outcome: the chat's transcript merges every device's log
+ * (A39), so its last message can be another device's later turn, and a resume
+ * would have written this run's reply into that message.
  *
  * The handover happens inside `reconnectToStream`, before the SDK snapshots
  * the transcript, and only once the host has actually answered `attach` — so a
@@ -522,21 +525,62 @@ export const registerAgentHostRunReset = (
 /** Replay one run's durable events into the message the live path built. */
 const readRunMessage = async (events: readonly AgentLogEvent[]): Promise<MyUIMessage | undefined> => {
   const streamedBlocks = new Map();
-  const chunks = events.flatMap((event) => [...projectAgentHostEvent(event, streamedBlocks)]);
+  // The projection emits MyUIMessage chunks, but its shared return type is the broader UIMessageChunk.
+  const chunks = events.flatMap((event) => [...projectAgentHostEvent(event, streamedBlocks)]) as Array<
+    InferUIMessageChunk<MyUIMessage>
+  >;
   if (chunks.length === 0) {
     return undefined;
   }
-  const stream = new ReadableStream<UIMessageChunk>({
-    start: (controller) => {
-      for (const chunk of chunks) {
-        controller.enqueue(chunk);
-      }
-      controller.close();
+  // The reader snapshots only on writes. Step boundaries can change reducer
+  // state without a write, so a partial run must keep its last visible state.
+  const lastWrite = chunks.findLastIndex(
+    (chunk) =>
+      chunk.type !== 'start-step' &&
+      chunk.type !== 'finish-step' &&
+      chunk.type !== 'error' &&
+      chunk.type !== 'abort' &&
+      !(chunk.type === 'finish' && chunk.messageMetadata === undefined) &&
+      !(chunk.type === 'start' && chunk.messageId === undefined && chunk.messageMetadata === undefined) &&
+      !('transient' in chunk && chunk.transient === true),
+  );
+  if (lastWrite === -1) {
+    return undefined;
+  }
+  const trailingSteps = chunks.slice(lastWrite + 1).filter((chunk) => chunk.type === 'start-step').length;
+  const stream = (): ReadableStream<InferUIMessageChunk<MyUIMessage>> =>
+    new ReadableStream<InferUIMessageChunk<MyUIMessage>>({
+      start: (controller) => {
+        for (const chunk of chunks) {
+          controller.enqueue(chunk);
+        }
+        controller.close();
+      },
+    });
+  let message: MyUIMessage | undefined;
+  let streamError: unknown;
+  await consumeStream({
+    stream: createUIMessageStream<MyUIMessage>({
+      execute: ({ writer }) => {
+        writer.merge(stream());
+      },
+      generateId: () => '',
+      onError: () => 'An error occurred.',
+      onFinish: ({ responseMessage }) => {
+        message = responseMessage;
+      },
+    }),
+    onError: (error) => {
+      streamError = error;
     },
   });
-  let message: MyUIMessage | undefined;
-  for await (const next of readUIMessageStream<MyUIMessage>({ stream })) {
-    message = next;
+  if (streamError !== undefined) {
+    message = undefined;
+    for await (const next of readUIMessageStream<MyUIMessage>({ stream: stream() })) {
+      message = next;
+    }
+  } else if (message && trailingSteps > 0) {
+    message = { ...message, parts: message.parts.slice(0, -trailingSteps) };
   }
   return message;
 };
@@ -546,32 +590,74 @@ const readRunMessage = async (events: readonly AgentLogEvent[]): Promise<MyUIMes
  *
  * Every run contributes its user turn; every run but the streaming one also
  * contributes its rebuilt assistant message, because the stream this
- * accompanies is what rebuilds that last one.
+ * accompanies is what rebuilds that one. `undefined` streams no run. The map
+ * also answers whether that stream may run at all: not when another device's
+ * assistant message trails the transcript, because the AI SDK continues the transcript's trailing
+ * assistant message — another device's — so the streaming run is then rebuilt
+ * in place from the log too, and `streams` is `false`.
  */
 const rebuildTranscript = async (
   events: readonly AgentLogEvent[],
-  streamingRunId: string,
-): Promise<(current: readonly MyUIMessage[]) => readonly MyUIMessage[]> => {
+  streamingRunId: string | undefined,
+): Promise<(current: readonly MyUIMessage[]) => Readonly<{ messages: readonly MyUIMessage[]; streams: boolean }>> => {
   const runIds = [...new Set(events.map((event) => event.runId))];
   const runs = await Promise.all(
     runIds.map(async (id) => {
       const runEvents = events.filter((event) => event.runId === id);
       const user = runEvents.flatMap((event) => projectAgentHostUserTurn(event) ?? []).at(0);
-      const assistant = id === streamingRunId ? undefined : await readRunMessage(runEvents);
+      const assistant = await readRunMessage(runEvents);
       return [...(user === undefined ? [] : [user]), ...(assistant === undefined ? [] : [assistant])];
     }),
   );
-  const rebuilt = runs.flat();
+  const whole = runs.flat();
+  const wholeIds = new Set(whole.map((message) => message.id));
+  const streamed = runs.flatMap((messages, index) =>
+    runIds[index] === streamingRunId ? messages.filter((message) => message.role === 'user') : messages,
+  );
   /*
-   * Replace from the first message this log owns, so turns that predate it —
-   * another host's, another era's — are left exactly where they are. Every
-   * message from there on is one the log can reconstruct, and the stream this
-   * accompanies rebuilds the last of them.
+   * Replaced by id, in place. The chat's files merge every device's log
+   * (A39), so another device's turns sit in this transcript too, and one that
+   * came after this log's first run is not this log's to drop: replacing
+   * everything from that run onward erased the other device's later turns on
+   * every reopen (two-client V15). A message this log rebuilds but the
+   * transcript lacks — a daemon's chat this browser holds no files for — goes
+   * after the rebuilt message before it, or at the end when none is held; the
+   * streaming run's own copy is dropped, since its stream rebuilds it.
    */
-  const owned = new Set([...rebuilt.map((message) => message.id), streamingRunId]);
+  const place = (
+    current: readonly MyUIMessage[],
+    rebuilt: readonly MyUIMessage[],
+    dropped: string | undefined,
+  ): MyUIMessage[] => {
+    const rebuiltById = new Map(rebuilt.map((message) => [message.id, message]));
+    const next = current.flatMap((message) => (message.id === dropped ? [] : [rebuiltById.get(message.id) ?? message]));
+    const firstHeld = next.findIndex((message) => rebuiltById.has(message.id));
+    let at = firstHeld === -1 ? next.length : firstHeld;
+    for (const message of rebuilt) {
+      const held = next.findIndex((candidate) => candidate.id === message.id);
+      if (held === -1) {
+        next.splice(at, 0, message);
+        at += 1;
+      } else {
+        at = held + 1;
+      }
+    }
+    return next;
+  };
   return (current) => {
-    const from = current.findIndex((message) => owned.has(message.id));
-    return from === -1 ? [...current, ...rebuilt] : [...current.slice(0, from), ...rebuilt];
+    const messages = place(current, streamed, streamingRunId);
+    const tail = messages.at(-1);
+    /* Only a trailing assistant message is continued. Any other tail — this
+     * run's own user turn, which a snapshot-only attach leaves out of the log —
+     * gets a fresh message from the stream. */
+    if (streamingRunId === undefined || tail?.role !== 'assistant' || wholeIds.has(tail.id)) {
+      return { messages, streams: true };
+    }
+    /* ponytail: the run is rebuilt from what the log holds now, so a run still
+     * live here stops updating until the chat is next opened, and its failure
+     * reason is not raised meanwhile. The upgrade path is a stream that writes
+     * into the run's own message by id instead of the transcript's tail. */
+    return { messages: place(current, whole, undefined), streams: false };
   };
 };
 
@@ -591,8 +677,8 @@ export const deriveChatTranscript = async (events: readonly AgentLogEvent[]): Pr
   for (const event of events) {
     recordDurableTurnSettlement(event);
   }
-  const rebuild = await rebuildTranscript(events, '');
-  return rebuild([]);
+  const rebuild = await rebuildTranscript(events, undefined);
+  return rebuild([]).messages;
 };
 
 const registrationFor = async (chatId: string): Promise<BrowserAgentHostRegistration> => {
@@ -786,16 +872,25 @@ const createHostStream = <Message extends UIMessage>(input: {
   /**
    * Names the run this stream will rebuild and hands over the log it read,
    * once the host has answered `attach` and before any chunk is written — or
-   * `undefined` when it resolved no run. Called exactly once.
+   * `undefined` when it resolved no run. Called exactly once. `settled` says
+   * the run has ended and nobody asked to continue it; answering `true` takes
+   * its message, and the stream then writes only its outcome.
    * See {@link registerAgentHostRunReset}.
    */
-  readonly onRunResolved?: ((runId: string | undefined, events: readonly AgentLogEvent[]) => void) | undefined;
+  readonly onRunResolved?:
+    | ((runId: string | undefined, events: readonly AgentLogEvent[], settled: boolean) => boolean)
+    | undefined;
 }): ReadableStream<UIMessageChunk> => {
   let announceRun = input.onRunResolved;
-  const announce = (resolved: string | undefined, events: readonly AgentLogEvent[] = []): void => {
+  /** The transcript owner rebuilt this settled run's message; its replay carries only `error` chunks. */
+  let messageRebuilt = false;
+  const announce = (resolved: string | undefined, events: readonly AgentLogEvent[] = [], settled = false): void => {
     const once = announceRun;
+    if (once === undefined) {
+      return;
+    }
     announceRun = undefined;
-    once?.(resolved, events);
+    messageRebuilt = once(resolved, events, settled);
   };
   /* Consumed the moment the stream is created, so a later reattach this caller
    * did not ask for never inherits it. @see requestBrowserAgentHostResume */
@@ -888,6 +983,11 @@ const createHostStream = <Message extends UIMessage>(input: {
       for (const chunk of chunks) {
         if (cancelled || closed) {
           return;
+        }
+        /* An `error` chunk only raises the failure; every other chunk writes
+         * into the transcript's last message, which the owner already rebuilt. */
+        if (messageRebuilt && chunk.type !== 'error') {
+          continue;
         }
         // oxlint-disable-next-line no-await-in-loop -- writer readiness is the stream's native backpressure contract.
         await writer.write(chunk);
@@ -1060,7 +1160,8 @@ const createHostStream = <Message extends UIMessage>(input: {
       const events = await collectLog(hostClient, batch);
       // Handed over before the first chunk is written, and only now that the
       // host has actually answered for this chat's log.
-      announce(runId, events);
+      const found = batch.snapshot;
+      announce(runId, events, !driveResume && found !== undefined && found.runId === runId && terminal(found.state));
       for (const event of events) {
         queueEvent(event);
       }
@@ -1416,12 +1517,17 @@ export class BrowserPlacementChatTransport<Message extends UIMessage> implements
     const resolved = Promise.withResolvers<{
       readonly runId: string | undefined;
       readonly events: readonly AgentLogEvent[];
+      readonly streamingRunId: string | undefined;
     }>();
     const stream = createHostStream({
       chatId: options.chatId,
       ...(runId === undefined ? {} : { runId }),
-      onRunResolved: (resolvedRunId, events) => {
-        resolved.resolve({ runId: resolvedRunId, events });
+      onRunResolved: (resolvedRunId, events, settled) => {
+        /* A settled run is rebuilt in place with the others, and only when
+         * someone owns the transcript to put it in. */
+        const rebuilt = settled && resolvedRunId !== undefined && runResets.has(options.chatId);
+        resolved.resolve({ runId: resolvedRunId, events, streamingRunId: rebuilt ? undefined : resolvedRunId });
+        return rebuilt;
       },
     });
     // The AI SDK snapshots the transcript *after* this method settles, so the
@@ -1430,8 +1536,29 @@ export class BrowserPlacementChatTransport<Message extends UIMessage> implements
     // hands over nothing, and the transcript stands.
     const replayed = await resolved.promise;
     const reset = replayed.runId === undefined ? undefined : runResets.get(options.chatId);
-    if (reset && replayed.runId !== undefined) {
-      reset(await rebuildTranscript(replayed.events, replayed.runId));
+    if (reset) {
+      const rebuild = await rebuildTranscript(replayed.events, replayed.streamingRunId);
+      /* Read back after `reset`, which applies the rebuild synchronously. */
+      const handover = { streams: true };
+      reset((current) => {
+        const next = rebuild(current);
+        handover.streams = next.streams;
+        return next.messages;
+      });
+      if (!handover.streams) {
+        /* The rebuild above already carries this run; nothing may extend the
+         * tail. Drained rather than cancelled, because cancelling the stream
+         * asks the host to cancel the run. */
+        // async-iife: bootstrap -- nobody reads this stream; it only has to run to its end.
+        void (async () => {
+          try {
+            await stream.pipeTo(new WritableStream());
+          } catch {
+            /* The stream reports its own failure; a drain has nobody to tell. */
+          }
+        })();
+        return null;
+      }
     }
     return stream;
   }

@@ -17,6 +17,14 @@ import { PreviewDesktop } from '#routes/w.$workspace.$project_.preview/preview-d
 import { PreviewMobile } from '#routes/w.$workspace.$project_.preview/preview-mobile.js';
 import { PreviewProjectContext } from '#routes/w.$workspace.$project_.preview/preview-project-context.js';
 import type { PreviewProjectContextValue } from '#routes/w.$workspace.$project_.preview/preview-project-context.js';
+import { toast } from '#components/ui/sonner.js';
+
+/** Project details live in tau.json, which Tau refuses to write while it needs repair (R4). */
+const reportDetailsError = (error: unknown): void => {
+  toast.error('Could not save project details', {
+    description: error instanceof Error ? error.message : undefined,
+  });
+};
 
 /**
  * Provider for dynamic projects (from storage). Loads project metadata and defers rendering
@@ -66,7 +74,8 @@ export function DynamicPreviewProvider({
           ? { projectId, project: { ...previous.project, name } }
           : previous,
       );
-      void projectManager.updateProject(project.id, { ...project, name });
+      // oxlint-disable-next-line promise/prefer-await-to-then, tau-lint/no-async-iife -- a refused manifest write is named, not left loose
+      void projectManager.updateProject(project.id, { ...project, name }).catch(reportDetailsError);
     },
     [project, projectManager],
   );
@@ -82,7 +91,8 @@ export function DynamicPreviewProvider({
           ? { projectId, project: { ...previous.project, description } }
           : previous,
       );
-      void projectManager.updateProject(project.id, { ...project, description });
+      // oxlint-disable-next-line promise/prefer-await-to-then, tau-lint/no-async-iife -- a refused manifest write is named, not left loose
+      void projectManager.updateProject(project.id, { ...project, description }).catch(reportDetailsError);
     },
     [project, projectManager],
   );

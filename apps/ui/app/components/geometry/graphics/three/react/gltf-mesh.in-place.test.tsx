@@ -1,15 +1,20 @@
+import { useLayoutEffect } from 'react';
+import type { RenderFrame } from '@taucad/spatial';
 import { cleanup, render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { writeGlb } from '@taucad/geometry-core';
 import type { GlbMaterial } from '@taucad/geometry-core';
 import { GLTFLoader } from 'three/addons';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
-import type { BufferAttribute, Mesh, Object3D } from 'three';
+import { Raycaster, Vector3 } from 'three';
+import type { BufferAttribute, Intersection, Mesh, Object3D } from 'three';
+import * as bvhRaycast from '#components/geometry/graphics/three/utils/bvh-raycast.js';
 import * as sectionTopology from '#components/geometry/graphics/three/utils/section-surface-topology.js';
 
 const mocks = vi.hoisted(() => {
   const sceneBounds = { min: [-20, -10, -5], max: [20, 10, 5] };
   return {
+    noHoveredComponentIds: [] as readonly string[],
     camera: { name: 'perspective' },
     cameraRig: {
       actorRef: {
@@ -22,12 +27,17 @@ const mocks = vi.hoisted(() => {
     graphicsActor: {
       send: vi.fn(),
       getSnapshot: () => ({
-        context: { modelPointerClickSuppressionReasons: [], suppressNextModelPointerClick: false },
+        context: {
+          modelPointerClickSuppressionReasons: [],
+          suppressNextModelPointerClick: false,
+          viewerHoverSuppressionReasons: [] as string[],
+        },
       }),
     },
     gl: Object.create(null) as { compileAsync?: ReturnType<typeof vi.fn>; coordinateSystem?: number },
     frameCallback: undefined as (() => void) | undefined,
     invalidate: vi.fn(),
+    rootScene: { name: 'viewport-lighting-scene' },
     modelUnit: {
       focusedComponentId: undefined as string | undefined,
       hiddenComponentIds: [],
@@ -37,8 +47,12 @@ const mocks = vi.hoisted(() => {
       opacityByComponentId: {},
       selectedComponentIds: [],
     },
-    renderFrame: { anchorFrameId: 'tau:root', originMeters: [0, 0, 0], metersPerRenderUnit: 1 },
-    sectionView: { enableMesh: false, isActive: false, plane: undefined },
+    renderFrame: {
+      anchorFrameId: 'tau:root',
+      originMeters: [0, 0, 0] as [number, number, number],
+      metersPerRenderUnit: 1,
+    },
+    sectionView: { isActive: false },
   };
 });
 
@@ -46,13 +60,17 @@ vi.mock('@react-three/fiber', () => ({
   useFrame: (callback: () => void) => {
     mocks.frameCallback = callback;
   },
-  useThree: () => ({
-    camera: mocks.camera,
-    controls: undefined,
-    gl: mocks.gl,
-    invalidate: mocks.invalidate,
-    size: { height: 768, width: 1024 },
-  }),
+  useThree: (selector?: (state: Record<string, unknown>) => unknown) => {
+    const state = {
+      camera: mocks.camera,
+      controls: undefined,
+      gl: mocks.gl,
+      invalidate: mocks.invalidate,
+      scene: mocks.rootScene,
+      size: { height: 768, width: 1024 },
+    };
+    return selector ? selector(state) : state;
+  },
 }));
 
 vi.mock('#hooks/use-theme.js', () => ({
@@ -70,9 +88,16 @@ vi.mock('#hooks/use-graphics.js', () => ({
   useGraphics: () => mocks.graphicsActor,
   useGraphicsSelector: () => false,
   useRenderFrame: () => mocks.renderFrame,
+  useRenderFrameRetarget: (handler: (frame: RenderFrame) => void) => {
+    useLayoutEffect(() => {
+      handler(mocks.renderFrame);
+    }, [handler, mocks.renderFrame]);
+  },
   useModelInteractionRef: () => mocks.graphicsActor,
   useModelInteractionSelector: (selector: (state: { context: Record<string, unknown> }) => unknown) =>
     selector({ context: {} }),
+  // No kinematics unit hovers a component; one stable list keeps the model's visual state unchanged.
+  useKinematicsSelector: () => mocks.noHoveredComponentIds,
 }));
 
 vi.mock('#machines/model-interaction.machine.js', () => ({
@@ -81,18 +106,20 @@ vi.mock('#machines/model-interaction.machine.js', () => ({
 }));
 
 vi.mock('#components/geometry/graphics/three/use-section-view.js', () => ({
-  createSectionViewRaycastClipState: () => undefined,
-  useSectionView: () => mocks.sectionView,
+  resolveSectionViewRaycastClip: () => undefined,
+  useSectionViewFlags: () => mocks.sectionView,
+}));
+
+vi.mock('#components/geometry/graphics/three/react/kinematics-viewer.js', () => ({
+  useKinematicsViewer: () => () => undefined,
 }));
 
 const { GltfMesh } = await import('#components/geometry/graphics/three/react/gltf-mesh.js');
 
 const surfaceMaterial: GlbMaterial = {
-  baseColorFactor: [0.5, 0.5, 0.5, 1],
-  metallicFactor: 0.1,
-  roughnessFactor: 0.8,
   doubleSided: false,
   alphaMode: 'OPAQUE',
+  pbrMetallicRoughness: { baseColorFactor: [0.5, 0.5, 0.5, 1], metallicFactor: 0.1, roughnessFactor: 0.8 },
 };
 
 function buildGlb({ lift = 0, indices = [0, 1, 2] } = {}): Uint8Array<ArrayBuffer> {
@@ -147,7 +174,7 @@ describe('GltfMesh in-place updates', () => {
     mocks.cameraRig.actorRef.send.mockClear();
     mocks.invalidate.mockClear();
     mocks.frameCallback = undefined;
-    mocks.sectionView = { enableMesh: false, isActive: false, plane: undefined };
+    mocks.sectionView = { isActive: false };
   });
 
   it('should present a same-topology result without reparsing it', async () => {
@@ -208,7 +235,7 @@ describe('GltfMesh in-place updates', () => {
       expect(committedRevisions()).toEqual([1]);
     });
 
-    mocks.sectionView = { enableMesh: true, isActive: true, plane: undefined };
+    mocks.sectionView = { isActive: true };
     view.rerender(
       <GltfMesh gltfFile={buildGlb({ lift: 5 })} geometryHash='b' presentationRevision={2} enableMatcap={false} />,
     );
@@ -216,5 +243,39 @@ describe('GltfMesh in-place updates', () => {
     await waitFor(() => {
       expect(parseAsync).toHaveBeenCalledTimes(2);
     });
+  });
+});
+
+describe('GltfMesh model raycast', () => {
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    mocks.graphicsActor.send.mockClear();
+  });
+
+  it('should skip the model query while a section-view gizmo drag suppresses hover', async () => {
+    const parseAsync = vi.spyOn(GLTFLoader.prototype, 'parseAsync');
+    render(<GltfMesh gltfFile={buildGlb()} geometryHash='a' presentationRevision={1} enableMatcap={false} />);
+    await waitFor(() => {
+      expect(committedRevisions()).toEqual([1]);
+    });
+    const gltf = (await parseAsync.mock.results[0]?.value) as GLTF;
+    const query = vi.spyOn(bvhRaycast, 'raycastFirstVisibleMeshHit');
+    const raycaster = new Raycaster(new Vector3(0.25, 0.25, 10), new Vector3(0, 0, -1));
+    const intersections: Intersection[] = [];
+
+    gltf.scene.raycast(raycaster, intersections);
+    expect(query).toHaveBeenCalledOnce();
+
+    query.mockClear();
+    intersections.length = 0;
+    const { context } = mocks.graphicsActor.getSnapshot();
+    vi.spyOn(mocks.graphicsActor, 'getSnapshot').mockReturnValue({
+      context: { ...context, viewerHoverSuppressionReasons: ['sectionViewTransform'] },
+    });
+    gltf.scene.raycast(raycaster, intersections);
+
+    expect(query).not.toHaveBeenCalled();
+    expect(intersections).toEqual([]);
   });
 });

@@ -278,16 +278,8 @@ internal sealed class CaptureViewerBackend : IViewerBackend
         lock (gate)
         {
             ThrowIfDisposed();
-            var components = MaterializeComponents();
-            if (components.Count == 0)
-            {
-                throw new WorkerException(new Issue(
-                    "The PicoGK viewer contained no visible mesh or polyline geometry when the program completed.",
-                    "CS_TAU_EMPTY_SCENE",
-                    "validation",
-                    "error"));
-            }
-            return new CapturedScene(components, meshConstruction, meshExtraction, normalGeneration);
+            // An empty viewer is an empty scene, not an error: new projects start with no geometry.
+            return new CapturedScene(MaterializeComponents(), meshConstruction, meshExtraction, normalGeneration);
         }
     }
 

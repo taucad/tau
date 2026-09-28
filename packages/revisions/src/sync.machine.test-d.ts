@@ -2,15 +2,8 @@ import { expectTypeOf } from 'vitest';
 import type { AnyStateMachine } from 'xstate';
 
 import { selectSyncFacet, syncMachine } from '#sync.machine.js';
-import type {
-  SyncActors,
-  SyncFacet,
-  SyncMachineContext,
-  SyncMachineEvent,
-  SyncPushActorOutput,
-  SyncPushOutcome,
-  SyncQueueRecord,
-} from '#sync.machine.js';
+import type { SyncActors, SyncMachineContext, SyncMachineEvent, SyncPushActorOutput } from '#sync.machine.js';
+import type { SyncFacet, SyncPushOutcome, SyncQueueRecord } from '#sync.types.js';
 
 expectTypeOf(syncMachine).toExtend<AnyStateMachine>();
 

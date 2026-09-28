@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createActor, setup, assign } from 'xstate';
+import { createActor, setup, types } from 'xstate';
+import { eventSchemas } from '#lib/xstate.lib.js';
 
 import { defaultRenderTimeout } from '#constants/editor.constants.js';
 import { awaitFreshRender, AwaitFreshRenderTimeoutError } from '#machines/await-fresh-render.js';
@@ -13,16 +14,11 @@ import { awaitFreshRender, AwaitFreshRenderTimeoutError } from '#machines/await-
  * only depends on the structural contract, not the concrete machine.
  */
 const fakeCadMachine = setup({
-  types: {
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    context: {} as { lastRequestedRenderId: number; lastSettledRenderId: number },
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    events: {} as
-      | { type: 'request' }
-      | { type: 'settle' }
-      | { type: 'startRender' }
-      | { type: 'finishRender' }
-      | { type: 'fail' },
+  schemas: {
+    context: types<{ lastRequestedRenderId: number; lastSettledRenderId: number }>(),
+    events: eventSchemas<
+      { type: 'request' } | { type: 'settle' } | { type: 'startRender' } | { type: 'finishRender' } | { type: 'fail' }
+    >(),
   },
 }).createMachine({
   id: 'fakeCad',
@@ -32,17 +28,13 @@ const fakeCadMachine = setup({
     idle: {
       on: {
         request: {
-          actions: assign({
-            lastRequestedRenderId: ({ context }) => context.lastRequestedRenderId + 1,
-          }),
+          context: ({ context }) => ({ lastRequestedRenderId: context.lastRequestedRenderId + 1 }),
         },
-        startRender: 'rendering',
+        startRender: { target: 'rendering' },
         settle: {
-          actions: assign({
-            lastSettledRenderId: ({ context }) => context.lastRequestedRenderId,
-          }),
+          context: ({ context }) => ({ lastSettledRenderId: context.lastRequestedRenderId }),
         },
-        fail: 'error',
+        fail: { target: 'error' },
       },
     },
     rendering: {
@@ -51,25 +43,19 @@ const fakeCadMachine = setup({
          * intent and bumps the requested id there, so a render can be
          * overtaken before its own outcome arrives. */
         request: {
-          actions: assign({
-            lastRequestedRenderId: ({ context }) => context.lastRequestedRenderId + 1,
-          }),
+          context: ({ context }) => ({ lastRequestedRenderId: context.lastRequestedRenderId + 1 }),
         },
         finishRender: {
           target: 'idle',
-          actions: assign({
-            lastSettledRenderId: ({ context }) => context.lastRequestedRenderId,
-          }),
+          context: ({ context }) => ({ lastSettledRenderId: context.lastRequestedRenderId }),
         },
-        fail: 'error',
+        fail: { target: 'error' },
       },
     },
     error: {
       on: {
         request: {
-          actions: assign({
-            lastRequestedRenderId: ({ context }) => context.lastRequestedRenderId + 1,
-          }),
+          context: ({ context }) => ({ lastRequestedRenderId: context.lastRequestedRenderId + 1 }),
         },
       },
     },

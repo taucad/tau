@@ -1,4 +1,6 @@
-import { setup, assign } from 'xstate';
+import { setup, types } from 'xstate';
+
+import { eventSchemas } from '#lib/xstate.lib.js';
 
 /**
  * Conservative limit that leaves headroom for gizmo renderers, screenshot
@@ -31,14 +33,9 @@ type WebglContextMachineEvents = { type: 'acquire' } | { type: 'release' };
  * acquire/release events.
  */
 export const webglContextMachine = setup({
-  /* oxlint-disable @typescript-eslint/consistent-type-assertions -- Required for XState's type inference */
-  types: {
-    context: {} as WebglContextMachineContext,
-    events: {} as WebglContextMachineEvents,
-  },
-  /* oxlint-enable @typescript-eslint/consistent-type-assertions -- reenabling */
-  guards: {
-    hasActiveContexts: ({ context }) => context.count > 0,
+  schemas: {
+    context: types<WebglContextMachineContext>(),
+    events: eventSchemas<WebglContextMachineEvents>(),
   },
 }).createMachine({
   id: 'webglContext',
@@ -48,15 +45,8 @@ export const webglContextMachine = setup({
   },
   on: {
     acquire: {
-      actions: assign({
-        count: ({ context }) => context.count + 1,
-      }),
+      context: ({ context }) => ({ count: context.count + 1 }),
     },
-    release: {
-      guard: 'hasActiveContexts',
-      actions: assign({
-        count: ({ context }) => context.count - 1,
-      }),
-    },
+    release: ({ context }) => (context.count > 0 ? { context: { count: context.count - 1 } } : undefined),
   },
 });

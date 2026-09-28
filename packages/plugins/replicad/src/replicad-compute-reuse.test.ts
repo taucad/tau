@@ -331,6 +331,18 @@ describe('Replicad semantic compute reuse', () => {
       (enabled.library as typeof enabled.library & { makeSphere(radius: number): FakeShape }).makeSphere(9),
     );
     expect(enabled.unwrap([wrapped])).toEqual([expect.objectContaining({ value: 'sphere(9)' })]);
+    const image = new Uint8Array([1, 2, 3]);
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Standard glTF extension key.
+    const material = { extensions: { KHR_materials_anisotropy: { anisotropyStrength: 0.8 } } };
+    const rawShape = enabled.unwrap(wrapped);
+    const model = enabled.unwrap({ shapes: [{ shape: wrapped, material }], images: [{ data: image }] }) as {
+      shapes: Array<{ shape: unknown; material: unknown }>;
+      images: Array<{ data: Uint8Array<ArrayBuffer> }>;
+    };
+    expect(model.shapes[0]?.shape).toBe(rawShape);
+    expect(model.shapes[0]?.material).toBe(material);
+    expect(model.images[0]?.data).toBe(image);
+    expect((enabled.unwrap([{ shape: wrapped }]) as Array<{ shape: unknown }>)[0]?.shape).toBe(rawShape);
     expect(enabled.unwrap({ shape: wrapped, color: 'red' })).toMatchObject({
       shape: { value: 'sphere(9)' },
       color: 'red',

@@ -13,9 +13,9 @@ import { defaultPanelState } from '#constants/editor.constants.js';
 import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import type { FileManagerProxy } from '#machines/file-manager.machine.types.js';
 import type { PendingProjectOperation, PendingProjectStorage } from '#types/pending-project-operation.types.js';
-import type { ProjectLibraryState } from '#types/project.types.js';
+import type { ProjectLibraryState } from '#types/project-library.types.js';
 import type { ProjectCreationLocation } from '#types/project-creation-location.types.js';
-import type { ConnectedWorkspace, ProjectListing } from '#hooks/use-project-manager.js';
+import type { ConnectedWorkspace, CreateProjectOptions, ProjectListing } from '#hooks/use-project-manager.js';
 import type { ProjectNameInput } from '#chat-clients/use-project-name-client.js';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { uint8ArrayToBase64 } from 'uint8array-extras';
@@ -122,6 +122,7 @@ const mockCommitPendingProjectDirectory = vi.fn<FileManagerProxy['commitPendingP
   return { status: 'committed' } as const;
 });
 const mockListProjectManifests = vi.fn<() => Promise<ProjectDiscoveryResult>>(async () => ({ roots: [], entries: [] }));
+const mockAdoptProjectDirectory = vi.fn<FileManagerProxy['adoptProjectDirectory']>(async () => fakeProject);
 
 /** Worker change-channel double: one live subscription per event channel. */
 type WorkerChangeSubscription = {
@@ -187,6 +188,7 @@ vi.mock('#hooks/use-file-manager.js', () => ({
     },
     client: {
       listProjectManifests: mockListProjectManifests,
+      adoptProjectDirectory: mockAdoptProjectDirectory,
       permanentlyDeleteProjectDirectory: mockPermanentlyDeleteProjectDirectory,
       commitPendingProjectDirectory: mockCommitPendingProjectDirectory,
     },
@@ -505,6 +507,7 @@ vi.mock('#hooks/use-cookie.js', () => ({
 }));
 
 const { ProjectManagerProvider, useProjectManager } = await import('#hooks/use-project-manager.js');
+const { tauCloudIntent } = await import('#hooks/use-cloud-projects.js');
 
 const createWrapper = () => {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -852,8 +855,8 @@ describe('useProjectManager.createProject', () => {
     expect(mockSetProjectCreationLocation).not.toHaveBeenCalled();
   });
 
-  it('uses fresh discovery for route access after bootstrap completes', async () => {
-    mockListProjectManifests.mockResolvedValueOnce({ roots: [], entries: [] }).mockResolvedValue(validProjectDiscovery);
+  it('reuses bootstrap discovery for route access and refreshes after a manifest change', async () => {
+    mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 
     await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toMatchObject({
@@ -861,9 +864,14 @@ describe('useProjectManager.createProject', () => {
       project: fakeProject,
     });
     await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toMatchObject({ status: 'ready' });
+    expect(mockListProjectManifests).toHaveBeenCalledOnce();
+
+    mockListProjectManifests.mockResolvedValue({ roots: [], entries: [] });
+    emitWorkerChange('fileDeleted', '/test-project/tau.json');
+    await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toEqual({ status: 'missing' });
 
     expect(mockGetPendingProjectOperations).toHaveBeenCalledOnce();
-    expect(mockListProjectManifests).toHaveBeenCalledTimes(3);
+    expect(mockListProjectManifests).toHaveBeenCalledTimes(2);
   });
 
   it('waits for a journaled project route before reading its manifest', async () => {
@@ -1062,6 +1070,141 @@ describe('useProjectManager.createProject', () => {
       'duplicate-id',
       'route-blocked',
     ]);
+  });
+
+  describe('tau.json failure recovery', () => {
+    const copyLocator: ProjectLocator = { ...fakeLocator, relativeDirectory: 'test-project-copy' };
+    const boundToOriginal: ProjectFileSystemConfig = {
+      projectId: fakeProject.id,
+      backend: 'opfs',
+      providerBasePath: fakeLocator.relativeDirectory,
+    };
+    const encode = (value: unknown): Uint8Array<ArrayBuffer> => new TextEncoder().encode(JSON.stringify(value));
+
+    /* A Finder copy must not brick the original: the route binding names it (R7). */
+    it('keeps the directory its route binds open when a copy of it appears', async () => {
+      mockGetAllProjectFileSystemConfigs.mockResolvedValue([boundToOriginal]);
+      mockListProjectManifests.mockResolvedValue({
+        roots: [{ status: 'complete', root: { backend: 'opfs' } }],
+        entries: [
+          { status: 'duplicate-id', manifest: fakeProject, locator: fakeLocator },
+          { status: 'duplicate-id', manifest: fakeProject, locator: copyLocator },
+        ],
+      });
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toMatchObject({ status: 'ready' });
+      const listing = await result.current.getProjectListing();
+      expect(listing.conflicts).toEqual([{ status: 'duplicate-id', manifest: fakeProject, locator: copyLocator }]);
+    });
+
+    it('rebinds a duplicated id to the folder a person chooses and writes no project file', async () => {
+      mockGetAllProjectFileSystemConfigs.mockResolvedValue([boundToOriginal]);
+      mockListProjectManifests.mockResolvedValue({
+        roots: [{ status: 'complete', root: { backend: 'opfs' } }],
+        entries: [
+          { status: 'duplicate-id', manifest: fakeProject, locator: fakeLocator },
+          { status: 'duplicate-id', manifest: fakeProject, locator: copyLocator },
+        ],
+      });
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await result.current.chooseProjectDirectory(copyLocator, fakeProject.id);
+
+      expect(mockSetProjectFileSystemConfig).toHaveBeenCalledExactlyOnceWith({
+        projectId: fakeProject.id,
+        backend: 'opfs',
+        providerBasePath: copyLocator.relativeDirectory,
+      });
+      expect(mockSyncProjectRoots).toHaveBeenCalled();
+      expect(mockWriteFile).not.toHaveBeenCalled();
+      await expect(
+        result.current.chooseProjectDirectory({ ...fakeLocator, relativeDirectory: 'elsewhere' }, fakeProject.id),
+      ).rejects.toThrow('This folder no longer holds that project.');
+    });
+
+    it('restores the id a route last bound when adopting its identity-less directory', async () => {
+      mockGetAllProjectFileSystemConfigs.mockResolvedValue([boundToOriginal]);
+      mockListProjectManifests.mockResolvedValue({
+        roots: [{ status: 'complete', root: { backend: 'opfs' } }],
+        entries: [
+          {
+            status: 'adoption-required',
+            manifest: {
+              $schema: fakeProject.$schema,
+              name: 'test-project',
+              description: '',
+              tags: [],
+              assets: fakeProject.assets,
+            },
+            locator: fakeLocator,
+            issue: { code: 'manifest-missing' },
+          },
+        ],
+      });
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await result.current.adoptProject(fakeLocator);
+
+      expect(mockAdoptProjectDirectory).toHaveBeenCalledExactlyOnceWith(fakeLocator, { id: fakeProject.id });
+    });
+
+    it('mints a fresh id on adoption when another directory now claims the remembered one', async () => {
+      mockGetAllProjectFileSystemConfigs.mockResolvedValue([boundToOriginal]);
+      mockListProjectManifests.mockResolvedValue({
+        roots: [{ status: 'complete', root: { backend: 'opfs' } }],
+        entries: [
+          {
+            status: 'adoption-required',
+            manifest: {
+              $schema: fakeProject.$schema,
+              name: 'test-project',
+              description: '',
+              tags: [],
+              assets: fakeProject.assets,
+            },
+            locator: fakeLocator,
+            issue: { code: 'manifest-missing' },
+          },
+          { status: 'valid', manifest: fakeProject, locator: copyLocator },
+        ],
+      });
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await result.current.adoptProject(fakeLocator);
+
+      expect(mockAdoptProjectDirectory).toHaveBeenCalledExactlyOnceWith(fakeLocator, undefined);
+    });
+
+    /* The incident bytes: an extra asset key beside an intact identity. */
+    it('refuses to write over a degraded manifest until an explicit Repair canonicalizes it', async () => {
+      mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+      manifestBytes = encode({ ...fakeProject, assets: { ...fakeProject.assets, second: { entryPath: 'second.cs' } } });
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await expect(result.current.getProject(fakeProject.id)).resolves.toEqual(fakeProject);
+      await expect(result.current.updateProject(fakeProject.id, { name: 'Renamed' })).rejects.toThrow(
+        'tau.json needs repair',
+      );
+      expect(mockWriteFile).not.toHaveBeenCalled();
+
+      await expect(result.current.repairProject(fakeProject.id)).resolves.toEqual(fakeProject);
+      expect(mockWriteFile).toHaveBeenCalledExactlyOnceWith(
+        `/projects/${fakeProject.id}/tau.json`,
+        serializeProjectManifest(fakeProject),
+      );
+    });
+
+    it('offers no Repair for a JSON syntax error, whose defaults would erase recoverable text', async () => {
+      mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+      manifestBytes = new TextEncoder().encode(
+        `{"$schema": "${fakeProject.$schema}", "id": "${fakeProject.id}", "name": "Test",`,
+      );
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await expect(result.current.repairProject(fakeProject.id)).rejects.toThrow('not valid JSON');
+      expect(mockWriteFile).not.toHaveBeenCalled();
+    });
   });
 
   it('keeps a config whose directory is discovered but unreadable', async () => {
@@ -1461,6 +1604,65 @@ describe('useProjectManager.createProject', () => {
       status: 'ready',
       project: fakeProject,
     });
+  });
+
+  it('uses an explicit listing refresh to revoke a formerly valid route', async () => {
+    mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toMatchObject({ status: 'ready' });
+
+    mockListProjectManifests.mockResolvedValue({ roots: [], entries: [] });
+    await result.current.getProjectListing();
+    await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toEqual({ status: 'missing' });
+    expect(mockListProjectManifests).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    { change: 'fileDeleted', path: '/test-project/tau.json', next: { roots: [], entries: [] }, status: 'missing' },
+    {
+      change: 'fileWritten',
+      path: '/test-project-copy/tau.json',
+      next: {
+        roots: validProjectDiscovery.roots,
+        entries: [
+          { status: 'duplicate-id', manifest: fakeProject, locator: fakeLocator },
+          {
+            status: 'duplicate-id',
+            manifest: fakeProject,
+            locator: { ...fakeLocator, relativeDirectory: 'test-project-copy' },
+          },
+        ],
+      },
+      status: 'conflict',
+    },
+  ] as const)('does not admit a stale in-flight route after $change', async ({ change, path, next, status }) => {
+    mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toMatchObject({ status: 'ready' });
+
+    const staleScan = Promise.withResolvers<void>();
+    const scanStarted = Promise.withResolvers<void>();
+    mockListProjectManifests
+      .mockImplementationOnce(async () => {
+        scanStarted.resolve();
+        await staleScan.promise;
+        return validProjectDiscovery;
+      })
+      .mockResolvedValue(next);
+    const listing = result.current.getProjectListing();
+    await scanStarted.promise;
+    act(() => {
+      emitWorkerChange(change, path);
+    });
+    const route = result.current.getProjectRouteAccess(fakeProject.id);
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+    staleScan.resolve();
+
+    await listing;
+    await expect(route).resolves.toMatchObject({ status });
+    expect(mockListProjectManifests).toHaveBeenCalledTimes(3);
   });
 
   it('does not replay bootstrap work after project root configuration changes', async () => {
@@ -2069,6 +2271,39 @@ describe('useProjectManager.createProject', () => {
     expect(mockPrepareProjectCreation.mock.calls.at(-1)?.[0].manifest.id).toBe('proj_ccccccccccccccccccccc');
   });
 
+  /* D19 (W11 a2): a project born with no remote backs up by default; one
+     adopting an identity with a remote of its own does not. */
+  const remotelessCreations: ReadonlyArray<readonly [string, CreateProjectOptions]> = [
+    ['a fork', { project: { ...fakeProject, name: 'Fork of Test Project' }, files: {} }],
+    ['a file or zip import', { project: fakeProject, files: { 'main.ts': { content: new Uint8Array([1]) } } }],
+    ['a template', { kernel: 'openscad', projectName: 'Bracket' }],
+  ];
+  it.each(remotelessCreations)('should mark %s for backup by default', async (_label, options) => {
+    localStorage.clear();
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await act(async () => result.current.createProject({ ...options, location: { kind: 'home' } }));
+
+    const createdId = mockPrepareProjectCreation.mock.calls.at(-1)?.[0].manifest.id ?? '';
+    expect(tauCloudIntent.get(createdId)).toBe('default');
+  });
+
+  it('should not mark a project whose id the caller supplies (Tau Cloud open, linked GitHub import)', async () => {
+    localStorage.clear();
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await act(async () =>
+      result.current.createProject({
+        id: 'proj_ccccccccccccccccccccc',
+        project: fakeProject,
+        files: {},
+        location: { kind: 'home' },
+      }),
+    );
+
+    expect(tauCloudIntent.get('proj_ccccccccccccccccccccc')).toBeUndefined();
+  });
+
   /* Review R4: *Open* is offered from a 30 s cache against an asynchronous
      discovery pass, so the same row can be clicked twice. Two local projects
      under one id is a `duplicate-id` conflict neither of them recovers from, so
@@ -2090,6 +2325,93 @@ describe('useProjectManager.createProject', () => {
       }),
     ).rejects.toThrow(/already on this device/iu);
     expect(mockPrepareProjectCreation).not.toHaveBeenCalled();
+  });
+
+  /* RV-W11 3: an *Open* racing materialize on sign-in (or a second tab) checks
+     the same id before either has written it; the per-id lock orders them. */
+  it('creates one project when two creations of the same id race, refusing the second', async () => {
+    const id = 'proj_ccccccccccccccccccccc';
+    /* The route config exists once a creation of that id has been prepared. */
+    mockGetProjectFileSystemConfig.mockImplementation(async (projectId: string) =>
+      mockPrepareProjectCreation.mock.calls.some(([input]) => input.manifest.id === projectId)
+        ? { projectId, backend: 'opfs', providerBasePath: 'already-here' }
+        : undefined,
+    );
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    const create = async () =>
+      result.current.createProject({ id, project: fakeProject, files: {}, location: { kind: 'home' } });
+
+    const outcomes = await act(async () => Promise.allSettled([create(), create()]));
+
+    expect(outcomes.map((outcome) => outcome.status).toSorted()).toEqual(['fulfilled', 'rejected']);
+    const refused = outcomes.find((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected');
+    expect(refused?.reason).toEqual(new Error(`That project is already on this device: ${id}`));
+    expect(mockPrepareProjectCreation.mock.calls.filter(([input]) => input.manifest.id === id)).toHaveLength(1);
+  });
+
+  /* Defect R2: a reload mid-creation leaves the id's directory committed and its
+     journal row pending. The new page's recovery resumes it while its
+     materialize pass asks for the same id again; that must finish the one
+     creation, never allocate `<slug>-1` beside it. */
+  describe('an interrupted creation of a supplied id', () => {
+    const interrupted = { ...pendingCreate, files: {} };
+    const configured = async (projectId: string) =>
+      mockSetProjectFileSystemConfig.mock.calls.some(([config]) => config.projectId === projectId)
+        ? { projectId, backend: 'opfs', providerBasePath: interrupted.providerBasePath }
+        : undefined;
+    const createAgain = async (result: { readonly current: ReturnType<typeof useProjectManager> }) =>
+      result.current.createProject({
+        id: fakeProject.id,
+        chat: false,
+        project: fakeProject,
+        files: {},
+        location: { kind: 'home' },
+      });
+
+    beforeEach(() => {
+      mockGetProjectFileSystemConfig.mockImplementation(configured);
+      mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+    });
+
+    it('should finish the reloaded page’s recovery instead of creating a second directory', async () => {
+      let resolveCommit!: () => void;
+      mockGetPendingProjectOperations.mockResolvedValueOnce([interrupted]);
+      mockCommitPendingProjectDirectory.mockImplementationOnce(
+        async () =>
+          new Promise<{ status: 'already-committed' }>((resolve) => {
+            resolveCommit = () => {
+              resolve({ status: 'already-committed' });
+            };
+          }),
+      );
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+      await result.current.getProjectListing();
+
+      const again = createAgain(result);
+      resolveCommit();
+
+      await expect(again).rejects.toThrow(`That project is already on this device: ${fakeProject.id}`);
+      expect(mockPrepareProjectCreation).not.toHaveBeenCalled();
+      expect(mockCommitPendingProjectDirectory.mock.calls.map(([input]) => input.providerBasePath)).toEqual([
+        'test-project',
+      ]);
+    });
+
+    it('should finish a creation another tab left unfinished instead of creating a second directory', async () => {
+      mockListProjectManifests.mockResolvedValue({ roots: [], entries: [] });
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+      await result.current.getProjectListing();
+      /* Written after this page read the journal, by a tab closed mid-creation. */
+      mockGetPendingProjectOperations.mockResolvedValueOnce([interrupted]);
+      mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+
+      await expect(createAgain(result)).rejects.toThrow(`That project is already on this device: ${fakeProject.id}`);
+      expect(mockPrepareProjectCreation).not.toHaveBeenCalled();
+      expect(mockCommitPendingProjectDirectory.mock.calls.map(([input]) => input.providerBasePath)).toEqual([
+        'test-project',
+      ]);
+      expect(mockCompletePending).toHaveBeenCalledWith(interrupted.operationId);
+    });
   });
 
   /* Review R5: opening someone's project from Tau Cloud must not invent a chat

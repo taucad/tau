@@ -37,16 +37,17 @@ Applicability:
 
 ## C. Nx and releases
 
-| Kind | Check                                                                                                                                                                        |
-| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| R    | One root Nx project uses `nx:run-commands`; `quality` fans into every gate.                                                                                                  |
-| R    | `namedInputs` include runtime and native toolchain fingerprints.                                                                                                             |
-| R    | Nx Release uses Version Plans, standard pre-1.0 SemVer bumps, and git-inert settings.                                                                                        |
-| R    | Version-plan checks ignore only tests, docs, and governance paths that cannot change the package.                                                                            |
-| R    | `prepare-release.mjs` validates requested versus planned version.                                                                                                            |
-| R    | Release policy is a pure module with unit tests for PR, main, manual, and malformed release commits.                                                                         |
-| R    | Repo-local `release-<slug>` skill is model-selectable, with submit effects gated by current-task authorization and says CI owns publication, refs, releases, and deployment. |
-| R    | Only `chore(release): <slug> v<version>` can request stable publication.                                                                                                     |
+| Kind | Check                                                                                                                                                                              |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R    | One root Nx project uses `nx:run-commands`; `quality` fans into every gate.                                                                                                        |
+| R    | `namedInputs` include runtime and native toolchain fingerprints.                                                                                                                   |
+| R    | Nx Release uses Version Plans, standard pre-1.0 SemVer bumps, and git-inert settings.                                                                                              |
+| R    | Version-plan checks ignore only tests, docs, and governance paths that cannot change the package.                                                                                  |
+| R    | `prepare-release.mjs` validates requested versus planned version, supports `--from-plans`, runs `quality` once without `preVersionCommand`, and drops non-human changelog authors. |
+| R    | Release policy is a pure module with unit tests for PR, main, evidence-only dispatch, and malformed release commits; the lockfile is permitted, never required.                    |
+| R    | Repo-local `release-<slug>` skill is model-selectable, offers only `status` and `prepare`, and says CI owns publication, refs, releases, and deployment.                           |
+| R    | `release-pr.yml` runs after successful `main` CI, commits as `tau-release-bot` on `release/next`, and stages only files the release policy admits.                                 |
+| R    | Only `chore(release): <slug> v<version>` can request stable publication.                                                                                                           |
 
 ## D. CI and exact-candidate testing
 
@@ -65,11 +66,11 @@ Applicability:
 | R    | Browser jobs prove required adapters are usable on their bound runner and headless mode.                                      |
 | R    | Same-repository pull requests publish every tested package through one locked `pkg-pr-new` invocation.                        |
 | R    | Preview versions use `0.0.0-preview-<sha>` and sibling package references resolve through pkg.pr.new URLs.                    |
-| R    | A clean post-publish consumer installs hosted root previews and verifies rewritten sibling URLs and preview versions.         |
+| R    | A clean post-publish consumer installs hosted root previews, verifies sibling URLs and preview versions, and packs every URL. |
 | R    | Fork PRs skip preview publication and hosted consumer checks; `ci-gate` requires both only when eligible.                     |
 | R    | Publish job has `id-token: write`, no checkout, no registry token, and is idempotent.                                         |
 | R    | Existing registry versions are byte/provenance verified rather than overwritten.                                              |
-| R    | Registry verification installs by exact version and checks package, source repo, workflow, commit, integrity, and provenance. |
+| R    | Registry verification waits with bounded backoff, installs by exact version, and binds provenance to the run, any attempt.    |
 | R    | `ci-gate` names every required job and validates expected skips; branch protection requires only it.                          |
 | R    | Compatibility-table check marks map one-to-one to CI jobs.                                                                    |
 
@@ -144,6 +145,8 @@ Applicability:
 | ---- | ----------------------------------------------------------------------------------------------------- |
 | R    | Default Actions token is read-only; Actions cannot approve pull requests.                             |
 | R    | `main` ruleset requires linear history and `ci-gate`, blocks force-push, and requires zero approvals. |
+| R    | Merges are squash-only and take the pull request title (`PR_TITLE`) as the commit subject.            |
+| R    | A `release-pr` environment holds the `tau-release-bot` App credentials for `release-pr.yml`.          |
 | R    | Secret scanning, push protection, and private vulnerability reporting are enabled.                    |
 | R    | Terraform records bespoke repo settings until the fleet-module trigger is met.                        |
 | Q    | Every published package has a trusted publisher only when proven absent; each workflow is `ci.yml`.   |

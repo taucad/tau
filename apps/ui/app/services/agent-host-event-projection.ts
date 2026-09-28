@@ -41,12 +41,42 @@ const gatewayCodeCategories = new Map<string, ErrorCategory>([
   ['UPSTREAM_REJECTED', errorCategory.server],
 ]);
 
+/**
+ * What a failed external call printed, as the person would read it: a shell
+ * call's captured output and exit code, or an MCP result's text blocks.
+ * Without this the error card showed `{"formatted_output":…,"exit_code":1}`.
+ *
+ * @param value - The failed row's content.
+ * @returns The text, or `undefined` when the content has neither shape.
+ */
+const failedOutputText = (value: unknown): string | undefined => {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const output = [value['formatted_output'], value['aggregated_output'], value['output'], value['error']].find(
+    (candidate): candidate is string => typeof candidate === 'string' && candidate.trim() !== '',
+  );
+  const result =
+    isRecord(value['result']) && Array.isArray(value['result']['content']) ? value['result']['content'] : [];
+  const resultText = result
+    .flatMap((block: unknown) => (isRecord(block) && typeof block['text'] === 'string' ? [block['text']] : []))
+    .join('\n');
+  const exitCode = typeof value['exit_code'] === 'number' ? `Exit code ${String(value['exit_code'])}` : undefined;
+  const parts = [output ?? (resultText === '' ? undefined : resultText), exitCode].filter(
+    (part): part is string => part !== undefined,
+  );
+  return parts.length === 0 ? undefined : parts.join('\n\n');
+};
+
 const errorText = (value: unknown, fallback: string): string => {
   if (typeof value === 'string') {
     return value;
   }
   if (isRecord(value) && typeof value['message'] === 'string') {
     const { code, status, details } = value;
+    if (typeof value['errorCode'] === 'string') {
+      return JSON.stringify(value);
+    }
     // A coded refusal is a card, not prose: the code is what the card's copy is
     // keyed on, and a host refusal such as `NO_EVICTABLE_HISTORY` carries
     // neither an HTTP status nor structured fields.
@@ -78,7 +108,7 @@ const errorText = (value: unknown, fallback: string): string => {
     }
     return value['message'];
   }
-  return value === undefined ? fallback : JSON.stringify(value);
+  return failedOutputText(value) ?? (value === undefined ? fallback : JSON.stringify(value));
 };
 
 const blockKey = (runId: string, messageId: string, contentIndex: number): string =>
@@ -332,11 +362,14 @@ const assistantChunks = (
       }
       continue;
     }
-    if (
-      (value['type'] === 'image' || value['type'] === 'audio') &&
-      typeof value['mimeType'] === 'string' &&
-      typeof value['data'] === 'string'
-    ) {
+    /* An agent's media: an image or document by attachment reference (as the
+     * host now records it), or inline — the legacy image and any audio. */
+    const file = userFilePart(value);
+    if (file) {
+      chunks.push({ type: 'file', mediaType: file.mediaType, url: file.url });
+      continue;
+    }
+    if (value['type'] === 'audio' && typeof value['mimeType'] === 'string' && typeof value['data'] === 'string') {
       chunks.push({
         type: 'file',
         mediaType: value['mimeType'],
@@ -848,6 +881,21 @@ export type AgentHostApproval = {
    * performs it, so a presenter renders the facts and no action of its own.
    */
   readonly login?: AgentHostLogin | undefined;
+  /**
+   * The durable record this interrupt gates, when the tool named one.
+   *
+   * `request_print` writes `{ requestId, machineId, fileName }` so the Print
+   * pane can resolve the same ledger record the banner shows; other tools may
+   * write nothing.
+   */
+  readonly context?: AgentHostApprovalContext | undefined;
+};
+
+/** Ledger correlation a tool attaches to the interrupt it raises. @public */
+export type AgentHostApprovalContext = {
+  readonly requestId?: string | undefined;
+  readonly machineId?: string | undefined;
+  readonly fileName?: string | undefined;
 };
 
 /** One sign-in method an external agent offered. @public */
@@ -890,9 +938,38 @@ const interruptRequestSchema = z.looseObject({
     .looseObject({
       toolCall: z.looseObject({ title: z.string().optional() }).optional(),
       options: z.array(approvalOptionSchema).optional(),
+      requestId: z.string().min(1).optional(),
+      machineId: z.string().min(1).optional(),
+      fileName: z.string().min(1).optional(),
     })
     .optional(),
 });
+
+const agentHostApprovalContextSchema = z.object({
+  requestId: z.string().min(1).optional(),
+  machineId: z.string().min(1).optional(),
+  fileName: z.string().min(1).optional(),
+});
+
+/**
+ * The ledger correlation one interrupt context carries, if it carries any.
+ *
+ * @param context - The parsed `context` of the interrupt payload.
+ * @returns Only the correlation keys present, or `undefined` when none are.
+ */
+const approvalContextOf = (
+  context: { requestId?: string; machineId?: string; fileName?: string } | undefined,
+): AgentHostApprovalContext | undefined => {
+  if (!context) {
+    return undefined;
+  }
+  const picked: AgentHostApprovalContext = {
+    ...(context.requestId === undefined ? {} : { requestId: context.requestId }),
+    ...(context.machineId === undefined ? {} : { machineId: context.machineId }),
+    ...(context.fileName === undefined ? {} : { fileName: context.fileName }),
+  };
+  return Object.keys(picked).length === 0 ? undefined : picked;
+};
 
 /* `externalAgentLoginSchema` in `agent-wire.ts` is the writer's own shape; this
  * is the reader's, loose for the same reason as the rest of the payload. */
@@ -962,6 +1039,7 @@ const agentHostApprovalSchema = z.object({
   options: z.array(z.object({ optionId: z.string().min(1), name: z.string(), kind: z.string().optional() })),
   agentId: z.string().optional(),
   login: agentHostLoginSchema.optional(),
+  context: agentHostApprovalContextSchema.optional(),
 });
 
 /**
@@ -987,6 +1065,7 @@ const approvalChunks = (
   }
   const request = interruptRequestSchema.safeParse(event.payload).data;
   const login = loginOf(event.payload);
+  const context = approvalContextOf(request?.context);
   const input: AgentHostApproval = {
     interruptId: event.interruptId,
     kind: request?.kind ?? 'approval',
@@ -998,6 +1077,7 @@ const approvalChunks = (
     })),
     ...(request?.agentId === undefined ? {} : { agentId: request.agentId }),
     ...(login === undefined ? {} : { login }),
+    ...(context === undefined ? {} : { context }),
   };
   return [
     {

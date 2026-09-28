@@ -26,12 +26,13 @@ import { ChatTextareaSubmitButton } from '#components/chat/chat-textarea-submit-
 import type { ChatAttachmentAddOptions, ChatTextareaDragKind } from '#components/chat/chat-textarea-types.js';
 import type { DraftAttachment } from '#hooks/draft.machine.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
+import { useAgentHostPlacements } from '#hooks/use-cad-agent-config.js';
 import { ChatEditor } from '#components/chat/tiptap/chat-editor.js';
 import { buildEditorContentJson, extractContent, useChatEditor } from '#components/chat/tiptap/use-chat-editor.js';
 import type { ContextSuggestionItem, SlashCommandItem } from '#components/chat/tiptap/suggestion-types.js';
 import type { ClipboardPasteEvent } from '#components/chat/chat-paste-handler.js';
 import { createScreenshotContextHandler } from '#components/chat/screenshot-actions.utils.js';
-import { buildPastedContent } from '#utils/at-reference.utils.js';
+import { buildPastedContent, commandInvocation } from '#utils/at-reference.utils.js';
 import { skillMetadataToSlashCommand, useSkillsCatalog } from '#hooks/use-skills-catalog.js';
 import type { ChatContextReference } from '#components/chat/chat-context-insertion.js';
 
@@ -99,12 +100,12 @@ type ChatTextareaDesktopProperties = {
   readonly removeAttachment: (index: number) => void;
 };
 
-/** Map one ACP command to the existing slash menu without changing its native invocation. @public */
+/** Map one ACP command to the composer menu; its chip's text is the agent's exact invocation. @public */
 export const acpCommandToSlashCommand = (
   command: AcpSessionData['commands'][number],
   agentId: string,
 ): SlashCommandItem => {
-  const invocation = command.name.startsWith('$') || command.name.startsWith('/') ? command.name : `/${command.name}`;
+  const invocation = commandInvocation(command.name);
   return {
     id: invocation,
     label: invocation,
@@ -113,7 +114,6 @@ export const acpCommandToSlashCommand = (
     ...(command.input === null || command.input === undefined ? {} : { fullDescription: command.input.hint }),
     group: 'Commands',
     source: agentId,
-    commandText: `${invocation} `,
   };
 };
 
@@ -213,16 +213,19 @@ export const ChatTextareaDesktop = memo(function ({
 
   const commands = acpSessionData?.commands;
   const slashCommandItems = useMemo(
-    () =>
+    (): SlashCommandItem[] =>
       acpAgentId === undefined
         ? skillsCatalog.map((skillMetadata) => skillMetadataToSlashCommand(skillMetadata))
         : (commands ?? []).map((command) => acpCommandToSlashCommand(command, acpAgentId)),
     [acpAgentId, commands, skillsCatalog],
   );
-  const knownSkillIds = useMemo(
-    () => new Set(slashCommandItems.filter((item) => item.group !== 'Commands').map((item) => item.id)),
-    [slashCommandItems],
-  );
+  /* Keyed by content: the skills catalog re-reads on every tree change, and a new
+   * identity must not re-run rehydration when the offered tokens are the same. */
+  const knownTokensKey = slashCommandItems
+    .filter((item) => item.enabled !== false)
+    .map((item) => item.label)
+    .join('\n');
+  const knownTokens = useMemo(() => new Set(knownTokensKey === '' ? [] : knownTokensKey.split('\n')), [knownTokensKey]);
 
   const handleEditorUpdate = useCallback(
     (content: { text: string }) => {
@@ -257,20 +260,28 @@ export const ChatTextareaDesktop = memo(function ({
     editorRef.current = editor;
   }, [editor]);
 
+  const rehydratedTokensRef = useRef(knownTokens);
   useEffect(() => {
     if (!editor) {
       return undefined;
     }
-    const currentText = extractContent(editor).text;
-    if (inputText === currentText) {
-      return undefined;
-    }
+    const tokensChanged = rehydratedTokensRef.current !== knownTokens;
+    rehydratedTokensRef.current = knownTokens;
+    const current = extractContent(editor);
     if (inputText === '') {
-      editor.commands.clearContent(false);
+      if (current.text !== '') {
+        editor.commands.clearContent(false);
+      }
       return undefined;
     }
     const lazyTree: Map<string, FileEntry> = treeService?.getTreeSnapshot() ?? new Map<string, FileEntry>();
-    const segments = buildPastedContent(inputText, { fileTree: lazyTree, chats, knownSkills: knownSkillIds });
+    const segments = buildPastedContent(inputText, { fileTree: lazyTree, chats, knownTokens });
+    /* Same text is a no-op (typing must not move the caret) unless tokens that arrived
+     * late (catalog, agent commands) now resolve to more chips — a restored draft rehydrates. */
+    const chipCount = segments.filter((segment) => segment.type === 'chip').length;
+    if (inputText === current.text && (!tokensChanged || chipCount <= current.contextChips.length)) {
+      return undefined;
+    }
     /* F20: each chip's node view calls `flushSync`, which React refuses inside
      * its own commit, so the content lands in a microtask after it. */
     let isCurrent = true;
@@ -282,7 +293,7 @@ export const ChatTextareaDesktop = memo(function ({
     return () => {
       isCurrent = false;
     };
-  }, [inputText, editor, treeService, chats, knownSkillIds]);
+  }, [inputText, editor, treeService, chats, knownTokens]);
 
   // Expose focus function to parent via mutable ref
   useEffect(() => {
@@ -391,14 +402,14 @@ export const ChatTextareaDesktop = memo(function ({
     // and intentionally takes NO `className` passthrough — see
     // ChatTextareaBorderBeam's docs for why. All layout / styling
     // overrides live on the inner border container below.
-    <div className='relative size-full' data-chat-composer={mode}>
+    <div className='relative w-full' data-chat-composer={mode}>
       <ChatTextareaBorderBeam isActive={isSubmitting} className={radius} />
 
       <div
         ref={containerReference}
         className={cn(
           'group/chat-textarea @container',
-          'relative flex size-full flex-col border bg-background',
+          'relative flex w-full flex-col border bg-background',
           radius,
           'cursor-text overflow-hidden',
           'shadow-md',
@@ -421,7 +432,13 @@ export const ChatTextareaDesktop = memo(function ({
         />
 
         {/* Editor */}
-        <div className={cn('flex min-h-0 min-w-0 flex-1 flex-col overflow-auto')} onClick={handleEditorAreaClick}>
+        <div
+          className={cn(
+            'max-h-48 min-h-12 min-w-0 overflow-y-auto overscroll-contain',
+            mode === 'main' && 'max-h-[min(12rem,30cqh)]',
+          )}
+          onClick={handleEditorAreaClick}
+        >
           <ChatEditor
             editor={editor}
             className='pt-2'
@@ -575,7 +592,20 @@ export const ChatTextareaBar = memo(function ({
 }): React.JSX.Element {
   const barRef = useRef<HTMLDivElement>(null);
   useBarCollapse(barRef);
-  const agentConfig = useAgentConfig(acpSessionData, status);
+  const { targets: placements } = useAgentHostPlacements();
+  const { execution } = useChatComposer().execution;
+  const discoveredAgent =
+    execution.kind === 'acp'
+      ? placements
+          .find((placement) => placement.hostId === execution.hostId)
+          ?.externalAgents?.find((agent) => agent.id === execution.agentId)
+      : undefined;
+  const selectedModel = execution.kind === 'acp' ? (execution.model ?? discoveredAgent?.defaultModel) : undefined;
+  const discoveredThoughtLevel =
+    selectedModel === undefined
+      ? discoveredAgent?.thoughtLevel
+      : discoveredAgent?.models.find((model) => model.id === selectedModel)?.thoughtLevel;
+  const agentConfig = useAgentConfig(acpSessionData, status, discoveredThoughtLevel);
   /* F6: only the composer being typed in owns ⌘/ and ⌘. — the edit box while
    * focus is inside it, the main composer otherwise. */
   const ownsShortcuts = useCallback(
@@ -587,11 +617,7 @@ export const ChatTextareaBar = memo(function ({
   );
 
   return (
-    <div
-      ref={barRef}
-      data-slot='composer-bar'
-      className='group/bar absolute inset-x-2 bottom-2 flex items-center justify-between gap-2'
-    >
+    <div ref={barRef} data-slot='composer-bar' className='group/bar flex items-center justify-between gap-2 px-2 pb-2'>
       <div data-slot='composer-left' className='flex shrink-0 flex-row items-center gap-0.5'>
         <ChatAddMenu
           enableContextActions={enableContextActions}
@@ -614,7 +640,12 @@ export const ChatTextareaBar = memo(function ({
       </div>
       <div data-slot='composer-right' className='flex min-w-0 flex-row items-center gap-1'>
         <ChatContextIndicator />
-        <ChatAgentSheet agentConfig={agentConfig} focusEditor={focusEditor} enableShortcut={ownsShortcuts} />
+        <ChatAgentSheet
+          agentConfig={agentConfig}
+          placements={placements}
+          focusEditor={focusEditor}
+          enableShortcut={ownsShortcuts}
+        />
         <ChatTextareaSubmitButton
           status={status}
           isSubmitting={isSubmitting}

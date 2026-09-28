@@ -20,6 +20,7 @@ vi.mock('#acp/session.js', () => ({
       acpSessionId: 'acp-1',
       agent: { protocolVersion: 1, agentCapabilities: undefined, authMethods: [], agentInfo: undefined },
       configOptions: undefined,
+      probeModel: async () => undefined,
       modeId: undefined,
       contextLost: false,
       closed: Promise.withResolvers<void>().promise,

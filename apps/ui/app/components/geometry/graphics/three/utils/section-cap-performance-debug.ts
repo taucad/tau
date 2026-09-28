@@ -15,6 +15,7 @@ export const sectionCapPerformanceTimingPhaseNames = [
   'borderWrite',
   'worldPointBasis',
   'capPolygonBuild',
+  'capTrim',
   'overlapClassify',
   'renderPartSplit',
   'geometryPack',
@@ -49,6 +50,10 @@ export type SectionCapPerformanceCounters = {
   capPolygonCount: number;
   capRingCount: number;
   capPointCount: number;
+  /** Caps trimmed to their group this frame; the rest reused the trim they were drawn with. */
+  capTrimCount: number;
+  /** Clipper calls those trims made; a cap wholly inside or outside a region or footprint needs none for it. */
+  capTrimClipperCount: number;
   baseFillVertexCount: number;
   baseBoundarySegmentCount: number;
   rawOpenPolylineSegmentCount: number;
@@ -81,6 +86,8 @@ export type SectionCapPerformanceCounters = {
   hiddenFillCount: number;
   diagnosticsCount: number;
   uploadedByteCount: number;
+  /** 1 on a frame that left the drawn caps as they were because nothing they are drawn from changed. */
+  skippedFrameCount: number;
 };
 
 export type SectionCapBooleanOperation = 'intersection' | 'union' | 'difference';
@@ -101,11 +108,23 @@ export type SectionCapPackingStats = {
   packedByteCount: number;
 };
 
+/** One cut face's share of a frame's cap work, so a diagnostic can attribute costs per face. */
+export type SectionCapFacePerformance = {
+  faceKey: string;
+  timings: SectionCapPerformanceTimings;
+  /** Sources sliced through the face this frame; the rest reused the face's slices. */
+  slicedSourceCount: number;
+  capPointCount: number;
+  boundarySegmentCount: number;
+};
+
 export type SectionCapFramePerformance = {
   sequence: number;
   timestamp: number;
+  /** The whole frame; {@link SectionCapFramePerformance.faces} splits the per-face phases by face. */
   timings: SectionCapPerformanceTimings;
   counters: SectionCapPerformanceCounters;
+  faces: SectionCapFacePerformance[];
   topologyKey?: string;
   styleKey?: string;
   baseCapTopologyKey?: string;
@@ -158,6 +177,7 @@ export const createSectionCapPerformanceTimings = (): SectionCapPerformanceTimin
   borderWrite: 0,
   worldPointBasis: 0,
   capPolygonBuild: 0,
+  capTrim: 0,
   overlapClassify: 0,
   renderPartSplit: 0,
   geometryPack: 0,
@@ -188,6 +208,8 @@ export const createSectionCapPerformanceCounters = (): SectionCapPerformanceCoun
   capPolygonCount: 0,
   capRingCount: 0,
   capPointCount: 0,
+  capTrimCount: 0,
+  capTrimClipperCount: 0,
   baseFillVertexCount: 0,
   baseBoundarySegmentCount: 0,
   rawOpenPolylineSegmentCount: 0,
@@ -220,6 +242,7 @@ export const createSectionCapPerformanceCounters = (): SectionCapPerformanceCoun
   hiddenFillCount: 0,
   diagnosticsCount: 0,
   uploadedByteCount: 0,
+  skippedFrameCount: 0,
 });
 
 export const createSectionCapBooleanOperationStats = (): SectionCapBooleanOperationStats => ({
@@ -241,9 +264,29 @@ export const createSectionCapFramePerformance = (sequence: number, timestamp: nu
   timestamp,
   timings: createSectionCapPerformanceTimings(),
   counters: createSectionCapPerformanceCounters(),
+  faces: [],
   booleanOperations: createSectionCapBooleanOperationStats(),
   packing: createSectionCapPackingStats(),
 });
+
+/** The face's entry in the frame, added on first use. */
+export const getSectionCapFacePerformance = (
+  frame: SectionCapFramePerformance,
+  faceKey: string,
+): SectionCapFacePerformance => {
+  let face = frame.faces.find((candidate) => candidate.faceKey === faceKey);
+  if (!face) {
+    face = {
+      faceKey,
+      timings: createSectionCapPerformanceTimings(),
+      slicedSourceCount: 0,
+      capPointCount: 0,
+      boundarySegmentCount: 0,
+    };
+    frame.faces.push(face);
+  }
+  return face;
+};
 
 export const addSectionCapTiming = (
   frame: SectionCapFramePerformance | undefined,
@@ -255,6 +298,19 @@ export const addSectionCapTiming = (
   }
 
   frame.timings[phase] += elapsed;
+};
+
+/** Adds to a phase of the frame and to the face's share of it. */
+export const addSectionCapFaceTiming = (
+  frame: SectionCapFramePerformance | undefined,
+  { faceKey, phase, elapsed }: Readonly<{ faceKey: string; phase: SectionCapPerformanceTimingPhase; elapsed: number }>,
+): void => {
+  if (!frame || !Number.isFinite(elapsed) || elapsed < 0) {
+    return;
+  }
+
+  frame.timings[phase] += elapsed;
+  getSectionCapFacePerformance(frame, faceKey).timings[phase] += elapsed;
 };
 
 export const recordSectionCapBooleanOperation = (
@@ -319,6 +375,10 @@ const buildAggregates = (history: readonly SectionCapFramePerformance[]): Sectio
   };
 };
 
+/**
+ * Appends a frame to the history the aggregates cover. A skipped frame joins the history, so the phases are measured
+ * over every rendered frame, but `latestFrame` stays the frame that built what is drawn.
+ */
 export const appendSectionCapPerformanceFrame = (
   previous: SectionCapPerformanceDebugSummary | undefined,
   frame: SectionCapFramePerformance,
@@ -327,7 +387,7 @@ export const appendSectionCapPerformanceFrame = (
   const boundedLimit = Math.max(1, historyLimit);
   const nextHistory = [...(previous?.history ?? []), frame].slice(-boundedLimit);
   return {
-    latestFrame: frame,
+    latestFrame: frame.counters.skippedFrameCount > 0 && previous ? previous.latestFrame : frame,
     history: nextHistory,
     aggregates: buildAggregates(nextHistory),
   };

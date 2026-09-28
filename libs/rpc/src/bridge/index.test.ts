@@ -37,6 +37,37 @@ describe('@taucad/rpc/bridge', () => {
     proxy.dispose();
   });
 
+  it('settles concurrent multi-megabyte MessagePort calls without losing a frame', async () => {
+    const channel = new MessageChannel();
+    const server = createBridgeServer(
+      {
+        async inspect(
+          index: number,
+          bytes: Uint8Array<ArrayBuffer>,
+        ): Promise<{ index: number; length: number; marker: number }> {
+          return { index, length: bytes.byteLength, marker: bytes[bytes.byteLength - 1]! };
+        },
+      },
+      wrapBridgePort(channel.port1),
+    );
+    const client = createBridgeCall(wrapBridgePort(channel.port2));
+    try {
+      const outcomes = await Promise.all(
+        Array.from({ length: 4 }, async (_, index) => {
+          const bytes = new Uint8Array(4 * 1024 * 1024);
+          bytes[bytes.length - 1] = index + 1;
+          return client.call('inspect', [index, bytes]);
+        }),
+      );
+      expect(outcomes).toEqual(
+        Array.from({ length: 4 }, (_, index) => ({ index, length: 4 * 1024 * 1024, marker: index + 1 })),
+      );
+    } finally {
+      client.dispose();
+      server.dispose();
+    }
+  });
+
   it('should deliver server events to listen subscribers', async () => {
     const channel = new MessageChannel();
     const server = createBridgeServer({}, wrapBridgePort(channel.port1));
@@ -271,21 +302,19 @@ describe('@taucad/rpc/bridge', () => {
     }
   });
 
-  it('should close both ports from createBridgePort dispose', async () => {
-    vi.useFakeTimers();
+  it('should close both ports from createBridgePort dispose, typing the next call as a closure', async () => {
+    const ping = vi.fn().mockResolvedValue('pong');
+    const bridge = createBridgePort({ ping });
+    const proxy = createBridgeProxy<{ ping(): Promise<string> }>(wrapBridgePort(bridge.port));
     try {
-      const bridge = createBridgePort({ ping: vi.fn().mockResolvedValue('pong') });
-      const proxy = createBridgeProxy<{ ping(): Promise<string> }>(wrapBridgePort(bridge.port));
-
       expect(await proxy.ping()).toBe('pong');
       bridge.dispose();
 
-      const pending = expect(proxy.ping()).rejects.toThrow(/closed|timed out/u);
-      await vi.advanceTimersByTimeAsync(30_000);
-      await pending;
-      proxy.dispose();
+      // The port's own close event ends the call, not the 30-second bridge deadline.
+      await expect(proxy.ping()).rejects.toMatchObject({ code: 'CHANNEL_CLOSED' });
+      expect(ping).toHaveBeenCalledOnce();
     } finally {
-      vi.useRealTimers();
+      proxy.dispose();
     }
   });
 
@@ -330,7 +359,10 @@ describe('@taucad/rpc/bridge', () => {
     });
 
     try {
-      const ordinary = expect(client.call('ordinary', [])).rejects.toThrow("Bridge call 'ordinary' timed out");
+      const ordinary = expect(client.call('ordinary', [])).rejects.toMatchObject({
+        code: 'BRIDGE_CALL_TIMEOUT',
+        message: "Bridge call 'ordinary' timed out after 10ms",
+      });
       const commit = client.call('commitPendingProjectDirectory', []);
 
       await vi.advanceTimersByTimeAsync(30_000);
@@ -361,7 +393,7 @@ describe('@taucad/rpc/bridge', () => {
 
     client.dispose();
 
-    await expect(pending).rejects.toThrow('Bridge proxy closed');
+    await expect(pending).rejects.toMatchObject({ code: 'CHANNEL_CLOSED', message: 'Bridge proxy closed' });
   });
 
   it('rejects invalid resolved deadlines before dispatch', async () => {
@@ -378,5 +410,85 @@ describe('@taucad/rpc/bridge', () => {
     } finally {
       client.dispose();
     }
+  });
+
+  describe('terminal outcomes under closure', () => {
+    const readSize = 4 * 1024 * 1024;
+    const hang = async (): Promise<never> =>
+      new Promise<never>(() => {
+        void 0;
+      });
+
+    it('should settle every concurrent large read once, typing the in-flight ones as a port closure', async () => {
+      vi.useFakeTimers();
+      const channel = new MessageChannel();
+      const server = createBridgeServer(
+        {
+          async readFile(index: number): Promise<Uint8Array<ArrayBuffer>> {
+            if (index % 2 === 1) {
+              return hang();
+            }
+            const bytes = new Uint8Array(readSize);
+            bytes[readSize - 1] = index + 1;
+            return bytes;
+          },
+        },
+        wrapBridgePort(channel.port1),
+      );
+      const client = createBridgeCall(wrapBridgePort(channel.port2));
+      try {
+        const reads = Array.from({ length: 8 }, async (_, index) => client.call('readFile', [index]));
+        const outcomes = Promise.allSettled(reads);
+        const completed = await Promise.all(reads.filter((_, index) => index % 2 === 0));
+        expect(completed.map((bytes) => (bytes as Uint8Array<ArrayBuffer>)[readSize - 1])).toEqual([1, 3, 5, 7]);
+
+        channel.port1.close();
+
+        const settled = await outcomes;
+        expect(settled.filter(({ status }) => status === 'fulfilled')).toHaveLength(4);
+        for (const [index, outcome] of settled.entries()) {
+          if (index % 2 === 1) {
+            expect(outcome).toMatchObject({
+              status: 'rejected',
+              reason: { code: 'CHANNEL_CLOSED', message: 'Channel closed (remote: port-closed)' },
+            });
+          }
+        }
+        // No bridge deadline outlives its call.
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        client.dispose();
+        server.dispose();
+        vi.useRealTimers();
+      }
+    });
+
+    it('should type a call stranded by a peer restart and serve the retry from the new peer', async () => {
+      const first = new MessageChannel();
+      const firstServer = createBridgeServer({ readFile: hang }, wrapBridgePort(first.port1));
+      const firstClient = createBridgeCall(wrapBridgePort(first.port2));
+      await firstClient.ready;
+      const stranded = firstClient.call('readFile', ['/main.ts']);
+
+      firstServer.dispose();
+
+      await expect(stranded).rejects.toMatchObject({
+        code: 'CHANNEL_CLOSED',
+        message: 'Channel closed (remote: hard-close)',
+      });
+      const second = new MessageChannel();
+      const secondServer = createBridgeServer(
+        { readFile: async (path: string) => `content:${path}` },
+        wrapBridgePort(second.port1),
+      );
+      const secondClient = createBridgeCall(wrapBridgePort(second.port2));
+      try {
+        await expect(secondClient.call('readFile', ['/main.ts'])).resolves.toBe('content:/main.ts');
+      } finally {
+        firstClient.dispose();
+        secondClient.dispose();
+        secondServer.dispose();
+      }
+    });
   });
 });

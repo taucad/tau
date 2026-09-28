@@ -207,7 +207,7 @@ describe('repository restore from a second bucket', () => {
     expect(result.manifest.generation).toBe((sourceManifest?.generation ?? 0) + 1);
     expect(result.manifest.incarnation).not.toBe(sourceManifest?.incarnation);
     expect(result.manifest.committedBy).toBe('restore:rifont');
-    expect(result.manifest.retired).toStrictEqual([]);
+    expect(result.manifest.earlierPushes).toBeNull();
     expect(result.manifest.refs).toStrictEqual(sourceManifest?.refs);
     expect(await hydrateAndVerify(primary, locator)).toBe(await hydrateAndVerify(source, locator));
   }, 120_000);
@@ -233,6 +233,14 @@ describe('repository restore from a second bucket', () => {
     expect(result.manifest.refs).toStrictEqual(sourceManifest?.refs);
     // The primary's superseded packs are still there: restore never deletes (NI4).
     expect(await packKeys(primary, locator)).toStrictEqual(expect.arrayContaining(bytesBefore));
+    // And they are marked retired, so they get the retention window rather than the orphan threshold.
+    const markers: string[] = [];
+    for await (const object of primary.listObjects(locator, 'retired/')) {
+      markers.push(object.key);
+    }
+    expect(markers.map((key) => key.replace(/^retired\/\d+-/u, 'packs/')).sort()).toStrictEqual(
+      (before?.packs ?? []).map((pack) => pack.key).sort(),
+    );
     expect(await hydrateAndVerify(primary, locator)).toBe(await hydrateAndVerify(source, locator));
   }, 120_000);
 

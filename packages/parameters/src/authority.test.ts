@@ -1,7 +1,7 @@
 /* oxlint-disable typescript/no-restricted-types -- The checked-file test authority uses null for absent bytes. */
 import { contentDigest, digestContent } from '@taucad/cache-core';
 import { expect, it } from 'vitest';
-import { createActor, fromPromise, waitFor } from 'xstate';
+import { createActor, createAsyncLogic, waitFor } from 'xstate';
 import { commitParameterChange, loadParameterSnapshot, refreshParameterSnapshot } from '#authority.js';
 import type { ParameterAuthority } from '#authority.js';
 import { compileParameterManifest } from '#manifest.js';
@@ -13,6 +13,8 @@ import { parameterSetHarness } from '#parameter-set.test-helper.js';
 import { readParameterRecord } from '#record.js';
 import type { ParameterSnapshot } from '#snapshot.js';
 import type { ParameterSetIdentity, ParameterSetRequest, ParameterSetTarget } from '#types.js';
+import type { ParameterSetLoadInput } from '#parameter-set.machine.js';
+import type { CheckedFileWriteResult } from '@taucad/types';
 
 const target: ParameterSetTarget = { authority: 'memory', root: '/project', entry: 'main.ts' };
 const recordPath = '.tau/parameters/main.ts.json';
@@ -276,19 +278,24 @@ it('re-plans a stale actor without a field base and commits over the winning rec
     createActor(
       parameterSetMachine.provide({
         actors: {
-          loadParameterSet: fromPromise(async ({ input, signal: loadSignal }) =>
-            input.current === undefined
-              ? loadParameterSnapshot({
-                  target,
-                  authority: memory.authority,
-                  manifest: async () => manifest,
-                  signal: loadSignal,
-                })
-              : refreshParameterSnapshot({ current: input.current, authority: memory.authority, signal: loadSignal }),
-          ),
-          commitParameterSet: fromPromise(async ({ input: change, signal: commitSignal }) =>
-            commitParameterChange({ change, authority: memory.authority, signal: commitSignal }),
-          ),
+          loadParameterSet: createAsyncLogic<ParameterSnapshot, ParameterSetLoadInput>({
+            run: async ({ input, signal: loadSignal }) =>
+              input.current === undefined
+                ? loadParameterSnapshot({
+                    target,
+                    authority: memory.authority,
+                    manifest: async () => manifest,
+                    signal: loadSignal,
+                  })
+                : refreshParameterSnapshot({ current: input.current, authority: memory.authority, signal: loadSignal }),
+          }),
+          commitParameterSet: createAsyncLogic<
+            CheckedFileWriteResult,
+            Extract<ParameterChange, { status: 'prepared' }>
+          >({
+            run: async ({ input: change, signal: commitSignal }) =>
+              commitParameterChange({ change, authority: memory.authority, signal: commitSignal }),
+          }),
         },
       }),
       { input: { target } },

@@ -126,6 +126,15 @@ export const isRendererExecutionModule = (moduleId: string): boolean => {
   if (/packages\/plugins\/image\/src\/(?:nanoraster-camera|image-label|label)\.ts$/u.test(path)) {
     return false;
   }
+  // Print viewer data: G-code and 3MF parsing, print-intent schemas and plate
+  // descriptors. None of them load a kernel, a worker or WASM.
+  if (
+    /packages\/plugins\/(?:slicer\/src\/(?:toolpath|container|hashes|print-intent|slicer-options)|bambu\/src\/bambu\.plate)\.ts$/u.test(
+      path,
+    )
+  ) {
+    return false;
+  }
   if (
     /packages\/runtime\/src\/(?:framework\/(?:runtime-worker-client|runtime-framework\.constants)|plugins\/plugin-types)\.ts$/u.test(
       path,
@@ -325,17 +334,17 @@ export const inspectDesktopPayload = async (options: {
   };
   const require = createRequire(import.meta.url);
   const approvedWasm = new Map<string, string>();
-  await Promise.all(
+  const approvedWasmSizes = await Promise.all(
     ['@taucad/kcl-wasm-lib/kcl.wasm', 'clipper2-wasm/dist/es/clipper2z.wasm'].map(async (specifier) => {
       const sourcePath = realpathSync(require.resolve(specifier)).replaceAll('\\', '/');
-      approvedWasm.set(
-        sourcePath,
-        createHash('sha256')
-          .update(await readFile(sourcePath))
-          .digest('hex'),
-      );
+      const content = await readFile(sourcePath);
+      approvedWasm.set(sourcePath, createHash('sha256').update(content).digest('hex'));
+      return content.byteLength;
     }),
   );
+  // The budget is one copy of each approved producer at its installed version:
+  // a KCL upgrade moves it, while a second copy still exceeds it.
+  const approvedWasmBytes = approvedWasmSizes.reduce((total, bytes) => total + bytes, 0);
   // oxlint-disable-next-line complexity, max-params -- hot file-walk callback avoids allocating a second descriptor for every payload entry.
   const recordContent = (
     scope: PayloadScope,
@@ -593,7 +602,7 @@ export const inspectDesktopPayload = async (options: {
   const wasmBytes = inventory.files
     .filter((file) => file.scope === 'renderer' && file.kind === 'wasm')
     .reduce((total, file) => total + file.bytes, 0);
-  if (wasmBytes > 14 * 1024 * 1024) {
+  if (wasmBytes > approvedWasmBytes) {
     inventory.violations.push(`Renderer WASM budget exceeded: ${wasmBytes} bytes`);
   }
   inventory.files.sort((left, right) => `${left.scope}/${left.path}`.localeCompare(`${right.scope}/${right.path}`));

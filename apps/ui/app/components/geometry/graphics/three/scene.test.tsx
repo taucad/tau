@@ -2,7 +2,7 @@ import * as React from 'react';
 import { act } from '@testing-library/react';
 import { createRoot, events as createPointerEvents, extend, useThree } from '@react-three/fiber';
 import type { RootState } from '@react-three/fiber';
-import { createActor, fromPromise } from 'xstate';
+import { createActor, createAsyncLogic } from 'xstate';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import CameraControlsImpl from 'camera-controls';
 import * as THREE from 'three';
@@ -43,8 +43,8 @@ vi.mock('#components/geometry/graphics/three/react/section-contour-fill.js', () 
   SectionContourFills: () => null,
 }));
 
-vi.mock('#components/geometry/graphics/three/react/section-view-controls.js', () => ({
-  SectionViewControls: () => null,
+vi.mock('#components/geometry/graphics/three/react/section-handles.js', () => ({
+  SectionHandles: () => null,
 }));
 
 vi.mock('#components/geometry/graphics/three/react/section-view-test-bridge.js', () => ({
@@ -110,7 +110,7 @@ describe('Scene camera lifecycle', () => {
     const root = createRoot(canvas);
     const samples: SceneSample[] = [];
     const graphicsActor = createActor(
-      graphicsMachine.provide({ actors: { probeWebGpu: fromPromise(async () => false) } }),
+      graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
       { input: { graphicsBackend: 'webgl' } },
     );
     graphicsActor.start();

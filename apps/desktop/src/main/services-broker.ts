@@ -12,9 +12,10 @@ import { realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import type { MessageChannelMain, MessagePortMain, UtilityProcess } from 'electron';
+import type { MachineBindingOutcome } from '@taucad/runtime/machine';
 
 /** Concerns the services utility serves, one dedicated port each. */
-export const servicesConcerns = ['nodeFs', 'agentHost', 'runtimeFileSystem', 'geospecPerformance'] as const;
+export const servicesConcerns = ['nodeFs', 'agentHost', 'runtimeFileSystem', 'geospecPerformance', 'machines'] as const;
 
 /**
  * A concern the renderer may ask for a port to.
@@ -28,7 +29,35 @@ export const servicesConcerns = ['nodeFs', 'agentHost', 'runtimeFileSystem', 'ge
 export type ServicesConcern = (typeof servicesConcerns)[number];
 
 /** Concerns a renderer may request directly. */
-export const rendererServicesConcerns: readonly ServicesConcern[] = ['nodeFs', 'agentHost', 'geospecPerformance'];
+export const rendererServicesConcerns: readonly ServicesConcern[] = [
+  'nodeFs',
+  'agentHost',
+  'geospecPerformance',
+  'machines',
+];
+
+/**
+ * The native completion of one binding ceremony (D10).
+ *
+ * `accessCode` is the LAN secret the person typed; absent, the utility reuses
+ * the printer's saved code while its certificate still matches. The utility
+ * pins the endpoint the provider connects to, so `address` is carried for
+ * older renderers and ignored.
+ */
+export type MachineBindingCompletion = Readonly<{ ceremonyId: string; address?: string; accessCode?: string }>;
+
+/**
+ * The broker's shutdown admission refusing a new concern.
+ *
+ * Typed so main can answer it as the intended lifecycle refusal it is, apart
+ * from a concern that failed to connect.
+ */
+export class ServicesQuiescingError extends Error {
+  public constructor() {
+    super('The services broker is quiescing and accepts no new concerns.');
+    this.name = 'ServicesQuiescingError';
+  }
+}
 
 /** Observable result of the bounded services-host drain. */
 export type ServicesQuiesceOutcome =
@@ -40,7 +69,7 @@ export type ServicesQuiesceOutcome =
 
 /** Options for {@link createServicesBroker}. */
 export type ServicesBrokerOptions = {
-  /** Built utility entry (a `?modulePath` chunk). */
+  /** Built utility entry: `services-host.js` beside the main bundle. */
   readonly utilityEntry: string;
   /** Allowlisted environment for the fork. */
   readonly env: NodeJS.ProcessEnv;
@@ -81,6 +110,12 @@ export type ServicesBroker = {
     input: Readonly<{ workspaceRoot: string; projectId: string; attachmentId: string }>,
     boundMilliseconds: number,
   ): Promise<void>;
+  /**
+   * Complete one binding ceremony in the utility and await its outcome.
+   *
+   * Not a control frame: a secret is never replayed onto a fresh fork.
+   */
+  completeMachineBinding(input: MachineBindingCompletion, boundMilliseconds: number): Promise<MachineBindingOutcome>;
   /** Send a control frame (root admission, credential updates) to the utility. */
   post(message: unknown): void;
   /** Original project identity retained for an admitted execution root. */
@@ -130,6 +165,8 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
   const projectAttachments = new Map<string, Set<string>>();
   const attachmentGenerations = new Map<string, number>();
   const releaseWaiters = new Map<string, ReturnType<typeof Promise.withResolvers<void>>>();
+  const bindingWaiters = new Map<string, ReturnType<typeof Promise.withResolvers<MachineBindingOutcome>>>();
+  let bindingRequest = 0;
   /* Roots with a release in flight, by how many. `releaseAgentHost` awaits the
    * utility, and a window that remounts inside that wait re-adopts the project
    * under the attachment id that is releasing. */
@@ -238,6 +275,28 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
       }
       return;
     }
+    if (
+      (type === 'machine-binding-completed' || type === 'machine-binding-complete-failed') &&
+      typeof requestId === 'string'
+    ) {
+      const pending = bindingWaiters.get(requestId);
+      if (pending !== undefined) {
+        bindingWaiters.delete(requestId);
+        const record = frame as Record<string, unknown>;
+        if (type === 'machine-binding-completed') {
+          pending.resolve(record['outcome'] as MachineBindingOutcome);
+        } else {
+          pending.reject(
+            new Error(
+              typeof record['message'] === 'string'
+                ? record['message']
+                : 'The desktop machine host could not complete this binding.',
+            ),
+          );
+        }
+      }
+      return;
+    }
     if (type === 'quiesced' || type === 'quiesce-failed') {
       if (utility !== spawned) {
         return;
@@ -340,6 +399,10 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
           pending.reject(new Error('The desktop services host exited while releasing a project.'));
         }
         releaseWaiters.clear();
+        for (const pending of bindingWaiters.values()) {
+          pending.reject(new Error('The desktop services host exited while binding a machine.'));
+        }
+        bindingWaiters.clear();
       }
     });
     spawned.on('message', (message: unknown) => {
@@ -372,7 +435,7 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
   return {
     connect(concern, context) {
       if (!acceptingConnections) {
-        throw new Error('The services broker is quiescing and accepts no new concerns.');
+        throw new ServicesQuiescingError();
       }
       let concernContext = context;
       if (concern === 'agentHost' && context?.['workspaceRoot']) {
@@ -503,6 +566,31 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
         releaseWaiters.delete(requestId);
       }
     },
+    async completeMachineBinding(input, boundMilliseconds) {
+      if (!acceptingConnections) {
+        throw new Error('The services broker is quiescing and completes no bindings.');
+      }
+      bindingRequest += 1;
+      const requestId = `machine-binding-${String(bindingRequest)}`;
+      const pending = Promise.withResolvers<MachineBindingOutcome>();
+      bindingWaiters.set(requestId, pending);
+      let bindingTimeout: ReturnType<typeof setTimeout> | undefined;
+      try {
+        ensure().postMessage({ type: 'machine-binding-complete', requestId, ...input });
+        const deadline = new Promise<never>((_resolve, reject) => {
+          bindingTimeout = setTimeout(() => {
+            reject(new Error('The desktop machine binding timed out.'));
+          }, boundMilliseconds);
+          bindingTimeout.unref();
+        });
+        return await Promise.race([pending.promise, deadline]);
+      } finally {
+        if (bindingTimeout !== undefined) {
+          clearTimeout(bindingTimeout);
+        }
+        bindingWaiters.delete(requestId);
+      }
+    },
     post(message) {
       const { type } = message as { type?: unknown };
       if (typeof type !== 'string') {
@@ -563,6 +651,10 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
           pending.reject(new Error('The desktop services broker was disposed.'));
         }
         releaseWaiters.clear();
+        for (const pending of bindingWaiters.values()) {
+          pending.reject(new Error('The desktop services broker was disposed.'));
+        }
+        bindingWaiters.clear();
         settleQuiescence?.({ status: 'host-exited' });
         utility?.kill();
         utility = undefined;

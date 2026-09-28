@@ -45,6 +45,7 @@
     "./job": "./src/jobs/index.ts",
     "./machine": "./src/machines/index.ts",
     "./host": "./src/host/index.ts",
+    "./host/node": "./src/host/node.ts",
     "./worker": "./src/worker/index.ts",
     "./plugin": "./src/plugins/plugin-entry.ts",
     "./kernel": "./src/plugins/kernel-plugin-entry.ts",
@@ -127,6 +128,11 @@
         "types": "./dist/host/index.d.mts",
         "import": "./dist/host/index.mjs",
         "default": "./dist/host/index.mjs"
+      },
+      "./host/node": {
+        "types": "./dist/host/node.d.mts",
+        "import": "./dist/host/node.mjs",
+        "default": "./dist/host/node.mjs"
       },
       "./worker": {
         "types": "./dist/worker/index.d.mts",
@@ -277,6 +283,7 @@
     "@msgpack/msgpack": "catalog:",
     "@standard-schema/spec": "catalog:",
     "@taucad/cache-core": "workspace:*",
+    "@taucad/filesystem": "workspace:*",
     "@taucad/parameters": "workspace:*",
     "@taucad/project-core": "workspace:*",
     "@taucad/units": "workspace:*",
@@ -293,7 +300,6 @@
     "electron": ">=37.0.0",
     "next": ">=15.3.0 <17.0.0",
     "vite": "^7.0.0 || ^8.0.0",
-    "xstate": "^5.0.0",
     "zod": "^4.0.0"
   },
   "peerDependenciesMeta": {
@@ -309,7 +315,6 @@
   },
   "devDependencies": {
     "@taucad/events": "workspace:*",
-    "@taucad/filesystem": "workspace:*",
     "@taucad/fs-bridge": "workspace:*",
     "@taucad/json-schema": "workspace:*",
     "@taucad/memory": "workspace:*",
@@ -321,7 +326,6 @@
     "next": "catalog:next16",
     "vite": "catalog:electron-vite7",
     "vitest": "catalog:",
-    "xstate": "catalog:",
     "zod": "catalog:"
   }
 }

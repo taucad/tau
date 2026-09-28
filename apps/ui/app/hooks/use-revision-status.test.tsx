@@ -11,7 +11,8 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, render, waitFor } from '@testing-library/react';
-import { assign, createActor, setup } from 'xstate';
+import { createActor, setup, types } from 'xstate';
+import { eventSchemas } from '#lib/xstate.lib.js';
 import { createIsomorphicGitRevisionPort, createRevisionHttpClient } from '@taucad/revisions';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
 import { MemoryProvider } from '@taucad/filesystem/backend';
@@ -38,16 +39,14 @@ const projectId = 'alpha';
 
 /** The file-manager's own context, as far as this hook reads it. */
 const fileManagerMachine = setup({
-  types: {
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    context: {} as { worker: Worker | undefined },
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
-    events: {} as { type: 'worker'; worker: Worker | undefined },
+  schemas: {
+    context: types<{ worker: Worker | undefined }>(),
+    events: eventSchemas<{ type: 'worker'; worker: Worker | undefined }>(),
   },
 }).createMachine({
   context: { worker: undefined },
   on: {
-    worker: { actions: assign(({ event }) => ({ worker: event.worker })) },
+    worker: { context: ({ event }) => ({ worker: event.worker }) },
   },
 });
 
@@ -476,6 +475,46 @@ describe('the page client of the worker revision root', () => {
     client.close();
   });
 
+  it('should hold every frame until the route opens, so the credential precedes the first fetch (D36)', () => {
+    const { worker, ports, messages } = controlledWorker();
+    const revisionClient = getRevisionClient({ projectId, worker });
+    revisionClient.send({ command: 'setDeviceId', deviceId: 'device-1' });
+    revisionClient.remoteCredential({ apiBaseUrl: 'http://api.test', origin: 'https://github.com' });
+
+    /* Connecting starts the root and its opening fetch. */
+    expect(ports).toHaveLength(0);
+
+    revisionClient.open();
+
+    expect(ports).toHaveLength(1);
+    expect(messages).toMatchObject([
+      { command: 'remoteCredential' },
+      { command: 'setDeviceId', deviceId: 'device-1' },
+      { command: 'remoteCredential', origin: 'https://github.com' },
+    ]);
+    revisionClient.close();
+  });
+
+  it('should say which project is focused on every port it opens, so a reopened root streams again (RV-W5b2 N4)', () => {
+    const { worker, messages } = controlledWorker();
+    const revisionClient = getRevisionClient({ projectId, worker });
+    const focusFrames = (): unknown[] =>
+      messages.filter((message) => (message as { command?: string }).command === 'focus');
+    revisionClient.focus?.(true);
+    expect(focusFrames()).toEqual([]);
+
+    revisionClient.open();
+    expect(focusFrames()).toEqual([{ command: 'focus', focused: true }]);
+
+    revisionClient.close();
+    revisionClient.open();
+    expect(focusFrames()).toEqual([
+      { command: 'focus', focused: true },
+      { command: 'focus', focused: true },
+    ]);
+    revisionClient.close();
+  });
+
   it('should replay a completed chat projection to a later route subscriber', () => {
     const { worker, ports } = controlledWorker();
     const revisionClient = getRevisionClient({ projectId, worker });
@@ -605,7 +644,13 @@ describe('the page client of the worker revision root', () => {
     await settle();
 
     expect(root.inspect()).toMatchObject({ status: 'stopped', children: [] });
-    expect(registry.openProjectIds()).toEqual([]);
+    // Closing waits for the operation log's last append, so the registry lets go after the root stops.
+    await vi.waitFor(
+      () => {
+        expect(registry.openProjectIds()).toEqual([]);
+      },
+      { timeout: 10_000 },
+    );
   });
 
   it('should keep one lifecycle owner when one of multiple passive consumers unmounts', async () => {
@@ -836,7 +881,7 @@ describe('the page client of the worker revision root', () => {
       /* One hop from a surface, so the words are the table's rather than the
          registry's — "the registry made x without a checkout to run on" is
          banned vocabulary and unactionable besides (Rule 1). */
-      message: describeRevisionFailure('branch', 'BRANCH_UNPLACED', 'isolated-run').description,
+      message: describeRevisionFailure('branch', 'BRANCH_UNPLACED', { branch: 'isolated-run' }).description,
     });
     client.close();
   });
@@ -929,7 +974,13 @@ describe('the page client of the worker revision root', () => {
       expect(secondRoot.inspect().status).toBe('active');
     });
     expect(firstRoot.inspect().status).toBe('stopped');
-    expect(first.registry.openProjectIds()).toEqual([]);
+    // Closing waits for the operation log's last append, so the registry lets go after the root stops.
+    await vi.waitFor(
+      () => {
+        expect(first.registry.openProjectIds()).toEqual([]);
+      },
+      { timeout: 10_000 },
+    );
   });
 
   /**

@@ -20,7 +20,8 @@ import type { FakePromiseActors } from '#test/fake-actors.js';
  *     every earlier choice kept
  *  9  `finish` with a path still unanswered is refused by the guard
  * 10  `finish` with every path answered mints, emits and sends `conflictResolved`
- * 11  `finishMerge` failure → `resolving.failed` → `toast.error` → `idle`, with
+ * 11  `finishMerge` failure → `resolving.failed` → `toast.error` (and the
+ *     parent's `childToast`, L2-F8) → `idle`, with
  *     every choice kept
  * 12  `askChat` → `seeding` → `turnRequested { revisionId, checkoutId, paths }`
  * 13  `seedTurn` failure → `resolving.failed` → `toast.error`
@@ -310,7 +311,7 @@ describe('resolutionMachine', () => {
   });
 
   it('returns to the rows when the resolving revision cannot be minted', async () => {
-    const { actor, promises, emitted } = await loaded();
+    const { actor, promises, parent, emitted } = await loaded();
 
     for (const path of ['enclosure.ts', 'params/wall.json']) {
       actor.send({ type: 'keepTheirs', path });
@@ -332,6 +333,15 @@ describe('resolutionMachine', () => {
       type: 'toast.error',
       message: 'that branch moved while the merge was running',
     });
+    /* L2-F8: and through the root, which is the only actor a host holds. */
+    expect(parent.events.filter((event) => event.type === 'childToast')).toEqual([
+      {
+        type: 'childToast',
+        subject: 'resolution',
+        tone: 'error',
+        message: 'that branch moved while the merge was running',
+      },
+    ]);
 
     actor.stop();
   });

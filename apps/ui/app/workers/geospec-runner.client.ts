@@ -5,6 +5,7 @@ import type { RpcGeoSpecClient } from '@taucad/chat/rpc';
 import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
 import { randomUuid } from '@taucad/utils/id';
 import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';
+import { createBrowserGeoSpecWorker } from '#services/browser-geospec-worker.js';
 import type { GeoSpecRunnerWorkerRequest, GeoSpecRunnerWorkerResponse } from '#workers/geospec-runner.types.js';
 
 type CreateGeoSpecWorker = () => Worker;
@@ -29,6 +30,8 @@ export type GeoSpecWorkerRpcClient = RpcGeoSpecClient & {
 type PendingRun = {
   timeoutId: ReturnType<typeof globalThis.setTimeout>;
   abortTimeoutId?: ReturnType<typeof globalThis.setTimeout>;
+  signal?: AbortSignal;
+  abortListener?: () => void;
   resolve(result: RunGeoSpecTestsRpcResult): void;
 };
 
@@ -56,12 +59,6 @@ const defaultTimeout = rpcExecutionTimeout - defaultInitTimeout - defaultAbortGr
  * @public
  */
 export const geoSpecClientWorstCaseTimeout = defaultInitTimeout + defaultTimeout + defaultAbortGrace;
-
-const createDefaultGeoSpecWorker = (): Worker =>
-  new Worker(new URL('geospec-runner.worker.ts', import.meta.url), {
-    type: 'module',
-    name: 'tau-geospec-runner-worker',
-  });
 
 const createRequestId = (): string => randomUuid();
 
@@ -106,6 +103,9 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
     if (pending.abortTimeoutId) {
       globalThis.clearTimeout(pending.abortTimeoutId);
     }
+    if (pending.abortListener) {
+      pending.signal?.removeEventListener('abort', pending.abortListener);
+    }
     pendingRuns.delete(requestId);
   };
 
@@ -114,18 +114,15 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
     if (!pending) {
       return;
     }
+    const settledResult = pending.signal?.aborted ? errorResult('GeoSpec request cancelled.') : result;
     clearPendingRun(requestId);
-    pending.resolve(result);
+    pending.resolve(settledResult);
   };
 
   const failAllPendingRuns = (message: string): void => {
     for (const [requestId, pending] of pendingRuns) {
-      globalThis.clearTimeout(pending.timeoutId);
-      if (pending.abortTimeoutId) {
-        globalThis.clearTimeout(pending.abortTimeoutId);
-      }
+      clearPendingRun(requestId);
       pending.resolve(errorResult(message));
-      pendingRuns.delete(requestId);
     }
   };
 
@@ -217,7 +214,7 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
       return requireSessionId();
     }
 
-    worker = (options.createWorker ?? createDefaultGeoSpecWorker)();
+    worker = (options.createWorker ?? createBrowserGeoSpecWorker)();
     worker.addEventListener('message', onMessage);
     worker.addEventListener('error', onError);
 
@@ -260,7 +257,10 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
     terminateWorker(message);
   };
 
-  const runTests = async (args: Parameters<RpcGeoSpecClient['runTests']>[0]): Promise<RunGeoSpecTestsRpcResult> => {
+  const runTests: RpcGeoSpecClient['runTests'] = async (args, context) => {
+    if (context?.signal?.aborted) {
+      return errorResult('GeoSpec request cancelled.');
+    }
     let activeSessionId: string;
     try {
       activeSessionId = await ensureInitialized();
@@ -271,21 +271,24 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
     if (!worker) {
       return errorResult('GeoSpec worker is not available.');
     }
+    if (context?.signal?.aborted) {
+      return errorResult('GeoSpec request cancelled.');
+    }
 
     const activeWorker = worker;
     const requestId = createRequestId();
     return new Promise<RunGeoSpecTestsRpcResult>((resolve) => {
-      const timeoutId = globalThis.setTimeout(() => {
+      const abortRun = (reason: string): void => {
         const pending = pendingRuns.get(requestId);
-        if (!pending || !worker || !sessionId) {
+        if (!pending || pending.abortTimeoutId !== undefined) {
           return;
         }
-        const reason = createTimeoutMessage(runnerTimeout);
+        globalThis.clearTimeout(pending.timeoutId);
         try {
-          worker.postMessage({
+          activeWorker.postMessage({
             type: 'abort',
             requestId: createRequestId(),
-            sessionId,
+            sessionId: activeSessionId,
             targetRequestId: requestId,
             reason,
           } satisfies GeoSpecRunnerWorkerRequest);
@@ -296,9 +299,20 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
         pending.abortTimeoutId = globalThis.setTimeout(() => {
           hardResetRun(requestId, reason);
         }, abortGrace);
+      };
+      const abortListener = (): void => {
+        abortRun('GeoSpec request cancelled.');
+      };
+      const timeoutId = globalThis.setTimeout(() => {
+        abortRun(createTimeoutMessage(runnerTimeout));
       }, runnerTimeout);
 
-      pendingRuns.set(requestId, { resolve, timeoutId });
+      pendingRuns.set(requestId, {
+        resolve,
+        timeoutId,
+        abortListener,
+        ...(context?.signal ? { signal: context.signal } : {}),
+      });
       try {
         activeWorker.postMessage({
           type: 'run',
@@ -309,6 +323,11 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
       } catch (error) {
         const message = error instanceof Error ? error.message : 'GeoSpec worker failed to start a test run.';
         hardResetRun(requestId, message);
+        return;
+      }
+      context?.signal?.addEventListener('abort', abortListener, { once: true });
+      if (context?.signal?.aborted) {
+        abortListener();
       }
     });
   };

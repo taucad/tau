@@ -9,6 +9,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { picogkKernel } from '#picogk.kernel.js';
 import { PicogkWorkerError } from '#picogk-session.js';
+import type { PicogkSession } from '#picogk-session.js';
 
 const runtime = createMockKernelRuntime();
 const kernelOptions = {
@@ -81,6 +82,15 @@ const context = () => ({
   },
 });
 
+/**
+ * The worker methods a session fake was asked for, in order.
+ *
+ * @param request - The session's `request` spy.
+ * @returns Each call's `method`.
+ */
+const requestedMethods = (request: ReturnType<typeof vi.fn>): string[] =>
+  request.mock.calls.map(([call]) => (call as { readonly method: string }).method);
+
 const workerError = (type: 'syntax' | 'validation' | 'runtime' | 'kernel') =>
   new PicogkWorkerError([
     {
@@ -135,6 +145,9 @@ describe('PicoGK kernel', () => {
     );
     const mirrorRuntime = { ...createMockKernelRuntime(), filesystem };
     const value = await definition.initialize(kernelOptions, mirrorRuntime);
+    vi.spyOn((value as { readonly session: PicogkSession }).session, 'request').mockResolvedValue({
+      sources: ['main.cs'],
+    });
     try {
       await expect(definition.getDependencies({ entryPath: 'main.cs' }, mirrorRuntime, value)).resolves.toEqual({
         resolved: ['main.cs', 'package.json'],
@@ -152,9 +165,31 @@ describe('PicoGK kernel', () => {
 
   it('owns C#, watches model inputs but not Tau system artifacts, and preserves issue provenance', async () => {
     const value = context();
+    value.session.request.mockResolvedValueOnce({ sources: ['helper.cs', 'main.cs'] });
     await expect(definition.getDependencies({ entryPath: 'main.cs' }, runtime, value)).resolves.toEqual({
       resolved: ['helper.cs', 'main.cs', 'asset.txt'],
       unresolved: [],
+    });
+    // Another program in the project is its own model: never compiled, watched or hashed with this one.
+    value.mirror.sync.mockResolvedValueOnce(['helper.cs', 'main.cs', 'other.cs', 'asset.txt', 'tau.json']);
+    value.session.request.mockResolvedValueOnce({ sources: ['helper.cs', 'other.cs'] });
+    await expect(definition.getDependencies({ entryPath: 'other.cs' }, runtime, value)).resolves.toEqual({
+      resolved: ['helper.cs', 'other.cs', 'asset.txt'],
+      unresolved: [],
+    });
+    expect(value.session.request).toHaveBeenLastCalledWith(
+      expect.objectContaining({ method: 'resolve', params: { entryPath: 'other.cs' } }),
+    );
+    // An entry the worker cannot select watches every input, so the edit that settles it re-renders it.
+    value.mirror.sync.mockResolvedValueOnce(['helper.cs', 'main.cs', 'other.cs', 'asset.txt', 'tau.json']);
+    value.session.request.mockRejectedValueOnce(workerError('validation'));
+    await expect(definition.getDependencies({ entryPath: 'helper.cs' }, runtime, value)).resolves.toEqual({
+      resolved: ['helper.cs', 'main.cs', 'other.cs', 'asset.txt'],
+      unresolved: [],
+    });
+    value.session.request.mockRejectedValueOnce(new Error('worker exited'));
+    await expect(definition.getDependencies({ entryPath: 'main.cs' }, runtime, value)).rejects.toMatchObject({
+      issues: [expect.objectContaining({ message: 'worker exited', type: 'runtime' })],
     });
     value.mirror.sync.mockRejectedValueOnce(workerError('syntax'));
     await expect(definition.getDependencies({ entryPath: 'main.cs' }, runtime, value)).rejects.toMatchObject({
@@ -173,6 +208,26 @@ describe('PicoGK kernel', () => {
       success: false,
       issues: [{ message: 'plain failure', type: 'runtime', location: { fileName: 'main.cs' } }],
     });
+  });
+
+  it('scopes each mirror sync to the runtime operation and asks each worker question once', async () => {
+    const value = context();
+    value.session.request.mockImplementation(async ({ method }: { method: string }) =>
+      method === 'resolve'
+        ? { sources: ['main.cs'] }
+        : method === 'analyze'
+          ? { defaultParameters: {}, jsonSchema: { type: 'object' }, timings: compilationTimings }
+          : buildResult(),
+    );
+    const render = { ...runtime, operationId: 1 };
+
+    await definition.getDependencies({ entryPath: 'main.cs' }, render, value);
+    await definition.getParameters({ entryPath: 'main.cs' }, render, value);
+    await definition.createGeometry({ entryPath: 'main.cs', parameters: {}, options: {} }, render, value);
+
+    // The mirror reuses its own walk per operation id.
+    expect(value.mirror.sync.mock.calls.map((call): unknown => call[2])).toEqual([1, 1, 1]);
+    expect(requestedMethods(value.session.request)).toEqual(['resolve', 'analyze', 'build']);
   });
 
   it('returns parameters, canonical inline geometry, immutable handles, and GLB exports', async () => {

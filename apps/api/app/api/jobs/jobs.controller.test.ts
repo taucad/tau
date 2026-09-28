@@ -1,10 +1,8 @@
 import { Readable } from 'node:stream';
 
-import { ConflictException, ForbiddenException } from '@nestjs/common';
-import type { ConfigService } from '@nestjs/config';
+import { ConflictException, ForbiddenException, ServiceUnavailableException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { Environment } from '#config/environment.config.js';
 import type { HostsService } from '#api/hosts/hosts.service.js';
 import { JobsController } from '#api/jobs/jobs.controller.js';
 import type { JobsService } from '#api/jobs/jobs.service.js';
@@ -13,15 +11,7 @@ import type { ObjectStorageService } from '#storage/object-storage.service.js';
 
 const device = { id: 'device-authenticated', ownerId: 'owner-1' };
 
-type JobsEnvironment = { jobsEnabled?: boolean; nodeEnv?: string };
-
-const jobsConfig = (environment: JobsEnvironment = {}) =>
-  ({
-    get: (key: 'NODE_ENV' | 'TAU_JOBS_ENABLED') =>
-      key === 'TAU_JOBS_ENABLED' ? environment.jobsEnabled : (environment.nodeEnv ?? 'production'),
-  }) as unknown as ConfigService<Environment, true>;
-
-const harness = (environment: JobsEnvironment = {}) => {
+const harness = () => {
   const jobs = {
     isRunnerAuthorized: vi.fn(async () => true),
     isArtifactAttemptAuthorized: vi.fn(async () => true),
@@ -35,7 +25,6 @@ const harness = (environment: JobsEnvironment = {}) => {
     jobs as unknown as JobsService,
     hosts as unknown as HostsService,
     storage as ObjectStorageService,
-    jobsConfig(environment),
   );
   return { controller, jobs };
 };
@@ -117,7 +106,6 @@ describe('JobsController paired-runner authorization', () => {
       jobs as unknown as JobsService,
       hosts as unknown as HostsService,
       storage as unknown as ObjectStorageService,
-      jobsConfig(),
     );
 
     await expect(
@@ -163,7 +151,6 @@ describe('JobsController paired-runner authorization', () => {
       jobs as unknown as JobsService,
       hosts as unknown as HostsService,
       storage as unknown as ObjectStorageService,
-      jobsConfig(),
     );
 
     await expect(
@@ -225,7 +212,6 @@ describe('JobsController paired-runner authorization', () => {
       jobs as unknown as JobsService,
       hosts as unknown as HostsService,
       storage as unknown as ObjectStorageService,
-      jobsConfig(),
     );
 
     await expect(
@@ -278,7 +264,6 @@ describe('JobsController paired-runner authorization', () => {
       jobs as unknown as JobsService,
       hosts as unknown as HostsService,
       storage as unknown as ObjectStorageService,
-      jobsConfig(),
     );
 
     await expect(
@@ -307,27 +292,20 @@ describe('JobsController paired-runner authorization', () => {
   });
 });
 
-describe('JobsController supplier containment (B7 R10)', () => {
-  it('refuses submission before any dispatch while the paid job path is gated off', async () => {
+describe('JobsController retired dispatch', () => {
+  it('returns a stable unavailable result before creating a job', async () => {
     const { controller, jobs } = harness();
 
-    await expect(controller.submit(submission, 'owner-1')).rejects.toBeInstanceOf(ForbiddenException);
-    expect(jobs.submit).not.toHaveBeenCalled();
-  });
-
-  it('admits submission when the operator enables it, and by default in development', async () => {
-    const enabled = harness({ jobsEnabled: true });
-    await expect(enabled.controller.submit(submission, 'owner-1')).resolves.toBeDefined();
-    expect(enabled.jobs.submit).toHaveBeenCalledWith({ ownerId: 'owner-1', ...submission });
-
-    const development = harness({ nodeEnv: 'development' });
-    await expect(development.controller.submit(submission, 'owner-1')).resolves.toBeDefined();
-  });
-
-  it('keeps an explicit operator disable authoritative in development', async () => {
-    const { controller, jobs } = harness({ nodeEnv: 'development', jobsEnabled: false });
-
-    await expect(controller.submit(submission, 'owner-1')).rejects.toBeInstanceOf(ForbiddenException);
+    try {
+      await controller.submit(submission, 'owner-1');
+      expect.fail('Job dispatch should be unavailable.');
+    } catch (error) {
+      expect(error).toBeInstanceOf(ServiceUnavailableException);
+      if (!(error instanceof ServiceUnavailableException)) {
+        throw error;
+      }
+      expect(error.getResponse()).toMatchObject({ code: 'JOB_DISPATCH_UNAVAILABLE' });
+    }
     expect(jobs.submit).not.toHaveBeenCalled();
   });
 });

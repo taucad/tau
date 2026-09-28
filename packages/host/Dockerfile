@@ -28,6 +28,12 @@
 #     mints the device credential and passes it in as `TAU_HOST_CREDENTIAL`;
 #     the entrypoint writes it to `$TAU_CONFIG_DIR/host.json`, exactly the file
 #     `tau serve` would have written after a user-code pairing.
+#   - The host is a device of the owner (charter D21): the runtime carries `git`
+#     and `git-lfs`, the entrypoint clones the bound project with the
+#     repository-scoped push credential (`TAU_HOST_GIT_CREDENTIAL`), and the
+#     daemon's revision tree records and pushes the agent's turns from it.
+#     `git lfs install --system` so that clone smudges large files rather than
+#     leaving pointers in the working tree.
 
 # Node 26, not the API image's 24.3.0: tsdown's config loader trips a Node bug
 # fixed in 24.11.1 ("Failed to load the config file due to a known Node.js bug"),
@@ -80,6 +86,10 @@ LABEL org.opencontainers.image.title="Tau Host"
 LABEL org.opencontainers.image.description="Launcher 3: tau serve as a cloud agent host"
 WORKDIR /app
 
+RUN apt-get update && \
+    apt-get install --yes --no-install-recommends ca-certificates git git-lfs && \
+    rm -rf /var/lib/apt/lists/* && \
+    git lfs install --system --skip-repo
 RUN groupadd --system --gid 1001 tau && \
     useradd --system --uid 1001 --gid tau --home /app --shell /usr/sbin/nologin tau
 COPY --from=pruned --chown=tau:tau /pruned /app
@@ -88,13 +98,11 @@ RUN chmod 0755 /usr/local/bin/tau-host-entrypoint && \
     mkdir -p /workspace /config && chown tau:tau /workspace /config && chmod 0700 /config
 USER tau
 
-# `TAU_HOST_AGENT_PORT` is what turns the agent capability on (`tau serve`
-# offers it only when a port — or a UI directory — is configured); `0` asks for
-# an ephemeral loopback port, which is all a relayed host ever needs.
+# The agent port and every other `tau serve` flag live in the entrypoint, so the
+# script alone is the recipe for a cloud host.
 ENV NODE_ENV="production" \
     TAU_CONFIG_DIR="/config" \
-    TAU_HOST_WORKSPACE="/workspace" \
-    TAU_HOST_AGENT_PORT="0"
+    TAU_HOST_WORKSPACE="/workspace"
 VOLUME ["/workspace"]
 
 ENTRYPOINT ["/usr/local/bin/tau-host-entrypoint"]

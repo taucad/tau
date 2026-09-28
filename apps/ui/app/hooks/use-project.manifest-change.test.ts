@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { projectToManifest, serializeProjectManifest } from '@taucad/types';
-import type { ProjectManifest } from '@taucad/types';
+import type { ProjectManifest, ProjectManifestParseIssue } from '@taucad/types';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
+import { FileNotFoundError } from '@taucad/fs-client/file-content-errors';
 import {
   createProjectManifestChangeObserver,
   parameterStageForSettlement,
@@ -19,30 +20,47 @@ const project = (name: string): ProjectManifest =>
     assets: { main: { entryPath: 'main.ts' } },
   });
 
+const encode = (value: unknown): Uint8Array<ArrayBuffer> => new TextEncoder().encode(JSON.stringify(value));
+
+const observe = ({
+  current,
+  issue,
+  readManifest,
+}: {
+  readonly current: ProjectManifest;
+  readonly issue?: ProjectManifestParseIssue;
+  readonly readManifest: () => Promise<Uint8Array<ArrayBuffer>>;
+}) => {
+  const reload = vi.fn();
+  const report = vi.fn();
+  const observer = createProjectManifestChangeObserver({
+    projectId: current.id,
+    readManifest,
+    getCurrent: () => ({ project: current, issue }),
+    reload,
+    report,
+  });
+  return { observer, reload, report };
+};
+
 describe('createProjectManifestChangeObserver', () => {
   it('does not reload when a local write matches the current project', async () => {
     const current = project('Current');
-    const reload = vi.fn();
-    const observer = createProjectManifestChangeObserver({
+    const { observer, reload, report } = observe({
+      current,
       readManifest: async () => serializeProjectManifest(current),
-      getCurrentProject: () => current,
-      reload,
     });
 
     await observer.check();
 
     expect(reload).not.toHaveBeenCalled();
+    expect(report).not.toHaveBeenCalled();
   });
 
   it('reloads an externally changed manifest once', async () => {
     const current = project('Current');
     const changed = project('External change');
-    const reload = vi.fn();
-    const observer = createProjectManifestChangeObserver({
-      readManifest: async () => serializeProjectManifest(changed),
-      getCurrentProject: () => current,
-      reload,
-    });
+    const { observer, reload } = observe({ current, readManifest: async () => serializeProjectManifest(changed) });
 
     await observer.check();
     await observer.check();
@@ -50,16 +68,74 @@ describe('createProjectManifestChangeObserver', () => {
     expect(reload).toHaveBeenCalledOnce();
   });
 
-  it('ignores invalid manifests and results that arrive after disposal', async () => {
-    const reload = vi.fn();
+  /* The incident: an agent added a second asset key while the project was
+   * open, and the workspace carried on as if nothing had happened. */
+  it('reloads a degraded write so its issue shows while the project is open', async () => {
+    const current = project('Current');
+    const degraded = encode({ ...current, assets: { ...current.assets, second: { entryPath: 'second.cs' } } });
+    const { observer, reload, report } = observe({ current, readManifest: async () => degraded });
+
+    await observer.check();
+
+    expect(reload).toHaveBeenCalledOnce();
+    expect(report).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      'deleted',
+      async () => {
+        throw Object.assign(new Error('gone'), { code: 'ENOENT' });
+      },
+      'manifest-missing',
+    ],
+    [
+      'deleted, as the file manager reports it',
+      async () => {
+        throw new FileNotFoundError("File 'tau.json' was not found", { path: 'tau.json' });
+      },
+      'manifest-missing',
+    ],
+    [
+      'rewritten for another project',
+      async () => encode({ ...project('Current'), id: 'proj_abcdefghijklmnopqrstu' }),
+      'manifest-invalid',
+    ],
+    [
+      'given a foreign $schema',
+      async () => encode({ ...project('Current'), $schema: 'https://tau.new/schemas/tau-schema-v2.json' }),
+      'manifest-unknown-schema',
+    ],
+  ] as const)('reports a manifest %s instead of reloading into an error', async (_case, readManifest, code) => {
+    const { observer, reload, report } = observe({ current: project('Current'), readManifest });
+
+    await observer.check();
+
+    expect(reload).not.toHaveBeenCalled();
+    expect(report).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ code }));
+  });
+
+  it('reloads to clear a report when the last good bytes return', async () => {
+    const current = project('Current');
+    const { observer, reload } = observe({
+      current,
+      issue: { code: 'manifest-missing' },
+      readManifest: async () => serializeProjectManifest(current),
+    });
+
+    await observer.check();
+
+    expect(reload).toHaveBeenCalledOnce();
+  });
+
+  it('ignores results that arrive after disposal', async () => {
     let resolveRead: ((bytes: Uint8Array<ArrayBuffer>) => void) | undefined;
-    const observer = createProjectManifestChangeObserver({
+    const { observer, reload, report } = observe({
+      current: project('Current'),
       readManifest: async () =>
         new Promise((resolve) => {
           resolveRead = resolve;
         }),
-      getCurrentProject: () => project('Current'),
-      reload,
     });
 
     const pending = observer.check();
@@ -68,6 +144,7 @@ describe('createProjectManifestChangeObserver', () => {
     await pending;
 
     expect(reload).not.toHaveBeenCalled();
+    expect(report).not.toHaveBeenCalled();
   });
 });
 
@@ -77,13 +154,42 @@ describe('resolveScopedProjectManifest', () => {
     const expected = project('Current');
     contentService.resolve.mockResolvedValue({ kind: 'text', content: serializeProjectManifest(expected) });
 
-    await expect(resolveScopedProjectManifest({ contentService, projectId: expected.id })).resolves.toEqual(expected);
+    await expect(resolveScopedProjectManifest({ contentService, projectId: expected.id })).resolves.toEqual({
+      project: expected,
+    });
     expect(contentService.resolve).toHaveBeenCalledWith('tau.json', { forceText: true });
   });
 
-  it('should reject malformed manifests', async () => {
+  it('should open a degraded manifest with its issue', async () => {
+    const contentService = mock<FileContentService>();
+    const current = project('Current');
+    contentService.resolve.mockResolvedValue({
+      kind: 'text',
+      content: encode({ ...current, assets: { ...current.assets, second: { entryPath: 'second.cs' } } }),
+    });
+
+    await expect(resolveScopedProjectManifest({ contentService, projectId: current.id })).resolves.toEqual({
+      project: current,
+      /* oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- vitest types asymmetric matchers as `any`. */
+      issue: expect.objectContaining({ code: 'manifest-invalid' }),
+    });
+  });
+
+  it('should open malformed JSON under the route id so the file can be fixed in place', async () => {
     const contentService = mock<FileContentService>();
     contentService.resolve.mockResolvedValue({ kind: 'text', content: new TextEncoder().encode('{') });
+
+    await expect(
+      resolveScopedProjectManifest({ contentService, projectId: project('Current').id }),
+    ).resolves.toMatchObject({ project: { id: project('Current').id }, issue: { code: 'manifest-invalid-json' } });
+  });
+
+  it('should reject a manifest with a foreign $schema', async () => {
+    const contentService = mock<FileContentService>();
+    contentService.resolve.mockResolvedValue({
+      kind: 'text',
+      content: encode({ ...project('Current'), $schema: 'https://tau.new/schemas/tau-schema-v2.json' }),
+    });
 
     await expect(resolveScopedProjectManifest({ contentService, projectId: project('Current').id })).rejects.toThrow(
       'Invalid tau.json',

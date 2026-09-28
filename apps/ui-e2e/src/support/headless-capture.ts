@@ -339,6 +339,7 @@ export const readBase64CaptureEvidence = async (base64: string, mimeType: string
   }
 };
 
+/** Measures stroke width in pixels; `withoutLines` must be the same capture with its surfaces and without lines. */
 export const readLineCoverageEvidence = async (
   withLines: string,
   withoutLines: string,

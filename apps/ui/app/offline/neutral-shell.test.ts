@@ -72,6 +72,7 @@ it('keeps request cookies out of loader data', async () => {
 it('never revalidates the root server loader for the offline shell route', () => {
   const revalidate = (pathname: string): boolean | undefined =>
     shouldRevalidate({
+      currentUrl: new URL('https://tau.new/'),
       nextUrl: new URL(`https://tau.new${pathname}`),
       defaultShouldRevalidate: true,
     } as Parameters<typeof shouldRevalidate>[0]);

@@ -18,15 +18,18 @@ export { revisionId } from '@taucad/project-core/revision-id';
 export type { RevisionId } from '@taucad/project-core/revision-id';
 export { ImmutableRevisionTree } from '#algorithms/revision-tree.js';
 export type { RevisionTreeEntry, RevisionTreeInput } from '#algorithms/revision-tree.js';
-export { mergeRevisionTrees, renderConflictMarkers } from '#algorithms/revision-merge.js';
+export { mergeFilePreferring, mergeRevisionTrees, renderConflictMarkers } from '#algorithms/revision-merge.js';
 export type {
   AddAddConflict,
   BinaryConflict,
   ConflictMarkerInput,
   ConflictMarkerLabels,
   FileDirectoryConflict,
+  MergeRevisionTreesOptions,
   ModeConflict,
   ModifyDeleteConflict,
+  ParameterConflict,
+  ParameterRecordCodec,
   RevisionTreeConflict,
   RevisionTreeMergeResult,
   TextConflict,

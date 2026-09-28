@@ -7,6 +7,12 @@ import { RevisionPortError } from '#revision-port.js';
 import type { RevisionPort } from '#revision-port.js';
 import { remoteTrackingRef } from '#remotes.js';
 import { assertMaterializableRevisionTree } from '#portable-tree.js';
+import {
+  generatedGitattributesContent,
+  generatedGitattributesPath,
+  generatedIgnoreContent,
+  generatedIgnorePath,
+} from '#workspace-config.js';
 
 const headRefPrefix = 'refs/heads/';
 
@@ -22,7 +28,13 @@ export type RemoteBootstrapInput = Readonly<{
   maximumFiles?: number;
   maximumBytes?: number;
   signal?: AbortSignal;
-  /** Exact reviewed final tree. When it differs, bootstrap records one child of the imported head. */
+  /**
+   * Exact reviewed final tree. When it differs, bootstrap records one child of the imported head.
+   *
+   * The generated `.gitignore` and `.gitattributes` blocks are folded into it, so the
+   * workspace's first open finds them already recorded instead of writing them as
+   * unsaved changes (D34).
+   */
   setup?: Readonly<{
     files: ReadonlyArray<
       Readonly<{
@@ -129,6 +141,16 @@ export async function bootstrapRemoteRevisionStore(input: RemoteBootstrapInput):
       setupEntries.delete(file.path);
     } else {
       setupEntries.set(file.path, [file.path, file.content, file.mode ?? '100644']);
+    }
+  }
+  if (input.setup !== undefined) {
+    for (const [path, generate] of [
+      [generatedIgnorePath, generatedIgnoreContent],
+      [generatedGitattributesPath, generatedGitattributesContent],
+    ] as const) {
+      const existing = setupEntries.get(path);
+      const content = generate(existing === undefined ? undefined : new TextDecoder().decode(existing[1]));
+      setupEntries.set(path, [path, new TextEncoder().encode(content), existing?.[2] ?? '100644']);
     }
   }
   const tree = input.setup === undefined ? importedTree : new ImmutableRevisionTree(setupEntries.values());

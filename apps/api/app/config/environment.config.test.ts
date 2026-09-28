@@ -1,3 +1,4 @@
+import { readdirSync, readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
 import { environmentSchema } from '#config/environment.config.js';
 
@@ -15,6 +16,32 @@ const withRequiredCookieSecret = (env: NodeJS.ProcessEnv): Record<string, unknow
 };
 
 describe('environmentSchema', () => {
+  /*
+   * Charter D23: free-tier sync is landed code behind a launch gate. The flag
+   * defaults off, and no committed deploy config turns it on: the go-live
+   * checklist opens it by setting it in `fly.*.toml` and deleting the second
+   * row here in the same commit, so the opening is a reviewed change.
+   */
+  it('should keep free-tier sync closed when TAU_FREE_TIER_SYNC_ENABLED is unset', () => {
+    const environment = Object.fromEntries(
+      Object.entries(withRequiredCookieSecret(process.env)).filter(([key]) => key !== 'TAU_FREE_TIER_SYNC_ENABLED'),
+    );
+    const result = environmentSchema.safeParse(environment);
+
+    expect(result.success, JSON.stringify(result.success ? {} : result.error.issues)).toBe(true);
+    expect(result.success && result.data.TAU_FREE_TIER_SYNC_ENABLED).toBe(false);
+  });
+
+  it('should keep free-tier sync closed in every committed deploy config while D23 is open', () => {
+    const apiRoot = new URL('../../', import.meta.url);
+    const deployConfigs = readdirSync(apiRoot).filter((name) => /^fly\..*toml$/u.test(name));
+
+    expect(deployConfigs.length).toBeGreaterThan(0);
+    for (const name of deployConfigs) {
+      expect(readFileSync(new URL(name, apiRoot), 'utf8'), name).not.toContain('TAU_FREE_TIER_SYNC_ENABLED');
+    }
+  });
+
   it.each([
     [undefined, false],
     ['false', false],
@@ -459,6 +486,104 @@ describe('environmentSchema', () => {
         true,
       );
     }
+  });
+
+  it('should treat the empty GitHub repository App values of a copied .env.example as unconfigured', () => {
+    const result = environmentSchema.safeParse({
+      ...withRequiredCookieSecret(process.env),
+      NODE_ENV: 'development',
+      GITHUB_REPOSITORY_APP_CLIENT_ID: '',
+      GITHUB_REPOSITORY_APP_CLIENT_SECRET: '',
+      GITHUB_REPOSITORY_APP_SLUG: '',
+      GITHUB_REPOSITORY_APP_CALLBACK_URL: '',
+      GITHUB_REPOSITORY_CONNECTION_KEY: '',
+    });
+
+    expect(result.error?.issues).toBeUndefined();
+    expect(result.data).toMatchObject({
+      GITHUB_REPOSITORY_APP_CLIENT_ID: undefined,
+      GITHUB_REPOSITORY_APP_CLIENT_SECRET: undefined,
+      GITHUB_REPOSITORY_APP_SLUG: undefined,
+      GITHUB_REPOSITORY_APP_CALLBACK_URL: undefined,
+      GITHUB_REPOSITORY_CONNECTION_KEY: undefined,
+    });
+  });
+
+  it('should leave the App unconfigured when only the callback URL and connection key are set', () => {
+    const result = environmentSchema.safeParse({
+      ...withRequiredCookieSecret(process.env),
+      NODE_ENV: 'development',
+      GITHUB_REPOSITORY_APP_CLIENT_ID: '',
+      GITHUB_REPOSITORY_APP_CLIENT_SECRET: '',
+      GITHUB_REPOSITORY_APP_SLUG: '',
+      GITHUB_REPOSITORY_APP_CALLBACK_URL: 'http://localhost:4000/v1/github/callback',
+      GITHUB_REPOSITORY_CONNECTION_KEY: Buffer.alloc(32, 7).toString('base64url'),
+    });
+
+    expect(result.error?.issues).toBeUndefined();
+    expect(result.data).toMatchObject({
+      GITHUB_REPOSITORY_APP_CLIENT_ID: undefined,
+      GITHUB_REPOSITORY_APP_CLIENT_SECRET: undefined,
+      GITHUB_REPOSITORY_APP_SLUG: undefined,
+    });
+  });
+
+  it('should require the callback URL and connection key once the App credentials are set', () => {
+    const result = environmentSchema.safeParse({
+      ...withRequiredCookieSecret(process.env),
+      NODE_ENV: 'development',
+      GITHUB_REPOSITORY_APP_CLIENT_ID: 'Iv1.local',
+      GITHUB_REPOSITORY_APP_CLIENT_SECRET: 'github-app-secret',
+      GITHUB_REPOSITORY_APP_SLUG: 'tau-local',
+      GITHUB_REPOSITORY_APP_CALLBACK_URL: '',
+      GITHUB_REPOSITORY_CONNECTION_KEY: '',
+    });
+
+    expect(result.error?.issues.map((issue) => issue.path.join('.'))).toStrictEqual([
+      'GITHUB_REPOSITORY_APP_CALLBACK_URL',
+      'GITHUB_REPOSITORY_CONNECTION_KEY',
+    ]);
+  });
+
+  it('should reject an empty GitHub repository App value beside configured ones', () => {
+    const result = environmentSchema.safeParse({
+      ...withRequiredCookieSecret(process.env),
+      NODE_ENV: 'development',
+      GITHUB_REPOSITORY_APP_CLIENT_ID: 'Iv1.local',
+      GITHUB_REPOSITORY_APP_CLIENT_SECRET: '',
+      GITHUB_REPOSITORY_APP_SLUG: 'tau-local',
+      GITHUB_REPOSITORY_APP_CALLBACK_URL: 'http://localhost:4000/v1/github/callback',
+      GITHUB_REPOSITORY_CONNECTION_KEY: Buffer.alloc(32, 7).toString('base64url'),
+    });
+
+    expect(result.error?.issues.map((issue) => issue.path.join('.'))).toStrictEqual([
+      'GITHUB_REPOSITORY_APP_CLIENT_SECRET',
+    ]);
+  });
+
+  it('should accept a connection key made by the documented openssl recipe and reject padded base64', () => {
+    // `openssl rand -base64 32 | tr '+/' '-_' | tr -d '='` yields the unpadded base64url form of 32 bytes.
+    const bytes = Buffer.alloc(32, 251);
+    const recipe = bytes.toString('base64').replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
+    const parse = (key: string) =>
+      environmentSchema.safeParse({
+        ...withRequiredCookieSecret(process.env),
+        NODE_ENV: 'development',
+        GITHUB_REPOSITORY_APP_CLIENT_ID: 'Iv1.local',
+        GITHUB_REPOSITORY_APP_CLIENT_SECRET: 'github-app-secret',
+        GITHUB_REPOSITORY_APP_SLUG: 'tau-local',
+        GITHUB_REPOSITORY_APP_CALLBACK_URL: 'http://localhost:4000/v1/github/callback',
+        GITHUB_REPOSITORY_CONNECTION_KEY: key,
+      });
+
+    const accepted = parse(recipe);
+    const padded = parse(bytes.toString('base64'));
+
+    expect(recipe).toBe(bytes.toString('base64url'));
+    expect(accepted.success ? [] : accepted.error.issues).toStrictEqual([]);
+    expect(padded.success ? [] : padded.error.issues.map((issue) => issue.path.join('.'))).toStrictEqual([
+      'GITHUB_REPOSITORY_CONNECTION_KEY',
+    ]);
   });
 
   it('should allow production without the optional GitHub repository App', () => {

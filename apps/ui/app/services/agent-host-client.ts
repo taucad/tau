@@ -161,7 +161,8 @@ export type AgentHostClientOptions = {
   readonly gatewayBaseUrl: string;
   readonly systemPrompt: string;
   readonly systemPromptBlocks: AgentHostAdmissionConfig['systemPromptBlocks'];
-  readonly model: AgentHostModel;
+  /** Absent while the model catalog is unavailable; see `AgentHostWorkerInitializeRequest.model`. */
+  readonly model?: AgentHostModel | undefined;
   readonly runtimeConfig: UiRuntimeConfigInput;
   readonly geoSpecEngine?: 'legacy' | 'native' | undefined;
   readonly testingEnabled?: boolean | undefined;
@@ -440,17 +441,29 @@ export const createAgentHostClient = (
       }
     });
     const replaySnapshot = async (): Promise<HostRunSnapshot> => {
-      let attached: Awaited<ReturnType<AgentHostClient['attach']>>;
-      try {
-        attached = await attach({ chatId: initial.chatId, cursor, limit: agentHostTailBatchLimit });
-      } catch (error) {
-        if (error instanceof AgentHostWorkerError && error.code === 'COMMAND_TIMEOUT') {
-          throw new AgentHostWorkerError(
-            'RUN_IDLE_TIMEOUT',
-            `Agent host run ${initial.runId} stopped answering liveness probes.`,
-          );
+      let attached: Awaited<ReturnType<AgentHostClient['attach']>> | undefined;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- A missed read is retried with the same cursor, never a second admission.
+          attached = await attach({ chatId: initial.chatId, cursor, limit: agentHostTailBatchLimit });
+          break;
+        } catch (error) {
+          if (!(error instanceof AgentHostWorkerError) || error.code !== 'COMMAND_TIMEOUT') {
+            throw error;
+          }
+          if (attempt === 2) {
+            throw new AgentHostWorkerError(
+              'RUN_IDLE_TIMEOUT',
+              `Agent host control connection for run ${initial.runId} did not answer three liveness probes.`,
+            );
+          }
         }
-        throw error;
+      }
+      if (!attached) {
+        throw new AgentHostWorkerError(
+          'RUN_IDLE_TIMEOUT',
+          `Agent host replay for run ${initial.runId} did not return.`,
+        );
       }
       const { snapshot } = attached;
       cursor = attached.nextCursor;
@@ -628,7 +641,7 @@ const createAgentHostWorkerTransport = (options: AgentHostClientOptions): AgentH
   if (!capability.supported) {
     throw new AgentHostWorkerError(capability.reason, `Browser agent host is unavailable: ${capability.reason}`);
   }
-  if (!isBrowserAgentHostProviderKind(options.model.providerKind)) {
+  if (options.model !== undefined && !isBrowserAgentHostProviderKind(options.model.providerKind)) {
     throw new AgentHostWorkerError(
       'MODEL_PROVIDER_UNSUPPORTED',
       `Browser host does not speak the ${options.model.providerKind} provider wire.`,

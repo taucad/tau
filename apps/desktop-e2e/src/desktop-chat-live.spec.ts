@@ -44,7 +44,7 @@ import {
 
 const live = process.env['TAU_E2E_LIVE_LLM'] === 'true';
 const packaged = process.env['TAU_E2E_PACKAGED'] === 'true';
-const modelName = process.env['TAU_E2E_LIVE_MODEL'] ?? 'GPT-5.6 Luna';
+const modelName = process.env['TAU_E2E_LIVE_MODEL'] ?? 'GPT-6 Luna';
 const prompt = 'Create a 20 mm cube with a 6 mm centered cylindrical hole through it.';
 
 let session: DesktopSession | undefined;

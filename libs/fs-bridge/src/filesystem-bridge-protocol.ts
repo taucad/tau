@@ -472,6 +472,7 @@ const mountConfigSchema: z.ZodType<MountConfig> = z.discriminatedUnion('backend'
 
 const manifestIssueSchema = z.discriminatedUnion('code', [
   z.looseObject({ code: z.literal('manifest-unreadable'), message: z.string() }),
+  z.looseObject({ code: z.literal('manifest-missing') }),
   z.looseObject({ code: z.literal('manifest-invalid-json'), message: z.string() }),
   z.looseObject({ code: z.literal('manifest-too-large'), maxBytes: z.number() }),
   z.looseObject({
@@ -482,10 +483,16 @@ const manifestIssueSchema = z.discriminatedUnion('code', [
   z.looseObject({ code: z.literal('manifest-invalid'), issues: z.array(z.unknown()) }),
 ]) as z.ZodType<ProjectManifestParseIssue>;
 const adoptableProjectManifestSchema = projectManifestSchema.omit({ id: true });
+/* An identified entry's `issue` marks a degraded manifest: it routes, and its bytes await Repair. */
+const identifiedEntryShape = {
+  manifest: projectManifestSchema,
+  locator: projectLocatorSchema,
+  issue: manifestIssueSchema.optional(),
+};
 const projectDiscoveryEntrySchema: z.ZodType<ProjectDiscoveryEntry> = z.discriminatedUnion('status', [
-  z.looseObject({ status: z.literal('valid'), manifest: projectManifestSchema, locator: projectLocatorSchema }),
-  z.looseObject({ status: z.literal('duplicate-id'), manifest: projectManifestSchema, locator: projectLocatorSchema }),
-  z.looseObject({ status: z.literal('route-blocked'), manifest: projectManifestSchema, locator: projectLocatorSchema }),
+  z.looseObject({ status: z.literal('valid'), ...identifiedEntryShape }),
+  z.looseObject({ status: z.literal('duplicate-id'), ...identifiedEntryShape }),
+  z.looseObject({ status: z.literal('route-blocked'), ...identifiedEntryShape }),
   z.looseObject({
     status: z.literal('adoption-required'),
     manifest: adoptableProjectManifestSchema,
@@ -728,7 +735,10 @@ const callSchemas = {
     args: z.tuple([pendingProjectCommitInputSchema]),
     result: pendingProjectCommitResultSchema,
   },
-  adoptProjectDirectory: { args: z.tuple([projectLocatorSchema]), result: projectManifestSchema },
+  adoptProjectDirectory: {
+    args: z.tuple([projectLocatorSchema, z.object({ id: projectIdSchema.optional() }).optional()]),
+    result: projectManifestSchema,
+  },
   permanentlyDeleteProjectDirectory: {
     args: z.tuple([permanentDeleteInputSchema]),
     result: permanentDeleteResultSchema,

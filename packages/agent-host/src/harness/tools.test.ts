@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { estimateContextTokens } from '@earendil-works/pi-agent-core';
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import type { Api, Model } from '@earendil-works/pi-ai';
-import type { ToolRegistry } from '#waist/ports.js';
+import type { HostToolInvocation, ToolRegistry } from '#waist/ports.js';
 import { applyHostToolResult, createAgentTools, normalizeToolInput, toPiToolContent } from '#harness/tools.js';
 import type { HostToolExecutionDetails } from '#harness/tools.js';
 import { MessageIdentities, piMessageToProvider, providerMessageToPi } from '#harness/session-record.js';
@@ -48,6 +48,43 @@ describe('ToolInputCompatibility', () => {
 });
 
 describe('EagerDispatch', () => {
+  it('records a thrown tool abort as USER_INTERRUPTED', async () => {
+    const controller = new AbortController();
+    const registry: ToolRegistry = {
+      list: () => [{ name: 'screenshot', description: 'Capture', inputSchema: { type: 'object' } }],
+      invoke: async () => {
+        controller.abort();
+        throw new DOMException('signal is aborted without reason', 'AbortError');
+      },
+    };
+    const [tool] = createAgentTools({ registry, runId: 'run-abort' });
+    const result = await tool!.execute('call-abort', {}, controller.signal);
+    expect(result.details).toMatchObject({
+      isError: true,
+      content: { errorCode: 'USER_INTERRUPTED', message: 'Interrupted by user.' },
+    });
+    expect(result.content).toEqual([
+      { type: 'text', text: '{"errorCode":"USER_INTERRUPTED","message":"Interrupted by user."}' },
+    ]);
+  });
+
+  it('preserves a returned tool outcome after the signal aborts', async () => {
+    const controller = new AbortController();
+    const registry: ToolRegistry = {
+      list: () => [{ name: 'edit_file', description: 'Edit', inputSchema: { type: 'object' } }],
+      invoke: async () => {
+        controller.abort();
+        return { content: { errorCode: 'WRITE_FAILED', message: 'Write outcome is known.' }, isError: true };
+      },
+    };
+    const [tool] = createAgentTools({ registry, runId: 'run-abort' });
+    const result = await tool!.execute('call-write', {}, controller.signal);
+    expect(result.details).toMatchObject({
+      isError: true,
+      content: { errorCode: 'WRITE_FAILED', message: 'Write outcome is known.' },
+    });
+  });
+
   it('ports SP-8 T4 by substituting inside AgentTool.execute', async () => {
     const invoke = vi.fn(async () => ({ content: { real: true }, isError: false }));
     const registry: ToolRegistry = {
@@ -72,6 +109,28 @@ describe('EagerDispatch', () => {
     expect(result.content).toEqual([{ type: 'text', text: '{"cached":true}' }]);
     expect(result.details).toEqual({ content: { cached: true }, isError: false, substituted: true });
     expect(applyHostToolResult({ result })).toEqual({ isError: false });
+  });
+
+  it('forwards the run approval to every registry invocation', async () => {
+    const approve = vi.fn<NonNullable<HostToolInvocation['approve']>>(async () => ({
+      interruptId: 'interrupt-1',
+      outcome: 'approved',
+    }));
+    const seen: Array<HostToolInvocation['approve']> = [];
+    const registry: ToolRegistry = {
+      list: () => [{ name: 'request_print', description: 'Print', inputSchema: { type: 'object' } }],
+      invoke: async (invocation) => {
+        seen.push(invocation.approve);
+        return { content: null, isError: false };
+      },
+    };
+    const [withApproval] = createAgentTools({ registry, runId: 'run-approval', approve });
+    const [withoutApproval] = createAgentTools({ registry, runId: 'run-approval' });
+
+    await withApproval!.execute('call-1', {});
+    await withoutApproval!.execute('call-2', {});
+
+    expect(seen).toEqual([approve, undefined]);
   });
 
   it('forwards genuine registry progress through Pi tool updates', async () => {
@@ -243,6 +302,14 @@ describe('CaptureToolResults', () => {
     expect(
       forProvider.role === 'toolResult' && forProvider.content.filter((block) => block.type === 'image'),
     ).toHaveLength(multiAngleViews.length);
+  });
+
+  it('should tell the model in its summary what the images leave out', () => {
+    const message = 'Section cutaways narrower than 180° are not shown in captures.';
+
+    const [summary] = toPiToolContent({ ...captureResult(['isometric']), message });
+
+    expect(summary?.type === 'text' && summary.text).toContain(`Captured 1 screenshot(s). ${message} You are now`);
   });
 
   it('leaves non-capture tool results as JSON text', async () => {

@@ -1,9 +1,10 @@
 /* oxlint-disable new-cap, @typescript-eslint/consistent-type-imports -- NestJS decorators are factories and DI metadata needs runtime class imports */
 /* eslint-disable max-params-no-constructor/max-params-no-constructor -- Nest request facets and relay identity remain explicit. */
 import { isIPv4, isIPv6 } from 'node:net';
+import type { LookupFunction } from 'node:net';
 import { lookup } from 'node:dns/promises';
 import type { LookupAddress } from 'node:dns';
-import { randomUUID } from 'node:crypto';
+import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from 'node:crypto';
 import type { ReadableStream as WebReadableStream } from 'node:stream/web';
 import { Readable } from 'node:stream';
 import { request as httpRequest } from 'node:http';
@@ -13,6 +14,8 @@ import {
   BadRequestException,
   Controller,
   Get,
+  HttpException,
+  HttpStatus,
   Logger,
   Post,
   Put,
@@ -59,7 +62,6 @@ const lfsBatchSchema = z
   .loose();
 type LfsRelayRecord = Readonly<{
   userId: string;
-  repositoryUrl: string;
   oid: string;
   size: number;
   url: string;
@@ -69,7 +71,6 @@ type LfsRelayRecord = Readonly<{
 }>;
 const lfsRelayRecordSchema = z.object({
   userId: z.string().min(1),
-  repositoryUrl: z.url(),
   oid: z.string().regex(/^[0-9a-f]{64}$/u),
   size: z.number().int().nonnegative(),
   url: z.url(),
@@ -78,6 +79,33 @@ const lfsRelayRecordSchema = z.object({
   expiresAt: z.number().int().positive(),
 });
 const relayHandlePattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const relayKeyPattern = /^[\w-]{43}$/u;
+
+/*
+ * A relay record holds a third party's presigned URL and headers for five
+ * minutes (D22). It is sealed with a key made for that one handle and handed
+ * to the caller as an LFS action header, never stored: Redis alone holds only
+ * ciphertext, the caller alone holds only a key, and the handle is the
+ * additional data, so a sealed record cannot be replayed under another handle.
+ */
+export const sealRelayRecord = (handle: string, record: LfsRelayRecord): { sealed: string; key: string } => {
+  const key = randomBytes(32);
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', key, iv).setAAD(Buffer.from(handle));
+  const body = Buffer.concat([cipher.update(JSON.stringify(record)), cipher.final()]);
+  return {
+    sealed: Buffer.concat([iv, cipher.getAuthTag(), body]).toString('base64'),
+    key: key.toString('base64url'),
+  };
+};
+
+const openRelayRecord = (handle: string, sealed: string, key: string): unknown => {
+  const bytes = Buffer.from(sealed, 'base64');
+  const decipher = createDecipheriv('aes-256-gcm', Buffer.from(key, 'base64url'), bytes.subarray(0, 12))
+    .setAAD(Buffer.from(handle))
+    .setAuthTag(bytes.subarray(12, 28));
+  return JSON.parse(Buffer.concat([decipher.update(bytes.subarray(28)), decipher.final()]).toString('utf8'));
+};
 
 /**
  * The remote's credential travels in its own header, never in the query string
@@ -129,23 +157,48 @@ const isBlockedIpv4 = (address: string): boolean =>
     return Math.floor(toUint32(address) / block) === Math.floor(toUint32(network) / block);
   });
 
-/** `::ffff:127.0.0.1` and `::ffff:7f00:1` are the same address. */
-const mappedIpv4 = (address: string): string | undefined => {
-  const match = /^::ffff:(.+)$/u.exec(address);
-  if (match === null) {
-    return undefined;
+/**
+ * The eight 16-bit groups of a valid IPv6 literal. A dotted IPv4 tail (the
+ * resolver's `::ffff:127.0.0.1`) folds into the last two groups, so every
+ * spelling of one address compares the same.
+ */
+const ipv6Groups = (address: string): number[] => {
+  const text = address.replace(/%.*$/u, '');
+  const dotted = /(?:^|:)(\d+\.\d+\.\d+\.\d+)$/u.exec(text)?.[1];
+  const value = dotted === undefined ? 0 : toUint32(dotted);
+  const hex =
+    dotted === undefined
+      ? text
+      : `${text.slice(0, -dotted.length)}${Math.floor(value / 65_536).toString(16)}:${(value % 65_536).toString(16)}`;
+  const [head = '', tail] = hex.split('::');
+  const left = head === '' ? [] : head.split(':');
+  const right = tail === undefined || tail === '' ? [] : tail.split(':');
+  return [...left, ...Array.from({ length: 8 - left.length - right.length }, () => '0'), ...right].map((group) =>
+    Number.parseInt(group, 16),
+  );
+};
+
+/**
+ * The IPv4 address an IPv6 literal carries and a host may route to. In the low
+ * 32 bits: IPv4-mapped `::ffff:a.b.c.d`, SIIT `::ffff:0:a.b.c.d`,
+ * IPv4-compatible `::a.b.c.d` (which covers `::` and `::1`), and the NAT64
+ * well-known prefix `64:ff9b::/96`. Right after the prefix: 6to4 `2002::/16`.
+ */
+const embeddedIpv4Prefixes = new Set(['0:0:0:0:0:0', '0:0:0:0:0:ffff', '0:0:0:0:ffff:0', '64:ff9b:0:0:0:0']);
+const dottedIpv4 = (high = 0, low = 0): string =>
+  [Math.floor(high / 256), high % 256, Math.floor(low / 256), low % 256].join('.');
+const embeddedIpv4 = (groups: readonly number[]): string | undefined => {
+  if (
+    embeddedIpv4Prefixes.has(
+      groups
+        .slice(0, 6)
+        .map((group) => group.toString(16))
+        .join(':'),
+    )
+  ) {
+    return dottedIpv4(groups[6], groups[7]);
   }
-  const rest = match[1] ?? '';
-  if (isIPv4(rest)) {
-    return rest;
-  }
-  const groups = /^([\da-f]{1,4}):([\da-f]{1,4})$/u.exec(rest);
-  if (groups === null) {
-    return undefined;
-  }
-  const high = Number.parseInt(groups[1] ?? '0', 16);
-  const low = Number.parseInt(groups[2] ?? '0', 16);
-  return [Math.floor(high / 256), high % 256, Math.floor(low / 256), low % 256].join('.');
+  return groups[0] === 0x20_02 ? dottedIpv4(groups[1], groups[2]) : undefined;
 };
 
 /** Fast refusal for literal/private host forms; DNS answers are checked and socket-pinned separately. */
@@ -158,11 +211,20 @@ const isBlockedHost = (hostname: string): boolean => {
     return isBlockedIpv4(host);
   }
   if (isIPv6(host)) {
-    const mapped = mappedIpv4(host);
-    if (mapped !== undefined) {
-      return isBlockedIpv4(mapped);
+    const groups = ipv6Groups(host);
+    const embedded = embeddedIpv4(groups);
+    if (embedded !== undefined) {
+      return isBlockedIpv4(embedded);
     }
-    return host === '::1' || host === '::' || /^f[cd]/u.test(host) || /^fe[89ab]/u.test(host);
+    const [first = 0, second = 0, third = 0] = groups;
+    // Unique-local fc00::/7 (Fly's 6PN sits here), fe80::/10 link-local and fec0::/10 site-local, and the
+    // local-use NAT64 prefix 64:ff9b:1::/48, which only a private translator routes and which may place its
+    // IPv4 at any RFC 6052 offset.
+    return (
+      (first >= 0xfc_00 && first <= 0xfd_ff) ||
+      (first >= 0xfe_80 && first <= 0xfe_ff) ||
+      (first === 0x64 && second === 0xff_9b && third === 1)
+    );
   }
   return false;
 };
@@ -195,19 +257,65 @@ const upstreamTimeoutMilliseconds = 60 * 1000;
  */
 const proxyRequestLimitBytes = 512 * 1024 * 1024;
 
+/** A verify action's body is `{oid, size}`; anything near this is not one. */
+const lfsVerifyLimitBytes = 64 * 1024;
+
+/**
+ * Proxied requests one user may make per minute. A 2 s sync debounce with a
+ * push's three or four requests is ~120, so this bounds abuse without touching
+ * a busy session. The LFS relay has a budget of its own, below.
+ */
+const proxyRequestsPerUserPerMinute = 600;
+
+/**
+ * Relayed LFS requests one user may make per minute (I11). The relay only
+ * reaches actions an upstream batch answer issued, but a sealed handle is
+ * replayable until it expires, so it is bounded like every other git route:
+ * two requests (transfer and verify) per object, a thousand objects a minute.
+ */
+const lfsRelayRequestsPerUserPerMinute = 2000;
+
+/** The fixed-window counter `repositories.service.ts` uses for its per-IP limits. */
+const incrementWithExpiryLua = `
+local current = redis.call('INCR', KEYS[1])
+if current == 1 then
+  redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return current
+`;
+
+const lfsMediaType = 'application/vnd.git-lfs+json';
+
+/**
+ * The caller's `Accept` when it asks for the git-lfs media type, which the LFS
+ * batch and verify endpoints require (a server may answer a wildcard with `406`).
+ *
+ * @param request - The incoming request.
+ * @returns The header to forward, or undefined to keep the proxy's own.
+ */
+const lfsAccept = (request: FastifyRequest): string | undefined => {
+  const { accept } = request.headers;
+  return typeof accept === 'string' && accept.split(';')[0]?.trim().toLowerCase() === lfsMediaType ? accept : undefined;
+};
+
 /**
  * The request body, with a ceiling, reusing the shape the LFS relay already
  * uses for its exact-size check below.
  *
- * @param body - The incoming request stream.
+ * The git module parses `application/vnd.git-lfs+json` for its own LFS
+ * endpoints, which drains the raw stream first; that body is forwarded as the
+ * JSON it was, or the upstream receives nothing (D43).
+ *
+ * @param request - The incoming request.
  * @param limitBytes - The most it may carry.
  * @returns A stream that fails once the ceiling is passed.
  */
-const boundedBody = (body: Readable, limitBytes: number): Readable =>
+const boundedBody = (request: FastifyRequest, limitBytes: number): Readable =>
   Readable.from(
     (async function* (): AsyncGenerator<Uint8Array<ArrayBuffer>> {
       let received = 0;
-      for await (const chunk of body) {
+      const parsed = request.body !== undefined && !(request.body instanceof Readable);
+      for await (const chunk of parsed ? [Buffer.from(JSON.stringify(request.body))] : request.raw) {
         const bytes = Uint8Array.from(chunk as Uint8Array<ArrayBuffer>);
         received += bytes.byteLength;
         if (received > limitBytes) {
@@ -218,6 +326,18 @@ const boundedBody = (body: Readable, limitBytes: number): Readable =>
     })(),
   );
 
+/**
+ * One answer for every way the upstream failed to answer (socket, TLS,
+ * timeout, a body cut short), so a refusal cannot tell a closed port from a
+ * slow host (D21).
+ *
+ * @returns Never.
+ * @throws BadGatewayException `GIT_PROXY_UPSTREAM_FAILED`.
+ */
+const upstreamFailed = (): never => {
+  throw new BadGatewayException({ code: 'GIT_PROXY_UPSTREAM_FAILED', message: 'The git host did not answer' });
+};
+
 const pinnedFetch = async (target: URL, address: LookupAddress, init: RequestInit): Promise<Response> =>
   new Promise<Response>((resolve, reject) => {
     const request = (target.protocol === 'https:' ? httpsRequest : httpRequest)(
@@ -225,9 +345,15 @@ const pinnedFetch = async (target: URL, address: LookupAddress, init: RequestIni
       {
         method: init.method,
         headers: Object.fromEntries(new Headers(init.headers).entries()),
-        lookup: (_hostname, _options, callback) => {
-          callback(null, address.address, address.family);
-        },
+        /* Node's connect asks with `all: true` (happy-eyeballs) and then wants an
+         * address list; a bare address fails as `ERR_INVALID_IP_ADDRESS` (D32). */
+        lookup: ((_hostname, options, callback) => {
+          if (options.all === true) {
+            callback(null, [{ address: address.address, family: address.family }]);
+          } else {
+            callback(null, address.address, address.family);
+          }
+        }) satisfies LookupFunction,
       },
       (response) => {
         const headers = new Headers();
@@ -262,7 +388,13 @@ const pinnedFetch = async (target: URL, address: LookupAddress, init: RequestIni
       init.signal?.addEventListener('abort', abort, { once: true });
     }
     if (init.body instanceof ReadableStream) {
-      Readable.fromWeb(init.body as unknown as WebReadableStream).pipe(request);
+      const body = Readable.fromWeb(init.body as unknown as WebReadableStream);
+      // `pipe` leaves the request open when its source fails, so an over-limit
+      // body waited out the upstream timeout instead of answering its own 413.
+      body.once('error', (error) => {
+        request.destroy(error);
+      });
+      body.pipe(request);
     } else {
       request.end(init.body as string | Uint8Array<ArrayBuffer> | undefined);
     }
@@ -357,10 +489,13 @@ export class GitProxyController {
     userId: string,
   ): Promise<StreamableFile> {
     let target = this.resolveTarget(rawUrl);
+    await this.consumeRequestSlot(userId, { family: 'proxy', limit: proxyRequestsPerUserPerMinute });
     const proxyAuthorization = request.headers[proxyAuthorizationHeader];
+    const accept = lfsAccept(request);
     const headers = new Headers({
-      'user-agent': 'git/tau-proxy',
-      accept: '*/*',
+      /* GitHub's LFS API answers any `git/…` agent with an HTML 403 (D42). */
+      'user-agent': accept === undefined ? 'git/tau-proxy' : 'git-lfs/tau-proxy',
+      accept: accept ?? '*/*',
     });
     if (typeof proxyAuthorization === 'string') {
       headers.set('authorization', proxyAuthorization);
@@ -380,7 +515,7 @@ export class GitProxyController {
       headers,
       ...(request.method === 'POST'
         ? {
-            body: Readable.toWeb(boundedBody(request.raw, proxyRequestLimitBytes)) as ReadableStream,
+            body: Readable.toWeb(boundedBody(request, proxyRequestLimitBytes)) as ReadableStream,
             duplex: 'half',
           }
         : {}),
@@ -393,17 +528,10 @@ export class GitProxyController {
       if (location === null) {
         break;
       }
+      // A Location no URL parser accepts is the remote's fault, not the caller's.
+      const moved = URL.parse(location, target) ?? upstreamFailed();
       if (typeof proxyAuthorization === 'string') {
-        /* A GitHub App installation token is scoped to one *repository*, and a
-           renamed or transferred repository redirects to a different path on
-           the same origin — so dropping the credential only when the origin
-           changed replayed a repository-scoped token at a repository it was
-           never issued for (review C33, policy Rule 11). A credential follows
-           nothing: the client re-issues against the final URL. */
-        throw new BadGatewayException({
-          code: 'GIT_PROXY_REDIRECTED_CREDENTIAL',
-          message: 'The remote redirected a request that carried a credential; re-issue against the final URL',
-        });
+        return this.redirectedCredential(moved, reply);
       }
       if (hop >= maximumRedirectHops) {
         throw new BadGatewayException({
@@ -422,7 +550,7 @@ export class GitProxyController {
       // Every hop is re-checked: scheme, credentials, host range and git path.
       // A redirect that carried a credential was refused above, so there is
       // none left to drop here.
-      const next = this.resolveTarget(new URL(location, target).toString());
+      const next = this.resolveTarget(moved.toString());
       // oxlint-disable-next-line no-await-in-loop -- a redirect chain is sequential by definition
       response = await this.fetchTarget(next, {
         method: 'GET',
@@ -434,58 +562,7 @@ export class GitProxyController {
     }
 
     if (target.pathname.endsWith(lfsBatchSuffix) && response.ok) {
-      const parsed = lfsBatchSchema.parse(await response.json());
-      const repositoryUrl = new URL(target);
-      repositoryUrl.pathname = repositoryUrl.pathname.slice(0, -lfsBatchSuffix.length);
-      repositoryUrl.search = '';
-      repositoryUrl.hash = '';
-      for (const object of parsed.objects) {
-        for (const [name, method] of [
-          ['upload', 'PUT'],
-          ['download', 'GET'],
-          ['verify', 'POST'],
-        ] as const) {
-          const action = object.actions?.[name];
-          if (action === undefined) {
-            continue;
-          }
-          const actionUrl = new URL(action.href);
-          if (actionUrl.protocol !== 'https:' || actionUrl.username !== '' || actionUrl.password !== '') {
-            throw new BadGatewayException({ code: 'GIT_LFS_ACTION_REFUSED' });
-          }
-          // oxlint-disable-next-line no-await-in-loop -- each action URL is an independent SSRF boundary.
-          await this.publicAddress(actionUrl);
-          const handle = randomUUID();
-          const headers = Object.fromEntries(
-            Object.entries(action.header ?? {}).filter(([header]) => !refusedActionHeaders.has(header.toLowerCase())),
-          );
-          const record: LfsRelayRecord = {
-            userId,
-            repositoryUrl: repositoryUrl.toString(),
-            oid: object.oid,
-            size: object.size,
-            url: actionUrl.toString(),
-            method,
-            headers,
-            expiresAt: Date.now() + lfsHandleTtlSeconds * 1000,
-          };
-          // oxlint-disable-next-line no-await-in-loop -- each independently expiring action needs its own opaque handle.
-          await this.redis.client.set(
-            `git:lfs:relay:${handle}`,
-            JSON.stringify(record),
-            'EX',
-            lfsHandleTtlSeconds,
-            'NX',
-          );
-          action.href = `${this.#apiUrl}/v1/git/lfs/${handle}`;
-          action.header = {};
-        }
-      }
-      void reply
-        .status(response.status)
-        .header('content-type', 'application/vnd.git-lfs+json')
-        .header('cache-control', 'no-store');
-      return new StreamableFile(Buffer.from(JSON.stringify(parsed)));
+      return this.relayLfsBatch(response, userId, reply);
     }
 
     void reply.status(response.status);
@@ -501,6 +578,113 @@ export class GitProxyController {
     );
   }
 
+  /**
+   * Answer an LFS batch with every signed action replaced by a short-lived,
+   * user-bound relay handle, so the third party's presigned URL and headers
+   * never reach the browser.
+   *
+   * @param response - The upstream batch answer.
+   * @param userId - The caller the handles are bound to.
+   * @param reply - The caller's reply.
+   * @returns The rewritten batch body.
+   */
+  private async relayLfsBatch(response: Response, userId: string, reply: FastifyReply): Promise<StreamableFile> {
+    const answer = lfsBatchSchema.safeParse(await response.json().catch(upstreamFailed));
+    const parsed = answer.success ? answer.data : upstreamFailed();
+    for (const object of parsed.objects) {
+      for (const [name, method] of [
+        ['upload', 'PUT'],
+        ['download', 'GET'],
+        ['verify', 'POST'],
+      ] as const) {
+        const action = object.actions?.[name];
+        if (action === undefined) {
+          continue;
+        }
+        const actionUrl = new URL(action.href);
+        if (
+          actionUrl.protocol !== 'https:' ||
+          actionUrl.username !== '' ||
+          actionUrl.password !== '' ||
+          (actionUrl.port !== '' && !this.#allowPrivate)
+        ) {
+          throw new BadGatewayException({ code: 'GIT_LFS_ACTION_REFUSED' });
+        }
+        // oxlint-disable-next-line no-await-in-loop -- each action URL is an independent SSRF boundary.
+        await this.publicAddress(actionUrl);
+        const handle = randomUUID();
+        const headers = Object.fromEntries(
+          Object.entries(action.header ?? {}).filter(([header]) => !refusedActionHeaders.has(header.toLowerCase())),
+        );
+        const record: LfsRelayRecord = {
+          userId,
+          oid: object.oid,
+          size: object.size,
+          url: actionUrl.toString(),
+          method,
+          headers,
+          expiresAt: Date.now() + lfsHandleTtlSeconds * 1000,
+        };
+        const { sealed, key } = sealRelayRecord(handle, record);
+        // oxlint-disable-next-line no-await-in-loop -- each independently expiring action needs its own opaque handle.
+        await this.redis.client.set(`git:lfs:relay:${handle}`, sealed, 'EX', lfsHandleTtlSeconds, 'NX');
+        action.href = `${this.#apiUrl}/v1/git/lfs/${handle}`;
+        action.header = { [httpHeader.xTauLfsKey]: key };
+      }
+    }
+    void reply.status(response.status).header('content-type', lfsMediaType).header('cache-control', 'no-store');
+    return new StreamableFile(Buffer.from(JSON.stringify(parsed)));
+  }
+
+  /**
+   * Refuse a redirect on a request that carried a credential (D11).
+   *
+   * A GitHub App installation token is scoped to one *repository*, and a
+   * renamed or transferred repository redirects to a different path on the
+   * same origin — so dropping the credential only when the origin changed
+   * replayed a repository-scoped token at a repository it was never issued for
+   * (review C33, policy Rule 11). A credential follows nothing: the client
+   * learns where the repository went, re-resolves it by its stable id and asks
+   * the user before re-issuing. The target passes the same checks as any hop
+   * and loses its query (a signed redirect's token) and userinfo before it is
+   * echoed; a target that fails those checks is refused with the same code and
+   * no `location`, never with a refusal that reads as the caller's own URL.
+   * Answered here, not thrown: the global filter keeps only `code` and the
+   * message, and the client needs `location`.
+   *
+   * @param moved - Where the remote redirected to.
+   * @param reply - The caller's reply.
+   * @returns The typed `409` body.
+   */
+  private redirectedCredential(moved: URL, reply: FastifyReply): StreamableFile {
+    moved.username = '';
+    moved.password = '';
+    moved.search = '';
+    moved.hash = '';
+    let location: string | undefined;
+    try {
+      location = this.resolveTarget(moved.toString()).toString();
+    } catch (error) {
+      if (!(error instanceof BadRequestException)) {
+        throw error;
+      }
+    }
+    void reply
+      .status(HttpStatus.CONFLICT)
+      .header('content-type', 'application/json')
+      .header('cache-control', 'no-store');
+    return new StreamableFile(
+      Buffer.from(
+        JSON.stringify({
+          statusCode: HttpStatus.CONFLICT,
+          code: 'GIT_PROXY_REDIRECTED_CREDENTIAL',
+          error: 'The repository moved; confirm its new location before sending the credential there',
+          ...(location === undefined ? {} : { location }),
+        }),
+      ),
+    );
+  }
+
   private async relay(
     handle: string,
     method: 'GET' | 'POST' | 'PUT',
@@ -511,19 +695,44 @@ export class GitProxyController {
     if (!relayHandlePattern.test(handle)) {
       throw new BadRequestException({ code: 'GIT_LFS_HANDLE_INVALID' });
     }
-    const raw = await this.redis.client.get(`git:lfs:relay:${handle}`);
-    if (raw === null) {
+    await this.consumeRequestSlot(userId, { family: 'lfs-relay', limit: lfsRelayRequestsPerUserPerMinute });
+    const key = request.headers[httpHeader.xTauLfsKey];
+    if (typeof key !== 'string' || !relayKeyPattern.test(key)) {
+      throw new BadRequestException({ code: 'GIT_LFS_HANDLE_REFUSED' });
+    }
+    const sealed = await this.redis.client.get(`git:lfs:relay:${handle}`);
+    if (sealed === null) {
       throw new BadRequestException({ code: 'GIT_LFS_HANDLE_EXPIRED' });
     }
-    const record = lfsRelayRecordSchema.parse(JSON.parse(raw));
+    let opened: unknown;
+    try {
+      opened = openRelayRecord(handle, sealed, key);
+    } catch {
+      throw new BadRequestException({ code: 'GIT_LFS_HANDLE_REFUSED' });
+    }
+    const record = lfsRelayRecordSchema.parse(opened);
     if (record.userId !== userId || record.method !== method || record.expiresAt <= Date.now()) {
       throw new BadRequestException({ code: 'GIT_LFS_HANDLE_REFUSED' });
     }
     const target = new URL(record.url);
     const headers = new Headers(record.headers);
+    /* The pinned request sends no agent of its own, and GitHub's LFS verify
+     * refuses an anonymous one with an HTML 403 (D45). */
+    if (!headers.has('user-agent')) {
+      headers.set('user-agent', 'git-lfs/tau-proxy');
+    }
+    /* A presigned S3 PUT refuses a chunked body with 501; the sealed size is
+     * the length, and the stream below enforces it (D46). */
+    if (method === 'PUT') {
+      headers.set('content-length', String(record.size));
+    }
     const contentType = request.headers['content-type'];
     if (typeof contentType === 'string' && !headers.has('content-type')) {
       headers.set('content-type', contentType);
+    }
+    const accept = lfsAccept(request);
+    if (accept !== undefined && !headers.has('accept')) {
+      headers.set('accept', accept);
     }
     const body =
       method === 'PUT'
@@ -543,7 +752,7 @@ export class GitProxyController {
               }
             })(),
           )
-        : request.raw;
+        : boundedBody(request, lfsVerifyLimitBytes);
     const response = await this.fetchTarget(target, {
       method,
       headers,
@@ -564,7 +773,54 @@ export class GitProxyController {
 
   private async fetchTarget(target: URL, init: RequestInit): Promise<Response> {
     const address = await this.publicAddress(target);
-    return this.injectedFetch === undefined ? pinnedFetch(target, address, init) : this.injectedFetch(target, init);
+    try {
+      return await (this.injectedFetch === undefined
+        ? pinnedFetch(target, address, init)
+        : this.injectedFetch(target, init));
+    } catch (error) {
+      /* A refusal of the caller's own body (over its limit, wrong size) is
+         the caller's answer; undici wraps it as the `cause`. */
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      if (error instanceof Error && error.cause instanceof HttpException) {
+        throw error.cause;
+      }
+      // The caller gets one uniform answer (D21); the operator still needs the cause (D32).
+      new Logger(GitProxyController.name).warn(
+        {
+          host: target.host,
+          code: (error as { code?: unknown }).code,
+          reason: error instanceof Error ? error.message : 'unknown',
+        },
+        'Git proxy upstream request failed',
+      );
+      return upstreamFailed();
+    }
+  }
+
+  /**
+   * Take one of the caller's proxied requests for this minute (D21), from the
+   * proxy's budget or, for the LFS relay, the relay's own (I11).
+   *
+   * @param userId - The signed-in caller.
+   * @param budget - Which per-minute budget, and its ceiling.
+   * @throws HttpException 429 `GIT_PROXY_RATE_LIMITED` once the minute's budget is spent.
+   */
+  private async consumeRequestSlot(userId: string, budget: Readonly<{ family: string; limit: number }>): Promise<void> {
+    const minute = new Date().toISOString().slice(0, 16);
+    const count = await this.redis.client.eval(
+      incrementWithExpiryLua,
+      1,
+      `git:${budget.family}:rl:${userId}:${minute}`,
+      '60',
+    );
+    if (Number(count) > budget.limit) {
+      throw new HttpException(
+        { code: 'GIT_PROXY_RATE_LIMITED', message: 'Too many git requests; try again in a minute' },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
   }
 
   private async publicAddress(target: URL): Promise<LookupAddress> {
@@ -626,6 +882,14 @@ export class GitProxyController {
       throw new BadRequestException({
         code: 'GIT_PROXY_HOST_REFUSED',
         message: 'Refused host',
+      });
+    }
+    // The URL parser drops `:443`, so any port left is a non-default one: a
+    // port scanner, not a git host (D21). Local development keeps any port.
+    if (target.port !== '' && !this.#allowPrivate) {
+      throw new BadRequestException({
+        code: 'GIT_PROXY_PORT_REFUSED',
+        message: 'Only the default https port is proxied',
       });
     }
     if (!gitEndpointPattern.test(target.pathname)) {

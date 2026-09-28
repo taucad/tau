@@ -38,7 +38,7 @@ const published = (schema: z.ZodType, defaults: Record<string, unknown>): Resolv
 
 const fieldUnit = (label: string): string | undefined =>
   screen
-    .getByRole('textbox', { name: `Input for ${label}` })
+    .getByRole('spinbutton', { name: `Input for ${label}` })
     .closest<HTMLElement>('[data-slot="slider-input"]')
     ?.querySelector<HTMLElement>('[data-slot="slider-input-adornment"]')
     ?.textContent.trim();
@@ -257,7 +257,7 @@ describe('ExportSchemaForm', async () => {
     fireEvent.click(screen.getByRole('button', { name: 'Group: Tessellation' }));
 
     expect(fieldUnit('Minimum Size')).toBe('cm');
-    expect(screen.getByRole('textbox', { name: 'Input for Minimum Size' })).toHaveValue('0.2');
+    expect(screen.getByRole('spinbutton', { name: 'Input for Minimum Size' })).toHaveValue('0.2');
   });
 
   it('should name the format whose settings could not be prepared', async () => {

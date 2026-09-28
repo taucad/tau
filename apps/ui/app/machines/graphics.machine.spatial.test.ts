@@ -1,14 +1,14 @@
-import { createActor, fromPromise } from 'xstate';
+import { createActor, createAsyncLogic } from 'xstate';
 import { describe, expect, it } from 'vitest';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 
 const createGraphicsActor = () =>
-  createActor(graphicsMachine.provide({ actors: { probeWebGpu: fromPromise(async () => false) } }), {
+  createActor(graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }), {
     input: { graphicsBackend: 'webgl' },
   });
 
 describe('graphics machine physical scene metadata', () => {
-  it('stores physical radius and center and initializes a selected section through the geometry center', () => {
+  it('should store the physical radius and centre and add a new plane through the geometry centre', () => {
     const actor = createGraphicsActor();
     actor.start();
     try {
@@ -16,28 +16,31 @@ describe('graphics machine physical scene metadata', () => {
       expect(actor.getSnapshot().context.geometryRadius).toBe(0.1);
       expect(actor.getSnapshot().context.geometryCenter).toEqual([10, 20, 30]);
 
-      actor.send({ type: 'setSectionViewActive', payload: true });
-      actor.send({ type: 'selectSectionView', payload: 'xy' });
-      expect(actor.getSnapshot().context.sectionViewPivot).toEqual([10, 20, 30]);
-      expect(actor.getSnapshot().context.sectionViewTranslation).toBe(30);
+      actor.send({ type: 'addSectionCut', payload: { kind: 'plane', plane: 'xy' } });
+      expect(actor.getSnapshot().context.sectionCuts).toEqual([
+        expect.objectContaining({ kind: 'plane', plane: 'xy', offset: 30 }),
+      ]);
     } finally {
       actor.stop();
     }
   });
 
-  it('keeps a nonzero physical section pivot invariant through rotation and direction changes', () => {
+  it('should keep a cut through a nonzero centre in place when it flips or turns', () => {
     const actor = createGraphicsActor();
     actor.start();
     try {
       actor.send({ type: 'sceneRadiusUpdated', radius: 0.1, centerMeters: [10, 20, 30] });
-      actor.send({ type: 'setSectionViewActive', payload: true });
-      actor.send({ type: 'selectSectionView', payload: 'xy' });
-      actor.send({ type: 'setSectionViewRotation', payload: [0.1, 0.2, 0.3] });
-      actor.send({ type: 'toggleSectionViewDirection' });
+      actor.send({ type: 'addSectionCut', payload: { kind: 'plane', plane: 'xy' } });
+      actor.send({ type: 'addSectionCut', payload: { kind: 'revolution', axis: 'z' } });
+      const [plane, cutaway] = actor.getSnapshot().context.sectionCuts;
 
-      expect(actor.getSnapshot().context.sectionViewPivot).toEqual([10, 20, 30]);
-      expect(actor.getSnapshot().context.sectionViewTranslation).toBe(30);
-      expect(actor.getSnapshot().context.sectionViewDirection).toBe(1);
+      for (const isFlipped of [true, false]) {
+        actor.send({ type: 'updateSectionCut', payload: { id: plane!.id, patch: { isFlipped } } });
+        expect(actor.getSnapshot().context.sectionCuts[0]).toMatchObject({ offset: 30, isFlipped });
+      }
+      actor.send({ type: 'updateSectionCut', payload: { id: cutaway!.id, patch: { start: 120 } } });
+
+      expect(actor.getSnapshot().context.sectionCuts[1]).toMatchObject({ origin: [10, 20, 30], start: 120 });
     } finally {
       actor.stop();
     }

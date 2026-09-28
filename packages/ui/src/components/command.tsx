@@ -79,14 +79,17 @@ function Command({ className, ...properties }: CommandProps): React.JSX.Element 
  */
 function CommandDialog({
   title = 'Command Palette',
-  description = 'Search for a command to run...',
+  description = 'Search for a command to run…',
   contentClassName,
+  shouldFilter,
   children,
   ...properties
 }: React.ComponentProps<typeof Dialog> & {
   readonly title?: string;
   readonly description?: string;
   readonly contentClassName?: string;
+  /** Pass `false` when the caller filters and ranks items itself, such as a virtualized list. */
+  readonly shouldFilter?: boolean;
 }): React.JSX.Element {
   return (
     <Dialog {...properties}>
@@ -100,7 +103,10 @@ function CommandDialog({
           contentClassName,
         )}
       >
-        <Command className='[&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:size-4'>
+        <Command
+          shouldFilter={shouldFilter}
+          className='[&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:size-4'
+        >
           {children}
         </Command>
       </DialogContent>
@@ -153,7 +159,7 @@ function CommandList({ className, ...properties }: CommandListProps): React.JSX.
   return (
     <CommandPrimitive.List
       data-slot='command-list'
-      className={cn('flex max-h-[400px] flex-col gap-0.5 overflow-x-hidden overflow-y-auto', className)}
+      className={cn('flex max-h-100 flex-col gap-0.5 overflow-x-hidden overflow-y-auto', className)}
       {...properties}
     />
   );

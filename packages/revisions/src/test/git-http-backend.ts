@@ -61,6 +61,8 @@ export type GitHttpBackendOptions = Readonly<{
    * allow-list — and this is how that reaches a client.
    */
   refusedRef?: string;
+  /** What the hook prints when it refuses {@link GitHttpBackendOptions.refusedRef}, one line per entry. */
+  refusedSaying?: readonly string[];
   /**
    * Set, the LFS batch endpoint answers `413` instead of issuing transfers.
    *
@@ -176,7 +178,7 @@ export const startGitHttpBackend = async (options: GitHttpBackendOptions): Promi
       [
         '#!/bin/sh',
         `if [ "$1" = "${options.refusedRef}" ]; then`,
-        '  echo "not allowed here" >&2',
+        ...(options.refusedSaying ?? ['not allowed here']).map((line) => `  echo '${line}' >&2`),
         '  exit 1',
         'fi',
         'exit 0',

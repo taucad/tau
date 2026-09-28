@@ -25,6 +25,13 @@ declare const variadicClient: RuntimeClient<VariadicRuntime>;
 declare const declaredRuntime: RuntimeDefinition;
 
 describe('RuntimeClient dynamic projection', () => {
+  it('should reserve the jobs facet as an unavailable refusal consumers must narrow on', () => {
+    expectTypeOf(dynamicClient.jobs.available).toEqualTypeOf<false>();
+    expectTypeOf(dynamicClient.jobs).toEqualTypeOf<
+      Readonly<{ available: false; reason: 'not-granted' | 'unsupported' }>
+    >();
+  });
+
   it('should accept an exact client in a host-variable binding', () => {
     const assigned: RuntimeClient = exactClient;
     expectTypeOf(assigned).toEqualTypeOf<RuntimeClient>();

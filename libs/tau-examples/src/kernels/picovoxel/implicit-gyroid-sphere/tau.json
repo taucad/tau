@@ -1,0 +1,13 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_picovoxel000000000013",
+  "name": "PicoVoxel Implicit Gyroid Sphere",
+  "description": "PicoVoxel Implicit Gyroid Sphere community example, adapted to Tau's injected-session runtime.",
+  "tags": ["picovoxel", "typescript", "community-example"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

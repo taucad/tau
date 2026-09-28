@@ -11,12 +11,7 @@ type GithubBranchesResponse = {
 /**
  * Error thrown when GitHub's Git Trees API returns a truncated response.
  * This occurs when the repository tree exceeds ~100,000 entries or 7MB response size.
- *
- * Callers should catch this error and implement alternative strategies:
- * - Use Repository Contents API for incremental directory traversal
- * - Use GraphQL API with pagination
- * - Clone the repository locally
- * - Filter to a specific subdirectory
+ * Its message is written for the person importing; the import can still proceed without a file list.
  */
 export class GitHubTreeTruncatedError extends Error {
   public readonly owner: string;
@@ -175,13 +170,7 @@ class GitHubApiClient {
         repo,
         ref,
         partialCount: data.tree.length,
-        message:
-          'The repository tree is too large and was truncated by GitHub. ' +
-          'Consider using one of the following alternative strategies:\n' +
-          '1. Use the Repository Contents API to traverse directories incrementally\n' +
-          '2. Use the GraphQL API with pagination for more control\n' +
-          '3. Clone the repository locally using git\n' +
-          '4. Filter to a specific subdirectory if you only need part of the tree',
+        message: 'This repository has too many files for GitHub to list, so Tau cannot preview its files.',
       });
     }
 

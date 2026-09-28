@@ -14,15 +14,14 @@ export function NavChat(): React.JSX.Element {
       ctrlKey: true,
     },
     () => {
-      if (!isMatch) {
-        void navigate('/');
-      }
+      // Already home: replace, so the shortcut only refocuses the composer.
+      void navigate('/', { replace: Boolean(isMatch), state: { focusChatComposer: true } });
     },
   );
   return (
     // Elevate the sidebar group above the other items to ensure the new project button is always clickable
     <SidebarGroup className='z-10 px-0'>
-      <NavLink to='/'>
+      <NavLink to='/' state={{ focusChatComposer: true }}>
         {({ isActive, isPending }) => (
           <SidebarMenuButton
             asChild

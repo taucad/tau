@@ -30,7 +30,7 @@
 
 import { useCallback, useMemo, useRef, useSyncExternalStore } from 'react';
 import type { SnapshotFrom } from 'xstate';
-import type { RevisionStatusProjection } from '@taucad/revisions/project-revisions-machine';
+import type { RevisionStatusProjection } from '@taucad/revisions';
 import type { ChatSessionActorRef, chatSessionMachine } from '#machines/chat-session.machine.js';
 import type { ProjectSessionActorRef } from '#machines/project-session.machine.js';
 import type { SessionsActorRef } from '#machines/sessions.machine.js';
@@ -41,6 +41,7 @@ import { peekRevisionClient } from '#hooks/use-revision-status.js';
 import { useSessions } from '#hooks/use-sessions.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ChatSidebarState } from '#types/chat-sidebar.types.js';
+import { actorSessionIdOf } from '#lib/xstate.lib.js';
 
 /**
  * Everything a chat row draws, from that chat's own machine.
@@ -415,7 +416,7 @@ const chatRollup = (row: ProjectSidebarRow): SidebarFacts | undefined => {
       count: row.attention,
       /* R4: "1 needs you" alone sends the person into the chats to look for a
        * conflict that lives in the checkout, so the sentence names it. */
-      sentence: `${needsYou(row.attention)}${row.conflicted ? ' · needs resolution' : ''}`,
+      sentence: `${needsYou(row.attention)}${row.conflicted ? ' · Needs your decision' : ''}`,
     };
   }
   if (row.failed > 0) {
@@ -480,7 +481,7 @@ export const selectProjectFacts = (row: ProjectSidebarRow, expanded: boolean): S
   if (rollup === undefined) {
     /* An expanded conflict still names itself: no chat row can carry it. */
     return row.conflicted
-      ? { mark: 'attention', sentence: `${liveness} · needs resolution` }
+      ? { mark: 'attention', sentence: `${liveness} · Needs your decision` }
       : { mark: 'none', sentence: liveness };
   }
   return { ...rollup, sentence: `${liveness} · ${rollup.sentence ?? ''}` };
@@ -583,7 +584,10 @@ const bindProject = ({
     const key = [
       session === undefined ? 'closed' : 'live',
       peekRevisionClient(projectId) === undefined ? 'no-client' : 'client',
-      ...ids.map((id) => references[id]?.sessionId ?? id),
+      ...ids.map((id) => {
+        const reference = references[id];
+        return reference === undefined ? id : actorSessionIdOf(reference);
+      }),
     ].join(keySeparator);
     if (key === boundKey) {
       return;

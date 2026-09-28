@@ -1,7 +1,7 @@
 /**
  * EQ6 / W10.6: the path policy reaches this package by injection, not by import.
  *
- * The mirror of `libs/filesystem`'s own `path-registry` rule (D6): the mask is
+ * The mirror of `packages/filesystem`'s own `path-registry` rule (D6): the mask is
  * the mechanism and a project's reserved layout is data, so the classifier is
  * given to `createRevisionActors` and carried to every site that asks. One
  * module may name the default — it pairs the classifier with the rows the
@@ -31,7 +31,7 @@ const withoutComments = (source: string): string =>
 /**
  * The one module allowed to name Tau's own layout.
  *
- * It exports `tauRevisionPolicy`, the classifier-and-rows pair every default
+ * It exports `tauRevisionPolicy`, the classifier-and-layout pair every default
  * reads, so moving the import here is what makes the rule below true of
  * everything else — including the two adapters, which write a Tau store and so
  * take the default rather than a policy of their own.

@@ -7,7 +7,7 @@
  * work — kernels, disk, the agent host — lives in the utilities.
  */
 
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { Worker } from 'node:worker_threads';
 
@@ -20,6 +20,7 @@ import {
   net,
   protocol,
   safeStorage,
+  screen,
   session,
   shell,
   utilityProcess,
@@ -28,12 +29,14 @@ import type { IpcMainInvokeEvent } from 'electron';
 import { installElectronRuntimeHeaders, registerElectronRuntimeMain } from '@taucad/runtime/electron/main';
 import { connectSqliteComputeStoreWorker } from '@taucad/runtime/node';
 import type { ComputeBinding } from '@taucad/runtime/types';
-import { defaultConfigDirectory, discoverAcpAgents, externalAgentDescriptors } from '@taucad/host';
+import {
+  defaultConfigDirectory,
+  discoverAcpAgents,
+  externalAgentDescriptors,
+  projectCloseMilliseconds,
+  projectReleaseMilliseconds,
+} from '@taucad/host';
 import type { ExternalAgentDescriptor } from '@taucad/agent-host';
-
-import kernelUtilityEntry from '#tau/kernel-host.entry?modulePath';
-import servicesUtilityEntry from '#tau/services-host.entry?modulePath';
-import computeStoreWorkerEntry from '#main/compute-store.worker?modulePath';
 
 import { appOrigin, appSchemePrivileges, registerAppProtocol } from '#main/app-protocol.js';
 import { createAuthService } from '#main/auth-service.js';
@@ -64,9 +67,10 @@ import {
   kernelForkEnvAllowlist,
   sanitizeServicesContext,
 } from '#main/project-roots.js';
-import { createServicesBroker, rendererServicesConcerns } from '#main/services-broker.js';
+import { createServicesBroker, rendererServicesConcerns, ServicesQuiescingError } from '#main/services-broker.js';
 import type { ServicesConcern } from '#main/services-broker.js';
 import {
+  bundledGitEnvironment,
   compileCacheEnvironment,
   loginShellEnvironment,
   packagedEsbuildEnvironment,
@@ -76,15 +80,19 @@ import { createQuickLookController, removeStaleQuickLookSessions } from '#main/q
 import type { QuickLookController } from '#main/quick-look.js';
 import { deepLinkArgument, parseDeepLink } from '#main/deep-links.js';
 import { createOpenFileQueue } from '#main/open-files.js';
+import { createBambuStudioService } from '#main/bambu-studio-service.js';
+import { readWindowState, writeWindowState } from '#main/window-state.js';
 import {
   appIconThemeChannel,
   agentHostSessionChannels,
+  machinesChannels,
   externalAgentsChannel,
   quitChannels,
   bootstrapArgumentPrefix,
   desktopNativeKernelIds,
   computeControlChannels,
   servicesPortRelayTag,
+  slicersChannels,
 } from '#shared/desktop-bootstrap.js';
 import type { AppIconTheme } from '#shared/desktop-bootstrap.js';
 import { openFilesIpcChannel, quickLookIpcChannels } from '#shared/quick-look.js';
@@ -103,6 +111,11 @@ const clientRoot =
   (app.isPackaged
     ? join(process.resourcesPath, 'ui/client')
     : join(import.meta.dirname, '../../../ui/desktop/build/client'));
+/* Entries `electron.vite.config.ts` emits beside `index.js`, the bundle this
+ * module lands in. */
+const kernelUtilityEntry = join(import.meta.dirname, 'kernel-host.js');
+const servicesUtilityEntry = join(import.meta.dirname, 'services-host.js');
+const computeStoreWorkerEntry = join(import.meta.dirname, 'compute-store.worker.js');
 const applicationResource = (name: string): string =>
   app.isPackaged ? join(process.resourcesPath, 'branding', name) : join(import.meta.dirname, '../../resources', name);
 const applicationIcon = applicationResource(`icon.${process.platform === 'win32' ? 'ico' : 'png'}`);
@@ -166,24 +179,54 @@ if (launchDeepLink !== undefined) {
   receiveDeepLink(launchDeepLink);
 }
 
+/* How far each quit wait outlasts the bound it awaits, so the inner reason lands first (rule 9). */
+const quitMarginMilliseconds = 3000;
+
 /**
  * How long quit waits for every served project to settle (W19, D31).
  *
- * Long enough for a close cut plus W13's `closeFlushMilliseconds` sync wait on
- * several projects, short enough that a wedged utility never holds the app
- * open: after it the durable queue is the guarantee (D28).
+ * Derived from the host's own worst case for closing one project — its runs
+ * drain, then the live-checkout wait, the close cuts and the sync quiesce — so
+ * rule 9's nesting holds whatever those bounds become: the host's reason
+ * lands before this wait's. Projects close in parallel, so the per-project
+ * bound is the whole bound. After it the durable queue is the guarantee (D28).
+ *
+ * @internal
  */
-const quitQuiesceMilliseconds = 20_000;
+export const quitQuiesceMilliseconds = projectCloseMilliseconds + quitMarginMilliseconds;
+
+/*
+ * The page's own close steps before its sync flush: `cancelRuns`, then
+ * `flushProducers`, each on the editor bound of `project-live-sessions.tsx`
+ * (`editorFlushTimeoutMilliseconds`, 10 s). ponytail: mirrored, not imported —
+ * desktop has no dependency on the ui app; move the page bound into a package
+ * both read if it ever changes.
+ */
+const rendererCloseStepsMilliseconds = 2 * 10_000;
+
+/**
+ * How long a binding ceremony may take to reach the printer and answer (D10).
+ *
+ * The provider's MQTT hello is seconds on the LAN; the bound only bites a
+ * printer that is asleep or unreachable, which is exactly when the person
+ * should hear "timed out" rather than wait on a spinner.
+ */
+const machineBindingMilliseconds = 60_000;
 
 /**
  * How long quit waits for the renderer's sessions registry (D31, P49).
  *
- * The page runs every live project's `closing` — cancel, sync flush, lease
- * release — and answers `quiesced`. The person can cut it short with *Quit
- * anyway*. The bound reports failure to main; it never turns an incomplete
- * close into permission to quit.
+ * The page runs every live project's `closing` — cancel, producer flush, sync
+ * flush, lease release — and answers `quiesced`. A desktop project's sync
+ * flush is the host's close, so the wait is the page's own steps plus
+ * {@link projectReleaseMilliseconds} plus a margin (rule 9, RV-W2b #1). The
+ * person can cut it short with *Quit anyway*. The bound reports failure to
+ * main; it never turns an incomplete close into permission to quit.
+ *
+ * @internal
  */
-const quitRendererMilliseconds = 20_000;
+export const quitRendererMilliseconds =
+  rendererCloseStepsMilliseconds + projectReleaseMilliseconds + quitMarginMilliseconds;
 
 /**
  * Ask every window's sessions registry to close its projects, and wait.
@@ -281,26 +324,10 @@ const bootstrapElectronApp = async (): Promise<void> => {
   const picogkResourceRoot = app.isPackaged
     ? join(process.resourcesPath, 'picogk')
     : join(import.meta.dirname, '../../resources/picogk');
-  /*
-   * The `git` this app records revisions with (OQ3, C68).
-   *
-   * One binary, not two: the bundled git's own exec path carries `git-lfs`, so
-   * `git lfs` resolves through it and nothing has to name a second executable.
-   * Absent — a development tree, or a platform whose payload is not built — the
-   * toolchain comes from `PATH`, which on a Finder launch is
-   * `/usr/bin:/bin:/usr/sbin:/sbin`; a machine that has neither is told once,
-   * by name, through `revision.unavailable`.
-   */
-  const bundledGitExecutable = join(
-    app.isPackaged ? join(process.resourcesPath, 'git') : join(import.meta.dirname, '../../resources/git'),
-    `${process.platform}-${process.arch}`,
-    'bin',
-    process.platform === 'win32' ? 'git.exe' : 'git',
+  /* The `git` this app records revisions with, when this build ships one (OQ3, C68). */
+  const gitEnvironment = bundledGitEnvironment(
+    app.isPackaged ? process.resourcesPath : join(import.meta.dirname, '../../resources'),
   );
-  const gitEnvironment: Readonly<Record<string, string>> = existsSync(bundledGitExecutable)
-    ? // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
-      { TAU_GIT_EXECUTABLE: bundledGitExecutable }
-    : {};
   const esbuildEnvironment = packagedEsbuildEnvironment(app.isPackaged, process.resourcesPath);
   const log = createDiagnosticsLog({ directory: logDirectory, echo: isDevelopment });
   log.log('info', 'main.ready', { electron: process.versions.electron, packaged: app.isPackaged, isDevelopment });
@@ -314,12 +341,27 @@ const bootstrapElectronApp = async (): Promise<void> => {
   mkdirSync(homeRoot, { recursive: true });
   const authorityDirectory = join(app.getPath('userData'), 'filesystem-authority');
   mkdirSync(authorityDirectory, { recursive: true });
+  /* The per-user machine store every Tau host on this computer shares
+   * (`tau serve` opens it too), never under an authored root. The app's old
+   * `userData/machines` is imported from once, and only when it is another
+   * directory: on a case-insensitive volume `…/Tau` and `…/tau` are one. */
+  const tauConfigDirectory = defaultConfigDirectory();
+  const machinesDirectory = join(tauConfigDirectory, 'machines');
+  mkdirSync(machinesDirectory, { recursive: true, mode: 0o700 });
+  const legacyMachinesDirectory = join(app.getPath('userData'), 'machines');
+  const legacyMachinesEnvironment: Readonly<Record<string, string>> =
+    existsSync(legacyMachinesDirectory) &&
+    realpathSync.native(legacyMachinesDirectory) !== realpathSync.native(machinesDirectory)
+      ? // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
+        { TAU_DESKTOP_LEGACY_MACHINES_DIR: legacyMachinesDirectory }
+      : {};
 
   /* Grants outlive the session: the renderer keeps a picked folder's workspace
    * record in IndexedDB and offers it again on the next launch, so a grant main
    * forgot would answer `EACCES` for a folder the user believes is connected. */
   const roots = createProjectRootRegistry({ storePath: join(app.getPath('userData'), 'granted-roots.json') });
   roots.admit(homeRoot);
+  const windowStatePath = join(app.getPath('userData'), 'window-state.json');
   const quickLookTemporaryRoot = join(app.getPath('temp'), 'tau-quick-look');
   removeStaleQuickLookSessions(quickLookTemporaryRoot);
   const quickLookControllers = new Map<number, QuickLookController>();
@@ -523,7 +565,6 @@ const bootstrapElectronApp = async (): Promise<void> => {
     return computeConnection(root).control.collect({ budget: budget as number, ...(cursor ? { cursor } : {}) });
   });
 
-  const tauConfigDirectory = defaultConfigDirectory();
   const services = createServicesBroker({
     utilityEntry: servicesUtilityEntry,
     env: utilityEnvironment(environment, {
@@ -532,6 +573,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
       ...compileCacheEnvironment(app.getPath('userData')),
       TAU_CONFIG_DIR: tauConfigDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       TAU_DESKTOP_AUTHORITY_DIR: authorityDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
+      TAU_DESKTOP_MACHINES_DIR: machinesDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
+      ...legacyMachinesEnvironment,
       TAU_DESKTOP_LOG_DIR: logDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
     }),
     fork: (entry, args, forkOptions) => utilityProcess.fork(entry, args, forkOptions),
@@ -569,6 +612,35 @@ const bootstrapElectronApp = async (): Promise<void> => {
   ipcMain.handle(agentHostSessionChannels.release, async (event, payload) => {
     await services.releaseAgentHost(agentHostSessionInput(event, payload), quitQuiesceMilliseconds);
   });
+  /* The secret half of the binding ceremony (D10). The renderer never keeps
+   * the access code: it rides this one invoke to the utility, which saves it
+   * only once the printer accepts it. Without one the utility reuses the
+   * printer's saved code while its certificate still matches. A real X1C
+   * answers its MQTT hello in seconds, but a wrong code or a sleeping printer
+   * is only known at the provider's own timeout, hence the bound. */
+  ipcMain.handle(machinesChannels.completeBinding, async (event, payload) => {
+    const { ceremonyId, address, accessCode } = (payload ?? {}) as Record<string, unknown>;
+    const optionalString = (value: unknown): value is string | undefined =>
+      value === undefined || (typeof value === 'string' && value.length > 0 && value.length <= 256);
+    if (
+      !trusted(event.senderFrame) ||
+      typeof ceremonyId !== 'string' ||
+      ceremonyId === '' ||
+      ceremonyId.length > 256 ||
+      !optionalString(address) ||
+      !optionalString(accessCode)
+    ) {
+      throw new Error('Desktop shell refused invalid machine binding completion.');
+    }
+    return services.completeMachineBinding(
+      {
+        ceremonyId,
+        ...(address === undefined ? {} : { address }),
+        ...(accessCode === undefined ? {} : { accessCode }),
+      },
+      machineBindingMilliseconds,
+    );
+  });
   registeredProjectRootFor = (executionRoot) => services.computeProjectRoot(executionRoot);
   const publishRoots = (): void => {
     services.post({ type: 'allowRoots', roots: roots.roots() });
@@ -597,11 +669,10 @@ const bootstrapElectronApp = async (): Promise<void> => {
    * boot pays the slower one; 1.5 s is ~17x the worst observed and only bites a
    * CLI that hangs, which is the case the timeout exists for.
    *
-   * The *model* probe runs beside it on its own 5 s clock (V5 / EQ1 A): it
-   * opens a real vendor session, which Claude answered in 1.9 s here, so one
-   * shared budget would either kill it or make every boot wait on it. A probe
-   * that fails or times out leaves the agent advertised with no model list — a
-   * logged-out CLI must never remove the row. */
+   * The *model* probe runs beside it on its own 15 s clock (V5 / EQ1 A): it
+   * opens a real vendor session, which can take over 5 s through a cold
+   * packaged app.asar adapter. A failure or timeout leaves the agent
+   * advertised with no model list; a logged-out CLI cannot remove the row. */
   /**
    * Discover the external agents and configure the host with them.
    *
@@ -668,6 +739,22 @@ const bootstrapElectronApp = async (): Promise<void> => {
   };
 
   ipcMain.handle(externalAgentsChannel, async (event) => (trusted(event.senderFrame) ? externalAgents : []));
+  /* Blueprint D12: the Print pane's Bambu Studio presets and settings. The
+   * service parses every input; this guard keeps other senders out. */
+  const bambuStudio = createBambuStudioService({ env: environment });
+  for (const [channel, call] of [
+    [slicersChannels.bambuStudio.status, bambuStudio.status],
+    [slicersChannels.bambuStudio.catalog, bambuStudio.catalog],
+    [slicersChannels.bambuStudio.resolveSelection, bambuStudio.resolveSelection],
+    [slicersChannels.bambuStudio.settings, bambuStudio.settings],
+  ] as const) {
+    ipcMain.handle(channel, async (event, input: unknown) => {
+      if (!trusted(event.senderFrame)) {
+        throw new Error('Desktop shell refused Bambu Studio request.');
+      }
+      return call(input);
+    });
+  }
   ipcMain.handle('tau:auth:sign-in', async (event) => {
     if (trusted(event.senderFrame)) {
       await auth.signIn();
@@ -824,7 +911,9 @@ const bootstrapElectronApp = async (): Promise<void> => {
       /* Launcher 2 is scoped to one workspace root, and the renderer names it —
        * so it passes the same registry the kernel fork resolver uses. Refusing
        * outright rather than substituting Home: an agent host working over the
-       * wrong directory is worse than no agent host. */
+       * wrong directory is worse than no agent host. Machines need no root:
+       * printers belong to the per-user store, and a print request names its
+       * own project. */
       if (concern === 'agentHost' && !roots.isTrusted(resolved['workspaceRoot'] ?? '')) {
         log.log('error', 'services.untrusted-root', { concern, workspaceRoot: resolved['workspaceRoot'] });
         refuse('services.untrusted-root');
@@ -853,6 +942,13 @@ const bootstrapElectronApp = async (): Promise<void> => {
       const port = services.connect(concern as ServicesConcern, resolved);
       event.senderFrame?.postMessage(servicesPortRelayTag, { requestId }, [port]);
     } catch (error) {
+      /* Quit and reload refuse new concerns by design: an expected answer the
+       * requester settles, not a connection failure or a capture defect. */
+      if (error instanceof ServicesQuiescingError) {
+        log.log('info', 'services.connect-refused-quiescing', { concern });
+        refuse('services.quiescing');
+        return;
+      }
       log.log('error', 'services.connect-failed', error);
       refuse('services.connect-failed');
     }
@@ -868,9 +964,15 @@ const bootstrapElectronApp = async (): Promise<void> => {
     new URL(path, isDevelopment ? environment.ELECTRON_RENDERER_URL! : `${appOrigin}/`).href;
 
   const createMainWindow = async (): Promise<BrowserWindow> => {
+    /* Reopen where the user left the window; the first launch fills the work
+     * area (display minus menu bar and dock) of the display the user launched
+     * from. */
+    const saved = readWindowState(
+      windowStatePath,
+      screen.getAllDisplays().map((display) => display.workArea),
+    );
     const window = new BrowserWindow({
-      width: 1440,
-      height: 900,
+      ...(saved?.bounds ?? screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea),
       show: false,
       icon: applicationIcon,
       title: 'Tau',
@@ -900,6 +1002,15 @@ const bootstrapElectronApp = async (): Promise<void> => {
     });
     quickLookControllers.set(window.id, quickLook);
     window.once('close', () => {
+      try {
+        writeWindowState(windowStatePath, {
+          bounds: window.getNormalBounds(),
+          maximized: window.isMaximized(),
+          fullScreen: window.isFullScreen(),
+        });
+      } catch (error) {
+        log.log('warn', 'window-state.write-failed', { message: String(error) });
+      }
       quickLook.dispose();
       quickLookControllers.delete(window.id);
     });
@@ -937,7 +1048,13 @@ const bootstrapElectronApp = async (): Promise<void> => {
     window.webContents.on('will-redirect', guardNavigation('will-redirect'));
 
     await window.loadURL(rendererUrl(openFiles.hasPending() ? '/import?desktop-open=1' : '/'));
+    if (saved?.maximized) {
+      window.maximize();
+    }
     window.show();
+    if (saved?.fullScreen) {
+      window.setFullScreen(true);
+    }
     return window;
   };
 

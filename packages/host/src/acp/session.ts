@@ -96,11 +96,13 @@ import {
   getKernelResultInputSchema,
   getKernelResultOutputSchema,
   screenshotInputSchema,
-  screenshotOutputSchema,
+  screenshotMcpOutputSchema,
   testModelInputSchema,
   testModelOutputSchema,
 } from '@taucad/chat';
 import { toolName } from '@taucad/chat/constants';
+import { rpcClientErrorCodeSchema } from '@taucad/chat/schemas/rpc';
+import { checkProjectManifestReplacement } from '@taucad/types';
 
 const maskedPath = (message: string): Error => Object.assign(new Error(message), { code: maskedPathCode });
 
@@ -297,7 +299,24 @@ export const writeSessionTextFile = async (
   params: { readonly path: string; readonly content: string },
 ): Promise<void> => {
   const provider = new NodeFsProvider(cwd);
-  await provider.writeFile(await confine(cwd, params.path, 'write'), params.content);
+  const target = await confine(cwd, params.path, 'write');
+  /* The one content rule on this path, shared with Tau's own file tools: the
+   * manifest stays valid and keeps its identity (manifest recovery blueprint R8). */
+  if (target === 'tau.json') {
+    let current: Uint8Array<ArrayBuffer> | undefined;
+    try {
+      current = await provider.readFile(target);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw error;
+      }
+    }
+    const refusal = checkProjectManifestReplacement(new TextEncoder().encode(params.content), current);
+    if (refusal !== undefined) {
+      throw Object.assign(new Error(refusal), { code: 'VALIDATION_ERROR' });
+    }
+  }
+  await provider.writeFile(target, params.content);
 };
 
 // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- an ACP payload is JSON by construction of its transport.
@@ -540,9 +559,22 @@ type JsonSchema = {
 const tauMcpSchemas = {
   [toolName.getKernelResult]: { input: getKernelResultInputSchema, output: getKernelResultOutputSchema },
   [toolName.testModel]: { input: testModelInputSchema, output: testModelOutputSchema },
-  [toolName.screenshot]: { input: screenshotInputSchema, output: screenshotOutputSchema },
+  [toolName.screenshot]: { input: screenshotInputSchema, output: screenshotMcpOutputSchema },
   [toolName.exportGeometry]: { input: exportGeometryInputSchema, output: exportGeometryOutputSchema },
 } as const;
+
+/** Tau MCP errors emitted outside the shared business RPC schema. */
+const tauMcpHostErrorCodes = new Set([
+  'AGENT_HOST_ERROR',
+  'MACHINE_TOOL_ERROR',
+  'MCP_RUN_INACTIVE',
+  'RUNTIME_UNAVAILABLE',
+  'STALE_EVALUATION',
+  'TOOL_ERROR',
+  'TOOL_INPUT_VALIDATION_FAILED',
+  'TOOL_NOT_ALLOWED',
+  'TOOL_NOT_FOUND',
+]);
 
 type NormalizedTauMcpCall = {
   readonly toolName: keyof typeof tauMcpSchemas;
@@ -604,24 +636,61 @@ const mcpResult = (
     };
   }
   if (result['isError'] === true || failed) {
+    const structured = asRecord(result['structuredContent']);
+    if (typeof structured?.['errorCode'] === 'string' && typeof structured['message'] === 'string') {
+      return {
+        content: { errorCode: structured['errorCode'], message: structured['message'] },
+        isError: true,
+      };
+    }
     const content = Array.isArray(result['content'])
       ? result['content']
           .map((block) => asRecord(block))
           .flatMap((block) => (typeof block?.['text'] === 'string' ? [block['text']] : []))
           .join('\n')
       : '';
+    /* Codex drops `structuredContent` from every `isError` result (all 134
+     * recorded failures), so the code survives only as the `CODE: message`
+     * text Tau's MCP failure writes; read it back so the category stays. */
+    const coded = /^([A-Z][A-Z\d]*(?:_[A-Z\d]+)*): (.+)$/su.exec(content);
+    const code = coded?.[1];
+    const rpcCode = rpcClientErrorCodeSchema.safeParse(code);
+    const knownCode = rpcCode.success ? rpcCode.data : code && tauMcpHostErrorCodes.has(code) ? code : undefined;
     return {
-      content: { errorCode: 'MCP_TOOL_ERROR', message: content.slice(0, 2000) || `${tool.toolName} failed.` },
+      content:
+        coded && knownCode
+          ? { errorCode: knownCode, message: coded[2]!.slice(0, 2000) }
+          : { errorCode: 'MCP_TOOL_ERROR', message: content.slice(0, 2000) || `${tool.toolName} failed.` },
       isError: true,
     };
   }
   const parsed = tool.outputSchema.safeParse(result['structuredContent']);
+  const clipped =
+    Array.isArray(result['content']) &&
+    result['content'].some((block) => {
+      const text = asRecord(block)?.['text'];
+      return typeof text === 'string' && /…\d+ chars truncated…/u.test(text);
+    });
+  const missing = result['structuredContent'] === undefined;
+  const blocks: readonly unknown[] = Array.isArray(result['content']) ? result['content'] : [];
+  let textBytes = 0;
+  for (const block of blocks) {
+    const value = asRecord(block)?.['text'];
+    if (typeof value === 'string') {
+      textBytes += Buffer.byteLength(value, 'utf8');
+    }
+  }
+  const shape = `${String(blocks.length)} content blocks, ${String(textBytes)} text bytes`;
   return parsed.success
     ? { content: asJson(parsed.data), isError: false }
     : {
         content: {
-          errorCode: 'MCP_RESULT_INVALID',
-          message: `Tau MCP returned an invalid ${tool.toolName} result.`,
+          errorCode: clipped ? 'MCP_RESULT_TRUNCATED' : missing ? 'MCP_RESULT_MISSING' : 'MCP_RESULT_INVALID',
+          message: clipped
+            ? `The ${tool.toolName} result was truncated before Tau received its structured output (${shape}).`
+            : missing
+              ? `Tau MCP returned no structured ${tool.toolName} result (${shape}).`
+              : `Tau MCP returned an invalid ${tool.toolName} result (${shape}).`,
         },
         isError: true,
       };
@@ -791,6 +860,8 @@ export type AcpSession = {
   readonly agent: AcpAgentFacts;
   /** Config options as the session last reported them, `config_option_update` included. */
   readonly configOptions: readonly SessionConfigOption[] | undefined;
+  /** Select a model on a throwaway discovery session to read that model's own configuration options. */
+  probeModel(model: string): Promise<readonly SessionConfigOption[] | undefined>;
   /** The mode the agent last reported, when it pushed one. */
   readonly modeId: string | undefined;
   /** `true` when a requested session could be neither resumed nor loaded. */
@@ -1326,7 +1397,17 @@ export const createTurnProjection = (options: {
       }
       return;
     }
-    const normalized = tauMcp === undefined ? undefined : mcpResult(rawOutput, tauMcp, update.status === 'failed');
+    const result = tauMcp === undefined ? undefined : mcpResult(rawOutput, tauMcp, update.status === 'failed');
+    /* A bare MCP abort follows a stopped turn. A completed tool error remains
+     * authoritative even if Stop races with its projection. */
+    const error = asRecord(result?.content);
+    const bareAbort =
+      error?.['errorCode'] === 'MCP_TOOL_ERROR' &&
+      (error['message'] === 'This operation was aborted' || error['message'] === 'The turn was cancelled.');
+    const normalized =
+      result?.isError === true && turn.signal.aborted && bareAbort
+        ? { content: { errorCode: 'USER_INTERRUPTED', message: 'Interrupted by user.' }, isError: true }
+        : result;
     const { content: _content, ...outputFacts } = facts;
     await append([
       {
@@ -2196,6 +2277,21 @@ export const openAcpSession = async (options: OpenAcpSessionOptions): Promise<Ac
       contextLost,
       agent: facts,
       get configOptions(): readonly SessionConfigOption[] | undefined {
+        return configOptions;
+      },
+      probeModel: async (model) => {
+        const choice = modelChoice(configOptions);
+        if (!choice?.values.includes(model)) {
+          return undefined;
+        }
+        if (choice.currentValue !== model) {
+          const set = await connection.agent.request('session/set_config_option', {
+            sessionId: acpSessionId,
+            configId: choice.configId,
+            value: model,
+          });
+          configOptions = set.configOptions;
+        }
         return configOptions;
       },
       get modeId(): string | undefined {

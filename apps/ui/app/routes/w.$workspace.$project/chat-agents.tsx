@@ -294,10 +294,13 @@ const AgentRowContent = ({ agent }: { readonly agent: AgentProjection }): React.
               <FolderGit2 aria-hidden='true' className='size-3 shrink-0' />
               <span className='max-w-28 truncate'>{agent.workspace}</span>
             </span>
-            <span className='flex min-w-0 items-center gap-1 font-mono' title={`Branch: ${agent.branch}`}>
-              <GitBranch aria-hidden='true' className='size-3 shrink-0' />
-              <span className='max-w-32 truncate'>{agent.branch}</span>
-            </span>
+            {/* An unplaced chat names no line rather than a guessed one (I6). */}
+            {agent.branch === undefined ? null : (
+              <span className='flex min-w-0 items-center gap-1 font-mono' title={`Branch: ${agent.branch}`}>
+                <GitBranch aria-hidden='true' className='size-3 shrink-0' />
+                <span className='max-w-32 truncate'>{agent.branch}</span>
+              </span>
+            )}
             {agent.pendingApprovalCount > 0 ? (
               <span className='ml-auto flex shrink-0 items-center gap-1 text-warning'>
                 <ShieldAlert aria-hidden='true' className='size-3' />

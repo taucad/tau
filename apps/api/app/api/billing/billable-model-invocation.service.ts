@@ -1,5 +1,6 @@
 import { countBillableModelInput } from '#api/billing/billable-model-input-count.js';
 import { maximumMeterCharge } from '#api/billing/billable-model-bound.js';
+import { maximumModelRequestBytes } from '#api/billing/billable-model-request.js';
 import { routeSkuFamily } from '#api/billing/billable-model-qualification.js';
 import { createHmac } from 'node:crypto';
 import { HttpStatus, Inject, Injectable, Logger, Optional } from '@nestjs/common';
@@ -43,6 +44,7 @@ import type {
   TerminalEvidence,
 } from '#api/billing/credit-ledger.types.js';
 import { MetricsService } from '#telemetry/metrics.js';
+import { ShutdownService } from '#lifecycle/shutdown.service.js';
 
 type InvocationRow = NonNullable<Awaited<ReturnType<CreditLedgerService['getOperationForAttempt']>>>;
 const requestKeyVersion = 1;
@@ -52,7 +54,17 @@ const environment = (value: string): BillingEnvironment => {
   }
   throw new Error('Stored billing environment is invalid');
 };
-const assertDigestBoundary = (value: unknown): void => {
+const requestTooLarge = (): LlmGatewayError =>
+  new LlmGatewayError(HttpStatus.PAYLOAD_TOO_LARGE, 'REQUEST_TOO_LARGE', 'Model request is larger than Tau accepts.', {
+    maximumBytes: maximumModelRequestBytes,
+  });
+/**
+ * Refuse a body the request digest will not walk: deeper than 64, more than
+ * 100,000 objects, cyclic, or over the funded request contract's UTF-8 bytes.
+ * The byte bound is the contract's own, so no body the contract admits is
+ * refused here first.
+ */
+const assertRequestBound = (value: unknown): void => {
   const pending: Array<{ value: unknown; depth: number }> = [{ value, depth: 0 }];
   // oxlint-disable-next-line typescript/no-restricted-types -- WeakSet accepts arrays and records
   const seen = new WeakSet<object>();
@@ -63,12 +75,15 @@ const assertDigestBoundary = (value: unknown): void => {
       continue;
     }
     if (current.depth > 64 || ++nodes > 100_000 || seen.has(current.value)) {
-      throw new Error('Model request exceeds its digest boundary');
+      throw requestTooLarge();
     }
     seen.add(current.value);
     for (const child of Object.values(current.value)) {
       pending.push({ value: child, depth: current.depth + 1 });
     }
+  }
+  if (Buffer.byteLength(JSON.stringify(value), 'utf8') > maximumModelRequestBytes) {
+    throw requestTooLarge();
   }
 };
 /** A provider-account refusal in the body, with its provider narrowed to the gateway's own set. */
@@ -115,13 +130,12 @@ export class BillableModelInvocationService {
     @Optional()
     @Inject(DatabaseService)
     private readonly database?: Pick<DatabaseService, 'database'>,
+    // oxlint-disable-next-line new-cap -- NestJS parameter decorators are invoked without new
+    @Optional() private readonly shutdown?: ShutdownService,
   ) {}
 
   public async invoke(suppliedIntent: BillableInvocationIntent): Promise<BillableInvocationResult> {
-    assertDigestBoundary(suppliedIntent.body);
-    if (Buffer.byteLength(JSON.stringify(suppliedIntent.body), 'utf8') > 4_000_000) {
-      throw new Error('Model request exceeds its digest boundary');
-    }
+    assertRequestBound(suppliedIntent.body);
     const intent = {
       ...suppliedIntent,
       body: structuredClone(suppliedIntent.body),
@@ -600,8 +614,24 @@ export class BillableModelInvocationService {
     qualification: QualifiedBillableInvocation,
     row: InvocationRow,
     generation: bigint,
-    evidence: TerminalEvidence,
+    observed: TerminalEvidence,
   ): Promise<void> {
+    /* A stream the process cut because it is stopping (a deploy) is settled here, at
+     * zero, rather than left pending for recovery: the supplier stream is severed, so
+     * nothing further can ever price it, and recovery would reach the same absorbed
+     * outcome only after `due_at` plus its grace, while an automatic retry of the step
+     * waits on it. A person who leaves during the stop is counted the same way. */
+    const cutByStop = observed.kind === 'absorbed_unknown' && this.shutdown?.signal.aborted === true;
+    const evidence: TerminalEvidence = cutByStop
+      ? {
+          ...observed,
+          executionStatus: 'cancelled',
+          normalizationEvidence: {
+            ...(observed.normalizationEvidence ?? { version: 'service-restart-v1', fields: {} }),
+            terminalReason: 'service_restart',
+          },
+        }
+      : observed;
     await this.ledger.recordInvocationEvidence({
       operationId: row.id,
       accountId: row.accountId,
@@ -614,7 +644,9 @@ export class BillableModelInvocationService {
       'tau.billing.capacity_pool': classifyFundedLlmCapacity(row.activity).pool,
       'tau.billing.terminal.kind': evidence.kind,
       'tau.billing.terminal.incomplete_reason':
-        terminalReason === 'max_output_tokens' || terminalReason === 'content_filter'
+        terminalReason === 'max_output_tokens' ||
+        terminalReason === 'content_filter' ||
+        terminalReason === 'service_restart'
           ? terminalReason
           : terminalReason === undefined
             ? 'none'
@@ -635,7 +667,7 @@ export class BillableModelInvocationService {
         sourceRevision: finality.supplierEvidence.sourceRevision,
       });
     }
-    if (evidence.kind === 'absorbed_unknown') {
+    if (evidence.kind === 'absorbed_unknown' && !cutByStop) {
       return;
     }
     await this.ledger.terminalizeOperation({
@@ -645,6 +677,8 @@ export class BillableModelInvocationService {
       expectedGeneration: generation,
       evidence,
       resolvedAt: new Date(),
+      // Recovery's own reason for expiring an absorbed hold: no supplier evidence is coming.
+      ...(cutByStop ? { expireSpendHold: true } : {}),
     });
   }
 
@@ -690,11 +724,6 @@ export class BillableModelInvocationService {
     const secret = this.config.get<string>('BILLING_REQUEST_DIGEST_SECRET');
     if (!secret || secret.length < 32) {
       throw new Error('BILLING_REQUEST_DIGEST_SECRET is required');
-    }
-    assertDigestBoundary(intent.body);
-    const bounded = JSON.stringify(intent.body);
-    if (bounded.length > 4_000_000) {
-      throw new Error('Model request exceeds its digest boundary');
     }
     const canonical = canonicalize({
       owner: intent.authUserId,

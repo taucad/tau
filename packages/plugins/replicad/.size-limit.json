@@ -1,8 +1,8 @@
 [
   {
-    "name": "total (ESM JS) — measured 15.16 kB brotlied on 2026-08-23",
+    "name": "total (ESM JS) with physical materials — measured 20.54 kB brotlied on 2026-09-24",
     "path": ["dist/**/*.mjs"],
-    "limit": "18 kB"
+    "limit": "21 kB"
   },
   {
     "name": "font + sourcemap payload — measured 1.43 MB on 2026-08-23",

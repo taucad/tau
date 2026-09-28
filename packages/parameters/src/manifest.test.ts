@@ -7,7 +7,8 @@ import {
   admitParameterValues,
   compileParameterManifest,
   parameterManifestProfile,
-  projectParameterSchemaToDraft7,
+  projectJsonSchemaToParameterDeclaration,
+  projectParameterSchema,
   resolveParameterBinding,
 } from '@taucad/parameters';
 import type { ParameterDeclaration, ParameterProvenance } from '@taucad/parameters';
@@ -124,6 +125,27 @@ it('admits nested partial values without requiring untouched siblings', async ()
   expect(() => {
     admitParameterValues(manifest, { dimensions: { width: 21 } });
   }).not.toThrow();
+});
+
+it('should admit decimal multipleOf steps despite binary floating-point remainders', async () => {
+  // OpenSCAD Customizer `Overall_Size = 50; // [10:0.1:200]`; `50 % 0.1` is ≈ 0.0999… in binary64.
+  const manifest = await compile({
+    ...declaration(),
+    schema: {
+      ...declaration().schema,
+      properties: { size: { type: 'double', ucumUnit: 'mm', minimum: 10, maximum: 200, multipleOf: 0.1 } },
+      required: ['size'],
+    },
+    defaults: { size: 50 },
+    bindings: {},
+  });
+
+  expect(() => {
+    admitParameterValues(manifest, { size: 10.6 });
+  }).not.toThrow();
+  expect(() => {
+    admitParameterValues(manifest, { size: 10.25 });
+  }).toThrow(ParameterAdmissionError);
 });
 
 describe('native parameter manifest', () => {
@@ -388,7 +410,7 @@ describe('native parameter manifest', () => {
       properties: Record<string, unknown>;
     };
     delete projectable.properties['precise'];
-    const projected = projectParameterSchemaToDraft7(projectable);
+    const projected = projectParameterSchema({ schema: projectable, bindings: {} }, { dialect: 'draft-07' });
     expect(projected.status).toBe('usable');
     if (projected.status !== 'usable') {
       throw new Error('expected usable projection');
@@ -431,7 +453,7 @@ describe('native parameter manifest', () => {
         },
       },
     };
-    const projected = projectParameterSchemaToDraft7(schema);
+    const projected = projectParameterSchema({ schema, bindings: {} }, { dialect: 'draft-07' });
 
     expect(projected).toMatchObject({
       status: 'usable',
@@ -449,17 +471,23 @@ describe('native parameter manifest', () => {
   });
 
   it('marks decimal and wide-integer Draft-7 execution as unsupported', () => {
-    const projected = projectParameterSchemaToDraft7({
-      $schema: 'https://json-structure.org/meta/extended/v0/#',
-      $id: 'urn:taucad:test:unsupported-projection',
-      $uses: ['JSONSchemaUnits'],
-      name: 'UnsupportedProjection',
-      type: 'object',
-      properties: {
-        precise: { type: 'decimal', ucumUnit: 'm' },
-        count: { type: 'int64', ucumUnit: '1' },
+    const projected = projectParameterSchema(
+      {
+        schema: {
+          $schema: 'https://json-structure.org/meta/extended/v0/#',
+          $id: 'urn:taucad:test:unsupported-projection',
+          $uses: ['JSONSchemaUnits'],
+          name: 'UnsupportedProjection',
+          type: 'object',
+          properties: {
+            precise: { type: 'decimal', ucumUnit: 'm' },
+            count: { type: 'int64', ucumUnit: '1' },
+          },
+        },
+        bindings: {},
       },
-    });
+      { dialect: 'draft-07' },
+    );
     expect(projected.status).toBe('unsupported');
     expect(projected.diagnostics).toEqual(
       expect.arrayContaining([
@@ -834,6 +862,20 @@ describe('native parameter manifest', () => {
     });
   });
 
+  it('admits a manifest whose trusted resolution spells out the default mode', async () => {
+    const producerDeclaration = declaration();
+    const producer = await compile(producerDeclaration, { mode: 'default', inferenceLanguage: 'en-NZ' });
+
+    await expect(
+      admitParameterManifest(producer, {
+        scope: producer.scope,
+        source: producer.source,
+        identity: { ...producer.identity, resolution: { mode: 'default', inferenceLanguage: 'en-NZ' } },
+        producerDeclaration,
+      }),
+    ).resolves.toMatchObject({ identity: { resolution: { inferenceLanguage: 'en-NZ' } } });
+  });
+
   it.each(semanticAttributionFailures)(
     'rejects %s %s attribution when required values are %s',
     async (field, origin, mode) => {
@@ -1160,5 +1202,320 @@ describe('native parameter manifest', () => {
         identity: { ...manifest.identity, resolution: { mode: 'invented' } },
       }),
     ).rejects.toThrow(ParameterAdmissionError);
+  });
+});
+
+describe('authored claims inside the native carrier', () => {
+  const lengthKind = 'http://qudt.org/vocab/quantitykind/Length';
+  const carrier = (properties: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
+    $schema: 'https://json-structure.org/meta/extended/v0/#',
+    $id: 'urn:taucad:test:claims',
+    $uses: ['JSONSchemaUnits'],
+    name: 'Claims',
+    type: 'object',
+    properties,
+    ...extra,
+  });
+  const refusal = (value: unknown): Readonly<{ code: string; resource: string; schemaPointer: string }> => {
+    try {
+      admitParameterDeclaration(value);
+    } catch (error) {
+      const first = error instanceof ParameterAdmissionError ? error.diagnostics[0] : undefined;
+      if (first === undefined) {
+        throw error;
+      }
+      return { code: first.code, resource: first.resource, schemaPointer: first.schemaPointer };
+    }
+    return expect.fail('expected the declaration to be refused');
+  };
+
+  it.each([
+    ['x-tau-quantity-kind', lengthKind],
+    ['x-ogc-definition', lengthKind],
+    ['x-tau-space', 'linear'],
+    ['x-tau-unit', 'mm'],
+    ['x-ogc-unit', 'mm'],
+  ])('should refuse an in-document %s claim instead of dropping it', (claim, value) => {
+    expect(
+      refusal({ schema: carrier({ length: { type: 'double', ucumUnit: 'mm', [claim]: value } }), defaults: {} }),
+    ).toEqual({
+      code: 'INVALID_ANNOTATION',
+      resource: 'urn:taucad:parameter-schema:root',
+      schemaPointer: `/properties/length/${claim}`,
+    });
+  });
+
+  it('should refuse claims in definitions, array items and supplied resources', () => {
+    expect(
+      refusal({
+        schema: carrier(
+          { length: { type: { $ref: '#/definitions/length' } } },
+          { definitions: { length: { type: 'double', ucumUnit: 'mm', 'x-tau-space': 'linear' } } },
+        ),
+        defaults: {},
+      }),
+    ).toMatchObject({ code: 'INVALID_ANNOTATION', schemaPointer: '/definitions/length/x-tau-space' });
+    expect(
+      refusal({
+        schema: carrier({ samples: { type: 'array', items: { type: 'double', 'x-ogc-unit': 'mm' } } }),
+        defaults: {},
+      }),
+    ).toMatchObject({ code: 'INVALID_ANNOTATION', schemaPointer: '/properties/samples/items/x-ogc-unit' });
+    expect(
+      refusal({
+        schema: carrier({ offset: { type: { $ref: 'urn:taucad:test:claims-resource' } } }),
+        resources: {
+          'urn:taucad:test:claims-resource': {
+            $schema: 'https://json-structure.org/meta/extended/v0/#',
+            $id: 'urn:taucad:test:claims-resource',
+            $uses: ['JSONSchemaUnits'],
+            name: 'ClaimsResource',
+            type: 'double',
+            ucumUnit: 'cm',
+            'x-tau-quantity-kind': lengthKind,
+          },
+        },
+        defaults: {},
+      }),
+    ).toEqual({
+      code: 'INVALID_ANNOTATION',
+      resource: 'urn:taucad:test:claims-resource',
+      schemaPointer: '/x-tau-quantity-kind',
+    });
+  });
+
+  it('should admit data payloads whose keys merely look like claims', () => {
+    const literal = { 'x-tau-unit': 'literal', 'x-ogc-definition': lengthKind };
+
+    expect(() =>
+      admitParameterDeclaration({
+        schema: carrier(
+          { length: { type: 'double', ucumUnit: 'mm' } },
+          { default: literal, const: literal, enum: [literal], examples: [literal] },
+        ),
+        defaults: {},
+      }),
+    ).not.toThrow();
+  });
+});
+
+// The outbound OGC-profile view. Fixtures are Tau's own; tests cite the OGC 23-058r2 requirement they exercise.
+describe('2020-12 parameter schema view', () => {
+  const lengthKind = 'http://qudt.org/vocab/quantitykind/Length';
+  const widthKind = 'http://qudt.org/vocab/quantitykind/Width';
+  const carrier = (properties: Readonly<Record<string, unknown>>, extra: Readonly<Record<string, unknown>> = {}) => ({
+    $schema: 'https://json-structure.org/meta/extended/v0/#',
+    $id: 'urn:taucad:test:view',
+    $uses: ['JSONSchemaUnits'],
+    name: 'View',
+    type: 'object',
+    properties,
+    ...extra,
+  });
+  const projectable = async () => {
+    const producer = structuredClone(declaration()) as unknown as {
+      schema: { properties: Record<string, unknown> };
+      defaults: Record<string, unknown>;
+    };
+    delete producer.schema.properties['precise'];
+    delete producer.defaults['precise'];
+    return compile(producer as unknown as ParameterDeclaration);
+  };
+
+  it('should emit the OGC profile with binding semantics and no $id (Requirements 1, 7, 8; Recommendation 1 G–L)', async () => {
+    const view = projectParameterSchema(await projectable());
+
+    expect(view).toEqual({
+      status: 'usable',
+      dialect: '2020-12',
+      diagnostics: [],
+      schema: {
+        $schema: 'https://json-schema.org/draft/2020-12/schema',
+        type: 'object',
+        $defs: {
+          nullableLength: { type: 'number', format: 'double', 'x-ogc-unit': 'mm', 'x-ogc-unitLang': 'UCUM' },
+        },
+        properties: {
+          length: {
+            type: 'number',
+            format: 'double',
+            minimum: 0,
+            maximum: 100,
+            multipleOf: 0.5,
+            enum: [0.5, 2.5, 100],
+            'x-ogc-unit': 'mm',
+            'x-ogc-unitLang': 'UCUM',
+            'x-ogc-definition': lengthKind,
+            'x-tau-space': 'linear',
+            'x-tau-symbols': { default: 'mm', 'lang:en-NZ': 'millimetres' },
+          },
+          copies: { type: 'integer', format: 'int32', 'x-ogc-unit': '1', 'x-ogc-unitLang': 'UCUM' },
+          optionalLength: { anyOf: [{ $ref: '#/$defs/nullableLength' }, { type: 'null' }] },
+        },
+        required: ['length', 'copies'],
+      },
+    });
+  });
+
+  it('should keep the embedded Draft-07 view as the draft-07 dialect of the same function', async () => {
+    const manifest = await projectable();
+
+    expect(projectParameterSchema(manifest, { dialect: 'draft-07' })).toEqual(manifest.legacyProjection);
+  });
+
+  it('should round-trip through the JSON Schema adapter into the same carrier and bindings', async () => {
+    const producer: ParameterDeclaration = {
+      schema: carrier(
+        {
+          width: { type: 'double', ucumUnit: 'mm', symbol: 'w', minimum: 0 },
+          ratio: { type: 'float', ucumUnit: '1' },
+          teeth: { type: 'uint32', ucumUnit: '1' },
+        },
+        { required: ['width'] },
+      ),
+      defaults: { width: 4, ratio: 0.5, teeth: 12 },
+      bindings: { '/width': { quantityKind: widthKind, space: 'linear' } },
+    };
+    const view = projectParameterSchema(await compile(producer));
+    if (view.status !== 'usable') {
+      throw new Error('expected a usable view');
+    }
+
+    const readmitted = projectJsonSchemaToParameterDeclaration({
+      schema: view.schema,
+      defaults: producer.defaults,
+      schemaId: 'urn:taucad:test:view',
+      schemaName: 'View',
+    });
+
+    expect(readmitted.schema).toEqual(producer.schema);
+    expect(readmitted.bindings).toEqual(producer.bindings);
+  });
+
+  it('should refuse numbers the carrier holds as strings and report keywords it cannot express', async () => {
+    const decimal = projectParameterSchema({
+      schema: carrier({ precise: { type: 'decimal', ucumUnit: 'm' }, count: { type: 'int64', ucumUnit: '1' } }),
+      bindings: {},
+    });
+
+    expect(decimal.status).toBe('unsupported');
+    expect(decimal.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'REPRESENTATION_UNSUPPORTED', schemaPointer: '/properties/precise/type' }),
+        expect.objectContaining({ code: 'LEGACY_PROJECTION_LOSS', schemaPointer: '/properties/count/type' }),
+      ]),
+    );
+    expect(
+      projectParameterSchema({
+        schema: carrier({ label: { type: 'string', altnames: { en: 'Label' } } }),
+        bindings: {},
+      }),
+    ).toMatchObject({
+      status: 'usable',
+      diagnostics: [
+        { code: 'LEGACY_PROJECTION_LOSS', severity: 'warning', schemaPointer: '/properties/label/altnames' },
+      ],
+    });
+  });
+
+  it('should never place semantics without a unit or from disagreeing bindings', async () => {
+    const unitless = await compile({
+      schema: carrier({ opaque: { type: 'double' } }),
+      defaults: { opaque: 1 },
+      bindings: { '/opaque': { quantityKind: lengthKind } },
+    });
+    const shared = await compile({
+      schema: carrier(
+        { depth: { type: { $ref: '#/definitions/span' } }, width: { type: { $ref: '#/definitions/span' } } },
+        { definitions: { span: { type: 'double', ucumUnit: 'mm' } } },
+      ),
+      defaults: { depth: 1, width: 1 },
+      bindings: { '/depth': { quantityKind: lengthKind }, '/width': { quantityKind: widthKind } },
+    });
+
+    expect(projectParameterSchema(unitless)).toMatchObject({
+      status: 'usable',
+      schema: { properties: { opaque: { type: 'number', format: 'double' } } },
+      diagnostics: [{ code: 'LEGACY_PROJECTION_LOSS', schemaPointer: '/properties/opaque' }],
+    });
+    expect(projectParameterSchema(shared)).toMatchObject({
+      status: 'usable',
+      schema: { $defs: { span: { type: 'number', format: 'double', 'x-ogc-unit': 'mm', 'x-ogc-unitLang': 'UCUM' } } },
+      diagnostics: [{ code: 'LEGACY_PROJECTION_LOSS', schemaPointer: '/definitions/span' }],
+    });
+    expect(JSON.stringify(projectParameterSchema(shared))).not.toContain('x-ogc-definition');
+  });
+});
+
+const dataCarrier = (properties: Readonly<Record<string, unknown>>) => ({
+  $schema: 'https://json-structure.org/meta/extended/v0/#',
+  $id: 'urn:taucad:test:data-values',
+  $uses: ['JSONSchemaUnits'],
+  name: 'DataValues',
+  type: 'object',
+  properties,
+});
+
+describe('data-valued keywords in schema views', () => {
+  // Every key here is also a carrier or view keyword; inside a data value each one is an ordinary property name.
+  const token = { unit: 'mm', value: 3, ucumUnit: 'mm', symbol: 'd', symbols: { default: 'd' }, type: 'int64' };
+  const other = { unit: 'in', value: 1, name: 'n', $uses: ['JSONSchemaUnits'], properties: { unit: 'in' } };
+  const valueSchema = { type: 'object', properties: { unit: { type: 'string' }, value: { type: 'double' } } };
+
+  it.each(['draft-07', '2020-12'] as const)('should copy data-valued keywords verbatim into the %s view', (dialect) => {
+    const size = { ...valueSchema, default: token, const: token, enum: [token, other], examples: [token] };
+    const view = projectParameterSchema(
+      { schema: dataCarrier({ size: structuredClone(size) }), bindings: {} },
+      { dialect },
+    );
+    expect(view).toMatchObject({
+      status: 'usable',
+      diagnostics: [],
+      schema: { properties: { size: { ...size, properties: { value: { type: 'number' } } } } },
+    });
+  });
+
+  it('should embed an object-valued default unchanged in the manifest legacy projection', async () => {
+    const length = { unit: 'mm', value: 3 };
+    const schema = dataCarrier({ length: { ...valueSchema, default: structuredClone(length) } });
+    const manifest = await compile({ schema, defaults: { length }, bindings: {} });
+
+    expect(manifest.legacyProjection).toMatchObject({
+      status: 'usable',
+      diagnostics: [],
+      schema: { properties: { length: { default: length } } },
+    });
+  });
+});
+
+describe('data-valued keywords in value validation', () => {
+  // Each key is also a carrier keyword the validator schema rewrites; inside an enum member it is a property name.
+  const member = (tag: string) => ({ required: [tag], $uses: ['JSONSchemaUnits'], type: { $ref: 'urn:x:absent#/x' } });
+  const text = { type: 'string' };
+  const strings = { type: 'array', items: text };
+  const size = { type: 'object', properties: { width: { type: 'double' } }, required: ['width'] };
+
+  it('should admit object enum members as data and name-map entries as partial schemas', async () => {
+    const admitted = await compile({
+      schema: dataCarrier({
+        choice: {
+          type: 'object',
+          properties: { required: strings, $uses: strings, type: { type: 'object', properties: { $ref: text } } },
+          enum: [member('a')],
+        },
+        // Name-map entries named like data keywords are schemas, so partial values still apply inside them.
+        default: size,
+        required: size,
+      }),
+      defaults: { choice: member('a') },
+      bindings: {},
+    });
+
+    expect(() => {
+      admitParameterValues(admitted, { choice: member('a'), default: {}, required: {} });
+    }).not.toThrow();
+    expect(() => {
+      admitParameterValues(admitted, { choice: member('b') });
+    }).toThrow(ParameterAdmissionError);
   });
 });

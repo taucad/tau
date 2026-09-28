@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import { HttpStatus, ServiceUnavailableException } from '@nestjs/common';
+import { ConflictException, HttpStatus, ServiceUnavailableException } from '@nestjs/common';
 import type { ArgumentsHost } from '@nestjs/common';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { WebSocket } from 'ws';
@@ -8,16 +8,18 @@ import type { WebSocket } from 'ws';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 
 import { relayHostFramesThroughRedis } from '#api/hosts/host-frame-relay.js';
+import { ShutdownService } from '#lifecycle/shutdown.service.js';
 import { hostControlMessageSchema } from '#api/hosts/hosts.dto.js';
 import { HostsService } from '#api/hosts/hosts.service.js';
-import { agentRun } from '#database/schema.js';
+import { hashHostGitCredential, resolveHostGitCredential } from '#api/hosts/host-git-credential.js';
+import { agentRun, project } from '#database/schema.js';
 import type { DatabaseService } from '#database/database.service.js';
 import type { RedisService } from '#redis/redis.service.js';
 import type { ConfigService } from '@nestjs/config';
 import type { Environment } from '#config/environment.config.js';
 
 vi.mock('#api/hosts/host-frame-relay.js', () => ({
-  relayHostFramesThroughRedis: vi.fn(async () => ({ close: vi.fn() })),
+  relayHostFramesThroughRedis: vi.fn(async () => ({ close: vi.fn(), depart: vi.fn(async () => undefined) })),
 }));
 
 const hash = (value: string): string => createHash('sha256').update(value).digest('base64url');
@@ -224,6 +226,7 @@ describe('HostsService agent capability advertisement', () => {
     ownerId: 'owner-1',
     label: 'workshop-mac',
     credentialHash: 'never-returned',
+    gitCredentialHash: 'never-returned-either',
     createdAt: new Date(0),
     lastSeenAt: null,
     revokedAt: null,
@@ -369,6 +372,18 @@ describe('HostsService agent capability advertisement', () => {
     expect(values.has(`host:browser:${session.id}:runtime`)).toBe(true);
     service.onModuleDestroy();
   });
+
+  it('should list a device without either credential hash', async () => {
+    const { redis, database, config } = harness();
+    const service = new HostsService(database, redis, config);
+
+    const [listed] = await service.listDevices('owner-1');
+
+    expect(listed).toMatchObject({ id: 'device-1' });
+    expect(listed).not.toHaveProperty('credentialHash');
+    expect(listed).not.toHaveProperty('gitCredentialHash');
+    service.onModuleDestroy();
+  });
 });
 
 /**
@@ -459,6 +474,8 @@ describe('HostsService session lifetime', () => {
         }
         if (typeof replacement === 'string' && replacement.startsWith('{')) {
           put(key, replacement, 60);
+        } else {
+          values.delete(key);
         }
         return 1;
       },
@@ -564,7 +581,8 @@ describe('HostsService session lifetime', () => {
   };
 
   const openSession = async (service: HostsService, offers: Array<Record<string, unknown>>) => {
-    await service.registerControl('device-1', routeSocket());
+    const control = routeSocket();
+    await service.registerControl('device-1', control);
     await service.handleControlMessage(
       'device-1',
       JSON.stringify({
@@ -581,7 +599,7 @@ describe('HostsService session lifetime', () => {
       userId: 'owner-1',
       runtimeVersion: '1.0.0',
     });
-    return { session, offer: offers[0] as { agentAuthorization: string } };
+    return { session, offer: offers[0] as { agentAuthorization: string }, control };
   };
 
   afterEach(() => {
@@ -677,6 +695,37 @@ describe('HostsService session lifetime', () => {
     expect(relay?.close).not.toHaveBeenCalled();
   });
 
+  it('departs every socket, while Redis is up, the moment the process begins to stop', async () => {
+    vi.useFakeTimers();
+    const { offers, redis, database, config, values } = ttlHarness();
+    const shutdown = new ShutdownService();
+    const service = new HostsService(database, redis, config, undefined, shutdown);
+    const { session, offer, control } = await openSession(service, offers);
+    const host = routeSocket();
+    await service.acceptHostRoute({
+      sessionId: session.id,
+      route: 'agent',
+      authorization: `Bearer ${offer.agentAuthorization}`,
+      socket: host,
+    });
+    const parked = vi.mocked(relayHostFramesThroughRedis).mock.results.at(-1);
+    const relay = parked?.type === 'return' ? await parked.value : undefined;
+    expect(values.has('host:online:device-1')).toBe(true);
+
+    shutdown.stop();
+
+    expect(control.close).toHaveBeenCalledWith(1012, 'service restart');
+    expect(host.close).toHaveBeenCalledWith(1012, 'service restart');
+    // The departure is published before the handle closes, or the peer on another Machine never hears of it.
+    expect(relay?.depart).toHaveBeenCalledWith(1012, 'service restart');
+    expect(vi.mocked(relay!.depart).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(relay!.close).mock.invocationCallOrder[0]!,
+    );
+    await expect(shutdown.settled(Date.now() + 1000)).resolves.toBe(0);
+    expect(values.has('host:online:device-1')).toBe(false);
+    service.onModuleDestroy();
+  });
+
   /**
    * Admission is all awaits — a one-use grant read, a device lookup, the
    * keepalive's own pipeline, the relay's reader connect — and every listener is
@@ -717,17 +766,30 @@ describe('HostsService cloud provisioning', () => {
     ownerId: string;
     label: string;
     credentialHash: string;
+    /* oxlint-disable-next-line typescript/no-restricted-types -- the column is nullable: `null` is a pre-0045 cloud row */
+    gitCredentialHash?: string | null | undefined;
     cloudProjectId?: string | undefined;
     revokedAt?: Date | undefined;
+  };
+  type StartedSpec = {
+    deviceId: string;
+    credential: string;
+    gitCredential: string;
+    ownerId: string;
+    ownerName?: string;
+    projectId: string;
+    apiUrl: string;
   };
 
   const cloudHarness = () => {
     const devices: DeviceRow[] = [];
     const runs: Array<Record<string, unknown>> = [];
-    const started: Array<{ deviceId: string; credential: string; ownerId: string; projectId: string; apiUrl: string }> =
-      [];
+    /* The caller's registered project, as the lookup by id and owner answers it; empty when it has none. */
+    const projects: Array<{ id: string; ownerName: string }> = [{ id: 'registered', ownerName: 'Ada Owner' }];
+    const started: StartedSpec[] = [];
     const stopped: string[] = [];
     let startFailure: Error | undefined;
+    const stopFailures = new Set<string>();
     /* One predicate per call site, applied in order: the doubles below feed the
      * same rows to every `where`, so each query names what it is looking for. */
     let nextMatch: (row: DeviceRow) => boolean = () => true;
@@ -735,15 +797,20 @@ describe('HostsService cloud provisioning', () => {
     const database = {
       database: {
         select: () => ({
-          from: (table: unknown) => ({
-            where: () => {
-              const rows: Array<Record<string, unknown>> = table === agentRun ? runs : live();
-              return {
+          from: (table: unknown) => {
+            // oxlint-disable-next-line typescript/promise-function-async -- drizzle's builder is a thenable with methods on it, not a promise.
+            const where = () => {
+              const rows: Array<Record<string, unknown>> =
+                table === agentRun ? runs : table === project ? projects : live();
+              /* A thenable, as drizzle's builder is: a query with no `limit` awaits the rows. */
+              return Object.assign(Promise.resolve(rows), {
                 limit: async () => rows.slice(0, 1),
                 orderBy: () => ({ limit: async () => rows }),
-              };
-            },
-          }),
+              });
+            };
+            /* The project lookup joins its owner's name; the rows already carry it. */
+            return { where, innerJoin: () => ({ where }) };
+          },
         }),
         insert: (table: unknown) => ({
           // oxlint-disable-next-line typescript/promise-function-async -- drizzle's builder is a thenable with methods on it, not a promise.
@@ -800,13 +867,7 @@ describe('HostsService cloud provisioning', () => {
     } as unknown as RedisService;
     const config = { get: () => 'https://api.tau.test' } as unknown as ConfigService<Environment, true>;
     const provisioner = {
-      start: async (spec: {
-        deviceId: string;
-        credential: string;
-        ownerId: string;
-        projectId: string;
-        apiUrl: string;
-      }) => {
+      start: async (spec: StartedSpec) => {
         if (startFailure !== undefined) {
           throw startFailure;
         }
@@ -814,12 +875,16 @@ describe('HostsService cloud provisioning', () => {
         return { reference: `tau-host-${spec.deviceId}` };
       },
       stop: async (deviceId: string) => {
+        if (stopFailures.has(deviceId)) {
+          throw new Error('Cannot connect to the Docker daemon');
+        }
         stopped.push(deviceId);
       },
     };
     return {
       devices,
       runs,
+      projects,
       started,
       stopped,
       provisioner,
@@ -831,6 +896,9 @@ describe('HostsService cloud provisioning', () => {
       },
       failNextStart: (error: Error = new Error('docker: no such image')) => {
         startFailure = error;
+      },
+      failStop: (deviceId: string) => {
+        stopFailures.add(deviceId);
       },
     };
   };
@@ -848,12 +916,20 @@ describe('HostsService cloud provisioning', () => {
     expect(harness.started[0]).toMatchObject({
       deviceId: first.deviceId,
       ownerId: 'owner-1',
+      /* Rule 15: the host records the owner, so it is told who that is (FX7 D2). */
+      ownerName: 'Ada Owner',
       projectId: 'project-a',
       apiUrl: 'https://api.tau.test',
     });
     expect(harness.started[0]?.credential.length).toBeGreaterThanOrEqual(32);
     /* The row stores only a hash — the credential is unrecoverable from here. */
     expect(harness.devices[0]?.credentialHash).not.toBe(harness.started[0]?.credential);
+    /* D21: a second, repository-scoped credential beside the device one, also hashed. */
+    const gitCredential = harness.started[0]?.gitCredential ?? 'unreachable';
+    expect(gitCredential).toMatch(/^taugit_[\w-]{43}$/u);
+    expect(gitCredential).not.toBe(harness.started[0]?.credential);
+    expect(JSON.stringify(first)).not.toContain(gitCredential);
+    expect(harness.devices[0]?.gitCredentialHash).toBe(hashHostGitCredential(gitCredential));
 
     const second = await service.provisionCloudHost({ userId: 'owner-1', projectId: 'project-a' });
     expect(second).toEqual({ deviceId: first.deviceId, label: 'Tau Cloud', state: 'existing' });
@@ -962,6 +1038,109 @@ describe('HostsService cloud provisioning', () => {
     harness.setMatch((row) => row.id === 'device-laptop');
     await service.revokeDevice('device-laptop', 'owner-1');
     expect(harness.stopped).toEqual(['device-cloud']);
+    service.onModuleDestroy();
+  });
+
+  it('should refuse a project with no Hosted Remote before creating a device or a container', async () => {
+    const harness = cloudHarness();
+    harness.projects.length = 0;
+    const service = new HostsService(harness.database, harness.redis, harness.config, harness.provisioner);
+
+    const refusal = await service
+      .provisionCloudHost({ userId: 'owner-1', projectId: 'project-local-only' })
+      .catch((error: unknown) => error);
+
+    expect(refusal).toBeInstanceOf(ConflictException);
+    expect((refusal as ConflictException).getResponse()).toMatchObject({ code: 'PROJECT_NOT_ON_TAU_CLOUD' });
+    expect(harness.devices).toEqual([]);
+    expect(harness.started).toEqual([]);
+    service.onModuleDestroy();
+  });
+
+  it('should retire a live cloud host that has no push credential and provision a fresh one', async () => {
+    const harness = cloudHarness();
+    harness.devices.push({
+      id: 'device-before-0045',
+      ownerId: 'owner-1',
+      label: 'Tau Cloud',
+      credentialHash: 'hash',
+      gitCredentialHash: null,
+      cloudProjectId: 'project-e',
+    });
+    harness.setMatch((row) => row.cloudProjectId === 'project-e');
+    const service = new HostsService(harness.database, harness.redis, harness.config, harness.provisioner);
+
+    const provisioned = await service.provisionCloudHost({ userId: 'owner-1', projectId: 'project-e' });
+
+    expect(provisioned.state).toBe('provisioned');
+    expect(provisioned.deviceId).not.toBe('device-before-0045');
+    expect(harness.devices[0]?.revokedAt).toBeInstanceOf(Date);
+    expect(harness.stopped).toEqual(['device-before-0045']);
+    expect(harness.started.map((spec) => spec.deviceId)).toEqual([provisioned.deviceId]);
+    expect(harness.devices[1]?.gitCredentialHash).toEqual(expect.any(String));
+    service.onModuleDestroy();
+  });
+
+  it('should stop and revoke a deleted account cloud host, and never let a stuck container block the deletion', async () => {
+    const cloud = (id: string, cloudProjectId: string) => ({
+      id,
+      ownerId: 'owner-leaving',
+      label: 'Tau Cloud',
+      credentialHash: `hash-${id}`,
+      gitCredentialHash: `git-${id}`,
+      cloudProjectId,
+    });
+    /* The double answers the rows this predicate names: the account's live cloud hosts. */
+    const accountCloudHosts = (row: { ownerId: string; cloudProjectId?: string | undefined }): boolean =>
+      row.ownerId === 'owner-leaving' && row.cloudProjectId !== undefined;
+
+    const harness = cloudHarness();
+    harness.devices.push(cloud('device-cloud', 'project-f'));
+    harness.setMatch(accountCloudHosts);
+    const service = new HostsService(harness.database, harness.redis, harness.config, harness.provisioner);
+    await service.retireCloudHosts('owner-leaving');
+    expect(harness.stopped).toEqual(['device-cloud']);
+    expect(harness.devices[0]?.revokedAt).toBeInstanceOf(Date);
+    service.onModuleDestroy();
+
+    const stuck = cloudHarness();
+    stuck.devices.push(cloud('device-stuck', 'project-g'));
+    stuck.failStop('device-stuck');
+    stuck.setMatch(accountCloudHosts);
+    const stuckService = new HostsService(stuck.database, stuck.redis, stuck.config, stuck.provisioner);
+    await expect(stuckService.retireCloudHosts('owner-leaving')).resolves.toBeUndefined();
+    /* Revoked before the stop was tried, so both credentials are dead regardless. */
+    expect(stuck.devices[0]?.revokedAt).toBeInstanceOf(Date);
+    stuckService.onModuleDestroy();
+  });
+
+  it('should resolve the push credential to its one project until deprovisioning revokes the device', async () => {
+    const harness = cloudHarness();
+    harness.setMatch((row) => row.cloudProjectId === 'project-d' && row.revokedAt === undefined);
+    const service = new HostsService(harness.database, harness.redis, harness.config, harness.provisioner);
+    const { deviceId } = await service.provisionCloudHost({ userId: 'owner-1', projectId: 'project-d' });
+    const [spec] = harness.started;
+    /* The database double answers the rows this predicate names, as the real query does by hash. */
+    const presenting = (credential: string): void => {
+      harness.setMatch((row) => row.gitCredentialHash === hashHostGitCredential(credential));
+    };
+
+    presenting(spec?.gitCredential ?? 'unreachable');
+    await expect(resolveHostGitCredential(harness.database, spec?.gitCredential ?? '')).resolves.toEqual({
+      ownerId: 'owner-1',
+      deviceId,
+      projectId: 'project-d',
+    });
+    /* The device credential is not a push credential. */
+    presenting(spec?.credential ?? 'unreachable');
+    await expect(resolveHostGitCredential(harness.database, spec?.credential ?? '')).resolves.toBeUndefined();
+
+    harness.setMatch((row) => row.id === deviceId);
+    await service.revokeDevice(deviceId, 'owner-1');
+
+    presenting(spec?.gitCredential ?? 'unreachable');
+    await expect(resolveHostGitCredential(harness.database, spec?.gitCredential ?? '')).resolves.toBeUndefined();
+    expect(harness.stopped).toEqual([deviceId]);
     service.onModuleDestroy();
   });
 
@@ -1168,6 +1347,17 @@ describe('hostControlMessageSchema', () => {
           { id: 'gpt-5.3-codex-spark', name: 'GPT-5.3-Codex-Spark' },
         ],
         defaultModel: 'gpt-5.6-sol',
+        thoughtLevel: {
+          type: 'select',
+          id: 'thought_level',
+          name: 'Thinking',
+          category: 'thought_level',
+          currentValue: 'medium',
+          options: [
+            { value: 'medium', name: 'Medium' },
+            { value: 'high', name: 'High' },
+          ],
+        },
       },
       { id: 'claude', displayName: 'Claude Code', models: [], refusal: 'CLI_TOO_OLD' },
     ];

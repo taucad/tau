@@ -1,5 +1,4 @@
 import { configDefaults, defineConfig } from 'vitest/config';
-import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 
 /** Broad by construction: new executable source is covered unless it enters one of these audited non-production classes. */
 export const engineCoverageSourcePolicy = {
@@ -16,7 +15,6 @@ export const engineCoverageSourcePolicy = {
 };
 
 export default defineConfig({
-  plugins: [nxViteTsPaths()],
   test: {
     environment: 'node',
     exclude: [...configDefaults.exclude, 'e2e/**'],

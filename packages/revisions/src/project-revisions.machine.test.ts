@@ -1,13 +1,15 @@
 import { createActor } from 'xstate';
+import type { ActorRefFrom, AnyActorRef } from 'xstate';
 import { describe, expect, it } from 'vitest';
 
 import * as machineModule from '#project-revisions.machine.js';
 import { projectRevisionsMachine, selectRevisionStatus } from '#project-revisions.machine.js';
+import { releaseUnplacedTurns } from '#revision-effects.js';
 import { checkoutMachine } from '#checkout.machine.js';
 import type { CheckoutFenceActorInput } from '#checkout.machine.js';
 import { checkoutsMachine } from '#checkouts.machine.js';
 import { RevisionPortError } from '#revision-port.js';
-import type { CheckoutRecord } from '#revision-port.js';
+import type { CheckoutRecord, ConflictRecord } from '#revision-port.js';
 import { remoteMachine } from '#remote.machine.js';
 import { resolutionMachine } from '#resolution.machine.js';
 import { restoreMachine } from '#restore.machine.js';
@@ -71,8 +73,19 @@ import type { FakeCallbackActors, FakePromiseActors } from '#test/fake-actors.js
  * 30  a turn-ending verb that names a run reaches the queue as well as the ref,
  *     and a run id another turn already holds is refused whatever turn id
  *     carries it (T4-02, T4-hyp1)
- * --  `checkoutChanged` re-heads the checkout; the checkouts' own statuses feed
- *     the `RevisionStatus` projection; serializable snapshot; one machine value
+ * 31  a restore mints on its line through the checkout child — pre-restore cut,
+ *     apply, `restore` cut with `restoredFrom` — and never detaches (D1, T2); a
+ *     restore on a held checkout is refused before any cut (A1); an admission to
+ *     the restoring checkout waits for it, the open question included (A2, M4);
+ *     `restore` hears the selection's line, again when a live switch moves it (M1)
+ * 32  the projection names its line: `unknown`, `unborn`, `branch` (D3)
+ * 33  W5b, RV-W5b: a conflicted turn retires its lease through the registry and
+ *     the parked scheduler resumes (F1); a scheduler cut naming an unknown
+ *     checkout is answered at once (F8); a stale registry lease over a dirty
+ *     checkout cannot spin the pull (F2)
+ * --  `checkoutChanged` re-heads the checkout and keeps its branch; the checkouts'
+ *     own statuses feed the `RevisionStatus` projection; serializable snapshot;
+ *     one machine value
  */
 
 /** Let every queued microtask and the actors' promise handlers run. */
@@ -101,12 +114,11 @@ const linked: CheckoutRecord = {
   leaseChatIds: [],
 };
 
-/** The same linked checkout, but its head is a conflicted revision (W10). */
-const conflictedLinked: CheckoutRecord = {
-  ...linked,
-  headRevisionId: 'rev-conflict',
-  conflicted: true,
-};
+/** This device's conflict line for `main` (D14). */
+const conflictLine = 'conflicts/main/device-a';
+
+/** One undecided conflicted revision on it. */
+const undecided: ConflictRecord = { revisionId: 'rev-conflict', line: conflictLine, into: 'main', foreign: false };
 
 type Harness = Readonly<{
   actor: ReturnType<typeof createActor<typeof projectRevisionsMachine>>;
@@ -201,18 +213,23 @@ const start = (): Harness => {
   return { actor, promises, callbacks, emitted };
 };
 
-const registerCheckouts = (harness: Harness, checkouts: readonly CheckoutRecord[] = [live, linked]): void => {
-  harness.actor.send({ type: 'checkoutsChanged', checkouts });
+const registerCheckouts = (
+  harness: Harness,
+  checkouts: readonly CheckoutRecord[] = [live, linked],
+  conflicts: readonly ConflictRecord[] = [],
+): void => {
+  harness.actor.send({ type: 'checkoutsChanged', checkouts, conflicts });
 };
 
 /** Bring the invoked `checkouts` child to `ready` through its own records. */
 const readyRegistry = async (
   harness: Harness,
   checkouts: readonly CheckoutRecord[] = [live, linked],
+  conflicts: readonly ConflictRecord[] = [],
 ): Promise<void> => {
   harness.promises.settle('sweepLeases', { output: { retiredRunIds: [] } });
   await flush();
-  harness.promises.settle('listCheckouts', { output: { checkouts } });
+  harness.promises.settle('listCheckouts', { output: { checkouts, conflicts } });
   await flush();
 };
 
@@ -645,7 +662,7 @@ describe('projectRevisionsMachine', () => {
     harness.actor.stop();
   });
 
-  it('re-heads a checkout that a restore moved', () => {
+  it('re-heads a checkout another verb moved and keeps its branch when the fact names none (T2)', () => {
     const harness = start();
 
     registerCheckouts(harness);
@@ -660,12 +677,277 @@ describe('projectRevisionsMachine', () => {
     const ref = harness.actor.getSnapshot().context.checkoutRefs['checkout-b'];
     expect(ref?.getSnapshot().context.headRevisionId).toBe('rev-4');
     expect(ref?.getSnapshot().context.headTreeId).toBe('tree-4');
+    /* A head moved; the line did not. `branch` is never `undefined` as a state (D3). */
     expect(harness.actor.getSnapshot().context.checkouts[1]).toMatchObject({
       headRevisionId: 'rev-4',
-      branch: undefined,
+      branch: 'agent/b',
     });
 
     harness.actor.stop();
+  });
+
+  it('publishes to the line a live Switch moved the same checkout onto (N9)', async () => {
+    const harness = start();
+    const { actor, promises, callbacks } = harness;
+    registerCheckouts(harness, [{ ...live, headRevisionId: 'rev-5', headTreeId: 'tree-5' }, linked]);
+
+    actor.send({
+      type: 'checkoutChanged',
+      checkoutId: 'checkout-live',
+      revisionId: 'rev-5',
+      treeId: 'tree-5',
+      branch: 'feature',
+    });
+    actor.send({ type: 'cut', checkoutId: 'checkout-live', trigger: 'save', leaseIds: [] });
+    callbacks.sendBack('fence', { type: 'fenceGranted' });
+    promises.settle('cut', { output: { treeId: 'tree-6', cutId: 'cut-1' } });
+    await flush();
+    promises.settle('writeRevision', { output: { revisionId: 'rev-6' } });
+    await flush();
+
+    expect(promises.inputsFor('casHead')).toEqual([
+      { checkoutId: 'checkout-live', branch: 'feature', expectedHead: 'rev-5', head: 'rev-6' },
+    ]);
+
+    actor.stop();
+  });
+
+  it('follows a rename of the branch a dirty checkout tracks without calling it clean (N9)', () => {
+    const harness = start();
+    registerCheckouts(harness, [{ ...live, headRevisionId: 'rev-5', headTreeId: 'tree-5' }, linked]);
+    harness.actor.send({ type: 'changed', checkoutId: 'checkout-live', paths: ['main.ts'], generation: 1 });
+
+    registerCheckouts(harness, [{ ...live, branch: 'renamed', headRevisionId: 'rev-5', headTreeId: 'tree-5' }, linked]);
+
+    const child = harness.actor.getSnapshot().context.checkoutRefs['checkout-live']?.getSnapshot();
+    expect(child?.context.branch).toBe('renamed');
+    expect(child?.matches('dirty')).toBe(true);
+
+    harness.actor.stop();
+  });
+
+  it('names the line explicitly: unknown before the registry, unborn without a revision, then the branch (D3)', () => {
+    const harness = start();
+
+    expect(selectRevisionStatus(harness.actor.getSnapshot()).line).toEqual({ kind: 'unknown' });
+
+    registerCheckouts(harness);
+    expect(selectRevisionStatus(harness.actor.getSnapshot()).line).toEqual({ kind: 'unborn', name: 'main' });
+
+    registerCheckouts(harness, [{ ...live, headRevisionId: 'rev-1', headTreeId: 'tree-1' }, linked]);
+    expect(selectRevisionStatus(harness.actor.getSnapshot()).line).toEqual({ kind: 'branch', name: 'main' });
+
+    harness.actor.stop();
+  });
+
+  it('restores by minting on the line: pre-restore cut, apply, restore cut — never a detached head (D1, T2)', async () => {
+    const harness = start();
+    const { actor, promises, callbacks, emitted } = harness;
+    const bornLive = { ...live, headRevisionId: 'rev-5', headTreeId: 'tree-5' };
+    registerCheckouts(harness, [bornLive, linked]);
+    const restoreRef = actor.getSnapshot().children['restore'];
+
+    restoreRef?.send({ type: 'restore', revisionId: 'rev-3' });
+    /* The pre-restore cut reaches the live checkout, and a clean tree mints nothing. */
+    expect(promises.inputsFor('cut')).toEqual([]);
+    callbacks.sendBack('fence', { type: 'fenceGranted' });
+    expect(promises.inputsFor('cut')).toEqual([{ checkoutId: 'checkout-live', trigger: 'restore', generation: 0 }]);
+    promises.settle('cut', { output: { treeId: 'tree-5', cutId: 'cut-1' } });
+    await flush();
+
+    expect(promises.inputsFor('computePlan')).toEqual([{ checkoutId: 'checkout-live', target: 'rev-3' }]);
+    promises.settle('computePlan', {
+      output: { planId: 'plan-1', revisionId: 'rev-3', revisionNumber: 3, removedPathCount: 0, dirty: false },
+    });
+    await flush();
+    promises.settle('applyPlan', { output: { revisionId: 'rev-3', treeId: 'tree-3' } });
+    await flush();
+
+    /* The applied tree is minted by the checkout itself, on top of the head it had. */
+    callbacks.sendBack('fence', { type: 'fenceGranted' });
+    promises.settle('cut', { output: { treeId: 'tree-3', cutId: 'cut-2' } });
+    await flush();
+    expect(promises.inputsFor('writeRevision')).toEqual([
+      {
+        checkoutId: 'checkout-live',
+        cutId: 'cut-2',
+        treeId: 'tree-3',
+        parents: ['rev-5'],
+        trigger: 'restore',
+        leaseIds: [],
+        restoredFrom: 'rev-3',
+      },
+    ]);
+    promises.settle('writeRevision', { output: { revisionId: 'rev-6' } });
+    await flush();
+    expect(promises.inputsFor('casHead')).toEqual([
+      { checkoutId: 'checkout-live', branch: 'main', expectedHead: 'rev-5', head: 'rev-6' },
+    ]);
+    promises.settle('casHead', { output: { status: 'updated', head: 'rev-6' } });
+    await flush();
+
+    const status = selectRevisionStatus(actor.getSnapshot());
+    expect(status.line).toEqual({ kind: 'branch', name: 'main' });
+    expect(status.headRevisionId).toBe('rev-6');
+    expect(status.restore.busy).toBe(false);
+    expect(actor.getSnapshot().context.checkouts[0]).toMatchObject({ branch: 'main' });
+    expect(emitted.find((event) => event.type === 'revisionMinted')).toMatchObject({
+      trigger: 'restore',
+      revisionId: 'rev-6',
+    });
+    expect(restoreRef?.getSnapshot().context.restoredRevisionId).toBe('rev-6');
+
+    actor.stop();
+  });
+
+  /* W1 palette/strip: offer Undo restore exactly when the machine would answer it, never UNDO_UNAVAILABLE. */
+  it('says a restore is undoable only while its row is the selected head this root minted (M1)', async () => {
+    const harness = start();
+    const { actor, promises, callbacks } = harness;
+    /* A reload, or a restore another device made: the head is a restore row this root never minted. */
+    registerCheckouts(harness, [{ ...live, headRevisionId: 'rev-5', headTreeId: 'tree-5' }, linked]);
+    expect(selectRevisionStatus(actor.getSnapshot()).restore.undoable).toBe(false);
+
+    actor.getSnapshot().children['restore']?.send({ type: 'restore', revisionId: 'rev-3' });
+    callbacks.sendBack('fence', { type: 'fenceGranted' });
+    promises.settle('cut', { output: { treeId: 'tree-5', cutId: 'cut-1' } });
+    await flush();
+    promises.settle('computePlan', {
+      output: { planId: 'plan-1', revisionId: 'rev-3', revisionNumber: 3, removedPathCount: 0, dirty: false },
+    });
+    await flush();
+    promises.settle('applyPlan', { output: { revisionId: 'rev-3', treeId: 'tree-3' } });
+    await flush();
+    callbacks.sendBack('fence', { type: 'fenceGranted' });
+    promises.settle('cut', { output: { treeId: 'tree-3', cutId: 'cut-2' } });
+    await flush();
+    promises.settle('writeRevision', { output: { revisionId: 'rev-6' } });
+    await flush();
+    promises.settle('casHead', { output: { status: 'updated', head: 'rev-6' } });
+    await flush();
+    expect(selectRevisionStatus(actor.getSnapshot()).restore.undoable).toBe(true);
+
+    /* A save on top: the restore row is history now, and Undo would not reverse the newest change. */
+    actor.send({
+      type: 'checkoutStatusChanged',
+      checkoutId: 'checkout-live',
+      status: 'clean',
+      headRevisionId: 'rev-7',
+    });
+    expect(selectRevisionStatus(actor.getSnapshot()).restore.undoable).toBe(false);
+
+    actor.stop();
+  });
+
+  it('refuses a restore on a checkout a turn holds before any cut, in Switch’s words (A1)', () => {
+    const harness = start();
+    const { actor, promises } = harness;
+    registerCheckouts(harness, [
+      { ...live, headRevisionId: 'rev-5', headTreeId: 'tree-5', leaseRunIds: ['run-1'] },
+      linked,
+    ]);
+    const restoreRef = actor.getSnapshot().children['restore'];
+    const toasts: unknown[] = [];
+    restoreRef?.on('toast.error', (toast) => toasts.push(toast));
+
+    restoreRef?.send({ type: 'restore', revisionId: 'rev-3' });
+
+    expect(restoreRef?.getSnapshot().matches('idle')).toBe(true);
+    expect(harness.callbacks.active('fence')).toBe(0);
+    expect(promises.inputsFor('computePlan')).toEqual([]);
+    expect(toasts).toEqual([
+      { type: 'toast.error', message: 'An agent is working in this project’s files.', code: 'LEASE_UNAVAILABLE' },
+    ]);
+
+    actor.stop();
+  });
+
+  it('holds an admission to the restoring checkout until the restore settles (A2)', async () => {
+    const harness = start();
+    const { actor, promises, callbacks } = harness;
+    registerCheckouts(harness, [{ ...live, headRevisionId: 'rev-5', headTreeId: 'tree-5' }, linked]);
+    const restoreRef = actor.getSnapshot().children['restore'];
+
+    restoreRef?.send({ type: 'restore', revisionId: 'rev-3' });
+    actor.send({ type: 'admitTurn', turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' });
+
+    expect(actor.getSnapshot().context.turnRefs['turn-1']).toBeUndefined();
+    expect(actor.getSnapshot().context.pendingAdmissions).toEqual([
+      { turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' },
+    ]);
+
+    callbacks.sendBack('fence', { type: 'fenceGranted' });
+    promises.settle('cut', { output: { treeId: 'tree-5', cutId: 'cut-1' } });
+    await flush();
+    promises.settle('computePlan', { error: new Error('unknown revision') });
+    await flush();
+
+    expect(restoreRef?.getSnapshot().matches('idle')).toBe(true);
+    expect(actor.getSnapshot().context.turnRefs['turn-1']).toBeDefined();
+    expect(actor.getSnapshot().context.pendingAdmissions).toEqual([]);
+
+    actor.stop();
+  });
+
+  it('holds an admission made while the restore question is open until the restore row lands (A2, M4)', async () => {
+    const harness = start();
+    const { actor, promises, callbacks } = harness;
+    registerCheckouts(harness, [{ ...live, headRevisionId: 'rev-5', headTreeId: 'tree-5' }, linked]);
+    const restoreRef = actor.getSnapshot().children['restore'];
+
+    restoreRef?.send({ type: 'restore', revisionId: 'rev-3' });
+    callbacks.sendBack('fence', { type: 'fenceGranted' });
+    promises.settle('cut', { output: { treeId: 'tree-5', cutId: 'cut-1' } });
+    await flush();
+    promises.settle('computePlan', {
+      output: { planId: 'plan-1', revisionId: 'rev-3', revisionNumber: 3, removedPathCount: 2, dirty: false },
+    });
+    await flush();
+    expect(restoreRef?.getSnapshot().matches('confirming')).toBe(true);
+
+    /* The person has not answered yet; a chat turn arrives for the same files. */
+    actor.send({ type: 'admitTurn', turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' });
+    expect(actor.getSnapshot().context.turnRefs['turn-1']).toBeUndefined();
+
+    restoreRef?.send({ type: 'confirm' });
+    promises.settle('applyPlan', { output: { revisionId: 'rev-3', treeId: 'tree-3' } });
+    await flush();
+    /* The turn still waits: the files are the target's, and the restore row is not minted yet. */
+    expect(actor.getSnapshot().context.turnRefs['turn-1']).toBeUndefined();
+
+    callbacks.sendBack('fence', { type: 'fenceGranted' });
+    promises.settle('cut', { output: { treeId: 'tree-3', cutId: 'cut-2' } });
+    await flush();
+    promises.settle('writeRevision', { output: { revisionId: 'rev-6' } });
+    await flush();
+    promises.settle('casHead', { output: { status: 'updated', head: 'rev-6' } });
+    await flush();
+
+    expect(restoreRef?.getSnapshot().context.restoredRevisionId).toBe('rev-6');
+    expect(actor.getSnapshot().context.turnRefs['turn-1']).toBeDefined();
+    expect(actor.getSnapshot().context.pendingAdmissions).toEqual([]);
+
+    actor.stop();
+  });
+
+  it('tells restore the selection’s line, and again when a live switch moves it under the same id (M1)', () => {
+    const harness = start();
+    const { actor } = harness;
+    registerCheckouts(harness, [{ ...live, headRevisionId: 'rev-5', headTreeId: 'tree-5' }, linked]);
+    const restoreRef = actor.getSnapshot().children['restore'];
+    expect(restoreRef?.getSnapshot().context).toMatchObject({ checkoutId: 'checkout-live', branch: 'main' });
+
+    actor.send({
+      type: 'checkoutChanged',
+      checkoutId: 'checkout-live',
+      revisionId: 'rev-9',
+      treeId: 'tree-9',
+      branch: 'feature',
+    });
+
+    expect(restoreRef?.getSnapshot().context).toMatchObject({ checkoutId: 'checkout-live', branch: 'feature' });
+
+    actor.stop();
   });
 
   it('projects a RevisionStatus from the statuses its checkouts report', () => {
@@ -679,7 +961,8 @@ describe('projectRevisionsMachine', () => {
       projectId: 'project-1',
       checkoutId: 'checkout-b',
       checkoutRoot: '/checkouts/checkout-b',
-      branch: 'agent/b',
+      line: { kind: 'unborn', name: 'agent/b' },
+      registrySettled: true,
       projectDirty: true,
       dirty: true,
       minting: false,
@@ -688,7 +971,15 @@ describe('projectRevisionsMachine', () => {
       attention: 0,
       /* The restore child is idle until someone asks for a restore, and the
        * plan's two risk facts are read from it rather than copied (S19). */
-      restore: { asking: false, busy: false, removedPathCount: 0, dirty: false, revisionNumber: undefined },
+      restore: {
+        asking: false,
+        busy: false,
+        removedPathCount: 0,
+        dirty: false,
+        revisionNumber: undefined,
+        undoable: false,
+        canUndo: false,
+      },
       /* Same rule for the remote child: the facet is read from it, and it is
          still reading git's remotes list here (S26 shows *Sync* only once a
          remote exists, D26). */
@@ -972,21 +1263,20 @@ describe('projectRevisionsMachine', () => {
     harness.actor.stop();
   });
 
-  it('tells restore which checkout the registry resolved, and its head', async () => {
+  it('tells restore which checkout the registry resolved', async () => {
     const harness = start();
 
     harness.promises.settle('sweepLeases', { output: { retiredRunIds: [] } });
     await flush();
     harness.promises.settle('listCheckouts', {
-      output: { checkouts: [{ ...live, headRevisionId: 'rev-9' }, linked] },
+      output: { checkouts: [{ ...live, headRevisionId: 'rev-9' }, linked], conflicts: [] },
     });
     await flush();
 
     /* `restore`'s invoke input was evaluated before any record existed, so the
-     * head it plans an undo against has to arrive as an announcement (R8). */
+     * checkout it restores has to arrive as an announcement (R8). */
     const restoreRef = harness.actor.getSnapshot().children['restore'];
     expect(restoreRef?.getSnapshot().context.checkoutId).toBe('checkout-live');
-    expect(restoreRef?.getSnapshot().context.headRevisionId).toBe('rev-9');
 
     harness.actor.send({ type: 'pinTo', checkoutId: 'checkout-b' });
     expect(restoreRef?.getSnapshot().context.checkoutId).toBe('checkout-b');
@@ -1031,18 +1321,168 @@ describe('projectRevisionsMachine', () => {
     harness.actor.stop();
   });
 
+  it('routes the answer to the scheduler’s merge cut, and a retired lease, into the scheduler (D12, rule 9)', async () => {
+    const harness = start();
+    registerCheckouts(harness, [{ ...live, headRevisionId: 'rev-1', headTreeId: 'tree-1' }]);
+    harness.promises.settle('readPending', { output: { version: 1, entries: [] } });
+    await flush();
+    harness.promises.settle('readSyncRemote', { output: { remote: 'tau' } });
+    await flush();
+    harness.promises.settle('syncFetch', { output: { leases: {}, integration: 'fastForward' } });
+    await flush();
+    harness.promises.settle('syncFastForward', {
+      output: { status: 'held', hold: 'dirty', checkoutId: 'checkout-live', revisionId: 'remote-2' },
+    });
+    await flush();
+
+    /* The scheduler asked the checkout actor, through this root, for a `merge`
+     * cut; the tree is already the head's, so the answer is *nothing to save*,
+     * and only that answer reaching the scheduler lets it pull again. */
+    harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
+    harness.promises.settle('cut', { output: { treeId: 'tree-1', cutId: 'cut-1' } });
+    await flush();
+    expect(harness.promises.inputsFor('syncFetch')).toHaveLength(2);
+
+    /* Leased this time: parked until the registry says the lease retired. */
+    harness.promises.settle('syncFetch', { output: { leases: {}, integration: 'fastForward' } });
+    await flush();
+    harness.promises.settle('syncFastForward', {
+      output: { status: 'held', hold: 'leased', checkoutId: 'checkout-live', revisionId: 'remote-2' },
+    });
+    await flush();
+    expect(selectRevisionStatus(harness.actor.getSnapshot()).sync.arrived).toBe('remote-2');
+
+    harness.actor.send({ type: 'leaseRetired', runId: 'run-1' });
+    await flush();
+    expect(harness.promises.inputsFor('syncFetch')).toHaveLength(3);
+
+    harness.actor.stop();
+  });
+
+  it('resumes a scheduler parked behind a turn that ended conflicted (rule 9, RV-W5b F1)', async () => {
+    const harness = start();
+    await readyRegistry(harness, [{ ...live, headRevisionId: 'rev-1', headTreeId: 'tree-1', leaseRunIds: ['run-7'] }]);
+    harness.promises.settle('readPending', { output: { version: 1, entries: [] } });
+    await flush();
+    harness.promises.settle('readSyncRemote', { output: { remote: 'tau' } });
+    await flush();
+    harness.promises.settle('syncFetch', { output: { leases: {}, integration: 'fastForward' } });
+    await flush();
+    harness.promises.settle('syncFastForward', {
+      output: { status: 'held', hold: 'leased', checkoutId: 'checkout-live', revisionId: 'remote-2' },
+    });
+    await flush();
+    expect(selectRevisionStatus(harness.actor.getSnapshot()).sync.arrived).toBe('remote-2');
+
+    harness.actor.send({
+      type: 'turnConflicted',
+      turnId: 'turn-7',
+      chatId: 'chat-7',
+      checkoutId: 'checkout-live',
+      runId: 'run-7',
+      revisionId: 'rev-2',
+      trigger: 'turn',
+      branch: 'main',
+      runIds: ['run-7'],
+    });
+    await flush();
+    harness.promises.settle('retireRegistryLease', { output: undefined });
+    await flush();
+
+    expect(harness.promises.inputsFor('syncFetch')).toHaveLength(2);
+    expect(harness.actor.getSnapshot().context.checkouts.find(({ id }) => id === 'checkout-live')?.leaseRunIds).toEqual(
+      [],
+    );
+
+    harness.actor.stop();
+  });
+
+  it('answers a scheduler cut naming a checkout it has not spawned at once (RV-W5b F8)', async () => {
+    const harness = start();
+    registerCheckouts(harness, [{ ...live, headRevisionId: 'rev-1', headTreeId: 'tree-1' }]);
+    harness.promises.settle('readPending', { output: { version: 1, entries: [] } });
+    await flush();
+    harness.promises.settle('readSyncRemote', { output: { remote: 'tau' } });
+    await flush();
+    harness.promises.settle('syncFetch', { output: { leases: {}, integration: 'fastForward' } });
+    await flush();
+    harness.promises.settle('syncFastForward', {
+      output: { status: 'held', hold: 'dirty', checkoutId: 'checkout-ghost', revisionId: 'remote-2' },
+    });
+    await flush();
+
+    /* No clock advance: the answer, not the pull deadline, settles it. */
+    expect(selectRevisionStatus(harness.actor.getSnapshot()).sync).toMatchObject({
+      state: 'queued',
+      error: 'This project has no checkout checkout-ghost.',
+    });
+
+    harness.actor.stop();
+  });
+
+  it('cannot spin the pull over a stale registry lease and a dirty checkout (RV-W5b F2)', async () => {
+    const harness = start();
+    /* The registry still lists run-7, as a conflicted turn left it before F1: the root answers `nothingToSave`. */
+    registerCheckouts(harness, [{ ...live, headRevisionId: 'rev-1', headTreeId: 'tree-1', leaseRunIds: ['run-7'] }]);
+    harness.promises.settle('readPending', { output: { version: 1, entries: [] } });
+    await flush();
+    harness.promises.settle('readSyncRemote', { output: { remote: 'tau' } });
+    await flush();
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      if (harness.promises.running('syncFetch') === 0) {
+        break;
+      }
+      harness.promises.settle('syncFetch', { output: { leases: {}, integration: 'fastForward' } });
+      // eslint-disable-next-line no-await-in-loop -- one pull at a time.
+      await flush();
+      harness.promises.settle('syncFastForward', {
+        output: { status: 'held', hold: 'dirty', checkoutId: 'checkout-live', revisionId: 'remote-2' },
+      });
+      // eslint-disable-next-line no-await-in-loop -- one pull at a time.
+      await flush();
+      // eslint-disable-next-line no-await-in-loop -- one pull at a time.
+      await flush();
+    }
+
+    /* One immediate re-pull, then the backoff: no timers advanced, two pulls. */
+    expect(harness.promises.inputsFor('syncFetch')).toHaveLength(2);
+    expect(harness.promises.inputsFor('cut')).toHaveLength(0);
+
+    harness.actor.stop();
+  });
+
   it('re-emits the registry facts a host has to show', async () => {
     const harness = start();
 
     harness.promises.settle('sweepLeases', { output: { retiredRunIds: ['run-0'] } });
     await flush();
     harness.promises.settle('listCheckouts', {
-      output: { checkouts: [live, { ...linked, removable: true }] },
+      output: { checkouts: [live, { ...linked, removable: true }], conflicts: [] },
     });
     await flush();
 
     expect(harness.emitted.map((event) => event.type)).toContain('leaseRetired');
     expect(harness.emitted.map((event) => event.type)).toContain('removalOffered');
+
+    harness.actor.stop();
+  });
+
+  it('releases every turn a close would wait on, buffered or still placing, and names their runs (RV-W2b #5)', async () => {
+    const harness = start();
+    harness.actor.send({ type: 'admitTurn', turnId: 'turn-0', chatId: 'chat-0', runId: 'run-0' });
+
+    expect(releaseUnplacedTurns(harness.actor)).toEqual(['run-0']);
+    expect(harness.actor.getSnapshot().context.pendingAdmissions).toEqual([]);
+
+    await readyRegistry(harness);
+    harness.actor.send({ type: 'admitTurn', turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' });
+    expect(Object.keys(harness.actor.getSnapshot().context.turnRefs)).toEqual(['turn-1']);
+
+    expect(releaseUnplacedTurns(harness.actor)).toEqual(['run-1']);
+    await flush();
+    /* Nothing is left holding every checkout, so a close cuts them all. */
+    expect(harness.actor.getSnapshot().context.turnRefs).toEqual({});
+    expect(harness.promises.inputsFor('prepare')).toEqual([{ turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' }]);
 
     harness.actor.stop();
   });
@@ -1182,6 +1622,67 @@ describe('projectRevisionsMachine', () => {
     harness.actor.stop();
   });
 
+  /* A registry still loading takes no verb: a *New branch* from a named base
+   * asked for then was dropped, and waited out its whole bound (W4 a3b). */
+  it('asks the registry for a branch sent before the registry answered, once it answers', async () => {
+    const harness = start();
+
+    harness.actor.send({ type: 'branch', event: { type: 'create', name: 'enclosure-v2', from: 'rev-12' } });
+    await flush();
+    expect(harness.promises.inputsFor('addCheckout')).toEqual([]);
+
+    await readyRegistry(harness);
+
+    expect(harness.promises.inputsFor('addCheckout')).toEqual([
+      { projectId: 'project-1', branch: 'enclosure-v2', from: 'rev-12' },
+    ]);
+    harness.promises.settle('addCheckout', {
+      error: Object.assign(new Error('no such revision'), { code: 'UNKNOWN_REVISION' }),
+    });
+    await flush();
+    expect(harness.actor.getSnapshot().children.branch?.getSnapshot().context.reasonCode).toBe('UNKNOWN_REVISION');
+
+    harness.actor.stop();
+  });
+
+  /* The clock never moves here, so a verb the registry dropped would sit busy
+   * forever instead of failing at its 30 s bound (W4 a3c). */
+  it('makes a new branch asked for while a lease is retiring, once the retirement lands', async () => {
+    const harness = start();
+    await readyRegistry(harness, [live, { ...linked, leaseRunIds: ['run-9'] }]);
+    harness.actor.send({ type: 'leaseStale', runId: 'run-9' });
+    await flush();
+    expect(harness.promises.inputsFor('retireRegistryLease')).toEqual([{ projectId: 'project-1', runId: 'run-9' }]);
+
+    harness.actor.send({ type: 'branch', event: { type: 'create', name: 'enclosure-v2', from: 'rev-12' } });
+    await flush();
+    expect(harness.promises.inputsFor('addCheckout')).toEqual([]);
+    harness.promises.settle('retireRegistryLease', { output: undefined });
+    await flush();
+
+    expect(harness.promises.inputsFor('addCheckout')).toEqual([
+      { projectId: 'project-1', branch: 'enclosure-v2', from: 'rev-12' },
+    ]);
+
+    harness.actor.stop();
+  });
+
+  it('refuses a new branch at once when the registry failed to open', async () => {
+    const harness = start();
+    harness.promises.settle('sweepLeases', { error: new Error('no runs directory') });
+    await flush();
+
+    harness.actor.send({ type: 'branch', event: { type: 'create', name: 'enclosure-v2', from: 'rev-12' } });
+    await flush();
+
+    /* `failed` is transient: the verb is back to idle, carrying the open's refusal. */
+    expect(selectRevisionStatus(harness.actor.getSnapshot()).branchVerb.busy).toBe(false);
+    expect(harness.actor.getSnapshot().children.branch?.getSnapshot().context.reason).toBe('no runs directory');
+    expect(harness.promises.inputsFor('addCheckout')).toEqual([]);
+
+    harness.actor.stop();
+  });
+
   /* A fresh project has files and no revision. *New branch* there used to reach
    * the registry with no base, which the port refuses as unborn — so the
    * composer's picker made no checkout and the turn leased the project itself.
@@ -1201,9 +1702,18 @@ describe('projectRevisionsMachine', () => {
     });
     /* The checkout is the sole minter (F2), so the verb asks it and waits. */
     expect(harness.promises.inputsFor('addCheckout')).toEqual([]);
-    expect(harness.actor.getSnapshot().children['checkout:checkout-live']?.getSnapshot().matches('minting')).toBe(true);
+    /* Spawned children are not in the typed `schemas.children` map, so they are read by id. */
+    const children: Readonly<Record<string, AnyActorRef | undefined>> = harness.actor.getSnapshot().children;
+    const liveCheckout: ActorRefFrom<typeof checkoutMachine> | undefined = children['checkout:checkout-live'];
+    expect(liveCheckout?.getSnapshot().matches('minting')).toBe(true);
 
-    harness.actor.send({ type: 'revisionMinted', checkoutId: 'checkout-live', trigger: 'switch', revisionId: 'rev-1' });
+    harness.actor.send({
+      type: 'revisionMinted',
+      checkoutId: 'checkout-live',
+      trigger: 'switch',
+      requestId: 'branch-1',
+      revisionId: 'rev-1',
+    });
     await flush();
 
     expect(harness.promises.inputsFor('addCheckout')).toEqual([
@@ -1224,12 +1734,46 @@ describe('projectRevisionsMachine', () => {
       checkoutId: 'checkout-live',
       head: 'rev-1',
     });
-    harness.actor.send({ type: 'nothingToSave', checkoutId: 'checkout-live', trigger: 'switch' });
+    harness.actor.send({
+      type: 'nothingToSave',
+      checkoutId: 'checkout-live',
+      trigger: 'switch',
+      requestId: 'branch-1',
+    });
     await flush();
 
     expect(harness.promises.inputsFor('addCheckout')).toEqual([
       { projectId: 'project-1', branch: 'isolated-run', from: 'rev-1' },
     ]);
+
+    harness.actor.stop();
+  });
+
+  it('says whether the checkout registry has answered, so a rootless first projection is not read as no checkout (D41)', async () => {
+    const harness = start();
+    expect(selectRevisionStatus(harness.actor.getSnapshot()).registrySettled).toBe(false);
+
+    await readyRegistry(harness, [live]);
+
+    expect(selectRevisionStatus(harness.actor.getSnapshot()).registrySettled).toBe(true);
+    harness.actor.stop();
+  });
+
+  it('reads a checked-out branch row at the live head, not the lagging registry record (D47)', async () => {
+    const harness = start();
+
+    await readyRegistry(harness, [{ ...live, headRevisionId: 'rev-1', headTreeId: 'tree-1' }]);
+    harness.actor.send({
+      type: 'checkoutStatusChanged',
+      checkoutId: 'checkout-live',
+      status: 'clean',
+      headRevisionId: 'rev-2',
+    });
+    await flush();
+
+    const status = selectRevisionStatus(harness.actor.getSnapshot());
+    expect(status.headRevisionId).toBe('rev-2');
+    expect(status.branches.find((row) => row.checkoutId === 'checkout-live')?.head).toBe('rev-2');
 
     harness.actor.stop();
   });
@@ -1270,7 +1814,12 @@ describe('projectRevisionsMachine', () => {
     await readyRegistry(harness, [{ ...live, headRevisionId: 'rev-1', headTreeId: 'tree-1' }, linked]);
     harness.actor.send({ type: 'branch', event: { type: 'create', name: 'enclosure-v2' } });
     await flush();
-    harness.actor.send({ type: 'nothingToSave', checkoutId: 'checkout-live', trigger: 'switch' });
+    harness.actor.send({
+      type: 'nothingToSave',
+      checkoutId: 'checkout-live',
+      trigger: 'switch',
+      requestId: 'branch-1',
+    });
     await flush();
     harness.promises.settle('addCheckout', {
       error: new RevisionPortError('CHECKOUT_CONFLICT', 'That branch already has a checkout.'),
@@ -1351,10 +1900,10 @@ describe('projectRevisionsMachine', () => {
   });
 
   /* 25–28: the conflict cards (W10, S33). */
-  it('spawns one resolution child per conflicted head and retires it when the head moves', async () => {
+  it('spawns one resolution child per undecided conflict and retires it once the line contains it (D14)', async () => {
     const harness = start();
 
-    registerCheckouts(harness, [live, conflictedLinked]);
+    registerCheckouts(harness, [live, linked], [undecided]);
     await flush();
 
     expect(Object.keys(harness.actor.getSnapshot().context.resolutionRefs)).toEqual(['rev-conflict']);
@@ -1362,12 +1911,12 @@ describe('projectRevisionsMachine', () => {
       { projectId: 'project-1', revisionId: 'rev-conflict' },
     ]);
     /* Not spawned twice for the same head. */
-    registerCheckouts(harness, [live, conflictedLinked]);
+    registerCheckouts(harness, [live, linked], [undecided]);
     await flush();
     expect(harness.promises.inputsFor('loadConflict')).toHaveLength(1);
 
-    /* The head moved off the conflicted revision: the card, and its child, go. */
-    registerCheckouts(harness, [live, { ...linked, headRevisionId: 'rev-resolved' }]);
+    /* A decision landed: the listing no longer holds it, and the card and its child go. */
+    registerCheckouts(harness, [live, linked], []);
     await flush();
     expect(harness.actor.getSnapshot().context.resolutionRefs).toEqual({});
 
@@ -1377,11 +1926,20 @@ describe('projectRevisionsMachine', () => {
   it('projects the conflict card from the records and its child, and counts it as attention', async () => {
     const harness = start();
 
-    registerCheckouts(harness, [live, conflictedLinked]);
+    registerCheckouts(harness, [live, linked], [undecided]);
     await flush();
     /* Before the child has read anything, the card exists and says so. */
     expect(selectRevisionStatus(harness.actor.getSnapshot()).conflicts).toEqual([
-      { revisionId: 'rev-conflict', branch: 'agent/b', labels: undefined, paths: [], busy: true, ready: false },
+      {
+        revisionId: 'rev-conflict',
+        branch: conflictLine,
+        into: 'main',
+        foreign: false,
+        labels: undefined,
+        paths: [],
+        busy: true,
+        ready: false,
+      },
     ]);
     const projectedPathCounts: number[] = [];
     const subscription = harness.actor.subscribe((snapshot) => {
@@ -1390,10 +1948,10 @@ describe('projectRevisionsMachine', () => {
 
     harness.promises.settle('loadConflict', {
       output: {
-        branch: 'agent/b',
+        branch: conflictLine,
         labels: { ours: 'main', theirs: 'agent/b' },
         paths: [{ path: 'enclosure.ts', openable: true }],
-        checkoutId: 'checkout-b',
+        checkoutId: 'checkout-live',
       },
     });
     await flush();
@@ -1402,7 +1960,9 @@ describe('projectRevisionsMachine', () => {
     expect(status.conflicts).toEqual([
       {
         revisionId: 'rev-conflict',
-        branch: 'agent/b',
+        branch: conflictLine,
+        into: 'main',
+        foreign: false,
         labels: { ours: 'main', theirs: 'agent/b' },
         paths: [{ path: 'enclosure.ts', openable: true, side: undefined }],
         busy: false,
@@ -1420,14 +1980,14 @@ describe('projectRevisionsMachine', () => {
   it('routes a per-file verb to the conflicted revision it names', async () => {
     const harness = start();
 
-    registerCheckouts(harness, [live, conflictedLinked]);
+    registerCheckouts(harness, [live, linked], [undecided]);
     await flush();
     harness.promises.settle('loadConflict', {
       output: {
-        branch: 'agent/b',
+        branch: conflictLine,
         labels: { ours: 'main', theirs: 'agent/b' },
         paths: [{ path: 'enclosure.ts', openable: true }],
-        checkoutId: 'checkout-b',
+        checkoutId: 'checkout-live',
       },
     });
     await flush();
@@ -1457,13 +2017,13 @@ describe('projectRevisionsMachine', () => {
   it('re-emits a resolved conflict and asks the registry to read again', async () => {
     const harness = start();
 
-    await readyRegistry(harness, [live, conflictedLinked]);
+    await readyRegistry(harness, [live, linked], [undecided]);
     harness.promises.settle('loadConflict', {
       output: {
-        branch: 'agent/b',
+        branch: conflictLine,
         labels: { ours: 'main', theirs: 'agent/b' },
         paths: [{ path: 'enclosure.ts', openable: true }],
-        checkoutId: 'checkout-b',
+        checkoutId: 'checkout-live',
       },
     });
     await flush();
@@ -1475,16 +2035,52 @@ describe('projectRevisionsMachine', () => {
     harness.promises.settle('applyResolution', { output: undefined });
     await flush();
     harness.actor.send({ type: 'resolution', revisionId: 'rev-conflict', event: { type: 'finish' } });
-    harness.promises.settle('finishMerge', { output: { revisionId: 'rev-resolved', branch: 'agent/b' } });
+    harness.promises.settle('finishMerge', { output: { revisionId: 'rev-resolved', branch: conflictLine } });
     await flush();
 
     expect(harness.emitted.find((event) => event.type === 'conflictResolved')).toEqual({
       type: 'conflictResolved',
       revisionId: 'rev-resolved',
-      branch: 'agent/b',
+      branch: conflictLine,
     });
     /* The registry is re-read, which is what retires the card (one writer). */
     expect(harness.promises.inputsFor('listCheckouts')).toHaveLength(2);
+
+    harness.actor.stop();
+  });
+
+  it('re-emits a child toast, so a refused finish reaches the host with its reason (L2-F8)', async () => {
+    const harness = start();
+
+    await readyRegistry(harness, [live, linked], [undecided]);
+    harness.promises.settle('loadConflict', {
+      output: {
+        branch: conflictLine,
+        labels: { ours: 'main', theirs: 'agent/b' },
+        paths: [{ path: 'enclosure.ts', openable: true }],
+        checkoutId: 'checkout-live',
+      },
+    });
+    await flush();
+    harness.actor.send({
+      type: 'resolution',
+      revisionId: 'rev-conflict',
+      event: { type: 'keepMine', path: 'enclosure.ts' },
+    });
+    harness.promises.settle('applyResolution', { output: undefined });
+    await flush();
+    harness.actor.send({ type: 'resolution', revisionId: 'rev-conflict', event: { type: 'finish' } });
+    harness.promises.settle('finishMerge', { error: new Error('The disk is full.') });
+    await flush();
+
+    expect(harness.emitted.filter((event) => event.type === 'childToast')).toEqual([
+      {
+        type: 'childToast',
+        subject: 'resolution',
+        tone: 'error',
+        message: expect.stringContaining('The disk is full.') as unknown as string,
+      },
+    ]);
 
     harness.actor.stop();
   });
@@ -1510,9 +2106,35 @@ describe('projectRevisionsMachine', () => {
     harness.actor.stop();
   });
 
+  it('D50: pulls the branch the live checkout switched to, not the one the project opened on', async () => {
+    const harness = start();
+
+    await readyRegistry(harness, [live]);
+    harness.promises.settle('readPending', { output: { version: 1, entries: [] } });
+    await flush();
+    harness.promises.settle('readSyncRemote', { output: { remote: 'origin', branch: 'main' } });
+    await flush();
+    harness.promises.settle('syncFetch', { output: { leases: {}, integration: 'upToDate' } });
+    await flush();
+    expect(harness.promises.inputsFor('syncFetch').at(-1)).toMatchObject({ branch: 'main' });
+
+    harness.actor.send({
+      type: 'checkoutChanged',
+      checkoutId: live.id,
+      revisionId: 'rev-feature',
+      treeId: 'tree-feature',
+      branch: 'feature',
+    });
+    await flush();
+
+    expect(harness.promises.inputsFor('syncFetch')).toHaveLength(2);
+    expect(harness.promises.inputsFor('syncFetch').at(-1)).toMatchObject({ branch: 'feature' });
+
+    harness.actor.stop();
+  });
+
   it('tells the scheduler a conflict was composed, so `Needs resolution` is not sticky (W13 review 2 R6/P37)', async () => {
     const harness = start();
-    const conflictedLive: CheckoutRecord = { ...live, headRevisionId: 'rev-conflict', conflicted: true };
 
     /* The scheduler rehydrates, pulls, and finds the two lines diverged. */
     harness.promises.settle('readPending', { output: { version: 1, entries: [] } });
@@ -1531,16 +2153,16 @@ describe('projectRevisionsMachine', () => {
       leaseChatIds: [],
     });
     harness.promises.settle('syncMerge', {
-      output: { status: 'conflicted', branch: 'main', into: 'main', paths: ['enclosure.ts'] },
+      output: { status: 'conflicted', branch: conflictLine, into: 'main', paths: ['enclosure.ts'] },
     });
     await flush();
-    await readyRegistry(harness, [conflictedLive]);
+    await readyRegistry(harness, [live], [undecided]);
     expect(selectRevisionStatus(harness.actor.getSnapshot()).sync.state).toBe('conflicted');
 
-    /* W10's resolution settles on the branch the scheduler tracks. */
+    /* W10's resolution settles on the conflict line the scheduler recorded. */
     harness.promises.settle('loadConflict', {
       output: {
-        branch: 'main',
+        branch: conflictLine,
         labels: { ours: 'main', theirs: 'agent/b' },
         paths: [{ path: 'enclosure.ts', openable: true }],
         checkoutId: 'checkout-live',
@@ -1555,7 +2177,7 @@ describe('projectRevisionsMachine', () => {
     harness.promises.settle('applyResolution', { output: undefined });
     await flush();
     harness.actor.send({ type: 'resolution', revisionId: 'rev-conflict', event: { type: 'finish' } });
-    harness.promises.settle('finishMerge', { output: { revisionId: 'rev-resolved', branch: 'main' } });
+    harness.promises.settle('finishMerge', { output: { revisionId: 'rev-resolved', branch: conflictLine } });
     await flush();
 
     /* Pulling again, not still `Needs resolution`: whether the remote takes the
@@ -1569,14 +2191,14 @@ describe('projectRevisionsMachine', () => {
   it('re-emits a request to have a chat resolve one', async () => {
     const harness = start();
 
-    registerCheckouts(harness, [live, conflictedLinked]);
+    registerCheckouts(harness, [live, linked], [undecided]);
     await flush();
     harness.promises.settle('loadConflict', {
       output: {
-        branch: 'agent/b',
+        branch: conflictLine,
         labels: { ours: 'main', theirs: 'agent/b' },
         paths: [{ path: 'enclosure.ts', openable: true }],
-        checkoutId: 'checkout-b',
+        checkoutId: 'checkout-live',
       },
     });
     await flush();
@@ -1591,6 +2213,45 @@ describe('projectRevisionsMachine', () => {
       checkoutId: 'checkout-b',
       paths: ['enclosure.ts'],
     });
+
+    harness.actor.stop();
+  });
+
+  it('re-reads the registry when a fetch brings a conflict line, and lists only undecided lines (D14)', async () => {
+    const harness = start();
+
+    await readyRegistry(harness, [live]);
+    harness.promises.settle('readPending', { output: { version: 1, entries: [] } });
+    await flush();
+    harness.promises.settle('readSyncRemote', { output: { remote: 'tau' } });
+    await flush();
+    /* Another device's line arrives with the fetch; a line already decided rides along. */
+    harness.promises.settle('syncFetch', {
+      output: {
+        leases: {},
+        integration: 'upToDate',
+        branches: [
+          { name: 'main', head: 'rev-1' },
+          { name: 'conflicts/main/device-b', head: 'rev-foreign' },
+          { name: 'conflicts/main/device-c', head: 'rev-decided' },
+        ],
+      },
+    });
+    await flush();
+    expect(harness.promises.inputsFor('listCheckouts')).toHaveLength(2);
+    harness.promises.settle('listCheckouts', {
+      output: {
+        checkouts: [live],
+        conflicts: [{ revisionId: 'rev-foreign', line: 'conflicts/main/device-b', into: 'main', foreign: true }],
+      },
+    });
+    await flush();
+
+    const status = selectRevisionStatus(harness.actor.getSnapshot());
+    expect(status.conflicts.map(({ branch, into, foreign }) => ({ branch, into, foreign }))).toEqual([
+      { branch: 'conflicts/main/device-b', into: 'main', foreign: true },
+    ]);
+    expect(status.branches.map((branch) => branch.name)).toEqual(['main', 'conflicts/main/device-b']);
 
     harness.actor.stop();
   });
@@ -1615,6 +2276,6 @@ describe('root invokes notify the host on every child transition (P45)', () => {
   });
 
   it.each(children)('declares onSnapshot on %s so a child transition is a root snapshot', (id) => {
-    expect(entries.find((entry) => entry.id === id)?.onSnapshot).toStrictEqual({ actions: [] });
+    expect(entries.find((entry) => entry.id === id)?.onSnapshot).toStrictEqual({});
   });
 });

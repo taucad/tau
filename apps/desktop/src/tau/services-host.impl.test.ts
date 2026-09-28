@@ -11,6 +11,7 @@ import type { AgentChannelClient } from '@taucad/agent-host/channel-client';
 import { NodeFsChannel, NodeFsProviderClient } from '@taucad/filesystem/backend';
 import { acquireNodeAuthorityWriter, toNodeFsPort } from '@taucad/filesystem/backend/node';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
+import { requireRevisionToolchain } from '@taucad/host';
 import type * as TauHost from '@taucad/host';
 import type * as AgentTools from '@taucad/host/agent-tools';
 import type * as RuntimeClient from '@taucad/runtime/client';
@@ -30,6 +31,14 @@ const acpPortCalls = vi.hoisted(() => [] as Array<Parameters<typeof TauHost.crea
 const toolRegistryCalls = vi.hoisted(() => [] as Array<Parameters<typeof AgentTools.createHostToolRegistry>[0]>);
 const toolRegistries = vi.hoisted(() => [] as Array<ReturnType<typeof AgentTools.createHostToolRegistry>>);
 const runtimeClientCalls = vi.hoisted(() => [] as Array<ReturnType<typeof RuntimeClient.createRuntimeClient>>);
+
+/* The same `git` + `git lfs` probe the host refuses on (OQ-B8): the row that
+ * builds a bundled-git stand-in needs both, so without them it skips rather than
+ * dying on `which git-lfs`. */
+const gitToolchainOnPath = await requireRevisionToolchain().then(
+  () => true,
+  () => false,
+);
 
 vi.mock('@taucad/host', async (importOriginal) => {
   const actual = await importOriginal<typeof TauHost>();
@@ -1327,7 +1336,7 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     });
     expect(nativeHistory).toMatchObject({
       type: 'revision',
-      status: { projectId, branch: 'main' },
+      status: { projectId, line: { kind: 'branch', name: 'main' } },
       result: [expect.objectContaining({ revisionNumber: 1 })],
     });
     /* The turn held a lease while it ran and the settlement retired it, so the
@@ -1346,73 +1355,77 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
   /* Review a1 R1: the desktop performs the early named refusal too. A packaged app
    * launched from Finder has `/usr/bin:/bin:/usr/sbin:/sbin` on PATH, and
    * Homebrew's `git-lfs` is not on it. */
-  it('names the binaries it is missing, and records with the ones main gives it', async () => {
-    const unavailable: Array<{
-      readonly reason: string;
-      readonly missing: readonly string[];
-    }> = [];
-    const previousPath = process.env['PATH'] ?? '';
-    process.env['PATH'] = '';
-    try {
-      const { host, workspaceRoot } = await configuredHost(
-        {},
-        {
-          onRevisionsUnavailable: (_root, event) => {
-            unavailable.push(event);
+  it.runIf(gitToolchainOnPath)(
+    'names the binaries it is missing, and records with the ones main gives it',
+    async () => {
+      const unavailable: Array<{
+        readonly reason: string;
+        readonly missing: readonly string[];
+      }> = [];
+      const previousPath = process.env['PATH'] ?? '';
+      process.env['PATH'] = '';
+      try {
+        const { host, workspaceRoot } = await configuredHost(
+          {},
+          {
+            onRevisionsUnavailable: (_root, event) => {
+              unavailable.push(event);
+            },
           },
-        },
-      );
-      connect(host, workspaceRoot);
-      await expect.poll(() => unavailable.length, { timeout: 10_000 }).toBe(1);
-      expect(unavailable[0]?.missing).toEqual(['git', 'git-lfs']);
-      expect(unavailable[0]?.reason).toContain('git-lfs');
-      expect(existsSync(join(workspaceRoot, '.git'))).toBe(false);
-    } finally {
-      process.env['PATH'] = previousPath;
-    }
+        );
+        connect(host, workspaceRoot);
+        await expect.poll(() => unavailable.length, { timeout: 10_000 }).toBe(1);
+        expect(unavailable[0]?.missing).toEqual(['git', 'git-lfs']);
+        expect(unavailable[0]?.reason).toContain('git-lfs');
+        expect(existsSync(join(workspaceRoot, '.git'))).toBe(false);
+      } finally {
+        process.env['PATH'] = previousPath;
+      }
 
-    /* Environment names, not identifiers: assigned rather than spelled as keys. */
-    const searchPath: NodeJS.ProcessEnv = {};
-    searchPath['PATH'] = previousPath;
-    const git = execFileSync('which', ['git'], {
-      encoding: 'utf8',
-      env: searchPath,
-    }).trim();
-    const gitLfs = execFileSync('which', ['git-lfs'], {
-      encoding: 'utf8',
-      env: searchPath,
-    }).trim();
-    /* The bundled layout OQ3 ships: one `git` whose own exec path carries
-     * `git-lfs`, so `git lfs` resolves through it with nothing on `PATH` and
-     * this host names a single binary. A system git has no such exec path,
-     * hence the stand-in. */
-    const bundleRoot = await mkdtemp(join(tmpdir(), 'tau-services-git-bundle-'));
-    workspaces.push(bundleRoot);
-    const bundledGit = join(bundleRoot, 'bundled-git');
-    await writeFile(bundledGit, `#!/bin/sh\nPATH="${dirname(gitLfs)}"\nexport PATH\nexec "${git}" "$@"\n`);
-    await chmod(bundledGit, 0o755);
-    process.env['PATH'] = '';
-    try {
-      const bundled = await configuredHost(
-        {},
-        {
-          gitExecutable: bundledGit,
-          onRevisionsUnavailable: (_root, event) => {
-            unavailable.push(event);
+      /* Environment names, not identifiers: assigned rather than spelled as keys. */
+      const searchPath: NodeJS.ProcessEnv = {};
+      searchPath['PATH'] = previousPath;
+      const git = execFileSync('which', ['git'], {
+        encoding: 'utf8',
+        env: searchPath,
+      }).trim();
+      const gitLfs = execFileSync('which', ['git-lfs'], {
+        encoding: 'utf8',
+        env: searchPath,
+      }).trim();
+      /* The bundled layout OQ3 ships: one `git` whose own exec path carries
+       * `git-lfs`, so `git lfs` resolves through it with nothing on `PATH` and
+       * this host names a single binary. A system git has no such exec path,
+       * hence the stand-in. */
+      const bundleRoot = await mkdtemp(join(tmpdir(), 'tau-services-git-bundle-'));
+      workspaces.push(bundleRoot);
+      const bundledGit = join(bundleRoot, 'bundled-git');
+      await writeFile(bundledGit, `#!/bin/sh\nPATH="${dirname(gitLfs)}"\nexport PATH\nexec "${git}" "$@"\n`);
+      await chmod(bundledGit, 0o755);
+      process.env['PATH'] = '';
+      try {
+        const bundled = await configuredHost(
+          {},
+          {
+            gitExecutable: bundledGit,
+            onRevisionsUnavailable: (_root, event) => {
+              unavailable.push(event);
+            },
           },
-        },
-      );
-      connect(bundled.host, bundled.workspaceRoot);
-      await expect
-        .poll(() => existsSync(join(bundled.workspaceRoot, '.git')), {
-          timeout: 10_000,
-        })
-        .toBe(true);
-      expect(unavailable).toHaveLength(1);
-    } finally {
-      process.env['PATH'] = previousPath;
-    }
-  }, 30_000);
+        );
+        connect(bundled.host, bundled.workspaceRoot);
+        await expect
+          .poll(() => existsSync(join(bundled.workspaceRoot, '.git')), {
+            timeout: 10_000,
+          })
+          .toBe(true);
+        expect(unavailable).toHaveLength(1);
+      } finally {
+        process.env['PATH'] = previousPath;
+      }
+    },
+    30_000,
+  );
 
   it('leaves a direct turn to the project context main already registered', async () => {
     const runtimeContext = vi.fn();

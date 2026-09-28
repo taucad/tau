@@ -17,13 +17,19 @@ const openSeededProject = async (): Promise<void> => {
     await target.expectUrl(/\/w\/[^/]+\/[^/]+/u, 60_000);
   }
 
-  await target.expectVisible(selectors.getByCss('[aria-label="Ask Tau to build anything..."]'), 60_000);
+  await target.expectVisible(selectors.getByTestId('cad-viewer-canvas-region').getByCss('canvas').first(), 60_000);
+  /* The seed opens with the chat lane closed. */
+  const composer = selectors.getByCss('[aria-label="Ask Tau to build anything..."]');
+  if (!(await target.isVisible(composer))) {
+    await target.click(selectors.getByCss('[aria-label="Toggle Chat lane"]'));
+  }
+  await target.expectVisible(composer, 60_000);
   await target.click(selectors.getByRole('button', { name: /^decline$/iu }), { timeout: 5000 }).catch(() => undefined);
 };
 
 const openParameters = async (): Promise<void> => {
   await target.click(selectors.getByRole('button', { name: 'Search', exact: true }));
-  const commandSearch = selectors.getByPlaceholder('Search projects, chats, and actions...');
+  const commandSearch = selectors.getByPlaceholder('Search projects, chats, and actions…');
   await target.fill(commandSearch, 'Open parameters');
   await target.click(selectors.getByText('Open parameters', { exact: true }));
 };
@@ -69,7 +75,7 @@ test('should apply the shared squircle curve while preserving semantic circles',
 
   const composer = selectors.getByCss('[aria-label="Ask Tau to build anything..."]');
   const parametersTab = selectors.getByRole('tab', { name: 'Parameters', exact: true });
-  const filter = selectors.getByRole('textbox', { name: 'Filter parameters' });
+  const filter = selectors.getByRole('searchbox', { name: 'Filter parameters' });
   const fullRoundAction = selectors.getByRole('button', { name: 'Add', exact: true });
   const disclosure = selectors.getByRole('button', { name: mainPath, exact: true });
 

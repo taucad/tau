@@ -34,6 +34,12 @@ type OpenRscadBackend = typeof OpenRscadModule;
 type OpenRscadContext = {
   backend: OpenRscadBackend;
   entryPath: string | undefined;
+  /**
+   * Whether the last display mesh asked for edges. A build renders the variant its mesh will most
+   * likely want, so a host that always shows edges renders once per request; a switch costs one
+   * extra render, which is what every edged request cost before.
+   */
+  includeEdges: boolean;
 };
 
 // `$fa`: the minimum fragment angle, in degrees.
@@ -108,7 +114,9 @@ type SourceBundle = {
 };
 
 type OpenRscadNativeHandle = {
-  previewGlb: Uint8Array<ArrayBuffer>;
+  /** The display GLB without edge overlays, once rendered. */
+  previewGlb?: Uint8Array<ArrayBuffer>;
+  /** The display GLB with native edge overlays, once rendered. */
   previewGlbWithEdges?: Uint8Array<ArrayBuffer>;
   source: string;
   files: Record<string, string>;
@@ -525,7 +533,7 @@ export const createOpenrscadKernel = ({
           data: backend.backendCause,
         });
       }
-      const context: OpenRscadContext = { backend, entryPath: undefined };
+      const context: OpenRscadContext = { backend, entryPath: undefined, includeEdges: false };
       return context;
     },
 
@@ -560,8 +568,10 @@ export const createOpenrscadKernel = ({
         filesystem,
         logger,
       });
+      const { includeEdges } = context;
       const span = tracer.startSpan('openrscad.export-3d', {
         phase: 'computingGeometry',
+        includeEdges,
       });
       let result: ExportShape3DOutput;
       try {
@@ -574,7 +584,7 @@ export const createOpenrscadKernel = ({
               parameters,
               tessellation: options.tessellation,
               exportOptions: {
-                includeEdges: false,
+                includeEdges,
               },
             }),
           ),
@@ -586,9 +596,9 @@ export const createOpenrscadKernel = ({
         logger.debug(result.echo);
       }
       const issues = collectIssues(result, bundle.source, normalizedEntryPath);
-      const previewGlb = asBuffer(result.bytes);
+      const preview = asBuffer(result.bytes);
       const nativeHandle: OpenRscadNativeHandle = {
-        previewGlb,
+        ...(includeEdges ? { previewGlbWithEdges: preview } : { previewGlb: preview }),
         source: bundle.source,
         files: bundle.files,
         binaryFiles: bundle.binaryFiles,
@@ -610,23 +620,16 @@ export const createOpenrscadKernel = ({
     },
 
     async meshGeometry({ nativeHandle, options, content }, { tracer }, context) {
-      if (content?.includeEdges !== true) {
-        const geometry: GeometryGltf = {
-          format: 'gltf',
-          content: nativeHandle.previewGlb,
-        };
+      const includeEdges = content?.includeEdges === true;
+      context.includeEdges = includeEdges;
+      const rendered = includeEdges ? nativeHandle.previewGlbWithEdges : nativeHandle.previewGlb;
+      if (rendered) {
         return finalizeMeshOutput({
-          artifacts: [geometry],
+          artifacts: [{ format: 'gltf', content: rendered }],
           issues: nativeHandle.issues,
         });
       }
-      if (nativeHandle.previewGlbWithEdges) {
-        return finalizeMeshOutput({
-          artifacts: [{ format: 'gltf', content: nativeHandle.previewGlbWithEdges }],
-          issues: nativeHandle.issues,
-        });
-      }
-      const span = tracer.startSpan('openrscad.export-3d-edges', {
+      const span = tracer.startSpan(includeEdges ? 'openrscad.export-3d-edges' : 'openrscad.export-3d-plain', {
         phase: 'serializingGeometry',
       });
       let result: ExportShape3DOutput;
@@ -640,7 +643,7 @@ export const createOpenrscadKernel = ({
               parameters: nativeHandle.parameters,
               tessellation: options.tessellation,
               exportOptions: {
-                includeEdges: true,
+                includeEdges,
               },
             }),
           ),
@@ -648,10 +651,11 @@ export const createOpenrscadKernel = ({
       } finally {
         span.end();
       }
-      nativeHandle.previewGlbWithEdges = asBuffer(result.bytes);
+      const preview = asBuffer(result.bytes);
+      nativeHandle[includeEdges ? 'previewGlbWithEdges' : 'previewGlb'] = preview;
       const geometry: GeometryGltf = {
         format: 'gltf',
-        content: nativeHandle.previewGlbWithEdges,
+        content: preview,
       };
       return finalizeMeshOutput({
         artifacts: [geometry],

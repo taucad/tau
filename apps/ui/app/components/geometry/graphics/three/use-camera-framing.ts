@@ -29,8 +29,8 @@ const directionFromRotation = ({
 /**
  * Sends geometry framing policy to the provider-owned portable camera actor.
  *
- * The first real geometry uses configured angles and becomes the reset home.
- * Later significant bounds/aspect changes preserve the user's direction.
+ * The first real geometry uses configured angles. Later significant bounds/aspect
+ * changes and Fit view preserve the user's direction: they only recentre and zoom.
  */
 export function useCameraFraming<
   Options extends {
@@ -103,7 +103,6 @@ export function useCameraFraming<
 
     if (!framing.initialized) {
       frame({ enableConfiguredAngles: true });
-      rig.actorRef.send({ type: 'saveHome' });
       if (framing.pendingView) {
         rig.actorRef.send({ type: 'setView', ...framing.pendingView });
       }
@@ -156,13 +155,14 @@ export function useCameraFraming<
   }, [frame, geometryRadius, viewportAspect]);
 
   useLayoutEffect(() => {
-    const subscription = graphicsActor.on('viewResetRequested', () => {
-      rig.actorRef.send({ type: 'reset' });
+    // Fit view zooms and recentres on the model; it never rotates the camera.
+    const subscription = graphicsActor.on('viewFitRequested', () => {
+      frame({ enableConfiguredAngles: false });
     });
     return () => {
       subscription.unsubscribe();
     };
-  }, [graphicsActor, rig]);
+  }, [graphicsActor, frame]);
 
   return frame;
 }

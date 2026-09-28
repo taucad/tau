@@ -79,6 +79,14 @@ describe('PluginsRoute', () => {
     mockUseSkillsCatalog.mockReturnValue([]);
   });
 
+  it('should lead with the page title inside the shell main', () => {
+    renderRoute();
+
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Plugins');
+    expect(screen.queryByRole('main')).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Search plugins' })).toBeInTheDocument();
+  });
+
   it('should install a Tau Plugin Store skill as a visible .agents skill and update the manifest', async () => {
     renderRoute();
 

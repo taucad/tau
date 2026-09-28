@@ -27,10 +27,22 @@ import type {
   RpcSkillResolver,
 } from '@taucad/chat/rpc';
 import { getProviderFacingToolInputSchemas, toProviderToolJsonSchema } from '@taucad/chat/schemas';
+import type { MachineClient } from '@taucad/runtime/machine';
+import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
 import { sha256String } from '@taucad/utils/hash';
 import { z } from 'zod';
 
-import type { HostToolDefinition, JsonObject, JsonValue, ToolRegistry } from '@taucad/agent-host';
+import type {
+  HostToolDefinition,
+  HostToolInvocation,
+  HostToolResult,
+  JsonObject,
+  JsonValue,
+  ToolRegistry,
+} from '@taucad/agent-host';
+import { createMachinePrintPlanner } from '#registry/machine-print-planner.js';
+import type { MachinePrintPlannerDependencies } from '#registry/machine-print-planner.js';
+import { createMachineToolRegistry, isMachineToolName } from '#registry/machine-tool-registry.js';
 
 /** The optional dispatcher client one tool needs beyond the filesystem. */
 type ToolClientKey = 'kernelClient' | 'graphics' | 'images' | 'geospec' | 'skillResolver' | 'revisions' | 'parameters';
@@ -61,6 +73,7 @@ const rpcForTool: Readonly<Record<string, { readonly rpc: RpcName; readonly need
     rpc: rpcName.applyParameterOperation,
     needs: 'parameters',
   },
+  [toolName.updateTodos]: { rpc: rpcName.writeTodos },
 };
 
 const geospecAuthoringRecipes = {
@@ -69,6 +82,13 @@ const geospecAuthoringRecipes = {
   native:
     "Selected GeoSpec API: native. Import describe, it, and expectNativeGeo from 'geospec'; import loadNativeModel from 'geospec/runner/native'. Load with await loadNativeModel({ file: 'main.ts' }) and await every expectNativeGeo(model) assertion.",
 } as const;
+
+/**
+ * Records Tau writes on the agent's behalf. The agent's own composed view keeps
+ * `.tau/artifacts` and `.tau/chats` read-only, so these writes go through the
+ * host's record filesystem; each handler fences its own target path.
+ */
+const recordRpcNames = new Set<RpcName>([rpcName.exportGeometry, rpcName.writeTodos]);
 
 /**
  * The verdict tools whose answers the gate checks.
@@ -163,7 +183,12 @@ export type ChatToolRegistryOptions = {
    * Always required: the file tools are the floor of every host.
    */
   readonly fileSystemFor: (signal: AbortSignal) => RpcFileSystem;
-  /** Host-owned record writer used only to persist `export_geometry` artifacts. */
+  /**
+   * Host-owned record writer, used only for the records Tau writes on the
+   * agent's behalf: `export_geometry` artifacts under `.tau/artifacts` and the
+   * `update_todos` list at `.tau/chats/<chatId>/todo.yaml`, both read-only in
+   * the agent's own view. Without it those writes go through `fileSystemFor`.
+   */
   readonly recordFileSystemFor?: ((signal: AbortSignal) => RpcFileSystem) | undefined;
   /** Backs `get_kernel_result`. */
   readonly kernelClient?: RpcRuntimeClient | undefined;
@@ -179,6 +204,18 @@ export type ChatToolRegistryOptions = {
   readonly skillResolver?: RpcSkillResolver | undefined;
   /** Backs the read-only `revisions` tool; a host without a revision graph omits it. */
   readonly revisions?: RpcRevisionsClient | undefined;
+  /** Explicit machine tools, offered only after transport capability and route grant negotiation. */
+  readonly machines?: RuntimeTransportFacet<MachineClient> | undefined;
+  /**
+   * The host's part of printing: the `tau.json` id of the project the agent
+   * works in, which names every print artifact, and a binary read of the
+   * recorded slice. The registry slices through its own `export_geometry`
+   * route, so `request_print` is offered only with these, a `graphics` client
+   * and an available `machines` facet. A host that cannot name its project
+   * omits this, and neither `request_print` nor `prepare_machine_print` is
+   * offered.
+   */
+  readonly print?: Pick<MachinePrintPlannerDependencies, 'projectId' | 'readArtifact'> | undefined;
   /** Backs checked semantic parameter reads and operations. */
   readonly parameters?: RpcParameterClient | undefined;
   /** `test_model`'s independent policy gate in `@taucad/chat`. */
@@ -234,185 +271,242 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
    * before it is refused (`reconcile`). */
   const written = new Map<string, string>();
 
+  /**
+   * One chat RPC tool call: validate the input against the tool's own schema,
+   * then dispatch it through the canonical dispatcher.
+   *
+   * @param invocation - The call, from the model or from this registry's own
+   *   print planner.
+   * @param exportOptions - Transcoder options for `export_geometry`. Only the
+   *   print planner passes them, after `request_print` admitted them; model
+   *   input never carries them this far, since the tool schema strips them.
+   * @returns The tool result.
+   */
+  const invokeRpcTool = async (invocation: HostToolInvocation, exportOptions?: JsonObject): Promise<HostToolResult> => {
+    const entry = byName.get(invocation.toolName);
+    const mapped = rpcForTool[invocation.toolName];
+    if (!entry || !mapped) {
+      return {
+        content: {
+          errorCode: 'TOOL_NOT_FOUND',
+          message: `Unknown tool: ${invocation.toolName}`,
+        },
+        isError: true,
+      };
+    }
+    const parsed = entry.schema.safeParse(invocation.input);
+    if (!parsed.success) {
+      return {
+        content: {
+          errorCode: 'TOOL_INPUT_VALIDATION_FAILED',
+          message: z.prettifyError(parsed.error),
+        },
+        isError: true,
+      };
+    }
+    const preserveMutatingOutcome = mutatingRpcNames.has(mapped.rpc);
+    try {
+      const fileSystemFor =
+        recordRpcNames.has(mapped.rpc) && options.recordFileSystemFor !== undefined
+          ? options.recordFileSystemFor
+          : options.fileSystemFor;
+      const fileSystem = fileSystemFor(invocation.signal);
+      const dispatcher = createRpcDispatcher({
+        fileSystem,
+        kernelClient: options.kernelClient ?? unattachedKernelClient,
+        ...(options.graphics === undefined ? {} : { graphics: options.graphics }),
+        ...(options.images === undefined ? {} : { images: options.images }),
+        ...(options.geospec === undefined ? {} : { geospec: options.geospec }),
+        ...(options.skillResolver === undefined ? {} : { skillResolver: options.skillResolver }),
+        ...(options.revisions === undefined ? {} : { revisions: options.revisions }),
+        ...(options.parameters === undefined ? {} : { parameters: options.parameters }),
+      });
+      const dispatchOnce = async (): Promise<Awaited<ReturnType<typeof dispatcher.dispatch>>> => {
+        const aborted = Promise.withResolvers<never>();
+        /* Tracked so a rejection that lands after the race is already won is
+         * handled rather than surfacing as an unhandled rejection. */
+        const settleAborted = async (): Promise<void> => {
+          try {
+            await aborted.promise;
+          } catch {
+            /* The dispatch below reports the abort. */
+          }
+        };
+        void settleAborted();
+        const onAbort = (): void => {
+          aborted.reject(abortError(invocation.signal));
+        };
+        invocation.signal.addEventListener('abort', onAbort, { once: true });
+        try {
+          if (typeof parsed.data !== 'object' || parsed.data === null || Array.isArray(parsed.data)) {
+            throw new TypeError('Tool input schema returned a non-object value');
+          }
+          /* The trusted ID and options join after parsing; parsed model input
+           * cannot carry either, since the tool schema strips unknown keys. */
+          const args =
+            mapped.rpc === rpcName.exportGeometry
+              ? {
+                  ...parsed.data,
+                  toolCallId: invocation.toolCallId,
+                  ...(exportOptions === undefined ? {} : { exportOptions }),
+                }
+              : parsed.data;
+          // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- schema validation above pins the tool↔RPC input pair.
+          const dispatch = dispatcher.dispatch({ rpcName: mapped.rpc, args } as RpcCall, {
+            signal: invocation.signal,
+          });
+          return preserveMutatingOutcome ? await dispatch : await Promise.race([dispatch, aborted.promise]);
+        } finally {
+          invocation.signal.removeEventListener('abort', onAbort);
+        }
+      };
+      /**
+       * Drop the disagreements the bytes on disk settle.
+       *
+       * `written` remembers only this registry's own writes, so anything that
+       * edits the checkout outside the tools leaves it naming bytes that no
+       * longer exist and would wedge every later verdict. The file itself is
+       * the authority: a verdict whose closure matches what is at the path
+       * now describes current reality whatever the memory says, and the
+       * memory is corrected to it.
+       *
+       * ponytail: re-reads the disagreeing paths (only ever paths this run
+       * wrote, so text and bounded by `edit_file`'s limit) rather than
+       * stamping size/mtime beside every write. A file whose bytes the disk
+       * read cannot reproduce exactly — today, a UTF-8 BOM, which
+       * `RpcFileSystem.readFile` decodes away while the kernel hashes it —
+       * simply fails to reconcile and takes the refusing path.
+       *
+       * @param mismatches - Every path this verdict and the memory disagree on.
+       * @returns The first disagreement the disk did not settle.
+       */
+      const reconcile = async (mismatches: readonly RevisionMismatch[]): Promise<RevisionMismatch | undefined> => {
+        const onDisk = await Promise.all(
+          mismatches.map(async ({ actual }): Promise<string> => {
+            try {
+              return `sha256:${await sha256String(await fileSystem.readFile(actual.path))}`;
+            } catch {
+              /* Gone, or unreadable as text: either way not the verdict's bytes. */
+              return 'missing';
+            }
+          }),
+        );
+        for (const [index, mismatch] of mismatches.entries()) {
+          if (onDisk[index] === mismatch.actual.digest) {
+            written.set(mismatch.actual.path, mismatch.actual.digest);
+          }
+        }
+        return mismatches.find((mismatch, index) => onDisk[index] !== mismatch.actual.digest);
+      };
+      /**
+       * Settle one dispatched result under the freshness gate (R5).
+       *
+       * A verdict that names bytes this run has replaced gets exactly one
+       * more chance — the second call runs against the same clients, so a
+       * host that revalidates its retained closure (R1) answers freshly here.
+       * A second disagreement is a host failure rather than geometry, so it
+       * leaves as a typed error and never as a verdict the agent would act on
+       * (charter Q2).
+       *
+       * @param first - Result the first dispatch returned.
+       * @returns The tool result the agent sees.
+       */
+      const settle = async (
+        first: Awaited<ReturnType<typeof dispatcher.dispatch>>,
+      ): Promise<Awaited<ReturnType<ToolRegistry['invoke']>>> => {
+        let result = first;
+        if (!verdictRpcNames.has(mapped.rpc)) {
+          /* Only the three write tools carry a top-level `revision`; the
+           * parameter operation's revision is nested under its outcome. */
+          const revision = writeResultSchema.safeParse(result).data?.revision;
+          if (revision && result.success) {
+            written.set(revision.path, revision.digest);
+          }
+        } else if (await reconcile(revisionMismatches(result, written))) {
+          result = await dispatchOnce();
+          assertNotAborted(invocation.signal);
+          const mismatch = await reconcile(revisionMismatches(result, written));
+          if (mismatch) {
+            return {
+              content: {
+                errorCode: 'STALE_EVALUATION',
+                message:
+                  `${invocation.toolName} answered for ${mismatch.actual.path} at ${mismatch.actual.digest}, ` +
+                  `but this run last wrote ${mismatch.expected.digest} there. Re-running returned the same ` +
+                  'revision, so the answer describes bytes that no longer exist.',
+                expected: mismatch.expected,
+                actual: mismatch.actual,
+              },
+              isError: true,
+            };
+          }
+        }
+        // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- RPC results are JSON by construction.
+        return {
+          content: structuredClone(result) as JsonValue,
+          isError: !result.success,
+        };
+      };
+      const dispatched = await dispatchOnce();
+      if (!preserveMutatingOutcome) {
+        assertNotAborted(invocation.signal);
+      }
+      return await settle(dispatched);
+    } catch (error) {
+      if (invocation.signal.aborted && !preserveMutatingOutcome) {
+        throw abortError(invocation.signal);
+      }
+      return {
+        content: {
+          errorCode: errorCode(error),
+          message: error instanceof Error ? error.message : String(error),
+        },
+        isError: true,
+      };
+    }
+  };
+
+  const { machines, print } = options;
+  const machineRegistry = machines?.available
+    ? createMachineToolRegistry(machines, {
+        projectId: print?.projectId,
+        /* The agent's own view, the one its edits to the print intent go through. */
+        fileSystemFor: options.fileSystemFor,
+        planPrint:
+          print === undefined || !servable(rpcForTool[toolName.exportGeometry])
+            ? undefined
+            : createMachinePrintPlanner({
+                ...print,
+                machines,
+                /* This registry's own route, so the slice is validated and recorded exactly as an export is. */
+                exportGeometry: async ({ exportOptions, ...input }) =>
+                  invokeRpcTool(
+                    {
+                      toolCallId: input.toolCallId,
+                      toolName: toolName.exportGeometry,
+                      input: { targetFile: input.targetFile, format: input.format },
+                      signal: input.signal,
+                    },
+                    exportOptions,
+                  ),
+              }),
+      })
+    : undefined;
+  definitions.push(...(machineRegistry?.list() ?? []));
+
   return {
     list: () => definitions,
     async invoke(invocation) {
       assertNotAborted(invocation.signal);
-      const entry = byName.get(invocation.toolName);
-      const mapped = rpcForTool[invocation.toolName];
-      if (!entry || !mapped) {
-        return {
-          content: {
-            errorCode: 'TOOL_NOT_FOUND',
-            message: `Unknown tool: ${invocation.toolName}`,
-          },
-          isError: true,
-        };
-      }
-      const parsed = entry.schema.safeParse(invocation.input);
-      if (!parsed.success) {
-        return {
-          content: {
-            errorCode: 'TOOL_INPUT_VALIDATION_FAILED',
-            message: z.prettifyError(parsed.error),
-          },
-          isError: true,
-        };
-      }
-      const preserveMutatingOutcome = mutatingRpcNames.has(mapped.rpc);
-      try {
-        const fileSystemFor =
-          mapped.rpc === rpcName.exportGeometry && options.recordFileSystemFor !== undefined
-            ? options.recordFileSystemFor
-            : options.fileSystemFor;
-        const fileSystem = fileSystemFor(invocation.signal);
-        const dispatcher = createRpcDispatcher({
-          fileSystem,
-          kernelClient: options.kernelClient ?? unattachedKernelClient,
-          ...(options.graphics === undefined ? {} : { graphics: options.graphics }),
-          ...(options.images === undefined ? {} : { images: options.images }),
-          ...(options.geospec === undefined ? {} : { geospec: options.geospec }),
-          ...(options.skillResolver === undefined ? {} : { skillResolver: options.skillResolver }),
-          ...(options.revisions === undefined ? {} : { revisions: options.revisions }),
-          ...(options.parameters === undefined ? {} : { parameters: options.parameters }),
-        });
-        const dispatchOnce = async (): Promise<Awaited<ReturnType<typeof dispatcher.dispatch>>> => {
-          const aborted = Promise.withResolvers<never>();
-          /* Tracked so a rejection that lands after the race is already won is
-           * handled rather than surfacing as an unhandled rejection. */
-          const settleAborted = async (): Promise<void> => {
-            try {
-              await aborted.promise;
-            } catch {
-              /* The dispatch below reports the abort. */
-            }
-          };
-          void settleAborted();
-          const onAbort = (): void => {
-            aborted.reject(abortError(invocation.signal));
-          };
-          invocation.signal.addEventListener('abort', onAbort, { once: true });
-          try {
-            if (typeof parsed.data !== 'object' || parsed.data === null || Array.isArray(parsed.data)) {
-              throw new TypeError('Tool input schema returned a non-object value');
-            }
-            const args =
-              mapped.rpc === rpcName.exportGeometry
-                ? { ...parsed.data, toolCallId: invocation.toolCallId }
-                : parsed.data;
-            // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- schema validation above pins the tool↔RPC input pair.
-            const dispatch = dispatcher.dispatch({ rpcName: mapped.rpc, args } as RpcCall, {
-              signal: invocation.signal,
-            });
-            return preserveMutatingOutcome ? await dispatch : await Promise.race([dispatch, aborted.promise]);
-          } finally {
-            invocation.signal.removeEventListener('abort', onAbort);
+      if (isMachineToolName(invocation.toolName)) {
+        return (
+          machineRegistry?.invoke(invocation) ?? {
+            content: { errorCode: 'TOOL_NOT_FOUND', message: `Unknown tool: ${invocation.toolName}` },
+            isError: true,
           }
-        };
-        /**
-         * Drop the disagreements the bytes on disk settle.
-         *
-         * `written` remembers only this registry's own writes, so anything that
-         * edits the checkout outside the tools leaves it naming bytes that no
-         * longer exist and would wedge every later verdict. The file itself is
-         * the authority: a verdict whose closure matches what is at the path
-         * now describes current reality whatever the memory says, and the
-         * memory is corrected to it.
-         *
-         * ponytail: re-reads the disagreeing paths (only ever paths this run
-         * wrote, so text and bounded by `edit_file`'s limit) rather than
-         * stamping size/mtime beside every write. A file whose bytes the disk
-         * read cannot reproduce exactly — today, a UTF-8 BOM, which
-         * `RpcFileSystem.readFile` decodes away while the kernel hashes it —
-         * simply fails to reconcile and takes the refusing path.
-         *
-         * @param mismatches - Every path this verdict and the memory disagree on.
-         * @returns The first disagreement the disk did not settle.
-         */
-        const reconcile = async (mismatches: readonly RevisionMismatch[]): Promise<RevisionMismatch | undefined> => {
-          const onDisk = await Promise.all(
-            mismatches.map(async ({ actual }): Promise<string> => {
-              try {
-                return `sha256:${await sha256String(await fileSystem.readFile(actual.path))}`;
-              } catch {
-                /* Gone, or unreadable as text: either way not the verdict's bytes. */
-                return 'missing';
-              }
-            }),
-          );
-          for (const [index, mismatch] of mismatches.entries()) {
-            if (onDisk[index] === mismatch.actual.digest) {
-              written.set(mismatch.actual.path, mismatch.actual.digest);
-            }
-          }
-          return mismatches.find((mismatch, index) => onDisk[index] !== mismatch.actual.digest);
-        };
-        /**
-         * Settle one dispatched result under the freshness gate (R5).
-         *
-         * A verdict that names bytes this run has replaced gets exactly one
-         * more chance — the second call runs against the same clients, so a
-         * host that revalidates its retained closure (R1) answers freshly here.
-         * A second disagreement is a host failure rather than geometry, so it
-         * leaves as a typed error and never as a verdict the agent would act on
-         * (charter Q2).
-         *
-         * @param first - Result the first dispatch returned.
-         * @returns The tool result the agent sees.
-         */
-        const settle = async (
-          first: Awaited<ReturnType<typeof dispatcher.dispatch>>,
-        ): Promise<Awaited<ReturnType<ToolRegistry['invoke']>>> => {
-          let result = first;
-          if (!verdictRpcNames.has(mapped.rpc)) {
-            /* Only the three write tools carry a top-level `revision`; the
-             * parameter operation's revision is nested under its outcome. */
-            const revision = writeResultSchema.safeParse(result).data?.revision;
-            if (revision && result.success) {
-              written.set(revision.path, revision.digest);
-            }
-          } else if (await reconcile(revisionMismatches(result, written))) {
-            result = await dispatchOnce();
-            assertNotAborted(invocation.signal);
-            const mismatch = await reconcile(revisionMismatches(result, written));
-            if (mismatch) {
-              return {
-                content: {
-                  errorCode: 'STALE_EVALUATION',
-                  message:
-                    `${invocation.toolName} answered for ${mismatch.actual.path} at ${mismatch.actual.digest}, ` +
-                    `but this run last wrote ${mismatch.expected.digest} there. Re-running returned the same ` +
-                    'revision, so the answer describes bytes that no longer exist.',
-                  expected: mismatch.expected,
-                  actual: mismatch.actual,
-                },
-                isError: true,
-              };
-            }
-          }
-          // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- RPC results are JSON by construction.
-          return {
-            content: structuredClone(result) as JsonValue,
-            isError: !result.success,
-          };
-        };
-        const dispatched = await dispatchOnce();
-        if (!preserveMutatingOutcome) {
-          assertNotAborted(invocation.signal);
-        }
-        return await settle(dispatched);
-      } catch (error) {
-        if (invocation.signal.aborted && !preserveMutatingOutcome) {
-          throw abortError(invocation.signal);
-        }
-        return {
-          content: {
-            errorCode: errorCode(error),
-            message: error instanceof Error ? error.message : String(error),
-          },
-          isError: true,
-        };
+        );
       }
+      return invokeRpcTool(invocation);
     },
   };
 };

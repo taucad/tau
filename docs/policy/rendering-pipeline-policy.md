@@ -3,7 +3,7 @@ title: 'Rendering Pipeline Policy'
 description: 'Unified PBR defaults, material policy, tone mapping, AO, environment strategy, and performance patterns for the CAD viewer.'
 status: active
 created: '2026-02-15'
-updated: '2026-09-23'
+updated: '2026-09-27'
 related:
   - docs/research/onshape-viewer-lighting-profile.md
   - docs/research/headless-gltf-interleaved-accessor-corruption-v2.md
@@ -102,9 +102,9 @@ A zero N8AO falloff suppresses occlusion samples; do not use it to disable atten
 - Works with the `frameloop="demand"` mode (AO runs during render passes only)
 - Uses `screenSpaceRadius` for zoom-independent consistent appearance
 
-**Section view compatibility**: Section View uses clipped source geometry plus generated BVH contour fills outside the clipping group. Section caps are opaque, depth-owned meshes rather than stencil-derived transparent planes; post-processing must preserve their normal depth ordering.
+**Section view compatibility**: Section View clips the source geometry with one fixed-array section clip over every cut (at most eight convex pieces) and draws generated BVH contour fills outside that clip: an exact cap for each cut face and source, trimmed by the other cuts and outlined by its cap edge rings. Section caps are opaque, depth-owned meshes rather than stencil-derived transparent planes; post-processing must preserve their normal depth ordering.
 
-**Section cap diagnostics**: Section-plane overlap highlighting is a viewport visual diagnostic, not GeoSpec exact positive-volume evidence. Implement red overlap cues by splitting generated cap regions into disjoint normal and diagnostic triangles in section-cap geometry, preferably using one packed vertex-colored mesh per source and shared opaque WebGL/WebGPU striped cap materials. Do not render transparent red overlays, coincident duplicate cap meshes, or stencil-derived caps for this diagnostic.
+**Section cap diagnostics**: Section-plane overlap highlighting is a viewport visual diagnostic, not GeoSpec exact positive-volume evidence. Implement red overlap cues by splitting generated cap regions into disjoint normal and diagnostic triangles in section-cap geometry, preferably using one packed vertex-colored mesh per source on each cut face, and shared opaque WebGL/WebGPU striped cap materials. Do not render transparent red overlays, coincident duplicate cap meshes, or stencil-derived caps for this diagnostic.
 
 ## Environment Strategy
 
@@ -117,7 +117,7 @@ The main CAD viewer uses an `<Environment>` component with `<Lightformer>` child
 - **No background**: The environment map contributes PBR lighting and reflections (`background` is not set). The app's CSS background shows through, consistent with standard CAD viewer behaviour.
 - **Conditional on matcap**: When matcap is enabled, the environment is skipped entirely since `MeshMatcapMaterial` ignores environment maps. This avoids unnecessary GPU work.
 - **Camera-relative rig**: Five asymmetric Lightformers provide key, left fill, top, ground, and back-fill panels; the complete camera quaternion rotates the environment through tilt, roll, and pole crossings, keeping the rig fixed in view space.
-- **Headlamp and ambient floor**: Use a view-space directional key along `normalize([1, 1, 1])` at intensity `2.5`, ambient intensity `1.17`, and environment intensity `0.09`. Keep all light energy independent of field of view and projection. The key reflection panel uses intensity `192`, position `[2.3, 0, 3] × sceneRadius`, and size `[0.8, 1.2] × sceneRadius`; the other four panels provide low-energy fill.
+- **Headlamp and ambient floor**: The default view-space directional key follows `normalize([1, 1, 1])` at intensity `1.5`, with ambient intensity `0.1` and environment intensity `1`. Keep all light energy independent of field of view and projection. The key reflection panel uses intensity `64`, position `[1, 1, 1] × sceneRadius`, and size `[1.2, 1.2] × sceneRadius`; the other four panels provide low-energy fill.
 - **Environment resolution**: `512px` for sharp, defined reflections on surfaces.
 - **Material ownership**: Preserve authored glTF roughness and metalness; do not add a post-load global material override merely to fit one reference part.
 

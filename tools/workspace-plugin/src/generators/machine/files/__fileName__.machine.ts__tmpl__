@@ -1,4 +1,4 @@
-import { fromCallback, setup } from 'xstate';
+import { createCallbackLogic, setup, types } from 'xstate';
 
 /** Input accepted when creating the <%= machineName %> actor. @public */
 export type <%= className %>MachineInput = Readonly<Record<string, never>>;
@@ -9,7 +9,7 @@ export type <%= className %>MachineContext = Readonly<Record<string, never>>;
 /** Events accepted by <%= machineName %>. @public */
 export type <%= className %>MachineEvent = { readonly type: 'reset' };
 
-const <%= propertyName %>Driver = fromCallback(() => {
+const <%= propertyName %>Driver = createCallbackLogic(() => {
   return () => undefined;
 });
 
@@ -19,10 +19,11 @@ const <%= propertyName %>Driver = fromCallback(() => {
  * @public
  */
 export const <%= machineName %> = setup({
-  types: {
-    context: {} as <%= className %>MachineContext,
-    events: {} as <%= className %>MachineEvent,
-    input: {} as <%= className %>MachineInput,
+  schemas: {
+    context: types<<%= className %>MachineContext>(),
+    /* One payload schema per event type; `reset` carries none. */
+    events: { reset: types<Readonly<Record<never, never>>>() },
+    input: types<<%= className %>MachineInput>(),
   },
   actors: {
     <%= propertyName %>Driver,

@@ -25,10 +25,13 @@ const getSnapshot = vi.fn(() => ({
       content: geometryFormat === 'gltf' ? geometryContent : '<svg xmlns="http://www.w3.org/2000/svg"/>',
       hash: 'geometry-hash',
     },
+    lastRequestedRenderId: 0,
   },
 }));
 let geometryListener: ((event: { geometry: { hash: string } }) => void) | undefined;
 const unsubscribe = vi.fn();
+const unsubscribeSnapshots = vi.fn();
+const subscribe = vi.fn(() => ({ unsubscribe: unsubscribeSnapshots }));
 const on = vi.fn((_event: string, listener: (event: { geometry: { hash: string } }) => void) => {
   geometryListener = listener;
   return { unsubscribe };
@@ -36,7 +39,7 @@ const on = vi.fn((_event: string, listener: (event: { geometry: { hash: string }
 
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({
-    geometryUnits: new Map([['src/main.ts', { getSnapshot, on }]]),
+    geometryUnits: new Map([['src/main.ts', { getSnapshot, on, subscribe }]]),
     mainEntryPath: 'src/main.ts',
     projectId: 'proj_aaaaaaaaaaaaaaaaaaaaa',
   }),
@@ -136,6 +139,7 @@ describe('useThumbnailGenerator', () => {
           projection: { kind: 'perspective', verticalFieldOfView: 45 },
         },
         quality: 0.9,
+        ao: {},
       },
     });
     const job = exportImage.mock.calls[0]![0];
@@ -233,7 +237,7 @@ describe('useThumbnailGenerator', () => {
     expect(event?.type).toBe('settled');
     if (event?.type === 'settled') {
       expect(event.hash).toBe(
-        'proj_aaaaaaaaaaaaaaaaaaaaa:src/main.ts:geometry-hash:webp:q0.9:768x576:m0.1:lw3:camera-bounds-v1:edges',
+        'proj_aaaaaaaaaaaaaaaaaaaaa:src/main.ts:geometry-hash:webp:q0.9:768x576:m0.1:lw3:camera-bounds-v1:edges:studio-v5',
       );
     }
   });
@@ -270,12 +274,13 @@ describe('useThumbnailGenerator', () => {
     });
   });
 
-  it('should unsubscribe from geometry events on unmount', () => {
+  it('should unsubscribe from geometry events and render requests on unmount', () => {
     const { unmount } = renderHook(() => useThumbnailGenerator());
 
     unmount();
 
     expect(unsubscribe).toHaveBeenCalledOnce();
+    expect(unsubscribeSnapshots).toHaveBeenCalledOnce();
   });
 
   it('should resolve regenerate with the machine-reported outcome', async () => {

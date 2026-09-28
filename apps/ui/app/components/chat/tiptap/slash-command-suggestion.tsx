@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, memo } from 'react';
 import { createPortal } from 'react-dom';
-import { Extension } from '@tiptap/core';
+import { Extension, InputRule } from '@tiptap/core';
 import { Suggestion } from '@tiptap/suggestion';
 import { PluginKey } from '@tiptap/pm/state';
 import type { EditorState } from '@tiptap/pm/state';
@@ -15,6 +15,7 @@ import type {
 } from '#components/chat/tiptap/suggestion-types.js';
 
 const slashCommandPluginKey = new PluginKey('slashCommand');
+const dollarCommandPluginKey = new PluginKey('dollarCommand');
 
 export const defaultCommands: SlashCommandItem[] = [
   {
@@ -31,8 +32,14 @@ export const isEnabledSlashCommandItem = (item: SlashCommandItem): boolean => it
 export const getEnabledSlashCommandItems = (items: readonly SlashCommandItem[]): SlashCommandItem[] =>
   items.filter((item) => isEnabledSlashCommandItem(item));
 
+/** Chip node for one invocation token; its text (the label) is exactly what the agent receives. */
+const invocationChip = (item: Pick<SlashCommandItem, 'label'>) =>
+  ({ type: 'contextChip', attrs: { id: item.label, label: item.label, chipType: 'skill' } }) as const;
+
 export type SlashCommandOptions = {
   getItems?: (query: string) => SlashCommandItem[];
+  /** Enabled items by exact invocation token, for typed-token conversion and the `$` trigger. */
+  getKnownItems?: () => ReadonlyMap<string, SlashCommandItem>;
   renderCallbacks: SuggestionRenderCallbacks<SlashCommandItem>;
   onCommand?: (item: SlashCommandItem) => void;
 };
@@ -59,6 +66,7 @@ export const SlashCommand = Extension.create<SlashCommandOptions>({
   addOptions() {
     return {
       getItems: undefined,
+      getKnownItems: undefined,
       renderCallbacks: {
         onStateChange: () => undefined,
         keydownHandlerRef: { current: undefined },
@@ -67,8 +75,32 @@ export const SlashCommand = Extension.create<SlashCommandOptions>({
     };
   },
 
+  addInputRules() {
+    const { getKnownItems } = this.options;
+    return [
+      /* Typing a known token then a space turns it into its chip, as picking it from the menu would. */
+      new InputRule({
+        find: /(?:^|\s)([$/][\w-]+(?::[\w-]+)*)\s$/,
+        handler: ({ range, match, chain }) => {
+          const token = match[1] ?? '';
+          const item = getKnownItems?.().get(token);
+          if (!item) {
+            return null;
+          }
+          /* `range.to` is the caret: the typed space is not in the document yet. */
+          const from = range.to - token.length;
+          chain()
+            .deleteRange({ from, to: range.to })
+            .insertContentAt(from, [invocationChip(item), { type: 'text', text: ' ' }])
+            .run();
+          return undefined;
+        },
+      }),
+    ];
+  },
+
   addProseMirrorPlugins() {
-    const { getItems, renderCallbacks, onCommand } = this.options;
+    const { getItems, getKnownItems, renderCallbacks, onCommand } = this.options;
 
     const defaultGetItems = (query: string): SlashCommandItem[] => {
       const all = getEnabledSlashCommandItems(defaultCommands);
@@ -80,46 +112,28 @@ export const SlashCommand = Extension.create<SlashCommandOptions>({
     };
 
     const itemsFunction = getItems ?? defaultGetItems;
+    const hasDollarItems = (): boolean => [...(getKnownItems?.().keys() ?? [])].some((token) => token.startsWith('$'));
 
-    return [
+    const suggestionFor = (char: '/' | '$', pluginKey: PluginKey) =>
       // oxlint-disable-next-line new-cap -- Tiptap's Suggestion factory is PascalCase
       Suggestion<SlashCommandItem>({
-        pluginKey: slashCommandPluginKey,
+        pluginKey,
         editor: this.editor,
-        char: '/',
-        items: ({ query }) => itemsFunction(query),
+        char,
+        /* `/` lists every command (Codex parity); `$` lists only the agent's `$` skills. */
+        items: ({ query }) =>
+          char === '/' ? itemsFunction(query) : itemsFunction(query).filter((item) => item.label.startsWith('$')),
         allowedPrefixes: null,
-        allow: ({ state, range }) => shouldAllowSlashCommandTrigger({ state, range }),
+        allow: ({ state, range }) =>
+          shouldAllowSlashCommandTrigger({ state, range }) && (char === '/' || hasDollarItems()),
         command: ({ editor, range, props }) => {
           const item = props as SlashCommandItem;
           if (!isEnabledSlashCommandItem(item)) {
             return;
           }
 
-          if (item.group === 'Commands') {
-            const chain = editor.chain().focus().deleteRange(range);
-            if (item.commandText !== undefined) {
-              chain.insertContent(item.commandText);
-            }
-            chain.run();
-            onCommand?.(item);
-            return;
-          }
-
-          editor
-            .chain()
-            .focus()
-            .deleteRange(range)
-            .insertContent({
-              type: 'contextChip',
-              attrs: {
-                id: item.id,
-                label: item.label,
-                chipType: 'skill',
-              },
-            })
-            .insertContent(' ')
-            .run();
+          editor.chain().focus().deleteRange(range).insertContent(invocationChip(item)).insertContent(' ').run();
+          onCommand?.(item);
         },
         render: () => ({
           onStart(properties) {
@@ -145,8 +159,9 @@ export const SlashCommand = Extension.create<SlashCommandOptions>({
             return renderCallbacks.keydownHandlerRef.current?.(event) ?? false;
           },
         }),
-      }),
-    ];
+      });
+
+    return [suggestionFor('/', slashCommandPluginKey), suggestionFor('$', dollarCommandPluginKey)];
   },
 });
 

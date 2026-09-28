@@ -1,13 +1,13 @@
-import type { ParameterSnapshot } from '@taucad/parameters';
 import type { CheckedFileWriteResult } from '@taucad/types';
 import { expect, it } from 'vitest';
-import { createActor, fromCallback, fromPromise, waitFor } from 'xstate';
+import { createActor, createCallbackLogic, createAsyncLogic, waitFor } from 'xstate';
 import { parameterSetMachine, submitParameterRequest } from '#parameter-set.machine.js';
 import type { ParameterSetLoadInput } from '#parameter-set.machine.js';
 import { parameterSetHarness } from '#parameter-set.test-helper.js';
 import { planParameterChange } from '#planning.js';
 import type { ParameterChange } from '#planning.js';
 import type { ParameterSetOutcome, ParameterSetRequest } from '#types.js';
+import type { ParameterSnapshot } from '#snapshot.js';
 
 const groupRequest = (requestId: string, harness: { snapshot: ParameterSnapshot }): ParameterSetRequest => ({
   requestId,
@@ -59,10 +59,14 @@ it('settles a failed write that left the record untouched as a known refusal', a
   const actor = createActor(
     parameterSetMachine.provide({
       actors: {
-        loadParameterSet: fromPromise(async () => structuredClone(fixture.snapshot)),
-        commitParameterSet: fromPromise(async (): Promise<CheckedFileWriteResult> => {
-          writes += 1;
-          throw new Error('Reply lost; nothing was written');
+        loadParameterSet: createAsyncLogic<ParameterSnapshot, ParameterSetLoadInput>({
+          run: async () => structuredClone(fixture.snapshot),
+        }),
+        commitParameterSet: createAsyncLogic<CheckedFileWriteResult, Extract<ParameterChange, { status: 'prepared' }>>({
+          run: async (): Promise<CheckedFileWriteResult> => {
+            writes += 1;
+            throw new Error('Reply lost; nothing was written');
+          },
         }),
       },
     }),
@@ -86,10 +90,14 @@ it('should reconcile a lost reply when the intended write landed', async () => {
   const actor = createActor(
     parameterSetMachine.provide({
       actors: {
-        loadParameterSet: fromPromise(async () => structuredClone(visible)),
-        commitParameterSet: fromPromise(async ({ input }): Promise<CheckedFileWriteResult> => {
-          visible = structuredClone(input.proposed);
-          throw new Error('Reply lost after the write landed');
+        loadParameterSet: createAsyncLogic<ParameterSnapshot, ParameterSetLoadInput>({
+          run: async () => structuredClone(visible),
+        }),
+        commitParameterSet: createAsyncLogic<CheckedFileWriteResult, Extract<ParameterChange, { status: 'prepared' }>>({
+          run: async ({ input }): Promise<CheckedFileWriteResult> => {
+            visible = structuredClone(input.proposed);
+            throw new Error('Reply lost after the write landed');
+          },
         }),
       },
     }),
@@ -119,15 +127,19 @@ it('should accept a command after a readback that found foreign bytes', async ()
   const actor = createActor(
     parameterSetMachine.provide({
       actors: {
-        loadParameterSet: fromPromise(async () => structuredClone(visible)),
-        commitParameterSet: fromPromise(async ({ input }): Promise<CheckedFileWriteResult> => {
-          if (lost) {
-            lost = false;
-            visible = foreign;
-            throw new Error('Reply lost after an unknown write');
-          }
-          visible = structuredClone(input.proposed);
-          return { status: 'applied', content: input.proposed.bytes! };
+        loadParameterSet: createAsyncLogic<ParameterSnapshot, ParameterSetLoadInput>({
+          run: async () => structuredClone(visible),
+        }),
+        commitParameterSet: createAsyncLogic<CheckedFileWriteResult, Extract<ParameterChange, { status: 'prepared' }>>({
+          run: async ({ input }): Promise<CheckedFileWriteResult> => {
+            if (lost) {
+              lost = false;
+              visible = foreign;
+              throw new Error('Reply lost after an unknown write');
+            }
+            visible = structuredClone(input.proposed);
+            return { status: 'applied', content: input.proposed.bytes! };
+          },
         }),
       },
     }),
@@ -156,10 +168,12 @@ it('publishes only the latest overlapping load and keeps the last good snapshot 
   const actor = createActor(
     parameterSetMachine.provide({
       actors: {
-        loadParameterSet: fromPromise(async () => {
-          const load = Promise.withResolvers<ParameterSnapshot>();
-          loads.push(load);
-          return load.promise;
+        loadParameterSet: createAsyncLogic<ParameterSnapshot, ParameterSetLoadInput>({
+          run: async () => {
+            const load = Promise.withResolvers<ParameterSnapshot>();
+            loads.push(load);
+            return load.promise;
+          },
         }),
       },
     }),
@@ -191,9 +205,11 @@ it('hands a same-mode re-resolution the held snapshot, leaving the host to decid
   const actor = createActor(
     parameterSetMachine.provide({
       actors: {
-        loadParameterSet: fromPromise(async ({ input }) => {
-          inputs.push(input);
-          return fixture.snapshot;
+        loadParameterSet: createAsyncLogic<ParameterSnapshot, ParameterSetLoadInput>({
+          run: async ({ input }) => {
+            inputs.push(input);
+            return fixture.snapshot;
+          },
         }),
       },
     }),
@@ -428,8 +444,10 @@ it('disposes a failed observer and rearms it before accepting edits after reconn
   const actor = createActor(
     parameterSetMachine.provide({
       actors: {
-        loadParameterSet: fromPromise(async () => fixture.snapshot),
-        observeParameterSet: fromCallback(() => {
+        loadParameterSet: createAsyncLogic<ParameterSnapshot, ParameterSetLoadInput>({
+          run: async () => fixture.snapshot,
+        }),
+        observeParameterSet: createCallbackLogic(() => {
           opens += 1;
           return () => {
             closes += 1;
@@ -561,18 +579,27 @@ it('should re-plan against foreign bytes that land during planning and keep the 
   const actor = createActor(
     parameterSetMachine.provide({
       actors: {
-        loadParameterSet: fromPromise(async () => structuredClone(visible)),
-        planParameterSet: fromPromise(async ({ input }) => {
-          plans += 1;
-          if (plans === 1) {
-            await firstPlan.promise;
-          }
-          return planParameterChange(input);
+        loadParameterSet: createAsyncLogic<ParameterSnapshot, ParameterSetLoadInput>({
+          run: async () => structuredClone(visible),
         }),
-        commitParameterSet: fromPromise(async ({ input }) => {
-          writes.push(input);
-          visible = structuredClone(input.proposed);
-          return { status: 'applied', content: input.proposed.bytes! };
+        planParameterSet: createAsyncLogic<
+          ParameterChange,
+          Readonly<{ current: ParameterSnapshot; request: ParameterSetRequest }>
+        >({
+          run: async ({ input }) => {
+            plans += 1;
+            if (plans === 1) {
+              await firstPlan.promise;
+            }
+            return planParameterChange(input);
+          },
+        }),
+        commitParameterSet: createAsyncLogic<CheckedFileWriteResult, Extract<ParameterChange, { status: 'prepared' }>>({
+          run: async ({ input }) => {
+            writes.push(input);
+            visible = structuredClone(input.proposed);
+            return { status: 'applied', content: input.proposed.bytes! };
+          },
         }),
       },
     }),
@@ -605,18 +632,27 @@ it('should refuse only on base when the foreign write moved the same field', asy
   const actor = createActor(
     parameterSetMachine.provide({
       actors: {
-        loadParameterSet: fromPromise(async () => structuredClone(visible)),
-        planParameterSet: fromPromise(async ({ input }) => {
-          plans += 1;
-          if (plans === 1) {
-            await firstPlan.promise;
-          }
-          return planParameterChange(input);
+        loadParameterSet: createAsyncLogic<ParameterSnapshot, ParameterSetLoadInput>({
+          run: async () => structuredClone(visible),
         }),
-        commitParameterSet: fromPromise(async ({ input }) => {
-          writes += 1;
-          visible = structuredClone(input.proposed);
-          return { status: 'applied', content: input.proposed.bytes! };
+        planParameterSet: createAsyncLogic<
+          ParameterChange,
+          Readonly<{ current: ParameterSnapshot; request: ParameterSetRequest }>
+        >({
+          run: async ({ input }) => {
+            plans += 1;
+            if (plans === 1) {
+              await firstPlan.promise;
+            }
+            return planParameterChange(input);
+          },
+        }),
+        commitParameterSet: createAsyncLogic<CheckedFileWriteResult, Extract<ParameterChange, { status: 'prepared' }>>({
+          run: async ({ input }) => {
+            writes += 1;
+            visible = structuredClone(input.proposed);
+            return { status: 'applied', content: input.proposed.bytes! };
+          },
         }),
       },
     }),
@@ -727,11 +763,13 @@ it('rejects an invalid target before opening observation or loading authority', 
   const actor = createActor(
     parameterSetMachine.provide({
       actors: {
-        loadParameterSet: fromPromise(async (): Promise<ParameterSnapshot> => {
-          effects += 1;
-          throw new Error('Invalid target must not load');
+        loadParameterSet: createAsyncLogic<ParameterSnapshot, ParameterSetLoadInput>({
+          run: async (): Promise<ParameterSnapshot> => {
+            effects += 1;
+            throw new Error('Invalid target must not load');
+          },
         }),
-        observeParameterSet: fromCallback(() => {
+        observeParameterSet: createCallbackLogic(() => {
           effects += 1;
         }),
       },

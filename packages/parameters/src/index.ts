@@ -8,11 +8,11 @@ export {
   isParameterManifestShape,
   parameterManifestProfile,
   ParameterAdmissionError,
-  projectParameterSchemaToDraft7,
+  projectParameterSchema,
   resolveParameterBinding,
   resolveParameterBindingPointer,
 } from '#manifest.js';
-export { projectDraft7SchemaToParameterDeclaration } from '#json-schema-adapter.js';
+export { projectJsonSchemaToParameterDeclaration } from '#json-schema-adapter.js';
 export { projectParameterField } from '#projection.js';
 export {
   parameterRecordInputValues,
@@ -22,7 +22,7 @@ export {
   valueAtPointer,
 } from '#values.js';
 export { readParameterRecord, requireParameterRecord, sameRecordBytes, serializeParameterRecord } from '#record.js';
-export type { Draft7ParameterDeclarationInput } from '#json-schema-adapter.js';
+export type { JsonSchemaParameterDeclarationInput } from '#json-schema-adapter.js';
 export type { ParameterFieldDisplay, ParameterFieldProjection } from '#projection.js';
 export type { ParameterRecordRead } from '#record.js';
 export type {
@@ -33,13 +33,15 @@ export type {
   ParameterDeclaration,
   ParameterDiagnostic,
   ParameterIdentity,
-  ParameterLegacyProjection,
   ParameterManifest,
   ParameterProvenance,
   ParameterResolutionOptions,
+  ParameterSchemaProjection,
+  ParameterSchemaProjectionOptions,
   ParameterScope,
   ParameterSource,
 } from '#manifest.js';
+export type { JsonSchema, JsonSchemaDialect } from '#schema-admission.js';
 
 export { resolveParameterSnapshot } from '#snapshot.js';
 export type { ParameterSnapshot } from '#snapshot.js';

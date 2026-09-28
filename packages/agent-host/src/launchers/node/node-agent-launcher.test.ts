@@ -214,6 +214,22 @@ describe('createNodeAgentLauncher', () => {
     expect(replayed).toMatchObject({ type: 'result', operation: 'start', snapshot: { runId: 'run-replayed' } });
   });
 
+  it('reads a chat nobody wrote as empty without creating its log', async () => {
+    const host = await makeLauncher(scriptedGateway());
+    const workspaceRoot = roots.at(-1) ?? '';
+
+    const tailed = await host.execute({ type: 'tail', chatId: 'chat-unwritten', cursor: 0, limit: 1 });
+    const attached = await host.execute({ type: 'attach', chatId: 'chat-unwritten', cursor: 0, limit: 1 });
+
+    expect(tailed).toMatchObject({ type: 'tail', batch: { endCursor: 0, events: [] } });
+    expect(attached).toMatchObject({ type: 'attach', batch: { endCursor: 0, events: [] } });
+    await expect(
+      readFile(join(workspaceRoot, '.tau', 'chats', 'chat-unwritten', 'events.jsonl')),
+    ).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
+
   it('refuses a chat id that is not one storage path segment', async () => {
     const host = await makeLauncher(scriptedGateway());
     await expect(host.execute({ type: 'tail', chatId: '../escape', cursor: 0, limit: 16 })).rejects.toMatchObject({

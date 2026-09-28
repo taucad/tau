@@ -7,6 +7,7 @@ import { join, resolve } from 'node:path';
 import process from 'node:process';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { sharedEnvironment } from '#git/api-process.js';
 import { gitE2EApiUrl, gitE2EFrontendUrl, gitE2EStore } from '#git/config.js';
 import {
   basicAuthorization,
@@ -91,8 +92,11 @@ const maintenance = async (
       cwd: apiRoot,
       encoding: 'utf8',
       maxBuffer: 16 * 1024 * 1024,
+      /* The API's own environment, so the command reads the database the API
+       * wrote: `NODE_ENV=development` is what points both at this worktree's
+       * database fork, and `--env-file` never overrides an inherited value. */
       env: {
-        ...process.env,
+        ...sharedEnvironment(gitE2EFrontendUrl),
         TAU_S3_RESTORE_ENDPOINT: gitE2EStore.endpoint,
         TAU_S3_RESTORE_BUCKET: gitE2EStore.restoreBucket,
         TAU_S3_RESTORE_ACCESS_KEY_ID: gitE2EStore.accessKeyId,

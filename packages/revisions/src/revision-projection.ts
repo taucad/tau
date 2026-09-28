@@ -10,7 +10,7 @@
  * both come from there.
  */
 import type { ChangeEvent, PathPolicy } from '@taucad/filesystem';
-import type { RevisionStatusProjection } from '#project-revisions.machine.js';
+import type { RevisionStatusProjection } from '#project-revisions.types.js';
 
 /**
  * The versioned paths one content-change event touches inside one project.
@@ -20,6 +20,10 @@ import type { RevisionStatusProjection } from '#project-revisions.machine.js';
  * mint, so a seam that split an event into several would make a write that
  * landed during a mint invisible (F9, F4). Paths are returned
  * project-relative, which is the namespace the revision tree speaks.
+ *
+ * An event whose scope is unknown — a backend that changed wholesale, or
+ * bytes landing on the project's own route or one above it — is the root, `''`,
+ * which every capture reads as "walk everything" (E1).
  *
  * @param event - One authority-level change event.
  * @param projectRoot - The project's route, e.g. `/projects/p1`.
@@ -32,14 +36,32 @@ export const versionedChangePaths = (
   projectRoot: string,
   policy: PathPolicy,
 ): readonly string[] => {
+  if (event.type === 'backendChanged') {
+    return [''];
+  }
   const absolute =
     'path' in event
       ? [event.path]
       : 'oldPath' in event
         ? [event.oldPath, event.newPath]
-        : 'sourcePath' in event
-          ? [event.sourcePath, event.targetPath]
-          : [];
+        : [event.sourcePath, event.targetPath];
+  /* Bytes landing on the route itself or above it (a tree moved or copied
+   * over the project) name no path inside it. A delete there removes the
+   * project, which is not a change to record. */
+  const landed =
+    'newPath' in event
+      ? event.newPath
+      : 'targetPath' in event
+        ? event.targetPath
+        : event.type.endsWith('Deleted')
+          ? undefined
+          : event.path;
+  if (
+    landed !== undefined &&
+    (landed === projectRoot || projectRoot.startsWith(landed === '/' ? landed : `${landed}/`))
+  ) {
+    return [''];
+  }
   const prefix = `${projectRoot}/`;
   return absolute
     .filter((path) => path.startsWith(prefix))

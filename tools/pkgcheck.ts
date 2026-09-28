@@ -493,6 +493,10 @@ function validateWorkspaceRanges(): CheckResult {
  * the canonical two entries, and a reason that outlives its key is an issue.
  */
 const internalImportsExceptions: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  '@taucad/slicer': {
+    '#bambu-studio/engine.js':
+      'node/default platform swap for the Bambu Studio engine, pinned by src/slicer.plugin.test.ts',
+  },
   '@taucad/geospec-engine': {
     '#cache/node-evidence-store.js':
       'browser/default platform swap for the evidence store, pinned by src/browser-import-graph.test.ts',
@@ -515,6 +519,12 @@ const internalImportsExceptions: Readonly<Record<string, Readonly<Record<string,
   },
   '@taucad/tau-examples': {
     '#scripts/*.js': 'thumbnail/manifest generators outside src/; relative imports are banned workspace-wide',
+  },
+  // The canonical `#*.js` target is a literal `.ts` file, which never reaches a `.tsx`
+  // component; a tsconfig alias would, but it leaks into every program compiling this source.
+  '@taucad/ui': {
+    '#components/*.variants.js': 'variant modules are .ts and share components/ with the .tsx components',
+    '#components/*.js': 'components are .tsx, which the canonical #*.js -> ./src/*.ts target cannot reach',
   },
 };
 

@@ -137,6 +137,10 @@ declare module 'vitest' {
   export interface ProvidedContext {
     webGpuProfile: TargetWebGpuProfile;
     acpLiveEnabled: boolean;
+    /** False when the server was started without COOP/COEP (`TAU_E2E_DISABLE_COI`). */
+    crossOriginIsolation: boolean;
+    /** DP18: the exact STL and GLB of `picovoxel.sphere-minus-beams` every host exports (tau-examples `exact-pins.json`). */
+    picovoxelExactPins: Readonly<Record<'stl' | 'glb', { readonly sha256: string; readonly bytes: number }>>;
   }
 }
 
@@ -164,6 +168,7 @@ export type UiBrowserCommands = {
   uiCloseSecondaryTarget(): Promise<void>;
   uiCloseTarget(): Promise<void>;
   uiCookies(): Promise<TargetCookie[]>;
+  uiCpuProfile(action: 'start' | 'stop', artifactName?: string, surface?: TargetSurface): Promise<string | undefined>;
   uiDragTarget(source: string, target: string, surface?: TargetSurface): Promise<void>;
   uiDownloadTarget(triggerSelector: string): Promise<TargetDownload>;
   uiEmulateColorScheme(colorScheme: 'dark' | 'light' | 'no-preference', surface?: TargetSurface): Promise<void>;
@@ -376,6 +381,13 @@ export const closeSecondary = (): Promise<void> => server.commands.uiCloseSecond
 export const workers = (urlSubstring?: string, surface?: TargetSurface): Promise<readonly TargetWorker[]> =>
   server.commands.uiTargetWorkers(urlSubstring, surface);
 export const cookies = (): Promise<TargetCookie[]> => server.commands.uiCookies();
+/** Begin a CPU profile of one page; see {@link stopCpuProfile}. */
+export const startCpuProfile = async (surface?: TargetSurface): Promise<void> => {
+  await server.commands.uiCpuProfile('start', undefined, surface);
+};
+/** End the page's CPU profile and write it as `artifactName`; resolves to its path. */
+export const stopCpuProfile = async (artifactName: string, surface?: TargetSurface): Promise<string> =>
+  (await server.commands.uiCpuProfile('stop', artifactName, surface)) ?? artifactName;
 export const addCookies = (values: readonly TargetCookie[]): Promise<void> => server.commands.uiAddCookies(values);
 export const authenticateTauTestUser = (account: TargetTauTestAccount): Promise<void> =>
   server.commands.uiAuthenticateTauTestUser(account);

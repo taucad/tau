@@ -14,9 +14,10 @@ import {
   projectAgentHostUserTurn,
   projectTurnFinalized,
   latestAcpSessionData,
+  parseAgentHostApproval,
   projectTurnSettlement,
 } from '#services/agent-host-event-projection.js';
-import { parseErrorForPersistence } from '#utils/error.utils.js';
+import { chatTooLongMessage, parseErrorForPersistence } from '#utils/error.utils.js';
 import hexagonalNutLog from '#services/__fixtures__/daemon-reattach-hexnut.jsonl?raw';
 import hexagonalNutFourRunLog from '#services/__fixtures__/daemon-reattach-hexnut-4runs.jsonl?raw';
 
@@ -421,6 +422,24 @@ describe('projectAgentHostEvent', () => {
     ]);
   });
 
+  it("projects an agent's media recorded by attachment reference as a file part the chat resolves", () => {
+    const path = `attachments/${'e'.repeat(64)}.png`;
+    const message = {
+      id: 'assistant-render',
+      role: 'assistant',
+      content: [
+        { type: 'file-ref', path, mimeType: 'image/png', byteLength: 4, filename: 'exec-1.png' },
+        // Not a path any attachment store could have written: dropped, never rendered as a broken source.
+        { type: 'file-ref', path: 'attachments/../../tau.json', mimeType: 'image/png' },
+      ],
+    } as const;
+
+    expect(projectAgentHostEvent({ ...base, type: 'message.appended', message })).toEqual([
+      { type: 'file', mediaType: 'image/png', url: path },
+      { type: 'finish-step' },
+    ]);
+  });
+
   it('projects text, thinking, usage, and tool calls from an assistant message', () => {
     const chunks = projectAgentHostEvent({
       ...base,
@@ -642,6 +661,46 @@ describe('projectAgentHostEvent', () => {
     ]);
   });
 
+  it('preserves a durable interruption code for the tool error card', () => {
+    const [chunk] = projectAgentHostEvent({
+      ...base,
+      type: 'message.appended',
+      message: {
+        id: 'stopped-output',
+        role: 'tool-output',
+        toolCallId: 'stopped-call',
+        toolName: 'screenshot',
+        content: { errorCode: 'USER_INTERRUPTED', message: 'Interrupted by user.' },
+        isError: true,
+      },
+    });
+    expect(chunk).toMatchObject({
+      type: 'tool-output-error',
+      errorText: '{"errorCode":"USER_INTERRUPTED","message":"Interrupted by user."}',
+    });
+  });
+
+  it.each([
+    [
+      'a shell call',
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Codex's own `rawOutput` field names.
+      { formatted_output: 'zsh: command not found: dotnet\n', exit_code: 1 },
+      'zsh: command not found: dotnet\n\n\nExit code 1',
+    ],
+    [
+      'an MCP call',
+      { result: { content: [{ type: 'text', text: 'Computer Use permissions are not granted' }] } },
+      'Computer Use permissions are not granted',
+    ],
+  ])("renders a failed %s's output as text, never as JSON", (_name, content, expected) => {
+    const [chunk] = projectAgentHostEvent({
+      ...base,
+      type: 'message.appended',
+      message: { id: 'output-3', role: 'tool-output', toolCallId: 'call-3', toolName: 'shell', content, isError: true },
+    });
+    expect(chunk).toMatchObject({ type: 'tool-output-error', errorText: expected });
+  });
+
   it('opens a self-contained approval part carrying the options the host recorded', () => {
     expect(
       projectAgentHostEvent({
@@ -680,6 +739,29 @@ describe('projectAgentHostEvent', () => {
       },
       { type: 'tool-approval-request', approvalId: 'approval-1', toolCallId: 'approval-1' },
     ]);
+  });
+
+  it('carries the ledger correlation a print request attaches, and nothing else from its context', () => {
+    const [part] = projectAgentHostEvent({
+      ...base,
+      type: 'interrupt.recorded',
+      interruptId: 'approval-print',
+      phase: 'requested',
+      reason: 'Print pyramid.gcode.3mf on Simulated X1C',
+      payload: {
+        kind: 'approval',
+        prompt: 'Print pyramid.gcode.3mf on Simulated X1C',
+        context: { requestId: 'req-7f3a', machineId: 'bambu-simulator', fileName: 'pyramid.gcode.3mf', extra: 1 },
+      },
+    });
+    expect(part).toMatchObject({
+      type: 'tool-input-available',
+      input: {
+        interruptId: 'approval-print',
+        context: { requestId: 'req-7f3a', machineId: 'bambu-simulator', fileName: 'pyramid.gcode.3mf' },
+      },
+    });
+    expect(parseAgentHostApproval((part as { input: unknown }).input)?.context?.requestId).toBe('req-7f3a');
   });
 
   it('projects a login an external agent is waiting on as facts, not a decision', () => {
@@ -989,7 +1071,7 @@ describe('projectAgentHostEvent', () => {
      * person reads the host's own sentence about evicting history. */
     expect(parseErrorForPersistence(new Error(chunk.errorText))).toMatchObject({
       code: 'NO_EVICTABLE_HISTORY',
-      message: "This chat's first message is too large to continue. Start a new chat and attach less.",
+      message: chatTooLongMessage,
       raw: chunk.errorText,
     });
   });

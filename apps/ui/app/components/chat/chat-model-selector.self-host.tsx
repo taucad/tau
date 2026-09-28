@@ -12,14 +12,12 @@ type ChatModelSelectorProps = Omit<React.HTMLAttributes<HTMLDivElement>, 'childr
   readonly onClose?: () => void;
   readonly children: (props: { selectedModel: ResolvedModel }) => ReactNode;
   readonly popoverProperties?: React.ComponentProps<typeof ComboBoxResponsive>['popoverProperties'];
-  readonly isNested?: boolean;
 };
 
 export const ChatModelSelector = memo(function ({
   onSelect,
   onClose,
   children,
-  isNested,
   ...properties
 }: ChatModelSelectorProps): React.JSX.Element {
   const [open, setOpen] = useState(false);
@@ -38,12 +36,11 @@ export const ChatModelSelector = memo(function ({
   return (
     <ComboBoxResponsive
       {...properties}
-      isNested={isNested}
       isOpen={open}
       onOpenChange={setOpen}
       popoverProperties={properties.popoverProperties}
       emptyListMessage='No configured models found.'
-      searchPlaceHolder='Search models...'
+      searchPlaceHolder='Search models…'
       title='Select a model'
       description='Select a model configured by this server.'
       groupedItems={[{ name: 'Models', items: visibleModels }]}

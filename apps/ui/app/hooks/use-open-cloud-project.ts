@@ -10,8 +10,38 @@ import { useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useProjects } from '#hooks/use-projects.js';
-import { projectUrl } from '#utils/project-url.utils.js';
+import { projectLibraryUrl, projectUrl } from '#utils/project-url.utils.js';
+import { toast } from '#components/ui/sonner.js';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
+import type { CreateProjectOptions } from '#hooks/use-project-manager.js';
+
+/**
+ * What this device creates for a Tau Cloud project before its first pull: the
+ * remote's id and name, no chat and no files — *Open*'s first half, and all
+ * that materialize on sign-in (D20) creates.
+ *
+ * @param entry - The Tau Cloud project.
+ * @returns The `createProject` options.
+ * @public
+ */
+export const cloudProjectStub = (entry: CloudProject): CreateProjectOptions => ({
+  /* The remote's id, because the id is the repository path there. */
+  id: entry.id,
+  /* The chats come with the pull (W17), so creating one here would be an empty
+     chat nobody asked for that the pull cannot remove and the next push offers
+     to the account (review R5). */
+  chat: false,
+  project: {
+    name: entry.name,
+    description: '',
+    tags: [],
+    /* A placeholder for one round trip: `tau.json` is versioned, so the
+       remote's own manifest — its name and the file it opens with — arrives
+       with the open pull and replaces this one. */
+    assets: { main: { entryPath: 'main.scad' } },
+  },
+  files: {},
+});
 
 /**
  * Open a Tau Cloud project on this device.
@@ -23,40 +53,37 @@ import type { CloudProject } from '#hooks/use-cloud-projects.js';
  * projection — with no chat turn.
  *
  * A project this device already holds is navigated to instead, which is what an
- * invitation accepted twice lands in.
+ * invitation accepted twice lands in; one in its Trash is still held — creating
+ * it again would be refused — so the verb says where it is and offers the Trash.
  *
  * @returns The verb, which throws whatever `createProject` throws.
  * @public
  */
 export const useOpenCloudProject = (): ((entry: CloudProject) => Promise<void>) => {
-  const { projects } = useProjects();
+  const { projects } = useProjects({ includeDeleted: true });
   const { createProject } = useProjectManager();
   const navigate = useNavigate();
 
   return useCallback(
     async (entry: CloudProject): Promise<void> => {
       const held = projects.find((project) => project.id === entry.id);
+      if (held?.deletedAt !== undefined) {
+        toast.info(`${entry.name} is in Trash on this device`, {
+          description: 'Restore it from Trash to open it.',
+          action: {
+            label: 'Show Trash',
+            onClick() {
+              void navigate(`${projectLibraryUrl}?trash=1`);
+            },
+          },
+        });
+        return;
+      }
       if (held?.slugs !== undefined) {
         await navigate(projectUrl(held.slugs));
         return;
       }
-      const created = await createProject({
-        id: entry.id,
-        /* The chats come with the pull (W17), so creating one here would be an
-           empty chat nobody asked for that the pull cannot remove and the next
-           push offers to the account (review R5). */
-        chat: false,
-        project: {
-          name: entry.name,
-          description: '',
-          tags: [],
-          /* A placeholder for one round trip: `tau.json` is versioned, so the
-             remote's own manifest — its name and the file it opens with —
-             arrives with the open pull and replaces this one. */
-          assets: { main: { entryPath: 'main.scad' } },
-        },
-        files: {},
-      });
+      const created = await createProject(cloudProjectStub(entry));
       /* The library owns the root file-manager worker, while the project route
          owns a project-scoped worker. Carry the gesture across navigation so
          the owning worker records and opens the remote; sending it here loses

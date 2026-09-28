@@ -25,6 +25,7 @@ import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
 import { BatchLogRecordProcessor } from '@opentelemetry/sdk-logs';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { LangChainInstrumentation } from '@traceloop/instrumentation-langchain';
+import { redactUrlQuery } from '#logger/logger-factory.js';
 
 const configuredMetricsPort = process.env['OTEL_METRICS_PORT'];
 const metricsPort = configuredMetricsPort === undefined ? 9464 : Number(configuredMetricsPort);
@@ -74,6 +75,12 @@ const sdk = new NodeSDK({
           const host = request.headers.host ?? '';
           return host.includes(String(metricsPort));
         },
+        // Merged over the recorded span attributes, where an undefined value drops the attribute: an OAuth
+        // callback's span keeps its path (`url.path`) but never its code and state.
+        startIncomingSpanHook: (request) =>
+          redactUrlQuery(request.url ?? '') === (request.url ?? '')
+            ? {}
+            : { 'url.query': undefined, 'http.target': undefined, 'http.url': undefined },
       },
       '@opentelemetry/instrumentation-pg': {
         addSqlCommenterCommentToQueries: false,

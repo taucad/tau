@@ -29,6 +29,11 @@ export const httpHeader = {
   // `x-tau-` prefix of `x-tau-attempt-id` rather than RFC 6648's advice.
   xTauProxyAuthorization: 'x-tau-proxy-authorization',
   /**
+   * The key that opens one sealed LFS relay record (D22). Issued as an LFS
+   * action header in the batch answer and sent back with that action only.
+   */
+  xTauLfsKey: 'x-tau-lfs-key',
+  /**
    * Git's own protocol-version request header (`version=2`), which
    * `isomorphic-git` sends on every smart-HTTP request the browser leg makes.
    *

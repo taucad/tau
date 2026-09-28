@@ -25,7 +25,7 @@
  *   joint proof over the API wire is W18's.
  */
 
-import { execFile, execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -36,7 +36,7 @@ import { promisify } from 'node:util';
 import { createMemoryProvider } from '@taucad/filesystem/backend';
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import type { RevisionId } from '#algorithms/index.js';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { createRevisionHttpClient } from '#http-client.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
@@ -46,12 +46,14 @@ import { largeObjectThresholdBytes } from '#workspace-config.js';
 import type { RevisionProvenance } from '#revision-authority.js';
 import type { RevisionPort } from '#revision-port.js';
 import { startGitHttpBackend } from '#test/git-http-backend.js';
+/* `git` and `git lfs`, probed as a disk host probes them: without `git-lfs` the
+ * large-object rows would fail product-shaped instead of skipping. */
+import { gitToolchainOnPath } from '#test/native-git-harness.js';
 
 /*
  * `git` runs asynchronously here, always. The fixture's HTTP server shares this
  * process's event loop, so a synchronous `git clone` blocks the very server it
- * is cloning from and the two wait for each other forever. (Only the
- * `git --version` probe below is synchronous, and nothing is listening then.)
+ * is cloning from and the two wait for each other forever.
  */
 const runGit = promisify(execFile);
 
@@ -59,15 +61,6 @@ const encoder = new TextEncoder();
 const author = { name: 'Tau', email: 'tau@example.com' };
 const remoteCredential = 'Bearer gho_third_party';
 const tauSession = 'Bearer tau-session';
-
-const gitOnPath = ((): boolean => {
-  try {
-    execFileSync('git', ['--version'], { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-})();
 
 const tree = (files: Readonly<Record<string, string>>): ImmutableRevisionTree =>
   new ImmutableRevisionTree(Object.entries(files).map(([path, content]) => [path, encoder.encode(content)]));
@@ -184,7 +177,7 @@ const startProxy = async (): Promise<
   };
 };
 
-describe.runIf(gitOnPath)('AC18 — a Git remote, from both legs', () => {
+describe.runIf(gitToolchainOnPath)('AC18 — a Git remote, from both legs', () => {
   let root: string;
   let nativeRemote: Awaited<ReturnType<typeof startGitHttpBackend>>;
   let browserRemote: Awaited<ReturnType<typeof startGitHttpBackend>>;
@@ -342,7 +335,7 @@ describe.runIf(gitOnPath)('AC18 — a Git remote, from both legs', () => {
  * close. What is asserted here is the agreement, not the refusal: same code,
  * same file list, nothing offered on either leg.
  */
-describe.runIf(gitOnPath)('P20 — large objects and a third-party remote', () => {
+describe.runIf(gitToolchainOnPath)('P20 — large objects and a third-party remote', () => {
   let root: string;
   let remote: Awaited<ReturnType<typeof startGitHttpBackend>>;
 
@@ -351,12 +344,15 @@ describe.runIf(gitOnPath)('P20 — large objects and a third-party remote', () =
   const large = ((): string => 'x'.repeat(largeObjectThresholdBytes + 1024))();
   const files = { 'models/housing.step': large, 'readme.md': 'small\n' };
 
-  beforeAll(async () => {
+  /* Each row owns its backend (L2-F13): both rows assert the trail is empty, so
+   * a shared one made the second fail on the first's traffic whenever the first
+   * leg pushed at all. */
+  beforeEach(async () => {
     root = await mkdtemp(join(tmpdir(), 'tau-w12-p20-'));
     remote = await startGitHttpBackend({ root: join(root, 'remote'), name: 'third-party' });
   }, 180_000);
 
-  afterAll(async () => {
+  afterEach(async () => {
     await remote.close();
     await rm(root, { force: true, recursive: true });
   });
@@ -428,12 +424,13 @@ describe.runIf(gitOnPath)('P20 — large objects and a third-party remote', () =
  *   TAU_E2E_GITHUB_TOKEN=<a token with `public_repo` on that repository> \
  *   pnpm nx test revisions --watch=false -- git-remote.integration
  *
- * The sandbox repository is expected to be empty and disposable: the run force-
- * pushes a branch of its own name and deletes nothing.
+ * The sandbox repository is expected to be empty and disposable: the run pushes
+ * a branch of its own name and deletes that branch again, through the same
+ * credential helper, however the row ends.
  */
 const sandboxUrl = process.env['TAU_E2E_GITHUB_SANDBOX'];
 const sandboxToken = process.env['TAU_E2E_GITHUB_TOKEN'];
-const sandboxConfigured = gitOnPath && sandboxUrl !== undefined && sandboxToken !== undefined;
+const sandboxConfigured = gitToolchainOnPath && sandboxUrl !== undefined && sandboxToken !== undefined;
 
 describe.runIf(sandboxConfigured)('AC18 — the GitHub sandbox run (env-gated)', () => {
   it('pushes a branch to the sandbox repository and reads it back with stock git', async () => {
@@ -441,6 +438,7 @@ describe.runIf(sandboxConfigured)('AC18 — the GitHub sandbox run (env-gated)',
     const repositoryPath = join(root, 'project');
     await mkdir(repositoryPath, { recursive: true });
     const branch = `tau-w12-${String(Date.now())}`;
+    let pushedBranch = false;
     try {
       const port = createNativeGitRevisionPort({ repositoryPath });
       await port.init({ author });
@@ -454,11 +452,11 @@ describe.runIf(sandboxConfigured)('AC18 — the GitHub sandbox run (env-gated)',
       await port.updateRef({ name: branch, expectedHead: undefined, head });
 
       /*
-       * On a disk host the credential is git's own — the system credential
-       * helper, which `createNativeGitRevisionPort` leaves reachable because it
-       * clears only `GIT_*` from the child's environment. That is the right
-       * answer for a person at a desktop and it is the whole seam (W12 report
-       * §"desktop and CLI"): Tau writes no token to disk.
+       * A remote Tau holds no credential record for is reached with git's own
+       * credential helper, which `createNativeGitRevisionPort` leaves reachable
+       * for exactly that case (ruling G1: only Tau-managed remotes switch the
+       * helpers off). That is the CLI's and a self-managed remote's seam, and
+       * Tau writes no token to disk.
        *
        * So this row hands the run's token to git the same way: a helper local
        * to one `mktemp` repository that echoes what the *environment* holds.
@@ -478,12 +476,21 @@ describe.runIf(sandboxConfigured)('AC18 — the GitHub sandbox run (env-gated)',
       );
       await port.setRemote({ name: 'origin', url: sandboxUrl ?? '' });
       const pushed = await port.push({ remote: 'origin', refs: [{ name: `refs/heads/${branch}` }], atomic: true });
+      pushedBranch = pushed.refs[0]?.status === 'updated';
 
       expect(pushed.refs[0]?.status).toBe('updated');
       const { stdout } = await runGit('git', ['ls-remote', sandboxUrl ?? '', branch], { cwd: repositoryPath });
       expect(stdout).toContain(head);
     } finally {
-      await rm(root, { force: true, recursive: true });
+      try {
+        if (pushedBranch) {
+          /* The same repository-local helper that pushed it; nothing is left
+             behind in the sandbox for the next run to trip over. */
+          await runGit('git', ['push', '--delete', 'origin', branch], { cwd: repositoryPath });
+        }
+      } finally {
+        await rm(root, { force: true, recursive: true });
+      }
     }
   }, 300_000);
 });

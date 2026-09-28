@@ -8,18 +8,14 @@ import { gltf } from '@taucad/gltf';
 import { image } from '@taucad/image';
 import { jscad } from '@taucad/jscad';
 import { manifold } from '@taucad/manifold';
-import {
-  geometryCache,
-  gltfEdgeDetection,
-  parameterCache,
-  parameterFileResolver,
-  parameterUnits,
-} from '@taucad/middleware';
+import { geometryCache, gltfEdgeDetection, parameterFileResolver, parameterUnits } from '@taucad/middleware';
 import { opencascade } from '@taucad/opencascade';
 import { openrscadKernel } from '@taucad/openrscad';
 import { picogk } from '@taucad/picogk';
+import { picovoxel } from '@taucad/picovoxel';
 import { replicad } from '@taucad/replicad';
 import { rhino } from '@taucad/rhino';
+import { slicer } from '@taucad/slicer';
 
 import { build123dKernelOptions } from '#tau/build123d-resources.js';
 import { picogkKernelOptions } from '#tau/picogk-resources.js';
@@ -46,10 +42,14 @@ const createDesktopRuntimeImplementation = (options: DesktopRuntimeOptions = {})
         opencascade(),
         jscad(),
         manifold(),
+        // Kernels run in Node utility processes, where shared WebAssembly memory is available, so 'auto'
+        // serves the fast lane multi-threaded.
+        picovoxel(),
         gltf(),
         brep(),
         rhino(),
         image(),
+        slicer(),
         assimp({
           preset: 'all',
           transcoders: { export: { backend: desktopAssimpBackend } },
@@ -68,7 +68,7 @@ const createDesktopRuntimeImplementation = (options: DesktopRuntimeOptions = {})
         }),
       ],
       kernels: [desktopOpenrscadKernel],
-      middleware: [parameterFileResolver(), parameterCache(), parameterUnits(), geometryCache(), gltfEdgeDetection()],
+      middleware: [parameterFileResolver(), parameterUnits(), geometryCache(), gltfEdgeDetection()],
     }),
   });
 

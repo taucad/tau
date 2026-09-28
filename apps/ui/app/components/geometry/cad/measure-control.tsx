@@ -1,38 +1,40 @@
+import { useCallback } from 'react';
+import { flushSync } from 'react-dom';
 import { Ruler } from 'lucide-react';
-import { Button } from '@taucad/ui/components/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
-import { cn } from '@taucad/ui/utils/cn';
+import { ToolToggle } from '#components/geometry/cad/section-view-control.js';
 import { useGraphics, useGraphicsSelector } from '#hooks/use-graphics.js';
 
-export function MeasureControl(): React.JSX.Element {
+type MeasureControlProps = Readonly<{
+  /** The formatted shortcut the tooltip shows. */
+  shortcut?: string;
+  /** Runs once the toggle has started measuring and its row is on screen. */
+  onStart?: () => void;
+}>;
+
+/** Starts and stops measuring; stopping keeps every measurement. */
+export function MeasureControl({ shortcut, onStart }: MeasureControlProps): React.JSX.Element {
   const graphicsRef = useGraphics();
-  const isMeasureActive = useGraphicsSelector((state) => state.matches({ operational: 'measure' }));
-  const is2dGeometry = useGraphicsSelector((state) => state.context.geometry?.format === 'svg');
+  const isMeasureActive = useGraphicsSelector((state) => state.context.isMeasureActive);
 
-  const handleClick = (): void => {
-    graphicsRef.send({
-      type: 'setMeasureActive',
-      payload: !isMeasureActive,
+  const handleToggle = useCallback(() => {
+    // Synchronous, so the measuring row exists when `onStart` moves focus into it.
+    flushSync(() => {
+      graphicsRef.send({ type: 'setMeasureActive', payload: !isMeasureActive });
     });
-  };
-
-  const label = `${isMeasureActive ? 'Disable' : 'Enable'} measuring tool`;
+    if (!isMeasureActive) {
+      onStart?.();
+    }
+  }, [graphicsRef, isMeasureActive, onStart]);
 
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          variant='overlay'
-          size='icon'
-          aria-label={label}
-          data-active={isMeasureActive ? 'true' : 'false'}
-          className={cn('data-[active=true]:bg-accent data-[active=true]:text-primary', is2dGeometry && 'hidden')}
-          onClick={handleClick}
-        >
-          <Ruler className='size-4 -rotate-45' />
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
-    </Tooltip>
+    <ToolToggle
+      tool='measure'
+      name='Measure'
+      label='Measure'
+      icon={<Ruler className='size-4 -rotate-45' />}
+      isActive={isMeasureActive}
+      shortcut={shortcut}
+      onToggle={handleToggle}
+    />
   );
 }

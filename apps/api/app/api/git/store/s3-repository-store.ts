@@ -4,6 +4,7 @@ import type { Readable } from 'node:stream';
 import { Injectable, Optional } from '@nestjs/common';
 import { concatUint8Arrays } from '#storage/concat-uint8-arrays.js';
 import { ObjectStorageService, isS3ObjectMissing } from '#storage/object-storage.service.js';
+import { RepositoryStoreError } from '#api/git/store/errors.js';
 import type {
   CommitToken,
   ManifestBytes,
@@ -148,14 +149,22 @@ export class S3RepositoryStore implements RepositoryStore {
     key: string,
     range?: { start: number; end: number },
   ): Promise<Readable> {
-    const blob = await this.driver(locator).getBlob({
-      namespace: 'tenants',
-      key: `${repositoryPrefix(locator)}${key}`,
-      tier: 'private',
-      ...(range === undefined ? {} : { range }),
-    });
+    try {
+      const blob = await this.driver(locator).getBlob({
+        namespace: 'tenants',
+        key: `${repositoryPrefix(locator)}${key}`,
+        tier: 'private',
+        ...(range === undefined ? {} : { range }),
+      });
 
-    return blob.body;
+      return blob.body;
+    } catch (error) {
+      if (isS3ObjectMissing(error)) {
+        throw new RepositoryStoreError('missing-pack', `the store holds no '${key}'`, { cause: error });
+      }
+
+      throw error;
+    }
   }
 
   public async *listObjects(locator: RepositoryLocator, prefix: string): AsyncIterable<StoredObject> {

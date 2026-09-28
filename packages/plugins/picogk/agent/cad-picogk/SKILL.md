@@ -7,12 +7,9 @@ description: Guides trusted, upstream-compatible PicoGK C# voxel authoring in ma
 
 ## Contract
 
-1. Author an ordinary C# console program in `main.cs`, with optional project-local `.cs` helpers and assets.
-2. Use the public `PicoGK` API directly. Do not import a Tau authoring namespace or return a Tau-specific model wrapper.
-3. Call `Library.Go(voxelSizeMm, task)` from the program entry point. Create geometry inside `task` using normal PicoGK APIs.
-4. Publish display geometry with `Library.oViewer().Add(...)`. Set appearance with `SetGroupMaterial`; meshes, voxels, and polylines are supported.
-5. Treat the final viewer state as the model result. `Remove`, `SetGroupVisible`, and `RemoveAllObjects` affect what Tau renders after the task completes.
-6. Keep final displayed geometry alive until the task returns. Dispose temporary operands normally.
+1. Write ordinary `main.cs` with optional local C# helpers/assets and the public `PicoGK` API; no Tau authoring wrapper.
+2. Call `Library.Go(voxelSizeMm, task)`; create and publish geometry inside `task` with `Library.oViewer().Add(...)`.
+3. The final viewer state is the model. `Remove`, `SetGroupVisible`, and `RemoveAllObjects` change it. Keep displayed geometry alive; dispose temporary operands.
 
 ## Canonical pattern
 
@@ -22,35 +19,32 @@ using PicoGK;
 
 Library.Go(1.0f, () =>
 {
-    var sphere = Voxels.voxSphere(Vector3.Zero, 20.0f);
-    Library.oViewer().SetGroupMaterial(0, "4f7dd9", 0.2f, 0.7f);
-    Library.oViewer().Add(sphere);
+    Library.oViewer().Add(Voxels.voxSphere(Vector3.Zero, 20.0f));
 });
 ```
 
-Tau hosts the viewer without opening a second native window and renders the captured final scene after each completed run. Smaller voxels increase fidelity and memory/runtime cost sharply. Prefer voxel booleans and fields, use project-relative assets, and treat output as mesh topology rather than precise BRep.
+Tau captures the final scene as mesh topology, not precise BRep. Smaller voxels raise memory and runtime cost sharply. Use project-relative assets.
+
+## Part names and mechanisms
+
+Current `Viewer.Add` cannot name parts; groups are for appearance/transforms. PicoGK `Animation` does not publish Tau mechanism metadata. Proposed named `Add` and `SetMechanism` calls are **not shipped**; do not emit them until listed in the pinned assembly. Then name final parts uniquely, reference exact names in `links.*.shapes`, and declare explicit mm/rad-or-deg units, links, and joints in the as-built frame. Tau resolves component IDs and converts mechanism coordinates with the GLB vertices. Inspect warning source paths when metadata is invalid.
 
 ## Interactive parameters
 
-The optional `Params` convention keeps source runnable as a normal PicoGK console program: its property initializers are the standalone defaults, and Tau sets selected values before invoking the same entry point. Supported property types are `bool`, `int`, `float`, `double`, `string`, and project-local enums. Use standard `System.ComponentModel.DataAnnotations.Range` for numeric limits and `Display` for labels, descriptions, and order. Defaults must be finite, non-null compile-time constants; do not add an explicit static constructor.
+Optional `Params` property initializers are standalone defaults; Tau overrides selected values. Use `bool`, `int`, `float`, `double`, `string`, or local enums. Use `Range` and `Display` attributes. Defaults must be finite, non-null compile-time constants; avoid an explicit static constructor.
 
 ```csharp
 using System.ComponentModel.DataAnnotations;
-using System.Numerics;
 using PicoGK;
 
 Library.Go(Params.VoxelSizeMm, () =>
-    Library.oViewer().Add(Voxels.voxSphere(Vector3.Zero, Params.RadiusMm)));
+    Library.oViewer().Add(Voxels.voxSphere(System.Numerics.Vector3.Zero, 20f)));
 
 public static class Params
 {
     [Range(0.05, 5.0)]
     [Display(Name = "Voxel size", Order = 0)]
     public static float VoxelSizeMm { get; set; } = 0.5f;
-
-    [Range(1.0, 100.0)]
-    [Display(Name = "Radius", Order = 1)]
-    public static float RadiusMm { get; set; } = 20f;
 }
 ```
 

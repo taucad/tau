@@ -1,15 +1,12 @@
 import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
-import { availableParallelism } from 'node:os';
 import { join, resolve } from 'node:path';
 import { Worker } from 'node:worker_threads';
 
-import { createSolverHatchetJobWorkerFactory, defaultConfigDirectory, startHostDaemon } from '@taucad/host';
+import { defaultConfigDirectory, startHostDaemon } from '@taucad/host';
 import { connectSqliteComputeStoreWorker } from '@taucad/runtime/node';
 import type { ComputeBinding } from '@taucad/runtime/types';
 import type { HostDaemonAgentOptions, HostDaemonEvent } from '@taucad/host';
-import { calculixSolverVersion, createDirectorySolverInputMaterializer } from '@taucad/jobs-solvers';
-import type { OpenFoamSolverVersion } from '@taucad/jobs-solvers';
 import { systemSkillBundles } from '@taucad/skills/resources';
 import { defineCommand } from 'citty';
 import { consola } from 'consola';
@@ -40,6 +37,18 @@ const computeStoreWorkerModulePath = (): string =>
       import.meta.url,
     ),
   );
+
+/**
+ * The machine providers `--machines` serves: the Bambu Lab X1C and its
+ * socket-free simulator, the operator's dry-run device. Loaded on demand so a
+ * daemon without the flag never touches the vendor package.
+ *
+ * @returns The daemon's machines option.
+ */
+const machineProviders = async (): Promise<NonNullable<HostDaemonAgentOptions['machines']>> => {
+  const { bambuMachine, bambuSimulatorMachine } = await import('@taucad/bambu');
+  return { providers: [bambuMachine(), bambuSimulatorMachine()] };
+};
 
 const childArguments = (options: { readonly plugin: unknown; readonly config?: string }): string[] => {
   const plugins = Array.isArray(options.plugin)
@@ -200,18 +209,6 @@ const parsePositiveInteger = (name: string, value: string): number => {
   return parsed;
 };
 
-const parseAttempts = (value: string): readonly number[] => {
-  const attempts = value.split(',').map((entry) => parsePositiveInteger('--job-max-attempts', entry));
-  return [...new Set(attempts)].toSorted((left, right) => left - right);
-};
-
-const parseOpenFoamVersion = (value: string): OpenFoamSolverVersion => {
-  if (value !== '2506' && value !== '2606') {
-    throw new TypeError('--openfoam-version must be 2506 or 2606');
-  }
-  return value;
-};
-
 /** `tau serve` command. */
 export const serveCommand = defineCommand({
   meta: {
@@ -245,43 +242,16 @@ export const serveCommand = defineCommand({
       description: 'Compute reuse mode: off, memory, or durable',
       default: 'durable',
     },
-    jobSlots: {
-      type: 'string',
-      description: 'Hatchet slots advertised by this daemon when HATCHET_CLIENT_TOKEN is configured',
-      default: String(availableParallelism()),
-    },
-    jobMaxAttempts: {
-      type: 'string',
-      description: 'Comma-separated retry counts for which static Hatchet task profiles are installed',
-      default: '1',
-    },
-    solverInputRoot: {
-      type: 'string',
-      description: 'Deployment-owned directory CAS root containing one extracted directory per SHA-256 digest',
-      required: false,
-      default: process.env['TAU_SOLVER_INPUT_ROOT'],
-    },
-    openfoamVersion: {
-      type: 'string',
-      description: 'Exact OpenFOAM release advertised by this worker',
-      default: process.env['TAU_OPENFOAM_VERSION'] ?? '2506',
-    },
-    openfoamImage: {
-      type: 'string',
-      description: 'Optional reviewed immutable OpenFOAM image override',
-      required: false,
-      default: process.env['TAU_OPENFOAM_IMAGE'],
-    },
-    calculixImage: {
-      type: 'string',
-      description: 'Optional reviewed immutable CalculiX 2.23 image',
-      required: false,
-      default: process.env['TAU_CALCULIX_IMAGE'],
-    },
     trustProjects: {
       type: 'boolean',
       description: 'Acknowledge that remote project code executes on this machine',
       default: false,
+    },
+    pair: {
+      type: 'boolean',
+      description:
+        'Pair interactively when this host has no accepted credential; --no-pair exits instead (a provisioned cloud host)',
+      default: true,
     },
     agentPort: {
       type: 'string',
@@ -329,6 +299,12 @@ export const serveCommand = defineCommand({
         'Offer external ACP agents (Claude Code, Codex) that resolve and whose CLI is installed; --no-external-agents withholds them',
       default: process.env['TAU_HOST_EXTERNAL_AGENTS'] !== 'false',
     },
+    machines: {
+      type: 'boolean',
+      description:
+        'Serve the machines route beside the agent channel with the Bambu Lab X1C provider and its simulator (TAU_HOST_MACHINES=true)',
+      default: process.env['TAU_HOST_MACHINES'] === 'true',
+    },
   },
   async run({ args }) {
     if (!args.trustProjects) {
@@ -345,6 +321,10 @@ export const serveCommand = defineCommand({
       throw new TypeError('--compute-mode must be off, memory, or durable');
     }
     const agent = agentOptions(args);
+    if (args.machines && !agent) {
+      throw new TypeError('--machines serves beside the agent channel: pass --agentPort or --ui as well');
+    }
+    const machines = args.machines ? await machineProviders() : undefined;
     let computeWorker: Worker | undefined;
     let computeConnection: ReturnType<typeof connectSqliteComputeStoreWorker> | undefined;
     const computeWorkspaceRoot = agent?.workspaceRoot;
@@ -385,6 +365,7 @@ export const serveCommand = defineCommand({
     const configuredAgent = agent
       ? {
           ...agent,
+          ...(machines ? { machines } : {}),
           compute: compute!,
           ...(args.computeMode === 'durable'
             ? {
@@ -398,37 +379,6 @@ export const serveCommand = defineCommand({
             : {}),
         }
       : undefined;
-    const hatchetToken = process.env['HATCHET_CLIENT_TOKEN'];
-    const jobWorker = (() => {
-      if (!hatchetToken) {
-        consola.warn('Durable job execution is disabled because HATCHET_CLIENT_TOKEN is not configured');
-        return undefined;
-      }
-      if (!args.solverInputRoot) {
-        throw new TypeError('--solver-input-root is required when HATCHET_CLIENT_TOKEN enables solver jobs');
-      }
-      const inputRoot = resolve(args.solverInputRoot);
-      const openFoamVersion = parseOpenFoamVersion(args.openfoamVersion);
-      return createSolverHatchetJobWorkerFactory({
-        hatchetToken,
-        hatchetNamespace: process.env['HATCHET_CLIENT_NAMESPACE'] ?? 'tau-local',
-        slots: parsePositiveInteger('--job-slots', args.jobSlots),
-        supportedMaxAttempts: parseAttempts(args.jobMaxAttempts),
-        openFoamSolverVersion: openFoamVersion,
-        ...(args.openfoamImage ? { openFoamImage: args.openfoamImage } : {}),
-        ...(args.calculixImage
-          ? {
-              calculixImage: {
-                reference: args.calculixImage,
-                solverVersion: calculixSolverVersion,
-              },
-            }
-          : {}),
-        inputMaterializer: createDirectorySolverInputMaterializer({
-          resolve: async (snapshot) => join(inputRoot, snapshot.digest.slice('sha256:'.length)),
-        }),
-      });
-    })();
     const stopped = Promise.withResolvers<NodeJS.Signals>();
     const onSignal = (signal: NodeJS.Signals): void => {
       stopped.resolve(signal);
@@ -443,7 +393,7 @@ export const serveCommand = defineCommand({
       },
       maxSessions,
       systemSkillBundles,
-      ...(jobWorker ? { jobWorker } : {}),
+      pair: args.pair,
       ...(configuredAgent ? { agent: configuredAgent } : {}),
       onEvent: reportEvent,
     });

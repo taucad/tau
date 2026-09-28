@@ -109,6 +109,37 @@ describe('validateTsgoRuntimeReferences', () => {
     });
   });
 
+  it('should reject `#` path aliases and keep other aliases', () => {
+    writeProject('apps/app');
+    writeFixtureFile(
+      'apps/app/tsconfig.app.json',
+      JSON.stringify({
+        compilerOptions: { paths: { 'package.json': ['./package.json'], '#*': ['./app/*'] } },
+      }),
+    );
+
+    const diagnostics = validateTsgoRuntimeReferences({ workspaceRoot });
+
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]).toMatchObject({
+      kind: 'hash-path-alias',
+      configPath: 'apps/app/tsconfig.app.json',
+      projectRoot: 'apps/app',
+    });
+    expect(diagnostics[0]?.message).toContain('"#*"');
+    expect(diagnostics[0]?.message).toContain('package.json#imports');
+  });
+
+  it('should allow a recorded `#` path alias exception', () => {
+    writeProject('apps/ui-e2e');
+    writeFixtureFile(
+      'apps/ui-e2e/tsconfig.spec.json',
+      JSON.stringify({ compilerOptions: { paths: { '#*': ['./src/*'] } } }),
+    );
+
+    expect(validateTsgoRuntimeReferences({ workspaceRoot })).toEqual([]);
+  });
+
   it('should ignore root solution references and non-runtime build configs', () => {
     writeProject('packages/source');
     writeProject('packages/dependency');

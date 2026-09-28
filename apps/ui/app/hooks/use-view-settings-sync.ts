@@ -6,17 +6,19 @@ import type {
   CameraOwnedSettings,
   GraphicsViewSettings,
   PersistedCameraView,
-  PersistedSectionDisplay,
+  PersistedSectionCut,
   PersistedSectionView,
   PinnedMeasurement,
 } from '#constants/editor.constants.js';
+import { areSectionCutsEqual } from '#components/geometry/graphics/section-cuts.js';
+import type { SectionCut } from '#components/geometry/graphics/section-cuts.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { editorMachine } from '#machines/editor.machine.js';
 import { useViewCameraSession } from '#hooks/use-graphics.js';
 
-/** Milliseconds. Quiet period after the last camera emission before the settled pose is persisted. */
-const cameraSettle = 250;
+/** Milliseconds. Quiet period after the last camera emission or section-cut change before the pose is persisted. */
+const poseSettle = 250;
 
 const vector3Equal = (left: readonly [number, number, number], right: readonly [number, number, number]): boolean =>
   left[0] === right[0] && left[1] === right[1] && left[2] === right[2];
@@ -29,14 +31,16 @@ const cameraViewEqual = (left: PersistedCameraView, right: PersistedCameraView):
   left.verticalSpan === right.verticalSpan &&
   left.perspectiveZoom === right.perspectiveZoom;
 
-/* The pivot and rotation are rebuilt on every assign, so a drag hands this hook a new array per
- * pointer move. Comparing by value is what keeps a drag from fanning an editor event out per frame. */
+/* A drag can settle where it started, and removing a cut then adding it back rebuilds equal values under a new id.
+ * Comparing by value keeps either from sending an editor event, which every editor subscriber would re-render for. */
 const sectionViewEqual = (left: PersistedSectionView, right: PersistedSectionView): boolean =>
-  left.active === right.active &&
-  left.plane === right.plane &&
-  left.direction === right.direction &&
-  vector3Equal(left.pivot, right.pivot) &&
-  vector3Equal(left.rotation, right.rotation);
+  left.active === right.active && areSectionCutsEqual(left.cuts, right.cuts);
+
+/** A cut's values without its id, which is made anew at every load. */
+const toPersistedSectionCut = (cut: SectionCut): PersistedSectionCut =>
+  cut.kind === 'plane'
+    ? { kind: 'plane', plane: cut.plane, offset: cut.offset, isFlipped: cut.isFlipped }
+    : { kind: 'revolution', axis: cut.axis, origin: cut.origin, start: cut.start, sweep: cut.sweep };
 
 /**
  * Synchronises a view's persistable settings from its owners back to the EditorMachine's
@@ -52,10 +56,10 @@ const sectionViewEqual = (left: PersistedSectionView, right: PersistedSectionVie
  * creates a new reference on every emission, which triggers the `useEffect`
  * on every render and causes an infinite update loop.
  *
- * The camera pose is deliberately NOT selected: it changes every frame during
- * an orbit, so subscribing to it would re-render the calling viewer (and fan a
- * machine event out to every editor subscriber) once per frame. It is read
- * imperatively once the pose has settled.
+ * The camera pose and the section cuts are deliberately NOT selected: they change
+ * every frame during an orbit or a drag, so subscribing to them would re-render the
+ * calling viewer (and fan a machine event out to every editor subscriber) once per
+ * frame. They are read imperatively once they have settled.
  */
 export function useViewSettingsSync({
   viewId,
@@ -93,15 +97,8 @@ export function useViewSettingsSync({
   const geometryFormat = useSelector(cadRef, (s) => s?.context.geometry?.format);
   const graphicsBackendPreference = useSelector(graphicsRef, (s) => s.context.graphicsBackendPreference);
 
-  // Section view: the cut is entry-scoped, its display preferences are pane-scoped (E2)
+  // Section view: the cuts are entry-scoped and read when they settle.
   const isSectionViewActive = useSelector(graphicsRef, (s) => s.context.isSectionViewActive);
-  const selectedSectionViewId = useSelector(graphicsRef, (s) => s.context.selectedSectionViewId);
-  const sectionViewPivot = useSelector(graphicsRef, (s) => s.context.sectionViewPivot);
-  const sectionViewRotation = useSelector(graphicsRef, (s) => s.context.sectionViewRotation);
-  const sectionViewDirection = useSelector(graphicsRef, (s) => s.context.sectionViewDirection);
-  const enableClippingLines = useSelector(graphicsRef, (s) => s.context.enableClippingLines);
-  const enableClippingMesh = useSelector(graphicsRef, (s) => s.context.enableClippingMesh);
-  const planeName = useSelector(graphicsRef, (s) => s.context.planeName);
 
   // Pinned measurements for persistence
   const measurements = useSelector(graphicsRef, (s) => s.context.measurements);
@@ -124,22 +121,6 @@ export function useViewSettingsSync({
           name: m.name,
         })),
     [measurements],
-  );
-
-  const sectionView = useMemo<PersistedSectionView>(
-    () => ({
-      active: isSectionViewActive,
-      plane: selectedSectionViewId,
-      pivot: sectionViewPivot,
-      rotation: sectionViewRotation,
-      direction: sectionViewDirection,
-    }),
-    [isSectionViewActive, selectedSectionViewId, sectionViewPivot, sectionViewRotation, sectionViewDirection],
-  );
-
-  const sectionDisplay = useMemo<PersistedSectionDisplay>(
-    () => ({ clipLines: enableClippingLines, clipMesh: enableClippingMesh, planeName }),
-    [enableClippingLines, enableClippingMesh, planeName],
   );
 
   useEffect(() => {
@@ -174,6 +155,11 @@ export function useViewSettingsSync({
         };
       })();
 
+      const sectionView: PersistedSectionView = {
+        active: isSectionViewActive,
+        cuts: graphicsRef.getSnapshot().context.sectionCuts.map((cut) => toPersistedSectionCut(cut)),
+      };
+
       const newSettings: Partial<GraphicsViewSettings> = {
         enableSurfaces,
         enableLines,
@@ -190,8 +176,7 @@ export function useViewSettingsSync({
           previous?.sectionView && sectionViewEqual(previous.sectionView, sectionView)
             ? previous.sectionView
             : sectionView,
-        sectionDisplay,
-        schemaVersion: 11,
+        schemaVersion: 12,
       };
 
       // Shallow comparison to avoid unnecessary writes
@@ -213,6 +198,7 @@ export function useViewSettingsSync({
   }, [
     viewId,
     editorRef,
+    graphicsRef,
     enableSurfaces,
     enableLines,
     enableGizmo,
@@ -226,8 +212,7 @@ export function useViewSettingsSync({
     geometryFormat,
     graphicsBackendPreference,
     pinnedMeasurements,
-    sectionView,
-    sectionDisplay,
+    isSectionViewActive,
   ]);
 
   /* The entry's CAD actor owns its render timeout, so only a change the person makes while this
@@ -250,33 +235,41 @@ export function useViewSettingsSync({
     editorRef.send({ type: 'setUnitSettings', entryPath, settings: { renderTimeout } });
   }, [cadRef, editorRef, entryPath, renderTimeout]);
 
-  // Persist the camera pose once it has settled instead of once per frame.
+  // Persist the camera pose and the section cuts once they have settled instead of once per frame or step.
   useEffect(() => {
-    if (!session) {
-      return;
-    }
-
     let settleTimer: ReturnType<typeof setTimeout> | undefined;
-    const subscription = session.rig.actorRef.subscribe(() => {
+    const restartSettle = (): void => {
       clearTimeout(settleTimer);
       settleTimer = setTimeout(() => {
         settleTimer = undefined;
         persistRef.current();
-      }, cameraSettle);
+      }, poseSettle);
+    };
+    const cameraSubscription = session?.rig.actorRef.subscribe(restartSettle);
+    /* The graphics actor emits for every event it handles; only a new cut list is a change. An edit that
+     * changes no value keeps the list, so comparing references is enough. */
+    let { sectionCuts } = graphicsRef.getSnapshot().context;
+    const sectionSubscription = graphicsRef.subscribe(({ context }) => {
+      if (context.sectionCuts === sectionCuts) {
+        return;
+      }
+      ({ sectionCuts } = context);
+      restartSettle();
     });
 
     return () => {
-      subscription.unsubscribe();
+      cameraSubscription?.unsubscribe();
+      sectionSubscription.unsubscribe();
       if (settleTimer === undefined) {
         return;
       }
       /* The pane can close, the file can change or the route can leave inside the settle window.
-       * Cancelling the timer there would throw away the pose the user just set, so the teardown is
+       * Cancelling the timer there would throw away the pose or cut the user just set, so the teardown is
        * the flush. `persist` only sends when the settings actually changed. */
       clearTimeout(settleTimer);
       persistRef.current();
     };
-  }, [session]);
+  }, [graphicsRef, session]);
 }
 
 /**

@@ -49,18 +49,23 @@ describe('resolveAppRequest', () => {
     expect(resolveAppRequest(`${appOrigin}/`, clientRoot)).toBe(index);
     expect(resolveAppRequest(`${appOrigin}/w/acme/widget`, clientRoot)).toBe(index);
     expect(resolveAppRequest(`${appOrigin}/import/github/owner/repo`, clientRoot)).toBe(index);
+    // A builtin share slug carries a dot, which is not a file extension.
+    expect(resolveAppRequest(`${appOrigin}/s/builtin~replicad.birdhouse`, clientRoot)).toBe(index);
   });
 
   it('404s a missing asset rather than answering it with HTML', () => {
     /* Answering a missing module script with `index.html` produces a strict
      * MIME failure that reads like a bundler bug. */
     expect(resolveAppRequest(`${appOrigin}/assets/absent.js`, clientRoot)).toBeUndefined();
+    expect(resolveAppRequest(`${appOrigin}/assets/x.js`, clientRoot)).toBeUndefined();
   });
 
-  it('refuses traversal, plain and percent-encoded', () => {
-    expect(resolveAppRequest(`${appOrigin}/../${'secret.txt'}`, clientRoot)).toBeUndefined();
-    expect(resolveAppRequest(`${appOrigin}/%2e%2e%2f%2e%2e%2fsecret.txt`, clientRoot)).toBeUndefined();
-    expect(resolveAppRequest(`${appOrigin}/assets/../../secret.txt`, clientRoot)).toBeUndefined();
+  it('keeps traversal inside the client root, plain and percent-encoded', () => {
+    /* Every form collapses to a client route inside the root, so the SPA answers it; nothing outside is served. */
+    const index = join(clientRoot, 'index.html');
+    expect(resolveAppRequest(`${appOrigin}/../${'secret.txt'}`, clientRoot)).toBe(index);
+    expect(resolveAppRequest(`${appOrigin}/%2e%2e%2f%2e%2e%2fsecret.txt`, clientRoot)).toBe(index);
+    expect(resolveAppRequest(`${appOrigin}/assets/../../secret.txt`, clientRoot)).toBe(index);
   });
 
   it('refuses another host or scheme on the same handler', () => {

@@ -95,8 +95,9 @@ export function gapFlank(
     outerRadius
   ) {
     low -= 0.05;
-    if (low <= Math.abs(z) + 0.05)
+    if (low <= Math.abs(z) + 0.05) {
       throw new Error('Wheel face exceeds the supported generating envelope.');
+    }
   }
   let high = d.filletStartR;
   for (let i = 0; i < 45; i++) {
@@ -104,9 +105,11 @@ export function gapFlank(
     if (
       Math.hypot(...envelopePoint(d, middle, z, side).point.slice(0, 2)) >
       outerRadius
-    )
+    ) {
       low = middle;
-    else high = middle;
+    } else {
+      high = middle;
+    }
   }
   const fillet = Array.from({ length: 9 }, (_, i) => {
     const angle = Math.PI / 2 + ((d.alpha - Math.PI / 2) * i) / 8;

@@ -47,7 +47,7 @@ export const quantity = (options: QuantitySchemaOptions): z.ZodNumber => {
   if ((options.space === 'point') !== (options.reference !== undefined)) {
     throw new TypeError('Point quantities require a supported reference and other spaces forbid one.');
   }
-  if (options.symbol !== undefined && options.symbol.length === 0) {
+  if (options.symbol?.length === 0) {
     throw new TypeError('A quantity symbol must not be empty.');
   }
   return z.number().check(

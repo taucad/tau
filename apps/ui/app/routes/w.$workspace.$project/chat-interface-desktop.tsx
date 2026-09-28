@@ -7,6 +7,7 @@ import { ViewerDockview } from '#routes/w.$workspace.$project/chat-viewer-dockvi
 import { WorkbenchDockview } from '#routes/w.$workspace.$project/chat-workbench-dockview.js';
 import { WorkbenchToggle } from '#routes/w.$workspace.$project/project-workspace-actions.js';
 import { ProjectUnavailableOverlay } from '#routes/w.$workspace.$project/project-unavailable-overlay.js';
+import { ProjectManifestIssueBanner } from '#routes/w.$workspace.$project/project-manifest-issue-banner.js';
 import { WorkspaceSkeleton } from '#routes/w.$workspace.$project/workspace-skeleton.js';
 import { ChatContextInsertionProvider } from '#components/chat/chat-context-insertion.js';
 import { useSidebar } from '#components/ui/sidebar.js';
@@ -137,6 +138,7 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
                     )}
                   >
                     <ViewerDockview />
+                    <ProjectManifestIssueBanner />
                     <ProjectUnavailableOverlay />
                   </div>
                 </Allotment.Pane>

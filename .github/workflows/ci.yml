@@ -384,8 +384,10 @@ jobs:
       - *download-geospec
       - *verify-geospec
 
-      - name: Install Chromium for Vitest Browser
-        run: pnpm exec playwright install --with-deps chromium
+      # The ui-e2e matrix also has `firefox` and `webkit-smoke` instances, and
+      # `test:e2e:non-isolated` runs PicoVoxel on Chromium and Firefox.
+      - name: Install browsers for Vitest Browser
+        run: pnpm exec playwright install --with-deps chromium firefox webkit
 
       # `desktop-e2e:test:e2e` boots a real API, which reads this file for its
       # `BILLING_*` development values; without them it refuses to start. Same
@@ -397,10 +399,13 @@ jobs:
       # Electron shell, which is why xvfb is enough and `desktop:package-macos` is
       # not in its dependency chain; it brings up its own Postgres/Redis/MinIO and
       # publishes the development billing policy before its specs.
+      # `test:e2e:non-isolated` serves the UI without COOP/COEP: the mode production
+      # web runs in until go-live row X-5 closes (D19), so kernels must degrade to
+      # their serial builds there.
       - name: Run affected end-to-end suites
         env:
           TAU_E2E_WEBGPU_PROFILE: software
-        run: xvfb-run --auto-servernum pnpm nx affected -t test:e2e test:e2e:development
+        run: xvfb-run --auto-servernum pnpm nx affected -t test:e2e test:e2e:development test:e2e:non-isolated
 
       - name: Check workspace root hygiene
         if: always()

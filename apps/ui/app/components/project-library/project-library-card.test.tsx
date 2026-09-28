@@ -8,7 +8,7 @@ import { projectToManifest } from '@taucad/types';
 import { ProjectLibraryCard } from '#components/project-library/project-library.js';
 import type { ProjectActions } from '#components/project-library/project-library.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
-import type { ProjectListItem } from '#types/project.types.js';
+import type { ProjectListItem } from '#types/project-library.types.js';
 
 const mockProject: ProjectListItem = {
   ...projectToManifest({
@@ -143,11 +143,11 @@ describe('ProjectLibraryCard live preview', () => {
   it('should render the static thumbnail and no project-scoped FM until preview is toggled', () => {
     renderCard();
 
-    expect(screen.getByRole('img', { name: 'Library Preview Demo' })).toBeInTheDocument();
+    expect(screen.getByRole('presentation')).toBeInTheDocument();
     expect(screen.getAllByRole('link')).toHaveLength(1);
     const cardLink = screen.getByRole('link', { name: 'Open Library Preview Demo' });
     expect(cardLink).toHaveAttribute('href', '/w/home/library');
-    expect(cardLink.parentElement).toHaveClass('hover:border-primary/60');
+    expect(cardLink.parentElement).toHaveClass('hover:border-foreground/30');
     expect(screen.getByText('Open')).toBeInTheDocument();
     expect(screen.queryByText('Test project')).not.toBeInTheDocument();
     expect(screen.queryByText('Mechanical')).not.toBeInTheDocument();
@@ -192,7 +192,7 @@ describe('ProjectLibraryCard live preview', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Preview model' }));
 
-    expect(screen.queryByRole('img', { name: 'Library Preview Demo' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('presentation')).not.toBeInTheDocument();
     expect(screen.getByTestId('shared-worker-gate')).toBeInTheDocument();
 
     const fm = screen.getByTestId('file-manager-provider');
@@ -214,7 +214,7 @@ describe('ProjectLibraryCard live preview', () => {
     expect(screen.getByTestId('file-manager-provider')).toBeInTheDocument();
 
     await userEvent.click(previewToggle);
-    expect(screen.getByRole('img', { name: 'Library Preview Demo' })).toBeInTheDocument();
+    expect(screen.getByRole('presentation')).toBeInTheDocument();
     expect(screen.queryByTestId('file-manager-provider')).not.toBeInTheDocument();
     expect(screen.queryByTestId('cad-preview-provider')).not.toBeInTheDocument();
   });

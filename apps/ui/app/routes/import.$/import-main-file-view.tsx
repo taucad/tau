@@ -73,7 +73,7 @@ export function ImportMainFileView({
               <FileSelector
                 dataSource={dataSource}
                 selectedFile={selectedMainFile}
-                placeholder='Select main file...'
+                placeholder='Select main file…'
                 title='Select Main File'
                 description='Choose the main entry path for your project'
                 emptyMessage='No files found'

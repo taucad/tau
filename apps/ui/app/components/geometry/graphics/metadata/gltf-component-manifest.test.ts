@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { tauCadTopologyExtension } from '@taucad/types/constants';
 import {
   buildGltfComponentManifest,
@@ -6,6 +6,7 @@ import {
 } from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
 
 const positionAttribute = 'POSITION';
+const unlitExtension = 'KHR_materials_unlit';
 const duplicateDurableIdField = `persistent${'Id'}` as const;
 const duplicateDurableKeyField = `persistent${'Key'}` as const;
 
@@ -356,7 +357,117 @@ describe('buildGltfComponentManifest', () => {
       color: '#ff0000',
       colors: ['#ff0000', '#0000ff'],
       materialNames: ['red paint', 'blue paint'],
+      materials: [
+        { materialIndex: 0, color: '#ff0000' },
+        { materialIndex: 1, color: '#0000ff' },
+      ],
     });
+  });
+
+  it('should preserve explicit PBR factors while excluding native line materials from surface metadata', () => {
+    const manifest = buildGltfComponentManifest(
+      encodeJson({
+        nodes: [{ name: 'Carrier', mesh: 0 }],
+        meshes: [{ primitives: [{ material: 0 }, { material: 1, mode: 1 }] }],
+        materials: [
+          {
+            pbrMetallicRoughness: {
+              baseColorFactor: [0.021219010376003555, 0.1119324278369056, 0.24620132670783548, 1],
+              metallicFactor: 0.65,
+              roughnessFactor: 0.32,
+            },
+          },
+          {
+            name: 'BRep edges',
+            pbrMetallicRoughness: { baseColorFactor: [0, 0, 0, 1], metallicFactor: 0, roughnessFactor: 1 },
+            extensions: { [unlitExtension]: {} },
+          },
+        ],
+      }),
+    );
+    const appearance = manifest.nodesById['component:node-0']?.appearance;
+
+    expect(appearance).toEqual({
+      color: '#285e88',
+      colors: ['#285e88', '#000000'],
+      materialNames: ['BRep edges'],
+      materials: [{ materialIndex: 0, color: '#285e88', metalness: 0.65, roughness: 0.32 }],
+    });
+  });
+
+  it.each([false, true])('should aggregate mixed descendant surface factors with topology=%s', (withTopology) => {
+    const manifest = buildGltfComponentManifest(
+      encodeJson({
+        nodes: [
+          { name: 'Assembly', children: [1, 2] },
+          { name: 'Left', mesh: 0 },
+          { name: 'Right', mesh: 1 },
+        ],
+        meshes: [{ primitives: [{ material: 0 }] }, { primitives: [{ material: 1 }] }],
+        materials: [
+          { pbrMetallicRoughness: { metallicFactor: 0.2, roughnessFactor: 0.35 } },
+          { pbrMetallicRoughness: { metallicFactor: 0.8, roughnessFactor: 0.35 } },
+        ],
+        ...(withTopology
+          ? {
+              extensions: {
+                [tauCadTopologyExtension]: {
+                  components: [
+                    { id: 'assembly', nodeIndex: 0, childIds: ['left', 'right'] },
+                    { id: 'left', nodeIndex: 1, parentId: 'assembly' },
+                    { id: 'right', nodeIndex: 2, parentId: 'assembly' },
+                  ],
+                },
+              },
+            }
+          : {}),
+      }),
+    );
+
+    const expected = [
+      { materialIndex: 0, metalness: 0.2, roughness: 0.35 },
+      { materialIndex: 1, metalness: 0.8, roughness: 0.35 },
+    ];
+    const assembly = manifest.nodesById[withTopology ? 'assembly' : 'component:node-0'];
+    expect(assembly?.appearance?.materials).toEqual(expected);
+    expect(manifest.nodesById[manifest.rootId]?.appearance?.materials).toEqual(expected);
+  });
+
+  it('should distinguish omitted factors, explicit defaults and unavailable factors', () => {
+    const manifest = buildGltfComponentManifest(
+      encodeJson({
+        nodes: [{ mesh: 0 }],
+        meshes: [{ primitives: [{ material: 0 }, { material: 1 }, {}, { material: 2 }, { material: 99 }] }],
+        materials: [
+          {},
+          { pbrMetallicRoughness: { baseColorFactor: [1, 1, 1, 1], metallicFactor: 1, roughnessFactor: 1 } },
+          { pbrMetallicRoughness: { baseColorFactor: [2, 0, 0, 1], metallicFactor: -1, roughnessFactor: 2 } },
+        ],
+      }),
+    );
+
+    expect(manifest.nodesById['component:node-0']?.appearance?.materials).toEqual([
+      { materialIndex: 0 },
+      { materialIndex: 1, color: '#ffffff', metalness: 1, roughness: 1 },
+      {},
+      { materialIndex: 2, color: 'unavailable', metalness: 'unavailable', roughness: 'unavailable' },
+      { materialIndex: 99, color: 'unavailable', metalness: 'unavailable', roughness: 'unavailable' },
+    ]);
+  });
+
+  it('should retain an unlit surface marker without treating line-only components as PBR surfaces', () => {
+    const manifest = buildGltfComponentManifest(
+      encodeJson({
+        nodes: [{ mesh: 0 }, { mesh: 1 }],
+        meshes: [{ primitives: [{ material: 0 }] }, { primitives: [{ material: 0, mode: 1 }] }],
+        materials: [{ extensions: { [unlitExtension]: {} } }],
+      }),
+    );
+
+    expect(manifest.nodesById['component:node-0']?.appearance?.materials).toEqual([
+      { materialIndex: 0, isUnlit: true },
+    ]);
+    expect(manifest.nodesById['component:node-1']?.appearance?.materials).toBeUndefined();
   });
 
   it('should create separate fallback components for each named node in a multi-node glTF', () => {
@@ -468,5 +579,69 @@ describe('buildGltfComponentManifest', () => {
     expect(component).not.toHaveProperty(duplicateDurableKeyField);
     expect(component.reference).not.toHaveProperty(duplicateDurableIdField);
     expect(component.reference).not.toHaveProperty(duplicateDurableKeyField);
+  });
+  describe('mechanism', () => {
+    const hinge = {
+      schemaVersion: 1,
+      units: { length: 'm', angle: 'deg' },
+      root: 'base',
+      links: { base: { components: ['component:base'] }, lid: { components: ['component:lid'] } },
+      joints: { hinge: { type: 'revolute', parent: 'base', child: 'lid', origin: [0, 0.02, 0], axis: [1, 0, 0] } },
+    };
+    const hingedGltf = (mechanism: unknown): Uint8Array<ArrayBuffer> =>
+      encodeJson({
+        nodes: [
+          { name: 'Base', mesh: 0 },
+          { name: 'Lid', mesh: 0 },
+        ],
+        meshes: [{ primitives: [{}] }],
+        extensions: {
+          [tauCadTopologyExtension]: {
+            components: [
+              { id: 'component:base', name: 'Base', kind: 'part', selector: 'node/0', nodeIndex: 0 },
+              { id: 'component:lid', name: 'Lid', kind: 'part', selector: 'node/1', nodeIndex: 1 },
+            ],
+            mechanism,
+          },
+        },
+      });
+
+    it('should attach the admitted topology mechanism to the manifest', () => {
+      const manifest = buildGltfComponentManifest(hingedGltf(hinge));
+
+      expect(manifest.nodeOrder).toEqual(['root', 'component:base', 'component:lid']);
+      expect(manifest.mechanism).toMatchObject(hinge);
+    });
+
+    it('should drop an invalid topology mechanism with a warning and keep the components', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const manifest = buildGltfComponentManifest(hingedGltf({ ...hinge, units: { length: 'cm', angle: 'deg' } }));
+
+        expect(manifest.nodeOrder).toEqual(['root', 'component:base', 'component:lid']);
+        expect(manifest.mechanism).toBeUndefined();
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringMatching(/^Ignoring the TAU_cad_topology mechanism: \/units/),
+          expect.arrayContaining([expect.objectContaining({ code: 'INVALID_UNIT' })]),
+        );
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('should drop a mechanism whose links name components the payload does not declare', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const manifest = buildGltfComponentManifest(
+          hingedGltf({ ...hinge, links: { ...hinge.links, lid: { components: ['component:missing'] } } }),
+        );
+
+        expect(manifest.nodeOrder).toEqual(['root', 'component:base', 'component:lid']);
+        expect(manifest.mechanism).toBeUndefined();
+        expect(warn).toHaveBeenCalledWith(expect.stringMatching(/undeclared components component:missing$/));
+      } finally {
+        warn.mockRestore();
+      }
+    });
   });
 });

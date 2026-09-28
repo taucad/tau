@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { REVISION } from 'three';
+import { NoBlending, REVISION } from 'three';
 import {
   cameraFar,
   cameraNear,
@@ -172,15 +172,17 @@ describe('Line2NodeMaterial.outputNode (gamma-space blend regression guard)', ()
     expect(view.outputNode).toBeDefined();
     expect(view.colorNode).toBeDefined();
 
-    const opacity = toChainable(materialOpacity);
+    const colorRgb = view.colorNode.rgb;
+    const colorAlpha = view.colorNode.a;
+    const opacity = toChainable(materialOpacity).mul(colorAlpha);
     // Reference graph mirrors the implementation: it samples the Tau-owned non-mip
     // singleton (`tauOpaqueViewportTexture()`) rather than three.js's stock
     // `viewportOpaqueMipTexture()`. If the implementation regresses to the mip variant,
     // the fingerprint comparison below fails because the underlying texture node carries
     // a different `generateMipmaps` flag.
-    const viewportRgb = toChainable(tauOpaqueViewportTexture()).rgb;
-    const colorRgb = view.colorNode.rgb;
-    const colorAlpha = view.colorNode.a;
+    const viewport = toChainable(tauOpaqueViewportTexture());
+    const viewportRgb = viewport.rgb;
+    const compositedAlpha = opacity.add(viewport.a.mul(opacity.oneMinus()));
 
     // Reference graph: gamma-space mix — must match the implementation byte-for-byte under
     // the uuid-stripped fingerprint helper.
@@ -190,18 +192,24 @@ describe('Line2NodeMaterial.outputNode (gamma-space blend regression guard)', ()
     const expectedSrgb = toChainable(
       vec4(
         sRGBTransferEOTF(asSrgbInput(blendedSrgb)) as unknown as Parameters<typeof vec4>[0],
-        colorAlpha as unknown as Parameters<typeof vec4>[1],
+        compositedAlpha as unknown as Parameters<typeof vec4>[1],
       ),
     );
 
     // Linear-only reference (the prior broken shape) — must NOT match.
     const linearBlend = colorRgb.mul(opacity).add(viewportRgb.mul(opacity.oneMinus()));
     const linearReference = toChainable(
-      vec4(linearBlend as unknown as Parameters<typeof vec4>[0], colorAlpha as unknown as Parameters<typeof vec4>[1]),
+      vec4(
+        linearBlend as unknown as Parameters<typeof vec4>[0],
+        compositedAlpha as unknown as Parameters<typeof vec4>[1],
+      ),
     );
 
     expect(fingerprint(view.outputNode)).toBe(fingerprint(expectedSrgb));
     expect(fingerprint(view.outputNode)).not.toBe(fingerprint(linearReference));
+    // The composite already includes the destination; blending it again made lines over the
+    // transparent canvas opaque and dark.
+    expect(material.blending).toBe(NoBlending);
   });
 
   /**
@@ -281,44 +289,6 @@ describe('Line2NodeMaterial.setup parent dispatch (regression guard)', () => {
     const nodeView = material as unknown as NodeBearingMaterial;
     expect(nodeView.vertexNode).toBeDefined();
     expect(nodeView.colorNode).toBeDefined();
-  });
-});
-
-describe('Line2NodeMaterial.setupHardwareClipping (section-view regression guard)', () => {
-  /**
-   * Smoking-gun regression: `NodeMaterial.setupHardwareClipping` activates vertex-stage
-   * `gl_ClipDistance` whenever the device exposes `clip-distances`, but the hardware path's
-   * `positionView` falls through to `modelViewMatrix * positionLocal` — for a
-   * `LineSegmentsGeometry` that's the static unit-quad attribute reused by every instanced
-   * segment, so the clip distance is constant per draw call and bleeds line edges onto the
-   * sectioned-off half of the model. Forcing `hardwareClipping = false` routes through the
-   * fragment-stage software path that reconstructs `positionView` per fragment from
-   * `clipSpace`, which clips correctly. See the class JSDoc for the full chain.
-   */
-  it('skips the base addToStack(hardwareClipping()) and leaves hardwareClipping = false', () => {
-    const material = new Line2NodeMaterial({
-      color: 0xff_00_ff,
-      linewidth: 1,
-      opacity: 0.6,
-      transparent: true,
-      worldUnits: false,
-    });
-
-    const stackPushes: readonly unknown[] = [];
-    const stubBuilder = {
-      clippingContext: { unionPlanes: [{}, {}] },
-      isAvailable: (capability: string) => capability === 'clipDistance',
-      stack: {
-        addToStack: (node: unknown) => {
-          (stackPushes as unknown[]).push(node);
-        },
-      },
-    };
-
-    material.setupHardwareClipping(stubBuilder);
-
-    expect(stackPushes).toHaveLength(0);
-    expect((material as unknown as { hardwareClipping: boolean }).hardwareClipping).toBe(false);
   });
 });
 

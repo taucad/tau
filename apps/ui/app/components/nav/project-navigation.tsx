@@ -2,7 +2,7 @@ import { Fragment, useMemo, useState } from 'react';
 import { ChevronRight, Copy, Forward, EllipsisVertical, Pencil, SquarePen, Trash2, X } from 'lucide-react';
 import { useLocation, useNavigate, useNavigation } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import type { ProjectListItem } from '#types/project.types.js';
+import type { ProjectListItem } from '#types/project-library.types.js';
 import { useProjects } from '#hooks/use-projects.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useAppUiPreferences } from '#hooks/use-app-ui-preferences.js';
@@ -445,7 +445,7 @@ function ProjectsLabel(): React.JSX.Element {
         {projects > 0 ? <span className='ml-1.5 font-normal tabular-nums'>{`${String(projects)} live`}</span> : null}
       </SidebarGroupLabel>
       {idleProjectIds.length > 0 ? (
-        <span className='hidden group-focus-within/label:flex group-hover/label:flex pointer-coarse:flex'>
+        <span className='hidden group-focus-within/label:flex group-hover/label:flex has-[[aria-haspopup=menu][data-state=open]]:flex pointer-coarse:flex'>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button

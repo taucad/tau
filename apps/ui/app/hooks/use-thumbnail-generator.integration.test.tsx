@@ -13,10 +13,18 @@ const getSnapshot = vi.fn(() => ({
       content: geometryFormat === 'gltf' ? geometryContent : '<svg xmlns="http://www.w3.org/2000/svg"/>',
       hash: 'geometry-hash',
     },
+    lastRequestedRenderId,
   },
 }));
 let geometryListener: ((event: { geometry: { hash: string } }) => void) | undefined;
 const unsubscribe = vi.fn();
+let lastRequestedRenderId = 0;
+let snapshotListener: ((snapshot: ReturnType<typeof getSnapshot>) => void) | undefined;
+const unsubscribeSnapshots = vi.fn();
+const subscribe = vi.fn((listener: (snapshot: ReturnType<typeof getSnapshot>) => void) => {
+  snapshotListener = listener;
+  return { unsubscribe: unsubscribeSnapshots };
+});
 const on = vi.fn((_event: string, listener: (event: { geometry: { hash: string } }) => void) => {
   geometryListener = listener;
   return { unsubscribe };
@@ -24,7 +32,7 @@ const on = vi.fn((_event: string, listener: (event: { geometry: { hash: string }
 
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({
-    geometryUnits: new Map([['src/main.ts', { getSnapshot, on }]]),
+    geometryUnits: new Map([['src/main.ts', { getSnapshot, on, subscribe }]]),
     mainEntryPath: 'src/main.ts',
     projectId: 'proj_aaaaaaaaaaaaaaaaaaaaa',
   }),
@@ -75,6 +83,13 @@ const settle = (hash: string): void => {
   });
 };
 
+const requestRender = (): void => {
+  lastRequestedRenderId += 1;
+  act(() => {
+    snapshotListener?.(getSnapshot());
+  });
+};
+
 const advance = async (milliseconds: number): Promise<void> => {
   await act(async () => {
     await vi.advanceTimersByTimeAsync(milliseconds);
@@ -86,6 +101,8 @@ describe('useThumbnailGenerator integration', () => {
     vi.useFakeTimers();
     vi.clearAllMocks();
     geometryListener = undefined;
+    snapshotListener = undefined;
+    lastRequestedRenderId = 0;
     geometryFormat = 'gltf';
     getProjectFileSystemConfig.mockResolvedValue(locator);
     exportImage.mockResolvedValue(webpFile(1));
@@ -118,6 +135,20 @@ describe('useThumbnailGenerator integration', () => {
     expect(job.content).toBe(geometryContent);
     expect(writeFile).toHaveBeenCalledOnce();
     expect(writeFile).toHaveBeenCalledWith('thumbnail.webp', webpBytes(1), { source: 'machine' });
+  });
+
+  it('should hold a pending thumbnail back while the main unit renders a newer request', async () => {
+    renderHook(() => useThumbnailGenerator());
+
+    settle('geometry-hash');
+    await advance(900);
+    requestRender();
+    await advance(900);
+    expect(exportImage).not.toHaveBeenCalled();
+
+    await advance(100);
+
+    expect(exportImage).toHaveBeenCalledOnce();
   });
 
   it('should discard a late artifact after a newer settlement and persist only the latest bytes', async () => {
@@ -203,6 +234,9 @@ describe('useThumbnailGenerator integration', () => {
     expect(job.signal?.aborted).toBe(false);
 
     hook.unmount();
+    /* @xstate/react 7 stops an unmounted actor at the next microtask (RB1-1), still before the
+     * late bytes below can arrive. */
+    await Promise.resolve();
     expect(job.signal?.aborted).toBe(true);
     pending.resolve(webpFile(9));
     await advance(0);

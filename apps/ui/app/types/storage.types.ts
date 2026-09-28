@@ -1,7 +1,7 @@
 import type { Chat } from '@taucad/chat';
 import type { PartialDeep } from 'type-fest';
 import type { EditorState, EditorStateInput } from '#types/editor.types.js';
-import type { ProjectLibraryState } from '#types/project.types.js';
+import type { ProjectLibraryState } from '#types/project-library.types.js';
 
 export type CommitCancelledDraftRestoreInput = {
   messages: Chat['messages'];

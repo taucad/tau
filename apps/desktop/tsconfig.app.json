@@ -15,10 +15,6 @@
     "types": ["node", "electron", "electron-vite/node", "vite/client"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "target": "ES2024",
-    "paths": {
-      "#*": ["./src/*"],
-      "#macos/*": ["./macos/*"]
-    }
+    "target": "ES2024"
   }
 }

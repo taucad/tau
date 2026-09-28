@@ -39,6 +39,33 @@ export const createCloudHostSchema = z.object({
 });
 export class CreateCloudHostDto extends createZodDto(createCloudHostSchema) {}
 
+const acpThoughtValueSchema = z.object({
+  value: z.string().max(128),
+  name: z.string().max(128),
+  description: z.string().max(512).nullish(),
+});
+
+const acpThoughtLevelSchema = z.object({
+  type: z.literal('select'),
+  id: z.string().min(1).max(128),
+  name: z.string().min(1).max(128),
+  category: z.literal('thought_level'),
+  description: z.string().max(512).nullish(),
+  currentValue: z.string().max(128),
+  options: z.union([
+    z.array(acpThoughtValueSchema).max(16),
+    z
+      .array(
+        z.object({
+          group: z.string().max(128),
+          name: z.string().max(128),
+          options: z.array(acpThoughtValueSchema).max(16),
+        }),
+      )
+      .max(16),
+  ]),
+});
+
 /**
  * What a paired daemon can do beyond remote compute.
  *
@@ -69,10 +96,17 @@ export const hostCapabilitiesSchema = z.object({
             id: z.string().min(1).max(64),
             displayName: z.string().min(1).max(64),
             models: z
-              .array(z.strictObject({ id: z.string().min(1).max(128), name: z.string().min(1).max(128) }))
+              .array(
+                z.strictObject({
+                  id: z.string().min(1).max(128),
+                  name: z.string().min(1).max(128),
+                  thoughtLevel: acpThoughtLevelSchema.optional(),
+                }),
+              )
               .max(64)
               .default([]),
             defaultModel: z.string().min(1).max(128).optional(),
+            thoughtLevel: acpThoughtLevelSchema.optional(),
             refusal: z.string().min(1).max(64).optional(),
           }),
         )

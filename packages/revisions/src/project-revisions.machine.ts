@@ -15,148 +15,40 @@
  * `checkouts`' lease set.
  */
 
-import { assign, emit, enqueueActions, sendTo, setup } from 'xstate';
-import type { ActorRefFrom, SnapshotFrom } from 'xstate';
+import { setup, types } from 'xstate';
+import type { ActorRefFrom, AnyActorRef, EnqueueObject, SnapshotFrom, SystemRegistry } from 'xstate';
 
 import { checkoutMachine } from '#checkout.machine.js';
 import type { CheckoutCutTrigger, CheckoutStatus } from '#checkout.machine.js';
 import { branchMachine, selectBranchFacet } from '#branch.machine.js';
-import type { BranchMachineEvent, BranchOperation } from '#branch.machine.js';
+import type { BranchMachineEvent } from '#branch.machine.js';
 import { checkoutsMachine } from '#checkouts.machine.js';
 import type { CheckoutOperation } from '#checkouts.machine.js';
+import { eventSchemas } from '#machine-schemas.js';
 import { publishMachine, selectPublishFacet } from '#publish.machine.js';
-import type { PublishFacet, PublishMachineEvent } from '#publish.machine.js';
+import type { PublishMachineEvent } from '#publish.machine.js';
+import type { PublishFacet } from '#publish.types.js';
 import { remoteMachine, selectRemoteFacet } from '#remote.machine.js';
-import type { RemoteFacet, RemoteMachineEvent } from '#remote.machine.js';
+import type { RemoteFacet, RemoteMachineEvent, RevisionChildToast } from '#remote.types.js';
 import type { RemoteKind } from '#remotes.js';
 import { resolutionMachine, selectResolutionFacet } from '#resolution.machine.js';
-import type { ResolutionMachineEvent, ResolutionSide } from '#resolution.machine.js';
+import type { ResolutionMachineEvent } from '#resolution.machine.js';
 import { restoreMachine, selectRestoreBusy, selectRestoreNeedsConfirmation } from '#restore.machine.js';
 import { selectSyncFacet, syncMachine } from '#sync.machine.js';
-import type { SyncFacet, SyncMachineEvent, SyncPushOutcome } from '#sync.machine.js';
-import type { CheckoutRecord, RevisionPortErrorCode } from '#revision-port.js';
+import type { SyncMachineEvent } from '#sync.machine.js';
+import type { SyncFacet, SyncPushOutcome } from '#sync.types.js';
+import type { CheckoutRecord, ConflictRecord, RevisionPortErrorCode } from '#revision-port.js';
 import { turnMachine } from '#turn.machine.js';
 import type { TurnFailureCode, TurnOutcome, TurnSettlement } from '#turn.machine.js';
+import type {
+  RevisionStatusProjection,
+  RevisionBranchFacet,
+  RevisionConflictFacet,
+  RevisionLine,
+} from '#project-revisions.types.js';
 
 /** What one checkout last reported about itself. @public */
 export type CheckoutStatusEntry = Readonly<{ status: CheckoutStatus; headRevisionId: string | undefined }>;
-
-/**
- * The coalesced status one project publishes to its UI.
- *
- * `Rev N` is not here: it is derived from the graph at read time (I3). The sync
- * *progress* facet arrives with `sync.machine` in W13; `remote` is the
- * connection itself, which the Sync region renders on its own (S26, S35).
- *
- * @public
- */
-export type RevisionStatusProjection = Readonly<{
-  projectId: string;
-  checkoutId: string | undefined;
-  /**
-   * Where that checkout's files are — the route every consumer re-roots at
-   * when *Switch* moves the workbench (S27).
-   *
-   * The registry's own answer, not a rule a caller re-derives: the live
-   * checkout is the project directory and a linked one is its own route, and
-   * only the host that made them knows which is which.
-   */
-  checkoutRoot: string | undefined;
-  branch: string | undefined;
-  /** Whether any checkout has work that is not safely recorded. */
-  projectDirty: boolean;
-  dirty: boolean;
-  minting: boolean;
-  headRevisionId: string | undefined;
-  follow: 'chat' | 'pinned';
-  /** Checkouts that need a person: a failed cut or a head that lost its CAS. */
-  attention: number;
-  /**
-   * What the restore child is doing, for the one surface that asks (S19).
-   *
-   * The plan's file sets stay with the host behind `planId`; these are the two
-   * facts the confirmation renders — how many files the restore deletes, and
-   * whether the checkout has diverged from its head — plus whether it is
-   * waiting to be confirmed at all.
-   */
-  restore: Readonly<{
-    asking: boolean;
-    busy: boolean;
-    removedPathCount: number;
-    dirty: boolean;
-    revisionNumber: number | undefined;
-  }>;
-  /** Which remote this project has, and what it costs (S26 *Sync*, S35). */
-  remote: RemoteFacet;
-  /** Where this project's publication is, for the Publish dialog (S32, W8). */
-  publish: PublishFacet;
-  /**
-   * Whether this project is backed up, and how much is not (S26, S41).
-   *
-   * Settled values only (A38, P28): `Backed up`, `Backing up… n`,
-   * `Not backed up · n`, `Needs resolution` — never a backoff tick and never a
-   * per-write counter.
-   */
-  sync: SyncFacet;
-  /**
-   * Every branch this project has, for the pane's *Branches* region (S26).
-   *
-   * One row per branch, because one branch is one checkout (A2): the chats are
-   * the ones whose last placed turn landed there, which is what "the chats
-   * working on this branch" means to a reader. Ahead/behind is a graph read the
-   * pane asks for separately when it needs it.
-   */
-  branches: readonly RevisionBranchFacet[];
-  /** What the branch verbs are doing, for the one region that drives them. */
-  branchVerb: Readonly<{
-    busy: boolean;
-    asking: boolean;
-    operation: BranchOperation | undefined;
-    branch: string | undefined;
-    question: string | undefined;
-  }>;
-  /**
-   * Every branch whose head is a conflicted revision (A22, S33).
-   *
-   * Existence is record-derived — the registry's `conflicted` flag, so a reload
-   * still shows *Needs resolution* — while the per-file rows come from that
-   * revision's own `resolution` child, which is the only thing that knows what
-   * a person has chosen so far.
-   */
-  conflicts: readonly RevisionConflictFacet[];
-}>;
-
-/** One conflicted branch as the *Needs resolution* card renders it. @public */
-export type RevisionConflictFacet = Readonly<{
-  /** The conflicted revision, which is that branch's head. */
-  revisionId: string;
-  branch: string | undefined;
-  /** The two side labels the markers carry, once its child has read them. */
-  labels: Readonly<{ ours: string; theirs: string }> | undefined;
-  /** One row per file, with the side chosen for it so far. */
-  paths: ReadonlyArray<Readonly<{ path: string; openable: boolean; side: ResolutionSide | undefined }>>;
-  /** A resolution effect is running. */
-  busy: boolean;
-  /** Every file has a side, so *Merge into `<current>`* can be asked for again. */
-  ready: boolean;
-}>;
-
-/** One branch as the *Branches* region renders it. @public */
-export type RevisionBranchFacet = Readonly<{
-  name: string;
-  /** The revision the branch names, or `undefined` while unborn. */
-  head: string | undefined;
-  /** The checkout that tracks it; `undefined` when no checkout does. */
-  checkoutId: string | undefined;
-  /**
-   * Where that checkout's files are — `/projects/<id>` for the live tree, and
-   * `/checkouts/<id>` for a linked one. It is what the workbench re-roots at
-   * (S27) and what tells a host which routes a linked checkout needs mounted.
-   */
-  checkoutRoot: string | undefined;
-  /** Chats whose turns are placed on this branch (the row's chips). */
-  leaseChatIds: readonly string[];
-}>;
 
 /** Input accepted when creating the projectRevisionsMachine actor. @public */
 export type ProjectRevisionsMachineInput = Readonly<{
@@ -166,10 +58,12 @@ export type ProjectRevisionsMachineInput = Readonly<{
   selectedCheckoutId?: string;
 }>;
 
-/** Serializable state owned by projectRevisionsMachine. @public */
-export type ProjectRevisionsMachineContext = Readonly<{
+/* The fields of {@link ProjectRevisionsMachineContext}, named by the interface below. */
+type ProjectRevisionsMachineContextFields = Readonly<{
   projectId: string;
   checkouts: readonly CheckoutRecord[];
+  /** Every conflicted revision no decision has landed yet, from the registry's last listing (D14). */
+  conflicts: readonly ConflictRecord[];
   /** Local branch refs learned from fetch that do not need a checkout yet. */
   availableBranches: ReadonlyArray<Readonly<{ name: string; head: string }>>;
   checkoutStatus: Readonly<Record<string, CheckoutStatusEntry>>;
@@ -207,9 +101,13 @@ export type ProjectRevisionsMachineContext = Readonly<{
   registrySettled: boolean;
 }>;
 
+/** Serializable state owned by projectRevisionsMachine. @public */
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type, typescript/consistent-type-definitions -- an interface, not a type alias: declarations reference it by name, where an alias is expanded into every transition of this machine and of any machine that holds it (K-17, TS7056)
+export interface ProjectRevisionsMachineContext extends ProjectRevisionsMachineContextFields {}
+
 /** Events accepted by projectRevisionsMachine. @public */
 export type ProjectRevisionsMachineEvent =
-  | Readonly<{ type: 'checkoutsChanged'; checkouts: readonly CheckoutRecord[] }>
+  | Readonly<{ type: 'checkoutsChanged'; checkouts: readonly CheckoutRecord[]; conflicts: readonly ConflictRecord[] }>
   | Readonly<{
       type: 'branchesFetched';
       branches: ReadonlyArray<Readonly<{ name: string; head: string }>>;
@@ -235,23 +133,37 @@ export type ProjectRevisionsMachineEvent =
       turnId?: string;
       checkoutId: string | undefined;
       leaseIds: readonly string[];
+      /** The revision a restore applied, on the cut that mints that restore (D1). */
+      restoredFrom?: string;
+      /** The requester's own id for this cut, echoed on every answer to it (N2). */
+      requestId?: string;
     }>
+  /** The `restore` child finished a verb, so the admissions it held can run (A2). */
+  | Readonly<{ type: 'restoreSettled'; checkoutId: string }>
   | Readonly<{
       type: 'revisionMinted';
       checkoutId: string;
       trigger: CheckoutCutTrigger;
       turnId?: string;
+      requestId?: string;
       revisionId: string;
     }>
-  | Readonly<{ type: 'nothingToSave'; checkoutId: string; trigger: CheckoutCutTrigger; turnId?: string }>
+  | Readonly<{
+      type: 'nothingToSave';
+      checkoutId: string;
+      trigger: CheckoutCutTrigger;
+      turnId?: string;
+      requestId?: string;
+    }>
   | Readonly<{
       type: 'cutFailed';
       checkoutId: string;
       trigger: CheckoutCutTrigger;
       turnId?: string;
+      requestId?: string;
       reason: string;
     }>
-  | Readonly<{ type: 'casLost'; checkoutId: string; trigger: CheckoutCutTrigger; turnId?: string }>
+  | Readonly<{ type: 'casLost'; checkoutId: string; trigger: CheckoutCutTrigger; turnId?: string; requestId?: string }>
   | (Readonly<{ type: 'turnFinalized' }> & TurnSettlement)
   | (Readonly<{ type: 'turnConflicted' }> & TurnSettlement)
   | Readonly<{ type: 'leaseStale'; runId: string }>
@@ -285,6 +197,7 @@ export type ProjectRevisionsMachineEvent =
   | Readonly<{ type: 'leaseRetired'; runId: string }>
   | Readonly<{ type: 'removalOffered'; checkoutId: string }>
   | Readonly<{ type: 'checkoutFailed'; operation: CheckoutOperation; reason: string; code?: RevisionPortErrorCode }>
+  | RevisionChildToast
   | Readonly<{ type: 'addCheckout'; branch: string; from: string }>
   | Readonly<{ type: 'removeCheckout'; id: string }>
   | Readonly<{ type: 'switch'; branch: string }>
@@ -344,17 +257,25 @@ export type ProjectRevisionsMachineEmitted =
       checkoutId: string;
       trigger: CheckoutCutTrigger;
       turnId?: string;
+      requestId?: string;
       revisionId: string;
     }>
-  | Readonly<{ type: 'nothingToSave'; checkoutId: string; trigger: CheckoutCutTrigger; turnId?: string }>
+  | Readonly<{
+      type: 'nothingToSave';
+      checkoutId: string;
+      trigger: CheckoutCutTrigger;
+      turnId?: string;
+      requestId?: string;
+    }>
   | Readonly<{
       type: 'cutFailed';
       checkoutId: string;
       trigger: CheckoutCutTrigger;
       turnId?: string;
+      requestId?: string;
       reason: string;
     }>
-  | Readonly<{ type: 'casLost'; checkoutId: string; trigger: CheckoutCutTrigger; turnId?: string }>
+  | Readonly<{ type: 'casLost'; checkoutId: string; trigger: CheckoutCutTrigger; turnId?: string; requestId?: string }>
   | (Readonly<{ type: 'turnFinalized' }> & TurnSettlement)
   | (Readonly<{ type: 'turnConflicted' }> & TurnSettlement)
   /*
@@ -404,6 +325,8 @@ export type ProjectRevisionsMachineEmitted =
     }>
   | Readonly<{ type: 'leaseRetired'; runId: string }>
   | Readonly<{ type: 'removalOffered'; checkoutId: string }>
+  /** A remote or resolution child's toast, re-emitted because a host holds the root and nothing else (L2-F8, A38). */
+  | RevisionChildToast
   /* P4: a refusal crosses as a code; the page that shows it owns the words. */
   | Readonly<{ type: 'checkoutFailed'; operation: CheckoutOperation; reason: string; code?: RevisionPortErrorCode }>
   /**
@@ -433,6 +356,9 @@ export type ProjectRevisionsMachineEmitted =
       checkoutId: string | undefined;
       paths: readonly string[];
     }>;
+
+/** The refusal a verb that would rewrite a checkout reads while a turn holds it (D10, A1). */
+const turnHoldsFilesMessage = 'An agent is working in this project’s files.';
 
 const selectedRecord = (context: ProjectRevisionsMachineContext): CheckoutRecord | undefined =>
   context.checkouts.find((checkout) => checkout.id === context.selectedCheckoutId);
@@ -477,21 +403,216 @@ const endingTurnRef = (
   return event.runId === undefined || ref?.getSnapshot().context.runId === event.runId ? ref : undefined;
 };
 
-/**
- * Headless root of one project's revision actor tree.
+type ProjectRevisionsEnqueue = EnqueueObject<
+  ProjectRevisionsMachineEvent,
+  ProjectRevisionsMachineEmitted,
+  SystemRegistry,
+  Readonly<{ resolution: typeof resolutionMachine; checkout: typeof checkoutMachine; turn: typeof turnMachine }>,
+  Readonly<{
+    checkouts?: ActorRefFrom<typeof checkoutsMachine>;
+    restore?: ActorRefFrom<typeof restoreMachine>;
+    remote?: ActorRefFrom<typeof remoteMachine>;
+    branch?: ActorRefFrom<typeof branchMachine>;
+    publish?: ActorRefFrom<typeof publishMachine>;
+    sync?: ActorRefFrom<typeof syncMachine>;
+  }>
+>;
+type ProjectRevisionsSelf = AnyActorRef;
+type ProjectRevisionsPatch = Partial<ProjectRevisionsMachineContext>;
+
+/* R12: every terminal state of a turn drops its ref, not just the two that
+ * carry a settlement. */
+const dropTurn = (
+  context: ProjectRevisionsMachineContext,
+  enq: ProjectRevisionsEnqueue,
+  turnId: string,
+): ProjectRevisionsPatch => {
+  const ref = context.turnRefs[turnId];
+  if (ref === undefined) {
+    return {};
+  }
+  enq.stop(ref);
+  for (const admission of context.pendingAdmissions) {
+    if (admission.turnId === turnId) {
+      enq.raise({ type: 'admitTurn', ...admission });
+    }
+  }
+  return {
+    turnRefs: Object.fromEntries(Object.entries(context.turnRefs).filter(([held]) => held !== turnId)),
+    /* The hold this turn id had is over, so the admissions it delayed are
+     * released with it — in arrival order (V8). */
+    pendingAdmissions: context.pendingAdmissions.filter((admission) => admission.turnId !== turnId),
+  };
+};
+
+/*
+ * One `resolution` child per unresolved conflicted revision (S33, A38, D14).
  *
- * @public
+ * Spawned from the conflict lines, so a reload rebuilds exactly the cards the
+ * store still justifies (I3), and stopped the moment the line it decides
+ * contains the revision — which is what `finish` does, here or on another
+ * device.
  */
-export const projectRevisionsMachine = setup({
-  types: {
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState setup typing.
-    context: {} as ProjectRevisionsMachineContext,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState setup typing.
-    events: {} as ProjectRevisionsMachineEvent,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState setup typing.
-    emitted: {} as ProjectRevisionsMachineEmitted,
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- XState setup typing.
-    input: {} as ProjectRevisionsMachineInput,
+const syncResolutions = (
+  context: ProjectRevisionsMachineContext,
+  enq: ProjectRevisionsEnqueue,
+  self: ProjectRevisionsSelf,
+): ProjectRevisionsPatch => {
+  const wanted = new Map(context.conflicts.map((conflict) => [conflict.revisionId, conflict.line]));
+  for (const [id, ref] of Object.entries(context.resolutionRefs)) {
+    if (!wanted.has(id)) {
+      enq.stop(ref);
+    }
+  }
+  const kept = Object.fromEntries(Object.entries(context.resolutionRefs).filter(([id]) => wanted.has(id)));
+  for (const [id, branch] of wanted) {
+    kept[id] ??= enq.spawn('resolution', {
+      id: `resolution:${id}`,
+      input: {
+        projectId: context.projectId,
+        revisionId: id,
+        branch,
+        parentRef: self,
+      },
+    });
+  }
+  return { resolutionRefs: kept };
+};
+
+/*
+ * A cut's answer goes to the turn that asked for it, or — when no turn
+ * did — to the `branch` and `restore` children, which record the selected tree
+ * before they branch (P3) or restore (D1, A7). Each ignores what it did not ask for.
+ */
+const answerCut = (
+  context: ProjectRevisionsMachineContext,
+  enq: ProjectRevisionsEnqueue,
+  event: Extract<ProjectRevisionsMachineEvent, { type: 'revisionMinted' | 'nothingToSave' | 'cutFailed' | 'casLost' }>,
+): void => {
+  if (event.turnId === undefined) {
+    enq.sendTo('branch', event);
+    enq.sendTo('restore', event);
+    /* `sync` asks for a `merge` cut before it integrates a dirty checkout (D12);
+     * it already hears every `revisionMinted` below. */
+    if (event.type !== 'revisionMinted') {
+      enq.sendTo('sync', event);
+    }
+    return;
+  }
+  /* A turn whose ref has already gone is not the `branch` child's answer:
+     the cut it asked for was that turn's (review finding 9). */
+  const ref = context.turnRefs[event.turnId];
+  if (ref !== undefined) {
+    enq.sendTo(ref, event);
+  }
+};
+
+/* Tell `restore` which checkout the workbench is rooted at now and on which
+ * line (M1), and `branch` which branch *Merge into `<current>`* means. */
+const announceSelection = (context: ProjectRevisionsMachineContext, enq: ProjectRevisionsEnqueue): void => {
+  const branch = selectedRecord(context)?.branch;
+  enq.sendTo('restore', {
+    type: 'selectCheckout',
+    checkoutId: context.selectedCheckoutId ?? '',
+    ...(branch === undefined ? {} : { branch }),
+  });
+  enq.sendTo('branch', { type: 'selectBranch', branch });
+};
+
+/* The admissions a registry answer releases: raised in arrival order, and the buffer emptied. */
+const releaseAdmissions = (
+  context: ProjectRevisionsMachineContext,
+  enq: ProjectRevisionsEnqueue,
+): ProjectRevisionsPatch => {
+  for (const admission of context.pendingAdmissions) {
+    enq.raise({ type: 'admitTurn', ...admission });
+  }
+  return { pendingAdmissions: [] };
+};
+
+/*
+ * A turn's settlement: the registry retires its lease, the host hears it, and the root drops the ref.
+ *
+ * Forwarded verbatim, `turnConflicted` included: a conflicted turn deleted its
+ * lease file too, and a scheduler parked behind it resumes only on the
+ * registry's `leaseRetired` (rule 9, RV-W5b F1).
+ */
+const settleTurn = (
+  context: ProjectRevisionsMachineContext,
+  enq: ProjectRevisionsEnqueue,
+  settlement: Readonly<{
+    registry: AnyActorRef | undefined;
+    event: Extract<ProjectRevisionsMachineEvent, { type: 'turnFinalized' | 'turnConflicted' | 'turnReleased' }>;
+  }>,
+) => {
+  const { registry, event } = settlement;
+  enq.sendTo(registry, event);
+  enq.emit(event);
+  return { context: dropTurn(context, enq, event.turnId) };
+};
+
+/*
+ * A2: a turn admitted to a checkout a restore is working on waits for it.
+ *
+ * From the pre-restore cut until the verb settles, the question included: a
+ * turn admitted while the person decides would write its lease between the
+ * plan and the apply, and the restore they confirmed would then be refused or,
+ * worse, write files it cannot cut (M4). The pinned checkout is set exactly
+ * that long.
+ *
+ * An admission that names no checkout lands on the chat's, which this root
+ * only learns in the turn's own `prepare` — so it waits too, which costs at
+ * most one restore and never a byte.
+ */
+const restoreHolds = (
+  restore: SnapshotFrom<typeof restoreMachine> | undefined,
+  checkoutId: string | undefined,
+): boolean => {
+  const pinned = restore?.context.restoringCheckoutId;
+  return pinned !== undefined && (checkoutId === undefined || checkoutId === pinned);
+};
+
+/* What the registry moved under one running checkout: its line (a rename, N9), then its head. */
+const tellCheckoutMoved = (
+  enq: ProjectRevisionsEnqueue,
+  ref: ActorRefFrom<typeof checkoutMachine>,
+  [previous, next]: readonly [CheckoutRecord | undefined, CheckoutRecord | undefined],
+): void => {
+  if (next?.branch !== undefined && previous?.branch !== next.branch) {
+    enq.sendTo(ref, { type: 'lineChanged', branch: next.branch });
+  }
+  if (
+    previous?.headRevisionId !== next?.headRevisionId &&
+    next?.headRevisionId !== undefined &&
+    next.headTreeId !== undefined
+  ) {
+    enq.sendTo(ref, { type: 'headChanged', revisionId: next.headRevisionId, treeId: next.headTreeId });
+  }
+};
+
+const bufferAdmission = (
+  context: ProjectRevisionsMachineContext,
+  event: Extract<ProjectRevisionsMachineEvent, { type: 'admitTurn' }>,
+): ProjectRevisionsPatch => {
+  const { type: _type, ...admission } = event;
+  return { pendingAdmissions: [...context.pendingAdmissions, admission] };
+};
+
+const projectRevisionsMachineDefinition = setup({
+  schemas: {
+    context: types<ProjectRevisionsMachineContext>(),
+    events: eventSchemas<ProjectRevisionsMachineEvent>(),
+    emitted: eventSchemas<ProjectRevisionsMachineEmitted>(),
+    input: types<ProjectRevisionsMachineInput>(),
+    /* The invoked children by id, as v5 inferred them from `invoke`: selectors read their snapshots. */
+    children: {
+      checkouts: types<ActorRefFrom<typeof checkoutsMachine>>(),
+      restore: types<ActorRefFrom<typeof restoreMachine>>(),
+      remote: types<ActorRefFrom<typeof remoteMachine>>(),
+      branch: types<ActorRefFrom<typeof branchMachine>>(),
+      publish: types<ActorRefFrom<typeof publishMachine>>(),
+      sync: types<ActorRefFrom<typeof syncMachine>>(),
+    },
   },
   actors: {
     checkouts: checkoutsMachine,
@@ -505,8 +626,8 @@ export const projectRevisionsMachine = setup({
     resolution: resolutionMachine,
   },
   guards: {
-    turnIsNew: ({ context }, params: Readonly<{ turnId: string }>) => context.turnRefs[params.turnId] === undefined,
-    registryUnanswered: ({ context }) => !context.registrySettled,
+    turnIsNew: (context: ProjectRevisionsMachineContext, turnId: string) => context.turnRefs[turnId] === undefined,
+    registryUnanswered: (context: ProjectRevisionsMachineContext) => !context.registrySettled,
     /*
      * V9: a run id is minted once per gesture and *is* the idempotency key, so
      * the same one arriving twice is a bug in the caller, never a queue.
@@ -515,106 +636,15 @@ export const projectRevisionsMachine = setup({
      * run id is also its lease's own key (`.tau/runs/<runId>.json`), so a second
      * turn admitted under it writes and retires the first turn's lease.
      */
-    runIsAlreadyHeld: ({ context, event }) =>
-      event.type === 'admitTurn' &&
-      Object.values(context.turnRefs).some((ref) => ref.getSnapshot().context.runId === event.runId),
-  },
-  actions: {
-    /* R12: every terminal state of a turn drops its ref, not just the two that
-     * carry a settlement. */
-    dropTurn: enqueueActions(({ context, enqueue }, params: Readonly<{ turnId: string }>) => {
-      const ref = context.turnRefs[params.turnId];
-      if (ref === undefined) {
-        return;
-      }
-      enqueue.stopChild(ref);
-      enqueue.assign({
-        turnRefs: Object.fromEntries(Object.entries(context.turnRefs).filter(([turnId]) => turnId !== params.turnId)),
-        /* The hold this turn id had is over, so the admissions it delayed are
-         * released with it — in arrival order (V8). */
-        pendingAdmissions: context.pendingAdmissions.filter((admission) => admission.turnId !== params.turnId),
-      });
-      for (const admission of context.pendingAdmissions) {
-        if (admission.turnId === params.turnId) {
-          enqueue.raise({ type: 'admitTurn', ...admission });
-        }
-      }
-    }),
-    /*
-     * One `resolution` child per conflicted branch head (S33, A38).
-     *
-     * Spawned from the *records*, so a reload rebuilds exactly the cards the
-     * store still justifies (I3), and stopped the moment a head stops being
-     * conflicted — which is what `finish` and a second merge both do.
-     */
-    syncResolutions: enqueueActions(({ context, enqueue }) => {
-      const wanted = new Map(
-        context.checkouts
-          .filter((checkout) => checkout.conflicted === true && checkout.headRevisionId !== undefined)
-          .map((checkout) => [checkout.headRevisionId ?? '', checkout.branch]),
-      );
-      for (const [id, ref] of Object.entries(context.resolutionRefs)) {
-        if (!wanted.has(id)) {
-          enqueue.stopChild(ref);
-        }
-      }
-      enqueue.assign(({ context: current, self, spawn }) => {
-        const kept = Object.fromEntries(Object.entries(current.resolutionRefs).filter(([id]) => wanted.has(id)));
-        for (const [id, branch] of wanted) {
-          kept[id] ??= spawn('resolution', {
-            id: `resolution:${id}`,
-            input: {
-              projectId: current.projectId,
-              revisionId: id,
-              ...(branch === undefined ? {} : { branch }),
-              parentRef: self,
-            },
-          });
-        }
-        return { resolutionRefs: kept };
-      });
-    }),
-    /*
-     * A cut's answer goes to the turn that asked for it, or — when no turn
-     * did — to the `branch` child, which may be recording the selected tree
-     * before it makes a branch (P3). The child ignores what it did not ask for.
-     */
-    answerCut: enqueueActions(({ context, enqueue, event }) => {
-      if (
-        event.type !== 'revisionMinted' &&
-        event.type !== 'nothingToSave' &&
-        event.type !== 'cutFailed' &&
-        event.type !== 'casLost'
-      ) {
-        return;
-      }
-      if (event.turnId === undefined) {
-        enqueue.sendTo('branch', event);
-        return;
-      }
-      /* A turn whose ref has already gone is not the `branch` child's answer:
-         the cut it asked for was that turn's (review finding 9). */
-      const ref = context.turnRefs[event.turnId];
-      if (ref !== undefined) {
-        enqueue.sendTo(ref, event);
-      }
-    }),
-    /* Tell `restore` which checkout the workbench is rooted at now, and
-     * `branch` which branch *Merge into `<current>`* means. */
-    announceSelection: enqueueActions(({ context, enqueue }) => {
-      enqueue.sendTo('restore', {
-        type: 'selectCheckout',
-        checkoutId: context.selectedCheckoutId ?? '',
-        headRevisionId: selectedRecord(context)?.headRevisionId,
-      });
-      enqueue.sendTo('branch', { type: 'selectBranch', branch: selectedRecord(context)?.branch });
-    }),
+    runIsAlreadyHeld: (context: ProjectRevisionsMachineContext, runId: string) =>
+      Object.values(context.turnRefs).some((ref) => ref.getSnapshot().context.runId === runId),
   },
 }).createMachine({
   id: 'project-revisions',
   context: ({ input }) => ({
     projectId: input.projectId,
     checkouts: [],
+    conflicts: [],
     availableBranches: [],
     checkoutStatus: {},
     liveCheckoutId: input.liveCheckoutId,
@@ -634,7 +664,7 @@ export const projectRevisionsMachine = setup({
       src: 'checkouts',
       input: ({ context, self }) => ({ projectId: context.projectId, parentRef: self }),
       /* P45: a child's own transition is a root snapshot, so the host frame follows it (see `sync` below). */
-      onSnapshot: { actions: [] },
+      onSnapshot: {},
     },
     {
       id: 'restore',
@@ -644,13 +674,13 @@ export const projectRevisionsMachine = setup({
         checkoutId: context.selectedCheckoutId ?? '',
         parentRef: self,
       }),
-      onSnapshot: { actions: [] },
+      onSnapshot: {},
     },
     {
       id: 'remote',
       src: 'remote',
       input: ({ context, self }) => ({ projectId: context.projectId, parentRef: self }),
-      onSnapshot: { actions: [] },
+      onSnapshot: {},
     },
     {
       id: 'branch',
@@ -659,13 +689,13 @@ export const projectRevisionsMachine = setup({
         projectId: context.projectId,
         parentRef: self,
       }),
-      onSnapshot: { actions: [] },
+      onSnapshot: {},
     },
     {
       id: 'publish',
       src: 'publish',
       input: ({ context, self }) => ({ projectId: context.projectId, parentRef: self }),
-      onSnapshot: { actions: [] },
+      onSnapshot: {},
     },
     {
       id: 'sync',
@@ -678,332 +708,353 @@ export const projectRevisionsMachine = setup({
        * The facet is read from the child, but a host subscribes to the *root*,
        * and a child's own transition is not one — so a push settling, a queue
        * write finishing or the pull's deadline firing left the Sync row showing
-       * whatever it showed when the root last moved. No action: the transition
-       * itself is the notification, and the host's own settled-value filter
-       * (`sameStatus`) is what stops it becoming a repaint (A38, P28).
+       * whatever it showed when the root last moved. No handler body: the
+       * transition itself is the notification, and the host's own settled-value
+       * filter (`sameStatus`) is what stops it becoming a repaint (A38, P28).
        */
-      onSnapshot: { actions: [] },
+      onSnapshot: {},
     },
   ],
-  entry: sendTo('checkouts', { type: 'open' }),
-  exit: enqueueActions(({ context, enqueue }) => {
+  entry: (_, enq) => {
+    enq.sendTo('checkouts', { type: 'open' });
+  },
+  exit: ({ context }, enq) => {
     for (const ref of Object.values(context.checkoutRefs)) {
-      enqueue.stopChild(ref);
+      enq.stop(ref);
     }
     for (const ref of Object.values(context.turnRefs)) {
-      enqueue.stopChild(ref);
+      enq.stop(ref);
     }
     for (const ref of Object.values(context.resolutionRefs)) {
-      enqueue.stopChild(ref);
+      enq.stop(ref);
     }
-    enqueue.assign({ checkoutRefs: {}, turnRefs: {}, resolutionRefs: {} });
-  }),
+    return { context: { checkoutRefs: {}, turnRefs: {}, resolutionRefs: {} } };
+  },
   initial: 'ready',
   states: {
     ready: {
       on: {
-        branchesFetched: { actions: assign({ availableBranches: ({ event }) => event.branches }) },
-        checkoutsChanged: {
-          actions: enqueueActions(({ context, enqueue, event }) => {
-            const known = new Set(event.checkouts.map((checkout) => checkout.id));
-            for (const [id, ref] of Object.entries(context.checkoutRefs)) {
-              if (!known.has(id)) {
-                enqueue.stopChild(ref);
-                continue;
-              }
-              const previous = context.checkouts.find((checkout) => checkout.id === id);
-              const next = event.checkouts.find((checkout) => checkout.id === id);
-              if (
-                previous?.headRevisionId !== next?.headRevisionId &&
-                next?.headRevisionId !== undefined &&
-                next.headTreeId !== undefined
-              ) {
-                enqueue.sendTo(ref, {
-                  type: 'headChanged',
-                  revisionId: next.headRevisionId,
-                  treeId: next.headTreeId,
-                });
-              }
+        /* A fetch can bring a conflict line from another device, or drop one
+         * the owner removed, so the registry re-reads whenever either is in
+         * play (D14). Most fetches carry neither and re-read nothing. */
+        branchesFetched: ({ context, event }, enq) => {
+          if (
+            context.conflicts.length > 0 ||
+            event.branches.some((branch) => branch.name === 'conflicts' || branch.name.startsWith('conflicts/'))
+          ) {
+            enq.sendTo('checkouts', { type: 'open' });
+          }
+          return { context: { availableBranches: event.branches } };
+        },
+        checkoutsChanged: ({ context, event, self }, enq) => {
+          const known = new Set(event.checkouts.map((checkout) => checkout.id));
+          for (const [id, ref] of Object.entries(context.checkoutRefs)) {
+            if (!known.has(id)) {
+              enq.stop(ref);
+              continue;
             }
-            /* W3b's own correction, unexecuted until a consumer needed it: the
-             * registry's `kind === 'live'` record *is* the live checkout, so a
-             * host that pins none still gets one — without this the selection,
-             * and therefore the whole `RevisionStatus` projection, stays empty
-             * forever (W3d). `input.liveCheckoutId` remains the override. */
-            const liveId = context.liveCheckoutId ?? event.checkouts.find((checkout) => checkout.kind === 'live')?.id;
-            enqueue.assign(({ context: current, self, spawn }) => {
-              const kept = Object.fromEntries(Object.entries(current.checkoutRefs).filter(([id]) => known.has(id)));
-              for (const record of event.checkouts) {
-                if (kept[record.id] !== undefined) {
-                  continue;
-                }
-                kept[record.id] = spawn('checkout', {
-                  id: `checkout:${record.id}`,
-                  input: {
-                    checkoutId: record.id,
-                    branch: record.branch,
-                    headRevisionId: record.headRevisionId,
-                    /* I5's left-hand side, so the first cut after a rehydration
-                     * can be recognised as a no-op (R3). */
-                    headTreeId: record.headTreeId,
-                    parentRef: self,
-                  },
-                });
-              }
-              const selected =
-                current.selectedCheckoutId !== undefined && known.has(current.selectedCheckoutId)
-                  ? current.selectedCheckoutId
-                  : liveId;
-              return {
-                checkouts: event.checkouts,
-                checkoutRefs: kept,
-                chatCheckouts: Object.fromEntries(
-                  Object.entries(current.chatCheckouts).filter(([, checkoutId]) => known.has(checkoutId)),
-                ),
-                liveCheckoutId: liveId,
-                selectedCheckoutId: selected,
-              };
+            tellCheckoutMoved(enq, ref, [
+              context.checkouts.find((checkout) => checkout.id === id),
+              event.checkouts.find((checkout) => checkout.id === id),
+            ]);
+          }
+          /* W3b's own correction, unexecuted until a consumer needed it: the
+           * registry's `kind === 'live'` record *is* the live checkout, so a
+           * host that pins none still gets one — without this the selection,
+           * and therefore the whole `RevisionStatus` projection, stays empty
+           * forever (W3d). `input.liveCheckoutId` remains the override. */
+          const liveId = context.liveCheckoutId ?? event.checkouts.find((checkout) => checkout.kind === 'live')?.id;
+          const kept = Object.fromEntries(Object.entries(context.checkoutRefs).filter(([id]) => known.has(id)));
+          for (const record of event.checkouts) {
+            if (kept[record.id] !== undefined) {
+              continue;
+            }
+            kept[record.id] = enq.spawn('checkout', {
+              id: `checkout:${record.id}`,
+              input: {
+                checkoutId: record.id,
+                branch: record.branch,
+                headRevisionId: record.headRevisionId,
+                /* I5's left-hand side, so the first cut after a rehydration
+                 * can be recognised as a no-op (R3). */
+                headTreeId: record.headTreeId,
+                parentRef: self,
+              },
             });
-            /* R8: `restore`'s invoke input was evaluated before any record
-             * existed, so the first registry it ever sees has to be announced,
-             * and so does a head that moved under the selection. */
-            const nextSelected =
-              context.selectedCheckoutId !== undefined && known.has(context.selectedCheckoutId)
-                ? context.selectedCheckoutId
-                : liveId;
-            const previousHead = context.checkouts.find(
-              (checkout) => checkout.id === context.selectedCheckoutId,
-            )?.headRevisionId;
-            const nextHead = event.checkouts.find((checkout) => checkout.id === nextSelected)?.headRevisionId;
-            if (
-              nextSelected !== undefined &&
-              (context.checkouts.length === 0 ||
-                nextSelected !== context.selectedCheckoutId ||
-                nextHead !== previousHead)
-            ) {
-              enqueue('announceSelection');
-            }
-            /* One conflict card per conflicted head the records justify (S33). */
-            enqueue('syncResolutions');
-            /* `branch` delegated *New branch* and *Discard* to the registry, so
-             * the registry's own answer is what settles them. */
-            enqueue.sendTo('branch', {
-              type: 'branchesChanged',
-              branches: event.checkouts.flatMap((checkout) => (checkout.branch === undefined ? [] : [checkout.branch])),
-              /* The records too, so a settled `create` knows which checkout it
-                 made without scraping the projection (P4). */
-              checkouts: event.checkouts.flatMap((checkout) =>
-                checkout.branch === undefined
-                  ? []
-                  : [{ branch: checkout.branch, checkoutId: checkout.id, checkoutRoot: checkout.root }],
-              ),
-            });
-            enqueue.assign({ registrySettled: true });
-            /* The registry has answered, so the turns that arrived before it
-             * can be admitted onto checkouts that now have actors. */
-            if (context.pendingAdmissions.length > 0 && event.checkouts.length > 0) {
-              for (const admission of context.pendingAdmissions) {
-                enqueue.raise({ type: 'admitTurn', ...admission });
-              }
-              enqueue.assign({ pendingAdmissions: [] });
-            }
-          }),
+          }
+          const selected =
+            context.selectedCheckoutId !== undefined && known.has(context.selectedCheckoutId)
+              ? context.selectedCheckoutId
+              : liveId;
+          let next: ProjectRevisionsMachineContext = {
+            ...context,
+            checkouts: event.checkouts,
+            conflicts: event.conflicts,
+            checkoutRefs: kept,
+            chatCheckouts: Object.fromEntries(
+              Object.entries(context.chatCheckouts).filter(([, checkoutId]) => known.has(checkoutId)),
+            ),
+            liveCheckoutId: liveId,
+            selectedCheckoutId: selected,
+          };
+          /* R8: `restore`'s invoke input was evaluated before any record
+           * existed, so the first registry it ever sees has to be announced,
+           * and so does a head that moved under the selection. */
+          const previous = context.checkouts.find((checkout) => checkout.id === context.selectedCheckoutId);
+          const nextSelected = event.checkouts.find((checkout) => checkout.id === selected);
+          if (
+            selected !== undefined &&
+            (context.checkouts.length === 0 ||
+              selected !== context.selectedCheckoutId ||
+              nextSelected?.headRevisionId !== previous?.headRevisionId ||
+              nextSelected?.branch !== previous?.branch)
+          ) {
+            announceSelection(next, enq);
+          }
+          /* One conflict card per conflicted revision the conflict lines justify (S33, D14). */
+          next = { ...next, ...syncResolutions(next, enq, self) };
+          /* `branch` delegated *New branch* and *Discard* to the registry, so
+           * the registry's own answer is what settles them. */
+          enq.sendTo('branch', {
+            type: 'branchesChanged',
+            branches: event.checkouts.flatMap((checkout) => (checkout.branch === undefined ? [] : [checkout.branch])),
+            /* The records too, so a settled `create` knows which checkout it
+               made without scraping the projection (P4). */
+            checkouts: event.checkouts.flatMap((checkout) =>
+              checkout.branch === undefined
+                ? []
+                : [{ branch: checkout.branch, checkoutId: checkout.id, checkoutRoot: checkout.root }],
+            ),
+          });
+          next = { ...next, registrySettled: true };
+          /* The registry has answered, so the turns that arrived before it
+           * can be admitted onto checkouts that now have actors. */
+          if (context.pendingAdmissions.length > 0 && event.checkouts.length > 0) {
+            next = { ...next, ...releaseAdmissions(next, enq) };
+          }
+          return {
+            context: {
+              checkouts: next.checkouts,
+              conflicts: next.conflicts,
+              checkoutRefs: next.checkoutRefs,
+              chatCheckouts: next.chatCheckouts,
+              liveCheckoutId: next.liveCheckoutId,
+              selectedCheckoutId: next.selectedCheckoutId,
+              resolutionRefs: next.resolutionRefs,
+              registrySettled: next.registrySettled,
+              pendingAdmissions: next.pendingAdmissions,
+            },
+          };
         },
         checkoutStatusChanged: {
-          actions: assign({
-            checkoutStatus: ({ context, event }) => ({
+          context: ({ context, event }) => ({
+            checkoutStatus: {
               ...context.checkoutStatus,
               [event.checkoutId]: { status: event.status, headRevisionId: event.headRevisionId },
-            }),
+            },
           }),
         },
-        admitTurn: [
-          {
-            guard: 'registryUnanswered',
-            actions: assign({
-              pendingAdmissions: ({ context, event }) => {
-                const { type: _type, ...admission } = event;
-                return [...context.pendingAdmissions, admission];
-              },
-            }),
-          },
-          {
-            guard: 'runIsAlreadyHeld',
-            actions: emit(
-              ({ event }): Extract<ProjectRevisionsMachineEmitted, { readonly type: 'turnRefused' }> => ({
-                type: 'turnRefused',
+        admitTurn: ({ children, context, event, guards, self }, enq) => {
+          if (guards.registryUnanswered(context) || restoreHolds(children.restore?.getSnapshot(), event.checkoutId)) {
+            return { context: bufferAdmission(context, event) };
+          }
+          if (guards.runIsAlreadyHeld(context, event.runId)) {
+            enq.emit({
+              type: 'turnRefused',
+              turnId: event.turnId,
+              chatId: event.chatId,
+              runId: event.runId,
+              code: 'TURN_ALREADY_LEASED',
+              reason: 'This run has already taken this chat’s checkout.',
+            });
+            return {};
+          }
+          if (guards.turnIsNew(context, event.turnId)) {
+            const ref = enq.spawn('turn', {
+              id: `turn:${event.turnId}`,
+              input: {
                 turnId: event.turnId,
                 chatId: event.chatId,
                 runId: event.runId,
-                code: 'TURN_ALREADY_LEASED',
-                reason: 'This run has already taken this chat’s checkout.',
-              }),
-            ),
-          },
-          {
-            guard: { type: 'turnIsNew', params: ({ event }) => ({ turnId: event.turnId }) },
-            actions: assign({
-              turnRefs: ({ context, event, self, spawn }) => ({
-                ...context.turnRefs,
-                [event.turnId]: spawn('turn', {
-                  id: `turn:${event.turnId}`,
-                  input: {
-                    turnId: event.turnId,
-                    chatId: event.chatId,
-                    runId: event.runId,
-                    ...(event.checkoutId === undefined ? {} : { checkoutId: event.checkoutId }),
-                    parentRef: self,
-                  },
-                }),
-              }),
-            }),
-          },
-          {
-            /*
-             * V8: a held turn id delays an admission inside its owner.
-             *
-             * An edit or a *Try again* leases the turn id of the message it
-             * rewinds to, which is the id the previous run of that turn leased.
-             * Refusing it outright put a banner in front of the person for a
-             * condition that clears itself in well under a second — and no page
-             * code read the code to recover from it. The root is what knows when
-             * the hold ends, so the root is what waits.
-             */
-            actions: assign({
-              pendingAdmissions: ({ context, event }) => {
-                const { type: _type, ...admission } = event;
-                return [...context.pendingAdmissions, admission];
+                ...(event.checkoutId === undefined ? {} : { checkoutId: event.checkoutId }),
+                parentRef: self,
               },
-            }),
-          },
-        ],
-        turnPrepared: {
-          actions: assign({
-            chatCheckouts: ({ context, event }) => ({ ...context.chatCheckouts, [event.chatId]: event.checkoutId }),
-          }),
-        },
-        cut: {
-          actions: enqueueActions(({ context, enqueue, event }) => {
-            const ref = event.checkoutId === undefined ? undefined : context.checkoutRefs[event.checkoutId];
-            if (ref === undefined) {
-              /* R5: a dropped request is a turn that waits out its whole bound
-               * and then fails with a timeout nobody can act on. */
-              const reason = `This project has no checkout ${event.checkoutId ?? '(none named)'}.`;
-              if (event.turnId === undefined) {
-                /* The `branch` child asks for this cut before it branches, and
-                   waited out its whole bound when nobody answered — a *New
-                   branch* on a project with nothing selected (finding 10). */
-                enqueue.sendTo('branch', {
-                  type: 'cutFailed',
-                  checkoutId: event.checkoutId,
-                  trigger: event.trigger,
-                  reason,
-                  code: 'CHECKOUT_UNKNOWN',
-                });
-                return;
-              }
-              const turnRef = context.turnRefs[event.turnId];
-              if (turnRef !== undefined) {
-                enqueue.sendTo(turnRef, {
-                  type: 'cutFailed',
-                  trigger: event.trigger,
-                  turnId: event.turnId,
-                  reason,
-                });
-              }
-              return;
-            }
-            /*
-             * A trigger-only cut never takes a running turn's bytes (a2 R1).
-             *
-             * `save`, `idle`, `hidden` and `close` are ambient: the tab going
-             * hidden and the page unloading fire on their own schedule, and the
-             * one that lands mid-turn would pass the I5 gate on the agent's
-             * writes, record them as the person's, and leave the turn's own
-             * settlement with an unchanged tree and no revision (AC9). The turn
-             * is already recording them, so the honest answer is the same one an
-             * unchanged tree gets — settled, never a silent drop.
-             */
-            if (event.turnId === undefined && heldByTurn(context, event.checkoutId ?? '')) {
-              enqueue.raise({
-                type: 'nothingToSave',
-                checkoutId: event.checkoutId ?? '',
-                trigger: event.trigger,
-              });
-              return;
-            }
-            enqueue.sendTo(ref, {
-              type: 'cut',
-              trigger: event.trigger,
-              ...(event.turnId === undefined ? {} : { turnId: event.turnId }),
-              leaseIds: event.leaseIds,
             });
+            return { context: { turnRefs: { ...context.turnRefs, [event.turnId]: ref } } };
+          }
+          /*
+           * V8: a held turn id delays an admission inside its owner.
+           *
+           * An edit or a *Try again* leases the turn id of the message it
+           * rewinds to, which is the id the previous run of that turn leased.
+           * Refusing it outright put a banner in front of the person for a
+           * condition that clears itself in well under a second — and no page
+           * code read the code to recover from it. The root is what knows when
+           * the hold ends, so the root is what waits.
+           */
+          return { context: bufferAdmission(context, event) };
+        },
+        turnPrepared: {
+          context: ({ context, event }) => ({
+            chatCheckouts: { ...context.chatCheckouts, [event.chatId]: event.checkoutId },
           }),
         },
-        revisionMinted: {
-          actions: [
-            'answerCut',
-            /* The scheduler hears about every revision this project mints, and
-               nothing else decides when a push happens (D28, W13). A cut the
-               root declined above never reaches here, so the durable queue can
-               never record a phantom (W6-a2 R1). */
-            sendTo('sync', ({ event }) => event),
-            emit(({ event }) => event),
-          ],
+        cut: ({ context, event }, enq) => {
+          const ref = event.checkoutId === undefined ? undefined : context.checkoutRefs[event.checkoutId];
+          if (ref === undefined) {
+            /* R5: a dropped request is a turn that waits out its whole bound
+             * and then fails with a timeout nobody can act on. */
+            const reason = `This project has no checkout ${event.checkoutId ?? '(none named)'}.`;
+            if (event.turnId === undefined) {
+              /* The `branch` child asks for this cut before it branches, and
+                 waited out its whole bound when nobody answered — a *New
+                 branch* on a project with nothing selected (finding 10). */
+              enq.sendTo('branch', {
+                type: 'cutFailed',
+                checkoutId: event.checkoutId,
+                trigger: event.trigger,
+                ...(event.requestId === undefined ? {} : { requestId: event.requestId }),
+                reason,
+                code: 'CHECKOUT_UNKNOWN',
+              });
+              enq.sendTo('restore', {
+                type: 'cutFailed',
+                checkoutId: event.checkoutId,
+                trigger: event.trigger,
+                ...(event.requestId === undefined ? {} : { requestId: event.requestId }),
+                reason,
+              });
+              /* The scheduler's merge cut, too, rather than its pull deadline (RV-W5b F8). */
+              enq.sendTo('sync', {
+                type: 'cutFailed',
+                checkoutId: event.checkoutId,
+                trigger: event.trigger,
+                ...(event.requestId === undefined ? {} : { requestId: event.requestId }),
+                reason,
+              });
+              return {};
+            }
+            const turnRef = context.turnRefs[event.turnId];
+            if (turnRef !== undefined) {
+              enq.sendTo(turnRef, {
+                type: 'cutFailed',
+                trigger: event.trigger,
+                turnId: event.turnId,
+                reason,
+              });
+            }
+            return {};
+          }
+          /*
+           * A trigger-only cut never takes a running turn's bytes (a2 R1).
+           *
+           * `save`, `idle`, `hidden` and `close` are ambient: the tab going
+           * hidden and the page unloading fire on their own schedule, and the
+           * one that lands mid-turn would pass the I5 gate on the agent's
+           * writes, record them as the person's, and leave the turn's own
+           * settlement with an unchanged tree and no revision (AC9). The turn
+           * is already recording them, so the honest answer is the same one an
+           * unchanged tree gets — settled, never a silent drop.
+           */
+          if (event.turnId === undefined && heldByTurn(context, event.checkoutId ?? '')) {
+            /* A1: a restore would write over what the turn is recording, so it
+             * is refused before anything is cut — in Switch's own words. */
+            if (event.trigger === 'restore') {
+              enq.sendTo('restore', {
+                type: 'cutFailed',
+                checkoutId: event.checkoutId,
+                trigger: event.trigger,
+                ...(event.requestId === undefined ? {} : { requestId: event.requestId }),
+                reason: turnHoldsFilesMessage,
+                code: 'LEASE_UNAVAILABLE',
+              });
+              return {};
+            }
+            enq.raise({
+              type: 'nothingToSave',
+              checkoutId: event.checkoutId ?? '',
+              trigger: event.trigger,
+              ...(event.requestId === undefined ? {} : { requestId: event.requestId }),
+            });
+            return {};
+          }
+          enq.sendTo(ref, {
+            type: 'cut',
+            trigger: event.trigger,
+            ...(event.turnId === undefined ? {} : { turnId: event.turnId }),
+            leaseIds: event.leaseIds,
+            ...(event.restoredFrom === undefined ? {} : { restoredFrom: event.restoredFrom }),
+            ...(event.requestId === undefined ? {} : { requestId: event.requestId }),
+          });
+          return {};
+        },
+        /* The admissions A2 held are raised again; any still held re-buffer. */
+        restoreSettled: ({ context }, enq) =>
+          context.pendingAdmissions.length === 0 ? {} : { context: releaseAdmissions(context, enq) },
+        revisionMinted: ({ children, context, event }, enq) => {
+          answerCut(context, enq, event);
+          /* The scheduler hears about every revision this project mints, and
+             nothing else decides when a push happens (D28, W13). A cut the
+             root declined above never reaches here, so the durable queue can
+             never record a phantom (W6-a2 R1). Verbatim, whatever its trigger,
+             so the scheduler is addressed as any actor. */
+          const scheduler: AnyActorRef | undefined = children.sync;
+          enq.sendTo(scheduler, event);
+          /* A mint on the selection is a new operation *Undo* could reverse (D15). */
+          if (event.checkoutId === context.selectedCheckoutId) {
+            enq.sendTo('restore', { type: 'lineMinted' });
+          }
+          enq.emit(event);
+          return {};
         },
         /* Re-emitted as well as routed (W6): a trigger-only cut — `save`,
          * `idle`, `hidden`, `close` — has no turn to answer, and its outcome is
          * exactly what *Nothing changed since Rev N* renders and what a host
          * quitting on a `close` flush waits for. */
-        nothingToSave: {
-          actions: ['answerCut', emit(({ event }) => event)],
+        nothingToSave: ({ context, event }, enq) => {
+          answerCut(context, enq, event);
+          enq.emit(event);
+          return {};
         },
-        cutFailed: {
-          actions: ['answerCut', emit(({ event }) => event)],
+        cutFailed: ({ context, event }, enq) => {
+          answerCut(context, enq, event);
+          enq.emit(event);
+          return {};
         },
-        casLost: {
-          actions: ['answerCut', emit(({ event }) => event)],
+        casLost: ({ context, event }, enq) => {
+          answerCut(context, enq, event);
+          enq.emit(event);
+          return {};
         },
-        turnFinalized: {
-          actions: [
-            sendTo('checkouts', ({ event }) => event),
-            emit(({ event }) => event),
-            { type: 'dropTurn', params: ({ event }) => ({ turnId: event.turnId }) },
-          ],
+        turnFinalized: ({ children, context, event }, enq) =>
+          settleTurn(context, enq, { registry: children.checkouts, event }),
+        turnConflicted: ({ children, context, event }, enq) =>
+          settleTurn(context, enq, { registry: children.checkouts, event }),
+        leaseStale: ({ event }, enq) => {
+          enq.sendTo('checkouts', event);
+          return {};
         },
-        turnConflicted: {
-          actions: [
-            sendTo('checkouts', ({ event }) => event),
-            emit(({ event }) => event),
-            { type: 'dropTurn', params: ({ event }) => ({ turnId: event.turnId }) },
-          ],
+        leaseWritten: ({ event }, enq) => {
+          enq.sendTo('checkouts', event);
+          return {};
         },
-        leaseStale: { actions: sendTo('checkouts', ({ event }) => event) },
-        leaseWritten: { actions: sendTo('checkouts', ({ event }) => event) },
-        turnReleased: {
-          actions: [
-            sendTo('checkouts', ({ event }) => event),
-            emit(({ event }) => event),
-            { type: 'dropTurn', params: ({ event }) => ({ turnId: event.turnId }) },
-          ],
-        },
+        turnReleased: ({ children, context, event }, enq) =>
+          settleTurn(context, enq, { registry: children.checkouts, event }),
         /* R9: the host drives the tree through the root, so the root owns the
          * inbound routes as well as the outbound ones. */
-        changed: {
-          actions: enqueueActions(({ context, enqueue, event }) => {
-            const ref = context.checkoutRefs[event.checkoutId];
-            if (ref !== undefined) {
-              enqueue.sendTo(ref, { type: 'changed', paths: event.paths, generation: event.generation });
-            }
-          }),
+        changed: ({ context, event }, enq) => {
+          const ref = context.checkoutRefs[event.checkoutId];
+          if (ref !== undefined) {
+            enq.sendTo(ref, { type: 'changed', paths: event.paths, generation: event.generation });
+          }
+          return {};
         },
-        turnCompleted: {
-          actions: enqueueActions(({ context, enqueue, event }) => {
-            const ref = context.turnRefs[event.turnId];
-            if (ref !== undefined) {
-              enqueue.sendTo(ref, { type: 'turnCompleted' });
-            }
-          }),
+        turnCompleted: ({ context, event }, enq) => {
+          const ref = context.turnRefs[event.turnId];
+          if (ref !== undefined) {
+            enq.sendTo(ref, { type: 'turnCompleted' });
+          }
+          return {};
         },
         /*
          * T4-02: a turn-ending verb reaches the queue as well as the ref.
@@ -1018,126 +1069,151 @@ export const projectRevisionsMachine = setup({
          * *is* its liveness signal, and the run id is what tells the run that
          * gave up from the one still recording.
          */
-        turnAbandoned: {
-          actions: enqueueActions(({ context, enqueue, event }) => {
-            const ref = endingTurnRef(context, event);
-            if (ref !== undefined) {
-              enqueue.sendTo(ref, { type: 'turnAbandoned' });
-            }
-            if (event.runId !== undefined) {
-              enqueue.assign({
-                pendingAdmissions: context.pendingAdmissions.filter((admission) => admission.runId !== event.runId),
-              });
-            }
-          }),
+        turnAbandoned: ({ context, event }, enq) => {
+          const ref = endingTurnRef(context, event);
+          if (ref !== undefined) {
+            enq.sendTo(ref, { type: 'turnAbandoned' });
+          }
+          return event.runId === undefined
+            ? {}
+            : {
+                context: {
+                  pendingAdmissions: context.pendingAdmissions.filter((admission) => admission.runId !== event.runId),
+                },
+              };
         },
         /* The other half of the same verb, and the same queue rule. */
-        release: {
-          actions: enqueueActions(({ context, enqueue, event }) => {
-            const ref = endingTurnRef(context, event);
-            if (ref !== undefined) {
-              enqueue.sendTo(ref, { type: 'release' });
-            }
-            if (event.runId !== undefined) {
-              enqueue.assign({
-                pendingAdmissions: context.pendingAdmissions.filter((admission) => admission.runId !== event.runId),
-              });
-            }
-          }),
+        release: ({ context, event }, enq) => {
+          const ref = endingTurnRef(context, event);
+          if (ref !== undefined) {
+            enq.sendTo(ref, { type: 'release' });
+          }
+          return event.runId === undefined
+            ? {}
+            : {
+                context: {
+                  pendingAdmissions: context.pendingAdmissions.filter((admission) => admission.runId !== event.runId),
+                },
+              };
         },
         /* R11: registry facts a host has to show reach it through the root. */
-        leaseRetired: { actions: emit(({ event }) => event) },
-        removalOffered: { actions: emit(({ event }) => event) },
-        checkoutFailed: {
-          actions: [
-            emit(({ event }) => event),
-            sendTo('branch', ({ event }) => ({
-              type: 'operationFailed',
-              reason: event.reason,
-              ...(event.code === undefined ? {} : { code: event.code }),
-            })),
-            /* A registry that failed will never announce, so an admission held
-             * for it would wait out its host's whole bound. Release the buffer
-             * instead: the turn's own `prepare` is what refuses it, with the
-             * reason — which is how a host refuses a run rather than running it
-             * unrecorded (I-EDIT). */
-            enqueueActions(({ context, enqueue }) => {
-              enqueue.assign({ registrySettled: true });
-              if (context.pendingAdmissions.length === 0) {
-                return;
-              }
-              for (const admission of context.pendingAdmissions) {
-                enqueue.raise({ type: 'admitTurn', ...admission });
-              }
-              enqueue.assign({ pendingAdmissions: [] });
-            }),
-          ],
+        leaseRetired: ({ event }, enq) => {
+          enq.emit(event);
+          /* A fetch parked behind this lease applies now (D12, rule 9). */
+          enq.sendTo('sync', event);
+          return {};
         },
-        checkoutChanged: {
-          actions: [
-            assign({
-              checkouts: ({ context, event }) =>
-                context.checkouts.map((checkout) =>
-                  checkout.id === event.checkoutId
-                    ? { ...checkout, headRevisionId: event.revisionId, branch: event.branch }
-                    : checkout,
-                ),
-            }),
-            enqueueActions(({ context, enqueue, event }) => {
-              const ref = context.checkoutRefs[event.checkoutId];
-              if (ref !== undefined) {
-                enqueue.sendTo(ref, {
-                  type: 'headChanged',
-                  revisionId: event.revisionId,
-                  treeId: event.treeId,
-                });
-              }
-            }),
-          ],
+        removalOffered: ({ event }, enq) => {
+          enq.emit(event);
+          return {};
         },
-        pinTo: {
-          actions: [
-            assign({
-              selectedCheckoutId: ({ event }) => event.checkoutId,
-              follow: 'pinned',
-              followedChatId: undefined,
-            }),
-            'announceSelection',
-          ],
+        childToast: ({ event }, enq) => {
+          enq.emit(event);
+          return {};
+        },
+        checkoutFailed: ({ context, event }, enq) => {
+          enq.emit(event);
+          enq.sendTo('branch', {
+            type: 'operationFailed',
+            reason: event.reason,
+            ...(event.code === undefined ? {} : { code: event.code }),
+          });
+          /* A registry that failed will never announce, so an admission held
+           * for it would wait out its host's whole bound. Release the buffer
+           * instead: the turn's own `prepare` is what refuses it, with the
+           * reason — which is how a host refuses a run rather than running it
+           * unrecorded (I-EDIT). */
+          if (context.pendingAdmissions.length === 0) {
+            return { context: { registrySettled: true } };
+          }
+          return { context: { registrySettled: true, ...releaseAdmissions(context, enq) } };
+        },
+        checkoutChanged: ({ context, event }, enq) => {
+          const ref = context.checkoutRefs[event.checkoutId];
+          if (ref !== undefined) {
+            /* A line that moved can land a decision made on another device: the
+             * conflicted revision is then this line's ancestor and its card goes
+             * (D14). Only re-read while a conflict is listed. */
+            if (context.conflicts.length > 0) {
+              enq.sendTo('checkouts', { type: 'open' });
+            }
+            /* A live Switch keeps the checkout id and moves its line (N9). */
+            if (event.branch !== undefined) {
+              enq.sendTo(ref, { type: 'lineChanged', branch: event.branch });
+            }
+            enq.sendTo(ref, {
+              type: 'headChanged',
+              revisionId: event.revisionId,
+              treeId: event.treeId,
+            });
+          }
+          /* A fact that names no branch moved a head, not a line: the record
+           * keeps its branch, so `line` never goes `undefined` under it (D3). */
+          const checkouts = context.checkouts.map((checkout) =>
+            checkout.id === event.checkoutId
+              ? { ...checkout, headRevisionId: event.revisionId, branch: event.branch ?? checkout.branch }
+              : checkout,
+          );
+          /* A live *Switch* moves the selection's line under the same id (M1). */
+          if (
+            event.checkoutId === context.selectedCheckoutId &&
+            selectedRecord({ ...context, checkouts })?.branch !== selectedRecord(context)?.branch
+          ) {
+            announceSelection({ ...context, checkouts }, enq);
+          }
+          /* D50: the scheduler pulls the live checkout's branch. */
+          if (event.checkoutId === context.liveCheckoutId && event.branch !== undefined) {
+            enq.sendTo('sync', { type: 'branchChanged', branch: event.branch });
+          }
+          return { context: { checkouts } };
+        },
+        pinTo: ({ context, event }, enq) => {
+          const patch = {
+            selectedCheckoutId: event.checkoutId,
+            follow: 'pinned',
+            followedChatId: undefined,
+          } satisfies ProjectRevisionsPatch;
+          announceSelection({ ...context, ...patch }, enq);
+          return { context: patch };
         },
         /* The root routes, it does not interpret: a host sends one verb per
          * surface and the child owns what the verb means (A38). */
-        remote: {
-          actions: enqueueActions(({ enqueue, event }) => {
-            /* Replacing a destination first retires the old scheduler. An
-             * in-flight request may finish against the old remote, but no
-             * queued lease is allowed to wake up against the replacement. */
-            if (event.event.type === 'connect') {
-              enqueue.sendTo('sync', { type: 'remoteDisconnected' });
-            }
-            enqueue.sendTo('remote', event.event);
-          }),
+        remote: ({ event }, enq) => {
+          /* Replacing a destination first retires the old scheduler. An
+           * in-flight request may finish against the old remote, but no
+           * queued lease is allowed to wake up against the replacement. */
+          if (event.event.type === 'connect') {
+            enq.sendTo('sync', { type: 'remoteDisconnected' });
+          }
+          enq.sendTo('remote', event.event);
+          return {};
         },
-        branch: {
-          actions: sendTo('branch', ({ context, event }) => {
-            if (event.event.type !== 'create') {
-              return event.event;
-            }
-            /* P3: a branch starts from what the person sees, and only the root
-             * knows where they are standing. The sequence — record, then add —
-             * is the child's; this names the selection it works from. */
-            const selected = selectedRecord(context);
-            const head =
-              context.checkoutStatus[context.selectedCheckoutId ?? '']?.headRevisionId ?? selected?.headRevisionId;
-            return {
-              ...event.event,
-              ...(context.selectedCheckoutId === undefined ? {} : { checkoutId: context.selectedCheckoutId }),
-              ...(head === undefined ? {} : { head }),
-            };
-          }),
+        branch: ({ context, event }, enq) => {
+          if (event.event.type !== 'create') {
+            enq.sendTo('branch', event.event);
+            return {};
+          }
+          /* P3: a branch starts from what the person sees, and only the root
+           * knows where they are standing. The sequence — record, then add —
+           * is the child's; this names the selection it works from. */
+          const selected = selectedRecord(context);
+          const head =
+            context.checkoutStatus[context.selectedCheckoutId ?? '']?.headRevisionId ?? selected?.headRevisionId;
+          enq.sendTo('branch', {
+            ...event.event,
+            ...(context.selectedCheckoutId === undefined ? {} : { checkoutId: context.selectedCheckoutId }),
+            ...(head === undefined ? {} : { head }),
+          });
+          return {};
         },
-        publish: { actions: sendTo('publish', ({ event }) => event.event) },
-        sync: { actions: sendTo('sync', ({ event }) => event.event) },
+        publish: ({ event }, enq) => {
+          enq.sendTo('publish', event.event);
+          return {};
+        },
+        sync: ({ event }, enq) => {
+          enq.sendTo('sync', event.event);
+          return {};
+        },
         /*
          * The conflict card's verbs, addressed to one conflicted revision (S33).
          *
@@ -1145,60 +1221,71 @@ export const projectRevisionsMachine = setup({
          * revision and a project can hold several at once — one per branch that
          * was merged and did not settle.
          */
-        resolution: {
-          actions: enqueueActions(({ context, enqueue, event }) => {
-            const ref = context.resolutionRefs[event.revisionId];
-            if (ref !== undefined) {
-              enqueue.sendTo(ref, event.event);
-            }
-          }),
+        resolution: ({ context, event }, enq) => {
+          const ref = context.resolutionRefs[event.revisionId];
+          if (ref !== undefined) {
+            enq.sendTo(ref, event.event);
+          }
+          return {};
         },
-        resolutionChanged: { actions: [] },
+        resolutionChanged: {},
         /* The merge moved the source branch onto a conflicted revision, so the
          * registry is re-read; `syncResolutions` then spawns the child and the
          * *Needs resolution* card exists without anyone reopening the project.
          * Re-emitted too, because a verb that changed nothing a person can see
          * has to say so (A25) — the card says the rest. */
-        remoteConnected: {
-          actions: sendTo('sync', ({ event }) => ({ type: 'remoteConnected', remote: event.name })),
+        remoteConnected: ({ event }, enq) => {
+          enq.sendTo('sync', { type: 'remoteConnected', remote: event.name });
+          return {};
         },
-        remoteDisconnected: {
-          actions: sendTo('sync', { type: 'remoteDisconnected' }),
+        remoteDisconnected: (_, enq) => {
+          enq.sendTo('sync', { type: 'remoteDisconnected' });
+          return {};
         },
-        mergeConflicted: {
-          actions: enqueueActions(({ enqueue, event }) => {
-            enqueue.emit(event);
-            enqueue.sendTo('checkouts', { type: 'open' });
-          }),
+        mergeConflicted: ({ event }, enq) => {
+          enq.emit(event);
+          enq.sendTo('checkouts', { type: 'open' });
+          return {};
         },
-        branchMerged: { actions: sendTo('checkouts', { type: 'open' }) },
+        branchMerged: (_, enq) => {
+          enq.sendTo('checkouts', { type: 'open' });
+          return {};
+        },
         /* The head moved off the conflicted revision, so the registry is re-read
          * and `syncResolutions` retires the child on the answer — one writer of
          * the ref table, exactly as `checkoutRefs` has one. */
-        conflictResolved: {
-          actions: enqueueActions(({ enqueue, event }) => {
-            enqueue.emit({ type: 'conflictResolved', revisionId: event.revisionId, branch: event.branch });
-            enqueue.sendTo('checkouts', { type: 'open' });
-            /* And the scheduler, or the Sync row would still read `Needs
-             * resolution` after the person composed the two lines: `conflicted`
-             * otherwise leaves only on connectivity or a correlated `syncNow`
-             * (W13 review 2 R6, P37). The branch is what W10's resolution
-             * settled; `sync` matches it against the ref it recorded. */
-            enqueue.sendTo('sync', {
-              type: 'conflictResolved',
-              revisionId: event.revisionId,
-              ...(event.branch === undefined ? {} : { ref: `refs/heads/${event.branch}` }),
-            });
-          }),
+        conflictResolved: ({ event }, enq) => {
+          enq.emit({ type: 'conflictResolved', revisionId: event.revisionId, branch: event.branch });
+          enq.sendTo('checkouts', { type: 'open' });
+          /* And the scheduler, or the Sync row would still read `Needs
+           * resolution` after the person composed the two lines: `conflicted`
+           * otherwise leaves only on connectivity or a correlated `syncNow`
+           * (W13 review 2 R6, P37). The branch is what W10's resolution
+           * settled; `sync` matches it against the ref it recorded. */
+          enq.sendTo('sync', {
+            type: 'conflictResolved',
+            revisionId: event.revisionId,
+            ...(event.branch === undefined ? {} : { ref: `refs/heads/${event.branch}` }),
+          });
+          return {};
         },
         /* The marker text goes to the page that has an editor to show it in. */
-        conflictMaterialized: { actions: emit(({ event }) => event) },
+        conflictMaterialized: ({ event }, enq) => {
+          enq.emit(event);
+          return {};
+        },
         /* And so does its refusal: a surface that asked for a file learns that
          * nothing is coming from a fact, not from a timeout (C44). */
-        conflictMaterializationFailed: { actions: emit(({ event }) => event) },
+        conflictMaterializationFailed: ({ event }, enq) => {
+          enq.emit(event);
+          return {};
+        },
         /* *Ask chat to resolve*: only a page or a CLI can start a chat, and both
          * hold the root (A38), so the request is re-emitted here. */
-        turnRequested: { actions: emit(({ event }) => event) },
+        turnRequested: ({ event }, enq) => {
+          enq.emit(event);
+          return {};
+        },
         /* Verbatim to the machine that asked for the push, `outcome` included:
          * dropping it would let a failed or queued push publish a row for a
          * name the remote does not have (W8 review R3, P39). */
@@ -1206,97 +1293,131 @@ export const projectRevisionsMachine = setup({
          * push through here, because siblings speak through the parent (A38).
          * Without this edge `publish` could only declare its own success and
          * P39's three other outcomes were unreachable (W22 DEF-W22-2). */
-        syncNow: {
-          actions: sendTo('sync', ({ event }) => ({
+        syncNow: ({ event }, enq) => {
+          enq.sendTo('sync', {
             type: 'syncNow',
             pushId: event.pushId,
             ...(event.remote === undefined ? {} : { remote: event.remote }),
-          })),
+          });
+          return {};
         },
-        pushSettled: {
-          actions: sendTo('publish', ({ event }) => ({
+        pushSettled: ({ event }, enq) => {
+          enq.sendTo('publish', {
             type: 'pushSettled',
             pushId: event.pushId,
             outcome: event.outcome,
-          })),
+          });
+          return {};
         },
         /* The registry's two verbs, which `branch` asks for through here
          * rather than opening a second writer of the same records. A router,
          * not a sequencer: what a new branch starts from is the `branch`
          * child's, which is the state machine that has the waits for it (P3). */
-        addCheckout: { actions: sendTo('checkouts', ({ event }) => event) },
-        removeCheckout: { actions: sendTo('checkouts', ({ event }) => event) },
-        followChat: {
-          actions: [
-            assign({
-              follow: 'chat',
-              followedChatId: ({ event }) => event.chatId,
-              selectedCheckoutId: ({ context, event }) => context.chatCheckouts[event.chatId] ?? context.liveCheckoutId,
-            }),
-            'announceSelection',
-          ],
+        addCheckout: ({ event }, enq) => {
+          enq.sendTo('checkouts', event);
+          return {};
+        },
+        removeCheckout: ({ event }, enq) => {
+          enq.sendTo('checkouts', event);
+          return {};
+        },
+        followChat: ({ context, event }, enq) => {
+          const patch = {
+            follow: 'chat',
+            followedChatId: event.chatId,
+            selectedCheckoutId: context.chatCheckouts[event.chatId] ?? context.liveCheckoutId,
+          } satisfies ProjectRevisionsPatch;
+          announceSelection({ ...context, ...patch }, enq);
+          return { context: patch };
         },
         /* D10: one verb. Re-root when the branch has a checkout; otherwise apply
          * to the live checkout, but only while no lease holds it. */
-        switch: {
-          actions: enqueueActions(({ context, enqueue, event }) => {
-            const linked = context.checkouts.find((checkout) => checkout.branch === event.branch);
-            if (linked !== undefined) {
-              enqueue.assign({
-                selectedCheckoutId: linked.id,
-                follow: 'pinned',
-                followedChatId: undefined,
-              });
-              enqueue.emit({
-                type: 'switchResolved',
-                branch: event.branch,
-                mode: 'reroot',
-                checkoutId: linked.id,
-              });
-              enqueue('announceSelection');
-              return;
-            }
-            const liveRecord = context.checkouts.find((checkout) => checkout.id === context.liveCheckoutId);
-            if (liveRecord === undefined || liveRecord.leaseRunIds.length > 0) {
-              enqueue.emit({
-                type: 'switchRefused',
-                branch: event.branch,
-                reason:
-                  liveRecord === undefined
-                    ? 'This project has no files open to move.'
-                    : 'An agent is working in this project’s files.',
-              });
-              return;
-            }
-            enqueue.assign({
-              selectedCheckoutId: liveRecord.id,
+        switch: ({ context, event }, enq) => {
+          const linked = context.checkouts.find((checkout) => checkout.branch === event.branch);
+          if (linked !== undefined) {
+            const patch = {
+              selectedCheckoutId: linked.id,
               follow: 'pinned',
               followedChatId: undefined,
-            });
-            enqueue.emit({
+            } satisfies ProjectRevisionsPatch;
+            enq.emit({
               type: 'switchResolved',
               branch: event.branch,
-              mode: 'applyToLive',
-              checkoutId: liveRecord.id,
+              mode: 'reroot',
+              checkoutId: linked.id,
             });
-            /* The resolution is not the application. `branch.machine` owns the
-               verb's lifecycle — its confirmation, its failure edge and the one
-               `applySwitch` actor that writes the tree — so the root hands it
-               the decision it just made rather than a host re-choreographing it
-               from the emit (A38, I20; review R3). */
-            enqueue.sendTo('branch', {
-              type: 'switch',
+            announceSelection({ ...context, ...patch }, enq);
+            return { context: patch };
+          }
+          const liveRecord = context.checkouts.find((checkout) => checkout.id === context.liveCheckoutId);
+          if (liveRecord === undefined || liveRecord.leaseRunIds.length > 0) {
+            enq.emit({
+              type: 'switchRefused',
               branch: event.branch,
-              mode: 'applyToLive',
-              checkoutId: liveRecord.id,
+              reason: liveRecord === undefined ? 'This project has no files open to move.' : turnHoldsFilesMessage,
             });
-            enqueue('announceSelection');
-          }),
+            return {};
+          }
+          const patch = {
+            selectedCheckoutId: liveRecord.id,
+            follow: 'pinned',
+            followedChatId: undefined,
+          } satisfies ProjectRevisionsPatch;
+          enq.emit({
+            type: 'switchResolved',
+            branch: event.branch,
+            mode: 'applyToLive',
+            checkoutId: liveRecord.id,
+          });
+          /* The resolution is not the application. `branch.machine` owns the
+             verb's lifecycle — its confirmation, its failure edge and the one
+             `applySwitch` actor that writes the tree — so the root hands it
+             the decision it just made rather than a host re-choreographing it
+             from the emit (A38, I20; review R3). */
+          enq.sendTo('branch', {
+            type: 'switch',
+            branch: event.branch,
+            mode: 'applyToLive',
+            checkoutId: liveRecord.id,
+          });
+          announceSelection({ ...context, ...patch }, enq);
+          return { context: patch };
         },
       },
     },
   },
 });
+
+type ProjectRevisionsMachineDefinition = typeof projectRevisionsMachineDefinition;
+
+/**
+ * The type of {@link projectRevisionsMachine}, named so declarations reference it rather than inline it.
+ *
+ * @public
+ */
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type, typescript/consistent-type-definitions -- an interface, not a type alias: declarations reference an interface by name and would expand an alias (K-17)
+export interface ProjectRevisionsMachine extends ProjectRevisionsMachineDefinition {}
+
+/**
+ * Headless root of one project's revision actor tree.
+ *
+ * @public
+ */
+export const projectRevisionsMachine: ProjectRevisionsMachine = projectRevisionsMachineDefinition;
+
+/**
+ * The line the selected checkout is on, as {@link RevisionLine} names it.
+ *
+ * @param branch - The branch its record tracks, if any.
+ * @param head - Its head revision, if any.
+ * @returns `unknown` with no branch to name, `unborn` before the first revision, else `branch`.
+ */
+const lineOf = (branch: string | undefined, head: string | undefined): RevisionLine =>
+  branch === undefined
+    ? { kind: 'unknown' }
+    : head === undefined
+      ? { kind: 'unborn', name: branch }
+      : { kind: 'branch', name: branch };
 
 /**
  * Selects the coalesced status W3d publishes for this project.
@@ -1312,22 +1433,24 @@ export const selectRevisionStatus = (
   const selected = context.checkouts.find((checkout) => checkout.id === context.selectedCheckoutId);
   const status =
     context.selectedCheckoutId === undefined ? undefined : context.checkoutStatus[context.selectedCheckoutId];
+  const headRevisionId = status?.headRevisionId ?? selected?.headRevisionId;
   return {
     projectId: context.projectId,
     checkoutId: context.selectedCheckoutId,
     checkoutRoot: selected?.root,
-    branch: selected?.branch,
+    line: lineOf(selected?.branch, headRevisionId),
+    registrySettled: context.registrySettled,
     projectDirty: Object.values(context.checkoutStatus).some((entry) => entry.status !== 'clean'),
     dirty: status !== undefined && status.status !== 'clean',
     minting: status?.status === 'minting',
-    headRevisionId: status?.headRevisionId ?? selected?.headRevisionId,
+    headRevisionId,
     follow: context.follow,
     /* A conflicted branch needs a person as much as a failed cut does (A22,
      * the agent-state row `revision.conflicted`), so it counts here too. */
     attention:
       Object.values(context.checkoutStatus).filter((entry) => entry.status === 'failed' || entry.status === 'stale')
         .length + selectConflicts(snapshot).length,
-    restore: selectRestoreFacet(snapshot),
+    restore: selectRestoreFacet(snapshot, headRevisionId),
     remote: selectRemoteFacetOf(snapshot),
     publish: selectPublishFacetOf(snapshot),
     sync: selectSyncFacetOf(snapshot),
@@ -1338,35 +1461,32 @@ export const selectRevisionStatus = (
 };
 
 /**
- * Every conflicted branch, with what a person has chosen on it so far.
+ * Every undecided conflicted revision, with what a person has chosen on it so far.
  *
- * Two sources on purpose, each answering what only it can: the *records* say a
- * conflict exists (so a reload still shows the card), and the conflicted
+ * Two sources on purpose, each answering what only it can: the conflict lines
+ * say a conflict exists (so a reload, or another device, still shows the card), and the conflicted
  * revision's own `resolution` child says which files are left and which side
  * each has been given. Before that child has read the conflict the card renders
  * with no rows, which is exactly what is known.
  *
  * @param snapshot - Current root snapshot.
- * @returns One facet per conflicted branch head.
+ * @returns One facet per undecided conflicted revision.
  */
 const selectConflicts = (snapshot: SnapshotFrom<typeof projectRevisionsMachine>): readonly RevisionConflictFacet[] => {
   const { context } = snapshot;
-  return context.checkouts.flatMap((checkout) => {
-    if (checkout.conflicted !== true || checkout.headRevisionId === undefined) {
-      return [];
-    }
-    const child = context.resolutionRefs[checkout.headRevisionId]?.getSnapshot();
+  return context.conflicts.map((conflict) => {
+    const child = context.resolutionRefs[conflict.revisionId]?.getSnapshot();
     const facet = child === undefined ? undefined : selectResolutionFacet(child);
-    return [
-      {
-        revisionId: checkout.headRevisionId,
-        branch: checkout.branch,
-        labels: facet?.labels,
-        paths: facet?.paths ?? [],
-        busy: facet?.busy ?? true,
-        ready: facet?.ready ?? false,
-      },
-    ];
+    return {
+      revisionId: conflict.revisionId,
+      branch: conflict.line,
+      into: conflict.into,
+      foreign: conflict.foreign,
+      labels: facet?.labels,
+      paths: facet?.paths ?? [],
+      busy: facet?.busy ?? true,
+      ready: facet?.ready ?? false,
+    };
   });
 };
 
@@ -1384,7 +1504,10 @@ const selectBranches = (snapshot: SnapshotFrom<typeof projectRevisionsMachine>):
       : [
           {
             name: checkout.branch,
-            head: checkout.headRevisionId,
+            /* The live child's head first, as `headRevisionId` reads it: the
+               registry record lags a save, and the row then counted the
+               branch behind itself (D47). */
+            head: context.checkoutStatus[checkout.id]?.headRevisionId ?? checkout.headRevisionId,
             checkoutId: checkout.id,
             checkoutRoot: checkout.root,
             /* The registry's own record, not the root's routing memory: a chip
@@ -1395,9 +1518,24 @@ const selectBranches = (snapshot: SnapshotFrom<typeof projectRevisionsMachine>):
         ],
   );
   const known = new Set(checkedOut.map((branch) => branch.name));
+  /* A conflict line is listed while it holds a decision nobody landed, and
+   * hidden once the line it decides contains it (D14). */
+  const undecided = new Map<string, string>();
+  for (const conflict of context.conflicts) {
+    if (!undecided.has(conflict.line)) {
+      undecided.set(conflict.line, conflict.revisionId);
+    }
+  }
+  const isConflictLine = (name: string): boolean => name === 'conflicts' || name.startsWith('conflicts/');
+  const refOnly = [
+    ...context.availableBranches.filter((branch) => !isConflictLine(branch.name) || undecided.has(branch.name)),
+    ...[...undecided]
+      .filter(([line]) => !context.availableBranches.some((branch) => branch.name === line))
+      .map(([name, head]) => ({ name, head })),
+  ];
   return [
     ...checkedOut,
-    ...context.availableBranches
+    ...refOnly
       .filter((branch) => !known.has(branch.name))
       .map((branch) => ({
         name: branch.name,
@@ -1489,21 +1627,37 @@ const selectPublishFacetOf = (snapshot: SnapshotFrom<typeof projectRevisionsMach
  * because a copy would be a second truth to keep in step.
  *
  * @param snapshot - Current root snapshot.
- * @returns The facts the restore confirmation renders.
+ * @param headRevisionId - The selected checkout's head, which an undo must still be on.
+ * @returns The facts the restore confirmation and *Undo restore* render.
  */
 const selectRestoreFacet = (
   snapshot: SnapshotFrom<typeof projectRevisionsMachine>,
+  headRevisionId: string | undefined,
 ): RevisionStatusProjection['restore'] => {
   const restore = snapshot.children.restore?.getSnapshot();
   if (restore === undefined) {
-    return { asking: false, busy: false, removedPathCount: 0, dirty: false, revisionNumber: undefined };
+    return {
+      asking: false,
+      busy: false,
+      removedPathCount: 0,
+      dirty: false,
+      revisionNumber: undefined,
+      undoable: false,
+      canUndo: false,
+    };
   }
+  const undoTarget = restore.context.restoredRevisionId;
   return {
     asking: selectRestoreNeedsConfirmation(restore),
     busy: selectRestoreBusy(restore),
     removedPathCount: restore.context.removedPathCount,
     dirty: restore.context.dirty,
     revisionNumber: restore.context.revisionNumber,
+    /* The machine's own undo target, and only while it is still the line's
+     * head: a reload, another device's restore and a save on top all read
+     * false, so no surface offers an Undo the machine would refuse (M1). */
+    undoable: undoTarget !== undefined && undoTarget === headRevisionId,
+    canUndo: restore.context.canUndo,
   };
 };
 

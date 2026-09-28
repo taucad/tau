@@ -39,13 +39,14 @@ export const acpCliProbeTimeout = 10_000;
  *
  * Its own budget, spent in parallel with {@link acpCliProbeTimeout}'s: the
  * version probe measures a CLI that answers in milliseconds, while this one
- * opens a real vendor session (Claude measured at 1.9 s on an M-series host),
+ * opens a real vendor session (Codex took 6.1 s through a cold packaged
+ * app.asar adapter on an M-series host),
  * and folding them into one number would either kill the model probe or make
  * every boot wait on the slower question (EQ1 A).
  *
  * @public
  */
-export const acpModelProbeTimeout = 5000;
+export const acpModelProbeTimeout = 15_000;
 
 /** One reviewed external agent: its adapter pin and everything Tau knows about it. @public */
 export type AcpAgentProfile = {

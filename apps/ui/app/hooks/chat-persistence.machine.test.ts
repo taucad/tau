@@ -5,6 +5,7 @@ import { unansweredEvents } from '@taucad/xstate-testing/paths';
 import type { Chat } from '@taucad/chat';
 import type { ChatError } from '@taucad/types';
 import { chatPersistenceIgnoredEvents, chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
+import type { ChatLoadOutput } from '#hooks/chat-persistence.machine.js';
 
 const refusal: ChatError = {
   category: 'generic',
@@ -29,7 +30,11 @@ describe('chatPersistenceMachine', () => {
   it('hydrates the selected chat, including its execution, kernel and refusal', async () => {
     const actor = createActor(
       chatPersistenceMachine.provide({
-        actors: { loadChatActor: createAsyncLogic({ run: async () => ({ chat: chat('chat_a') }) }) },
+        actors: {
+          loadChatActor: createAsyncLogic<ChatLoadOutput, { chatId: string }>({
+            run: async () => ({ chat: chat('chat_a') }),
+          }),
+        },
       }),
       { input: {} },
     ).start();
@@ -50,7 +55,7 @@ describe('chatPersistenceMachine', () => {
     const actor = createActor(
       chatPersistenceMachine.provide({
         actors: {
-          loadChatActor: createAsyncLogic({
+          loadChatActor: createAsyncLogic<ChatLoadOutput, { chatId: string }>({
             run: async ({ input }) =>
               input.chatId === 'chat_a'
                 ? new Promise<{ chat: Chat }>((resolve) => {
@@ -78,22 +83,25 @@ describe('chatPersistenceMachine', () => {
     const actor = createActor(
       chatPersistenceMachine.provide({
         actors: {
-          persistActiveExecutionActor: createAsyncLogic({
+          persistActiveExecutionActor: createAsyncLogic<
+            void,
+            { chatId: string; activeExecution: Chat['activeExecution'] }
+          >({
             run: async ({ input }) => {
               writes.push(`execution:${input.chatId}:${input.activeExecution?.kind}`);
             },
           }),
-          persistActiveKernelActor: createAsyncLogic({
+          persistActiveKernelActor: createAsyncLogic<void, { chatId: string; activeKernel: Chat['activeKernel'] }>({
             run: async ({ input }) => {
               writes.push(`kernel:${input.chatId}:${input.activeKernel}`);
             },
           }),
-          persistErrorActor: createAsyncLogic({
+          persistErrorActor: createAsyncLogic<void, { chatId: string; error: ChatError }>({
             run: async ({ input }) => {
               writes.push(`refusal:${input.chatId}:${input.error.code}`);
             },
           }),
-          clearErrorActor: createAsyncLogic({
+          clearErrorActor: createAsyncLogic<void, { chatId: string }>({
             run: async ({ input }) => {
               writes.push(`clear:${input.chatId}`);
             },

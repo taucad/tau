@@ -1029,7 +1029,7 @@ const machineDefinition = setup({
  */
 export const acpSessionMachine = machineDefinition.createMachine({
   id: 'acpSession',
-  version: '1',
+  version: '2',
   context: ({ input }) => ({
     key: input.key,
     parentRef: input.parentRef,

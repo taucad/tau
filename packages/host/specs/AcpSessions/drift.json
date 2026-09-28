@@ -38,7 +38,10 @@
     "acpSession.idle.persisting.sessionUpdate": "Stutter",
     "acpSession.idle.persisting.xstate.done.actor": "Dequeued",
     "acpSession.idle.persisting.xstate.error.actor": "Stutter",
+    "acpSession.idle.probing.callSettled": "Stutter",
+    "acpSession.idle.probing.lend": "Acquire",
     "acpSession.idle.resting.lend": "Acquire",
+    "acpSession.idle.resting.probeModel": "Stutter",
     "acpSession.idle.resting.sessionUpdate": "Stutter",
     "acpSession.killDue": "Stutter",
     "acpSession.lend": "Stutter",
@@ -51,6 +54,7 @@
     "acpSession.opening.starting.publishing.xstate.done.actor": "Stutter",
     "acpSession.opening.starting.publishing.xstate.error.actor": "Unmodelled",
     "acpSession.opening.starting.xstate.timeout": "Cancel",
+    "acpSession.probeModel": "Stutter",
     "acpSession.recorded": "Stutter",
     "acpSession.sessionUpdate": "Stutter",
     "acpSession.vendorAnswered": "Stutter",
@@ -91,6 +95,7 @@
     "lentFailed",
     "lentReady",
     "opened",
+    "probeModel",
     "recorded",
     "sessionUpdate",
     "turnEnded",
@@ -98,11 +103,11 @@
     "vendorRequest"
   ],
   "specs": {
-    "AcpSessions.tla": "7418ac8ff24ffb2a12ac5a35b5f7a9d705d4c16810a6e5811df49a0c63b9ae4f"
+    "AcpSessions.tla": "4408723ef61625106f5c1a8034528425977f2637fa596422a4a223e6aed8f5af"
   },
   "tables": {},
   "versions": {
-    "acpSession": "1",
+    "acpSession": "2",
     "acpSessions": "1"
   }
 }

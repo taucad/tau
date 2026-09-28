@@ -1420,7 +1420,7 @@ export function KinematicsPanelBody({ panelApi }: { readonly panelApi?: Kinemati
       <div data-slot='kinematics-filter' className='shrink-0 bg-sidebar px-2 pt-2'>
         <SearchInput
           aria-label='Filter joints and parts'
-          placeholder='Filter joints and parts...'
+          placeholder='Filter joints and parts…'
           value={filterTerm}
           className='h-7 min-w-0 bg-background'
           onChange={(event) => {

@@ -95,7 +95,7 @@ export function ComboBoxResponsive<T>({
   popoverProperties,
   drawerProperties,
   placeholder = 'Set item',
-  searchPlaceHolder = 'Filter items...',
+  searchPlaceHolder = 'Filter items…',
   asChildLabel = false,
   labelClassName,
   isDisabled,
@@ -432,7 +432,7 @@ function ItemList<T>({
                   ? () => (
                       <div className='flex items-center gap-2 p-2 text-sm text-muted-foreground'>
                         <Loader />
-                        <span>Loading more...</span>
+                        <span>Loading more…</span>
                       </div>
                     )
                   : () => <div className='h-1' />,

@@ -1681,6 +1681,18 @@
       }
     },
     {
+      // Page Composition Policy gates (docs/policy/page-composition-policy.md, Enforcement).
+      // Product page components only: tests and `[__e2e]` fixture routes author no product copy.
+      // Autofixable rules are errors; judgment rules warn for one release, then become errors.
+      "files": ["apps/ui/app/**/*.tsx", "packages/ui/src/**/*.tsx"],
+      "excludeFiles": ["**/*.{test,spec}.tsx", "apps/ui/app/routes/?__e2e?.*/**"],
+      "rules": {
+        "tau-lint/no-ascii-ellipsis": "error",
+        "tau-lint/require-accessible-name": "warn",
+        "tau-lint/no-label-replacing-loader": "warn"
+      }
+    },
+    {
       // Static `new URL(literal, import.meta.url)` invariant for the runtime.
       // Computed first arguments silently opt out of
       // bundler asset emission and break downstream consumers.

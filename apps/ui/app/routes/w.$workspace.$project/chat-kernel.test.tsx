@@ -145,7 +145,7 @@ describe('ChatKernel', () => {
 
     expect(screen.getByRole('searchbox', { name: 'Filter telemetry' })).toHaveAttribute(
       'placeholder',
-      'Filter telemetry...',
+      'Filter telemetry…',
     );
     expect(screen.getAllByRole('searchbox', { name: 'Filter telemetry' })).toHaveLength(1);
     expect(screen.getByText('No geometry units.')).toBeInTheDocument();

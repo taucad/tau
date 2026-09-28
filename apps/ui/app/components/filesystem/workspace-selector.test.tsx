@@ -139,7 +139,7 @@ describe('WorkspaceSelector', () => {
 
     await user.click(screen.getByRole('button', { name: 'Create in Home' }));
 
-    expect(screen.queryByPlaceholderText('Search locations...')).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText('Search locations…')).not.toBeInTheDocument();
     expect(screen.getByText('Create in')).toBeVisible();
     const options = screen.getAllByRole('option');
     expect(options).toHaveLength(2);
@@ -179,9 +179,9 @@ describe('WorkspaceSelector', () => {
     await user.click(screen.getByRole('button', { name: 'Create in Home' }));
 
     if (enabled) {
-      expect(screen.getByPlaceholderText('Search locations...')).toBeVisible();
+      expect(screen.getByPlaceholderText('Search locations…')).toBeVisible();
     } else {
-      expect(screen.queryByPlaceholderText('Search locations...')).not.toBeInTheDocument();
+      expect(screen.queryByPlaceholderText('Search locations…')).not.toBeInTheDocument();
     }
   });
 

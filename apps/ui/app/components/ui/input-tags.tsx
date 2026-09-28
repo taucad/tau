@@ -72,7 +72,7 @@ export type TagsTriggerProps = {
 export function TagsTrigger({
   id,
   className,
-  placeholder = 'Type to add tags...',
+  placeholder = 'Type to add tags…',
   inputAriaLabel,
   disabled,
 }: TagsTriggerProps): React.JSX.Element {

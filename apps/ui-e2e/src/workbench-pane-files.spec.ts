@@ -75,7 +75,7 @@ const openSeededProject = async (): Promise<void> => {
   await target.expectVisible(selectors.getByTestId('cad-viewer-canvas-region').getByCss('canvas').first(), 60_000);
   if (!(await target.isVisible(filesPane()))) {
     await target.click(selectors.getByRole('button', { name: /Search/u }));
-    const search = selectors.getByPlaceholder('Search projects, chats, and actions...');
+    const search = selectors.getByPlaceholder('Search projects, chats, and actions…');
     await target.fill(search, 'Open files');
     await target.click(selectors.getByText('Open files', { exact: true }));
   }
@@ -109,7 +109,7 @@ test('should own Files and Markdown views independently in each Workbench pane',
   expect(await readHeaderInlinePadding(packageActions)).toEqual({ left: 4, right: 4 });
 
   await target.click(selectors.getByRole('button', { name: 'package.json', exact: true }).first());
-  const fileFilter = selectors.getByCss('input[data-slot="command-input"][placeholder="Filter files..."]');
+  const fileFilter = selectors.getByCss('input[data-slot="command-input"][placeholder="Filter files…"]');
   await expectModernCommandInput(fileFilter);
   const fileSelectorChrome = await target.evaluateLocator(fileFilter, (element) => {
     const popover = element.closest<HTMLElement>('[data-slot="popover-content"]');
@@ -129,7 +129,7 @@ test('should own Files and Markdown views independently in each Workbench pane',
   await target.fill(fileFilter, 'readme.md');
   await target.expectVisible(
     selectors
-      .getByCss('[data-slot="popover-content"]:has(input[data-slot="command-input"][placeholder="Filter files..."])')
+      .getByCss('[data-slot="popover-content"]:has(input[data-slot="command-input"][placeholder="Filter files…"])')
       .getByText('readme.md', { exact: true }),
   );
   await target.emulateColorScheme('light');
@@ -201,7 +201,7 @@ test('should share modern command search chrome across command, model, kernel, a
   await openSeededProject();
 
   await target.click(selectors.getByRole('button', { name: /Search/u }));
-  const commandFilter = selectors.getByPlaceholder('Search projects, chats, and actions...');
+  const commandFilter = selectors.getByPlaceholder('Search projects, chats, and actions…');
   await expectModernCommandInput(commandFilter);
   await target.press(commandFilter, 'Escape');
 
@@ -212,12 +212,12 @@ test('should share modern command search chrome across command, model, kernel, a
   await target.expectVisible(chatComposer);
   const chatControlButtons = chatComposer.getByCss('button');
   await target.click(chatControlButtons.first());
-  const modelFilter = selectors.getByPlaceholder('Search models...');
+  const modelFilter = selectors.getByPlaceholder('Search models…');
   await expectModernCommandInput(modelFilter);
   await target.press(modelFilter, 'Escape');
 
   await target.click(chatControlButtons.nth(1));
-  const kernelFilter = selectors.getByPlaceholder('Search kernels...');
+  const kernelFilter = selectors.getByPlaceholder('Search kernels…');
   await expectModernCommandInput(kernelFilter);
   await target.screenshot(selectors.getByCss('body'), 'workbench-command-search-light.png');
   await target.press(kernelFilter, 'Escape');
@@ -236,13 +236,13 @@ test('should share modern command search chrome across command, model, kernel, a
   // The phone composer is the same bar: its agent sheet opens as a drawer.
   await target.click(agentTrigger);
   await target.click(selectors.getByRole('button', { name: /^Model: .*\. Change$/u }));
-  const mobileModelFilter = selectors.getByPlaceholder('Search models...');
+  const mobileModelFilter = selectors.getByPlaceholder('Search models…');
   await expectModernCommandInput(mobileModelFilter);
   await target.press(mobileModelFilter, 'Escape');
   await target.expectCount(mobileModelFilter, 0);
 
   await target.click(selectors.getByRole('button', { name: /^Select kernel/u }));
-  const mobileKernelFilter = selectors.getByPlaceholder('Search kernels...');
+  const mobileKernelFilter = selectors.getByPlaceholder('Search kernels…');
   await expectModernCommandInput(mobileKernelFilter);
   await target.emulateColorScheme('dark');
   await target.screenshot(selectors.getByCss('body'), 'workbench-command-search-mobile-dark.png');

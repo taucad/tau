@@ -625,7 +625,7 @@ const settle = async (quietMs = 600, maxMs = 15_000): Promise<void> => {
 
 const openCommand = async (name: string, surface?: target.TargetSurface): Promise<void> => {
   await target.click(selectors.getByRole('button', { name: 'Search', exact: true }), undefined, surface);
-  await target.fill(selectors.getByPlaceholder('Search projects, chats, and actions...'), name, surface);
+  await target.fill(selectors.getByPlaceholder('Search projects, chats, and actions…'), name, surface);
   await target.click(selectors.getByText(name, { exact: true }), undefined, surface);
 };
 

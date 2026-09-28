@@ -115,7 +115,7 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
        * workspace-relative facade, not an alias of its root. */
       async () => fileManager.getZippedDirectory('', { versionedOnly: true }),
       {
-        loading: 'Creating ZIP archive...',
+        loading: 'Creating ZIP archive…',
         success(blob) {
           downloadBlob(blob, `${projectName}.zip`);
           return 'ZIP downloaded successfully';
@@ -196,7 +196,7 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
         await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
       },
       {
-        loading: `Copying ${projectName}.png to clipboard...`,
+        loading: `Copying ${projectName}.png to clipboard…`,
         success: `Copied ${projectName}.png to clipboard`,
         error: `Failed to copy ${projectName}.png to clipboard`,
       },

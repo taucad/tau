@@ -86,7 +86,7 @@ export function ProjectSettingsDialog(): React.JSX.Element {
             <Textarea
               id='project-description'
               value={localDescription}
-              placeholder='Describe your project...'
+              placeholder='Describe your project…'
               rows={3}
               onChange={(event) => {
                 setLocalDescription(event.target.value);

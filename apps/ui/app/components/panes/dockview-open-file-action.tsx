@@ -69,10 +69,10 @@ export function DockviewOpenFileAction({
       dataSource={dataSource}
       selectedFile={undefined}
       initialPath={initialPath}
-      placeholder='Open file...'
+      placeholder='Open file…'
       title='Open File'
       description='Choose a file to open in this pane'
-      searchPlaceholder='Search files...'
+      searchPlaceholder='Search files…'
       emptyMessage='No files found.'
       popoverProperties={{ align: 'start' }}
       onSelect={handleSelect}

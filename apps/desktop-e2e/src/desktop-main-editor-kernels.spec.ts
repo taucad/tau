@@ -187,7 +187,7 @@ const expectNativeOpenRscadEngine = async (logPath: string): Promise<void> => {
  */
 const expectPicovoxelMultiSession = async (page: Page, entryPath: string): Promise<void> => {
   await page.getByRole('button', { name: 'Search', exact: true }).click();
-  await page.getByPlaceholder('Search projects, chats, and actions...').fill('Open console');
+  await page.getByPlaceholder('Search projects, chats, and actions…').fill('Open console');
   await page.getByText('Open console', { exact: true }).click();
   const group = page.getByRole('button', { name: entryPath, exact: true });
   await expectVisible(group, 60_000);

@@ -73,7 +73,7 @@ describe('ChatMessageToolUpdateTodos', () => {
       />,
     );
     expect(screen.getByText('Updating')).toBeVisible();
-    expect(screen.getByText('tasks...')).toBeVisible();
+    expect(screen.getByText('tasks…')).toBeVisible();
   });
 
   it('should hand a failure to the shared tool error with its noun', () => {

@@ -199,7 +199,7 @@ describe('ChatAgentSheet', () => {
     const agentRow = screen.getByRole('button', { name: 'Agent: Tau. Change' });
     await userEvent.click(agentRow);
 
-    expect(screen.getByPlaceholderText('Search agents...')).toHaveFocus();
+    expect(screen.getByPlaceholderText('Search agents…')).toHaveFocus();
     expect(screen.getAllByRole('option').map((option) => option.getAttribute('aria-label'))).toEqual([
       'Tau, in use',
       'Codex · This Mac',
@@ -226,7 +226,7 @@ describe('ChatAgentSheet', () => {
     await userEvent.click(screen.getByRole('option', { name: 'Codex' }));
     /* Browsing an agent changes nothing, and the way back is to the agents. */
     expect(setActiveExecution).not.toHaveBeenCalled();
-    expect(screen.getByPlaceholderText('Search Codex models...')).toHaveFocus();
+    expect(screen.getByPlaceholderText('Search Codex models…')).toHaveFocus();
     expect(screen.getByRole('button', { name: 'Back to agents' })).toBeInTheDocument();
     await userEvent.click(screen.getByRole('option', { name: 'GPT-5.6-Sol' }));
 

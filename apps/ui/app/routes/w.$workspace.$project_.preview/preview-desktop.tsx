@@ -44,7 +44,7 @@ export const PreviewDesktop = memo(function (): React.JSX.Element {
       // The preview's file manager is rooted at this project; `''` is that root.
       async () => fileManager.getZippedDirectory('', { versionedOnly: true }),
       {
-        loading: 'Creating ZIP archive...',
+        loading: 'Creating ZIP archive…',
         success(blob) {
           downloadBlob(blob, `${project.name}.zip`);
           return 'ZIP downloaded successfully';
@@ -67,7 +67,7 @@ export const PreviewDesktop = memo(function (): React.JSX.Element {
   if (!project) {
     return (
       <div className='flex h-full items-center justify-center'>
-        <p className='text-muted-foreground'>Loading project...</p>
+        <p className='text-muted-foreground'>Loading project…</p>
       </div>
     );
   }

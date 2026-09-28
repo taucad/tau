@@ -1355,11 +1355,11 @@ export const FileEditor = memo(function ({
           </div>
           <FileSelector
             selectedFile={undefined}
-            placeholder='Select file to edit...'
+            placeholder='Select file to edit…'
             className='h-8 w-50'
             title='Open File'
             description='Choose a file to open in the editor'
-            searchPlaceholder='Search files...'
+            searchPlaceholder='Search files…'
             emptyMessage='No files found.'
             onSelect={handleFileSelectorSelect}
           />

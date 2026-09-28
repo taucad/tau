@@ -55,7 +55,7 @@ const openCommand = async (desktopSession: DesktopSession, label: string): Promi
     .getByRole('button', { name: /Search/u })
     .first()
     .click();
-  const search = desktopSession.page.getByPlaceholder('Search projects, chats, and actions...');
+  const search = desktopSession.page.getByPlaceholder('Search projects, chats, and actions…');
   await search.fill(label);
   const command = desktopSession.page.getByRole('option', { name: label, exact: true });
   await command.waitFor({ state: 'visible' });

@@ -79,7 +79,7 @@ function Command({ className, ...properties }: CommandProps): React.JSX.Element 
  */
 function CommandDialog({
   title = 'Command Palette',
-  description = 'Search for a command to run...',
+  description = 'Search for a command to run…',
   contentClassName,
   shouldFilter,
   children,

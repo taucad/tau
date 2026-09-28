@@ -15,7 +15,7 @@ const disclosure = (path: string): Locator => selectors.getByRole('button', { na
 
 const openCommand = async (name: string): Promise<void> => {
   await target.click(selectors.getByRole('button', { name: 'Search', exact: true }));
-  const commandSearch = selectors.getByPlaceholder('Search projects, chats, and actions...');
+  const commandSearch = selectors.getByPlaceholder('Search projects, chats, and actions…');
   await target.fill(commandSearch, name);
   await target.click(selectors.getByText(name, { exact: true }));
 };
@@ -150,7 +150,7 @@ test('modernizes Telemetry as a filterable, truthful, accessible trace explorer'
 
   const filter = selectors.getByRole('searchbox', { name: 'Filter telemetry' });
   await target.expectVisible(filter);
-  await target.expectAttribute(filter, 'placeholder', 'Filter telemetry...');
+  await target.expectAttribute(filter, 'placeholder', 'Filter telemetry…');
   await target.expectCount(selectors.getByRole('searchbox', { name: 'Filter telemetry' }), 1);
   await target.expectCount(selectors.getByRole('button', { name: /show search|hide search/iu }), 0);
 

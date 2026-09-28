@@ -147,7 +147,7 @@ export function ChatMessageToolTestModel({
             <ChatToolCardIcon icon={FlaskConical} />
             <ChatToolCardTitle>
               <ChatToolLabel verb='Running'>
-                <ChatToolDescription>tests...</ChatToolDescription>
+                <ChatToolDescription>tests…</ChatToolDescription>
               </ChatToolLabel>
             </ChatToolCardTitle>
           </ChatToolCardHeader>

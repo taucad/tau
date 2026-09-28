@@ -556,7 +556,7 @@ describe('ChatParameters', () => {
     render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
 
     const filter = screen.getByRole('searchbox', { name: 'Filter parameters' });
-    expect(filter).toHaveAttribute('placeholder', 'Filter parameters...');
+    expect(filter).toHaveAttribute('placeholder', 'Filter parameters…');
     expect(screen.getAllByRole('searchbox', { name: 'Filter parameters' })).toHaveLength(1);
     expect(screen.queryByRole('button', { name: /show search|hide search/iu })).toBeNull();
 

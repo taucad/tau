@@ -72,10 +72,7 @@ import { clearLedger } from '#services/rpc-ledger.js';
 import { parseErrorForPersistence } from '#utils/error.utils.js';
 import { buildUserMessage } from '#utils/chat.utils.js';
 import { createChatInstance } from '#chat-clients/_internal/shared-chat-transport.js';
-import {
-  BrowserPlacementChatTransport,
-  subscribeChatLogAnswers,
-} from '#chat-clients/_internal/browser-agent-host-transport.js';
+import { BrowserPlacementChatTransport } from '#chat-clients/_internal/browser-agent-host-transport.js';
 import { hostAttachment } from '#chat-clients/_internal/host-attachment.js';
 import type { AgentHostClient } from '#services/agent-host-client.js';
 import { chatTurnAdmission, clearChatTurnServices } from '#chat-clients/_internal/chat-host-binding.js';
@@ -92,7 +89,11 @@ import {
   selectToolsInFlight,
   materializeTranscript,
 } from '#machines/chat-projection.logic.js';
-import type { ChatProjection, ChatRunPhase as ProjectedRunPhase } from '#machines/chat-projection.logic.js';
+import type {
+  ChatProjection,
+  ChatProjectionReadAnswer,
+  ChatRunPhase as ProjectedRunPhase,
+} from '#machines/chat-projection.logic.js';
 import type { RowKey } from '@taucad/agent-host';
 import type { HostCommand } from '@taucad/agent-host/wire';
 import { sdkWatch } from '#chat-clients/_internal/sdk-watch.js';
@@ -416,13 +417,6 @@ export class ChatSessionStore {
         actors: { admitTurn: chatTurnAdmission },
       });
     this.#rootOptions = rootOptions;
-    /* Temporary test fixture bridge; production host attachment alone publishes batches. */
-    subscribeChatLogAnswers(({ chatId, answer }) => {
-      if (this.#observed.has(chatId) && this.#projectHostConnectors.has(this.#observed.get(chatId)!.projectId)) {
-        return;
-      }
-      this.#projectionOf(chatId).send({ type: 'batch', answer });
-    });
     // E2E reads the same owner that drives the sidebar. Keeping this bridge
     // debug-only makes a liveness failure report the store's SDK/cache facts
     // and the project actors' run sets instead of guessing from labels.
@@ -803,6 +797,11 @@ export class ChatSessionStore {
    */
   public getProjection(chatId: string): ChatProjection | undefined {
     return this.#projectionContext(chatId);
+  }
+
+  /** Fold one host read answer; the attachment and deterministic test readers share this projection ingress. @internal */
+  public receiveHostReadAnswer(chatId: string, answer: ChatProjectionReadAnswer): void {
+    this.#projectionOf(chatId).send({ type: 'batch', answer });
   }
 
   /** The current read-only host attachment's verified state, never a run lifecycle. @public */
@@ -1213,7 +1212,12 @@ export class ChatSessionStore {
       input: {
         chatId,
         connect: async () => connector.connect(chatId),
-        projection: this.#projectionOf(chatId),
+        projection: {
+          getSnapshot: () => this.#projectionOf(chatId).getSnapshot(),
+          send: (event) => {
+            this.receiveHostReadAnswer(chatId, event.answer);
+          },
+        },
         onStatus: (event) => {
           if (observed.attachment !== attachment) {
             return;

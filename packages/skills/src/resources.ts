@@ -13,6 +13,7 @@ import manifold from '@taucad/manifold/agent/resources.js';
 import opencascade from '@taucad/opencascade/agent/resources.js';
 import openrscad from '@taucad/openrscad/agent/resources.js';
 import picogk from '@taucad/picogk/agent/resources.js';
+import picovoxel from '@taucad/picovoxel/agent/resources.js';
 import replicad from '@taucad/replicad/agent/resources.js';
 import zoo from '@taucad/zoo/agent/resources.js';
 import geospec from 'geospec/agent/resources.js';
@@ -55,6 +56,7 @@ export const systemSkillBundles: readonly SystemSkillBundle[] = Object.freeze([
   ...build123d,
   ...openrscad,
   ...picogk,
+  ...picovoxel,
   ...zoo,
   ...geospec,
 ]);

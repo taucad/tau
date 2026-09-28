@@ -9,6 +9,7 @@ import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type * as ButtonModule from '@taucad/ui/components/button';
 import type * as SliderInputModule from '#components/ui/slider-input.js';
 import {
+  AxisLabel,
   SectionEditor,
   SectionOptions,
   resolveSectionTranslationControl,
@@ -232,6 +233,35 @@ describe('Section row', () => {
 
     expect(cuts(actor)).toHaveLength(0);
     expect(screen.getByRole('button', { name: 'Add section' })).toHaveFocus();
+  });
+
+  it('should number chips that read the same, and only while they do', async () => {
+    const actor = startSection();
+    actor.send({ type: 'addSectionCut', payload: { kind: 'plane', plane: 'xz' } });
+    const user = userEvent.setup();
+    renderRow(actor);
+
+    for (const ordinal of [1, 2]) {
+      expect(screen.getByRole('button', { name: `Plane XZ 0 mm (${ordinal})` })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: `Remove plane XZ 0 mm (${ordinal})` })).toBeInTheDocument();
+    }
+
+    await user.click(screen.getByRole('button', { name: 'Remove plane XZ 0 mm (1)' }));
+
+    expect(screen.getByRole('button', { name: 'Plane XZ 0 mm' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Remove plane XZ 0 mm' })).toBeInTheDocument();
+  });
+
+  it("should colour a chip's glyph as its axis mark, mixed toward the text colour", () => {
+    const actor = startSection();
+    renderRow(actor);
+    render(<AxisLabel axis='y' />);
+
+    const glyph = screen.getByRole('button', { name: 'Plane XZ 0 mm' }).querySelector('svg');
+    const mark = document.querySelector<HTMLElement>('span[aria-hidden="true"].rounded-full');
+
+    expect(glyph?.style.color).toContain('currentcolor');
+    expect(glyph?.style.color).toBe(mark?.style.backgroundColor);
   });
 
   it('should focus the editor when a chip opens by keyboard, but not by pointer', async () => {

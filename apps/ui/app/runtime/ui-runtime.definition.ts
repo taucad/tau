@@ -9,6 +9,7 @@ import { jscad } from '@taucad/jscad';
 import { manifold } from '@taucad/manifold';
 import { geometryCache, gltfEdgeDetection, parameterFileResolver, parameterUnits } from '@taucad/middleware';
 import { opencascade } from '@taucad/opencascade';
+import { picovoxel } from '@taucad/picovoxel';
 import { replicad } from '@taucad/replicad';
 import { rhino } from '@taucad/rhino';
 import { slicer } from '@taucad/slicer';
@@ -29,6 +30,9 @@ const createUiRuntimeOptions = (config: UiRuntimeConfig, options: UiRuntimeOptio
     openrscad(),
     jscad(),
     manifold(),
+    // Default wasm 'auto': the pthread build for fast viewer renders only when the worker is
+    // cross-origin isolated; exact exports always run on the serial build.
+    picovoxel(),
     gltf(),
     brep(),
     rhino(),

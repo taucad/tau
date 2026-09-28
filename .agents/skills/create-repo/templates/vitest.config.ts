@@ -2,6 +2,8 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
+    // `node --test` runs `tests/ci/**` and `tests/extract-candidate-packages.test.mjs`.
+    include: ['src/**/*.test.ts', 'tests/packaging.test.mjs', '*.test.ts'],
     coverage: {
       enabled: true,
       exclude: ['src/native/**', 'src/wasm/**', '**/*.test-d.ts'],

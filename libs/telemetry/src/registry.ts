@@ -651,7 +651,13 @@ export const TauMetrics = {
         'absorbed_unknown',
         'authorized_exhausted',
       ]),
-      'tau.billing.terminal.incomplete_reason': z.enum(['none', 'max_output_tokens', 'content_filter', 'other']),
+      'tau.billing.terminal.incomplete_reason': z.enum([
+        'none',
+        'max_output_tokens',
+        'content_filter',
+        'service_restart',
+        'other',
+      ]),
     }),
   }),
 

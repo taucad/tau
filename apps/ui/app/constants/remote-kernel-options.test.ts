@@ -108,6 +108,78 @@ describe('remoteKernelOptions', () => {
     }
   });
 
+  it('re-dials the same device on a fresh session when the API restarts under it', async () => {
+    const sockets: EventTarget[] = [];
+    vi.stubGlobal(
+      'WebSocket',
+      class extends EventTarget {
+        public constructor() {
+          super();
+          sockets.push(this);
+        }
+      },
+    );
+    try {
+      mocks.createSession.mockResolvedValue({
+        id: 'session-3',
+        runtimeVersion: '1.2.3',
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        url: 'wss://api.example/v1/agents/sessions/session-3/browser',
+      });
+      selectRemoteComputeDevice('device-3');
+      const revision = getRemoteComputeSelectionRevision();
+      (await remoteKernelOptions())({ fileSystem: fromMemoryFs() });
+      const [{ createSocket }] = vi.mocked(webSocketTransport).mock.calls[0]!;
+      createSocket!('wss://api.example/v1/agents/sessions/session-3/browser/runtime');
+
+      sockets[0]!.dispatchEvent(Object.assign(new Event('close'), { code: 1012 }));
+
+      expect(getRemoteComputeSelectionRevision()).toBe(revision + 1);
+      expect(getRemoteComputePlacement()).toEqual({ state: 'connecting', deviceId: 'device-3' });
+
+      // The daemon reads as offline until it reconnects to a staying Machine.
+      mocks.createSession.mockRejectedValueOnce(new RemoteHostApiError('DEVICE_OFFLINE', 'Device is offline'));
+      await remoteKernelOptions();
+
+      expect(mocks.createSession).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('parks any other close as disconnected', async () => {
+    const sockets: EventTarget[] = [];
+    vi.stubGlobal(
+      'WebSocket',
+      class extends EventTarget {
+        public constructor() {
+          super();
+          sockets.push(this);
+        }
+      },
+    );
+    try {
+      mocks.createSession.mockResolvedValue({
+        id: 'session-4',
+        runtimeVersion: '1.2.3',
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        url: 'wss://api.example/v1/agents/sessions/session-4/browser',
+      });
+      selectRemoteComputeDevice('device-4');
+      const revision = getRemoteComputeSelectionRevision();
+      (await remoteKernelOptions())({ fileSystem: fromMemoryFs() });
+      const [{ createSocket }] = vi.mocked(webSocketTransport).mock.calls[0]!;
+      createSocket!('wss://api.example/v1/agents/sessions/session-4/browser/runtime');
+
+      sockets[0]!.dispatchEvent(Object.assign(new Event('close'), { code: 1006 }));
+
+      expect(getRemoteComputeSelectionRevision()).toBe(revision);
+      expect(getRemoteComputePlacement()).toEqual({ state: 'disconnected', deviceId: 'device-4' });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('surfaces an offline device without choosing local execution', async () => {
     mocks.createSession.mockRejectedValue(new RemoteHostApiError('DEVICE_OFFLINE', 'Device is offline'));
     selectRemoteComputeDevice('device-2');

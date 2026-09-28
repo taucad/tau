@@ -44,6 +44,7 @@ import type {
   TerminalEvidence,
 } from '#api/billing/credit-ledger.types.js';
 import { MetricsService } from '#telemetry/metrics.js';
+import { ShutdownService } from '#lifecycle/shutdown.service.js';
 
 type InvocationRow = NonNullable<Awaited<ReturnType<CreditLedgerService['getOperationForAttempt']>>>;
 const requestKeyVersion = 1;
@@ -129,6 +130,8 @@ export class BillableModelInvocationService {
     @Optional()
     @Inject(DatabaseService)
     private readonly database?: Pick<DatabaseService, 'database'>,
+    // oxlint-disable-next-line new-cap -- NestJS parameter decorators are invoked without new
+    @Optional() private readonly shutdown?: ShutdownService,
   ) {}
 
   public async invoke(suppliedIntent: BillableInvocationIntent): Promise<BillableInvocationResult> {
@@ -622,8 +625,24 @@ export class BillableModelInvocationService {
     qualification: QualifiedBillableInvocation,
     row: InvocationRow,
     generation: bigint,
-    evidence: TerminalEvidence,
+    observed: TerminalEvidence,
   ): Promise<void> {
+    /* A stream the process cut because it is stopping (a deploy) is settled here, at
+     * zero, rather than left pending for recovery: the supplier stream is severed, so
+     * nothing further can ever price it, and recovery would reach the same absorbed
+     * outcome only after `due_at` plus its grace, while an automatic retry of the step
+     * waits on it. A person who leaves during the stop is counted the same way. */
+    const cutByStop = observed.kind === 'absorbed_unknown' && this.shutdown?.signal.aborted === true;
+    const evidence: TerminalEvidence = cutByStop
+      ? {
+          ...observed,
+          executionStatus: 'cancelled',
+          normalizationEvidence: {
+            ...(observed.normalizationEvidence ?? { version: 'service-restart-v1', fields: {} }),
+            terminalReason: 'service_restart',
+          },
+        }
+      : observed;
     await this.ledger.recordInvocationEvidence({
       operationId: row.id,
       accountId: row.accountId,
@@ -636,7 +655,9 @@ export class BillableModelInvocationService {
       'tau.billing.capacity_pool': classifyFundedLlmCapacity(row.activity).pool,
       'tau.billing.terminal.kind': evidence.kind,
       'tau.billing.terminal.incomplete_reason':
-        terminalReason === 'max_output_tokens' || terminalReason === 'content_filter'
+        terminalReason === 'max_output_tokens' ||
+        terminalReason === 'content_filter' ||
+        terminalReason === 'service_restart'
           ? terminalReason
           : terminalReason === undefined
             ? 'none'
@@ -657,7 +678,7 @@ export class BillableModelInvocationService {
         sourceRevision: finality.supplierEvidence.sourceRevision,
       });
     }
-    if (evidence.kind === 'absorbed_unknown') {
+    if (evidence.kind === 'absorbed_unknown' && !cutByStop) {
       return;
     }
     await this.ledger.terminalizeOperation({
@@ -667,6 +688,8 @@ export class BillableModelInvocationService {
       expectedGeneration: generation,
       evidence,
       resolvedAt: new Date(),
+      // Recovery's own reason for expiring an absorbed hold: no supplier evidence is coming.
+      ...(cutByStop ? { expireSpendHold: true } : {}),
     });
   }
 

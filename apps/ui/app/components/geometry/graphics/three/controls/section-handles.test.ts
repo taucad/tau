@@ -174,6 +174,21 @@ describe('createSectionHandles', () => {
     handles.layout(camera, 600);
 
     expect(arrow?.scale.x).toBeCloseTo(expected * 2, 6);
+
+    // Each input the layout reads on its own: the projection, then the viewport height.
+    camera.fov = 25;
+    camera.updateProjectionMatrix();
+    handles.layout(camera, 600);
+
+    const narrowed = (2 * 2000 * Math.tan((12.5 * Math.PI) / 180)) / 600;
+    expect(arrow?.scale.x).toBeCloseTo(narrowed, 6);
+
+    handles.layout(camera, 300);
+
+    expect(arrow?.scale.x).toBeCloseTo(narrowed * 2, 6);
+    const laidOutAgain = updateMatrixWorld.mock.calls.length;
+    handles.layout(camera, 300);
+    expect(updateMatrixWorld).toHaveBeenCalledTimes(laidOutAgain);
   });
 
   it('should raise a cut outline while its chip is hovered and fully while it is dragged', () => {

@@ -758,6 +758,20 @@ export const createSectionHandlesWarmup = ({
   };
 };
 
+/** Copies `values` into `target` from `offset`; true when nothing there changed. */
+const copyIfChanged = (target: Float64Array, offset: number, values: readonly number[]): boolean => {
+  let isSame = true;
+  let index = offset;
+  for (const value of values) {
+    if (target[index] !== value) {
+      target[index] = value;
+      isSame = false;
+    }
+    index++;
+  }
+  return isSame;
+};
+
 /** Everything the section tool draws in the model's space, in render units, updated in place as the cuts change. */
 export const createSectionHandles = ({ backend }: Readonly<{ backend: ResolvedGraphicsBackend }>): SectionHandles => {
   const root = new THREE.Group();
@@ -774,16 +788,14 @@ export const createSectionHandles = ({ backend }: Readonly<{ backend: ResolvedGr
   const cameraQuaternion = new THREE.Quaternion();
   const parentQuaternion = new THREE.Quaternion();
 
+  /** Records what the last layout saw, in place: this runs every frame while Section is on. */
   const isLaidOut = (camera: THREE.Camera, heightPx: number): boolean => {
-    const values = [...camera.matrixWorld.elements, ...camera.projectionMatrix.elements, heightPx, version];
-    let isSame = true;
-    for (const [index, value] of values.entries()) {
-      if (laidOut[index] !== value) {
-        laidOut[index] = value;
-        isSame = false;
-      }
-    }
-    return isSame;
+    const isWorldSame = copyIfChanged(laidOut, 0, camera.matrixWorld.elements);
+    const isProjectionSame = copyIfChanged(laidOut, 16, camera.projectionMatrix.elements);
+    const isRestSame = laidOut[32] === heightPx && laidOut[33] === version;
+    laidOut[32] = heightPx;
+    laidOut[33] = version;
+    return isWorldSame && isProjectionSame && isRestSame;
   };
 
   return {

@@ -62,7 +62,11 @@ const requestRuntimePort = async (
     const runtimePortTimeout = setTimeout(() => {
       pendingRuntimePorts.delete(requestId);
       parentPort.postMessage({ type: 'runtime-port-release', requestId });
-      reject(new Error('Main did not answer the desktop runtime-port request within 10 seconds.'));
+      reject(
+        Object.assign(new Error('Main did not answer the desktop runtime-port request within 10 seconds.'), {
+          code: 'TIMEOUT',
+        }),
+      );
     }, 10_000);
     pendingRuntimePorts.set(requestId, { resolve, reject, runtimePortTimeout });
   });

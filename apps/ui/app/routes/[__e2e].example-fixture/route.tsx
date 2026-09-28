@@ -2,6 +2,7 @@ import * as React from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { findBuiltinExample } from '@taucad/tau-examples/builtin';
 import { findTestFixture } from '@taucad/tau-examples/test-fixtures';
+import { isKernelId } from '@taucad/types/constants';
 import { Loader } from '#components/ui/loader.js';
 import { getEnvironment } from '#environment.config.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
@@ -54,7 +55,7 @@ const ExampleFixtureDebugRoute = (): React.JSX.Element => {
             tags: fixture.manifest.tags,
             assets: { main: { entryPath: fixture.manifest.assets.main.entryPath } },
           },
-          activeKernel: fixture.kernel === 'jscad' ? 'jscad' : 'replicad',
+          activeKernel: isKernelId(fixture.kernel) ? fixture.kernel : 'replicad',
           location: homeProjectCreationLocation,
           files,
         });

@@ -4,7 +4,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
-import { createServicesBroker, rendererServicesConcerns, servicesConcerns } from '#main/services-broker.js';
+import {
+  createServicesBroker,
+  rendererServicesConcerns,
+  servicesConcerns,
+  ServicesQuiescingError,
+} from '#main/services-broker.js';
 import type { ServicesBrokerOptions } from '#main/services-broker.js';
 
 type Spawned = {
@@ -761,6 +766,8 @@ describe('createServicesBroker — the quit hold (W19, D31)', () => {
     broker.connect('nodeFs');
 
     const quiescing = broker.quiesce(5000);
+    /* Typed, so main answers it as shutdown rather than as a failed connection. */
+    expect(() => broker.connect('nodeFs')).toThrow(ServicesQuiescingError);
     expect(() => broker.connect('nodeFs')).toThrow(/accepts no new concerns/u);
     spawns[0]!.message({ type: 'quiesce-failed', message: 'checked write drain failed' });
 

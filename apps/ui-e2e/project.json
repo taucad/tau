@@ -65,10 +65,30 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{workspaceRoot}",
-        "command": "vitest run --config apps/ui-e2e/vitest.config.ts --project chromium src/preview.spec.ts src/geospec-runner.spec.ts src/headless-chat-image-capture.development.spec.ts src/home-hydration.spec.ts src/project-open-first-paint.spec.ts",
+        "command": "vitest run --config apps/ui-e2e/vitest.config.ts --project chromium src/preview.spec.ts src/geospec-runner.spec.ts src/headless-chat-image-capture.development.spec.ts src/home-hydration.spec.ts src/picovoxel-multi.spec.ts src/project-open-first-paint.spec.ts",
         "env": {
           "PORT": "3012",
           "TAU_E2E_SERVER_MODE": "development"
+        }
+      }
+    },
+    "test:e2e:non-isolated": {
+      "executor": "nx:run-commands",
+      "dependsOn": [{ "projects": ["ui"], "target": "build" }],
+      "metadata": {
+        "description": "The degraded mode of T2.9: the snapshot production server without COOP/COEP, so kernels must fall back to their single-threaded builds, say why, and still export exact bytes. Its own PORT keeps it from reusing an isolated server another e2e target started."
+      },
+      "options": {
+        "cwd": "{workspaceRoot}/apps/ui-e2e",
+        "parallel": false,
+        "commands": [
+          "../../node_modules/.bin/vitest run --config vitest.config.ts --project chromium src/picovoxel-multi.spec.ts",
+          "../../node_modules/.bin/vitest run --config vitest.config.ts --project firefox src/picovoxel-multi.spec.ts"
+        ],
+        "env": {
+          "PORT": "3015",
+          "TAU_E2E_UI_SNAPSHOT": "true",
+          "TAU_E2E_DISABLE_COI": "true"
         }
       }
     },

@@ -1,10 +1,20 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { relative, resolve } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { build, createServer } from 'vite';
+import type { UserConfig } from 'vite';
 import { chromium } from 'playwright';
 
 import { createCanvasConfig, resolveCanvasRoot } from '#canvas-vite.config.js';
@@ -38,6 +48,37 @@ describe('canvas Vite config', () => {
     });
 
     expect(cacheDirectories[0]).not.toBe(cacheDirectories[1]);
+  });
+
+  it('should accept fixture aliases in a Brain outside a linked worktree and refuse ones escaping it', () => {
+    // A linked worktree's `docs/research` symlinks into the owning checkout's Brain, outside the worktree.
+    const repoRoot = resolve(import.meta.dirname, '../..');
+    const brain = mkdtempSync(resolve(tmpdir(), 'tau-canvas-brain-'));
+    const outside = mkdtempSync(resolve(tmpdir(), 'tau-canvas-outside-'));
+    const fixtureParent = resolve(repoRoot, 'out/research');
+    mkdirSync(fixtureParent, { recursive: true });
+    const worktreeDocs = mkdtempSync(resolve(fixtureParent, 'canvas-worktree-'));
+    temporaryPaths.push(brain, outside, worktreeDocs);
+    symlinkSync(brain, resolve(worktreeDocs, 'research'));
+    const artifacts = resolve(worktreeDocs, 'research/artifacts');
+    const canvas = resolve(artifacts, 'canvas');
+    mkdirSync(canvas, { recursive: true });
+    for (const entry of ['index.html', 'main.tsx', 'fixtures.tsx']) {
+      writeFileSync(resolve(canvas, entry), '');
+    }
+    writeFileSync(resolve(outside, 'secret.tsx'), '');
+    symlinkSync(resolve(outside, 'secret.tsx'), resolve(canvas, 'escape.tsx'));
+    const root = resolveCanvasRoot(canvas, artifacts);
+    const withAlias = (target: string): UserConfig => {
+      writeFileSync(
+        resolve(canvas, 'canvas.aliases.json'),
+        JSON.stringify({ '#hooks/use-graphics.js': relative(repoRoot, resolve(canvas, target)) }),
+      );
+      return createCanvasConfig(root, outside, artifacts);
+    };
+
+    expect(withAlias('fixtures.tsx').root).toBe(realpathSync(canvas));
+    expect(() => withAlias('escape.tsx')).toThrow('Canvas fixture aliases must remain inside the Tau checkout');
   });
 
   it('should compile React, Tau components, tokens, Tailwind, and Geist fonts', { timeout: 30_000 }, async () => {

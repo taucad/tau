@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ipcRenderer } from 'electron';
 import { quitChannels, slicersChannels } from '#shared/desktop-bootstrap.js';
+import { generatedImageIpcChannel } from '#shared/quick-look.js';
 
 const state = vi.hoisted(() => ({
   exposed: new Map<string, unknown>(),
@@ -75,6 +76,23 @@ describe('desktop preload quit bridge', () => {
     quitApi().onAsk(handler);
 
     expect(handler).toHaveBeenCalledOnce();
+  });
+});
+
+describe('desktop preload generated image bridge', () => {
+  it('should forward the requested path and return its bytes', async () => {
+    const response = { path: 'run-1/top.png', bytes: new Uint8Array([1, 2]) };
+    vi.mocked(ipcRenderer.invoke).mockReset().mockResolvedValue(response);
+    const tau = state.exposed.get('tau') as {
+      readonly generatedImages: { read(path: string): Promise<typeof response> };
+    };
+    await expect(tau.generatedImages.read('/Users/tester/.codex/generated_images/run-1/top.png')).resolves.toEqual(
+      response,
+    );
+    expect(ipcRenderer.invoke).toHaveBeenCalledExactlyOnceWith(
+      generatedImageIpcChannel,
+      '/Users/tester/.codex/generated_images/run-1/top.png',
+    );
   });
 });
 

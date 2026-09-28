@@ -260,6 +260,8 @@ export type AgentHostReadInput = {
  * @public
  */
 export type AgentHostClient = {
+  /** Execute one already-keyed command; the sender owns its id and any re-send decision. */
+  hostCommand(command: HostCommand): Promise<CommandAnswer>;
   start(input: AgentHostStartInput): Promise<HostRunSnapshot>;
   steer(runId: string, message: string): Promise<HostRunSnapshot>;
   cancel(runId: string): Promise<HostRunSnapshot>;
@@ -633,6 +635,7 @@ export const createAgentHostClient = (
   };
 
   return {
+    hostCommand: async (command) => guarded(async () => transport.execute(command), 'WORKER_PROTOCOL_FAILED'),
     async start(input) {
       chatsByRun.set(input.runId, input.chatId);
       const config = input.agent

@@ -436,6 +436,35 @@ const workerOf =
     worker as unknown as Worker;
 
 describe('createBrowserAgentHostClient', () => {
+  it('forwards a sender-minted command id and returns the host refusal unchanged', async () => {
+    const worker = new FakeResidentWorker();
+    worker.refusals.set('cancel', {
+      code: 'CHAT_RUN_LIVE',
+      message: 'The earlier run is settling.',
+      details: { state: 'settling' },
+    });
+    const client = createTestClient(workerOf(worker));
+    const command = {
+      type: 'cancel',
+      commandId: 'gesture-stop-1',
+      payload: { chatId: 'chat-1', runId: 'run-1' },
+    } as const;
+
+    await expect(client.hostCommand(command)).resolves.toMatchObject({
+      commandId: 'gesture-stop-1',
+      status: 'refused',
+      code: 'CHAT_RUN_LIVE',
+    });
+    await expect(client.hostCommand(command)).resolves.toMatchObject({
+      commandId: 'gesture-stop-1',
+      status: 'refused',
+    });
+    expect(
+      worker.requests.filter((request) => request.name === 'cancel').map((request) => request.args['commandId']),
+    ).toEqual(['gesture-stop-1', 'gesture-stop-1']);
+    await client.close();
+  });
+
   it('keeps the capability seam closed when OPFS is unavailable', () => {
     vi.stubGlobal('Worker', vi.fn());
     vi.stubGlobal('BroadcastChannel', vi.fn());

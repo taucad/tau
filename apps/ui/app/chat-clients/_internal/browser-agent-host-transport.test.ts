@@ -4,6 +4,7 @@ import type { UIMessageChunk } from 'ai';
 import { parseLogEvent } from '@taucad/agent-host';
 import type { AgentLiveEvent, AgentLogEvent } from '@taucad/agent-host';
 import { agentWireLimits } from '@taucad/agent-host/wire';
+import type { CommandAnswer, HostCommand } from '@taucad/agent-host/wire';
 import type { MyUIMessage } from '@taucad/chat';
 import { isRecord } from '@taucad/utils/schema';
 import { AgentHostWorkerError } from '#services/agent-host-client.js';
@@ -57,6 +58,15 @@ const snapshot = (
 const clientFor = (chatId: string, runId: string, overrides: Partial<AgentHostClient> = {}) => {
   let listener: Parameters<AgentHostClient['subscribe']>[1] | undefined;
   return {
+    hostCommand: vi.fn(
+      async (command: HostCommand): Promise<CommandAnswer> => ({
+        commandId: command.commandId,
+        generation: 1,
+        status: 'applied',
+        effect: 'not-applied',
+        details: {},
+      }),
+    ),
     start: vi.fn(async () => {
       listener?.(chatId, {
         version: 1,

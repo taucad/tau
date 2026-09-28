@@ -13,6 +13,7 @@ import {
 } from '#routes/w.$workspace.$project/chat-turn-revision-state.js';
 import type { TurnRevisionBase, TurnRevisionState } from '#routes/w.$workspace.$project/chat-turn-revision-state.js';
 import { requestRevisionReveal } from '#routes/w.$workspace.$project/revision-reveal.js';
+import { selectVisibleChatError } from '#routes/w.$workspace.$project/chat-error.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { useRevisionCards, useRevisionChanges, useRevisions, useTurnRevision } from '#hooks/use-revisions.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
@@ -98,7 +99,7 @@ function useTurnRevisionState(userMessageId: string, isLatestTurn: boolean): Tur
   const baseCard = useRevisionCard(isLatestTurn && log?.settlement === undefined ? baseRevisionId : undefined);
   const recorded = turnSave(useTurnRevision(userMessageId), baseRevisionId);
   const run = useChatSidebarStatus(projectId, activeChatId);
-  const hasError = useChatSelector((state) => state.error !== undefined || state.persistedError !== undefined);
+  const hasError = useChatSelector((state) => selectVisibleChatError(state) !== undefined);
   /* The last visible state, so a reconnect holds what the summary said. */
   const [held, setHeld] = useState<TurnRevisionState>();
 

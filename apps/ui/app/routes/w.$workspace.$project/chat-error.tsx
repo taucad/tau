@@ -52,8 +52,23 @@ export function selectVisibleChatError(
   }
   if (caughtUp && state.attachmentStatus === 'attached') {
     // A command refusal carries its command identity. A chat-wide legacy error
-    // does not, and cannot outrank the current host's verified healthy log.
-    return state.persistedError?.requestId ? state.persistedError : undefined;
+    // does not. A later healthy run also retires a prior refused Start, even
+    // when a different page admitted that run and this page never cleared the
+    // old chat record. A refused Resume still belongs to the same paused run;
+    // the persisted command records that run identity, not just its command ID.
+    const refusal = state.persistedError;
+    if (refusal?.requestId === undefined) {
+      return undefined;
+    }
+    const refusedRunId = refusal.details?.['runId'];
+    const refusedCommandType = refusal.details?.['commandType'];
+    if (
+      run !== undefined &&
+      (run.lifecycle !== 'paused' || refusedRunId !== run.runId || refusedCommandType !== 'resume')
+    ) {
+      return undefined;
+    }
+    return refusal;
   }
   return state.error ? parseErrorForPersistence(state.error) : state.persistedError;
 }

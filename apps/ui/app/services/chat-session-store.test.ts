@@ -592,6 +592,53 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     expect(settlements).toEqual([]);
   });
 
+  it('keeps the chat root idle after an empty caught-up log retires a legacy error', async () => {
+    const chatId = 'chat_empty_recovery';
+    const projectId = 'project_empty_recovery';
+    const deps = createStubDeps();
+    deps.getChat.mockResolvedValue(
+      chatRow(chatId, projectId, {
+        error: { category: errorCategory.generic, title: 'Old fault', message: 'Old channel closed' },
+      }),
+    );
+    const store = new ChatSessionStore({ chatSession });
+    store.setDependencies(deps);
+    const session = store.acquire(chatId, projectId);
+    await vi.waitFor(() => {
+      expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+    });
+    const unobserve = store.observe(chatId, projectId);
+    const hostCommand = vi.fn<AgentHostClient['hostCommand']>();
+    const unpublish = store.publishProjectHostConnector(
+      projectId,
+      async () =>
+        ({
+          hostCommand,
+          read: vi.fn<AgentHostClient['read']>(async () => ({
+            status: 'batch',
+            chatId,
+            cursor: 0,
+            nextCursor: 0,
+            endCursor: 0,
+            events: [],
+          })),
+          subscribe: (...args: Parameters<AgentHostClient['subscribe']>) => {
+            args[3]?.({ status: 'batch', chatId, cursor: 0, nextCursor: 0, endCursor: 0, events: [] });
+            return () => undefined;
+          },
+          close: vi.fn(async () => undefined),
+        }) as unknown as AgentHostClient,
+    );
+    await vi.waitFor(() => {
+      expect(store.getAttachmentStatus(chatId)).toBe('attached');
+    });
+    expect(session.stateActorRef.getSnapshot().matches({ run: 'idle' })).toBe(true);
+    expect(hostCommand).not.toHaveBeenCalled();
+    unpublish();
+    unobserve();
+    store.release(chatId);
+  });
+
   it('ignores a retired attachment callback after a newer run fails', async () => {
     const chatId = 'chat_attachment_generation';
     const projectId = 'project_attachment_generation';
@@ -1109,11 +1156,10 @@ describe('ChatSessionStore — historical host outcomes from the projection (PV-
     stopObserving();
   });
 });
-describe('ChatSessionStore — persisted failure replay (P59)', () => {
-  /* A reload finds the failed turn in IndexedDB, not on a live run: nothing
-   * ever sent the chat's machine a lifecycle for it, so the row read `Idle`
-   * for work that ended badly. Binding is the moment to say so. */
-  it('replays a persisted failure into the chat machine as its row loads, and settles no run', async () => {
+describe('ChatSessionStore — persisted failure diagnosis (P59)', () => {
+  /* A chat-wide record error remains available to the card while attachment
+   * is unknown, but it never manufactures a host run for the sidebar. */
+  it('leaves a hydrated refusal diagnostic out of the chat run machine', async () => {
     const store = createStore();
     const heard: Array<Record<string, unknown>> = [];
     const projectHeard: Array<{ type: string }> = [];
@@ -1139,7 +1185,8 @@ describe('ChatSessionStore — persisted failure replay (P59)', () => {
       expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
     });
 
-    expect(heard).toContainEqual({ type: 'runLifecycle', phase: 'failed', reason: 'the model refused' });
+    expect(heard).toEqual([]);
+    expect(session.stateActorRef.getSnapshot().matches({ run: 'idle' })).toBe(true);
     /* A refused command has no projected run for the project to count. */
     expect(projectHeard).toEqual([]);
     store.release('chat_reloaded');

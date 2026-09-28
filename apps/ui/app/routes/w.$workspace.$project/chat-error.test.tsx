@@ -159,6 +159,78 @@ describe('ChatError', () => {
     projection.stop();
   });
 
+  it('retires a refused Start after another device admits a later healthy run', () => {
+    const projection = createActor(chatProjectionLogic).start();
+    const oldRefusal: ChatErrorPayload = {
+      category: errorCategory.generic,
+      title: 'Start refused',
+      message: 'Old request was refused',
+      requestId: 'req_old',
+    };
+    vi.mocked(useChatSelector).mockImplementation((selector) =>
+      selector({
+        error: undefined,
+        persistedError: oldRefusal,
+        projection: projection.getSnapshot().context,
+        attachmentStatus: 'attached',
+      } as CombinedChatState),
+    );
+    const { rerender } = render(<ChatErrorBanner />);
+    expect(screen.getByText('Old request was refused')).toBeInTheDocument();
+
+    projection.send({
+      type: 'batch',
+      answer: { status: 'batch', cursor: 0, nextCursor: 0, endCursor: 0, events: [] },
+    });
+    rerender(<ChatErrorBanner className='caught-up-empty' />);
+    expect(screen.getByText('Old request was refused')).toBeInTheDocument();
+
+    projection.send({
+      type: 'batch',
+      answer: {
+        status: 'batch',
+        cursor: 0,
+        nextCursor: 2,
+        endCursor: 2,
+        events: [lifecycleRow(0, 'admitted', 'req_new'), lifecycleRow(1, 'completed', 'req_new')],
+      },
+    });
+    rerender(<ChatErrorBanner className='recovered' />);
+    expect(screen.queryByText('Old request was refused')).not.toBeInTheDocument();
+    projection.stop();
+  });
+
+  it('keeps a refused Resume only while its identified run is paused', () => {
+    const projection = createActor(chatProjectionLogic).start();
+    projection.send({
+      type: 'batch',
+      answer: {
+        status: 'batch',
+        cursor: 0,
+        nextCursor: 2,
+        endCursor: 2,
+        events: [lifecycleRow(0, 'admitted', 'req_paused'), lifecycleRow(1, 'paused', 'req_paused')],
+      },
+    });
+    vi.mocked(useChatSelector).mockImplementation((selector) =>
+      selector({
+        error: undefined,
+        persistedError: {
+          category: errorCategory.generic,
+          title: 'Resume refused',
+          message: 'Could not resume this run',
+          requestId: 'cmd_resume',
+          details: { runId: 'req_paused', commandType: 'resume' },
+        },
+        projection: projection.getSnapshot().context,
+        attachmentStatus: 'attached',
+      } as CombinedChatState),
+    );
+    render(<ChatErrorBanner />);
+    expect(screen.getByText('Could not resume this run')).toBeInTheDocument();
+    projection.stop();
+  });
+
   /* F5: the rate-limit and service cards are routed by CATEGORY, so each also
      serves codes the host rules unrecoverable. `isResumableRunFailure` is the
      one decision, taken here and handed to the card, so no card can promise a

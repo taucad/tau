@@ -63,17 +63,28 @@ const createProject = async (origin: string): Promise<void> => {
 };
 
 const agentTrigger = selectors.getByRole('button', { name: /^Agent and model: /u });
-const tauHostSegment = selectors.getByRole('tab', { name: /^Tau Host · /u });
 
 /** Open the agent sheet and wait for the daemon's segment under *Runs on*. */
-const openRunsOn = async (): Promise<void> => {
+const openRunsOn = async (workspace: string) => {
   await target.expectVisible(agentTrigger, 60_000);
   await target.click(agentTrigger);
+  const descriptor = await target.evaluate(async () => {
+    const response = await fetch('/.well-known/tau-host');
+    if (!response.ok) {
+      throw new Error(`Tau Host discovery failed (${String(response.status)}).`);
+    }
+    return (await response.json()) as { readonly label: string; readonly workspaceRoot: string };
+  });
+  expect(descriptor.workspaceRoot).toBe(workspace);
+  const tauHostSegment = selectors
+    .getByRole('tablist', { name: 'Where Tau runs' })
+    .getByRole('tab', { name: descriptor.label, exact: true });
   await target.expectVisible(tauHostSegment, 60_000);
+  return tauHostSegment;
 };
 
 const selectTauHost = async (workspace: string): Promise<void> => {
-  await openRunsOn();
+  const tauHostSegment = await openRunsOn(workspace);
   await target.click(tauHostSegment);
   // The note names the directory the turn will write to — the one fact a user
   // needs before placing a turn there.
@@ -329,7 +340,7 @@ describe('daemon agent host (AV-4, rung 1)', () => {
     await dismissCookieBanner();
 
     // The seed carried the chip's promise into the chat that now owns the turn.
-    await openRunsOn();
+    const tauHostSegment = await openRunsOn(workspace);
     await expect
       .poll(async () => target.getAttribute(tauHostSegment, 'aria-selected'), { timeout: 60_000 })
       .toBe('true');

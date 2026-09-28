@@ -1346,6 +1346,9 @@ it("should publish the worker's capability in the project-host status", async ()
     await expect(control.call('status', { projectId: 'no-such-project' })).resolves.toEqual({
       capability: expect.objectContaining({ supported: true }) as unknown,
     });
+    await expect(
+      control.call('runStoppability', { projectId: 'no-such-project', chatId: 'chat-unseen' }),
+    ).resolves.toBe('background-window');
   } finally {
     control.close();
     worker.terminate();

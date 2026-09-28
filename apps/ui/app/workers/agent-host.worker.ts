@@ -163,6 +163,10 @@ workerScope.addEventListener('message', (event) => {
             capability: await capabilityOf('exclusive-append'),
           };
         }
+        case 'runStoppability': {
+          const { projectId, chatId } = args as Calls['runStoppability']['args'];
+          return hosts.hostOf(projectId)?.stoppability(chatId) ?? 'background-window';
+        }
         case 'visibility': {
           visible = (args as Calls['visibility']['args']).visible;
           visibilityTopic.emit(visible);

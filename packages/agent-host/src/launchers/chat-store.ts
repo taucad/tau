@@ -61,6 +61,8 @@ export type LeadershipPort = Readonly<{
   ) => Promise<CommandAnswer>;
   read: (input: ReadInput, local: () => Promise<ReadAnswer>) => Promise<ReadAnswer>;
   role: (chatId: string) => Readonly<{ role: 'leader' | 'follower' | 'none'; epoch: number }>;
+  /** A read-only view of whether this process can route a cancel to a live compatible holder. */
+  stoppability: (chatId: string) => 'stoppable' | 'other-build' | 'background-window';
   /** A term's first append is its claim. */
   appended: (chatId: string, endCursor: number) => void;
   /** An append was refused `LOG_FENCED`. */

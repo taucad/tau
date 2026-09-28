@@ -31,7 +31,11 @@ import {
   ChatWorkspaceAuthorityProvider,
   readRootedBridgeCapabilities,
 } from '#providers/chat-workspace-authority-provider.js';
-import { createBrowserAgentHostClient, createAgentHostClient } from '#services/agent-host-client.js';
+import {
+  createBrowserAgentHostClient,
+  createAgentHostClient,
+  readBrowserRunStoppability,
+} from '#services/agent-host-client.js';
 import { createDaemonAgentHostTransport } from '#services/daemon-agent-host-client.js';
 import { daemonPlacementOf } from '#lib/agent-host-placement.js';
 import { dialAgentHost, agentHostClientConfig } from '#chat-clients/_internal/turn-body.js';
@@ -178,7 +182,7 @@ function ProjectSessionBinding({
     if (client === undefined || !viewsReady) {
       return;
     }
-    return chatSessions.publishProjectHostConnector(projectId, async (chatId) => {
+    const connect = async (chatId: string) => {
       const stored = await chatSessions.getChatHostSettings(chatId);
       const {
         defaultExecution: fallback,
@@ -259,6 +263,21 @@ function ProjectSessionBinding({
         }),
         runtimeConfig: createUiRuntimeConfig(ENV),
       });
+    };
+    return chatSessions.publishProjectHostConnector(projectId, connect, async (chatId) => {
+      const stored = await chatSessions.getChatHostSettings(chatId);
+      const execution = stored?.activeExecution ?? choices.current.defaultExecution;
+      const daemonHostId = daemonPlacementOf(execution);
+      if (daemonHostId !== undefined) {
+        try {
+          const channel = await dialAgentHost(daemonHostId, projectId);
+          channel.close();
+          return 'stoppable';
+        } catch {
+          return 'background-window';
+        }
+      }
+      return readBrowserRunStoppability(projectId, chatId);
     });
   }, [chatSessions, client, fileManagerRef, projectId, viewsReady, workspace]);
   /* RV-W5b2 R2-1: an editor's conflict still being recorded keeps the project open, like a dirty tree. */

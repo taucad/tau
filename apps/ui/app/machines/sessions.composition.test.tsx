@@ -145,6 +145,8 @@ const {
         },
       }),
       stopRun: vi.fn(),
+      cancelProjectedRun: vi.fn(async () => 'stopped'),
+      publishProjectHostConnector: vi.fn(() => () => undefined),
       setProjectSession: vi.fn(),
       setFocusedProject: vi.fn(),
       setRevisionFacts: vi.fn(),
@@ -154,6 +156,9 @@ const {
       chatRootsOf(projectId: string) {
         return this.roots.get(projectId) ?? new Map();
       },
+      observedChatIdsOf: () => [],
+      getProjection: () => undefined,
+      subscribeProjection: () => () => undefined,
       subscribeMembership(listener: () => void) {
         this.membership.add(listener);
         return () => {
@@ -1064,7 +1069,11 @@ describe('sessions composition', () => {
         await send({ type: 'open', projectId });
       }
       await settle();
-      sessionOf(projectId)?.send({ type: 'runStarted', chatId: `chat-${index}` });
+      sessionOf(projectId)?.send({
+        type: 'projectedRunsChanged',
+        runs: [`chat-${index}`],
+        stoppableRuns: [`chat-${index}`],
+      });
     }
     await settle();
 
@@ -1100,7 +1109,7 @@ describe('sessions composition', () => {
       if (facts.runs === undefined) {
         session?.send({ type: 'revisionState', dirty: facts.dirty === true, pushed: facts.pushed !== false });
       } else {
-        session?.send({ type: 'runStarted', chatId: 'chat-1' });
+        session?.send({ type: 'projectedRunsChanged', runs: ['chat-1'], stoppableRuns: ['chat-1'] });
       }
       await Promise.resolve();
     });
@@ -1119,7 +1128,7 @@ describe('sessions composition', () => {
     const view = await renderRoute('pin-g');
     const session = sessionOf('pin-g');
     await act(async () => {
-      session?.send({ type: 'runStarted', chatId: 'chat-1' });
+      session?.send({ type: 'projectedRunsChanged', runs: ['chat-1'], stoppableRuns: ['chat-1'] });
       await Promise.resolve();
     });
     await send({ type: 'idleExpired', projectId: 'pin-g' });
@@ -1127,7 +1136,7 @@ describe('sessions composition', () => {
 
     /* The run settles: the reason is gone, so the row stops saying it. */
     await act(async () => {
-      session?.send({ type: 'runSettled', chatId: 'chat-1' });
+      session?.send({ type: 'projectedRunsChanged', runs: [], stoppableRuns: [] });
       await Promise.resolve();
     });
     expect(sessionsActor.getSnapshot().context.refusals['pin-g']).toBeUndefined();
@@ -1145,7 +1154,7 @@ describe('sessions composition', () => {
     const session = sessionOf('pin-d');
     expect(session).toBeDefined();
     await act(async () => {
-      session?.send({ type: 'runStarted', chatId: 'chat-1' });
+      session?.send({ type: 'projectedRunsChanged', runs: ['chat-1'], stoppableRuns: ['chat-1'] });
       await Promise.resolve();
     });
     expect(Object.keys(session?.getSnapshot().children ?? {}).length).toBeGreaterThan(0);
@@ -1322,7 +1331,7 @@ describe('sessions composition — the idle window (S48(6))', () => {
     registry.send({ type: 'open', projectId: 'timer-busy' });
     await drain(registry);
     const session = registry.getSnapshot().context.refs['timer-busy'];
-    session?.send({ type: 'runStarted', chatId: 'chat-1' });
+    session?.send({ type: 'projectedRunsChanged', runs: ['chat-1'], stoppableRuns: ['chat-1'] });
     await drain(registry);
     expect(session?.getSnapshot().value).toEqual({ live: 'busy' });
 
@@ -1331,7 +1340,7 @@ describe('sessions composition — the idle window (S48(6))', () => {
     expect(registry.getSnapshot().context.refs['timer-busy']).toBeDefined();
     expect(registry.getSnapshot().context.closed['timer-busy']).toBeUndefined();
 
-    session?.send({ type: 'runSettled', chatId: 'chat-1' });
+    session?.send({ type: 'projectedRunsChanged', runs: [], stoppableRuns: [] });
     await drain(registry);
     registry.clock.advance(projectSessionIdleWindowMilliseconds);
     await drain(registry);

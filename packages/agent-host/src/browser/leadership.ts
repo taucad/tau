@@ -446,6 +446,16 @@ export const createBrowserLeadership =
         }
         return { role: 'none', epoch: 0 };
       },
+      stoppability: (chatId) => {
+        const snapshot = chats.get(chatId)?.actor.getSnapshot();
+        if (snapshot?.hasTag('leading') === true) {
+          return 'stoppable';
+        }
+        if (snapshot?.matches({ following: 'alive' }) === true) {
+          return snapshot.context.heard?.foreign === true ? 'other-build' : 'stoppable';
+        }
+        return 'background-window';
+      },
       appended: (chatId, endCursor) => {
         chats.get(chatId)?.actor.send({ type: 'appended', endCursor });
       },

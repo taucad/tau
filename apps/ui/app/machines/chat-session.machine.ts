@@ -38,12 +38,6 @@ import type { HostCommand } from '@taucad/agent-host/wire';
 /** How the chat's run reached the state it is in. @public */
 export type ChatRunPhase = 'admitted' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled';
 
-/** The persistence machine's request lifecycle, coalesced by the adapter. @public */
-export type ChatRequestLifecycle = 'idle' | 'invoking' | 'retrying' | 'stopping';
-
-/** What reload discovery says about this chat's server-authoritative run. @public */
-export type ChatDurableRunState = 'reattaching' | 'active' | 'terminal';
-
 /** The sync facet of the project's revision status, as this chat sees it. @public */
 export type ChatSyncState = 'synced' | 'pending' | 'conflicted';
 
@@ -161,8 +155,6 @@ export type ChatSessionMachineEvent =
   | { readonly type: 'adoptRun'; readonly runId: string }
   | { readonly type: 'interruptRecorded'; readonly state: 'requested' | 'resolved'; readonly count?: number }
   | { readonly type: 'toolParts'; readonly inFlight: number; readonly approvals: number; readonly toolName?: string }
-  | { readonly type: 'requestLifecycle'; readonly phase: ChatRequestLifecycle }
-  | { readonly type: 'durableRunState'; readonly state: ChatDurableRunState }
   | { readonly type: 'close' }
   | { readonly type: 'turnFinalized'; readonly branch: string }
   | { readonly type: 'dirtyChanged'; readonly dirty: boolean }
@@ -247,7 +239,7 @@ const adoptRunTransition = ({ context, event }: ChatSessionArgs<EventOf<'adoptRu
     return {};
   }
   announce(context, enq);
-  return { target: '#chat-session.run.running.reconnecting', context: { activeRunId: event.runId } };
+  return { target: '#chat-session.run.running.generating', context: { activeRunId: event.runId } };
 };
 
 /* A tool part in flight is what "running a tool" means; deltas never get here,
@@ -307,7 +299,6 @@ const pairs = (states: readonly string[], events: readonly string[]): Array<read
  * The (state, event) pairs this machine ignores (MC-R17).
  *
  * - `turnAdmitted` outside `queued.admitting`: the answer of an admission a later gesture aborted.
- * - `requestLifecycle` outside `running`: the store reports every change; only a running turn reads it.
  * - `adoptRun` in the states that hold a turn or a live run.
  *
  * @public
@@ -324,10 +315,6 @@ export const chatSessionIgnoredEvents: ReadonlyArray<readonly [state: string, ev
       runStates.stopped,
     ],
     ['turnAdmitted'],
-  ),
-  ...pairs(
-    [runStates.idle, runStates.queued, runStates.done, runStates.failed, runStates.stopped],
-    ['requestLifecycle'],
   ),
   ...pairs([runStates.queued, runStates.running], ['adoptRun']),
 ];
@@ -487,23 +474,8 @@ export const chatSessionMachine = setup({
                 input: {},
               },
             },
-            reconnecting: {},
           },
           on: {
-            requestLifecycle: ({ context, event }, enq) => {
-              if (event.phase === 'retrying') {
-                return { target: '.reconnecting' };
-              }
-              if (event.phase === 'stopping') {
-                announce(context, enq);
-                return { target: 'stopped', context: clearRunDetail };
-              }
-              /* `invoking` is a request in flight; the `generating` guards route
-               * it straight back to a tool or an approval when one is open. An
-               * `idle` request says nothing the run's own lifecycle will not. */
-              return event.phase === 'invoking' ? { target: '.generating' } : {};
-            },
-            durableRunState: ({ event }) => (event.state === 'reattaching' ? { target: '.reconnecting' } : undefined),
             requestTurn: holdGesture,
             interruptRecorded: ({ context, event }, enq) => {
               if (event.state !== 'requested') {
@@ -531,16 +503,6 @@ export const chatSessionMachine = setup({
           return { target: '.queued.admitting', reenter: true, context: { pendingGesture: event.gesture } };
         },
         runLifecycle,
-        /* Reload discovery can substantiate a run for a chat that never left
-         * `idle` on this page (`retainDurableRun`). */
-        durableRunState: ({ context, event }, enq) => {
-          /* Only a reattach moves the run; `active` and `terminal` arrive as its lifecycle. */
-          if (event.state !== 'reattaching') {
-            return {};
-          }
-          announce(context, enq);
-          return { target: '.running.reconnecting' };
-        },
         /*
          * *Close* on a chat (A35, P63).
          *

@@ -89,10 +89,8 @@ const emptyMetadataByChatId: Readonly<Record<string, AgentProjectionMetadata>> =
  * Ponytail: a chat with no machine is `idle`, full stop. A project session owns
  * a machine for every one of its chats, so the only rows without one are in a
  * project that is not live — and a closed project has no agent running. The one
- * fact this loses is a *persisted* error from a previous session, which used to
- * colour the row off `chat.error`; the honest place to restore it is the store
- * replaying it as `runLifecycle{phase:'failed'}` when it rehydrates the chat,
- * not a second status here.
+ * Persisted errors remain diagnostic until the host attachment catches up;
+ * this pane follows only projected run lifecycle, never a fabricated failure.
  */
 const paneState: Readonly<Record<ChatSidebarState, AgentProjectionState>> = {
   idle: 'idle',

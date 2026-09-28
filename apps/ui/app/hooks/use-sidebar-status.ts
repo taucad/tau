@@ -164,9 +164,6 @@ const chatRunState = (snapshot: ChatSnapshot): ChatSidebarState => {
   if (snapshot.matches({ run: { running: { waiting: 'input' } } })) {
     return 'question';
   }
-  if (snapshot.matches({ run: { running: 'reconnecting' } })) {
-    return 'reconnecting';
-  }
   if (snapshot.matches({ run: { running: 'tool' } })) {
     return 'tool';
   }
@@ -174,7 +171,7 @@ const chatRunState = (snapshot: ChatSnapshot): ChatSidebarState => {
     return 'working';
   }
   /* A run reads Done at its terminal row; the revision card owns "Saving revision" (§5.10). */
-  if (snapshot.matches({ run: 'finishing' }) || snapshot.matches({ run: 'done' })) {
+  if (snapshot.matches({ run: 'done' })) {
     return 'done';
   }
   if (snapshot.matches({ run: 'failed' })) {

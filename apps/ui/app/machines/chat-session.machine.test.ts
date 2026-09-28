@@ -92,19 +92,6 @@ const agentStateRows: ReadonlyArray<{
     run: 'running.waiting.approval',
   },
   {
-    signal: 'durableRunState: reattaching',
-    events: [{ type: 'durableRunState', state: 'reattaching' }],
-    run: 'running.reconnecting',
-  },
-  {
-    signal: 'request lifecycle retrying',
-    events: [
-      { type: 'runLifecycle', phase: 'running' },
-      { type: 'requestLifecycle', phase: 'retrying' },
-    ],
-    run: 'running.reconnecting',
-  },
-  {
     signal: 'run.lifecycle: completed',
     events: [{ type: 'runLifecycle', phase: 'completed' }],
     run: 'done',
@@ -115,14 +102,6 @@ const agentStateRows: ReadonlyArray<{
     run: 'failed',
   },
   { signal: 'run.lifecycle: cancelled', events: [{ type: 'runLifecycle', phase: 'cancelled' }], run: 'stopped' },
-  {
-    signal: 'request lifecycle stopping',
-    events: [
-      { type: 'runLifecycle', phase: 'running' },
-      { type: 'requestLifecycle', phase: 'stopping' },
-    ],
-    run: 'stopped',
-  },
 ];
 
 describe('chatSessionMachine', () => {
@@ -174,11 +153,8 @@ describe('chatSessionMachine', () => {
         { type: 'runLifecycle', phase: 'completed', runId: 'run-1' },
         { type: 'runLifecycle', phase: 'failed' },
         { type: 'runLifecycle', phase: 'cancelled' },
-        { type: 'requestLifecycle', phase: 'retrying' },
-        { type: 'requestLifecycle', phase: 'stopping' },
         { type: 'toolParts', inFlight: 1, approvals: 0 },
         { type: 'toolParts', inFlight: 0, approvals: 1 },
-        { type: 'durableRunState', state: 'reattaching' },
         { type: 'close' },
       ] satisfies ChatSessionMachineEvent[],
     });
@@ -196,7 +172,6 @@ describe('chatSessionMachine', () => {
         'idle',
         'queued.observing',
         'running.generating',
-        'running.reconnecting',
         'running.tool',
         'running.waiting.approval',
         'running.waiting.input',
@@ -472,7 +447,7 @@ describe('chatSessionMachine run ownership', () => {
 
     actor.send({ type: 'adoptRun', runId: 'run-elsewhere' });
 
-    expect(runState(actor)).toBe('running.reconnecting');
+    expect(runState(actor)).toBe('running.generating');
     expect(actor.getSnapshot().context.activeRunId).toBe('run-elsewhere');
 
     actor.stop();
@@ -514,7 +489,7 @@ describe('chatSessionMachine run ownership', () => {
     const actor = startOwning(script.actors);
 
     actor.send({ type: 'adoptRun', runId: 'run-adopted' });
-    expect(runState(actor)).toBe('running.reconnecting');
+    expect(runState(actor)).toBe('running.generating');
 
     actor.send({ type: 'requestTurn', gesture: sendGesture });
     expect(script.admissions).toEqual([]);
@@ -670,11 +645,6 @@ describe('chatSessionMachine — the machine contract (PV-S5, MC-R17)', () => {
     { type: 'toolParts', inFlight: 1, approvals: 0 },
     { type: 'toolParts', inFlight: 0, approvals: 1 },
     { type: 'toolParts', inFlight: 0, approvals: 0 },
-    ...(['invoking', 'retrying', 'stopping', 'idle'] as const).map(
-      (phase) => ({ type: 'requestLifecycle', phase }) as const,
-    ),
-    { type: 'durableRunState', state: 'reattaching' },
-    { type: 'durableRunState', state: 'active' },
     { type: 'close' },
     { type: 'turnFinalized', branch: 'main' },
     { type: 'dirtyChanged', dirty: true },

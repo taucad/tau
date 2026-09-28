@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { mock } from 'vitest-mock-extended';
 import type { Chat } from '@ai-sdk/react';
-import { chatTurnRequestSchema } from '@taucad/chat/schemas';
+import { commandPayloads } from '@taucad/agent-host/wire';
 import type { ChatSnapshot, ContextPayload, MyUIMessage } from '@taucad/chat';
 import { resolveKernel } from '@taucad/types/constants';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
@@ -55,7 +55,12 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
   useActiveChatSession: () => ({ activeChatId: 'chat_integration' }),
 }));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({
-  useChatSessionStore: () => ({ requestTurn: vi.fn(), setTurnPlacement: vi.fn(), reattachHostChat: vi.fn() }),
+  useChatSessionStore: () => ({
+    get: () => undefined,
+    getProjection: () => undefined,
+    requestTurn: vi.fn(),
+    setTurnPlacement: vi.fn(),
+  }),
 }));
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'proj_integration' }) }));
 /* The turn-start pre-flight (R9) is proved in `use-credit-preflight.test.tsx` and
@@ -65,6 +70,7 @@ vi.mock('#hooks/use-credit-preflight.js', () => ({ useCreditPreflight: () => () 
 vi.mock('#hooks/use-revision-status.js', () => ({ useRevisionClient: () => ({}) }));
 
 const noop = (): void => undefined;
+const contextPayloadMock = useContextPayload as unknown as ReturnType<typeof vi.fn>;
 
 /** Mount the client beside the chat's one turn host, which owns the admission. */
 const renderClient = (): ReturnType<typeof renderHook<ReturnType<typeof useCadChatClient>, unknown>> =>
@@ -77,27 +83,25 @@ const renderClient = (): ReturnType<typeof renderHook<ReturnType<typeof useCadCh
     ),
   });
 
-/** The wire body this chat's admission composes for a fresh turn. */
-const admittedBody = async (): Promise<Record<string, unknown> | undefined> => {
+/** The host command this chat's admission composes for a fresh turn. */
+const admittedCommand = async () => {
   const admit = chatTurnAdmit('chat_integration');
   expect(admit).toBeDefined();
   const turn = await admit!({ kind: 'regenerate' });
-  return turn.request.body as Record<string, unknown> | undefined;
+  const { command } = turn.request;
+  if (command?.type !== 'start') {
+    throw new Error('Expected a host Start command.');
+  }
+  return command;
 };
 
 /**
- * Integration scope for the CAD chat client wire body.
+ * Integration scope for the CAD host admission command.
  *
  * Wires the **real** `useCadAgentConfig` assembler hook (with the producer
  * hooks at realistic mocked values) into the **real** `useCadChatClient`,
- * intercepts the `body` the client hands to `useChatActions`'s
- * `sendMessage` / `regenerate` verbs (this is the same
- * `body` the chat-session-store dispatcher forwards to `Chat.sendMessage` /
- * `Chat.regenerate`), and asserts the composed wire body parses cleanly
- * through the **shared** `chatTurnRequestSchema` from `@taucad/chat/schemas`.
- *
- * That same schema is what the API uses to validate `POST /v1/chat`, so a
- * green test here proves the client/server contract holds end-to-end.
+ * Asserts the focused turn owner composes one Start command accepted by the
+ * portable host wire schema, including optional CAD context.
  *
  * @public
  */
@@ -108,15 +112,6 @@ const defaultMessages: readonly MyUIMessage[] = [
     parts: [{ type: 'text', text: 'integration scope' }],
   },
 ];
-
-const buildWireBody = (
-  capturedBody: Record<string, unknown> | undefined,
-  overrides: Partial<{ id: string; messages: readonly MyUIMessage[] }> = {},
-): unknown => ({
-  id: overrides.id ?? 'chat_integration',
-  messages: overrides.messages ?? defaultMessages,
-  ...capturedBody,
-});
 
 type ActionsMock = {
   sendMessage: ReturnType<typeof vi.fn>;
@@ -162,12 +157,13 @@ beforeEach(() => {
   );
   vi.mocked(useCookie).mockReturnValue([true, noop, noop] as unknown as ReturnType<typeof useCookie>);
   vi.mocked(useChatSnapshot).mockReturnValue(undefined);
-  vi.mocked(useContextPayload).mockReturnValue(undefined);
+  contextPayloadMock.mockReturnValue(undefined);
 });
 
-describe('useCadChatClient wire integration', () => {
-  it('should produce a body the API schema accepts when submit fires with minimal producer-hook state', async () => {
+describe('useCadChatClient host admission integration', () => {
+  it('should produce a host Start payload accepted by the wire schema', async () => {
     const chat = mock<Chat<MyUIMessage>>();
+    chat.messages = [...defaultMessages];
     vi.mocked(useActiveChatInstance).mockReturnValue(chat);
     const actions = buildActions();
     installActions(actions);
@@ -178,27 +174,22 @@ describe('useCadChatClient wire integration', () => {
       void result.current.submit({ text: 'design a vase' });
     });
 
-    const wireBody = buildWireBody(await admittedBody());
-
-    expect(() => chatTurnRequestSchema.parse(wireBody)).not.toThrow();
-    const parsed = chatTurnRequestSchema.parse(wireBody);
-    expect(parsed.agent).toMatchObject({
-      profile: 'cad',
-      execution: { kind: 'tau', model: 'openai-gpt-5.5' },
-      kernel: 'replicad',
-      mode: 'agent',
-      toolChoice: 'auto',
-      testingEnabled: true,
+    const command = await admittedCommand();
+    expect(commandPayloads.start.safeParse(command.payload).success).toBe(true);
+    expect(command.payload.config).toMatchObject({
+      model: { id: 'openai-gpt-5.5', providerKind: 'openai' },
     });
+    expect(command.commandId).toBe(command.payload.runId);
   });
 
-  it('should produce a body the API schema accepts when snapshot and contextPayload are present', async () => {
+  it('should include snapshot and contextPayload in the host Start config', async () => {
     const snapshot: ChatSnapshot = { activeFile: { path: 'src/main.ts', name: 'main.ts' } };
     const contextPayload: ContextPayload = { memory: { 'AGENTS.md': 'shared rules' } };
     vi.mocked(useChatSnapshot).mockReturnValue(snapshot);
-    vi.mocked(useContextPayload).mockReturnValue(contextPayload);
+    contextPayloadMock.mockReturnValue(contextPayload);
 
     const chat = mock<Chat<MyUIMessage>>();
+    chat.messages = [...defaultMessages];
     vi.mocked(useActiveChatInstance).mockReturnValue(chat);
     const actions = buildActions();
     installActions(actions);
@@ -209,14 +200,14 @@ describe('useCadChatClient wire integration', () => {
       void result.current.submit({ text: 'iterate' });
     });
 
-    const wireBody = buildWireBody(await admittedBody());
-
-    const parsed = chatTurnRequestSchema.parse(wireBody);
-    expect(parsed.agent).toMatchObject({ snapshot, contextPayload });
+    const command = await admittedCommand();
+    expect(commandPayloads.start.safeParse(command.payload).success).toBe(true);
+    expect(command.payload.config).toMatchObject({ snapshot, contextPayload });
   });
 
-  it('should produce a body the API schema rejects with a missing-agent path when the agent block is removed', async () => {
+  it('should reject a Start payload without its user message', async () => {
     const chat = mock<Chat<MyUIMessage>>();
+    chat.messages = [...defaultMessages];
     vi.mocked(useActiveChatInstance).mockReturnValue(chat);
     const actions = buildActions();
     installActions(actions);
@@ -227,14 +218,13 @@ describe('useCadChatClient wire integration', () => {
       void result.current.submit({ text: 'guard rail' });
     });
 
-    const goodBody = buildWireBody(await admittedBody()) as Record<string, unknown>;
-    const badBody = { ...goodBody };
-    delete badBody['agent'];
-
-    const verdict = chatTurnRequestSchema.safeParse(badBody);
+    const command = await admittedCommand();
+    const badPayload: Record<string, unknown> = { ...command.payload };
+    delete badPayload['message'];
+    const verdict = commandPayloads.start.safeParse(badPayload);
     expect(verdict.success).toBe(false);
     if (!verdict.success) {
-      expect(verdict.error.issues.some((issue) => issue.path[0] === 'agent')).toBe(true);
+      expect(verdict.error.issues.some((issue) => issue.path.join('.') === 'message')).toBe(true);
     }
   });
 });

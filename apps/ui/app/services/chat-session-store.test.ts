@@ -1447,10 +1447,7 @@ describe('ChatSessionStore', () => {
       owner.stop();
       expect(root.getSnapshot().status).toBe('active');
 
-      admission.resolve({
-        kind: 'regenerate',
-        body: { agent: { profile: 'cad', execution: { kind: 'tau', model: 'cad-default' }, kernel: 'replicad' } },
-      });
+      admission.resolve({ kind: 'regenerate' });
       await expect(requested).resolves.toBeUndefined();
       expect(root.getSnapshot().matches({ run: { queued: 'admitting' } })).toBe(false);
       store.release('chat_stopped_admitting');

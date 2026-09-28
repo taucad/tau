@@ -33,17 +33,27 @@ export function mechanism(p = defaultParams) {
     links: { base: { shapes: ['Base'] }, lid: { shapes: ['Lid'] } },
     joints: {
       hinge: {
-        type: 'revolute', name: 'Lid hinge', parent: 'base', child: 'lid',
-        origin: [0, 0, 4], axis: [1, 0, 0], limits: { lower: 0, upper: p.maxOpen },
+        type: 'revolute',
+        name: 'Lid hinge',
+        parent: 'base',
+        child: 'lid',
+        origin: [0, 0, 4],
+        axis: [1, 0, 0],
+        limits: { lower: 0, upper: p.maxOpen },
       },
     },
-    animations: [{
-      id: 'open-close', name: 'Open and close', duration: 2, loop: 'pingPong',
-      keyframes: [
-        { time: 0, coordinates: { hinge: 0 } },
-        { time: 2, coordinates: { hinge: p.maxOpen } },
-      ],
-    }],
+    animations: [
+      {
+        id: 'open-close',
+        name: 'Open and close',
+        duration: 2,
+        loop: 'pingPong',
+        keyframes: [
+          { time: 0, coordinates: { hinge: 0 } },
+          { time: 2, coordinates: { hinge: p.maxOpen } },
+        ],
+      },
+    ],
   } satisfies MechanismSource;
 }
 ```
@@ -54,15 +64,15 @@ The lid remains closed in `main`; the Kinematics pane rotates it about the X-axi
 
 Every joint has a stable object key, optional human `name`, `parent`, `child`, and `origin: [x, y, z]`. The key is used by couplings and animation coordinates; `name` labels the pane. Axes must be finite, nonzero vectors; the runtime normalizes them. Limits are inclusive in mechanism units and must contain the as-built coordinate, usually `0`.
 
-| `type` | Additional fields | Motion and coordinate IDs |
-| --- | --- | --- |
-| `fixed` | None | Welds the child to the parent; no degree of freedom. |
-| `revolute` | `axis`, optional `limits` | Rotation around the axis; ID is the joint key. |
-| `prismatic` | `axis`, optional `limits` | Translation along the axis; ID is the joint key. |
-| `cylindrical` | `axis`, optional `limits: { angle?, distance? }` | Independent rotation and translation; IDs `<joint>/angle`, `<joint>/distance`. |
-| `screw` | `axis`, nonzero `lead`, `handedness: 'right' | 'left'`, optional `limits` | One rotation ID equal to the joint key; one full turn advances by `lead` in length units, signed by handedness. |
-| `spherical` | Optional symmetric `limits` | Rotation vector about `origin`; IDs `<joint>/x`, `<joint>/y`, `<joint>/z`. Bounds, when present, use `lower = -upper` for all three. |
-| `planar` | `normal`, perpendicular in-plane `xAxis`, optional `limits: { x?, y?, angle? }` | Two in-plane translations and rotation about `normal`; IDs `<joint>/x`, `<joint>/y`, `<joint>/angle`. |
+| `type`        | Additional fields                                                               | Motion and coordinate IDs                                                                                                            |
+| ------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `fixed`       | None                                                                            | Welds the child to the parent; no degree of freedom.                                                                                 |
+| `revolute`    | `axis`, optional `limits`                                                       | Rotation around the axis; ID is the joint key.                                                                                       |
+| `prismatic`   | `axis`, optional `limits`                                                       | Translation along the axis; ID is the joint key.                                                                                     |
+| `cylindrical` | `axis`, optional `limits: { angle?, distance? }`                                | Independent rotation and translation; IDs `<joint>/angle`, `<joint>/distance`.                                                       |
+| `screw`       | `axis`, nonzero `lead`, `handedness` (`'right'` or `'left'`), optional `limits` | One rotation ID equal to the joint key; one full turn advances by `lead` in length units, signed by handedness.                      |
+| `spherical`   | Optional symmetric `limits`                                                     | Rotation vector about `origin`; IDs `<joint>/x`, `<joint>/y`, `<joint>/z`. Bounds, when present, use `lower = -upper` for all three. |
+| `planar`      | `normal`, perpendicular in-plane `xAxis`, optional `limits: { x?, y?, angle? }` | Two in-plane translations and rotation about `normal`; IDs `<joint>/x`, `<joint>/y`, `<joint>/angle`.                                |
 
 Choose joints from the physical relationship: a hinge or shaft is revolute, a drawer is prismatic, a spindle that independently spins and slides is cylindrical, a threaded drive is screw, a ball joint is spherical, and a body freely moving in one plane is planar. Combine two revolutes for a universal joint. A rigid assembly of several returned shapes uses one link. Fixed joints express a useful rigid hierarchy but do not create animation controls.
 

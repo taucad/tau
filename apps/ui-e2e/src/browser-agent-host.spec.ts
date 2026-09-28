@@ -240,6 +240,49 @@ const durableFailureReason = async (): Promise<string | undefined> => {
   return last?.state === 'failed' ? last.detail?.message : undefined;
 };
 
+/** A dead browser Worker fails its run and settles its first placed attempt exactly once. */
+const waitForAbandonedSettlement = async (backend: ActiveBackend): Promise<LogEvent> => {
+  await expect
+    .poll(
+      async () => {
+        const events = eventLog(await readActiveProjectTree(backend));
+        return {
+          failures: events.filter(
+            (event) =>
+              event.type === 'run.lifecycle' && event.state === 'failed' && event.detail?.code === 'RUN_ABANDONED',
+          ).length,
+          settlements: events.filter((event) => settlementTypes.has(event.type)).length,
+        };
+      },
+      { timeout: 120_000 },
+    )
+    .toEqual({ failures: 1, settlements: 1 });
+  const events = eventLog(await readActiveProjectTree(backend));
+  const admitted = events.filter((event) => event.type === 'run.lifecycle' && event.state === 'admitted');
+  const failed = events.filter(
+    (event) => event.type === 'run.lifecycle' && event.state === 'failed' && event.detail?.code === 'RUN_ABANDONED',
+  );
+  const settlements = events.filter((event) => settlementTypes.has(event.type));
+  expect(admitted).toHaveLength(1);
+  expect(failed).toHaveLength(1);
+  expect(settlements).toHaveLength(1);
+  expect(admitted[0]?.runId).toBe(failed[0]?.runId);
+  expect(settlements[0]?.runId).toBe(failed[0]?.runId);
+  return settlements[0]!;
+};
+
+/** A resumed attempt must settle after the abandoned attempt, even if both rows are `turn.finalized`. */
+const waitForResumedPublication = async (
+  backend: ActiveBackend,
+  abandoned: LogEvent,
+): Promise<Readonly<Record<string, string>>> => {
+  await waitForLocalPublishedTree(backend, abandoned.type === 'turn.finalized' ? 2 : 1);
+  await expect
+    .poll(async () => settlementTypesOf(await readActiveProjectTree(backend)).length, { timeout: 120_000 })
+    .toBe(2);
+  return readActiveProjectTree(backend);
+};
+
 /**
  * The turn was recorded authoritatively — S7's layout, not the retired one.
  *
@@ -565,9 +608,7 @@ describe.each([
     await submitAndWaitForPartial();
     await target.reload();
     await ensureChatOpen();
-    await expect
-      .poll(async () => settlementTypesOf(await readActiveProjectTree(backend)), { timeout: 120_000 })
-      .toEqual(['turn.failed']);
+    const abandoned = await waitForAbandonedSettlement(backend);
     expect(await readGatewayRequestCount()).toBe(1);
     await target.expectVisible(continueAction, 60_000);
     await target.click(continueAction);
@@ -575,9 +616,9 @@ describe.each([
     await expect.poll(parkedGatewayCount, { timeout: 120_000 }).toBe(2);
     await target.releaseAgentHostGatewayFixture();
     await target.expectVisible(selectors.getByText(finalText, { exact: true }), 120_000);
-    const tree = await waitForLocalPublishedTree(backend);
+    const tree = await waitForResumedPublication(backend, abandoned);
     assertPublication(tree);
-    expect(settlementTypesOf(tree)).toEqual(['turn.failed', 'turn.finalized']);
+    expect(settlementTypesOf(tree)).toEqual([abandoned.type, 'turn.finalized']);
     expect(eventLog(tree).filter((event) => event.type === 'run.lifecycle' && event.state === 'admitted')).toHaveLength(
       1,
     );
@@ -724,7 +765,6 @@ describe('seeded first turn', () => {
     await target.navigate(`${seedRoute}?prompt=${encodeURIComponent(seedPrompt)}`);
     await target.expectUrl(/\/w\/[^/]+\/[^/]+/u, 60_000);
     await ensureChatOpen();
-
     // No submit: the seeded turn dispatches itself.
     // The lease is the host-placed attempt's evidence, not a page claim.
     await expect.poll(seededLease, { timeout: 60_000, interval: 250 }).toMatchObject({
@@ -743,11 +783,7 @@ describe('seeded first turn', () => {
     await target.expectVisible(selectors.getByText(partialText, { exact: true }), 120_000);
     await target.reload();
     await ensureChatOpen();
-    await expect
-      .poll(async () => settlementTypesOf(await readActiveProjectTree('home')), { timeout: 120_000 })
-      .toEqual(['turn.failed']);
-    const abandoned = eventLog(await readActiveProjectTree('home'));
-    expect(abandoned.filter((event) => event.type === 'run.lifecycle' && event.state === 'admitted')).toHaveLength(1);
+    const abandoned = await waitForAbandonedSettlement('home');
     expect(await readGatewayRequestCount()).toBe(1);
     await target.expectVisible(continueAction, 60_000);
     await target.click(continueAction);
@@ -756,7 +792,7 @@ describe('seeded first turn', () => {
     await target.releaseAgentHostGatewayFixture();
     await target.expectVisible(selectors.getByText(finalText, { exact: true }), 120_000);
 
-    const tree = await waitForLocalPublishedTree('home');
+    const tree = await waitForResumedPublication('home', abandoned);
     expect(tree['/browser-host-proof.txt']).toBe('created by the browser agent host\n');
     assertPublication(tree);
     expect(
@@ -766,7 +802,7 @@ describe('seeded first turn', () => {
     ).toEqual(['admitted', 'running', 'failed', 'running', 'completed']);
     // The new attempt retires the lease; the page's remount did not admit again.
     await expect.poll(seededLease, { timeout: 60_000, interval: 250 }).toBeUndefined();
-    expect(settlementTypesOf(tree)).toEqual(['turn.failed', 'turn.finalized']);
+    expect(settlementTypesOf(tree)).toEqual([abandoned.type, 'turn.finalized']);
     expect(eventLog(tree).filter((event) => event.type === 'run.lifecycle' && event.state === 'admitted')).toHaveLength(
       1,
     );
@@ -800,9 +836,7 @@ describe('durable log reattach after a reload', () => {
     await expect
       .poll(durableFailureReason, { timeout: 120_000 })
       .toBe('The host executing this run is gone. Resume the turn to continue it.');
-    await expect
-      .poll(async () => settlementTypesOf(await readActiveProjectTree('home')).length, { timeout: 120_000 })
-      .toBe(1);
+    const firstSettlement = await waitForAbandonedSettlement('home');
     expect(await readGatewayRequestCount()).toBe(1);
     await assertNoApiRunCalls();
     const abandoned = eventLog(await readActiveProjectTree('home')).filter((event) => settlementTypes.has(event.type));
@@ -833,7 +867,7 @@ describe('durable log reattach after a reload', () => {
     await target.releaseAgentHostGatewayFixture();
     await target.expectVisible(selectors.getByText(finalText, { exact: true }), 120_000);
 
-    const tree = await waitForLocalPublishedTree('home');
+    const tree = await waitForResumedPublication('home', firstSettlement);
     assertPublication(tree);
     expect(settlementTypesOf(tree)).toEqual([abandoned[0]?.type, 'turn.finalized']);
     expect(settledTurns(tree).at(-1)?.runId).toBe(abandoned[0]?.runId);
@@ -855,8 +889,9 @@ describe('durable log reattach after a reload', () => {
     await target.expectVisible(selectors.getByText('The host executing this run is gone', { exact: false }), 60_000);
     expect(await readGatewayRequestCount()).toBe(1);
     await assertNoApiRunCalls();
+    const firstSettlement = await waitForAbandonedSettlement('home');
     const abandoned = eventLog(await readActiveProjectTree('home'));
-    expect(settlementTypesOf(await readActiveProjectTree('home'))).toEqual(['turn.failed']);
+    expect(settlementTypesOf(await readActiveProjectTree('home'))).toEqual([firstSettlement.type]);
     expect(abandoned.filter((event) => event.type === 'run.lifecycle' && event.state === 'admitted')).toHaveLength(1);
 
     // A settled failure leaves the chat submittable again — the wedge this
@@ -869,11 +904,9 @@ describe('durable log reattach after a reload', () => {
     await target.type(composer, `${seedPrompt} Again.`);
     await target.click(selectors.getByCss('button:has(svg.lucide-arrow-up)').last());
     await expect.poll(readGatewayRequestCount, { timeout: 120_000 }).toBe(priorRequests + 1);
-    await target.waitForAgentHostGatewayGate({ kind: 'stream', turn: `${seedPrompt} Again.` });
-    await target.releaseAgentHostGatewayFixture(`${seedPrompt} Again.`);
     await expect
       .poll(async () => settlementTypesOf(await readActiveProjectTree('home')), { timeout: 120_000 })
-      .toEqual(['turn.failed', 'turn.finalized']);
+      .toEqual([firstSettlement.type, 'turn.finalized']);
     // The second run can finish before a lease poll sees it; its log rows are durable.
     await expect
       .poll(

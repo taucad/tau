@@ -7,19 +7,26 @@
  * per row. Its context is JSON-safe records. Run phase, open interrupts and tools
  * in flight are selects over it; the page's copies of them go (G02–G04).
  *
- * ponytail: the run views, chunks and live overlay of §5.6 land with the steps
- * that read them (PV-S11, PV-S12, PV-S15); this step needs only the ledger and the
- * open tool calls.
+ * Durable run views and transcript materialization share this fold; a watched
+ * run may also carry an ephemeral live overlay, never a second persisted log.
  */
 
 import { createLogic } from 'xstate';
 import { readUIMessageStream } from 'ai';
 import type { UIMessageChunk } from 'ai';
 import { agentLogEventSchema, emptyChatLedger, foldReadAnswer, mergeLogSegments } from '@taucad/agent-host';
-import type { AgentLogEvent, ChatLedger, ChatLogSegment, RowKey, TurnPlacement } from '@taucad/agent-host';
+import type {
+  AgentLiveEvent,
+  AgentLogEvent,
+  ChatLedger,
+  ChatLogSegment,
+  RowKey,
+  TurnPlacement,
+} from '@taucad/agent-host';
 import type { MyUIMessage } from '@taucad/chat';
 import {
   projectAgentHostEvent,
+  projectAgentHostLiveEvent,
   projectAgentHostUserTurn,
   runFailureText,
 } from '#services/agent-host-event-projection.js';
@@ -53,6 +60,8 @@ export type ChatProjection = Readonly<{
   remote?: Readonly<{ digest: string; views: Readonly<Record<string, RunView>> }>;
   /** Open/closed block identities, stored as a JSON-safe record rather than a live Map. */
   blocks: Readonly<Record<string, Block>>;
+  /** The watched run's ephemeral SDK stream. Durable views remain independent and replace it at terminal materialization. */
+  live?: Readonly<{ runId: string; chunks: readonly UIMessageChunk[]; blocks: Readonly<Record<string, Block>> }>;
   /** The log's end as the last answer stated it; the projection holds the whole log once its cursor reaches it. */
   endCursor: number;
   /** What the last `failed` row said, for the run it failed; cleared by that run's next lifecycle row. */
@@ -68,6 +77,10 @@ export type ChatProjectionEvent =
   | Readonly<{ type: 'batch'; answer: ChatProjectionReadAnswer }>
   /** The reader starts over from cursor 0 (a refusal, or a new reader). */
   | Readonly<{ type: 'reset' }>
+  /** A non-durable model delta; it never advances the log cursor or transcript source. */
+  | Readonly<{ type: 'live'; event: AgentLiveEvent }>
+  /** Retire only the named ephemeral overlay after terminal delivery or reader loss. */
+  | Readonly<{ type: 'clear-live'; runId: string }>
   /** Other devices' projected segment files; no own-log cursor applies to them. */
   | Readonly<{ type: 'remote'; segments: readonly ChatLogSegment[] }>;
 
@@ -258,6 +271,22 @@ const foldRunViews = (
   return { views, blocks: Object.fromEntries(blocks) };
 };
 
+const copyBlocks = (blocks: ChatProjection['blocks']): AgentHostLiveBlocks =>
+  new Map(Object.entries(blocks).map(([key, block]) => [key, { ...block }]));
+
+/** Apply a durable row to the ephemeral watch too, deduping it against live block offsets. */
+const foldLiveRow = (
+  live: NonNullable<ChatProjection['live']>,
+  row: AgentLogEvent,
+): NonNullable<ChatProjection['live']> => {
+  if (row.runId !== live.runId) {
+    return live;
+  }
+  const blocks = copyBlocks(live.blocks);
+  const chunks = projectAgentHostEvent(row, blocks);
+  return { runId: live.runId, chunks: [...live.chunks, ...chunks], blocks: Object.fromEntries(blocks) };
+};
+
 /**
  * The projection's reducer: total, and it never throws (RB1).
  *
@@ -277,6 +306,33 @@ export const reduceChatProjection = (state: ChatProjection, event: ChatProjectio
     }
     const { views } = foldRunViews(mergeLogSegments(event.segments), {}, {});
     return { state: { ...state, remote: { digest, views } } };
+  }
+  if (event.type === 'live') {
+    const { runId } = event.event;
+    const lifecycle = state.ledger.runs[runId]?.lifecycle;
+    if (lifecycle === undefined || endedLifecycles.has(lifecycle)) {
+      return { state };
+    }
+    const prior = state.live?.runId === runId ? state.live : undefined;
+    const blocks = copyBlocks(prior?.blocks ?? state.blocks);
+    const chunks = projectAgentHostLiveEvent(event.event, blocks);
+    return {
+      state: {
+        ...state,
+        live: {
+          runId,
+          chunks: [...(prior?.chunks ?? state.views[runId]?.chunks ?? []), ...chunks],
+          blocks: Object.fromEntries(blocks),
+        },
+      },
+    };
+  }
+  if (event.type === 'clear-live') {
+    if (state.live?.runId !== event.runId) {
+      return { state };
+    }
+    const { live: _live, ...durable } = state;
+    return { state: durable };
   }
   /* Any batch states where the log ends, even one this projection already holds or cannot fold yet. */
   const endCursor =
@@ -301,21 +357,29 @@ export const reduceChatProjection = (state: ChatProjection, event: ChatProjectio
         failure = applyFailureRow(failure, row);
         attentionRow = attentionKeyOf(row) ?? attentionRow;
       }
-      const rendered = foldRunViews(
-        answer.events.flatMap((row) => {
-          const parsed = agentLogEventSchema.safeParse(row);
-          return parsed.success ? [parsed.data] : [];
-        }),
-        views,
-        state.blocks,
-      );
+      const parsedRows = answer.events.flatMap((row) => {
+        const parsed = agentLogEventSchema.safeParse(row);
+        return parsed.success ? [parsed.data] : [];
+      });
+      const rendered = foldRunViews(parsedRows, views, state.blocks);
       views = rendered.views;
+      let live = parsedRows.some(
+        (row) => row.type === 'run.lifecycle' && row.state === 'admitted' && row.runId !== state.live?.runId,
+      )
+        ? undefined
+        : state.live;
+      for (const row of parsedRows) {
+        if (live !== undefined) {
+          live = foldLiveRow(live, row);
+        }
+      }
       return {
         state: {
           ledger: fold.ledger,
           openTools: open ?? state.openTools,
           views,
           blocks: rendered.blocks,
+          ...(live === undefined ? {} : { live }),
           ...(state.remote === undefined ? {} : { remote: state.remote }),
           endCursor,
           ...(failure === undefined ? {} : { failure }),
@@ -352,7 +416,13 @@ export const chatProjectionLogic = createLogic<
   id: 'chatProjection',
   context: initialChatProjection,
   run: ({ context, event }, enq) => {
-    if (event.type !== 'batch' && event.type !== 'reset' && event.type !== 'remote') {
+    if (
+      event.type !== 'batch' &&
+      event.type !== 'reset' &&
+      event.type !== 'remote' &&
+      event.type !== 'live' &&
+      event.type !== 'clear-live'
+    ) {
       return undefined;
     }
     const step = reduceChatProjection(context, event as ChatProjectionEvent);

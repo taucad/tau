@@ -1242,7 +1242,11 @@ export class ChatSessionStore {
         projection: {
           getSnapshot: () => this.#projectionOf(chatId).getSnapshot(),
           send: (event) => {
-            this.receiveHostReadAnswer(chatId, event.answer);
+            if (event.type === 'batch') {
+              this.receiveHostReadAnswer(chatId, event.answer);
+            } else {
+              this.#projectionOf(chatId).send(event);
+            }
           },
         },
         onStatus: (event) => {
@@ -1258,7 +1262,14 @@ export class ChatSessionStore {
           this.#projectionTopics.get(chatId)?.emit();
           if (event.type === 'attachment.attached') {
             observed.attempts = 0;
+            this.#syncProjection(chatId, 'none');
             return;
+          }
+          const session = this.#sessions.get(chatId);
+          if (session?.watchedRunId !== undefined) {
+            session.watch?.stop();
+            session.watch = undefined;
+            session.watchedRunId = undefined;
           }
           if (event.type === 'attachment.refused') {
             queueMicrotask(() => {

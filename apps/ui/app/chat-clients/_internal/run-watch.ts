@@ -36,7 +36,10 @@ export const openRunWatch = (source: RunWatchSource): RunWatch => {
       return;
     }
     const projection = source.getProjection();
-    const chunks = projection?.views[source.runId]?.chunks ?? [];
+    const chunks =
+      projection?.live?.runId === source.runId
+        ? projection.live.chunks
+        : (projection?.views[source.runId]?.chunks ?? []);
     /* A projection reset invalidates this stream; the attachment rereads and
      * the session can open a fresh watch after it has rebuilt the transcript. */
     if (chunks.length < sent) {

@@ -7,10 +7,12 @@ import type { ChatProjection, ChatProjectionEvent } from '#machines/chat-project
 /** A read-only connection into one chat's projection. @public */
 export type HostAttachmentInput = Readonly<{
   chatId: string;
-  connect: () => Promise<Pick<AgentHostClient, 'read' | 'subscribe' | 'close'>>;
+  connect: () => Promise<
+    Pick<AgentHostClient, 'read' | 'subscribe' | 'close'> & Partial<Pick<AgentHostClient, 'subscribeLive'>>
+  >;
   projection: Readonly<{
     getSnapshot: () => Readonly<{ context: ChatProjection }>;
-    send: (event: Extract<ChatProjectionEvent, { type: 'batch' }>) => void;
+    send: (event: Extract<ChatProjectionEvent, { type: 'batch' | 'live' | 'clear-live' }>) => void;
   }>;
   onStatus?: (event: {
     type: 'attachment.attached' | 'attachment.lost' | 'attachment.refused';
@@ -24,7 +26,14 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
   let terminalRefusal = false;
   let attached = false;
   let unsubscribe: (() => void) | undefined;
-  let client: Pick<AgentHostClient, 'read' | 'subscribe' | 'close'> | undefined;
+  let unsubscribeLive: (() => void) | undefined;
+  let client: Awaited<ReturnType<HostAttachmentInput['connect']>> | undefined;
+  const clearLive = (): void => {
+    const runId = input.projection.getSnapshot().context.live?.runId;
+    if (runId !== undefined) {
+      input.projection.send({ type: 'clear-live', runId });
+    }
+  };
   const report = (event: {
     type: 'attachment.attached' | 'attachment.lost' | 'attachment.refused';
     reason?: string;
@@ -55,6 +64,21 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
             return;
           }
           input.projection.send({ type: 'batch', answer });
+          if (answer.status === 'batch') {
+            const projection = input.projection.getSnapshot().context;
+            const runId = projection.live?.runId;
+            const lifecycle = runId === undefined ? undefined : projection.ledger.runs[runId]?.lifecycle;
+            if (
+              runId !== undefined &&
+              (lifecycle === 'completed' || lifecycle === 'failed' || lifecycle === 'cancelled')
+            ) {
+              queueMicrotask(() => {
+                if (!closed) {
+                  input.projection.send({ type: 'clear-live', runId });
+                }
+              });
+            }
+          }
           if (answer.status === 'refused') {
             if (answer.reason === 'unreadable') {
               terminalRefusal = true;
@@ -74,6 +98,20 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
           return selectPosition(input.projection.getSnapshot().context).last;
         },
       );
+      unsubscribeLive = client.subscribeLive?.(
+        input.chatId,
+        (_chatId, event) => {
+          if (!closed) {
+            input.projection.send({ type: 'live', event });
+          }
+        },
+        () => {
+          if (!closed && !terminalRefusal) {
+            clearLive();
+            report({ type: 'attachment.lost', reason: 'live subscriber ended' });
+          }
+        },
+      );
     } catch (error) {
       report({ type: 'attachment.lost', reason: error instanceof Error ? error.message : String(error) });
     }
@@ -81,7 +119,9 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
   void begin();
   return () => {
     closed = true;
+    clearLive();
     unsubscribe?.();
+    unsubscribeLive?.();
     if (client !== undefined) {
       void client.close();
     }

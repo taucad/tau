@@ -1032,6 +1032,45 @@ describe('useCadChatClient', () => {
     expect(chat.addToolApprovalResponse).not.toHaveBeenCalled();
   });
 
+  it('should retain a resumed host reply that arrives before approval resolution returns', async () => {
+    browserHostHarness.run = { runId: 'run-paused', state: 'paused', eventCount: 4 };
+    let messages = [
+      {
+        id: 'assistant-approval',
+        role: 'assistant',
+        parts: [
+          {
+            type: 'tool-request_print',
+            toolCallId: 'call-print',
+            state: 'approval-requested',
+            input: {},
+            approval: { id: 'interrupt-1' },
+          },
+        ],
+      },
+    ] as MyUIMessage[];
+    const chat = mock<Chat<MyUIMessage>>();
+    Object.defineProperty(chat, 'messages', { get: () => messages });
+    useActiveChatInstanceMock.mockReturnValue(chat);
+    useChatSelectorMock.mockReturnValue('streaming');
+    const actions = buildActions();
+    actions.setMessages.mockImplementation((next: MyUIMessage[]) => {
+      messages = next;
+    });
+    installActions(actions);
+    browserHostHarness.resolveInterrupt.mockImplementationOnce(async () => {
+      messages = [
+        ...messages,
+        { id: 'resumed-reply', role: 'assistant', parts: [{ type: 'text', text: 'Print started.' }] },
+      ];
+    });
+
+    const { result } = renderClient();
+    await act(async () => result.current.respondToToolApproval('interrupt-1', true));
+
+    expect(messages.some((message) => message.id === 'resumed-reply')).toBe(true);
+  });
+
   it('does not open an SDK approval request for a run with no current host stream', async () => {
     browserHostHarness.resumable = true;
     browserHostHarness.hostRunId = 'run-stale';
@@ -1087,7 +1126,8 @@ describe('useCadChatClient', () => {
     Object.defineProperty(chat, 'messages', { get: () => [] });
     useActiveChatInstanceMock.mockReturnValue(chat);
     useChatSelectorMock.mockReturnValue('ready');
-    installActions(buildActions());
+    const actions = buildActions();
+    installActions(actions);
 
     const { result } = renderClient();
     await act(async () => result.current.respondToToolApproval('interrupt-1', true));
@@ -1104,6 +1144,7 @@ describe('useCadChatClient', () => {
     expect(typeof approval['commandId']).toBe('string');
     expect(typeof approval['resumeCommandId']).toBe('string');
     expect(chat.resumeStream).toHaveBeenCalledOnce();
+    expect(actions.setMessages).not.toHaveBeenCalled();
     expect(chat.addToolApprovalResponse).not.toHaveBeenCalled();
   });
 

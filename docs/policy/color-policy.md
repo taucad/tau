@@ -3,7 +3,7 @@ title: 'Color Policy'
 description: 'OKLCH color system rules: hue architecture, lightness levels, chroma ranges, semantic tokens, contrast requirements, colorblind safety, dark mode, and anti-patterns for all Tau UI surfaces.'
 status: active
 created: '2026-03-14'
-updated: '2026-09-05'
+updated: '2026-09-28'
 related:
   - docs/policy/ui-policy.md
   - docs/policy/diagram-policy.md
@@ -249,6 +249,10 @@ Define raw `oklch()` color tokens in the owning shared or app-specific styleshee
 Never create standalone dark-mode colors. The lightness inversion system ensures both modes stay in sync. Adding manual dark overrides creates maintenance burden and risks inconsistency.
 
 **Exception**: Component-scoped tokens like `--diagram-*` may define explicit dark-mode values when the inversion formula produces suboptimal results. These must be documented in the relevant component policy.
+
+Recorded component-scoped exceptions without a component policy of their own:
+
+- `--viewer-tool-active` (`apps/ui/app/styles/global.css`), the running viewer tool's glyph (Section, Measure). It is set by hand for light, dark and high contrast, and for light and dark under `prefers-contrast: more` (black takes dark's value), because it must stay at 3:1 on both `--accent` and `--sidebar-background` at every `--hue-primary`, and one lightness and chroma through the inversion scale cannot hold that on both surfaces. The `running viewer tool glyph token` test in `apps/ui/app/styles/global.test.ts` sweeps all seven themes at every 5° of hue.
 
 ### Brand-Derived Structural Neutrals
 

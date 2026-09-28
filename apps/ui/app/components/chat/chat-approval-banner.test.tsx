@@ -89,6 +89,7 @@ describe('pendingAgentHostApprovals', () => {
         kind: 'approval',
         prompt: 'create_file',
         options: [],
+        tauTool: true,
       },
     ]);
   });
@@ -148,6 +149,30 @@ describe('ChatApprovalBanner', () => {
 
     expect(screen.getByText('claude is waiting for approval')).toBeInTheDocument();
     expect(screen.queryByText(/codex is waiting/u)).not.toBeInTheDocument();
+  });
+
+  it('names an ordinary Tau tool after the composer switches to an external agent', () => {
+    messages = [
+      {
+        id: 'assistant-2',
+        role: 'assistant',
+        parts: [
+          {
+            type: 'tool-create_file',
+            toolCallId: 'call-1',
+            state: 'approval-requested',
+            input: { targetFile: 'main.scad', content: '' },
+            approval: { id: 'interrupt-2' },
+          },
+        ],
+      } as unknown as MyUIMessage,
+    ];
+
+    render(<ChatApprovalBanner />);
+
+    expect(screen.getByText('Tau is waiting for approval')).toBeInTheDocument();
+    expect(screen.queryByText(/codex is waiting/u)).not.toBeInTheDocument();
+    expect(screen.queryByText(/chat's tree/u)).not.toBeInTheDocument();
   });
 
   /* EQ5: one button per option the agent offered, and the keyboard lands on

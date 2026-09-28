@@ -5,7 +5,6 @@ import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
-import { useProject } from '#hooks/use-project.js';
 import { useRevisionClient } from '#hooks/use-revision-status.js';
 
 /**
@@ -115,7 +114,6 @@ export const waitForRootedBridgeOpener = async (fileManagerRef: FileManagerRef):
 };
 
 export function ChatWorkspaceAuthorityProvider({ children }: { readonly children: ReactNode }): React.JSX.Element {
-  const { projectId } = useProject();
   const { patchChat, invalidateProjectedChats } = useProjectManager();
   const chatSessions = useChatSessionStore();
   /* This is a passive consumer of the retained project session's connection;

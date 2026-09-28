@@ -79,6 +79,7 @@ import { useSidebarCommands } from '#hooks/use-sidebar-status.js';
 import { Skeleton } from '@taucad/ui/components/skeleton';
 import type { ProjectDiscoveryConflict, WorkspaceBindingRepairGroup } from '#hooks/use-project-manager.js';
 import { ProjectCard, ProjectCardCadPreview, ProjectCardMedia } from '#components/project-card.js';
+import { PageHeader } from '#components/layout/page-header.js';
 import { projectSlugOf, projectUrlOr } from '#utils/project-url.utils.js';
 import { projectLocationDescriptor, projectLocationFullLabel } from '#utils/project-creation-location.utils.js';
 import { useCloudProjects } from '#hooks/use-cloud-projects.js';
@@ -419,12 +420,22 @@ export function ProjectLibrary(): React.JSX.Element {
 
   return (
     <div className='container mx-auto px-4 py-8'>
-      <div className='mb-6 flex items-center justify-between'>
-        <h1 className='text-3xl font-bold'>Projects</h1>
-        <Button asChild>
-          <NavLink to='/'>{({ isPending }) => (isPending ? <Loader /> : 'New Project')}</NavLink>
-        </Button>
-      </div>
+      <PageHeader
+        title='Projects'
+        className='mb-6'
+        action={
+          <Button asChild>
+            <NavLink to='/'>
+              {({ isPending }) => (
+                <>
+                  New project
+                  {isPending ? <Loader /> : null}
+                </>
+              )}
+            </NavLink>
+          </Button>
+        }
+      />
 
       {workspaceBindingRepairs.length > 0 && (
         <div className='mb-6 space-y-2' aria-label='Workspace link repair'>

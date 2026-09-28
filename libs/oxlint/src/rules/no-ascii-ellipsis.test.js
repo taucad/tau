@@ -42,14 +42,14 @@ describe('no-ascii-ellipsis', () => {
         },
         {
           name: 'template tail',
-          code: 'const label = `Search ${name} models...`;',
-          output: 'const label = `Search ${name} models…`;',
+          code: `const label = \`Search \${name} models...\`;`,
+          output: `const label = \`Search \${name} models…\`;`,
           errors: [{ messageId: 'violation' }],
         },
         {
           name: 'template before an expression',
-          code: 'const label = `Reconnecting... ${attempt}`;',
-          output: 'const label = `Reconnecting… ${attempt}`;',
+          code: `const label = \`Reconnecting... \${attempt}\`;`,
+          output: `const label = \`Reconnecting… \${attempt}\`;`,
           errors: [{ messageId: 'violation' }],
         },
         {

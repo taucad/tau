@@ -47,7 +47,7 @@ const hasText = (node) => {
  * or a render-prop child such as `<NavLink>{({ isPending }) => (isPending ? <Loader /> : 'Sign in')}</NavLink>`.
  */
 const owningControl = (node) => {
-  let parent = node.parent;
+  let { parent } = node;
   if (parent?.type === 'ArrowFunctionExpression' && parent.body === node) {
     parent = parent.parent;
   }
@@ -74,8 +74,9 @@ export const noLabelReplacingLoaderRule = {
     return {
       ConditionalExpression(node) {
         const { consequent, alternate } = node;
-        const replacesLabel =
-          (isSilentLoader(consequent) && hasText(alternate)) || (isSilentLoader(alternate) && hasText(consequent));
+        const replacesLabel = isSilentLoader(consequent)
+          ? hasText(alternate)
+          : isSilentLoader(alternate) && hasText(consequent);
         if (replacesLabel && owningControl(node) !== undefined) {
           context.report({ node, messageId: 'violation' });
         }

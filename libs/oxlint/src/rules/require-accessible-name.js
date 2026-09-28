@@ -79,17 +79,17 @@ export const requireAccessibleNameRule = {
       JSXElement(node) {
         const opening = node.openingElement;
         const kind = controlKind(opening);
-        if (
-          kind === undefined ||
-          opening.attributes.some(
-            (item) =>
-              item.type === 'JSXSpreadAttribute' ||
-              NAMING_ATTRIBUTES.has(item.name.name) ||
-              item.name.name === 'asChild' ||
-              (kind === 'input' && item.name.name === 'id'),
-          ) ||
-          (kind === 'button' && childrenNameControl(node.children))
-        ) {
+        if (kind === undefined) {
+          return;
+        }
+        const isNamedByAttribute = opening.attributes.some(
+          (item) =>
+            item.type === 'JSXSpreadAttribute' ||
+            NAMING_ATTRIBUTES.has(item.name.name) ||
+            item.name.name === 'asChild' ||
+            (kind === 'input' && item.name.name === 'id'),
+        );
+        if (isNamedByAttribute === true || (kind === 'button' && childrenNameControl(node.children) === true)) {
           return;
         }
         context.report({ node: opening, messageId: kind });

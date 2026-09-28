@@ -45,6 +45,22 @@ const within = async <Value>(promise: Promise<Value>, milliseconds: number): Pro
   ]);
 
 describe('browser leadership', () => {
+  it('classifies only a live local or same-build holder as stoppable without taking a lock', async () => {
+    const fileSystem = memoryFileSystem();
+    const leader = launch(fileSystem, 'tab-leader');
+    const follower = launch(fileSystem, 'tab-follower');
+    const foreign = launch(fileSystem, 'tab-foreign', { build: 'older-build' });
+    const chatId = 'chat-close-plan';
+    expect(follower.stoppability(chatId)).toBe('background-window');
+    expect(await start(leader, chatId, 'run-close-plan')).toMatchObject({ status: 'applied' });
+    expect(leader.stoppability(chatId)).toBe('stoppable');
+    await follower.read({ chatId, cursor: 0, limit: 16, maxBytes: 1_048_576, signal: AbortSignal.timeout(50) });
+    await foreign.read({ chatId, cursor: 0, limit: 16, maxBytes: 1_048_576, signal: AbortSignal.timeout(50) });
+    await until(() => follower.stoppability(chatId) === 'stoppable');
+    await until(() => foreign.stoppability(chatId) === 'other-build');
+    expect(await heldLocks()).toContain(chatLeadershipNames(projectId, chatId).lock);
+  });
+
   /* W0.17 (O3, RH-R6): both names come from one key, so a tab that lost the lock race hears the holder. */
   it('should answer a follower on another checkout within one heartbeat', async () => {
     const fileSystem = memoryFileSystem();

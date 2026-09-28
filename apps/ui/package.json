@@ -96,6 +96,7 @@
     "@taucad/runtime-testing": "workspace:*",
     "@taucad/spatial": "workspace:*",
     "@taucad/vite": "workspace:*",
+    "@taucad/xstate-testing": "workspace:*",
     "@types/express": "^5.0.6",
     "@vitejs/plugin-react": "catalog:",
     "oxc-transform-react": "catalog:",

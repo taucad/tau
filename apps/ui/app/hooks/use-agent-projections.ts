@@ -67,6 +67,8 @@ export type AgentProjectionsView = {
 type AgentProjectionInput = {
   readonly chat: ChatEntity;
   readonly session?: ChatSession;
+  /** Whether the store says the chat is unread (PV-S8). */
+  readonly unread?: boolean;
   readonly focusedChatId?: string;
   readonly defaultModel: ResolvedModel;
   readonly resolveModel: (id: string) => ResolvedModel;
@@ -87,10 +89,8 @@ const emptyMetadataByChatId: Readonly<Record<string, AgentProjectionMetadata>> =
  * Ponytail: a chat with no machine is `idle`, full stop. A project session owns
  * a machine for every one of its chats, so the only rows without one are in a
  * project that is not live — and a closed project has no agent running. The one
- * fact this loses is a *persisted* error from a previous session, which used to
- * colour the row off `chat.error`; the honest place to restore it is the store
- * replaying it as `runLifecycle{phase:'failed'}` when it rehydrates the chat,
- * not a second status here.
+ * Persisted errors remain diagnostic until the host attachment catches up;
+ * this pane follows only projected run lifecycle, never a fabricated failure.
  */
 const paneState: Readonly<Record<ChatSidebarState, AgentProjectionState>> = {
   idle: 'idle',
@@ -100,17 +100,14 @@ const paneState: Readonly<Record<ChatSidebarState, AgentProjectionState>> = {
   approval: 'waiting',
   question: 'waiting',
   reconnecting: 'waiting',
-  /* P71: the run reported completion but the host has not attested the turn's
-   * cut and lease retirement yet — still the agent's. */
-  finishing: 'running',
   done: 'idle',
   failed: 'error',
   stopped: 'idle',
 };
 
-const chatStatusOf = (session: ChatSession | undefined): ChatSidebarStatus | undefined => {
-  const snapshot = session?.stateActorRef?.getSnapshot();
-  return snapshot === undefined ? undefined : selectChatStatus(snapshot);
+const chatStatusOf = (session: ChatSession | undefined, unread = false): ChatSidebarStatus | undefined => {
+  const snapshot = session?.stateActorRef.getSnapshot();
+  return snapshot === undefined ? undefined : selectChatStatus(snapshot, unread);
 };
 
 const lastMessageActivityAt = (messages: readonly MyUIMessage[], fallback: number): number => {
@@ -135,9 +132,9 @@ const usageOperationIds = (messages: readonly MyUIMessage[]): string[] => {
 
 /** Pure projection builder used by the hook and contract tests. */
 export const buildAgentProjection = (input: AgentProjectionInput): AgentProjection => {
-  const { chat, session, focusedChatId, defaultModel, resolveModel, defaultWorkspace, metadata } = input;
+  const { chat, session, unread, focusedChatId, defaultModel, resolveModel, defaultWorkspace, metadata } = input;
   const messages = session?.chat.messages ?? chat.messages;
-  const status = chatStatusOf(session);
+  const status = chatStatusOf(session, unread);
   const persistedSnapshot = session?.persistenceActorRef.getSnapshot();
   const activeExecution = persistedSnapshot?.context.activeExecution ?? chat.activeExecution;
   const activeModelId = activeExecution?.kind === 'tau' ? activeExecution.model : defaultModel.id;
@@ -163,8 +160,7 @@ export const buildAgentProjection = (input: AgentProjectionInput): AgentProjecti
     branch: metadata?.branch ?? status?.branch,
     pendingApprovalCount: status?.pendingApprovalCount ?? 0,
     operationIds: usageOperationIds(messages),
-    /* The machine's `read` region, which the store restores from the
-     * project's unread record (D9) — never a second answer (I26). */
+    /* The store's unread answer, from the chat's log and its read receipt (D9, PV-S8) — never a second answer (I26). */
     unread: chat.id !== focusedChatId && status?.unread === true,
     ...(detail === undefined ? {} : { detail }),
   };
@@ -197,7 +193,7 @@ const liveProjectionSnapshot = (store: ChatSessionStore, chatIds: readonly strin
       const persistenceSnapshot = session.persistenceActorRef.getSnapshot();
       return [
         chatId,
-        chatStatusOf(session),
+        chatStatusOf(session, store.isUnread(chatId)),
         usageOperationIds(messages),
         lastMessageActivityAt(messages, 0),
         persistenceSnapshot.context.activeExecution,
@@ -235,11 +231,11 @@ export const useAgentProjections = (options?: UseAgentProjectionsOptions): Agent
             continue;
           }
           const actorSubscription = session.persistenceActorRef.subscribe(listener);
-          const stateSubscription = session.stateActorRef?.subscribe(listener);
+          const stateSubscription = session.stateActorRef.subscribe(listener);
           const unsubscribeChat = store.subscribeChat(chatId, listener);
           sessionCleanups.push(() => {
             actorSubscription.unsubscribe();
-            stateSubscription?.unsubscribe();
+            stateSubscription.unsubscribe();
             unsubscribeChat();
           });
         }
@@ -250,8 +246,10 @@ export const useAgentProjections = (options?: UseAgentProjectionsOptions): Agent
         bindSessions();
         listener();
       });
+      const unsubscribeUnread = store.subscribeUnread(listener);
       return () => {
         unsubscribeMembership();
+        unsubscribeUnread();
         for (const cleanup of sessionCleanups) {
           cleanup();
         }
@@ -277,6 +275,7 @@ export const useAgentProjections = (options?: UseAgentProjectionsOptions): Agent
           buildAgentProjection({
             chat,
             session: store.get(chat.id),
+            unread: store.isUnread(chat.id),
             focusedChatId,
             defaultModel: selectedModel,
             resolveModel,

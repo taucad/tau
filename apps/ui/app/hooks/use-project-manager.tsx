@@ -64,7 +64,7 @@ import { nodeHomeRoot } from '#filesystem/desktop-bridge.js';
 import { createInitialProject } from '#constants/project.constants.js';
 import { attachmentKind, attachmentReferenceOf } from '#utils/attachment.utils.js';
 import { buildUserMessage } from '#utils/chat.utils.js';
-import type { AttachmentReference } from '#utils/attachment.utils.js';
+import type { StoredAttachmentRef } from '#utils/attachment.utils.js';
 import { createAttachmentStore, createChatAttachmentStore, isNotFound } from '#db/attachment-store.js';
 import { getMainFile, getEmptyCode } from '#utils/kernel.utils.js';
 import { encodeTextFile } from '#utils/filesystem.utils.js';
@@ -94,7 +94,7 @@ import type {
 } from '#hooks/workspace-connection.machine.js';
 
 /** A stored draft attachment, as the startup message references it. */
-export type InitialMessageAttachment = Omit<AttachmentReference, 'byteLength'>;
+export type InitialMessageAttachment = Omit<StoredAttachmentRef, 'byteLength'>;
 
 /** The operation field naming where a created chat's attachments are copied from, when not Home. */
 const attachmentSourceOf = (options: CreateProjectChatOptions): { attachmentSource?: string } => {
@@ -666,11 +666,10 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
   const invalidateProjectedChats = useCallback(
     (resourceId: string, chatIds: readonly string[]) => {
       for (const chatId of chatIds) {
-        chatStore.invalidateLog(chatId);
         invalidateChatQueries(resourceId, chatId);
       }
     },
-    [chatStore, invalidateChatQueries],
+    [invalidateChatQueries],
   );
 
   const invalidationTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -728,7 +727,6 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
           return;
         }
         const [resourceId, chatId] = projected;
-        chatStore.invalidateLog(chatId);
         invalidateChatQueries(resourceId, chatId);
       },
     };
@@ -1096,6 +1094,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
             id: generatePrefixedId(idPrefix.request),
             kind: 'regenerate-tail',
             messageId: initialUserMessage.id,
+            message: initialUserMessage,
             source: 'homepage-initial-message',
             createdAt: Date.now(),
           }

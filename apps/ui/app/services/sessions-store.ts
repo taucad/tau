@@ -1,10 +1,10 @@
 /**
  * The app's one sessions registry (S44, A38).
  *
- * Created with `createActor` in a module, never with `useActorRef`, so React
- * Strict Mode's mount → stop → rehydrate cycle cannot double-start every live
- * project. `SessionsProvider` hands it down; every reader is a selector over
- * its snapshot (the `ChatSessionStore` precedent).
+ * Created by {@link createSessionsActor} at the composition root (MC-R4), never
+ * with `useActorRef`, so React Strict Mode's mount → stop → rehydrate cycle
+ * cannot double-start every live project. `SessionsProvider` hands it down;
+ * every reader is a selector over its snapshot.
  *
  * The registry owns *liveness*. Two of a session's four startup regions own a
  * resource outright here — compute admission and the agent-host attachment —
@@ -18,17 +18,13 @@
 
 import { Topic } from '@taucad/events';
 import { randomUuid } from '@taucad/utils/id';
-import { createActor, createCallbackLogic } from 'xstate';
-import type { Actor, ActorRefFrom, EventObject } from 'xstate';
+import { createActor, createAsyncLogic, createCallbackLogic } from 'xstate';
+import type { Actor, ActorOptions, AnyActorLogic, EventObject } from 'xstate';
 import { isDesktopTarget } from '#filesystem/desktop-bridge.js';
 import { browserLiveProjectBudget, sessionsMachine } from '#machines/sessions.machine.js';
 import type { SessionsMachineContext, SessionsProjectStatus } from '#machines/sessions.machine.js';
 import { projectSessionMachine } from '#machines/project-session.machine.js';
-import { chatSessionMachine } from '#machines/chat-session.machine.js';
-import { chatHostBinding, chatTurnAdmission, chatTurnSettlement } from '#chat-clients/_internal/chat-host-binding.js';
 import type { ProjectSessionActorRef, ProjectSessionRegion } from '#machines/project-session.machine.js';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
-import { inspect } from '#machines/inspector.js';
 import { registerProjectAgentHost } from '#services/project-agent-host-registration.js';
 import type { ProjectAgentHostRegistration } from '#services/project-agent-host-registration.js';
 
@@ -235,78 +231,63 @@ const agentHostRegion = createCallbackLogic<EventObject, { projectId: string }>(
 
 const projectSession = projectSessionMachine.provide({
   actors: {
-    cancelRuns: fromSafeAsync<void, { projectId: string; runs: readonly string[] }>(async ({ input }) => {
-      await servicesFor(input.projectId).cancelRuns(input.runs);
+    cancelRuns: createAsyncLogic<void, { projectId: string; runs: readonly string[] }>({
+      run: async ({ input }) => {
+        await servicesFor(input.projectId).cancelRuns(input.runs);
+      },
     }),
-    flushProducers: fromSafeAsync<void, { projectId: string }>(async ({ input }) => {
-      await servicesFor(input.projectId).flushProducers();
+    flushProducers: createAsyncLogic<void, { projectId: string }>({
+      run: async ({ input }) => {
+        await servicesFor(input.projectId).flushProducers();
+      },
     }),
-    flushSync: fromSafeAsync<void, { projectId: string; boundMilliseconds: number }>(async ({ input }) => {
-      await servicesFor(input.projectId).flushSync(input.boundMilliseconds);
+    flushSync: createAsyncLogic<void, { projectId: string; boundMilliseconds: number }>({
+      run: async ({ input }) => {
+        await servicesFor(input.projectId).flushSync(input.boundMilliseconds);
+      },
     }),
-    releaseLeases: fromSafeAsync<void, { projectId: string }>(async ({ input }) => {
-      await servicesFor(input.projectId).releaseLeases();
+    releaseLeases: createAsyncLogic<void, { projectId: string }>({
+      run: async ({ input }) => {
+        await servicesFor(input.projectId).releaseLeases();
+      },
     }),
-    releaseAgentHost: fromSafeAsync<void, { projectId: string }>(async ({ input }) => {
-      const registration = agentHostRegistrations.get(input.projectId);
-      if (registration !== undefined) {
-        const registered = await registration;
-        await registered.release();
-        agentHostRegistrations.delete(input.projectId);
-      }
+    releaseAgentHost: createAsyncLogic<void, { projectId: string }>({
+      run: async ({ input }) => {
+        const registration = agentHostRegistrations.get(input.projectId);
+        if (registration !== undefined) {
+          const registered = await registration;
+          await registered.release();
+          agentHostRegistrations.delete(input.projectId);
+        }
+      },
     }),
     fileManager: relayRegion('views'),
     project: relayRegion('runtime'),
     agentHost: agentHostRegion,
     compute: computeRegion,
-    /* The chat's agent-host binding, injected here for the same reason every
-     * other resource is: the machines import no transport, no DOM and no React
-     * so their own rows run headless (policy §16 puts the binding on the chat
-     * session; this is where the real one is supplied). */
-    /* The chat session's three owned resources, bound to the route's published
-     * services: one host registration, one admission and one settlement per
-     * chat (policy §16). */
-    chatSession: chatSessionMachine.provide({
-      actors: { hostBinding: chatHostBinding, admitTurn: chatTurnAdmission, settleTurn: chatTurnSettlement },
-    }),
   },
 });
 
+/** What a registry root takes from its composition (MC-R4); production passes none. @public */
+export type SessionsActorOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' | 'inspect' | 'onRejectedEvent'>;
+
 /**
- * The registry actor.
+ * Create the app's registry, unstarted (MC-R4, PV-S5).
  *
  * Desktop is bounded by memory rather than a count (A35): its budget is the
  * absence of one, and the idle window still applies.
+ *
+ * @param options - The clock, inspector and rejected-event hook for this root.
+ * @returns The registry actor; the caller starts it once.
+ * @public
  */
-export const sessionsActor: Actor<typeof sessionsMachine> = createActor(
-  sessionsMachine.provide({ actors: { projectSession } }),
-  {
+export const createSessionsActor = (options: SessionsActorOptions = {}): Actor<typeof sessionsMachine> =>
+  createActor(sessionsMachine.provide({ actors: { projectSession } }), {
+    ...options,
     input: {
       budget: isDesktopTarget ? Number.POSITIVE_INFINITY : browserLiveProjectBudget,
     },
-    inspect,
-  },
-);
-
-let started = false;
-
-/**
- * Start the registry once, from the provider that hands it down.
- *
- * The flag is the only honest test: a `createActor` that has never run already
- * reports `status: 'active'` on its initial snapshot, so asking the snapshot
- * whether to start means never starting.
- *
- * @returns The one registry actor, running.
- * @public
- */
-export const startSessionsActor = (): ActorRefFrom<typeof sessionsMachine> => {
-  if (!started) {
-    started = true;
-    sessionsActor.start();
-  }
-  return sessionsActor;
-};
+  });
 
 // ---------------------------------------------------------------------------
 // Selectors

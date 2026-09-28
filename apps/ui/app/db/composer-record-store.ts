@@ -13,6 +13,8 @@ import { z } from 'zod';
 import type { CadAgentExecution, MyUIMessage } from '@taucad/chat';
 import { cadAgentExecutionSchema, safeValidateUiMessages } from '@taucad/chat';
 import { chatMode } from '@taucad/chat/constants';
+import type { RowKey } from '@taucad/agent-host';
+import { rowKeySchema } from '@taucad/agent-host/wire';
 import type { ChatMode } from '@taucad/chat/constants';
 import { createAttachmentStore, isNotFound } from '#db/attachment-store.js';
 import type { AttachmentClient, AttachmentStore } from '#db/attachment-store.js';
@@ -27,7 +29,7 @@ export const composerRecordPaths = {
   newProject: `${composersRoot}/new-project.json`,
   /** One record per project chat: draft, message edits, tool choice and mode. */
   chat: (projectId: string, chatId: string): string => `${composersRoot}/chats/${projectId}/${chatId}.json`,
-  /** One record per project holding the unread chat ids, so the sidebar reads them in one call. */
+  /** One record per project holding each chat's read receipt, so the sidebar reads them in one call. */
   unread: (projectId: string): string => `${composersRoot}/chats/${projectId}/unread.json`,
   /** The directory removed when a project is deleted. */
   project: (projectId: string): string => `${composersRoot}/chats/${projectId}`,
@@ -49,13 +51,16 @@ export type ComposerRecord = {
   readonly messageEdits?: Readonly<Record<string, MyUIMessage>>;
   readonly toolChoice?: string | string[];
   readonly mode?: ChatMode;
+  /** Legacy unread marks, read as receipts that match no row (W9 PV-S8); cleared when the chat is viewed. */
   readonly unread?: Readonly<Record<string, true>>;
+  /** Each chat's read receipt: the attention row the person last saw (W9 PV-S8). */
+  readonly readThrough?: Readonly<Record<string, RowKey>>;
   readonly execution?: CadAgentExecution;
 };
 
 /**
  * A field-scoped patch. An omitted key leaves that field alone; a draft or edit
- * with no parts clears it; an `unread` entry set to `false` is removed.
+ * with no parts clears it; an `unread` or `readThrough` entry set to `false` is removed.
  */
 export type ComposerRecordPatch = {
   readonly draft?: MyUIMessage;
@@ -63,6 +68,8 @@ export type ComposerRecordPatch = {
   readonly toolChoice?: string | string[];
   readonly mode?: ChatMode;
   readonly unread?: Readonly<Record<string, boolean>>;
+  /** A receipt per chat; `false` removes the chat's receipt. */
+  readonly readThrough?: Readonly<Record<string, RowKey | false>>;
   readonly execution?: CadAgentExecution;
 };
 
@@ -132,6 +139,7 @@ const envelopeSchema = z
     toolChoice: z.union([z.string(), z.array(z.string())]).optional(),
     mode: z.enum(chatMode).optional(),
     unread: z.record(z.string(), z.literal(true)).optional(),
+    readThrough: z.record(z.string(), rowKeySchema).optional(),
     execution: cadAgentExecutionSchema.optional(),
   })
   .strict();
@@ -140,7 +148,7 @@ const envelopeSchema = z
 const mutex = new KeyedMutex<string>();
 
 // The write order every record is serialised in, so equal records produce equal bytes.
-const fieldOrder = ['draft', 'messageEdits', 'toolChoice', 'mode', 'unread', 'execution'] as const;
+const fieldOrder = ['draft', 'messageEdits', 'toolChoice', 'mode', 'unread', 'readThrough', 'execution'] as const;
 
 const invalid = (error: unknown): ComposerRecordReadResult => ({
   status: 'invalid',
@@ -238,7 +246,7 @@ const parseRecord = async (text: string): Promise<ComposerRecordReadResult> => {
   if (!envelope.success) {
     return invalid(envelope.error);
   }
-  const { version, draft, messageEdits, toolChoice, mode, unread, execution } = envelope.data;
+  const { version, draft, messageEdits, toolChoice, mode, unread, readThrough, execution } = envelope.data;
 
   // Records written before empties were omitted still carry `parts: []` (D8); they mean "no field".
   const storedDraft = draft === undefined || isClearedMessage(draft) ? undefined : draft;
@@ -271,6 +279,7 @@ const parseRecord = async (text: string): Promise<ComposerRecordReadResult> => {
       ...withField('toolChoice', toolChoice),
       ...withField('mode', mode),
       ...withField('unread', nonEmptyMap({ ...unread })),
+      ...withField('readThrough', nonEmptyMap({ ...readThrough })),
       ...withField('execution', execution),
     },
   };
@@ -286,6 +295,10 @@ const mergeRecord = (record: ComposerRecord, fields: ComposerRecordPatch): Compo
     fields.unread === undefined
       ? { ...record.unread }
       : omitEmpty({ ...record.unread, ...fields.unread }, (value) => !value);
+  const readThrough =
+    fields.readThrough === undefined
+      ? { ...record.readThrough }
+      : omitEmpty({ ...record.readThrough, ...fields.readThrough }, (value) => value === false);
 
   return {
     version: 1,
@@ -295,6 +308,7 @@ const mergeRecord = (record: ComposerRecord, fields: ComposerRecordPatch): Compo
     ...withField('mode', fields.mode ?? record.mode),
     // `unread` only ever holds `true`, so the false entries dropped above are gone.
     ...withField('unread', nonEmptyMap(unread) as Readonly<Record<string, true>> | undefined),
+    ...withField('readThrough', nonEmptyMap(readThrough) as Readonly<Record<string, RowKey>> | undefined),
     ...withField('execution', fields.execution ?? record.execution),
   };
 };

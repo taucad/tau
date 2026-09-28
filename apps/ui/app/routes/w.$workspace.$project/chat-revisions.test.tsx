@@ -62,10 +62,11 @@ vi.mock('#hooks/use-revision-status.js', async () => {
 });
 /* One stable array: `useSyncExternalStore` re-renders forever when its snapshot
  * is a new reference on every read. */
-const settlements: readonly never[] = [];
-vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', () => ({
-  getHostFinalizedTurns: () => settlements,
-  subscribeHostFinalizedTurns: () => () => undefined,
+vi.mock('#hooks/chat-session-store-provider.js', () => ({
+  useChatSessionStore: () => ({
+    observedChatIdsOf: () => [],
+    subscribeMembership: () => () => undefined,
+  }),
 }));
 const chats = [
   { id: 'chat-1', name: 'Optimize bracket', checkoutId: 'co-2' },

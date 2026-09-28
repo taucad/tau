@@ -22,6 +22,7 @@ import type { ActiveChatSessionContextValue } from '#hooks/active-chat-provider.
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
 import type { AgentHostClientOptions, AgentHostClient } from '#services/agent-host-client.js';
+import type * as AgentHostClientModule from '#services/agent-host-client.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import { ChatTurnHost } from '#chat-clients/chat-turn-host.js';
 import { chatTurnAdmit, resetChatTurnServices } from '#chat-clients/_internal/chat-host-binding.js';
@@ -162,7 +163,8 @@ vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', () => ({
   resumableBrowserAgentHostRunId: () => undefined,
   resolveBrowserAgentHostInterrupt: browserHostHarness.resolveInterrupt,
 }));
-vi.mock('#services/agent-host-client.js', () => ({
+vi.mock('#services/agent-host-client.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof AgentHostClientModule>()),
   createAgentHostClient: browserHostHarness.createDaemonClient,
   createBrowserAgentHostClient: browserHostHarness.createClient,
   isBrowserAgentHostProviderKind: (providerKind: string) => providerKind !== 'tau' && providerKind !== 'ollama',
@@ -246,18 +248,16 @@ const sessionWithPersistedErrors = ((): ChatSessionStore['get'] =>
   })) as unknown as ChatSessionStore['get'])();
 
 const installSessionStore = (partial: Partial<ChatSessionStore>): void => {
-  /* Merged, not replaced: the chat's turn host mounts beside the view these
-   * rows render, and it calls the store's placement and reattach seams. */
+  /* The turn host reads the current projection before composing a command. */
   vi.mocked(useChatSessionStore).mockReturnValue({
     requestTurn: vi.fn(),
-    setTurnPlacement: vi.fn(),
-    reattachHostChat,
+    getProjection: () => undefined,
+    respondToProjectedApproval,
     ...partial,
-  } as ChatSessionStore);
+  } as unknown as ChatSessionStore);
 };
 
-/** The store's host-log reattach, re-armed per test. */
-let reattachHostChat = vi.fn();
+const respondToProjectedApproval = vi.fn(async () => undefined);
 
 const installActiveSession = (activeChatId: string): void => {
   vi.mocked(useActiveChatSession).mockReturnValue({
@@ -290,11 +290,8 @@ beforeEach(() => {
   useChatSelectorMock.mockReturnValue('ready');
   installActiveSession('chat_test');
   persistedErrors.length = 0;
-  reattachHostChat = vi.fn();
+  respondToProjectedApproval.mockClear();
   installSessionStore({
-    startRun: vi.fn((_chatId: string, body: Readonly<Record<string, unknown>>) => body),
-    endRun: vi.fn(),
-    reattachHostChat,
     get: sessionWithPersistedErrors,
   });
 });
@@ -340,8 +337,11 @@ describe('admission against the placement book a real discovery pass filled', ()
       expect(chatTurnAdmit('chat_test')).toBeDefined();
     });
     const turn = await chatTurnAdmit('chat_test')!({ kind: 'send', message: { id: 'm', role: 'user', parts: [] } });
-    const body = turn.request.body as Record<string, unknown>;
-    expect(body['execution']).toEqual({ hostId: 'origin' });
+    expect(turn.request.command).toMatchObject({
+      type: 'start',
+      payload: { chatId: 'chat_test', runId: turn.runId, trigger: 'submit' },
+    });
+    expect(workspaceHarness.prepare).not.toHaveBeenCalled();
     expect(persistedErrors).toEqual([]);
   });
 
@@ -367,6 +367,10 @@ describe('admission against the placement book a real discovery pass filled', ()
 
     expect(workspaceHarness.prepare).not.toHaveBeenCalled();
     expect(chat.addToolApprovalResponse).not.toHaveBeenCalled();
-    expect(browserHostHarness.resolveInterrupt).not.toHaveBeenCalled();
+    expect(respondToProjectedApproval).toHaveBeenCalledWith('chat_test', 'approval-1', {
+      approved: true,
+      reason: undefined,
+      optionId: undefined,
+    });
   });
 });

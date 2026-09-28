@@ -53,6 +53,7 @@ import type {
   RevisionStreamHandlers,
   RevisionTag,
   RevisionUserActor,
+  TurnAttemptKey,
 } from '@taucad/revisions';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import {
@@ -117,13 +118,6 @@ export type WorkerRevisionCommand =
   | Readonly<{ command: 'switch'; branch: string }>
   | Readonly<{ command: 'followChat'; chatId: string }>
   | Readonly<{ command: 'pinTo'; checkoutId: string }>
-  | Readonly<{
-      command: 'adoptHostFinalized';
-      checkoutId: string;
-      revisionId: string;
-      treeId: string;
-      branch?: string;
-    }>
   /*
    * The *Branches* region's verbs (S26, A2/D10).
    *
@@ -288,7 +282,8 @@ export type RevisionToast =
   | Readonly<{ type: 'restored'; revisionNumber: number | undefined }>
   /** *Undo* landed; the number is the revision it undid (D15). */
   | Readonly<{ type: 'undone'; revisionNumber: number | undefined }>
-  | Readonly<{ type: 'nothingToSave' }>
+  /** `heldBy`: the run whose lease held the save; its edits land in that run's revision (TS-R17, V5 A6). */
+  | Readonly<{ type: 'nothingToSave'; heldBy?: TurnAttemptKey }>
   | Readonly<{
       type: 'branch';
       operation: BranchOperation;
@@ -906,7 +901,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   });
   actor.on('nothingToSave', (event) => {
     if (event.trigger === 'save') {
-      toasts.emit({ type: 'nothingToSave' });
+      toasts.emit({ type: 'nothingToSave', ...(event.heldBy === undefined ? {} : { heldBy: event.heldBy }) });
     }
   });
   actor.on('switchRefused', (refusal) => {
@@ -1129,17 +1124,6 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   return {
     send: (command) => {
       switch (command.command) {
-        case 'adoptHostFinalized': {
-          /*
-           * A hint, never a head to adopt (RM-R5): the checkout re-reads its
-           * own ref. So a revision this store does not hold yet (a cloud host
-           * minted in its own clone; the sync fetch brings it, D12) and a
-           * replayed older settlement both leave the head where the store has
-           * it, and a daemon on this Git that moved the ref is read as moved.
-           */
-          actor.send({ type: 'checkoutChanged', checkoutId: command.checkoutId });
-          return;
-        }
         /* The root invokes `restore` as a child and forwards none of its five
          * verbs, so the page reaches it where it lives. */
         case 'restore': {

@@ -7,10 +7,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 
 import * as machineModule from './sessions.machine.js';
-import { browserLiveProjectBudget, sessionsCloseSuggestions, sessionsMachine } from './sessions.machine.js';
-import type { SessionsMachineEmitted } from './sessions.machine.js';
-import { projectSessionMachine } from './project-session.machine.js';
+import { guardActors } from '@taucad/xstate-testing/inspect';
+import { unansweredEvents } from '@taucad/xstate-testing/paths';
+import {
+  browserLiveProjectBudget,
+  sessionsCloseSuggestions,
+  sessionsIgnoredEvents,
+  sessionsMachine,
+} from './sessions.machine.js';
+import type { SessionsMachineEmitted, SessionsMachineEvent } from './sessions.machine.js';
 import type { ProjectSessionRegion } from './project-session.machine.js';
+import { projectSessionIgnoredEvents, projectSessionMachine } from './project-session.machine.js';
 
 const isMachine = (value: unknown): boolean =>
   typeof value === 'object' && value !== null && 'getInitialSnapshot' in value && 'transition' in value;
@@ -22,7 +29,11 @@ const isMachine = (value: unknown): boolean =>
  * `closing`, which is the half the registry's slot accounting depends on: the
  * slot frees when the child reports `sessionClosed`, not when `close` is sent.
  */
-const harness = (options?: { readonly budget?: number; readonly closeNever?: boolean }) => {
+const harness = (options?: {
+  readonly budget?: number;
+  readonly closeNever?: boolean;
+  readonly inspect?: ReturnType<typeof guardActors>['inspect'];
+}) => {
   const started: string[] = [];
   const stopped: string[] = [];
   const readyChild = (region: ProjectSessionRegion) =>
@@ -60,6 +71,7 @@ const harness = (options?: { readonly budget?: number; readonly closeNever?: boo
 
   const actor = createActor(sessionsMachine.provide({ actors: { projectSession } }), {
     input: options?.budget === undefined ? {} : { budget: options.budget },
+    ...(options?.inspect === undefined ? {} : { inspect: options.inspect }),
   });
   const emitted: SessionsMachineEmitted[] = [];
   for (const type of ['liveSetChanged', 'budgetRefused', 'quiesced'] as const) {
@@ -380,6 +392,50 @@ describe('sessionsMachine', async () => {
     for (const [key, value] of Object.entries(actor.getSnapshot().context)) {
       expect(typeof value, key).not.toBe('function');
     }
+    actor.stop();
+  });
+});
+
+describe('sessionsMachine — the machine contract (PV-S5, MC-R17)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('answers every sampled event, or declares it ignored, in every reachable state', () => {
+    const events = [
+      { type: 'open', projectId: 'a' },
+      { type: 'touch', projectId: 'a' },
+      { type: 'close', projectId: 'a', reason: 'user' },
+      { type: 'idleExpired', projectId: 'a' },
+      { type: 'quit' },
+      { type: 'quitAnyway' },
+      { type: 'cancelPendingOpen' },
+    ] satisfies SessionsMachineEvent[];
+    expect(
+      unansweredEvents(sessionsMachine, {
+        input: { budget: 2 },
+        events,
+        limit: 100_000,
+        ignore: sessionsIgnoredEvents,
+        serializeState: (snapshot) =>
+          JSON.stringify([snapshot.value, Object.keys(snapshot.context.refs as Record<string, unknown>)]),
+      }),
+    ).toEqual([]);
+  });
+
+  it('leaves no dead letter, unanswered delivery or fault from open to close', async () => {
+    const guard = guardActors({
+      ignore: { sessions: sessionsIgnoredEvents, 'project-session': projectSessionIgnoredEvents },
+    });
+    const { actor } = harness({ inspect: guard.inspect });
+    await openIdle(actor, 'proj_guard');
+    actor.send({ type: 'close', projectId: 'proj_guard', reason: 'user' });
+    await settle();
+    expect(actor.getSnapshot().context.refs['proj_guard']).toBeUndefined();
     actor.stop();
   });
 });

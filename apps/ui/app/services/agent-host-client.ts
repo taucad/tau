@@ -261,12 +261,18 @@ export type AgentHostReadInput = {
  * @public
  */
 export type AgentHostClient = {
+  /** Execute one already-keyed command; the sender owns its id and any re-send decision. */
+  hostCommand(command: HostCommand): Promise<CommandAnswer>;
   start(input: AgentHostStartInput): Promise<HostRunSnapshot>;
   steer(runId: string, message: string): Promise<HostRunSnapshot>;
   cancel(runId: string): Promise<HostRunSnapshot>;
   /** Continue the chat's current run, `runId`; any other run is refused `RESUME_UNAVAILABLE`. */
-  resume(chatId: string, runId: string): Promise<HostRunSnapshot>;
-  resolveInterrupt(chatId: string, runId: string, resolution: InterruptResolution): Promise<HostRunSnapshot>;
+  resume(chatId: string, runId: string, commandId?: string): Promise<HostRunSnapshot>;
+  resolveInterrupt(
+    chatId: string,
+    runId: string,
+    resolution: InterruptResolution & { readonly commandId?: string },
+  ): Promise<HostRunSnapshot>;
   /** The `attach` command, then one read from `cursor`: the chat's run and its first page of rows. */
   attach(input: AgentHostReadInput): Promise<
     ReadAnswer & {
@@ -282,11 +288,14 @@ export type AgentHostClient = {
    * ponytail: rows are handed over one by one, in the push shape the page projection folds; W9 replaces it.
    *
    * `onEnded` hears the follow stop for any reason but its own unsubscribe: no later row reaches `listener`.
+   * `position` is the row's cursor in the log; it restarts at 0 when the follow starts over (SC-R12).
    */
   subscribe(
-    input: { readonly chatId: string; readonly cursor: number },
-    listener: (chatId: string, event: AgentLogEvent) => void,
+    input: AgentHostReadInput,
+    listener: (chatId: string, event: AgentLogEvent, position?: number) => void,
     onEnded?: () => void,
+    /** The exact read batch or refusal, for a projection that owns the cursor. */
+    onAnswer?: (answer: ReadAnswer) => ReadRequest['last'] | void,
   ): () => void;
   /** One chat's live deltas. */
   subscribeLive?(chatId: string, listener: (chatId: string, event: AgentLiveEvent) => void): () => void;
@@ -324,7 +333,8 @@ const terminalRunState = (state: HostRunSnapshot['state']): boolean =>
  * wire field is optional so a headless daemon can run on its own default, but a
  * page that has picked a model expects that model.
  */
-const wireAdmissionConfig = (config: AgentHostAdmissionConfig): AgentChannelAdmissionConfig => ({
+/** Project the page's explicit Tau admission onto the host command wire. @public */
+export const wireAdmissionConfig = (config: AgentHostAdmissionConfig): AgentChannelAdmissionConfig => ({
   systemPrompt: config.systemPrompt,
   // Copied out of their readonly tuples; the wire shape is mutable by construction.
   systemPromptBlocks: [...config.systemPromptBlocks] as AgentChannelAdmissionConfig['systemPromptBlocks'],
@@ -349,7 +359,8 @@ const wireAdmissionConfig = (config: AgentHostAdmissionConfig): AgentChannelAdmi
  * the skill index and the editor snapshot. Nothing a Tau turn negotiates
  * travels; `toolChoice` is required by the wire and inert here.
  */
-const externalAdmissionConfig = (
+/** Project an external agent's explicit selector and context onto the host command wire. @public */
+export const externalAdmissionConfig = (
   agent: AgentHostExternalAgent,
   context: AgentHostExternalContext | undefined,
 ): AgentChannelAdmissionConfig => ({
@@ -504,19 +515,23 @@ export const createAgentHostClient = (
     };
   };
 
-  const follow: AgentHostClient['subscribe'] = ({ chatId, cursor: from }, listener, onEnded) =>
-    consume(async (signal) => {
+  const follow: AgentHostClient['subscribe'] = (...parameters) => {
+    const [{ chatId, cursor: from, last: initialLast }, listener, onEnded, onAnswer] = parameters;
+    return consume(async (signal) => {
       let cursor = from;
+      let last = initialLast;
       while (!signal.aborted) {
         // oxlint-disable-next-line no-await-in-loop -- one outstanding long-poll read per chat (SC-R14).
-        const answer = await read({ chatId, cursor }, signal);
+        const answer = await read({ chatId, cursor, last }, signal);
         if (isAborted(signal)) {
           return;
         }
+        const projectedLast = onAnswer?.(answer);
         if (answer.status === 'refused') {
           if (answer.reason === 'cursor-ahead' || answer.reason === 'identity-mismatch') {
             // SC-R12: never a clamp; the reader starts over, and the projection drops rows it already holds.
             cursor = 0;
+            last = undefined;
             continue;
           }
           throw new AgentHostWorkerError(
@@ -528,13 +543,15 @@ export const createAgentHostClient = (
         if (answer.cursor !== cursor) {
           continue;
         }
-        for (const event of answer.events) {
+        for (const [index, event] of answer.events.entries()) {
           // ponytail: rows cross the wire unparsed; W9's projection reads them through the ledger's tolerant reader.
-          listener(chatId, event as AgentLogEvent);
+          listener(chatId, event as AgentLogEvent, cursor + index);
         }
         cursor = answer.nextCursor;
+        last = projectedLast ?? last;
       }
     }, onEnded);
+  };
 
   const subscribeLive = (chatId: string, listener: (chatId: string, event: AgentLiveEvent) => void): (() => void) =>
     consume(async (signal) => {
@@ -657,6 +674,7 @@ export const createAgentHostClient = (
   };
 
   return {
+    hostCommand: async (command) => guarded(async () => transport.execute(command), 'WORKER_PROTOCOL_FAILED'),
     async start(input) {
       chatsByRun.set(input.runId, input.chatId);
       const config = input.agent
@@ -673,7 +691,7 @@ export const createAgentHostClient = (
       return runCommand(
         {
           type: 'start',
-          commandId: gestureKey(),
+          commandId: input.runId,
           payload:
             input.trigger === 'submit'
               ? { ...base, trigger: 'submit' }
@@ -692,12 +710,12 @@ export const createAgentHostClient = (
       await execute({ type: 'cancel', commandId: gestureKey(), payload: { chatId, runId } });
       return snapshotOf(chatId);
     },
-    resume: async (chatId, runId) =>
-      runCommand({ type: 'resume', commandId: gestureKey(), payload: { chatId, runId } }, runId),
+    resume: async (chatId, runId, commandId) =>
+      runCommand({ type: 'resume', commandId: commandId ?? gestureKey(), payload: { chatId, runId } }, runId),
     async resolveInterrupt(chatId, runId, resolution) {
       await execute({
         type: 'resolve-interrupt',
-        commandId: gestureKey(),
+        commandId: resolution.commandId ?? gestureKey(),
         payload: {
           chatId,
           runId,
@@ -773,6 +791,8 @@ export type ResidentAgentWorker = Readonly<{
    */
   connect: (projectId: string, closed?: () => boolean) => Promise<MessagePort>;
   capabilities: (durability: StorageDurabilityClass) => Promise<BrowserAgentHostCapability>;
+  /** Inspect an already-open project's leadership actor, without booting a worker or taking a lock. */
+  stoppability: (projectId: string, chatId: string) => Promise<'stoppable' | 'other-build' | 'background-window'>;
   /**
    * Count one client of a project and remember its latest bridges and defaults. The returned release, called once,
    * sends `release` for the project's host when it was the last client (T3, RH-R4).
@@ -1127,6 +1147,14 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
       const live = await incarnation();
       return live.channel.call('capabilities', { durability });
     },
+    stoppability: async (projectId, chatId) => {
+      const live = current;
+      if (live === undefined || live.dead) {
+        return 'background-window';
+      }
+      await live.ready;
+      return live.channel.call('runStoppability', { projectId, chatId });
+    },
     reprovide: async () => {
       const live = current;
       if (live === undefined || live.dead) {
@@ -1170,6 +1198,12 @@ export const residentAgentWorker = (createWorker: () => Worker = createBrowserAg
  * @returns Once every open project host was answered.
  */
 export const reprovideAgentHostProjects = async (): Promise<void> => residentAgentWorker().reprovide();
+
+/** Inspect an existing browser host's chat leadership for a truthful pre-close prompt. @public */
+export const readBrowserRunStoppability = async (
+  projectId: string,
+  chatId: string,
+): Promise<'stoppable' | 'other-build' | 'background-window'> => residentAgentWorker().stoppability(projectId, chatId);
 
 /**
  * The resident-worker transport: one stream on the project's host per client, over the agent channel client, whose

@@ -57,6 +57,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
+  AlertDialogTrigger,
 } from '@taucad/ui/components/alert-dialog';
 import { useCookie } from '#hooks/use-cookie.js';
 import { useSearchParameter } from '#hooks/use-search-parameter.js';
@@ -97,7 +98,7 @@ import type { LibraryRow } from '#routes/projects_/cloud-projects.js';
 // Note: useCookie is still used for projectViewMode (user preference, not per-build state)
 
 export type ProjectActions = {
-  handleDelete: (project: ProjectListItem) => void;
+  handleDelete: (project: ProjectListItem, options?: { announce?: boolean }) => Promise<boolean>;
   handlePermanentlyDelete: (project: ProjectListItem) => void;
   handleDuplicate: (project: ProjectListItem) => Promise<void>;
   handleRename: (projectId: string, newName: string) => Promise<void>;
@@ -233,29 +234,34 @@ export function ProjectLibrary(): React.JSX.Element {
   // The toast follows the mutation, never precedes it: a row that has already
   // vanished is a failure, not a silent success (DF3).
   const trashProject = useCallback(
-    async (project: ProjectListItem): Promise<void> => {
+    async (project: ProjectListItem, announce = true): Promise<boolean> => {
       try {
         const trashed = await deleteProject(project.id);
         if (trashed) {
-          toast.success(`Moved ${project.name} to Trash`, {
-            description: 'Its files remain on disk and can be restored from this browser profile.',
-          });
-          return;
+          if (announce) {
+            toast.success(`Moved ${project.name} to Trash`, {
+              description: 'Its files remain on disk and can be restored from this browser profile.',
+            });
+          }
+          return true;
         }
-        toast.error(`Could not move ${project.name} to Trash`);
+        if (announce) toast.error(`Could not move ${project.name} to Trash`);
       } catch (error) {
-        toast.error(`Could not move ${project.name} to Trash`, {
-          description: error instanceof Error ? error.message : undefined,
-        });
+        if (announce) {
+          toast.error(`Could not move ${project.name} to Trash`, {
+            description: error instanceof Error ? error.message : undefined,
+          });
+        }
         console.error('Error trashing project:', error);
       }
+      return false;
     },
     [deleteProject],
   );
 
   const handleDelete = useCallback(
-    (project: ProjectListItem) => {
-      void trashProject(project);
+    async (project: ProjectListItem, options?: { announce?: boolean }): Promise<boolean> => {
+      return trashProject(project, options?.announce);
     },
     [trashProject],
   );
@@ -952,81 +958,107 @@ export function ProjectLibraryCard({
 
 type BulkActionsProps = {
   readonly table: ReturnType<typeof useReactTable<LibraryRow>>;
-  readonly deleteProject: (project: ProjectListItem) => void;
+  readonly deleteProject: ProjectActions['handleDelete'];
 };
 
 function BulkActions({ table, deleteProject }: BulkActionsProps) {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Get selected row data
   const selectedRows = table.getFilteredSelectedRowModel().rows;
   const selectedCount = selectedRows.length;
 
-  const handleBulkDelete = () => {
-    setShowDeleteDialog(false);
+  const handleBulkDelete = async (): Promise<void> => {
+    setIsDeleting(true);
+    let successCount = 0;
+    let errorCount = 0;
+
     for (const row of selectedRows) {
-      const project = row.original;
-      /* Never selectable (D20): a Tau-Cloud-only row has nothing here to trash. */
-      if (!isCloudOnly(project)) {
-        /* Each guarded action reports its own result; counting a queued action
-         * as a successful deletion would promise removal before preflight. */
-        deleteProject(project);
+      try {
+        const project = row.original;
+        /* Never selectable (D20): a Tau-Cloud-only row has nothing here to trash. */
+        if (isCloudOnly(project)) {
+          continue;
+        }
+        if (await deleteProject(project, { announce: false })) {
+          successCount++;
+        } else {
+          errorCount++;
+        }
+      } catch (error) {
+        errorCount++;
+        console.error('Error deleting project:', error);
       }
     }
+
+    setIsDeleting(false);
+    setShowDeleteDialog(false);
     table.resetRowSelection();
+
+    if (successCount > 0 && errorCount === 0) {
+      toast.success(`Moved ${successCount} project${successCount === 1 ? '' : 's'} to Trash`);
+    } else if (successCount > 0 && errorCount > 0) {
+      toast.warning(`Moved ${successCount} project${successCount === 1 ? '' : 's'} to Trash; ${errorCount} failed`);
+    } else {
+      toast.error('Could not move selected projects to Trash');
+    }
   };
 
   return (
-    <>
+    <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
       <div className='flex items-center gap-2'>
-        <Button
-          variant='outline'
-          size='sm'
-          className='gap-1 border-destructive text-destructive hover:bg-destructive/10'
-          onClick={() => {
-            setShowDeleteDialog(true);
-          }}
-        >
-          <Trash className='h-4 w-4' />
-          Delete
-          <span className='ml-1 rounded-full bg-muted px-1.5 py-0.5 text-xs'>{selectedCount}</span>
-        </Button>
+        <AlertDialogTrigger asChild>
+          <Button
+            variant='outline'
+            size='sm'
+            className='gap-1 border-destructive text-destructive hover:bg-destructive/10'
+            disabled={isDeleting}
+          >
+            <Trash className='h-4 w-4' />
+            Move to Trash
+            <span className='ml-1 rounded-full bg-muted px-1.5 py-0.5 text-xs'>{selectedCount}</span>
+          </Button>
+        </AlertDialogTrigger>
       </div>
 
-      {/* Delete confirmation dialog */}
-      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className='flex items-center gap-2'>
-              <AlertCircle className='h-5 w-5 text-destructive' />
-              Delete {selectedCount} project{selectedCount === 1 ? '' : 's'}?
-            </AlertDialogTitle>
-            <AlertDialogDescription className='space-y-2'>
-              <p>The following projects will be moved to the trash:</p>
-              <p>Any running agents will be stopped first. Their work so far is saved as revisions.</p>
-              <ul className='max-h-40 list-disc overflow-y-auto pl-6 text-sm'>
-                {selectedRows.map((row) => {
-                  const project = row.original;
-                  return (
-                    <li key={row.id}>
-                      {project.name}{' '}
-                      <span className='text-muted-foreground/70 italic'>
-                        (modified {formatRelativeTime(project.lastActivityAt)})
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction className={buttonVariants({ variant: 'destructive' })} onClick={handleBulkDelete}>
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle className='flex items-center gap-2'>
+            <AlertCircle className='h-5 w-5 text-destructive' />
+            Move {selectedCount} project{selectedCount === 1 ? '' : 's'} to Trash?
+          </AlertDialogTitle>
+          <AlertDialogDescription className='space-y-2'>
+            <p>The following projects will be moved to the trash:</p>
+            <p>Any running agents will be stopped first. Their work so far is saved as revisions.</p>
+            <ul className='max-h-40 list-disc overflow-y-auto pl-6 text-sm'>
+              {selectedRows.map((row) => {
+                const project = row.original;
+                return (
+                  <li key={row.id}>
+                    {project.name}{' '}
+                    <span className='text-muted-foreground/70 italic'>
+                      (modified {formatRelativeTime(project.lastActivityAt)})
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+          <Button
+            variant='destructive'
+            disabled={isDeleting}
+            onClick={() => {
+              void handleBulkDelete();
+            }}
+          >
+            Move to Trash
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }

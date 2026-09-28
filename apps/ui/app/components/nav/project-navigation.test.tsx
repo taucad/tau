@@ -192,7 +192,7 @@ const projectsResult = {
   projects: [firstProject, secondProject],
   isLoading: false,
   error: undefined,
-  deleteProject: vi.fn(),
+  deleteProject: vi.fn(async () => true),
   duplicateProject: vi.fn(),
   updateName: vi.fn(),
 };
@@ -512,7 +512,7 @@ describe('ProjectNavigation', () => {
     });
     render(<ProjectNavigation />);
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[0]!);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Move to Trash' })[0]!);
 
     expect(projectsResult.deleteProject).not.toHaveBeenCalled();
     expect(

@@ -160,6 +160,7 @@ const defaultChatsResult = {
   error: undefined,
   updateChatName: vi.fn(),
   deleteChat: vi.fn(),
+  restoreChat: vi.fn(),
 };
 
 const { ProjectChatList, sortProjectChats } = await import('#components/nav/project-chat-list.js');
@@ -260,10 +261,27 @@ describe('ProjectChatList', () => {
     search = '?chat=chat_1';
     render(<ProjectChatList project={project} isProjectActive />);
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[0]!);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Move to Trash' })[0]!);
     await vi.waitFor(() => {
       expect(deleteChat).toHaveBeenCalledWith('chat_1');
       expect(mockNavigate).toHaveBeenCalledWith('/w/home/project%20one?chat=chat_2', { replace: true });
+    });
+  });
+
+  it('reveals trashed chats and restores one through the existing record', async () => {
+    const restoreChat = vi.fn().mockResolvedValue(chat(2));
+    mockUseChats.mockReturnValue({
+      ...defaultChatsResult,
+      chats: [chat(1), { ...chat(2), deletedAt: Date.now() }],
+      restoreChat,
+    });
+    render(<ProjectChatList project={project} isProjectActive />);
+
+    expect(screen.queryByRole('link', { name: 'Chat 2' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Chat Trash (1)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Restore Chat 2' }));
+    await vi.waitFor(() => {
+      expect(restoreChat).toHaveBeenCalledExactlyOnceWith('chat_2');
     });
   });
 
@@ -345,7 +363,7 @@ describe('ProjectChatList', () => {
       within(menu)
         .getAllByRole('menuitem')
         .map((item) => item.textContent),
-    ).toEqual(['Rename', 'Stop', 'Delete']);
+    ).toEqual(['Rename', 'Stop', 'Move to Trash']);
     fireEvent.click(within(menu).getByRole('menuitem', { name: 'Stop Chat 12' }));
     expect(mockCloseChat).toHaveBeenCalledExactlyOnceWith('proj_one', 'chat_12');
   });

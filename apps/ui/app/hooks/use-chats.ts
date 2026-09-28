@@ -109,6 +109,11 @@ export function useChats(resourceId: string, options?: { includeDeleted?: boolea
     [patchChatInManager, resourceId, queryClient],
   );
 
+  const restoreChat = useCallback(
+    async (chatId: string): Promise<Chat | undefined> => patchChat(chatId, 'deletedAt', undefined),
+    [patchChat],
+  );
+
   const softDeleteChat = useCallback(
     async (chatId: string): Promise<Chat | undefined> => {
       await chatSessions.removeChat(chatId);
@@ -133,6 +138,7 @@ export function useChats(resourceId: string, options?: { includeDeleted?: boolea
     applyGeneratedChatName,
     softDeleteChat,
     deleteChat,
+    restoreChat,
     updateChatName,
   };
 }

@@ -361,7 +361,10 @@ function ProjectSessionBinding({
         await client?.quiesce();
       },
       cancelRuns: async (chatIds) => {
-        await Promise.all(chatIds.map(async (chatId) => chatSessions.cancelProjectedRun(chatId)));
+        const outcomes = await Promise.all(chatIds.map(async (chatId) => chatSessions.cancelProjectedRun(chatId)));
+        if (outcomes.includes('continuing')) {
+          throw new Error('A run changed holder and could not be stopped. Review the current Close plan.');
+        }
       },
       /* The leases go with the root: `release()` retires every one this
        * session's turns took, inside the flush above. Kept as its own step

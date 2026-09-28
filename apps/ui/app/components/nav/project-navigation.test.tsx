@@ -498,24 +498,47 @@ describe('ProjectNavigation', () => {
     expect(mockCloseProject).toHaveBeenCalledWith('proj_two');
   });
 
-  it('asks before trashing a project with running work', async () => {
+  it('closes running work before a separate Delete gesture, without trashing it yet', async () => {
     mockRow.mockImplementation((projectId: string) => ({
       ...closedRow(projectId),
       glyph: projectId === 'proj_two' ? 'busy' : 'none',
       runs: projectId === 'proj_two' ? 2 : 0,
     }));
+    mockGetProjectClosePlan.mockResolvedValue({
+      stoppableRunCount: 1,
+      stoppableChatIds: ['chat-unseen'],
+      liveChatIds: ['chat-unseen'],
+      continuingRuns: [],
+    });
     render(<ProjectNavigation />);
 
     fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[0]!);
 
     expect(projectsResult.deleteProject).not.toHaveBeenCalled();
-    expect(await screen.findByRole('heading', { name: 'Close Two?' })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('heading', { name: 'Stop 1 run and close Two before deleting?' }),
+    ).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Stop and close' }));
     await waitFor(() => {
       expect(mockCloseProject).toHaveBeenLastCalledWith('proj_two');
-      expect(projectsResult.deleteProject).toHaveBeenCalledExactlyOnceWith('proj_two');
+      expect(projectsResult.deleteProject).not.toHaveBeenCalled();
     });
+  });
+
+  it('blocks Delete when another build still owns a run', async () => {
+    mockGetProjectClosePlan.mockResolvedValue({
+      stoppableRunCount: 0,
+      stoppableChatIds: [],
+      liveChatIds: ['chat-foreign'],
+      continuingRuns: [{ id: 'run-foreign', label: 'Foreign chat', reason: 'other-build' }],
+    });
+    render(<ProjectNavigation />);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[0]!);
+    await waitFor(() => expect(mockGetProjectClosePlan).toHaveBeenCalledWith('proj_two'));
+    expect(screen.queryByRole('heading', { name: /close Two before deleting/u })).not.toBeInTheDocument();
+    expect(projectsResult.deleteProject).not.toHaveBeenCalled();
+    expect(mockCloseProject).not.toHaveBeenCalled();
   });
 
   it('offers no Close on a project that is already closed', () => {

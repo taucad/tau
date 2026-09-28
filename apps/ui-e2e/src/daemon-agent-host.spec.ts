@@ -258,6 +258,17 @@ describe('daemon agent host (AV-4, rung 1)', () => {
       await ensureChatOpen();
       const stop = selectors.getByCss('button:has(svg.lucide-square)').last();
       await target.expectVisible(stop, 120_000);
+      await expect.poll(target.isTauServeGatewayHeld, { timeout: 120_000 }).toBe(true);
+      const liveLog = await durableLog();
+      const beforeStop = liveLog
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line) as { readonly type: string; readonly state?: string });
+      expect(beforeStop.filter(({ type }) => type === 'run.lifecycle').map(({ state }) => state)).toEqual([
+        'admitted',
+        'running',
+      ]);
+      expect(beforeStop.filter(({ type }) => type === 'turn.finalized' || type === 'turn.failed')).toHaveLength(0);
       await target.click(stop);
       await expect.poll(durableLog, { timeout: 120_000 }).toContain('"state":"cancelled"');
       const log = await durableLog();

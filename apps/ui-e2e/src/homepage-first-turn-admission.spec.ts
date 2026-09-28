@@ -62,7 +62,7 @@ test('dispatches the turn seeded by the homepage composer (W5)', async () => {
   await target.expectVisible(selectors.getByLabelText(/Open Revisions\. You are on main, Rev 1\./u), 120_000);
 });
 
-test('starts the seeded turn once when the page reloads during admission', async () => {
+test('starts the homepage seed once across a reload before the provider answers', async () => {
   const prompt = 'Create the homepage seed proof.';
   const answer = 'The homepage seed ran.';
   await target.installAgentHostGatewayFixture([reply(answer, { gated: true })]);
@@ -71,13 +71,17 @@ test('starts the seeded turn once when the page reloads during admission', async
   await dismissCookies();
   await target.expectVisible(selectors.getByCss(composer).first(), 60_000);
   await selectModel(pdfModelName);
+  await target.holdNextAgentHostGatewayRequest();
   await target.type(selectors.getByCss(composer).first(), prompt);
   await target.click(selectors.getByCss('button:has(svg.lucide-arrow-up)').last());
   await target.expectUrl(/\/w\/[^/]+\/[^/?]+\?(?:.*&)?chat=/u, 120_000);
   const chatId = new URL(await target.currentUrl()).searchParams.get('chat');
   expect(chatId).not.toBeNull();
+  /* The homepage seed reached the host exactly once, but its first provider
+   * request has not received even a response header when this page reloads. */
+  await target.waitForAgentHostGatewayGate({ kind: 'request', turn: prompt }, 120_000);
   await expect.poll(gatewayRequestCount, { timeout: 120_000 }).toBe(1);
-  await target.expectVisible(selectors.getByText(answer, { exact: true }), 120_000);
+  expect(await target.isVisible(selectors.getByText(answer, { exact: true }))).toBe(false);
 
   const events = async (): Promise<ReadonlyArray<{ readonly type: string; readonly state?: string }>> => {
     const storage = await readProjectStorageState();

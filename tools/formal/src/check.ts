@@ -402,7 +402,8 @@ export const updateProject = async (
 /**
  * Nightly: TLC random simulation of every exported graph from one fresh, printed seed, written to
  * `out/test-results/formal/<projectRoot>/simulated/<Module>.ndjson`. Owner conformance tests replay
- * these when `FORMAL_SIMULATED` names the directory, and so do the mutant runs.
+ * these when `FORMAL_SIMULATED` names the directory, and so do the mutant runs. Only a local
+ * missing-tool skip writes `.skipped`; an absent declared trace without that marker must fail replay.
  */
 const simulateProject = async (
   context: FormalContext,
@@ -412,27 +413,37 @@ const simulateProject = async (
   const graphs = findExpectedFiles(projectRoot).flatMap(({ directory, file }) =>
     Object.entries(file.graphs ?? {}).map(([module, graph]) => ({ directory, module, graph })),
   );
+  const invalid = graphs.find(({ module }) => !/^[A-Za-z]\w*$/.test(module));
+  if (invalid) {
+    log(`FAIL simulation graph module name is invalid: ${invalid.module}`);
+    return { status: 1 };
+  }
+  const projectRelative = path.relative(context.root, projectRoot);
+  if (
+    projectRelative === '' ||
+    projectRelative === '..' ||
+    projectRelative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(projectRelative)
+  ) {
+    log(`FAIL simulation project root is outside the workspace: ${projectRoot}`);
+    return { status: 1 };
+  }
+  const output = path.join(context.root, 'out/test-results/formal', projectRelative, 'simulated');
+  // This directory belongs only to simulation; remove traces for graphs deleted from expected.json too.
+  rmSync(output, { recursive: true, force: true });
   if (graphs.length === 0) {
     return { status: 0 };
   }
-  const output = path.join(
-    context.root,
-    'out/test-results/formal',
-    path.relative(context.root, projectRoot),
-    'simulated',
-  );
-  for (const { module } of graphs) {
-    rmSync(path.join(output, `${module}.ndjson`), { force: true });
-  }
   const tools = locateTools(context);
   if (!tools.java || !tools.tlc) {
+    const status =
+      missingTools(context, { tools, needed: ['java', 'tlc'], target: `${projectRelative} simulation` }, log) ?? 1;
+    if (status === 0) {
+      mkdirSync(output, { recursive: true });
+      writeFileSync(path.join(output, '.skipped'), 'java or tlc unavailable\n');
+    }
     return {
-      status:
-        missingTools(
-          context,
-          { tools, needed: ['java', 'tlc'], target: `${path.relative(context.root, projectRoot)} simulation` },
-          log,
-        ) ?? 1,
+      status,
     };
   }
   const seed = Number(context.env['FORMAL_SEED'] ?? Math.floor(Math.random() * 2_147_483_647));

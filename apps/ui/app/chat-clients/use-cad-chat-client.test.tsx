@@ -633,6 +633,28 @@ describe('useCadChatClient', () => {
     expect(options).not.toHaveProperty('model');
   });
 
+  it('does not poll the catalog before answering a send with an unresolved model', async () => {
+    mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-offline' } }));
+    const chat = mock<Chat<MyUIMessage>>();
+    Object.defineProperty(chat, 'messages', { get: () => [] });
+    useActiveChatInstanceMock.mockReturnValue(chat);
+    installActions(buildActions());
+
+    const { result } = renderClient();
+    await bindChatHost();
+    act(() => {
+      void result.current.submit({ text: 'Build it.' });
+    });
+
+    await waitFor(
+      () => {
+        expect(persistedErrors).toHaveLength(1);
+      },
+      { timeout: 300 },
+    );
+    expect(admittedTurns).toHaveLength(0);
+  });
+
   it('places a Tau Host turn on the daemon channel, claiming no browser workspace', async () => {
     mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-5.5', hostId: 'origin' } }));
     const chat = mock<Chat<MyUIMessage>>();

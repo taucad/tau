@@ -44,8 +44,8 @@ export const printIntentSchema = z.strictObject({
   preset: reference.preset.unwrap().optional(),
   printer: bambuStudio.printer,
   process: bambuStudio.process,
-  /** Bambu Studio filament preset per AMS slot, keyed `"0"` to `"15"`. */
-  filaments: z.record(z.string().regex(/^(?:\d|1[0-5])$/u), bambuStudio.filaments.unwrap().element).optional(),
+  /** Bambu Studio filament preset per slot: AMS trays `"0"` to `"15"`, the external spool `"254"`. */
+  filaments: z.record(z.string().regex(/^(?:\d|1[0-5]|254)$/u), bambuStudio.filaments.unwrap().element).optional(),
   plate: bambuStudio.plate,
   settings: bambuStudio.settings,
   /**

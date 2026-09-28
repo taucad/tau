@@ -532,19 +532,21 @@ const readRunMessage = async (events: readonly AgentLogEvent[]): Promise<MyUIMes
   if (chunks.length === 0) {
     return undefined;
   }
-  // The SDK reader only yields after a write; a partial log with step/error
-  // control chunks alone has no message even though the finish callback has state.
-  if (
-    chunks.every(
-      (chunk) =>
-        chunk.type === 'start-step' ||
-        chunk.type === 'finish-step' ||
-        chunk.type === 'error' ||
-        chunk.type === 'abort' ||
-        (chunk.type === 'finish' && chunk.messageMetadata == null),
-    )
-  )
-    return undefined;
+  // The reader snapshots only on writes. Step boundaries can change reducer
+  // state without a write, so a partial run must keep its last visible state.
+  const lastWrite = chunks.findLastIndex(
+    (chunk) =>
+      chunk.type !== 'start-step' &&
+      chunk.type !== 'finish-step' &&
+      chunk.type !== 'error' &&
+      chunk.type !== 'abort' &&
+      !(chunk.type === 'finish' && chunk.messageMetadata == null) &&
+      !(chunk.type === 'start' && chunk.messageId == null && chunk.messageMetadata == null) &&
+      !(chunk.type === 'message-metadata' && chunk.messageMetadata == null) &&
+      !('transient' in chunk && chunk.transient === true),
+  );
+  if (lastWrite < 0) return undefined;
+  const trailingSteps = chunks.slice(lastWrite + 1).filter((chunk) => chunk.type === 'start-step').length;
   const stream = (): ReadableStream<InferUIMessageChunk<MyUIMessage>> =>
     new ReadableStream<InferUIMessageChunk<MyUIMessage>>({
       start: (controller) => {
@@ -572,6 +574,8 @@ const readRunMessage = async (events: readonly AgentLogEvent[]): Promise<MyUIMes
   if (failed) {
     message = undefined;
     for await (const next of readUIMessageStream<MyUIMessage>({ stream: stream() })) message = next;
+  } else if (message && trailingSteps > 0) {
+    message = { ...message, parts: message.parts.slice(0, -trailingSteps) };
   }
   return message;
 };

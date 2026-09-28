@@ -1031,6 +1031,85 @@ the cancelled tools left the system unchanged.
     await host.close();
   });
 
+  it('should replay one real result when interruption overlaps an early tool call', async () => {
+    const file = createMemoryLogFile();
+    const toolStarted = Promise.withResolvers<void>();
+    const toolResult = Promise.withResolvers<{ content: string; isError: false }>();
+    const toolAborted = Promise.withResolvers<void>();
+    const requests: ModelStreamRequest[] = [];
+    const transport: ModelTransport = {
+      funding: { type: 'unfunded' },
+      async *stream(request): AsyncGenerator<ModelStreamEvent> {
+        requests.push(request);
+        if (requests.length === 1) {
+          yield {
+            type: 'tool-input',
+            toolCallId: 'interrupted-read',
+            toolName: 'read_file',
+            input: { targetFile: 'main.ts' },
+          };
+          yield { type: 'completed', stopReason: 'toolUse' };
+          return;
+        }
+        yield { type: 'text-delta', text: 'Recovered.' };
+        yield { type: 'completed', stopReason: 'stop' };
+      },
+    };
+    const invoke = vi.fn(async (invocation: Parameters<ToolRegistry['invoke']>[0]) => {
+      toolStarted.resolve();
+      invocation.signal.addEventListener(
+        'abort',
+        () => {
+          toolAborted.resolve();
+        },
+        { once: true },
+      );
+      return toolResult.promise;
+    });
+    const host = createTauAgentHost(
+      hostOptions({ openEventLog: file.open, transport, toolRegistry: tools(invoke), idPrefix: 'interrupted-tool' }),
+    );
+    const admission = host.admit({
+      chatId: 'chat-interrupted-tool',
+      runId: 'run-interrupted-tool',
+      trigger: 'submit',
+      message: { id: 'turn-interrupted-tool', role: 'user', content: 'Read main.ts.' },
+    });
+    await toolStarted.promise;
+    const interruption = host.interrupt({
+      interruptId: 'interrupt-tool',
+      runId: 'run-interrupted-tool',
+      kind: 'operator',
+      prompt: 'Continue?',
+    });
+    await toolAborted.promise;
+    toolResult.resolve({ content: 'fixture-main', isError: false });
+    await admission;
+    await host.resolveInterrupt({ runId: 'run-interrupted-tool', interruptId: 'interrupt-tool', outcome: 'approved' });
+    await interruption;
+    const resumed = await host.resume('chat-interrupted-tool');
+    const events = await readLog(file);
+    const outputs = resumed.filter(
+      (message) => message.role === 'tool-output' && message.toolCallId === 'interrupted-read',
+    );
+    expect(outputs).toMatchObject([{ content: 'fixture-main', isError: false }]);
+    expect(
+      events.filter(
+        (event) =>
+          event.type === 'message.appended' &&
+          event.message.role === 'tool-output' &&
+          event.message.toolCallId === 'interrupted-read',
+      ),
+    ).toHaveLength(1);
+    expect(
+      requests[1]?.messages.filter(
+        (message) => message.role === 'tool-output' && message.toolCallId === 'interrupted-read',
+      ),
+    ).toHaveLength(1);
+    expect(invoke).toHaveBeenCalledTimes(1);
+    await host.close();
+  });
+
   /*
    * D5 on the substrate (the fixture's one tool stands in for `request_print`): a tool's approval is the run's native durable interrupt. Asking ends the attempt paused
    * (D10, TS-R10); the answer resolves it, and the run's next attempt asks again and reads the answer. Geospec's

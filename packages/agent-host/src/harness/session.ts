@@ -1707,6 +1707,15 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     }
   };
   agent.subscribe(async (event) => {
+    if (
+      (event.type === 'tool_execution_end' && prestartedToolResults.has(event.toolCallId)) ||
+      (event.type === 'message_end' &&
+        event.message.role === 'toolResult' &&
+        prestartedToolResults.has(event.message.toolCallId))
+    ) {
+      /* Pi's abort result is provisional while the already-dispatched tool still owns the real result. */
+      return;
+    }
     await appendAgentEvent({ event, record, toolInputIds, toolOutputs, committedMessageIds, createId });
     if (event.type === 'agent_end') {
       lastFinal = [...event.messages].reverse().find((message) => message.role === 'assistant');

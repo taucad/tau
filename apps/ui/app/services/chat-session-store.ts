@@ -663,6 +663,56 @@ export class ChatSessionStore {
     return 'stopped';
   }
 
+  /** Answer only an interrupt the caught-up host log still holds, including after reload. @public */
+  public async respondToProjectedApproval(
+    chatId: string,
+    interruptId: string,
+    decision: Readonly<{ approved: boolean; reason?: string; optionId?: string }>,
+  ): Promise<boolean> {
+    const projection = this.#projectionContext(chatId);
+    if (projection === undefined || !selectCaughtUp(projection)) {
+      return false;
+    }
+    const run = selectCurrentRun(projection);
+    if (run === undefined || selectOpenInterrupts(projection)[interruptId] === undefined) {
+      return false;
+    }
+    const projectId = this.#sessions.get(chatId)?.projectId ?? this.#observed.get(chatId)?.projectId;
+    const connector = projectId === undefined ? undefined : this.#projectHostConnectors.get(projectId);
+    if (connector === undefined) {
+      throw new Error(`Chat ${chatId} has no live host connector.`);
+    }
+    const answer = await sendHostCommand(async () => connector.connect(chatId), {
+      type: 'resolve-interrupt',
+      commandId: generatePrefixedId(idPrefix.request),
+      payload: {
+        chatId,
+        runId: run.runId,
+        interruptId,
+        outcome: decision.approved ? 'approved' : 'denied',
+        ...(decision.optionId === undefined ? {} : { optionId: decision.optionId }),
+        ...(decision.reason === undefined ? {} : { payload: { reason: decision.reason } }),
+      },
+    });
+    if (answer.status === 'refused') {
+      throw new Error(`Host approval refused ${answer.code}: ${answer.message}`);
+    }
+    if (answer.effect !== 'durable') {
+      return false;
+    }
+    if (decision.approved && run.kind === 'tau') {
+      const resumed = await sendHostCommand(async () => connector.connect(chatId), {
+        type: 'resume',
+        commandId: generatePrefixedId(idPrefix.request),
+        payload: { chatId, runId: run.runId },
+      });
+      if (resumed.status === 'refused' && resumed.code !== 'INTERRUPT_PENDING') {
+        throw new Error(`Host resume refused ${resumed.code}: ${resumed.message}`);
+      }
+    }
+    return true;
+  }
+
   /** Classify every observed live run before Close asks, without sending a command or taking a lock. @public */
   public async getProjectClosePlan(projectId: string): Promise<ProjectClosePlan> {
     const version = (this.#projectRunVersions.get(projectId) ?? 0) + 1;

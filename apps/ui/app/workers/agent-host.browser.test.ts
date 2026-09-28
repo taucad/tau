@@ -6,6 +6,7 @@ import type { AgentChannelClient } from '@taucad/agent-host/channel-client';
 import { agentWireLimits } from '@taucad/agent-host/wire';
 import type { CommandAnswer, CommandVerb } from '@taucad/agent-host/wire';
 import { createBrowserAgentHostClient } from '#services/agent-host-client.js';
+import type { AgentHostClient } from '#services/agent-host-client.js';
 import type { AgentHostProjectProvide } from '#workers/agent-host.contract.js';
 import { openBrowserProjectHost } from '#workers/agent-host.impl.js';
 import { createProjectHosts } from '#workers/agent-host-projects.js';
@@ -31,6 +32,37 @@ afterEach(() => {
 });
 
 let keys = 0;
+
+const attachBrowserChat = async (client: AgentHostClient, chatId: string) =>
+  client.hostCommand({ type: 'attach', commandId: `attach-browser-${++keys}`, payload: { chatId } });
+
+// oxlint-disable-next-line eslint/max-params -- Test helper names the exact keyed Start fields.
+const startBrowserRun = async (
+  client: AgentHostClient,
+  chatId: string,
+  runId: string,
+  message: { readonly id: string; readonly role: 'user'; readonly content: string },
+  trigger: 'submit' | 'regenerate' = 'submit',
+) =>
+  client.hostCommand({
+    type: 'start',
+    commandId: runId,
+    payload: { chatId, runId, trigger, message, ...(trigger === 'regenerate' ? { retainedMessageIds: [] } : {}) },
+  });
+
+const completedBrowserSnapshot = async (
+  client: AgentHostClient,
+  chatId: string,
+  runId: string,
+): Promise<HostRunSnapshot> =>
+  vi.waitFor(async () => {
+    const answer = await attachBrowserChat(client, chatId);
+    expect(answer).toMatchObject({ status: 'applied', details: { snapshot: { runId, state: 'completed' } } });
+    if (answer.status !== 'applied' || answer.effect !== 'not-applied') {
+      throw new Error('Expected an attached host snapshot.');
+    }
+    return answer.details['snapshot'] as HostRunSnapshot;
+  });
 
 /**
  * A project host opened in this page, as the resident worker opens one on `provide` (RH-S8), and one agent-wire
@@ -171,12 +203,14 @@ it('runs a gateway turn in the dedicated launcher and commits its OPFS event log
   });
 
   try {
-    const snapshot = await client.start({
-      chatId: 'chat-browser-fixture',
-      runId: 'run-browser-fixture',
-      trigger: 'submit',
-      message: 'Confirm the browser launcher.',
-    });
+    await expect(
+      startBrowserRun(client, 'chat-browser-fixture', 'run-browser-fixture', {
+        id: 'user-browser-fixture',
+        role: 'user',
+        content: 'Confirm the browser launcher.',
+      }),
+    ).resolves.toMatchObject({ status: 'applied' });
+    const snapshot = await completedBrowserSnapshot(client, 'chat-browser-fixture', 'run-browser-fixture');
     expect(snapshot).toMatchObject({
       chatId: 'chat-browser-fixture',
       runId: 'run-browser-fixture',
@@ -223,13 +257,20 @@ it('runs a gateway turn in the dedicated launcher and commits its OPFS event log
     try {
       // A settled publication creates a fresh workspace and worker. Retry must
       // rewind before re-projecting the same durable user-message identity.
-      const retried = await retryClient.start({
-        chatId: 'chat-browser-fixture',
-        runId: 'run-browser-retry',
-        trigger: 'regenerate',
-        retainedMessageIds: [],
-        message: retryMessage,
-      });
+      await expect(
+        startBrowserRun(
+          retryClient,
+          'chat-browser-fixture',
+          'run-browser-retry',
+          {
+            id: retryMessage.id,
+            role: 'user',
+            content: retryMessage.content as string,
+          },
+          'regenerate',
+        ),
+      ).resolves.toMatchObject({ status: 'applied' });
+      const retried = await completedBrowserSnapshot(retryClient, 'chat-browser-fixture', 'run-browser-retry');
       expect(retried).toMatchObject({
         chatId: 'chat-browser-fixture',
         runId: 'run-browser-retry',
@@ -273,7 +314,11 @@ it('refuses initialization when the persisted project root is missing', async ()
   });
 
   await expect(
-    client.start({ chatId: 'missing-chat', runId: 'missing-run', trigger: 'submit', message: 'Do not create it.' }),
+    startBrowserRun(client, 'missing-chat', 'missing-run', {
+      id: 'user-missing',
+      role: 'user',
+      content: 'Do not create it.',
+    }),
   ).rejects.toMatchObject({ code: 'STORAGE_NOT_WRITABLE' });
   await client.close();
 });
@@ -344,8 +389,8 @@ it('reclaims an abandoned transactional writer lock after winning attach takeove
   });
 
   try {
-    await expect(client.attach({ chatId, cursor: 0 })).resolves.toMatchObject({
-      snapshot: { chatId, runId, state: 'completed' },
+    await expect(attachBrowserChat(client, chatId)).resolves.toMatchObject({
+      details: { snapshot: { chatId, runId, state: 'completed' } },
     });
   } finally {
     await client.close();
@@ -396,7 +441,7 @@ it('records the run a dead leader left as abandoned, observed on the stream', as
 
   try {
     /* RH-R1: `attach` is a read. It takes no lock, so neither worker leads an empty chat. */
-    await expect(leader.attach({ chatId, cursor: 0 })).resolves.toMatchObject({ status: 'batch' });
+    await expect(attachBrowserChat(leader, chatId)).resolves.toMatchObject({ status: 'applied' });
     const event = (sequence: number, value: Readonly<Record<string, unknown>>): string =>
       `${JSON.stringify({
         version: 1,
@@ -427,7 +472,7 @@ it('records the run a dead leader left as abandoned, observed on the stream', as
     );
     /* The dead leader's run has no driver in any live worker. The attach answers at once; the claim it asks for,
      * not the attach, writes the outcome, so the test watches the stream for it (RH-R1). */
-    await expect(follower.attach({ chatId, cursor: 0 })).resolves.toMatchObject({ status: 'batch' });
+    await expect(attachBrowserChat(follower, chatId)).resolves.toMatchObject({ status: 'applied' });
     /* I4: the claim *records* what it found. It never drives the dead leader's run — that would ask the provider
      * again for a turn nobody asked to repeat — so the run ends `failed`/`RUN_ABANDONED` and waits for Resume. */
     const terminal = Promise.withResolvers<void>();
@@ -452,8 +497,8 @@ it('records the run a dead leader left as abandoned, observed on the stream', as
     ]);
     unsubscribe();
     expect(outcome).toBe('abandoned');
-    await expect(follower.attach({ chatId, cursor: 0 })).resolves.toMatchObject({
-      snapshot: { runId, state: 'failed', failure: { code: 'RUN_ABANDONED' } },
+    await expect(attachBrowserChat(follower, chatId)).resolves.toMatchObject({
+      details: { snapshot: { runId, state: 'failed', failure: { code: 'RUN_ABANDONED' } } },
     });
   } finally {
     await Promise.allSettled([leader.close(), follower.close()]);
@@ -949,11 +994,13 @@ it('should serve two chats of one project over two connections in one worker', a
 
   try {
     const [a, b] = await Promise.all([
-      first.start({ chatId: 'chat-a', runId: 'run-a', trigger: 'submit', message: 'A.' }),
-      second.start({ chatId: 'chat-b', runId: 'run-b', trigger: 'submit', message: 'B.' }),
+      startBrowserRun(first, 'chat-a', 'run-a', { id: 'user-a', role: 'user', content: 'A.' }),
+      startBrowserRun(second, 'chat-b', 'run-b', { id: 'user-b', role: 'user', content: 'B.' }),
     ]);
-    expect(a).toMatchObject({ runId: 'run-a', state: 'completed' });
-    expect(b).toMatchObject({ runId: 'run-b', state: 'completed' });
+    expect(a).toMatchObject({ status: 'applied' });
+    expect(b).toMatchObject({ status: 'applied' });
+    await expect(completedBrowserSnapshot(first, 'chat-a', 'run-a')).resolves.toMatchObject({ state: 'completed' });
+    await expect(completedBrowserSnapshot(second, 'chat-b', 'run-b')).resolves.toMatchObject({ state: 'completed' });
     expect(createWorker).toHaveBeenCalledOnce();
   } finally {
     await Promise.allSettled([first.close(), second.close()]);
@@ -1498,7 +1545,7 @@ it("should broker the revisions port only after the project's revision client op
   const model = gateModel();
   try {
     expect(openRevisionsPort).not.toHaveBeenCalled();
-    await client.attach({ chatId: 'chat-revisions-port', cursor: 0 });
+    await attachBrowserChat(client, 'chat-revisions-port');
     expect(openRevisionsPort).toHaveBeenCalledOnce();
 
     /* The same host with no revisions port, opened in this page so its model request can be read. */

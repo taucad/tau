@@ -192,12 +192,22 @@ it('should rebridge an open project host without replacing it', async () => {
     createWorker,
   });
   try {
-    await client.attach({ chatId: 'chat-rebridge', cursor: 0 });
+    await client.hostCommand({
+      type: 'attach',
+      commandId: 'attach-before-rebridge',
+      payload: { chatId: 'chat-rebridge' },
+    });
 
     await residentAgentWorker(createWorker).reprovide();
 
     expect(disposals.map((dispose) => dispose.mock.calls.length)).toEqual([1, 1, 0, 0]);
-    await expect(client.attach({ chatId: 'chat-rebridge', cursor: 0 })).resolves.toMatchObject({ status: 'batch' });
+    await expect(
+      client.hostCommand({
+        type: 'attach',
+        commandId: 'attach-after-rebridge',
+        payload: { chatId: 'chat-rebridge' },
+      }),
+    ).resolves.toMatchObject({ status: 'applied' });
   } finally {
     await client.close();
     await retireWorkers(worker);

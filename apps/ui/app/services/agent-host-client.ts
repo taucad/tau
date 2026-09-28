@@ -1,14 +1,5 @@
 import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
-import type {
-  AgentLiveEvent,
-  AgentLogEvent,
-  Channel,
-  HostRunSnapshot,
-  InterruptResolution,
-  RunTrigger,
-  StorageDurabilityClass,
-  UserProviderMessage,
-} from '@taucad/agent-host';
+import type { AgentLogEvent, Channel, StorageDurabilityClass } from '@taucad/agent-host';
 import { isGatewayProviderKind } from '@taucad/agent-host';
 import { connectAgentWorkerChannel, createAgentChannelClient } from '@taucad/agent-host/channel-client';
 import { agentWireLimits } from '@taucad/agent-host/wire';
@@ -19,8 +10,7 @@ import type {
   ReadAnswer,
   ReadRequest,
 } from '@taucad/agent-host/wire';
-import { generatePrefixedId, randomUuid } from '@taucad/utils/id';
-import { idPrefix } from '@taucad/types/constants';
+import { randomUuid } from '@taucad/utils/id';
 import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';
 import type {
@@ -125,58 +115,6 @@ export class AgentHostWorkerError extends Error {
   }
 }
 
-/** A refusal of retry class `wait`: the chat's previous attempt has ended and is being settled (W8 TS-S6). */
-const isSettlingRefusal = (error: unknown): error is AgentHostWorkerError =>
-  error instanceof AgentHostWorkerError &&
-  error.code === 'CHAT_RUN_LIVE' &&
-  (error.details?.['state'] === 'settling' || error.details?.['state'] === 'terminal');
-
-/**
- * Send a command again while the host refuses it because the chat's previous attempt is settling (W8.r1 item 6).
- *
- * `CHAT_RUN_LIVE` naming a `settling` or already `terminal` run is retry class `wait`: the attempt's settlement row
- * is durable and its acknowledge follows it, so the command is admitted once that lands. The re-send backs off from
- * 20 ms to 250 ms; any other refusal, an abort, or the settlement bound passing ends it with the last refusal.
- *
- * @param send - One send of the command; a refusal rejects with its {@link AgentHostWorkerError}.
- * @param signal - Stops re-sending once aborted.
- * @param bound - The settlement bound, in milliseconds.
- * @returns What the admitted send resolved with.
- * @internal
- */
-export const resendWhileSettling = async <Result>(
-  send: () => Promise<Result>,
-  signal?: AbortSignal,
-  bound = 30_000,
-): Promise<Result> => {
-  const deadline = Date.now() + bound;
-  /* Read afresh after each wait: a stop can land during it. */
-  const aborted = (): boolean => signal?.aborted === true;
-  const attempt = async (backoffMilliseconds: number): Promise<Result> => {
-    let refusal: AgentHostWorkerError;
-    try {
-      return await send();
-    } catch (error) {
-      if (!isSettlingRefusal(error) || aborted() || Date.now() + backoffMilliseconds > deadline) {
-        throw error;
-      }
-      refusal = error;
-    }
-    await new Promise<void>((resolve) => {
-      globalThis.setTimeout(resolve, backoffMilliseconds);
-    });
-    /* A stop during the back-off sends nothing more: the last refusal is the answer (W8.r1 round 5). */
-    if (aborted()) {
-      throw refusal;
-    }
-    return attempt(Math.min(backoffMilliseconds * 2, 250));
-  };
-  return attempt(20);
-};
-
-/** The commands the page re-sends while the previous attempt settles; `start` recovers in the transport. */
-const waitingCommands: ReadonlySet<HostCommand['type']> = new Set(['resolve-interrupt', 'resume', 'cancel']);
-
 export type AgentHostClientOptions = {
   readonly openFileSystemBridge: () => FileSystemBridgeConnection;
   readonly openProjectRootBridge: () => FileSystemBridgeConnection;
@@ -205,7 +143,6 @@ export type AgentHostClientOptions = {
   readonly testingEnabled?: boolean | undefined;
   /** The worker factory, for tests; the document's resident worker otherwise. */
   readonly createWorker?: (() => Worker) | undefined;
-  readonly runIdleTimeout?: number | undefined;
   /**
    * The signed-in account the session cookie funds, read at every provide (W11 GI-Q6). The session's user by default;
    * `undefined` when nobody is signed in or the session cannot be read.
@@ -224,27 +161,6 @@ const sessionPrincipal = async (): Promise<string | undefined> => {
   }
 };
 
-type AgentHostStartInputBase = {
-  readonly chatId: string;
-  readonly runId: string;
-  readonly message: string | UserProviderMessage;
-  readonly config?: AgentHostAdmissionConfig | undefined;
-  /**
-   * External agent to run this turn (W4-ACP); absent = the host's own harness.
-   * Only a daemon transport can honour it — the browser worker has no process
-   * to spawn — and only a daemon-placed execution ever carries one.
-   */
-  readonly agent?: AgentHostExternalAgent | undefined;
-  /** CAD context for that external agent (V12); meaningless without one. */
-  readonly context?: AgentHostExternalContext | undefined;
-};
-
-export type AgentHostStartInput = AgentHostStartInputBase &
-  (
-    | { readonly trigger: 'submit'; readonly retainedMessageIds?: never }
-    | { readonly trigger: Exclude<RunTrigger, 'submit'>; readonly retainedMessageIds: readonly string[] }
-  );
-
 /** One read of a chat's durable rows from the reader's own position (SC-R11, SC-R12). */
 export type AgentHostReadInput = {
   readonly chatId: string;
@@ -262,24 +178,6 @@ export type AgentHostReadInput = {
 export type AgentHostClient = {
   /** Execute one already-keyed command; the sender owns its id and any re-send decision. */
   hostCommand(command: HostCommand): Promise<CommandAnswer>;
-  start(input: AgentHostStartInput): Promise<HostRunSnapshot>;
-  steer(runId: string, message: string): Promise<HostRunSnapshot>;
-  cancel(runId: string): Promise<HostRunSnapshot>;
-  /** Continue the chat's current run, `runId`; any other run is refused `RESUME_UNAVAILABLE`. */
-  resume(chatId: string, runId: string, commandId?: string): Promise<HostRunSnapshot>;
-  resolveInterrupt(
-    chatId: string,
-    runId: string,
-    resolution: InterruptResolution & { readonly commandId?: string },
-  ): Promise<HostRunSnapshot>;
-  /** The `attach` command, then one read from `cursor`: the chat's run and its first page of rows. */
-  attach(input: AgentHostReadInput): Promise<
-    ReadAnswer & {
-      readonly snapshot?: HostRunSnapshot | undefined;
-      /** A claim was asked for a run no driver in this host holds; its outcome arrives as rows (RH-R1). */
-      readonly takeover?: boolean | undefined;
-    }
-  >;
   /** One read of the chat's durable rows; a refusal means the reader resets to cursor 0, never a clamp. */
   read(input: AgentHostReadInput): Promise<ReadAnswer>;
   /**
@@ -296,13 +194,8 @@ export type AgentHostClient = {
     /** The exact read batch or refusal, for a projection that owns the cursor. */
     onAnswer?: (answer: ReadAnswer) => ReadRequest['last'] | void,
   ): () => void;
-  /** One chat's live deltas. */
-  subscribeLive?(chatId: string, listener: (chatId: string, event: AgentLiveEvent) => void): () => void;
   close(): Promise<void>;
 };
-
-const userMessage = (message: AgentHostStartInput['message']): UserProviderMessage =>
-  typeof message === 'string' ? { id: randomUuid(), role: 'user', content: message } : message;
 
 /** Static + dynamic at minimum; the workspace block rides between them when it has content. */
 const hasCacheablePromptBlocks = (blocks: readonly unknown[]): boolean => blocks.length >= 2;
@@ -320,9 +213,6 @@ const toWorkerError = (error: unknown, fallbackCode: string): AgentHostWorkerErr
 
 /** Read through a call, so a check after an `await` is not narrowed by the one before it. */
 const isAborted = (signal: AbortSignal): boolean => signal.aborted;
-
-const terminalRunState = (state: HostRunSnapshot['state']): boolean =>
-  state === 'completed' || state === 'failed' || state === 'cancelled';
 
 /**
  * Project the page's admission config onto the wire's (drift items 2, 3).
@@ -373,38 +263,18 @@ export const externalAdmissionConfig = (
   ...(context?.snapshot === undefined ? {} : { snapshot: context.snapshot }),
 });
 
-/** Deadlines the transport-agnostic core enforces on every wire. */
-export type AgentHostClientCoreOptions = {
-  readonly runIdleTimeout?: number | undefined;
-};
-
-/** What an `attach` answer names: the chat's run, whether it asked for the run's claim, and the log's end then. */
-type Attached = {
-  readonly snapshot?: HostRunSnapshot | undefined;
-  readonly takeover: boolean;
-  readonly endCursor: number;
-};
-
 /**
  * The one agent-host client, over any transport.
  *
  * Nothing here knows whether it is talking to a dedicated worker or to a
- * daemon's socket: keyed commands, pulled reads, the run-idle lease and the
- * close handshake are properties of the *host protocol*, not of the wire. Each
- * gesture mints one command id (SC-R6); the transport re-sends it by that key
- * after its wire is replaced, and the owner answers a re-send from its applied
- * set.
+ * daemon's socket: keyed commands, pulled reads, and close are properties of
+ * the host protocol. The caller owns each gesture's command id and retry.
  *
  * @param transport - The wire to drive.
- * @param options - Idle and close deadlines.
  * @returns A client whose answers the projection cannot distinguish by origin.
  * @public
  */
-export const createAgentHostClient = (
-  transport: AgentHostTransport,
-  options: AgentHostClientCoreOptions = {},
-): AgentHostClient => {
-  const chatsByRun = new Map<string, string>();
+export const createAgentHostClient = (transport: AgentHostTransport): AgentHostClient => {
   const streamSubscriptions = new Set<AbortController>();
   let closed = false;
   let transportFailure: AgentHostWorkerError | undefined;
@@ -427,46 +297,6 @@ export const createAgentHostClient = (
     }
   };
 
-  /** One gesture's key (SC-R6). */
-  const gestureKey = (): string => generatePrefixedId(idPrefix.request);
-
-  /** Send one keyed command; a refusal is thrown with its code and details. */
-  const execute = async (command: HostCommand): Promise<Exclude<CommandAnswer, { readonly status: 'refused' }>> => {
-    const send = async (): Promise<Exclude<CommandAnswer, { readonly status: 'refused' }>> => {
-      const answer = await guarded(async () => transport.execute(command), 'WORKER_PROTOCOL_FAILED');
-      if (answer.status === 'refused') {
-        throw new AgentHostWorkerError(answer.code, answer.message, answer.details);
-      }
-      return answer;
-    };
-    return waitingCommands.has(command.type) ? resendWhileSettling(send) : send();
-  };
-
-  const attachCommand = async (chatId: string): Promise<Attached> => {
-    const answer = await execute({ type: 'attach', commandId: gestureKey(), payload: { chatId } });
-    const details = answer.effect === 'not-applied' ? answer.details : {};
-    // ponytail: the owner's snapshot, read without a schema; W9's projection replaces it with the ledger.
-    const snapshot = details['snapshot'] as HostRunSnapshot | undefined;
-    /* A reattached page learns its run only here; without it `cancel` answers
-     * `RUN_NOT_FOUND` and Stop never reaches the host (W0.3). */
-    if (snapshot) {
-      chatsByRun.set(snapshot.runId, snapshot.chatId);
-    }
-    return {
-      snapshot,
-      takeover: details['takeover'] === true,
-      endCursor: typeof details['endCursor'] === 'number' ? details['endCursor'] : 0,
-    };
-  };
-
-  const snapshotOf = async (chatId: string): Promise<HostRunSnapshot> => {
-    const { snapshot } = await attachCommand(chatId);
-    if (!snapshot) {
-      throw new AgentHostWorkerError('NO_RUN_ADMITTED', `Chat ${chatId} has no run.`);
-    }
-    return snapshot;
-  };
-
   const read = async (input: AgentHostReadInput, signal?: AbortSignal): Promise<ReadAnswer> =>
     guarded(
       async () =>
@@ -480,14 +310,6 @@ export const createAgentHostClient = (
         }),
       'WORKER_PROTOCOL_FAILED',
     );
-
-  const chatFor = (runId: string): string => {
-    const chatId = chatsByRun.get(runId);
-    if (!chatId) {
-      throw new AgentHostWorkerError('RUN_NOT_FOUND', `No chat is registered for run ${runId}.`);
-    }
-    return chatId;
-  };
 
   /** Run one consumer for as long as its subscription lives; a failure other than the unsubscribe is the client's. */
   const consume = (run: (signal: AbortSignal) => Promise<void>, onEnded?: () => void): (() => void) => {
@@ -552,94 +374,6 @@ export const createAgentHostClient = (
     }, onEnded);
   };
 
-  const subscribeLive = (chatId: string, listener: (chatId: string, event: AgentLiveEvent) => void): (() => void) =>
-    consume(async (signal) => {
-      for await (const event of transport.liveEvents(chatId, signal)) {
-        listener(chatId, event);
-      }
-    });
-
-  const waitForRunCompletion = async (initial: HostRunSnapshot, from: number): Promise<HostRunSnapshot> => {
-    if (terminalRunState(initial.state)) {
-      return initial;
-    }
-    let wake = Promise.withResolvers<'activity' | 'terminal'>();
-    const signalActivity = (terminalEvent = false): void => {
-      wake.resolve(terminalEvent ? 'terminal' : 'activity');
-    };
-    /* From the command's own first row: every row after it is this run's activity, and none is missed. */
-    const unfollow = follow({ chatId: initial.chatId, cursor: from }, (_chatId, event) => {
-      if (event.runId !== initial.runId) {
-        return;
-      }
-      signalActivity(
-        event.type === 'run.lifecycle' &&
-          (event.state === 'completed' || event.state === 'failed' || event.state === 'cancelled'),
-      );
-    });
-    const unsubscribeLiveEvents = subscribeLive(initial.chatId, (_chatId, event) => {
-      if (event.runId === initial.runId) {
-        signalActivity();
-      }
-    });
-    const replaySnapshot = async (): Promise<HostRunSnapshot> => {
-      const { snapshot } = await attachCommand(initial.chatId);
-      if (!snapshot || snapshot.runId !== initial.runId) {
-        throw new AgentHostWorkerError(
-          'RUN_SNAPSHOT_MISSING',
-          `Agent host replay did not return run ${initial.runId}.`,
-        );
-      }
-      return snapshot;
-    };
-    try {
-      let snapshot = initial;
-      while (!terminalRunState(snapshot.state)) {
-        const activity = wake.promise;
-        const idle = Promise.withResolvers<'idle'>();
-        const idleTimeoutId = globalThis.setTimeout(() => {
-          idle.resolve('idle');
-        }, options.runIdleTimeout ?? 30_000);
-        // oxlint-disable-next-line no-await-in-loop -- Each lease waits for the next activity-or-idle transition.
-        const outcome = await Promise.race([activity, idle.promise]);
-        globalThis.clearTimeout(idleTimeoutId);
-        wake = Promise.withResolvers<'activity' | 'terminal'>();
-        if (outcome === 'activity') {
-          continue;
-        }
-        // oxlint-disable-next-line no-await-in-loop -- the next lease depends on this snapshot.
-        snapshot = await replaySnapshot();
-      }
-      return snapshot;
-    } finally {
-      unfollow();
-      unsubscribeLiveEvents();
-    }
-  };
-
-  /**
-   * Run one gesture that opens or continues a run, and wait it out.
-   *
-   * The answer is by key: a re-send after the wire was replaced answers
-   * `replayed` from the owner's applied set, so nothing re-attaches at cursor 0
-   * to guess whether the first send landed.
-   */
-  const runCommand = async (command: HostCommand, runId: string): Promise<HostRunSnapshot> => {
-    const answer = await execute(command);
-    const attached = await attachCommand(command.payload.chatId);
-    const admitted = attached.snapshot;
-    if (!admitted) {
-      throw new AgentHostWorkerError('RUN_SNAPSHOT_MISSING', `Agent host did not return run ${runId}.`);
-    }
-    if (admitted.runId !== runId) {
-      throw new AgentHostWorkerError(
-        'RUN_SNAPSHOT_MISMATCH',
-        `Agent host admitted ${admitted.runId} instead of ${runId}.`,
-      );
-    }
-    return waitForRunCompletion(admitted, answer.effect === 'durable' ? answer.cursor : attached.endCursor);
-  };
-
   const disposeSubscriptions = (): void => {
     for (const subscription of streamSubscriptions) {
       subscription.abort();
@@ -650,82 +384,8 @@ export const createAgentHostClient = (
 
   return {
     hostCommand: async (command) => guarded(async () => transport.execute(command), 'WORKER_PROTOCOL_FAILED'),
-    async start(input) {
-      chatsByRun.set(input.runId, input.chatId);
-      const config = input.agent
-        ? externalAdmissionConfig(input.agent, input.context)
-        : input.config
-          ? wireAdmissionConfig(input.config)
-          : undefined;
-      const base = {
-        chatId: input.chatId,
-        runId: input.runId,
-        message: userMessage(input.message),
-        ...(config ? { config } : {}),
-      };
-      return runCommand(
-        {
-          type: 'start',
-          commandId: input.runId,
-          payload:
-            input.trigger === 'submit'
-              ? { ...base, trigger: 'submit' }
-              : { ...base, trigger: input.trigger, retainedMessageIds: [...input.retainedMessageIds] },
-        },
-        input.runId,
-      );
-    },
-    async steer(runId, message) {
-      const chatId = chatFor(runId);
-      await execute({ type: 'steer', commandId: gestureKey(), payload: { chatId, runId, message } });
-      return snapshotOf(chatId);
-    },
-    async cancel(runId) {
-      const chatId = chatFor(runId);
-      await execute({ type: 'cancel', commandId: gestureKey(), payload: { chatId, runId } });
-      return snapshotOf(chatId);
-    },
-    resume: async (chatId, runId, commandId) =>
-      runCommand({ type: 'resume', commandId: commandId ?? gestureKey(), payload: { chatId, runId } }, runId),
-    async resolveInterrupt(chatId, runId, resolution) {
-      await execute({
-        type: 'resolve-interrupt',
-        commandId: resolution.commandId ?? gestureKey(),
-        payload: {
-          chatId,
-          runId,
-          interruptId: resolution.interruptId,
-          outcome: resolution.outcome,
-          ...(resolution.optionId === undefined ? {} : { optionId: resolution.optionId }),
-          ...(resolution.payload === undefined ? {} : { payload: resolution.payload }),
-        },
-      });
-      return snapshotOf(chatId);
-    },
-    async attach(input) {
-      const attached = await attachCommand(input.chatId);
-      /* A read at the log's end is a long poll (SC-R14); the attach answers with what exists, so a reader already at
-       * the end is handed the empty page instead of parking. */
-      const answer: ReadAnswer =
-        input.cursor === attached.endCursor
-          ? {
-              status: 'batch',
-              chatId: input.chatId,
-              cursor: input.cursor,
-              nextCursor: input.cursor,
-              endCursor: attached.endCursor,
-              events: [],
-            }
-          : await read(input);
-      return {
-        ...answer,
-        ...(attached.snapshot ? { snapshot: attached.snapshot } : {}),
-        takeover: attached.takeover,
-      };
-    },
     read: async (input) => read(input),
     subscribe: follow,
-    subscribeLive,
     async close() {
       if (closed) {
         return;
@@ -1238,4 +898,4 @@ const createAgentHostWorkerTransport = (options: AgentHostClientOptions): AgentH
  * @public
  */
 export const createBrowserAgentHostClient = (options: AgentHostClientOptions): AgentHostClient =>
-  createAgentHostClient(createAgentHostWorkerTransport(options), options);
+  createAgentHostClient(createAgentHostWorkerTransport(options));

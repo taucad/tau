@@ -18,11 +18,7 @@ import { createAgentChannelClient, serveAgentWorkerChannel } from '@taucad/agent
 import type { AgentChannelClient } from '@taucad/agent-host/channel-client';
 import { agentWireLimits, agentWireVersion } from '@taucad/agent-host/wire';
 import type { CommandAnswer, ReadAnswer } from '@taucad/agent-host/wire';
-import {
-  AgentHostWorkerError,
-  createBrowserAgentHostClient,
-  resendWhileSettling,
-} from '#services/agent-host-client.js';
+import { createBrowserAgentHostClient } from '#services/agent-host-client.js';
 import type { AgentHostWorkerProtocol } from '#workers/agent-host.contract.js';
 import {
   agentHostWorkerBuild,
@@ -334,8 +330,17 @@ const harness = async (): Promise<Harness> => {
   return state;
 };
 
-const start = async (seam: Harness) =>
-  seam.client.start({ chatId, runId: 'run-1', trigger: 'submit', message: 'hello' });
+const start = async (seam: Harness): Promise<CommandAnswer> => {
+  const answer = await seam.client.hostCommand({
+    type: 'start',
+    commandId: 'req_seam-first',
+    payload: { chatId, runId: 'run-1', trigger: 'submit', message: { id: 'user-1', role: 'user', content: 'hello' } },
+  });
+  if (answer.status === 'refused') {
+    throw Object.assign(new Error(answer.message), { code: answer.code, details: answer.details });
+  }
+  return answer;
+};
 
 const admittedRows = (rows: readonly AgentLogEvent[]): readonly AgentLogEvent[] =>
   rows.filter((row) => row.type === 'run.lifecycle' && row.state === 'admitted' && row.runId === 'run-1');
@@ -353,13 +358,16 @@ const settledRows = async (seam: Harness): Promise<readonly AgentLogEvent[]> => 
   return rows;
 };
 
-/** A turn the scripted gateway model actually completed (the config's `/v1/llm` fixture), not a vacuous terminal. */
-const completedTurn = {
-  runId: 'run-1',
-  state: 'completed',
-  messages: expect.arrayContaining([
-    expect.objectContaining({ role: 'assistant', content: [{ type: 'text', text: 'Worker ready.' }] }),
-  ]) as unknown,
+/** The scripted gateway model completed with output, not merely a terminal lifecycle row. */
+const expectCompletedTurn = (rows: readonly AgentLogEvent[]): void => {
+  expect(rows).toContainEqual(
+    expect.objectContaining({
+      type: 'message.appended',
+      runId: 'run-1',
+      // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- Vitest's asymmetric matcher is typed any.
+      message: expect.objectContaining({ role: 'assistant', content: [{ type: 'text', text: 'Worker ready.' }] }),
+    }),
+  );
 };
 
 /**
@@ -528,7 +536,7 @@ describe('the seam on the browser leg', () => {
     const seam = await harness();
     seam.fault = 'die-after-effect';
 
-    await expect(start(seam)).resolves.toMatchObject({ runId: 'run-1' });
+    await expect(start(seam)).resolves.toMatchObject({ status: 'replayed', effect: 'durable' });
 
     expect(seam.workers).toHaveLength(2);
     expect(seam.effects).toHaveLength(2);
@@ -545,7 +553,8 @@ describe('the seam on the browser leg', () => {
     const seam = await harness();
     seam.fault = 'die-before-effect';
 
-    await expect(start(seam)).resolves.toMatchObject(completedTurn);
+    await expect(start(seam)).resolves.toMatchObject({ status: 'applied', effect: 'durable' });
+    expectCompletedTurn(await settledRows(seam));
 
     expect(seam.workers).toHaveLength(2);
     expect(seam.workers[1]?.answers).toMatchObject([{ status: 'applied', effect: 'durable' }]);
@@ -557,7 +566,8 @@ describe('the seam on the browser leg', () => {
     seam.fault = 'hang';
     const began = performance.now();
 
-    await expect(start(seam)).resolves.toMatchObject(completedTurn);
+    await expect(start(seam)).resolves.toMatchObject({ status: 'applied', effect: 'durable' });
+    expectCompletedTurn(await settledRows(seam));
 
     expect(seam.workers).toHaveLength(2);
     expect(performance.now() - began).toBeGreaterThanOrEqual(livenessTimeout);
@@ -570,7 +580,8 @@ describe('the seam on the browser leg', () => {
     const seam = await harness();
     seam.fault = 'slow';
 
-    await expect(start(seam)).resolves.toMatchObject(completedTurn);
+    await expect(start(seam)).resolves.toMatchObject({ status: 'applied', effect: 'durable' });
+    expectCompletedTurn(await settledRows(seam));
 
     expect(seam.workers).toHaveLength(1);
     expect(seam.effects).toHaveLength(1);
@@ -629,23 +640,18 @@ describe('the seam on the browser leg', () => {
     await start(seam);
     await settledRows(seam);
 
-    /* The settled attempt is acknowledged after its row; a start in between is refused `CHAT_RUN_LIVE{settling}`, which
-     * the page re-sends with the product's own policy (W8.r1 item 6). */
-    const second = async (): Promise<CommandAnswer> => {
-      const answer = await currentClient(seam).execute({
+    /* A fresh command key cannot replay the settled run. The command answer, not a page-side settling loop, decides. */
+    let again: CommandAnswer | undefined;
+    await vi.waitFor(async () => {
+      again = await currentClient(seam).execute({
         type: 'start',
         commandId: 'req_seam-second',
         payload: { chatId, runId: 'run-1', trigger: 'submit', message: { id: 'user-2', role: 'user', content: 'hi' } },
       } as Parameters<AgentChannelClient['execute']>[0]);
-      if (answer.status === 'refused') {
-        throw new AgentHostWorkerError(answer.code, answer.message, answer.details);
-      }
-      return answer;
-    };
-    const again: unknown = await resendWhileSettling(second).catch((error: unknown) => error);
+      expect(again).toMatchObject({ status: 'refused', code: 'RUN_ID_TAKEN' });
+    });
 
     expect(again).not.toMatchObject({ status: 'replayed' });
-    expect(again).toMatchObject({ name: 'AgentHostWorkerError', code: 'RUN_ID_TAKEN' });
     expect(admittedRows(await seam.rows())).toHaveLength(1);
   });
 
@@ -655,12 +661,24 @@ describe('the seam on the browser leg', () => {
     const seam = await harness();
     const cancels = heardStarts(seam.projectId, 'cancel');
     await seam.leader();
-    await expect(seam.client.attach({ chatId, cursor: 0 })).resolves.toMatchObject({
-      snapshot: { runId: 'run-0', state: 'running' },
+    await expect(
+      seam.client.hostCommand({
+        type: 'attach',
+        commandId: 'attach-seam-leader',
+        payload: { chatId },
+      }),
+    ).resolves.toMatchObject({
+      details: { snapshot: { runId: 'run-0', state: 'running' } },
     });
     seam.fault = 'die-after-effect';
 
-    await expect(seam.client.cancel('run-0')).resolves.toMatchObject({ runId: 'run-0', state: 'cancelled' });
+    await expect(
+      seam.client.hostCommand({
+        type: 'cancel',
+        commandId: 'cancel-seam-leader',
+        payload: { chatId, runId: 'run-0' },
+      }),
+    ).resolves.toMatchObject({ status: 'replayed', effect: 'durable' });
 
     expect(seam.workers).toHaveLength(2);
     expect(new Set(seam.effects).size).toBe(1);

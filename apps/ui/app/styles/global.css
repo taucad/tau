@@ -157,7 +157,8 @@
   --diagram-note: oklch(0.96 0.012 calc(var(--hue-primary) + 60deg));
   --diagram-note-border: oklch(0.78 0.04 calc(var(--hue-primary) + 60deg));
   --diagram-accent: var(--muted-foreground);
-  /* The running viewer tool's glyph (Section, Measure): 3:1 on accent and sidebar at every primary hue. */
+  /* The running viewer tool's glyph (Section, Measure): 3:1 on accent and sidebar at every primary hue. Its per-theme
+     values below are a recorded exception in docs/policy/color-policy.md (Separate Dark Mode Authoring). */
   --viewer-tool-active: oklch(0.53 0.12 var(--hue-primary));
 }
 

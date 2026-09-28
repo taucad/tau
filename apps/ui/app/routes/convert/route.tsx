@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { formatConfigurations } from '@taucad/types/constants';
 import { Download, Upload, RotateCcw, Package, Code2 } from 'lucide-react';
@@ -131,10 +131,11 @@ export const ConverterViewer = memo(function ({
         geometry={geometry}
       />
 
-      {/* The export panel always covers the right 21rem, so the bar centres in, and sizes its labels to, the viewer
-          left of it. Where that is narrower than the bar, the bar starts at the left edge rather than centring off
-          it, so the grid readout and Section stay on screen. The file card sits on the line above the bar. */}
-      <div className='@container/viewer pointer-events-none absolute right-84 bottom-2 left-2 z-10 flex flex-col items-center-safe gap-2'>
+      {/* From md up the export panel always covers the right 21rem, so the bar centres in, and sizes its labels to, the
+          viewer left of it; below md the panel folds away and the bar takes the full width. Where the strip is
+          narrower than the bar, the bar starts at the left edge rather than centring off it, so the grid readout and
+          Section stay on screen. The file card sits on the line above the bar. */}
+      <div className='@container/viewer pointer-events-none absolute right-2 bottom-2 left-2 z-10 flex flex-col items-center-safe gap-2 md:right-84'>
         {uploadedFile ? (
           <div className='pointer-events-auto w-100 max-w-full self-start rounded-md border bg-sidebar p-3'>
             <div className='flex items-center gap-1'>
@@ -151,6 +152,49 @@ export const ConverterViewer = memo(function ({
     </div>
   );
 });
+
+/**
+ * The export panel. From md up it is always open beside the viewer. Below md it folds away behind an Export toggle, so
+ * the viewer and its bar stay in reach, and opens under the toggle over the viewer.
+ */
+export function ConverterExportPanel({ children }: Readonly<{ children: React.ReactNode }>): React.JSX.Element {
+  const [isOpenOnPhone, setIsOpenOnPhone] = useState(false);
+  const panelId = useId();
+  return (
+    <>
+      <Button
+        variant='overlay'
+        aria-expanded={isOpenOnPhone}
+        aria-controls={panelId}
+        className='absolute top-(--header-height) right-2 z-10 md:hidden'
+        onClick={() => {
+          setIsOpenOnPhone((isOpen) => !isOpen);
+        }}
+      >
+        <Download />
+        Export
+      </Button>
+      <div
+        id={panelId}
+        className={cn(
+          'absolute top-(--header-height) right-2 z-10 flex h-full gap-2 pb-[calc(var(--header-height)+var(--spacing)*2)]',
+          // Below the toggle, inset from every edge.
+          'max-md:top-[calc(var(--header-height)+var(--spacing)*10)] max-md:bottom-2 max-md:left-2 max-md:h-auto max-md:pb-0',
+          !isOpenOnPhone && 'max-md:hidden',
+        )}
+      >
+        <FloatingPanel isOpen side='right' className='rounded-md border'>
+          <FloatingPanelContent className='w-80 max-md:w-full'>
+            <FloatingPanelContentHeader>
+              <FloatingPanelContentTitle>Export Options</FloatingPanelContentTitle>
+            </FloatingPanelContentHeader>
+            {children}
+          </FloatingPanelContent>
+        </FloatingPanel>
+      </div>
+    </>
+  );
+}
 
 function ConverterContentInner(): React.JSX.Element {
   const [uploadedFile, setUploadedFile] = useState<UploadedFileInfo | undefined>(undefined);
@@ -362,45 +406,37 @@ function ConverterContentInner(): React.JSX.Element {
           <div className='relative flex-1'>
             <ConverterViewer glbData={glbData} uploadedFile={uploadedFile} />
 
-            {/* Export panel trigger */}
-            <div className='absolute top-(--header-height) right-2 z-10 flex h-full gap-2 pb-[calc(var(--header-height)+var(--spacing)*2)]'>
-              <FloatingPanel isOpen side='right' className='rounded-md border'>
-                <FloatingPanelContent className='w-80'>
-                  <FloatingPanelContentHeader>
-                    <FloatingPanelContentTitle>Export Options</FloatingPanelContentTitle>
-                  </FloatingPanelContentHeader>
-                  <FloatingPanelContentBody className='flex h-full flex-col justify-between gap-4 p-3 pt-2'>
-                    <Converter
-                      availableFormats={converterExportFormats}
-                      exportFormat={exportFormat}
-                      selectedFormats={selectedFormats}
-                      shouldUseZipForMultiple={useZipForMultiple}
-                      uploadedFile={uploadedFile}
-                      onFormatToggle={handleFormatToggle}
-                      onClearSelection={handleClearFormats}
-                      onZipToggle={handleZipToggle}
-                    />
+            <ConverterExportPanel>
+              <FloatingPanelContentBody className='flex h-full flex-col justify-between gap-4 p-3 pt-2'>
+                <Converter
+                  availableFormats={converterExportFormats}
+                  exportFormat={exportFormat}
+                  selectedFormats={selectedFormats}
+                  shouldUseZipForMultiple={useZipForMultiple}
+                  uploadedFile={uploadedFile}
+                  onFormatToggle={handleFormatToggle}
+                  onClearSelection={handleClearFormats}
+                  onZipToggle={handleZipToggle}
+                />
 
-                    <div className='flex flex-col space-y-4'>
-                      {/* Drop area for uploading new file */}
-                      <Dropzone className='w-full max-md:hidden' maxFiles={100} onDrop={handleFileDrop}>
-                        <DropzoneEmptyState>
-                          <div className='flex flex-col items-center gap-2 py-4'>
-                            <Upload className='size-6 text-muted-foreground' />
-                            <p className='text-sm font-medium'>Drop new file here</p>
-                            <p className='text-xs text-muted-foreground'>or click to browse</p>
-                          </div>
-                        </DropzoneEmptyState>
-                      </Dropzone>
-                      <Button variant='outline' className='w-full' size='lg' onClick={handleReset}>
-                        <RotateCcw className='size-4' />
-                        Clear and start over
-                      </Button>
-                    </div>
-                  </FloatingPanelContentBody>
-                </FloatingPanelContent>
-              </FloatingPanel>
-            </div>
+                <div className='flex flex-col space-y-4'>
+                  {/* Drop area for uploading new file */}
+                  <Dropzone className='w-full max-md:hidden' maxFiles={100} onDrop={handleFileDrop}>
+                    <DropzoneEmptyState>
+                      <div className='flex flex-col items-center gap-2 py-4'>
+                        <Upload className='size-6 text-muted-foreground' />
+                        <p className='text-sm font-medium'>Drop new file here</p>
+                        <p className='text-xs text-muted-foreground'>or click to browse</p>
+                      </div>
+                    </DropzoneEmptyState>
+                  </Dropzone>
+                  <Button variant='outline' className='w-full' size='lg' onClick={handleReset}>
+                    <RotateCcw className='size-4' />
+                    Clear and start over
+                  </Button>
+                </div>
+              </FloatingPanelContentBody>
+            </ConverterExportPanel>
           </div>
         </>
       ) : (

@@ -156,12 +156,14 @@ describe('convertKclErrorToKernelIssue', () => {
     const kclError = KclError.simple({ kind: 'connection', message: 'connection error' });
     const result = convertKclErrorToKernelIssue(kclError);
     expect(result.issues[0]!.type).toBe('connection');
+    expect(result.issues[0]!.code).toBe('RUNTIME');
   });
 
   it('should map auth kind to connection type', () => {
     const kclError = KclError.simple({ kind: 'auth', message: 'auth error' });
     const result = convertKclErrorToKernelIssue(kclError);
     expect(result.issues[0]!.type).toBe('connection');
+    expect(result.issues[0]!.code).toBe('AUTHENTICATION_ERROR');
   });
 
   it('should map interrupted kind to runtime type', () => {

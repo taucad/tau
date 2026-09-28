@@ -1140,7 +1140,8 @@ theorem t6_redelivery_idempotent (L : Ledger) (xs ys : List Row) (h : ∀ y ∈ 
 /-! ## T8: the legality tables are total, and every refusal is a registry code -/
 
 /-- The run-refusal registry (W4's codes for the three tables and the host gate). -/
-def registry : List Code := [.chatRunLive, .noRunAdmitted, .runIdTaken, .settlementWithoutRun, .settlementConflict]
+def registry : List Code := [.chatRunLive, .noRunAdmitted, .runIdTaken, .settlementWithoutRun,
+  .settlementConflict, .interruptAlreadyResolved]
 
 theorem t8_lifecycle_registry (c : Cond) (o : LOp) : lifecycleTable c o = .ok ∨ lifecycleTable c o ∈ registry := by
   cases c <;> cases o <;> decide
@@ -1168,8 +1169,14 @@ theorem t8_gate_registry (L : Ledger) (e : Row) : gateCode L e false = .ok ∨ g
       · left; rfl
       · right; decide
     · exact t8_settlement_registry _
+  · by_cases h : e.arg ∈ (L.entry e.run).resolved <;> simp [h, registry]
   · simp
   · left; rfl
+
+/-- A resolved interrupt id cannot be resolved again, even when the payload differs. -/
+theorem t8_interrupt_resolved_once (L : Ledger) (e : Row) (hk : e.kind = .R)
+    (seen : e.arg ∈ (L.entry e.run).resolved) : gateCode L e false = .interruptAlreadyResolved := by
+  simp [gateCode, hk, seen]
 
 /-- **T8** (the gate reads the table): a lifecycle row's refusal other than `CHAT_RUN_LIVE` is its table cell. -/
 theorem t8_gate_is_table (L : Ledger) (e : Row) (inv : Bool) (hk : e.kind = .L)
@@ -3089,6 +3096,11 @@ witnesses are instances; the general laws are `t7_segment_order`, `t7_duplicate_
 /-- A row of run 1 in term 0 (epoch 1). -/
 def r1 (seq : Nat) (k : Kind) (arg : Nat) : Row :=
   { term := 0, seq, run := 1, kind := k, arg, ms := 0, epoch := 1, attempt := 0 }
+
+theorem t8_duplicate_interrupt_resolution :
+    let L := fold {} [r1 0 .L 0, r1 1 .O 1, r1 2 .R 1]
+    gateCode L (r1 3 .R 1) false = .interruptAlreadyResolved := by
+  decide
 
 /-- S5 D2 (`t4_reopen_broader_than_legality`), fixed: after `admitted, running, S, running` the second `running`
 does not reopen the settled attempt, and a second, different settlement is refused. -/

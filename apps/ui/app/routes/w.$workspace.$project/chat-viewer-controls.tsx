@@ -63,7 +63,7 @@ function ToolRow({ tool, name, icon, above, children, onDone }: ToolRowProps): R
         </span>
         <Hairline />
         {children}
-        <Button variant='secondary' size='xs' className='h-7' onClick={onDone}>
+        <Button variant='secondary' size='xs' className='h-7' aria-label={`Done with ${tool}`} onClick={onDone}>
           Done
         </Button>
       </div>

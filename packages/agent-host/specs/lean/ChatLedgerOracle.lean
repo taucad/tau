@@ -13,6 +13,7 @@ A row is `<term> <seq> <run> <kind> <arg> <ms> <epoch> <attempt>` (`epoch`/`atte
   LEDGER                       fold the appender's view                   → `R … / I … / C … / P … / N … / U …`
   SETTLE <run> <content>       the host's settlement append on a copy     → `QS <outcome>`
   LIFE <run> <state>           gate one stamped lifecycle body            → `QL <code>`
+  RESOLVE <run> <interrupt>    gate one stamped interrupt resolution      → `QR <code>`
   PREP <run> <arg>             gate one stamped prepared body             → `QP <code>`
   BATCH <c> <limit> <maxBytes|-> <last|-> <sizes|->   the appender's `readBatch` → `QB …`
   READER                       reset the reader
@@ -53,6 +54,7 @@ def codeName : Code → String
   | .ok => "ok" | .chatRunLive => "CHAT_RUN_LIVE" | .noRunAdmitted => "NO_RUN_ADMITTED"
   | .runIdTaken => "RUN_ID_TAKEN" | .settlementWithoutRun => "SETTLEMENT_WITHOUT_RUN"
   | .settlementConflict => "SETTLEMENT_CONFLICT" | .invocationUnresolved => "INVOCATION_UNRESOLVED"
+  | .interruptAlreadyResolved => "INTERRUPT_ALREADY_RESOLVED"
 
 def lifeName : Life → String
   | .admitted => "admitted" | .running => "running" | .paused => "paused" | .completed => "completed"
@@ -171,6 +173,9 @@ def runLine (st : St) (line : String) : St × List String :=
   | ["LIFE", run, s] =>
     let L := fold {} st.app.view
     (st, [s!"QL {codeName (gateCode L (stamp L 99 (num run) .L (num s) 0) true)}"])
+  | ["RESOLVE", run, i] =>
+    let L := fold {} st.app.view
+    (st, [s!"QR {codeName (gateCode L (stamp L 99 (num run) .R (num i) 0) true)}"])
   | ["PREP", run, a] =>
     let L := fold {} st.app.view
     (st, [s!"QP {codeName (gateCode L (stamp L 99 (num run) .P (num a) 0) true)}"])

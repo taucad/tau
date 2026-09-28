@@ -197,9 +197,18 @@ type GltfJsonBufferView = {
   target?: number;
 };
 
+/** A source view and where it lands in the binary buffer; bytes are copied once, at write time. */
 type BufferEntry = {
-  data: Uint8Array<ArrayBuffer>;
+  source: ArrayBufferView;
   byteOffset: number;
+};
+
+/** The glTF JSON plus the binary buffer's layout, before any payload byte is copied. */
+type GltfLayout = {
+  json: GltfJson;
+  binByteLength: number;
+  /** Copy every view into `target` at `offset` + its layout offset; padding stays zero. */
+  writeBin: (target: Uint8Array<ArrayBuffer>, offset: number) => void;
 };
 
 type ValidatedManifoldTopology = {
@@ -354,12 +363,15 @@ const validateManifoldTopology = (node: GlbNode): ValidatedManifoldTopology => {
 };
 
 /**
- * Build the glTF JSON structure and binary buffer from the input.
+ * Build the glTF JSON structure and the binary buffer's layout from the input.
+ *
+ * Payload bytes are not copied here: each view keeps a reference to its source, and the caller
+ * writes all of them once into the final allocation.
  *
  * @param input - the scene description
- * @returns the JSON structure and binary buffer
+ * @returns the JSON structure and the binary layout
  */
-function buildGltf(input: GlbInput): { json: GltfJson; binBuffer: Uint8Array<ArrayBuffer> } {
+function buildGltf(input: GlbInput): GltfLayout {
   const accessors: GltfJsonAccessor[] = [];
   const bufferViews: GltfJsonBufferView[] = [];
   const materials: GlbMaterial[] = [];
@@ -412,23 +424,20 @@ function buildGltf(input: GlbInput): { json: GltfJson; binBuffer: Uint8Array<Arr
    * @returns index of the new bufferView
    */
   function addBufferView(data: Float32Array | Uint32Array | Uint8Array<ArrayBuffer>, target?: number): number {
-    const bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-    const aligned = alignTo4(bytes.byteLength);
-    const padded = new Uint8Array(aligned);
-    padded.set(bytes);
+    const aligned = alignTo4(data.byteLength);
 
     const viewIndex = bufferViews.length;
     const bufferView: GltfJsonBufferView = {
       buffer: 0,
       byteOffset: currentByteOffset,
-      byteLength: bytes.byteLength,
+      byteLength: data.byteLength,
     };
     if (target !== undefined) {
       bufferView.target = target;
     }
     bufferViews.push(bufferView);
 
-    bufferEntries.push({ data: padded, byteOffset: currentByteOffset });
+    bufferEntries.push({ source: data, byteOffset: currentByteOffset });
     currentByteOffset += aligned;
     return viewIndex;
   }
@@ -657,10 +666,6 @@ function buildGltf(input: GlbInput): { json: GltfJson; binBuffer: Uint8Array<Arr
   }));
   validateGlbResources(input);
   const totalBinSize = currentByteOffset;
-  const binBuffer = new Uint8Array(totalBinSize);
-  for (const entry of bufferEntries) {
-    binBuffer.set(entry.data, entry.byteOffset);
-  }
 
   const json: GltfJson = {
     asset: {
@@ -700,7 +705,15 @@ function buildGltf(input: GlbInput): { json: GltfJson; binBuffer: Uint8Array<Arr
     json.extensionsRequired = [...new Set([...(json.extensionsRequired ?? []), 'EXT_texture_webp'])];
   }
 
-  return { json, binBuffer };
+  return {
+    json,
+    binByteLength: totalBinSize,
+    writeBin(target, offset) {
+      for (const { source, byteOffset } of bufferEntries) {
+        target.set(new Uint8Array(source.buffer, source.byteOffset, source.byteLength), offset + byteOffset);
+      }
+    },
+  };
 }
 
 // =============================================================================
@@ -719,12 +732,12 @@ function buildGltf(input: GlbInput): { json: GltfJson; binBuffer: Uint8Array<Arr
  * @public
  */
 export function writeGlb(input: GlbInput): Uint8Array<ArrayBuffer> {
-  const { json, binBuffer } = buildGltf(input);
+  const { json, binByteLength, writeBin } = buildGltf(input);
 
   const jsonString = JSON.stringify(json);
   const jsonBytes = new TextEncoder().encode(jsonString);
   const jsonPaddedLength = alignTo4(jsonBytes.byteLength);
-  const binPaddedLength = alignTo4(binBuffer.byteLength);
+  const binPaddedLength = alignTo4(binByteLength);
 
   const totalLength = glbHeaderSize + chunkHeaderSize + jsonPaddedLength + chunkHeaderSize + binPaddedLength;
   const glb = new Uint8Array(totalLength);
@@ -753,7 +766,8 @@ export function writeGlb(input: GlbInput): Uint8Array<ArrayBuffer> {
   offset += 4;
   view.setUint32(offset, binChunkType, true);
   offset += 4;
-  glb.set(binBuffer, offset);
+  // The one copy of every payload byte: straight from its source view into the GLB.
+  writeBin(glb, offset);
 
   return glb;
 }
@@ -770,7 +784,9 @@ export function writeGlb(input: GlbInput): Uint8Array<ArrayBuffer> {
  * @public
  */
 export function writeGltfJson(input: GlbInput): Uint8Array<ArrayBuffer> {
-  const { json, binBuffer } = buildGltf(input);
+  const { json, binByteLength, writeBin } = buildGltf(input);
+  const binBuffer = new Uint8Array(binByteLength);
+  writeBin(binBuffer, 0);
 
   let binaryString = '';
   for (const byte of binBuffer) {

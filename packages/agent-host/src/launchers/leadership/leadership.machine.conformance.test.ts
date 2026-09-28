@@ -6,7 +6,7 @@
  */
 
 import path from 'node:path';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 
@@ -31,6 +31,7 @@ const specs = path.resolve(import.meta.dirname, '../../../specs');
 const graph = readSpecGraph(path.join(specs, 'LogLeadershipGraph/graph.json'));
 const suite = JSON.parse(readFileSync(path.join(specs, 'LogLeadershipGraph/suite.json'), 'utf8')) as CoveringSuite;
 const behaviours = suiteBehaviours(graph, suite);
+const simulated = process.env['FORMAL_SIMULATED'];
 
 type Step = WalkPath['steps'][number];
 
@@ -98,6 +99,20 @@ describe('leadershipMachine conforms to LogLeadership.tla', () => {
     expect(behaviours).toHaveLength(suite.behaviours.length);
     expect(await replaySuite(behaviours, logLeadershipAdapter, (state) => [state['act'], state])).toEqual([]);
   });
+
+  it.runIf(simulated !== undefined && !existsSync(path.join(simulated, '.skipped')))(
+    'should replay the simulated behaviours without divergence',
+    async () => {
+      const traces = readFileSync(path.join(simulated ?? '', 'LogLeadershipGraph.ndjson'), 'utf8')
+        .split('\n')
+        .filter((line) => line.trim() !== '')
+        .map((line) => JSON.parse(line) as SpecView[]);
+
+      expect(traces.length).toBeGreaterThan(0);
+      expect(await replaySuite(traces, logLeadershipAdapter, (state) => [state['act'], state])).toEqual([]);
+    },
+    120_000,
+  );
 
   it('should walk every implementation path through the spec graph without rejection', () => {
     const paths = implementationPaths();

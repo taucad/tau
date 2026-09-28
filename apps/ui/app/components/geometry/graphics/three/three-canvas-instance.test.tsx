@@ -3,7 +3,15 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { JSX } from 'react';
 import { useEffect } from 'react';
 import { act, render, screen, waitFor } from '@testing-library/react';
-import { OrthographicCamera, PerspectiveCamera, WebGLCoordinateSystem, WebGPUCoordinateSystem } from 'three';
+import {
+  OrthographicCamera,
+  PerspectiveCamera,
+  Raycaster,
+  Vector2,
+  WebGLCoordinateSystem,
+  WebGPUCoordinateSystem,
+} from 'three';
+import type { Camera } from 'three';
 
 import { ThreeCanvasInstance } from '#components/geometry/graphics/three/three-canvas-instance.js';
 import {
@@ -21,6 +29,22 @@ let latestCanvasEventPrefix: ReactThreeFiber.CanvasProps['eventPrefix'] | undefi
 let latestCanvasCamera: ReactThreeFiber.CanvasProps['camera'] | undefined;
 let latestCanvasGl: ReactThreeFiber.CanvasProps['gl'] | undefined;
 let exposureAfterCreated: number | undefined;
+let latestCanvasState: StubRootState | undefined;
+/** The camera the stub root rays from; a test replaces it. */
+let stubRootCamera: Camera = new PerspectiveCamera();
+
+type StubPointerEvent = Readonly<Record<'offsetX' | 'offsetY' | 'clientX' | 'clientY', number>>;
+type StubCompute = (event: StubPointerEvent, state: StubRootState, previous?: StubRootState) => void;
+/** The slice of R3F's root state that `onCreated` and pointer compute read. */
+type StubRootState = {
+  gl: Record<string, unknown>;
+  camera: Camera;
+  pointer: Vector2;
+  raycaster: Raycaster;
+  size: Readonly<{ width: number; height: number }>;
+  events: { compute?: StubCompute };
+  setEvents: (events: { compute?: StubCompute }) => void;
+};
 const rigCamera = new PerspectiveCamera();
 const orthographicCamera = new OrthographicCamera();
 const setClipPlanes = vi.fn();
@@ -43,7 +67,7 @@ vi.mock('@react-three/fiber', async (importOriginal) => {
     readonly gl?: ReactThreeFiber.CanvasProps['gl'];
     readonly eventPrefix?: ReactThreeFiber.CanvasProps['eventPrefix'];
     readonly eventSource?: ReactThreeFiber.CanvasProps['eventSource'];
-    readonly onCreated?: (state: { gl: Record<string, unknown> }) => void;
+    readonly onCreated?: (state: StubRootState) => void;
   };
 
   function StubCanvas({
@@ -77,8 +101,35 @@ vi.mock('@react-three/fiber', async (importOriginal) => {
         domElement,
       };
 
+      // As R3F's root: its default compute reads offset coordinates, and an `eventPrefix` Canvas swaps in a compute
+      // reading `${eventPrefix}X` just before `onCreated`. Both ray with three's own `setFromCamera`.
+      const computeFrom =
+        (prefix: 'offset' | 'client'): StubCompute =>
+        (event, state) => {
+          state.pointer.set(
+            (event[`${prefix}X`] / state.size.width) * 2 - 1,
+            -(event[`${prefix}Y`] / state.size.height) * 2 + 1,
+          );
+          state.raycaster.setFromCamera(state.pointer, state.camera);
+        };
+      const state: StubRootState = {
+        gl,
+        camera: stubRootCamera,
+        pointer: new Vector2(),
+        raycaster: new Raycaster(),
+        size: { width: 800, height: 600 },
+        events: { compute: computeFrom('offset') },
+        setEvents(events) {
+          state.events = { ...state.events, ...events };
+        },
+      };
+
       const microtaskHandle = (): void => {
-        onCreated?.({ gl });
+        if (eventPrefix === 'client') {
+          state.setEvents({ compute: computeFrom('client') });
+        }
+        onCreated?.(state);
+        latestCanvasState = state;
         exposureAfterCreated = gl.toneMappingExposure;
         fireLatestWebGlContextLost = (): void => {
           for (const listener of webglListeners) {
@@ -88,7 +139,7 @@ vi.mock('@react-three/fiber', async (importOriginal) => {
       };
 
       queueMicrotask(microtaskHandle);
-    }, [onCreated]);
+    }, [eventPrefix, onCreated]);
 
     return <div data-testid='stub-canvas'>{children}</div>;
   }
@@ -155,6 +206,8 @@ describe('ThreeCanvasInstance', () => {
     latestCanvasCamera = undefined;
     latestCanvasGl = undefined;
     exposureAfterCreated = undefined;
+    latestCanvasState = undefined;
+    stubRootCamera = new PerspectiveCamera();
     setClipPlanes.mockClear();
   });
 
@@ -263,6 +316,36 @@ describe('ThreeCanvasInstance', () => {
     expect(latestCanvasEventPrefix).toBe('client');
     expect(latestCanvasEventSource).toBe(eventSource);
   });
+
+  it.each([['default', undefined] as const, ['eventPrefix', 'client'] as const])(
+    'should start orthographic pointer rays on the camera plane under WebGPU reversed depth with the %s compute',
+    async (_compute, eventPrefix) => {
+      // At z 6 looking down −z, as the WebGPU renderer (`reversedDepthBuffer: true`) leaves an orthographic camera.
+      const camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, 20);
+      Object.assign(camera, { coordinateSystem: WebGPUCoordinateSystem, _reversedDepth: true });
+      camera.position.set(0, 0, 6);
+      camera.updateMatrixWorld();
+      camera.updateProjectionMatrix();
+      stubRootCamera = camera;
+
+      await act(async () => {
+        render(
+          <ThreeCanvasInstance eventPrefix={eventPrefix} graphicsBackend='webgpu' onRetry={() => undefined}>
+            {null}
+          </ThreeCanvasInstance>,
+        );
+        await Promise.resolve();
+      });
+      const state = latestCanvasState;
+      if (!state) {
+        throw new TypeError('Expected the Canvas to be created.');
+      }
+      state.events.compute?.({ offsetX: 400, offsetY: 300, clientX: 400, clientY: 300 }, state);
+
+      expect(state.raycaster.ray.origin.z).toBeCloseTo(6);
+      expect(state.raycaster.ray.direction.z).toBeCloseTo(-1);
+    },
+  );
 
   it('uses the provider-owned native camera from the first Canvas render', async () => {
     await act(async () => {

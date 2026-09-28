@@ -61,7 +61,7 @@ export type AgentChannelClient = {
 };
 
 /** Redials after a connection is lost before an unanswered command gives up, and the second one's backoff, doubling (T9 E7). Milliseconds. */
-const redialAttempts = 3;
+const redialAttempts = 5;
 const redialBackoff = 250;
 
 /** The rpc errors that mean the owner never acted on the command: answered as a refusal, not re-sent (SC T5). */

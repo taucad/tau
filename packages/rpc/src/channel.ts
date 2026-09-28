@@ -859,18 +859,51 @@ export const createChannelClient = <P extends RpcProtocol = EmptyRpcProtocol>(
     },
   };
 
+  /**
+   * Post one frame. A frame the port refuses — an uncloneable or detached
+   * payload throws `DataCloneError` — fails its own call or listen instead of
+   * stranding it; any other refused frame throws to the sender.
+   */
+  const send = (frame: WireMessage, transfer?: readonly Transferable[]): void => {
+    try {
+      port.postMessage(frame, transfer);
+    } catch (error) {
+      const failure = error instanceof Error ? error : new Error(String(error));
+      const pending = frame.k === 'rq' ? callPending.get(frame.i) : undefined;
+      if (frame.k === 'rq' && pending) {
+        callPending.delete(frame.i);
+        callPendingNames.delete(frame.i);
+        pending.reject(failure);
+        return;
+      }
+      const sink = frame.k === 'ss' ? listenSinks.get(frame.i) : undefined;
+      if (frame.k === 'ss' && sink) {
+        listenSinks.delete(frame.i);
+        sink.fail(failure);
+        return;
+      }
+      throw failure;
+    }
+  };
+
   const post = (frame: WireMessage, transfer?: readonly Transferable[]): void => {
     if (!isReady) {
       sendQueue.push({ frame, transfer });
       return;
     }
-    port.postMessage(frame, transfer);
+    send(frame, transfer);
   };
 
+  /* Runs inside the port's message listener: one refused frame must neither
+   * throw out of it nor strand the frames queued behind it. */
   const flushSendQueue = (): void => {
     while (sendQueue.length > 0) {
       const item = sendQueue.shift()!;
-      port.postMessage(item.frame, item.transfer);
+      try {
+        send(item.frame, item.transfer);
+      } catch {
+        // A queued notify has no caller left to tell; its frame is dropped.
+      }
     }
   };
 
@@ -1127,7 +1160,7 @@ export const createChannelClient = <P extends RpcProtocol = EmptyRpcProtocol>(
     }
     sendQueue.length = 0;
     if (!isReady) {
-      rejectReady(new Error('Channel closed before ready'));
+      rejectReady(new ChannelClosedError(info));
     }
   };
 
@@ -1184,7 +1217,12 @@ export const createChannelClient = <P extends RpcProtocol = EmptyRpcProtocol>(
       const id = createId();
       return new Promise<unknown>((resolve, reject) => {
         const onAbort = (): void => {
-          if (callPending.has(id)) {
+          /* A request still queued behind the hello never reached the server:
+           * drop it rather than let the server run it after the caller left. */
+          const queued = sendQueue.findIndex((item) => item.frame.k === 'rq' && item.frame.i === id);
+          if (queued !== -1) {
+            sendQueue.splice(queued, 1);
+          } else if (callPending.has(id)) {
             const cancelFrame: WireRequestCancel = { v: 1, k: 'rc', i: id, e: { m: 'aborted' } };
             try {
               port.postMessage(cancelFrame);

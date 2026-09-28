@@ -27,9 +27,11 @@ import {
 
 type KernelCase = Readonly<{
   extension: 'scad' | 'ts';
-  kernel: 'OpenRSCAD' | 'JSCAD' | 'Manifold' | 'Replicad';
+  kernel: 'OpenRSCAD' | 'JSCAD' | 'Manifold' | 'Replicad' | 'PicoVoxel';
   source: string;
   size: readonly [number, number, number];
+  /** Decimal digits the GLB size must match; defaults to exact B-rep precision. */
+  digits?: number;
 }>;
 
 const cases: readonly KernelCase[] = [
@@ -57,6 +59,19 @@ export default function main() { return Manifold.cube([16, 10, 7], true); }
 export default function main() { return makeBox([0, 0, 0], [18, 11, 8]); }
 `,
     size: [0.018, 0.008, 0.011],
+  },
+  {
+    // A Z-up beam, so the Y-up GLB size also pins the up axis. The iso-surface lands within a voxel.
+    kernel: 'PicoVoxel',
+    extension: 'ts',
+    source: `import type { Pico } from 'picovoxel';
+export const defaultParams = { voxelSize: 0.5 };
+export default function main(pico: Pico) {
+  return pico.createVoxels({ shape: 'beam', start: [0, 0, 0], end: [0, 0, 20], radius: 3 });
+}
+`,
+    size: [0.006, 0.026, 0.006],
+    digits: 3,
   },
 ];
 
@@ -162,6 +177,38 @@ const expectNativeOpenRscadEngine = async (logPath: string): Promise<void> => {
     .toBe(true);
 };
 
+/**
+ * T2.8: the fast render ran on PicoVoxel's multi-threaded build with a warm pthread pool. The
+ * kernel logs the selected variant at initialize and `variant=… pthreads=… lane=…` per session at
+ * debug level, so the debug filter is switched on to read the session line.
+ *
+ * @param page - The desktop renderer.
+ * @param entryPath - The model's entry file, which names its console group.
+ */
+const expectPicovoxelMultiSession = async (page: Page, entryPath: string): Promise<void> => {
+  await page.getByRole('button', { name: 'Search', exact: true }).click();
+  await page.getByPlaceholder('Search projects, chats, and actions...').fill('Open console');
+  await page.getByText('Open console', { exact: true }).click();
+  const group = page.getByRole('button', { name: entryPath, exact: true });
+  await expectVisible(group, 60_000);
+  if ((await group.getAttribute('aria-expanded')) !== 'true') {
+    await group.click();
+  }
+  const log = page.getByRole('log', { name: `Console logs for ${entryPath}` });
+  await expectVisible(log, 60_000);
+  await page.getByRole('button', { name: 'Filter by log level' }).click();
+  const debug = page.getByRole('menuitemcheckbox', { name: /debug/iu });
+  if ((await debug.getAttribute('aria-checked')) !== 'true') {
+    await debug.click();
+  }
+  await page.keyboard.press('Escape');
+  await expectVisible(log.getByText('PicoVoxel fast-lane WASM variant: multi', { exact: false }), 60_000);
+  const session = log.getByText(/PicoVoxel session variant=multi pthreads=\d+ lane=fast/u).first();
+  await expectVisible(session, 60_000);
+  const pthreads = Number(/pthreads=(\d+)/u.exec((await session.textContent()) ?? '')?.[1]);
+  expect(pthreads).toBeGreaterThan(1);
+};
+
 test.for(cases)(
   '[completed-artifact] renders and exports $kernel in the main editor',
   async (kernelCase: KernelCase) => {
@@ -198,10 +245,13 @@ test.for(cases)(
       const size = getBoundingBoxFromInspect(await getInspectReport(bytes))?.size;
       expect(size).toBeDefined();
       for (const [index, expected] of kernelCase.size.entries()) {
-        expect(size![index]).toBeCloseTo(expected, 6);
+        expect(size![index]).toBeCloseTo(expected, kernelCase.digits ?? 6);
       }
       if (kernelCase.kernel === 'OpenRSCAD') {
         await expectNativeOpenRscadEngine(session.logPath);
+      }
+      if (kernelCase.kernel === 'PicoVoxel') {
+        await expectPicovoxelMultiSession(page, `main.${kernelCase.extension}`);
       }
     } catch (error) {
       await session.capture(`main-editor-${kernelCase.kernel.toLowerCase()}-failure`);

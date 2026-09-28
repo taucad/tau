@@ -231,6 +231,8 @@ test('prints the chat pyramid on the simulated X1C only after Accept', async () 
     await expectVisible(page.getByRole('region', { name: `Printer simulation: ${fileName}`, exact: true }), 120_000);
     await showPrintPane(page);
 
+    /* The resumed attempt only needs to close; replaying the turn would repeat its tool calls. */
+    script.current = [];
     await paneCard.getByRole('button', { name: 'Accept' }).click();
     const confirm = paneCard.getByRole('group', { name: 'Confirm before starting' });
     const start = confirm.getByRole('button', { name: `Start print on ${machineName}` });

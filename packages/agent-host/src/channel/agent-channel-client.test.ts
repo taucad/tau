@@ -14,10 +14,10 @@ import { createServer } from 'node:http';
 import type { Server as HttpServer } from 'node:http';
 
 import { WebSocket, WebSocketServer } from 'ws';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ChannelClosedError, createChannelServer, wrapMessagePort } from '@taucad/rpc';
-import type { ChannelServer, CloseInfo, MessagePortLike } from '@taucad/rpc';
+import type { ChannelServer, CloseInfo, MessagePortLike, Port } from '@taucad/rpc';
 
 import { createAgentChannelClient } from '#channel/agent-channel-client.js';
 import { serveAgentChannel } from '#launchers/agent-channel.js';
@@ -83,6 +83,24 @@ const whatwgOnly = (port: MessagePortLike): MessagePortLike => ({
   close: () => {
     port.close();
   },
+});
+
+/** A connection that opens far enough to own an RPC wire, then loses its peer before hello. */
+const deadPort = (): Port<unknown> => ({
+  postMessage: () => undefined,
+  onMessage: () => () => undefined,
+  onClose: (handler) => {
+    let active = true;
+    queueMicrotask(() => {
+      if (active) {
+        handler();
+      }
+    });
+    return () => {
+      active = false;
+    };
+  },
+  close: () => undefined,
 });
 
 type ServedSocket = { readonly origin: string; kill: () => void };
@@ -191,23 +209,44 @@ describe('createAgentChannelClient', () => {
   });
 
   it('should reject unanswered commands with the close error once the redial budget is spent', async () => {
-    let dials = 0;
-    const client = createAgentChannelClient({
-      connect: () => {
-        dials += 1;
-        const socket = new WebSocket('ws://127.0.0.1:1/agent');
-        // `ws` throws an unobserved connection error; the close that follows is what the client reads.
-        socket.on('error', () => undefined);
-        return socket;
-      },
-    });
-    disposers.push(() => {
-      client.close();
-    });
+    vi.useFakeTimers();
+    try {
+      let dials = 0;
+      const client = createAgentChannelClient({
+        connect: () => {
+          dials += 1;
+          return deadPort();
+        },
+      });
+      disposers.push(() => {
+        client.close();
+      });
 
-    await expect(client.execute(cancel)).rejects.toBeInstanceOf(ChannelClosedError);
-    // The first dial and three redials (T9 E7).
-    expect(dials).toBe(4);
+      const failed = client.execute(cancel);
+      const failure = (async (): Promise<unknown> => {
+        try {
+          await failed;
+          return undefined;
+        } catch (error) {
+          return error;
+        }
+      })();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(dials).toBe(2);
+      await vi.advanceTimersByTimeAsync(250);
+      expect(dials).toBe(3);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(dials).toBe(4);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(dials).toBe(5);
+      await vi.advanceTimersByTimeAsync(1999);
+      expect(dials).toBe(5);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(dials).toBe(6);
+      expect(await failure).toBeInstanceOf(ChannelClosedError);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('should refuse an owner that speaks another wire version, without redialling', async () => {

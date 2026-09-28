@@ -27,6 +27,7 @@ const bundledWorkspaceDependencies = [
   '@taucad/opencascade',
   '@taucad/openrscad',
   '@taucad/picogk',
+  '@taucad/picovoxel',
   '@taucad/replicad',
   '@taucad/rhino',
   '@taucad/rpc',

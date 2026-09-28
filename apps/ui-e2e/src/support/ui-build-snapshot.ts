@@ -18,13 +18,14 @@ const hashedAsset = /-([A-Za-z0-9_-]{8})\.(?:js|mjs|css|wasm|woff2?|ttf|otf|png|
 /**
  * Whether a referenced name looks like a file the build emitted.
  *
- * A "hash" made only of lowercase letters is almost surely a word in a string
- * literal — `"./dist/nextjs/browser-node-builtins.mjs"` inside a bundled
- * package, say — rather than an asset this tree should contain.
+ * A "hash" made only of lowercase letters and hyphens is almost surely words in
+ * a string literal — `"./dist/nextjs/browser-node-builtins.mjs"` inside a
+ * bundled package, or `'./ex-base-box.js'` inside an example source inlined as
+ * text, say — rather than an asset this tree should contain.
  */
 const isEmittedAsset = (name: string): boolean => {
   const hash = hashedAsset.exec(name)?.[1];
-  return hash !== undefined && /[A-Z0-9_-]/u.test(hash);
+  return hash !== undefined && /[A-Z0-9_]/u.test(hash);
 };
 
 const scanReferences = (root: string, candidatesFor: (from: string, name: string) => readonly string[]): string[] => {

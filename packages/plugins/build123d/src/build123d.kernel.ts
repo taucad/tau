@@ -76,34 +76,53 @@ const issuesFrom = (error: unknown, fileName?: string): KernelIssue[] => {
   ];
 };
 
+/** The part of the kernel context `analyzeEntry` reads; it adds the memo field. */
+type Build123dContext = {
+  readonly session: PythonSession;
+  observedDependencies: string[];
+  analysis?: { readonly operationId: number; readonly key: string; readonly result: Promise<Build123dAnalysis> };
+};
+
 /**
- * One analyze request, spanned.
+ * One analyze request per entry and runtime operation, spanned.
  *
- * Every entry point asked the worker the same question with the same arguments;
- * D8 wants that wire time in the trace, and it belongs in one place rather than
- * three.
+ * Dependency and parameter discovery ask the worker the same question with the same arguments
+ * inside one render, so the second asks nothing. D8 wants the wire time in the trace.
  *
  * @param entryPath - Model entry the worker analyzes.
- * @param runtime - Kernel runtime, for its abort signal and tracer.
+ * @param runtime - Kernel runtime, for its operation, abort signal and tracer.
  * @param context - Kernel context holding the session and its observed dependencies.
  * @returns The worker's analysis.
  */
 const analyzeEntry = async (
   entryPath: string,
-  runtime: Pick<KernelRuntime, 'signal' | 'tracer'>,
-  context: { readonly session: PythonSession; readonly observedDependencies: string[] },
+  runtime: Pick<KernelRuntime, 'operationId' | 'signal' | 'tracer'>,
+  context: Build123dContext,
 ): Promise<Build123dAnalysis> => {
-  const span = runtime.tracer.startSpan('build123d.analyze', { entryPath });
-  try {
-    return await context.session.request({
-      method: 'analyze',
-      params: { entryPath, observedDependencies: context.observedDependencies },
-      schema: build123dAnalysisSchema,
-      signal: runtime.signal,
-    });
-  } finally {
-    span.end();
+  const { operationId } = runtime;
+  const { observedDependencies } = context;
+  const key = [entryPath, ...observedDependencies].join('\0');
+  if (operationId !== undefined && context.analysis?.operationId === operationId && context.analysis.key === key) {
+    return context.analysis.result;
   }
+  const analyze = async (): Promise<Build123dAnalysis> => {
+    const span = runtime.tracer.startSpan('build123d.analyze', { entryPath });
+    try {
+      return await context.session.request({
+        method: 'analyze',
+        params: { entryPath, observedDependencies },
+        schema: build123dAnalysisSchema,
+        signal: runtime.signal,
+      });
+    } finally {
+      span.end();
+    }
+  };
+  const result = analyze();
+  if (operationId !== undefined) {
+    context.analysis = { operationId, key, result };
+  }
+  return result;
 };
 
 /** `build123d` kernel capability. @public */
@@ -149,7 +168,7 @@ export const build123dKernel = defineKernel({
   },
 
   async getDependencies({ entryPath }, runtime, context) {
-    await context.mirror.sync(runtime.filesystem, runtime.fileContentCache);
+    await context.mirror.sync(runtime.filesystem, runtime.fileContentCache, runtime.operationId);
     try {
       const analysis = await analyzeEntry(entryPath, runtime, context);
       return { resolved: analysis.resolved, unresolved: analysis.unresolved };
@@ -159,7 +178,7 @@ export const build123dKernel = defineKernel({
   },
 
   async getParameters({ entryPath }, runtime, context) {
-    await context.mirror.sync(runtime.filesystem, runtime.fileContentCache);
+    await context.mirror.sync(runtime.filesystem, runtime.fileContentCache, runtime.operationId);
     try {
       const analysis = await analyzeEntry(entryPath, runtime, context);
       if (!analysis.declaration) {
@@ -172,7 +191,7 @@ export const build123dKernel = defineKernel({
   },
 
   async createGeometry({ entryPath, parameters }, runtime, context) {
-    await context.mirror.sync(runtime.filesystem, runtime.fileContentCache);
+    await context.mirror.sync(runtime.filesystem, runtime.fileContentCache, runtime.operationId);
     const build = async (compute: Record<string, unknown> | undefined) => {
       const span = runtime.tracer.startSpan('build123d.build', { entryPath });
       try {

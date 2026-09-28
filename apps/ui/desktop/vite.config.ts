@@ -1,7 +1,6 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { reactRouter } from '@react-router/dev/vite';
-import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
 import { tauRuntime } from '@taucad/runtime/vite';
@@ -52,14 +51,10 @@ export default defineConfig({
     createUiReactCompilerPlugin(),
     reactRouter(),
     tailwindcss(),
-    nxViteTsPaths(),
   ],
   worker: {
     // https://vite.dev/config/worker-options.html#worker-plugins
-    plugins: () => [
-      createUiSourceAliasPlugin({ emitModuleGraph: true, target: 'desktop', tauCloudEnabled }),
-      nxViteTsPaths(),
-    ],
+    plugins: () => [createUiSourceAliasPlugin({ emitModuleGraph: true, target: 'desktop', tauCloudEnabled })],
   },
   ssr: uiSsrOptions,
   server: {

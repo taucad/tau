@@ -1,8 +1,6 @@
 import { configDefaults, defineConfig } from 'vitest/config';
-import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 
 export default defineConfig({
-  plugins: [nxViteTsPaths()],
   test: {
     environment: 'node',
     exclude: [...configDefaults.exclude, 'src/**/*.browser.test.ts', 'src/**/*.benchmark.test.ts'],

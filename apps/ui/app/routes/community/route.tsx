@@ -12,7 +12,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
-import { sampleProjects } from '#constants/project-examples.js';
+import { galleryProjects } from '#constants/project-examples.js';
 import { CommunityProjectGrid } from '#components/project-grid.js';
 import type { Handle } from '#types/matches.types.js';
 import { Loader } from '#components/ui/loader.js';
@@ -38,7 +38,7 @@ export default function CadCommunity(): React.JSX.Element {
   const [visibleProjects, setVisibleProjects] = useState(itemsPerPage);
 
   // Filter projects based on search term and selected language
-  const filteredProjects = sampleProjects.filter((project) => {
+  const filteredProjects = galleryProjects.filter((project) => {
     const matchesSearch =
       searchTerm === '' ||
       project.name.toLowerCase().includes(searchTerm.toLowerCase()) ||

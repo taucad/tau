@@ -931,6 +931,11 @@ export class FileTreeService {
   }
 
   private optimisticAdd(path: string, metadata: { size: number } & FileContentMetadata): void {
+    /* A write to a listed file changes its content, never what the view stamped on it. */
+    if (this._tree.get(path)?.type === 'file') {
+      this.updateFileMetadata(path, metadata);
+      return;
+    }
     const parts = path.split('/');
     const name = parts.at(-1) ?? path;
     const newTree = new Map(this._tree);
@@ -962,6 +967,7 @@ export class FileTreeService {
       mtimeMs: Date.now(),
       isLoaded: entry.isLoaded,
       ...fileMetadataFields(metadata),
+      ...(entry.provenance === undefined ? {} : { provenance: entry.provenance }),
     });
     this._tree = newTree;
     this.notifyTreeSubscribers();

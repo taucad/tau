@@ -197,7 +197,7 @@ describe('external tool media', () => {
     });
     expect(screen.getByRole('button', { name: 'Open Image generation' })).toHaveClass('rounded-xl');
     expect(screen.queryByText(/Revised prompt/)).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /Ran Image generation/ }));
+    await user.click(screen.getByRole('button', { name: /^Generated image$/ }));
     expect(screen.getByText(/Revised prompt: a clean relief render/)).toBeVisible();
   });
 
@@ -361,7 +361,7 @@ describe('the external tool-call renderer', () => {
     expect(part.state).toBe('output-available');
 
     renderExternal(part);
-    await user.click(screen.getByRole('button', { name: /List files/ }));
+    await user.click(screen.getByRole('button', { name: /^Listed files$/ }));
     expect(screen.getByText('tau.json')).toBeVisible();
     expect(screen.getByText('package.json')).toBeVisible();
     expect(screen.queryByText(/Received unknown part/)).not.toBeInTheDocument();
@@ -541,6 +541,43 @@ describe('the external tool-call renderer', () => {
     expect(header).toHaveTextContent(/^Read skills cad-openscad, geospec-authoring$/u);
     await user.click(header);
     expect(screen.getByText(/\$ sed -n '1,240p'.*--- name: cad-openscad/u)).toBeVisible();
+    /* Each file read is linked, as an adapter-labelled read's locations are. */
+    expect(screen.getByText(/cad-openscad\/SKILL\.md$/u)).toBeVisible();
+    expect(screen.getByText(/geospec-authoring\/SKILL\.md$/u)).toBeVisible();
+  });
+
+  it('names what a failed command attempted, and shows what it printed and its exit code', async () => {
+    const user = userEvent.setup();
+    const command = `sed -n '267,322p' '/Tau/acp-skills/6948/.agents/skills/geospec-authoring/api-types.md' && command -v dotnet`;
+    const part = await partFromLog([
+      {
+        id: 'm-fail',
+        role: 'tool-input',
+        toolCallId: 'call-fail',
+        toolName: command,
+        call: { toolCallId: 'exec-2', kind: 'execute', title: command, status: 'pending' },
+        content: { command, cwd: '/work' },
+        metadata: externalMetadata,
+      },
+      {
+        id: 'm-fail-out',
+        role: 'tool-output',
+        toolCallId: 'call-fail',
+        toolName: command,
+        call: { toolCallId: 'exec-2', kind: 'execute', status: 'failed' },
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Codex's own `rawOutput` field names.
+        content: { formatted_output: 'GeoSpecMeshIntegrityExpectation: {', exit_code: 1 },
+        isError: true,
+        metadata: externalMetadata,
+      },
+    ]);
+
+    renderExternal(part);
+    const header = screen.getByRole('button', { name: /Attempted/u });
+    expect(header).toHaveTextContent(/^Attempted reading geospec-authoring\/api-types\.md, checking for dotnet$/u);
+    await user.click(header);
+    expect(screen.getByText(/GeoSpecMeshIntegrityExpectation: \{\s+Exit code 1/u)).toBeVisible();
+    expect(document.body.textContent).not.toContain('formatted_output');
   });
 
   it('strips control and bidirectional-override characters from an agent-authored title', async () => {

@@ -267,6 +267,14 @@ describe('CaptureToolResults', () => {
     ).toHaveLength(multiAngleViews.length);
   });
 
+  it('should tell the model in its summary what the images leave out', () => {
+    const message = 'Section cutaways narrower than 180° are not shown in captures.';
+
+    const [summary] = toPiToolContent({ ...captureResult(['isometric']), message });
+
+    expect(summary?.type === 'text' && summary.text).toContain(`Captured 1 screenshot(s). ${message} You are now`);
+  });
+
   it('leaves non-capture tool results as JSON text', async () => {
     const registry: ToolRegistry = {
       list: () => [{ name: 'get_kernel_result', description: 'Render', inputSchema: { type: 'object' } }],

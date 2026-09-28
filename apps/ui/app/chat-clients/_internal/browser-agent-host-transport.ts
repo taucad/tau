@@ -67,6 +67,8 @@ export const subscribeBrowserAgentHostRuns = (listener: () => void): (() => void
 const boundRunIds = new Map<string, string>();
 const activeClients = new Map<string, { readonly client: AgentHostClient; readonly runId: string }>();
 const clientSettlements = new Map<string, Promise<void>>();
+/** How the stream following a chat continues the native run an approval left paused (PV-S10). */
+const continuations = new Map<string, () => Promise<void>>();
 /** Chats whose next reattach may drive the host's own resume. @see requestBrowserAgentHostResume */
 const requestedResumes = new Set<string>();
 
@@ -134,6 +136,9 @@ let finalizedTurnSnapshot: readonly TurnFinalizedEvent[] = [];
 const finalizedTurnTopic = new Topic<void>({ name: 'host-finalized-turns' });
 const hostTurnSettlementTopic = new Topic<HostTurnSettlement>({ name: 'host-turn-settlements' });
 const latestSettlementByChat = new Map<string, HostTurnSettlement>();
+/* The attempt a durable settlement row stated, so a stream continuing a run tells a late row of an earlier attempt
+ * from its own (GM.r2 L-b). */
+const settlementAttempts = new WeakMap<HostTurnSettlement, number>();
 
 /** Every host-attested turn settlement this tab has seen. @see finalizedTurns */
 export const getHostFinalizedTurns = (): readonly TurnFinalizedEvent[] => finalizedTurnSnapshot;
@@ -282,6 +287,9 @@ const recordDurableTurnSettlement = (event: AgentLiveEvent | AgentLogEvent): voi
   }
   const settlement = projectTurnSettlement(event);
   if (settlement !== undefined) {
+    if (event.attempt !== undefined) {
+      settlementAttempts.set(settlement, event.attempt);
+    }
     recordHostTurnSettlement(settlement);
   }
 };
@@ -511,7 +519,7 @@ const readRunMessage = async (events: readonly AgentLogEvent[]): Promise<MyUIMes
  * contributes its rebuilt assistant message, because the stream this
  * accompanies is what rebuilds that one. `undefined` streams no run. The map
  * also answers whether that stream may run at all: not when another device's
- * turns follow it, because the AI SDK continues the transcript's trailing
+ * assistant message trails the transcript, because the AI SDK continues the transcript's trailing
  * assistant message — another device's — so the streaming run is then rebuilt
  * in place from the log too, and `streams` is `false`.
  */
@@ -566,7 +574,10 @@ const rebuildTranscript = async (
   return (current) => {
     const messages = place(current, streamed, streamingRunId);
     const tail = messages.at(-1);
-    if (streamingRunId === undefined || tail === undefined || wholeIds.has(tail.id)) {
+    /* Only a trailing assistant message is continued. Any other tail — this
+     * run's own user turn, which a snapshot-only attach leaves out of the log —
+     * gets a fresh message from the stream. */
+    if (streamingRunId === undefined || tail?.role !== 'assistant' || wholeIds.has(tail.id)) {
       return { messages, streams: true };
     }
     /* ponytail: the run is rebuilt from what the log holds now, so a run still
@@ -841,6 +852,7 @@ const createHostStream = <Message extends UIMessage>(input: {
     let unsubscribe: (() => void) | undefined;
     let unsubscribeLive: (() => void) | undefined;
     let unsubscribeSettlement: (() => void) | undefined;
+    let continueRun: (() => Promise<void>) | undefined;
     let { runId } = input;
     let closed = false;
     let cursor = 0;
@@ -866,6 +878,14 @@ const createHostStream = <Message extends UIMessage>(input: {
      * this same run id. */
     let terminalEvent = Promise.withResolvers<void>();
     let turnSettlement = Promise.withResolvers<void>();
+    /* The run's last attempt this stream saw open or end, and the one a re-armed gate waits past: attempt 1's late
+     * `turn.*` row must not release the gate re-armed for attempt 2 (GM.r2 L-b). */
+    let seenAttempt = 0;
+    let settledThrough = 0;
+    const armSettlement = (): void => {
+      settledThrough = seenAttempt;
+      turnSettlement = Promise.withResolvers<void>();
+    };
     /* The follow that delivers the settlement row stopped for a reason of its own (the host or its channel died):
      * the row cannot reach this stream, and the host that reconciles the attempt appends it for the next attach. */
     const followEnded = Promise.withResolvers<void>();
@@ -962,6 +982,9 @@ const createHostStream = <Message extends UIMessage>(input: {
         durableUserMessage = projectedUser;
       }
       state = lifecycleState(event) ?? state;
+      if (event.type === 'run.lifecycle' && event.runId === runId && event.attempt !== undefined) {
+        seenAttempt = Math.max(seenAttempt, event.attempt);
+      }
       /* The terminal row carries the refusal, and throwing it away left the
        * record saying `failed` with nothing to judge: resumability read
        * `isResumableRunFailure(undefined)` for every run whose failure arrived
@@ -1170,6 +1193,26 @@ const createHostStream = <Message extends UIMessage>(input: {
       if (runId !== undefined) {
         activeClients.set(input.chatId, { client, runId });
       }
+      /* The paused attempt's `turn.*` row already resolved the settlement gate, so the continued attempt's row is the
+       * one to wait for. `terminalEvent` stays: `paused` is not terminal, and this stream is awaiting that very
+       * promise, which a replacement would strand. */
+      continueRun = async (): Promise<void> => {
+        /* Re-armed once every row already delivered is projected, the paused attempt's settlement among them. */
+        await projection;
+        armSettlement();
+        let snapshot: HostRunSnapshot;
+        try {
+          snapshot = await client!.resume(input.chatId, runId!);
+        } catch (error) {
+          /* Refused (another request pending, the run gone, another run live): no attempt opened, so none will
+           * settle. Restored, the gate lets the stream end with the run instead of holding its client (GM.r2 M1). */
+          turnSettlement.resolve();
+          throw error;
+        }
+        await projection;
+        reconcileSnapshot(snapshot, true);
+      };
+      continuations.set(input.chatId, continueRun);
       unsubscribeLive = client.subscribeLive?.(input.chatId, (_chatId, event) => {
         queueSubscribedEvent(event);
       });
@@ -1178,7 +1221,11 @@ const createHostStream = <Message extends UIMessage>(input: {
        * replay/admission so a lifecycle-completed stream cannot close in the
        * gap before the matching settlement reaches the chat machine. */
       unsubscribeSettlement = subscribeHostTurnSettlements((event) => {
-        if (event.chatId === input.chatId && event.runId === runId) {
+        if (
+          event.chatId === input.chatId &&
+          event.runId === runId &&
+          (settlementAttempts.get(event) ?? Number.POSITIVE_INFINITY) > settledThrough
+        ) {
           turnSettlement.resolve();
         }
       });
@@ -1307,7 +1354,7 @@ const createHostStream = <Message extends UIMessage>(input: {
          * before it answers, so a re-arm conditioned on a non-terminal snapshot
          * lost that race and closed the stream over the reply. */
         terminalEvent = Promise.withResolvers<void>();
-        turnSettlement = Promise.withResolvers<void>();
+        armSettlement();
         // Everything the log already held is projected; what follows is this
         // attempt's, failure included.
         replayingContinuedFailure = false;
@@ -1368,6 +1415,9 @@ const createHostStream = <Message extends UIMessage>(input: {
       if (activeClients.get(input.chatId)?.client === client) {
         activeClients.delete(input.chatId);
       }
+      if (continueRun !== undefined && continuations.get(input.chatId) === continueRun) {
+        continuations.delete(input.chatId);
+      }
       const closeError = await closeClient(client);
       if (closeError !== undefined) {
         if (closed) {
@@ -1417,7 +1467,16 @@ export const cancelBrowserAgentHostRun = async (chatId: string): Promise<void> =
   }
 };
 
-/** Resolve a projected browser-host approval without opening a new admission. */
+/**
+ * Answer a projected browser-host approval without opening a new admission.
+ *
+ * W9 PV-S10: an approval sends `resolve-interrupt`, then `resume` for a native run the answer leaves paused. Asking
+ * ended the attempt (D10, TS-R10), so nothing else continues it; an external driver continues on its own, and a denial
+ * ends the run. The stream following the chat continues it, so it waits for the continued attempt; a chat no stream
+ * follows (a daemon-placed run answered from its card) is answered over a client of its own (GM.r1 H1).
+ *
+ * @param input - The chat, its run, the interrupt and the person's answer.
+ */
 export const resolveBrowserAgentHostInterrupt = async (input: {
   readonly chatId: string;
   readonly runId: string;
@@ -1428,15 +1487,36 @@ export const resolveBrowserAgentHostInterrupt = async (input: {
   readonly optionId?: string | undefined;
 }): Promise<void> => {
   const active = activeClients.get(input.chatId);
-  if (!active || active.runId !== input.runId) {
-    throw new Error(`Browser agent host run ${input.runId} is not attached.`);
+  const attached = active?.runId === input.runId ? active : undefined;
+  const registration = attached === undefined ? await registrationFor(input.chatId) : undefined;
+  const client = attached?.client ?? (await registration!.createClient());
+  try {
+    const answered = await client.resolveInterrupt(input.chatId, input.runId, {
+      interruptId: input.interruptId,
+      outcome: input.approved ? 'approved' : 'denied',
+      ...(input.optionId ? { optionId: input.optionId } : {}),
+      ...(input.reason ? { payload: { reason: input.reason } } : {}),
+    });
+    if (!input.approved || answered.runId !== input.runId || answered.state !== 'paused') {
+      return;
+    }
+    const continueRun = attached === undefined ? undefined : continuations.get(input.chatId);
+    try {
+      await (continueRun === undefined ? client.resume(input.chatId, input.runId) : continueRun());
+    } catch (error) {
+      /* Another request of the run still waits; its answer continues the run. */
+      if (!(error instanceof AgentHostWorkerError) || error.code !== 'INTERRUPT_PENDING') {
+        throw error;
+      }
+    }
+  } finally {
+    if (attached === undefined) {
+      const closeError = await closeClient(client);
+      if (closeError !== undefined) {
+        console.error('[browserAgentHost] closing the approval client failed', input.chatId, closeError);
+      }
+    }
   }
-  await active.client.resolveInterrupt(input.chatId, input.runId, {
-    interruptId: input.interruptId,
-    outcome: input.approved ? 'approved' : 'denied',
-    ...(input.optionId ? { optionId: input.optionId } : {}),
-    ...(input.reason ? { payload: { reason: input.reason } } : {}),
-  });
 };
 
 /**

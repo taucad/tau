@@ -9,21 +9,21 @@ import type { ResolvedAtReference } from '#utils/at-reference.utils.js';
 
 type AtReferenceChipProps = ComponentProps<'mark'> & {
   readonly 'data-at-reference'?: string;
-  readonly 'data-slash-command'?: string;
+  readonly 'data-invocation'?: string;
 };
 
 /**
- * Renders `@path` and `/command` references as visual chips in chat messages.
+ * Renders `@path` references and known invocation tokens (`/skill`, `$skill`) as chips in chat messages.
  * Resolves paths against the file tree and chats for display.
  *
  * Registered as the `mark` component override in `MarkdownViewerChat`.
  * `rehypeAtReferences` emits `<mark>` elements with either
- * `data-at-reference` or `data-slash-command` attributes.
+ * `data-at-reference` or `data-invocation` attributes.
  */
 export function AtReferenceChip(props: AtReferenceChipProps): React.JSX.Element {
-  const slashCommand = props['data-slash-command'];
-  if (slashCommand) {
-    return <ContextChip label={`/${slashCommand}`} chipType='skill' />;
+  const invocation = props['data-invocation'];
+  if (invocation) {
+    return <InvocationChip token={invocation} />;
   }
 
   const path = props['data-at-reference'];
@@ -32,6 +32,11 @@ export function AtReferenceChip(props: AtReferenceChipProps): React.JSX.Element 
   }
 
   return <ResolvedChip path={path} />;
+}
+
+function InvocationChip({ token }: { readonly token: string }): React.JSX.Element {
+  const { knownTokens } = useAtReferenceContext();
+  return knownTokens.has(token) ? <ContextChip label={token} chipType='skill' /> : <span>{token}</span>;
 }
 
 function ResolvedChip({ path }: { readonly path: string }): React.JSX.Element {
@@ -72,7 +77,12 @@ function ResolvedChip({ path }: { readonly path: string }): React.JSX.Element {
 
   return (
     <FileLink path={path} asChild>
-      <ContextChip label={resolved.displayName} chipType={resolved.chipType} isInteractive />
+      <ContextChip
+        label={resolved.displayName}
+        chipType={resolved.chipType}
+        isInteractive
+        tooltip={resolved.type === 'chat' ? undefined : path}
+      />
     </FileLink>
   );
 }

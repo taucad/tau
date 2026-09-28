@@ -76,7 +76,7 @@ export type ParameterSetService = Readonly<{
   draft(key: ParameterDraftKey): ParameterDraft | undefined;
   /** Retain or clear one row's draft; `undefined` clears it. */
   setDraft(key: ParameterDraftKey, draft: ParameterDraft | undefined): void;
-  /** Observe drafts being discarded elsewhere, so a mounted row re-reads its own. */
+  /** Observe drafts being cleared or discarded (never set), so a mounted row re-reads its own. */
   subscribeDrafts(listener: () => void): () => void;
   /**
    * Commit one field of one group against the authority's current record. `base` scopes the
@@ -591,14 +591,14 @@ export const createParameterSetService = (
     draft: (key) => drafts.get(draftKey(key))?.draft,
     setDraft: (key, draft) => {
       const mapKey = draftKey(key);
-      if (draft === undefined) {
-        if (!drafts.delete(mapKey)) {
-          return;
-        }
-      } else {
+      if (draft !== undefined) {
+        // Listeners act only on a cleared draft, so a keystroke notifies nobody.
         drafts.set(mapKey, { key, draft, label: draftLabel(key.group, key.pointer) });
+        return;
       }
-      draftChanges.emit();
+      if (drafts.delete(mapKey)) {
+        draftChanges.emit();
+      }
     },
     subscribeDrafts: (listener) => draftChanges.subscribe(listener),
     commitValue,

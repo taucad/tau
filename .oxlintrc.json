@@ -478,7 +478,20 @@
     "no-restricted-imports": [
       "error",
       {
-        "paths": ["error", "domain", "freelist", "smalloc", "punycode", "sys", "querystring", "colors"],
+        "paths": [
+          "error",
+          "domain",
+          "freelist",
+          "smalloc",
+          "punycode",
+          "sys",
+          "querystring",
+          "colors",
+          {
+            "name": "@nx/vite/plugins/nx-tsconfig-paths.plugin",
+            "message": "nxViteTsPaths applies tsconfig paths to every importer before Vite's resolver. Resolve # through package.json#imports, or add a scoped resolve.alias. See docs/research/scoped-hash-import-resolution.md."
+          }
+        ],
         "patterns": [
           {
             "regex": "^\\.",

@@ -1,23 +1,89 @@
+import { useEffect, useState } from 'react';
 import { Node, mergeAttributes } from '@tiptap/core';
+import type { Editor } from '@tiptap/core';
 import type { ReactNodeViewProps } from '@tiptap/react';
-import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react';
+import { ReactNodeViewRenderer, NodeViewWrapper, useEditorState } from '@tiptap/react';
 import { FileLink } from '#components/files/file-link.js';
 import { ContextChip } from '#components/chat/context-chip.js';
 import type { ChipType } from '#components/chat/context-chip.js';
+import { useOptionalFileManager } from '#hooks/use-file-manager.js';
 
-function ContextChipComponent({ node, deleteNode }: ReactNodeViewProps): React.JSX.Element {
+/** Whether a referenced file or folder is gone: asked once the tree is ready, and again whenever it changes. */
+function usePathMissing(path: string | undefined): boolean {
+  const treeService = useOptionalFileManager()?.treeService;
+  const [isMissing, setIsMissing] = useState(false);
+  useEffect(() => {
+    if (!treeService || !path) {
+      return undefined;
+    }
+    let cancelled = false;
+    const check = async (): Promise<void> => {
+      const entry = await treeService.getEntry(path);
+      if (!cancelled) {
+        setIsMissing(entry === undefined);
+      }
+    };
+    void check();
+    const unsubscribe = treeService.subscribeTree(check);
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [treeService, path]);
+  return isMissing;
+}
+
+/**
+ * File-chip labels that name more than one path in the document, one per line
+ * (a string, so the selector result compares by value).
+ */
+function ambiguousFileLabels(editor: Editor): string {
+  const pathsByLabel = new Map<string, Set<string>>();
+  editor.state.doc.descendants((node) => {
+    if (node.type.name === 'contextChip' && node.attrs['chipType'] === 'file' && node.attrs['path']) {
+      const label = String(node.attrs['label']);
+      pathsByLabel.set(label, (pathsByLabel.get(label) ?? new Set()).add(String(node.attrs['path'])));
+    }
+    return !node.isInline;
+  });
+  return [...pathsByLabel].flatMap(([label, paths]) => (paths.size > 1 ? [label] : [])).join('\n');
+}
+
+function ContextChipComponent({ node, deleteNode, selected, editor }: ReactNodeViewProps): React.JSX.Element {
   const label = String(node.attrs['label'] ?? '');
   const chipType = String(node.attrs['chipType'] ?? 'file') as ChipType;
   const path = String(node.attrs['path'] ?? '');
   const isLinkable = (chipType === 'file' || chipType === 'chat') && path;
+  // ponytail: every file chip rescans the document per transaction; O(chips²), fine for a message's handful.
+  const ambiguous = useEditorState({ editor, selector: ({ editor: current }) => ambiguousFileLabels(current) });
+  const isAmbiguous = chipType === 'file' && path !== '' && ambiguous.split('\n').includes(label);
+  const parent = isAmbiguous ? path.split('/').at(-2) : undefined;
+  const isMissing = usePathMissing(chipType === 'file' || chipType === 'folder' ? path : undefined);
 
   const chip = (
-    <ContextChip label={label} chipType={chipType} onRemove={deleteNode} isInteractive={Boolean(isLinkable)} />
+    <ContextChip
+      label={label}
+      chipType={chipType}
+      onRemove={deleteNode}
+      isInteractive={Boolean(isLinkable) && !isMissing}
+      isSelected={selected}
+      isMissing={isMissing}
+      detail={parent}
+      tooltip={
+        (chipType === 'file' || chipType === 'folder') && path
+          ? isMissing
+            ? `${path} — no longer in the project`
+            : path
+          : undefined
+      }
+    />
   );
 
   return (
-    <NodeViewWrapper as='span' className='inline-flex align-baseline'>
-      {isLinkable ? (
+    // Middle, not baseline: the wrapper's baseline follows the chip's first child, which swaps
+    // from glyph to remove button on hover and would change the line height.
+    <NodeViewWrapper as='span' className='inline-flex align-middle'>
+      {isLinkable && !isMissing ? (
         <FileLink path={path} asChild>
           {chip}
         </FileLink>

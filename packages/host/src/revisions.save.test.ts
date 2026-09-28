@@ -12,7 +12,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import type { RevisionPort } from '@taucad/revisions';
 import { ImmutableRevisionTree, revisionId } from '@taucad/revisions/algorithms';
@@ -289,6 +289,9 @@ describe.runIf(gitToolchainOnPath)('save on a disk host', () => {
     expect(outcome).toMatchObject({ status: 'saved' });
     expect(outcome.status === 'saved' && outcome.backup).not.toBe('backedUp');
     expect(outcome).toHaveProperty('reason');
+    /* No outcome says "timed out": the cut and the push are each answered (B3, A12; GM.r1 L2). */
+    expectTypeOf<RevisionSaveOutcome['status']>().toEqualTypeOf<'saved' | 'unchanged' | 'refused'>();
+    expectTypeOf<'timedOut'>().not.toExtend<Extract<RevisionSaveOutcome, { status: 'saved' }>['backup']>();
   }, 120_000);
 
   it('says a project with no remote is saved on this device, not that its backup failed', async () => {

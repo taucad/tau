@@ -54,6 +54,33 @@ const cardCategoryOf = (code: string): ErrorCategory | undefined =>
     ? gatewayCodeCategories[code as keyof typeof gatewayCodeCategories]
     : undefined;
 
+/**
+ * What a failed external call printed, as the person would read it: a shell
+ * call's captured output and exit code, or an MCP result's text blocks.
+ * Without this the error card showed `{"formatted_output":…,"exit_code":1}`.
+ *
+ * @param value - The failed row's content.
+ * @returns The text, or `undefined` when the content has neither shape.
+ */
+const failedOutputText = (value: unknown): string | undefined => {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const output = [value['formatted_output'], value['aggregated_output'], value['output'], value['error']].find(
+    (candidate): candidate is string => typeof candidate === 'string' && candidate.trim() !== '',
+  );
+  const result =
+    isRecord(value['result']) && Array.isArray(value['result']['content']) ? value['result']['content'] : [];
+  const resultText = result
+    .flatMap((block: unknown) => (isRecord(block) && typeof block['text'] === 'string' ? [block['text']] : []))
+    .join('\n');
+  const exitCode = typeof value['exit_code'] === 'number' ? `Exit code ${String(value['exit_code'])}` : undefined;
+  const parts = [output ?? (resultText === '' ? undefined : resultText), exitCode].filter(
+    (part): part is string => part !== undefined,
+  );
+  return parts.length === 0 ? undefined : parts.join('\n\n');
+};
+
 const errorText = (value: unknown, fallback: string): string => {
   if (typeof value === 'string') {
     return value;
@@ -91,7 +118,7 @@ const errorText = (value: unknown, fallback: string): string => {
     }
     return value['message'];
   }
-  return value === undefined ? fallback : JSON.stringify(value);
+  return failedOutputText(value) ?? (value === undefined ? fallback : JSON.stringify(value));
 };
 
 /**

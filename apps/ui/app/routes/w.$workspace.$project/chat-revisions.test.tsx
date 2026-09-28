@@ -483,11 +483,11 @@ describe('Revisions pane', () => {
   /* P4, W4 §D: the inline card is the toast's second surface, so it reads the
      same table. `turn.machine`'s own sentence names a checkout (Rule 1). */
   it('phrases a turn that saved nothing from its code, never from the machine', () => {
-    turnOutcomes = [{ projectId: 'p', kind: 'failed', turnId: 'turn-1', chatId: 'chat-1', code: 'CUT_TIMED_OUT' }];
+    turnOutcomes = [{ projectId: 'p', kind: 'failed', turnId: 'turn-1', chatId: 'chat-1', code: 'BASE_CUT_FAILED' }];
     renderPane();
 
     const alert = screen.getByRole('alert', { name: 'Turn outcome' });
-    expect(alert).toHaveTextContent('Tau took too long to record that change.');
+    expect(alert).toHaveTextContent('Tau could not save this project’s earlier edits first.');
     expect(alert.textContent).not.toMatch(/checkout/iu);
   });
 

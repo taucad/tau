@@ -196,7 +196,7 @@ describe('useViewSettingsSync', () => {
       expect(editorSend.mock.calls.at(-1)?.[0]).toMatchObject({
         type: 'updateViewSettings',
         viewId: 'view-1',
-        settings: { schemaVersion: 11, enableGrid: false },
+        settings: { schemaVersion: 12, enableGrid: false },
       });
     });
     expect(editorSend.mock.calls.at(-1)?.[0]).not.toHaveProperty('settings.componentDisplay');
@@ -296,9 +296,9 @@ describe('useViewSettingsSync', () => {
     graphicsRef.stop();
   });
 
-  /* E2: the cut and its display preferences are durable, so revisit and reload restore the same
-   * state. Translation is derived from the pivot on every assign and is never written. */
-  it('writes a cut as sectionView and its toggles as sectionDisplay', async () => {
+  /* The cuts are durable, so revisit and reload restore the same state. Their ids are made anew at every
+   * load and are never written. */
+  it('should write the cuts and whether the section is on, without cut ids', async () => {
     const graphicsRef = createGraphicsActor();
     const editorSend = vi.fn<(event: EditorSendEvent) => void>();
     const editorRef = mock<ActorRefFrom<typeof editorMachine>>({ send: editorSend });
@@ -311,28 +311,34 @@ describe('useViewSettingsSync', () => {
 
     act(() => {
       graphicsRef.send({ type: 'sceneRadiusUpdated', radius: 0.1, centerMeters: [1, 2, 3] });
-      graphicsRef.send({ type: 'setSectionViewActive', payload: true });
-      graphicsRef.send({ type: 'selectSectionView', payload: 'xz' });
-      graphicsRef.send({ type: 'setClippingLinesEnabled', payload: false });
+      graphicsRef.send({ type: 'addSectionCut', payload: { kind: 'plane' } });
+      graphicsRef.send({ type: 'addSectionCut', payload: { kind: 'revolution' } });
     });
 
     await waitFor(() => {
       expect(editorSend.mock.calls.at(-1)?.[0]).toMatchObject({
         type: 'updateViewSettings',
         settings: {
-          sectionView: { active: true, plane: 'xz', pivot: [1, 2, 3], direction: -1 },
-          sectionDisplay: { clipLines: false, clipMesh: true, planeName: 'face' },
+          schemaVersion: 12,
+          sectionView: {
+            active: true,
+            cuts: [
+              { kind: 'plane', plane: 'xz', offset: 2, isFlipped: false },
+              { kind: 'revolution', axis: 'z', origin: [1, 2, 3], start: 0, sweep: 90 },
+            ],
+          },
         },
       });
     });
     const lastCall = editorSend.mock.calls.at(-1)?.[0];
-    expect(lastCall).not.toHaveProperty('settings.sectionView.translation');
+    expect(lastCall).not.toHaveProperty('settings.sectionView.cuts.0.id');
+    expect(lastCall).not.toHaveProperty('settings.sectionDisplay');
     graphicsRef.stop();
   });
 
-  /* Dragging the plane rebuilds the pivot on every pointer move, so a reference comparison sends an
-   * editor event per frame -- and re-renders every editor subscriber with it. */
-  it('does not write a section drag that lands on the cut already stored', async () => {
+  /* A drag sends a step on every pointer move, often to where the cut already is. Such a step keeps the cut list, so
+   * it must not send an editor event per frame -- re-rendering every editor subscriber with it. */
+  it('should not write a section drag that lands on the cut already stored', async () => {
     const graphicsRef = createGraphicsActor();
     const editorSend = vi.fn<(event: EditorSendEvent) => void>();
     const editorRef = mock<ActorRefFrom<typeof editorMachine>>({ send: editorSend });
@@ -344,14 +350,16 @@ describe('useViewSettingsSync', () => {
     );
 
     act(() => {
-      graphicsRef.send({ type: 'setSectionViewActive', payload: true });
-      graphicsRef.send({ type: 'selectSectionView', payload: 'xz' });
-      graphicsRef.send({ type: 'setSectionViewTranslation', payload: 0.25 });
+      graphicsRef.send({ type: 'addSectionCut', payload: { kind: 'plane' } });
+    });
+    const [cut] = graphicsRef.getSnapshot().context.sectionCuts;
+    act(() => {
+      graphicsRef.send({ type: 'updateSectionCut', payload: { id: cut!.id, patch: { offset: 0.25 } } });
     });
     await waitFor(() => {
       expect(editorSend.mock.calls.at(-1)?.[0]).toMatchObject({
         type: 'updateViewSettings',
-        settings: { sectionView: { plane: 'xz' } },
+        settings: { sectionView: { cuts: [{ plane: 'xz', offset: 0.25 }] } },
       });
     });
 
@@ -359,17 +367,56 @@ describe('useViewSettingsSync', () => {
     act(() => {
       // Ten frames of a drag that never leaves the position it is already at.
       for (let frame = 0; frame < 10; frame++) {
-        graphicsRef.send({ type: 'setSectionViewTranslation', payload: 0.25 });
+        graphicsRef.send({ type: 'updateSectionCut', payload: { id: cut!.id, patch: { offset: 0.25 } } });
       }
     });
-    await act(async () => undefined);
+    await new Promise((resolve) => {
+      setTimeout(resolve, 400);
+    });
     expect(editorSend).not.toHaveBeenCalled();
     graphicsRef.stop();
   });
 
-  /* A drag moves the cut on every pointer move. Each editor event rebuilds the whole view-settings map and
-   * re-renders every editor subscriber, so the pose is written once it settles, like the camera's. */
-  it('persists the section pose once it settles instead of once per drag step', async () => {
+  /* A drag that comes back to where it started makes new cut lists, so the settle runs. Only comparing the cuts by
+   * value keeps it from writing the cut already stored again. */
+  it('should not write a section drag that returns to the cut already stored', async () => {
+    const graphicsRef = createGraphicsActor();
+    const editorSend = vi.fn<(event: EditorSendEvent) => void>();
+    const editorRef = mock<ActorRefFrom<typeof editorMachine>>({ send: editorSend });
+
+    render(<PaneLessHarness graphicsRef={graphicsRef} editorRef={editorRef} />);
+
+    act(() => {
+      graphicsRef.send({ type: 'addSectionCut', payload: { kind: 'plane' } });
+    });
+    const [cut] = graphicsRef.getSnapshot().context.sectionCuts;
+    act(() => {
+      graphicsRef.send({ type: 'updateSectionCut', payload: { id: cut!.id, patch: { offset: 0.25 } } });
+    });
+    await waitFor(() => {
+      expect(editorSend.mock.calls.at(-1)?.[0]).toMatchObject({
+        settings: { sectionView: { cuts: [{ plane: 'xz', offset: 0.25 }] } },
+      });
+    });
+    const stored = graphicsRef.getSnapshot().context.sectionCuts;
+
+    editorSend.mockClear();
+    act(() => {
+      graphicsRef.send({ type: 'updateSectionCut', payload: { id: cut!.id, patch: { offset: 0.3 } } });
+      graphicsRef.send({ type: 'updateSectionCut', payload: { id: cut!.id, patch: { offset: 0.25 } } });
+    });
+    expect(graphicsRef.getSnapshot().context.sectionCuts).not.toBe(stored);
+    // Past the settle, which was started before this wait and so has run by its end.
+    await new Promise((resolve) => {
+      setTimeout(resolve, 400);
+    });
+    expect(editorSend).not.toHaveBeenCalled();
+    graphicsRef.stop();
+  });
+
+  /* A drag moves a cut on every pointer move. Each editor event rebuilds the whole view-settings map and
+   * re-renders every editor subscriber, so the cuts are written once they settle, like the camera pose. */
+  it('should persist the cuts once they settle instead of once per drag step', async () => {
     const graphicsRef = createGraphicsActor();
     const editorSend = vi.fn<(event: EditorSendEvent) => void>();
     const editorRef = mock<ActorRefFrom<typeof editorMachine>>({ send: editorSend });
@@ -378,24 +425,21 @@ describe('useViewSettingsSync', () => {
 
     act(() => {
       graphicsRef.send({ type: 'setSectionViewActive', payload: true });
-      graphicsRef.send({ type: 'selectSectionView', payload: 'xz' });
     });
-    // Choosing the plane is a click, not a drag, so it is written at once.
+    // Turning the section on is a click, not a drag, so it is written at once.
     await waitFor(() => {
       expect(editorSend.mock.calls.at(-1)?.[0]).toMatchObject({
         type: 'updateViewSettings',
-        settings: { sectionView: { active: true, plane: 'xz' } },
+        settings: { sectionView: { active: true, cuts: [{ plane: 'xz' }] } },
       });
     });
+    const [cut] = graphicsRef.getSnapshot().context.sectionCuts;
 
     editorSend.mockClear();
     // Each pointer move is its own task, so each step commits on its own.
     for (let step = 1; step <= 5; step++) {
       act(() => {
-        graphicsRef.send({ type: 'setSectionViewTranslation', payload: step / 1000 });
-      });
-      act(() => {
-        graphicsRef.send({ type: 'setSectionViewRotation', payload: [(step * Math.PI) / 180, 0, 0] });
+        graphicsRef.send({ type: 'updateSectionCut', payload: { id: cut!.id, patch: { offset: step / 1000 } } });
       });
     }
 
@@ -405,24 +449,14 @@ describe('useViewSettingsSync', () => {
       expect(editorSend).toHaveBeenCalledTimes(1);
     });
     // The one write is exactly the cut the drag settled on.
-    const settled = graphicsRef.getSnapshot().context;
-    expect(settled.sectionViewRotation).toEqual([(5 * Math.PI) / 180, 0, 0]);
     expect(editorSend.mock.calls[0]?.[0]).toMatchObject({
       type: 'updateViewSettings',
-      settings: {
-        sectionView: {
-          active: true,
-          plane: 'xz',
-          pivot: settled.sectionViewPivot,
-          rotation: settled.sectionViewRotation,
-          direction: settled.sectionViewDirection,
-        },
-      },
+      settings: { sectionView: { active: true, cuts: [{ kind: 'plane', plane: 'xz', offset: 0.005 }] } },
     });
     graphicsRef.stop();
   });
 
-  it('writes the last section pose when the view goes away inside the settle window', async () => {
+  it('should write the last cut when the view goes away inside the settle window', async () => {
     const graphicsRef = createGraphicsActor();
     const editorSend = vi.fn<(event: EditorSendEvent) => void>();
     const editorRef = mock<ActorRefFrom<typeof editorMachine>>({ send: editorSend });
@@ -430,19 +464,21 @@ describe('useViewSettingsSync', () => {
     const view = render(<PaneLessHarness graphicsRef={graphicsRef} editorRef={editorRef} />);
 
     act(() => {
-      graphicsRef.send({ type: 'setSectionViewActive', payload: true });
-      graphicsRef.send({ type: 'selectSectionView', payload: 'xz' });
+      graphicsRef.send({ type: 'addSectionCut', payload: { kind: 'plane' } });
     });
     await waitFor(() => {
-      expect(editorSend.mock.calls.at(-1)?.[0]).toMatchObject({ settings: { sectionView: { plane: 'xz' } } });
+      expect(editorSend.mock.calls.at(-1)?.[0]).toMatchObject({
+        settings: { sectionView: { cuts: [{ plane: 'xz' }] } },
+      });
     });
+    const [cut] = graphicsRef.getSnapshot().context.sectionCuts;
 
     editorSend.mockClear();
     act(() => {
-      graphicsRef.send({ type: 'setSectionViewTranslation', payload: 0.004 });
+      graphicsRef.send({ type: 'updateSectionCut', payload: { id: cut!.id, patch: { offset: 0.004 } } });
     });
     expect(editorSend).not.toHaveBeenCalled();
-    // Closing the view, or the project, inside the settle window must not lose the cut just made.
+    // Closing the view, or the project, inside the settle window must not lose the cut just moved.
     act(() => {
       view.unmount();
     });
@@ -450,7 +486,7 @@ describe('useViewSettingsSync', () => {
     expect(editorSend).toHaveBeenCalledTimes(1);
     expect(editorSend.mock.calls[0]?.[0]).toMatchObject({
       type: 'updateViewSettings',
-      settings: { sectionView: { plane: 'xz', pivot: [0, 0.004, 0] } },
+      settings: { sectionView: { cuts: [{ plane: 'xz', offset: 0.004 }] } },
     });
     graphicsRef.stop();
   });
@@ -555,7 +591,7 @@ describe('useViewSettingsSync', () => {
       expect(editorSend.mock.calls.at(-1)?.[0]).toMatchObject({
         type: 'updateViewSettings',
         settings: {
-          schemaVersion: 11,
+          schemaVersion: 12,
           cameraView: {
             target: [3, 4, 5],
             direction: [1, 0, 0],
@@ -734,7 +770,7 @@ describe('useViewSettingsSync', () => {
     await waitFor(() => {
       expect(editorSend.mock.calls.at(-1)?.[0]).toMatchObject({
         type: 'updateViewSettings',
-        settings: { schemaVersion: 11, cameraView: undefined },
+        settings: { schemaVersion: 12, cameraView: undefined },
       });
     });
     graphicsRef.stop();

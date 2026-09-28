@@ -470,7 +470,7 @@ describe('composite fields', () => {
     const cameraTrigger = screen.getByRole('button', { name: 'Group: Camera' });
     const cameraContent = cameraTrigger
       .closest('[data-slot="parameter-group"]')
-      ?.querySelector(':scope > [data-slot="parameter-group-content"]');
+      ?.querySelector(':scope > [data-slot="parameter-group-content"] > [data-slot="parameter-group-body"]');
     expect(screen.getAllByRole('button', { name: 'Group: Camera' })).toHaveLength(1);
     expect(cameraContent).toHaveClass('[&>.panel>.form-group]:flex', '[&>.panel>.form-group]:justify-end');
     expect(screen.getByRole('combobox', { name: 'Select for Framing' })).toHaveTextContent('Fit');

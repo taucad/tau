@@ -5,6 +5,8 @@ import { cn } from '@taucad/ui/utils/cn';
 import { defaultMarkdownControls, MarkdownViewer } from '#components/markdown/markdown-viewer.js';
 import { rehypeAtReferences } from '#components/markdown/rehype-at-references.js';
 import { AtReferenceChip } from '#components/chat/at-reference-chip.js';
+import { useAtReferenceContext } from '#components/chat/at-reference-context.js';
+import { escapeDollarInvocations } from '#utils/at-reference.utils.js';
 import { ChatStreamingBlock, ChatStreamingFadeProvider } from '#components/markdown/chat-streaming-block.js';
 
 const chatMarkdownControls: ControlsConfig = { ...defaultMarkdownControls, table: false };
@@ -63,6 +65,8 @@ export const MarkdownViewerChat = memo(function ({
   isStreamingFade = false,
   ...properties
 }: MarkdownViewerChatProps): React.JSX.Element {
+  const { knownTokens } = useAtReferenceContext();
+  const content = useMemo(() => escapeDollarInvocations(children, knownTokens), [children, knownTokens]);
   const memoizedComponents = useMemo<Components>(
     () =>
       // oxlint-disable-next-line typescript/consistent-type-assertions -- Streamdown v2's string index signature conflicts with React Three Fiber's global JSX elements.
@@ -85,13 +89,13 @@ export const MarkdownViewerChat = memo(function ({
         controls={chatMarkdownControls}
         rehypePlugins={chatRehypePlugins}
       >
-        {children}
+        {content}
       </MarkdownViewer>
     );
   }
 
   return (
-    <ChatStreamingFadeProvider content={children}>
+    <ChatStreamingFadeProvider content={content}>
       {(parseBlocks) => (
         <MarkdownViewer
           {...properties}
@@ -104,7 +108,7 @@ export const MarkdownViewerChat = memo(function ({
           BlockComponent={ChatStreamingBlock}
           parseMarkdownIntoBlocksFn={parseBlocks}
         >
-          {children}
+          {content}
         </MarkdownViewer>
       )}
     </ChatStreamingFadeProvider>

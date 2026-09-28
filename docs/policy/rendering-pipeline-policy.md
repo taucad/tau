@@ -3,7 +3,7 @@ title: 'Rendering Pipeline Policy'
 description: 'Unified PBR defaults, material policy, tone mapping, AO, environment strategy, and performance patterns for the CAD viewer.'
 status: active
 created: '2026-02-15'
-updated: '2026-09-23'
+updated: '2026-09-27'
 related:
   - docs/research/onshape-viewer-lighting-profile.md
   - docs/research/headless-gltf-interleaved-accessor-corruption-v2.md
@@ -102,9 +102,9 @@ A zero N8AO falloff suppresses occlusion samples; do not use it to disable atten
 - Works with the `frameloop="demand"` mode (AO runs during render passes only)
 - Uses `screenSpaceRadius` for zoom-independent consistent appearance
 
-**Section view compatibility**: Section View uses clipped source geometry plus generated BVH contour fills outside the clipping group. Section caps are opaque, depth-owned meshes rather than stencil-derived transparent planes; post-processing must preserve their normal depth ordering.
+**Section view compatibility**: Section View clips the source geometry with one fixed-array section clip over every cut (at most eight convex pieces) and draws generated BVH contour fills outside that clip: an exact cap for each cut face and source, trimmed by the other cuts and outlined by its cap edge rings. Section caps are opaque, depth-owned meshes rather than stencil-derived transparent planes; post-processing must preserve their normal depth ordering.
 
-**Section cap diagnostics**: Section-plane overlap highlighting is a viewport visual diagnostic, not GeoSpec exact positive-volume evidence. Implement red overlap cues by splitting generated cap regions into disjoint normal and diagnostic triangles in section-cap geometry, preferably using one packed vertex-colored mesh per source and shared opaque WebGL/WebGPU striped cap materials. Do not render transparent red overlays, coincident duplicate cap meshes, or stencil-derived caps for this diagnostic.
+**Section cap diagnostics**: Section-plane overlap highlighting is a viewport visual diagnostic, not GeoSpec exact positive-volume evidence. Implement red overlap cues by splitting generated cap regions into disjoint normal and diagnostic triangles in section-cap geometry, preferably using one packed vertex-colored mesh per source on each cut face, and shared opaque WebGL/WebGPU striped cap materials. Do not render transparent red overlays, coincident duplicate cap meshes, or stencil-derived caps for this diagnostic.
 
 ## Environment Strategy
 

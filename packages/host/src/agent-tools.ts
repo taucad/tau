@@ -145,13 +145,13 @@ const issueMessage = (issues: ReadonlyArray<{ readonly message: string }>, fallb
 const runtimeFailure = (
   error: unknown,
   targetFile: string,
-): { readonly success: false; readonly errorCode: 'UNKNOWN'; readonly message: string } => {
+): { readonly success: false; readonly errorCode: 'UNKNOWN' | 'RESULT_TOO_LARGE'; readonly message: string } => {
   const reason = error instanceof Error ? error.message : String(error);
-  const isUnavailable =
-    error instanceof Error && (error as Error & { readonly code?: unknown }).code === 'RUNTIME_UNAVAILABLE';
+  const code = error instanceof Error ? (error as Error & { readonly code?: unknown }).code : undefined;
+  const isUnavailable = code === 'RUNTIME_UNAVAILABLE';
   return {
     success: false,
-    errorCode: rpcClientErrorCode.unknown,
+    errorCode: code === 'RESULT_TOO_LARGE' ? rpcClientErrorCode.resultTooLarge : rpcClientErrorCode.unknown,
     /* `RUNTIME_UNAVAILABLE` already reads as a sentence about this host — the
      * supervisor's own failure, verbatim — so it is not wrapped twice. */
     message: isUnavailable ? reason : `This Tau Host could not render ${targetFile}: ${reason}`,
@@ -387,7 +387,18 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
           signal: job.signal,
         });
         if (!result.success) {
-          throw new Error(issueMessage(result.issues, 'Image capture failed'));
+          const message = issueMessage(result.issues, 'Image capture failed');
+          const overLimit = result.issues.some(
+            (issue) =>
+              issue.details !== null &&
+              typeof issue.details === 'object' &&
+              'type' in issue.details &&
+              issue.details.type === 'render' &&
+              'code' in issue.details &&
+              issue.details.code === 'parse' &&
+              /accessor \d+ count \d+ exceeds \d+/u.test(issue.message),
+          );
+          throw Object.assign(new Error(message), overLimit ? { code: 'RESULT_TOO_LARGE' } : {});
         }
         return result.data;
       },
@@ -431,10 +442,16 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
      * worker returns — the only host-specific part is which runner ran.
      */
     const geospec: RpcGeoSpecClient | undefined = runnerFactory && {
-      async runTests(args) {
+      async runTests(args, context) {
         try {
+          context?.signal?.throwIfAborted();
           const runner = await runnerFactory(workspaceRoot);
+          const abortRunner = (): void => {
+            runner.abort('test_model request cancelled');
+          };
+          context?.signal?.addEventListener('abort', abortRunner, { once: true });
           try {
+            context?.signal?.throwIfAborted();
             const output = await runGeoSpecTests({
               discovery: {
                 readdir: async (path) => readdir(path),
@@ -450,8 +467,10 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
               // resolves its own sources, and an unproven verdict must not claim a revision.
               ...(runner.sourceRevisions === undefined ? {} : { sourceRevisions: runner.sourceRevisions }),
             });
+            context?.signal?.throwIfAborted();
             return { success: true, ...output };
           } finally {
+            context?.signal?.removeEventListener('abort', abortRunner);
             await runner.close();
           }
         } catch (error) {
@@ -527,6 +546,8 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
      * names, descriptions and schemas, and the list is read before any run
      * exists. */
     list: () => live.list(),
+    /* An answer names no checkout: every root's registry settles it through the same machine client (D5). */
+    answerApproval: async (answer) => live.answerApproval?.(answer),
     invoke: async (invocation) =>
       rootedRegistry(
         (invocation.runId === undefined ? undefined : options.checkouts?.get(invocation.runId)?.cwd) ??

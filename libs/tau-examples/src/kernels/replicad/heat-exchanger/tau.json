@@ -1,0 +1,13 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_fJu52x0KBucl4XvNHkVKE",
+  "name": "Shell-and-Tube Heat Exchanger",
+  "description": "A 19-tube hexagonal bundle on a 20.5 mm pitch in a 500 mm shell, with 12-bolt flanges, nozzles, a dished head and saddle supports. Stretch the shell to resize the unit.",
+  "tags": ["process-engineering", "pressure-vessel", "assembly", "replicad"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

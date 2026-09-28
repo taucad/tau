@@ -26,6 +26,7 @@ import { nestedActionVariants } from '@taucad/ui/components/nested-action.varian
 import { formatDisplayLabel } from '#utils/string.utils.js';
 import { ModifiedIndicator } from '#components/ui/modified-indicator.js';
 import { HighlightText } from '#components/highlight-text.js';
+import { ParameterGroupCard } from '#components/geometry/parameters/parameter-group-card.js';
 import {
   FieldLabelContext,
   ParametersWidget,
@@ -127,42 +128,20 @@ function CompositeFieldTemplate({
   const discriminatorLabel = formatDisplayLabel(union.discriminator);
 
   return (
-    <Collapsible
-      data-slot='parameter-group'
-      open={isOpen}
-      className='group/parameter-group w-full overflow-hidden rounded-lg border border-transparent transition-colors duration-150 data-[state=open]:border-border data-[state=open]:bg-background motion-reduce:transition-none'
+    <ParameterGroupCard
+      title={prettyTitle}
+      searchTerm={formContext.searchTerm}
+      trailing={<span className='shrink-0 text-xs text-muted-foreground tabular-nums'>({propertyCount})</span>}
+      isOpen={isOpen ?? false}
+      headerActions={<ArrayItemRemoveAction action={action} />}
+      bodyClassName='grid grid-cols-[minmax(0,40%)_minmax(0,1fr)] items-center [&>.panel]:contents [&>.panel>.field-group]:col-span-2 [&>.panel>.form-group]:col-start-2 [&>.panel>.form-group]:row-start-1 [&>.panel>.form-group]:flex [&>.panel>.form-group]:justify-end [&>.panel>.form-group]:py-1.5 [&>.panel>.form-group]:pr-2.5'
       onOpenChange={setIsOpen}
     >
-      <div
-        data-slot='parameter-group-header'
-        className='group/parameter-group-header flex items-center rounded-md transition-colors duration-150 group-data-[state=open]/parameter-group:rounded-b-none focus-within:bg-sidebar-accent hover:bg-sidebar-accent motion-reduce:transition-none'
-      >
-        <CollapsibleTrigger
-          className='group/collapsible flex min-h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 hover:bg-transparent focus-visible:focus-outline data-[state=open]:rounded-b-none motion-reduce:transition-none'
-          aria-label={`Group: ${prettyTitle}`}
-        >
-          <h3 className='min-w-0 flex-1 truncate text-sm font-medium text-foreground'>
-            <HighlightText text={prettyTitle} searchTerm={formContext.searchTerm} />
-          </h3>
-          <span className='shrink-0 text-xs text-muted-foreground tabular-nums'>({propertyCount})</span>
-          <ChevronDown
-            aria-hidden='true'
-            className='size-4 shrink-0 text-muted-foreground transition-transform duration-150 ease-out group-data-[state=open]/collapsible:rotate-180 motion-reduce:transition-none'
-          />
-        </CollapsibleTrigger>
-        <ArrayItemRemoveAction action={action} />
-      </div>
-
-      <CollapsibleContent
-        data-slot='parameter-group-content'
-        className='grid grid-cols-[minmax(0,40%)_minmax(0,1fr)] items-center border-t border-border/70 py-1 [&>.panel]:contents [&>.panel>.field-group]:col-span-2 [&>.panel>.form-group]:col-start-2 [&>.panel>.form-group]:row-start-1 [&>.panel>.form-group]:flex [&>.panel>.form-group]:justify-end [&>.panel>.form-group]:py-1.5 [&>.panel>.form-group]:pr-2.5'
-      >
-        <span className='col-start-1 row-start-1 truncate px-2.5 text-sm text-muted-foreground'>
-          {discriminatorLabel}
-        </span>
-        <rjsfLayoutContext.Provider value={selectedBranchContext}>{children}</rjsfLayoutContext.Provider>
-      </CollapsibleContent>
-    </Collapsible>
+      <span className='col-start-1 row-start-1 truncate px-2.5 text-sm text-muted-foreground'>
+        {discriminatorLabel}
+      </span>
+      <rjsfLayoutContext.Provider value={selectedBranchContext}>{children}</rjsfLayoutContext.Provider>
+    </ParameterGroupCard>
   );
 }
 
@@ -174,6 +153,17 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
   const layoutContext = useRjsfLayoutContext();
   const renderedField = useRenderedFieldPath();
   const fieldPath = renderedField?.path;
+  const instancePointer = fieldPath === undefined ? undefined : toInstancePointer(fieldPath);
+  const { parameterManifest, parameterGroup } = formContext;
+  /* Every field template re-renders on each filter keystroke; the projection depends on none of it.
+   * A group's pointer has no binding, so projecting it returns at once. */
+  const fieldProjection = useMemo(
+    () =>
+      instancePointer === undefined
+        ? undefined
+        : projectParameterField(parameterManifest, instancePointer, {}, parameterGroup),
+    [instancePointer, parameterGroup, parameterManifest],
+  );
 
   if (layoutContext.embeddedDiscriminator !== undefined && layoutContext.embeddedDiscriminator === fieldPath?.at(-1)) {
     return null;
@@ -266,11 +256,6 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
     fieldPath !== undefined &&
     (Object.is(formData, null) ? !Object.is(defaultValue, null) : hasCustomValue(formData, defaultValue, fieldPath));
   const canReset = !(renderedField?.isArrayItem && defaultValue === undefined);
-  const instancePointer = fieldPath === undefined ? undefined : toInstancePointer(fieldPath);
-  const fieldProjection =
-    instancePointer === undefined
-      ? undefined
-      : projectParameterField(formContext.parameterManifest, instancePointer, {}, formContext.parameterGroup);
   const inferredHint =
     fieldProjection?.guessed === true
       ? fieldProjection.inferredFields?.includes('unit') === true
@@ -451,44 +436,23 @@ function ObjectFieldTemplate(
     : `(${totalPropertiesCount})`;
 
   return (
-    <Collapsible
-      data-slot='parameter-group'
-      open={isOpen}
-      className='group/parameter-group w-full overflow-hidden rounded-lg border border-transparent transition-colors duration-150 data-[state=open]:border-border data-[state=open]:bg-background motion-reduce:transition-none'
+    <ParameterGroupCard
+      title={prettyTitle}
+      searchTerm={formContext.searchTerm}
+      trailing={
+        <span className={cn('shrink-0 text-xs tabular-nums text-muted-foreground', isCountFiltered && 'italic')}>
+          {countDisplay}
+        </span>
+      }
+      isOpen={isOpen ?? false}
+      headerActions={<ArrayItemRemoveAction action={layoutContext.arrayItemAction} />}
       onOpenChange={setIsOpen}
     >
-      <div
-        data-slot='parameter-group-header'
-        className='group/parameter-group-header flex items-center rounded-md transition-colors duration-150 group-data-[state=open]/parameter-group:rounded-b-none focus-within:bg-sidebar-accent hover:bg-sidebar-accent motion-reduce:transition-none'
-      >
-        <CollapsibleTrigger
-          className='group/collapsible flex min-h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 hover:bg-transparent focus-visible:focus-outline data-[state=open]:rounded-b-none motion-reduce:transition-none'
-          aria-label={`Group: ${prettyTitle}`}
-        >
-          <h3 className='min-w-0 flex-1 truncate text-sm font-medium text-foreground'>
-            <HighlightText text={prettyTitle} searchTerm={formContext.searchTerm} />
-          </h3>
-          <span className={cn('shrink-0 text-xs tabular-nums text-muted-foreground', isCountFiltered && 'italic')}>
-            {countDisplay}
-          </span>
-          <ChevronDown
-            aria-hidden='true'
-            className='size-4 shrink-0 text-muted-foreground transition-transform duration-150 ease-out group-data-[state=open]/collapsible:rotate-180 motion-reduce:transition-none'
-          />
-        </CollapsibleTrigger>
-        <ArrayItemRemoveAction action={layoutContext.arrayItemAction} />
-      </div>
-
-      <CollapsibleContent
-        data-slot='parameter-group-content'
-        className='border-t border-border/70 px-0 py-1 [&>.field-group]:mx-1'
-      >
-        <rjsfLayoutContext.Provider value={emptyRjsfLayoutContext}>
-          {description ? <div className='px-2.5 py-1.5 text-xs text-muted-foreground'>{description}</div> : null}
-          {properties.map((element) => element.content)}
-        </rjsfLayoutContext.Provider>
-      </CollapsibleContent>
-    </Collapsible>
+      <rjsfLayoutContext.Provider value={emptyRjsfLayoutContext}>
+        {description ? <div className='px-2.5 py-1.5 text-xs text-muted-foreground'>{description}</div> : null}
+        {properties.map((element) => element.content)}
+      </rjsfLayoutContext.Provider>
+    </ParameterGroupCard>
   );
 }
 

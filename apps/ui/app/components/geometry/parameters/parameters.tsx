@@ -123,20 +123,23 @@ export function Parameters({
     setLocalFilterTerm('');
   }, []);
 
+  /* The term invalidates every field, so the search box paints first and the row pass follows as
+   * interruptible work that later keystrokes coalesce. */
+  const deferredFilterTerm = useDeferredValue(activeFilterTerm);
   const formContext = useMemo<RJSFContext>(
     () => ({
       idPrefix: rjsfIdPrefix,
       rootPresentation: 'catalog',
       allExpanded,
-      searchTerm: activeFilterTerm,
+      searchTerm: deferredFilterTerm,
       resetSingleParameter,
       defaultParameters,
       shouldShowField(text) {
-        if (!activeFilterTerm) {
+        if (!deferredFilterTerm) {
           return true;
         }
 
-        return text.toLowerCase().includes(activeFilterTerm.toLowerCase());
+        return text.toLowerCase().includes(deferredFilterTerm.toLowerCase());
       },
       units,
       parameterManifest,
@@ -145,7 +148,7 @@ export function Parameters({
     }),
     [
       allExpanded,
-      activeFilterTerm,
+      deferredFilterTerm,
       resetSingleParameter,
       defaultParameters,
       units,

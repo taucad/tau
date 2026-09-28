@@ -12,6 +12,7 @@ const names = [
   'tau-test-both',
   'tau-test-corrupt-local',
   'tau-test-blocked',
+  'tau-test-unset',
 ];
 
 beforeEach(() => {
@@ -119,4 +120,16 @@ it('keeps the only durable copy when migration cannot write to local storage', (
 
   expect(store.get('tau-test-blocked')).toBe('old');
   expect(Cookies.get('tau-test-blocked')).toBe('"old"');
+});
+
+it('reads the request cookies once for an unset preference', () => {
+  const cookieGet = vi.spyOn(Document.prototype, 'cookie', 'get');
+
+  expect(store.get('tau-test-unset')).toBeUndefined();
+  expect(store.get('tau-test-unset')).toBeUndefined();
+  expect(cookieGet).toHaveBeenCalledOnce();
+
+  store.update('tau-test-unset', 'set');
+  expect(store.get('tau-test-unset')).toBe('set');
+  cookieGet.mockRestore();
 });

@@ -492,6 +492,8 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
 
   return {
     list: () => definitions,
+    /* Only the machine tools ask for approvals (D5). */
+    answerApproval: async (answer) => machineRegistry?.answerApproval?.(answer),
     async invoke(invocation) {
       assertNotAborted(invocation.signal);
       if (isMachineToolName(invocation.toolName)) {

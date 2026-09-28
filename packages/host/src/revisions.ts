@@ -338,16 +338,18 @@ const liveRoot = Symbol('live checkout');
 /** A watched checkout root: the live one, or a linked checkout by id. */
 type WatchKey = string | typeof liveRoot;
 
-/** How long a host waits for the live checkout, and then for the `close` cuts, before it lets the project go. */
+/** What a caller allows each of the close flush's two answered waits: the live checkout, then the `close` cuts. */
 const closeFlushMilliseconds = closeCutMilliseconds;
 
 /**
- * The longest `release()` holds one project before it lets go (rule 9).
+ * How long a caller that waits on `release()` allows one project (rule 9): the caller's bound, not the host's.
  *
- * The close flush runs three bounded waits in sequence: the live checkout
- * (a registry that answers late), the close cuts, then the scheduler's
- * quiesce. A caller that waits on `release()` — desktop quit — nests strictly
- * outside this, so the host's own reason lands before the caller's generic one.
+ * The close flush waits for the registry's live checkout and then for every
+ * `close` cut by request id, with no bound of its own (B3, B8), and only the
+ * scheduler's quiesce is bounded (W13 P33). This budget allows each of the two
+ * answered waits one close-cut bound before the quiesce. A caller that waits on
+ * `release()` (desktop quit, B9) nests strictly outside it, so a host that is
+ * merely slow answers before the caller gives up with its generic reason.
  *
  * @public
  */
@@ -1064,9 +1066,11 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
    * Record what is on disk before this host lets the project go (S30 `close`).
    *
    * The checkout's I5 gate decides whether anything is minted, so a clean
-   * checkout pays one tree hash. Bounded, because quitting must not hang on a
-   * store that stopped answering: a revision that was not minted here is minted
-   * by the next host to open the project, from the same bytes.
+   * checkout pays one tree hash. The registry and every cut are answered by
+   * request id, not bounded (B3, B8); only the scheduler's quiesce is. A quit
+   * that must not hang is bounded by its owner (desktop quit, B9): a revision
+   * not minted here is minted by the next host to open the project, from the
+   * same bytes.
    *
    * @returns Nothing; the outcome is the revision, or the absence of one.
    */
@@ -1707,18 +1711,15 @@ export type RevisionSaveOutcome =
       line: string;
       /**
        * How the push that followed ended; `noRemote` when this project backs up
-       * nowhere, `timedOut` when the push did not answer in time (its outcome is
-       * unknown, not failed).
+       * nowhere. A hung push ends at the scheduler's own deadline (A12).
        */
-      backup: SyncPushOutcome | 'noRemote' | 'timedOut';
+      backup: SyncPushOutcome | 'noRemote';
       /** The scheduler's own sentence, when `backup` is neither `backedUp` nor `noRemote`. */
       reason?: string;
     }>
   /** The files already are the head's revision, or a turn is recording them. */
   | Readonly<{ status: 'unchanged'; line: string }>
-  | Readonly<{ status: 'refused'; reason: string }>
-  /** The cut did not answer in time: whether a revision was recorded is unknown, not refused. */
-  | Readonly<{ status: 'timedOut'; reason: string }>;
+  | Readonly<{ status: 'refused'; reason: string }>;
 
 /** What an `openFromRemote` did, or why it did not (W18 DEF-2). @public */
 export type RevisionOpenOutcome =
@@ -2067,7 +2068,6 @@ export const openProjectRevisions = (
       | Readonly<{ status: 'minted'; revisionId: string }>
       | Readonly<{ status: 'unchanged' }>
       | Readonly<{ status: 'refused'; reason: string }>
-      | Readonly<{ status: 'timedOut'; reason: string }>
     >(
       (resolve) => {
         const subscriptions = [
@@ -2104,7 +2104,7 @@ export const openProjectRevisions = (
       },
       /* Answered by its request id in every state (B3, RM-R11): no host bound of its own. */
     );
-    if (cut.status === 'refused' || cut.status === 'timedOut') {
+    if (cut.status === 'refused') {
       return cut;
     }
     if (cut.status === 'unchanged') {
@@ -2114,7 +2114,7 @@ export const openProjectRevisions = (
     /* A push already running when this asks was built before the mint, so the
      * scheduler answers with the next one (sync.machine row 65). */
     const pushId = randomUUID();
-    const pushed = await answered<SyncPushOutcome | 'timedOut'>(
+    const pushed = await answered<SyncPushOutcome>(
       (resolve) => {
         const settled = scheduler.on('pushSettled', (event) => {
           if (event.pushId === pushId) {
@@ -2139,12 +2139,7 @@ export const openProjectRevisions = (
       backup,
       ...(backup === 'backedUp' || backup === 'noRemote'
         ? {}
-        : {
-            reason:
-              backup === 'timedOut'
-                ? 'The backup did not answer in time; whether it reached the remote is unknown.'
-                : (sync.error ?? 'This revision is saved here and was not backed up yet.'),
-          }),
+        : { reason: sync.error ?? 'This revision is saved here and was not backed up yet.' }),
     });
   };
 

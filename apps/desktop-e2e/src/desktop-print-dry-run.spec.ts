@@ -1,6 +1,6 @@
 /* oxlint-disable no-await-in-loop -- The physical checks are ticked one at a time, as a person does. */
-import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { readFile, readdir } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import type { Locator, Page } from 'playwright';
 import { launchDesktopApp } from '#support/desktop-app.js';
@@ -9,7 +9,6 @@ import {
   gatewayFixtureFinalText,
   gatewayFixtureModelName,
   gatewayFixtureScadSource,
-  gatewayToolResults,
   startGatewayFixture,
 } from '#support/gateway-fixture.js';
 import type { GatewayFixture, GatewayFixtureToolCall } from '#support/gateway-fixture.js';
@@ -24,6 +23,7 @@ import {
   selectKernel,
   sendPrompt,
   submitPrompt,
+  waitForRunToSettle,
 } from '#support/scenario.js';
 
 /**
@@ -32,8 +32,11 @@ import {
  * reach real hardware: the only machine bound is the one "Add simulated X1C" makes.
  *
  * The scripted turn writes the pyramid and calls `request_print`, which pauses the
- * run on an approval interrupt; the chat banner and the Print pane answer the same
- * ledger record, and accepting uploads and starts in one step (canvas ruling 1).
+ * run on its native approval interrupt (D5); the chat banner and the Print pane answer
+ * the same ledger record, and accepting uploads and starts in one step (canvas ruling 1).
+ * The host hands the answer to the machine ledger: an approval continues the run and
+ * tells the continued attempt the answer; a denial ends the run cancelled, with no
+ * closing line.
  */
 
 const seedPrompt = 'Start a project for a print test.';
@@ -97,13 +100,31 @@ const offeredTools = (current: GatewayFixture): readonly string[] =>
     (tool) => tool.name,
   );
 
-/** What `request_print` finally told the model, once the person answered. */
-const printToolResult = (current: GatewayFixture): Readonly<Record<string, unknown>> => {
-  const results = gatewayToolResults(current.gatewayRequests.slice(-1)).filter(({ name }) => name === 'request_print');
-  expect(results).toHaveLength(1);
-  expect(results[0]!.isError).toBe(false);
-  return JSON.parse(results[0]!.text) as Readonly<Record<string, unknown>>;
+/**
+ * The machine ledger's print requests for the simulated X1C, read from the files the desktop writes
+ * (`<userData>/config/machines/<machineId>/requests/<requestId>.json`, `{ version: 1, request }`).
+ */
+const ledgerRequests = async (current: DesktopSession): Promise<ReadonlyArray<Readonly<Record<string, unknown>>>> => {
+  const directory = join(dirname(current.homeRoot), 'config', 'machines', 'simulated-x1c', 'requests');
+  const entries = await readdir(directory);
+  const names = entries.filter((name) => name.endsWith('.json') && !name.startsWith('.'));
+  const records = await Promise.all(names.map(async (name) => readFile(join(directory, name), 'utf8')));
+  return records.map((text) => (JSON.parse(text) as { readonly request: Readonly<Record<string, unknown>> }).request);
 };
+
+/** Every text a gateway request's messages carry, tool results excluded: where the approval-answer reminder rides. */
+const requestTexts = (request: unknown): string =>
+  ((request as { readonly messages?: ReadonlyArray<{ readonly content?: unknown }> }).messages ?? [])
+    .flatMap(({ content }) =>
+      typeof content === 'string'
+        ? [content]
+        : Array.isArray(content)
+          ? (content as ReadonlyArray<Record<string, unknown>>).flatMap((block) =>
+              block['type'] === 'text' && typeof block['text'] === 'string' ? [block['text']] : [],
+            )
+          : [],
+    )
+    .join('\n');
 
 /**
  * Seed a project, bind the simulated X1C in Settings, and open the Print pane.
@@ -202,6 +223,7 @@ test('prints the chat pyramid on the simulated X1C only after Accept', async () 
   script.current = printTurn;
   try {
     const fileName = await requestPyramidPrint(page, root);
+    const paused = fixture!.gatewayRequests.length;
 
     /* Preview the exact requested bytes in the printer viewer before accepting them. */
     const paneCard = paneApprovalOf(page, fileName);
@@ -233,13 +255,19 @@ test('prints the chat pyramid on the simulated X1C only after Accept', async () 
       .poll(async () => Number(await progress.getAttribute('aria-valuenow')), { timeout: 60_000 })
       .toBeGreaterThan(firstProgress);
     expect(await page.getByRole('button', { name: 'Urgent stop' }).isEnabled()).toBe(true);
-    /* The seed turn closed with the same line; the print turn's is the second. */
+    /* The seed turn closed with the same line; the continued print turn's is the second. */
     await expectCount(page.getByText(gatewayFixtureFinalText, { exact: true }), 2, 300_000);
-    expect(printToolResult(fixture!)).toMatchObject({
-      approval: 'approved',
-      machineName,
-      request: { state: 'started', resolvedBy: { kind: 'user', label: 'Accepted in chat' } },
-    });
+    await expectCount(chatApprovalOf(page), 0);
+    /* The host handed the chat's answer to the ledger, in the chat's words. */
+    const [accepted, ...others] = await ledgerRequests(session!);
+    expect(others).toEqual([]);
+    expect(accepted).toMatchObject({ resolvedBy: { kind: 'user', label: 'Accepted in chat' } });
+    /* The continued attempt was told the answer, not only that its call was aborted. */
+    const continued = fixture!.gatewayRequests.slice(paused).map((request) => requestTexts(request));
+    expect(continued).toContainEqual(
+      expect.stringContaining("The run paused for the person's approval, and they answered:"),
+    );
+    expect(continued).toContainEqual(expect.stringContaining(`- approved: "Print ${fileName} on ${machineName}?`));
     await expectModelBuilt({
       finalText: gatewayFixtureFinalText,
       logPath: session!.logPath,
@@ -252,33 +280,41 @@ test('prints the chat pyramid on the simulated X1C only after Accept', async () 
   }
 });
 
-test('denies the chat pyramid print without uploading anything', async () => {
+/* The pane card and the chat banner answer the same interrupt; either one's Deny reaches the ledger. */
+test.each([
+  ['the Print pane', 'pane'],
+  ['the chat banner', 'chat'],
+] as const)('denies the chat pyramid print from %s without uploading anything', async (_surface, surface) => {
   const script = { current: seedTurn };
-  const { page, root } = await openPrintProject('print-dry-run-deny', script);
+  const { page, root } = await openPrintProject(`print-dry-run-deny-${surface}`, script);
   script.current = printTurn;
   try {
     const fileName = await requestPyramidPrint(page, root);
-    await paneApprovalOf(page, fileName).getByRole('button', { name: 'Deny' }).click();
+    const paused = fixture!.gatewayRequests.length;
+    const answering = surface === 'pane' ? paneApprovalOf(page, fileName) : chatApprovalOf(page);
+    await answering.getByRole('button', { name: 'Deny' }).click();
     await expect
       .poll(async () => latestRequestRow(page), { timeout: 60_000 })
       .toMatch(new RegExp(`^Denied${escapeRegExp(fileName)}by Tau agent`, 'u'));
     expect(await monitorText(page)).toContain('Idle');
-    await expectCount(page.getByText(gatewayFixtureFinalText, { exact: true }), 2, 300_000);
     await expectCount(chatApprovalOf(page), 0);
     await expectCount(paneApprovalOf(page, fileName), 0);
-    const result = printToolResult(fixture!);
-    expect(result).toMatchObject({
-      approval: 'denied',
-      machineName,
-      request: { state: 'denied', resolvedBy: { kind: 'user', label: 'Declined in chat' } },
+    /* A denial ends the run cancelled: the model is not asked again, and no closing line follows the seed turn's. */
+    await waitForRunToSettle(page, 120_000);
+    expect(fixture!.gatewayRequests.length).toBe(paused);
+    await expectCount(page.getByText(gatewayFixtureFinalText, { exact: true }), 1);
+    const [request, ...others] = await ledgerRequests(session!);
+    expect(others).toEqual([]);
+    expect(request).toMatchObject({
+      state: 'denied',
+      resolvedBy: { kind: 'user', label: 'Declined in chat' },
     });
     /* Zero uploads: a denied request never took a transfer, an operation id or a receipt. */
-    const request = result['request'] as Readonly<Record<string, unknown>>;
-    expect(['uploadOperationId', 'startOperationId', 'transferId', 'receipt'].filter((key) => key in request)).toEqual(
+    expect(['uploadOperationId', 'startOperationId', 'transferId', 'receipt'].filter((key) => key in request!)).toEqual(
       [],
     );
   } catch (error) {
-    await session!.capture('print-dry-run-deny');
+    await session!.capture(`print-dry-run-deny-${surface}`);
     throw error;
   }
 });

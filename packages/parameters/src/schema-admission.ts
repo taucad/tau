@@ -1,6 +1,7 @@
 import { Validator } from '@cfworker/json-schema';
 import { canonicalizeCacheValue } from '@taucad/cache-core';
 import type { CacheValue } from '@taucad/cache-core';
+import type { JSONSchema7 } from '@taucad/json-schema';
 import { admitUnit } from '@taucad/units/unit';
 import { quantityKinds, quantityReferences } from '@taucad/units/quantity';
 import { assertBoundedJson } from '#bounded-json.js';
@@ -579,16 +580,34 @@ export const admitJsonSchema = (schema: JsonSchema): void => {
   }
 };
 
+// The validator annotates the nodes it dereferences, so it compiles a copy. Admitted schemas are deep-frozen and cannot
+// change, so a frozen schema keeps its compiled validator for its lifetime; a mutable schema is compiled on every call.
+// Only a shallow freeze is checked: freezing a root over mutable children is unsupported.
+const compiledValidators = new WeakMap<JsonSchema, Validator>();
+
+const compiledValidator = (schema: JsonSchema): Validator => {
+  const cached = compiledValidators.get(schema);
+  if (cached) {
+    return cached;
+  }
+  const validator = new Validator(structuredClone(schema), validatorDrafts[dialectOf(schema)], false);
+  if (Object.isFrozen(schema)) {
+    compiledValidators.set(schema, validator);
+  }
+  return validator;
+};
+
 /**
  * Validate a value against an admitted schema in the dialect its `$schema` declares.
- * @param schema - Admitted schema.
+ * @param schema - Admitted schema; pass a frozen schema (as admission returns) to reuse its compiled validator.
  * @param value - Candidate data.
  * @returns Whether the candidate validates.
  * @public
  */
-export const validateJsonSchemaValue = (schema: JsonSchema, value: unknown): boolean => {
+export const validateJsonSchemaValue = (schema: JsonSchema | JSONSchema7, value: unknown): boolean => {
   try {
-    return new Validator(structuredClone(schema), validatorDrafts[dialectOf(schema)], false).validate(value).valid;
+    // A `JSONSchema7` is the same JSON document under a closed interface; the validator only reads it.
+    return compiledValidator(schema as JsonSchema).validate(value).valid;
   } catch {
     return false;
   }
@@ -605,7 +624,7 @@ export const validateJsonSchemaIssues = (
   schema: JsonSchema,
   value: unknown,
 ): ReadonlyArray<Readonly<{ pointer: string; message: string }>> => {
-  const result = new Validator(structuredClone(schema), validatorDrafts[dialectOf(schema)], false).validate(value);
+  const result = compiledValidator(schema).validate(value);
   return result.errors.map((error) => ({
     pointer: error.instanceLocation.startsWith('#') ? error.instanceLocation.slice(1) : error.instanceLocation,
     message: error.error,

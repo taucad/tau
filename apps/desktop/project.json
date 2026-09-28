@@ -43,7 +43,7 @@
       "executor": "nx:run-commands",
       "outputs": ["{projectRoot}/dist"],
       "inputs": ["production", "^production", { "env": "TAU_CLOUD_ENABLED" }],
-      "dependsOn": [{ "projects": ["ui"], "target": "build:desktop" }],
+      "dependsOn": ["typecheck", { "projects": ["ui"], "target": "build:desktop" }],
       "options": {
         "cwd": "{projectRoot}",
         "command": "electron-vite build"

@@ -20,7 +20,7 @@ import type { ChatContextReference } from '#components/chat/chat-context-inserti
 import { ChatApprovalBanner } from '#components/chat/chat-approval-banner.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
-import { captureCadImages, captureFilesToDataUrls } from '#services/headless-capture.js';
+import { captureCadImages, captureFilesToDataUrls, omittedSectionCutsNotice } from '#services/headless-capture.js';
 import { useChatSessionSnapshot } from '#hooks/use-chat-session.js';
 import { latestAcpSessionData } from '#services/agent-host-event-projection.js';
 
@@ -255,7 +255,7 @@ export const ChatTextarea = memo(function ({
         return;
       }
       try {
-        const files = await captureCadImages({
+        const { files, omittedSectionCutIds } = await captureCadImages({
           cadRef,
           graphicsRef: resolveGraphicsRefForEntry(entryPath),
           imageService,
@@ -269,6 +269,9 @@ export const ChatTextarea = memo(function ({
         }
         if (successToast) {
           toast.success('Added screenshot to chat');
+        }
+        if (omittedSectionCutIds.length > 0) {
+          toast.warning(omittedSectionCutsNotice);
         }
       } catch (error) {
         if (mounted.current) {

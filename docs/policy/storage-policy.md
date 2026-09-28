@@ -3,7 +3,7 @@ title: 'Storage Policy'
 description: 'Store-selection boundary (what belongs in IndexedDB at all) plus rules for atomic read-modify-write semantics, field-scoped patches, and concurrent-writer safety in client-side persistent storage providers.'
 status: active
 created: '2026-04-20'
-updated: '2026-09-26'
+updated: '2026-09-29'
 related:
   - docs/policy/project-manifest-policy.md
   - docs/policy/filesystem-authority-policy.md
@@ -46,6 +46,7 @@ Before applying any rule below, put the data in the right store. Portable projec
 | Draft-stage attachment bytes (images, PDFs)                                           | Home workspace (`attachments/` beside the owning composer record; `/.tau/composers/<surface>/attachments` for pre-project surfaces without one) | Composer record rules below                            |
 | Sent chat attachment bytes                                                            | Project filesystem (`.tau/chats/<chatId>/attachments/<sha256>.<ext>`)                                                                           | Composer record rules below + revisions policy Rule 12 |
 | Project print intent (printer model, presets, setting overrides)                      | Project filesystem (`.tau/machines/printer.json`)                                                                                               | Machine store rules below                              |
+| Portable workbench layout, viewer views and entry display                             | Project filesystem (`.tau/workbench/**`), authored records that are unversioned, agent read-write and UI-watched                                | Revisions policy Rule 4 + filesystem authority Rule 16 |
 | Printer bindings, preparations, print requests and effect logs, per user              | Per-user config folder (`<config>/machines/<machineId>/`; `TAU_CONFIG_DIR` overrides `<config>`)                                                | Machine store rules below                              |
 | Browser-local application state (editor layout, resource links)                       | Object store via `IndexedDbStorageProvider`                                                                                                     | This policy's RMW rules                                |
 | Browser-local app chrome preferences (project disclosure)                             | Dedicated `appUiPreferences` object store                                                                                                       | This policy's RMW rules                                |

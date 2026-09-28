@@ -242,7 +242,6 @@ export type ChatSessionLivenessSnapshot = Readonly<{
         phase: ProjectedRunPhase;
         machineState: unknown;
         activeRunId: string | undefined;
-        pendingSettlement: unknown;
       }>
     >
   >;
@@ -443,7 +442,6 @@ export class ChatSessionStore {
               phase: projection === undefined ? 'none' : selectRunPhase(projection),
               machineState: state.value,
               activeRunId: state.context.activeRunId,
-              pendingSettlement: state.context.pendingSettlement,
             },
           ];
         }),

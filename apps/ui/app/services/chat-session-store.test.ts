@@ -13,11 +13,10 @@ import type { CommandAnswer, HostCommand } from '@taucad/agent-host/wire';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { uint8ArrayToBase64 } from 'uint8array-extras';
-import type { ChatRequest, ChatTurnGesture, ChatTurnSettlementInput } from '#machines/chat-session.machine.js';
+import type { ChatRequest, ChatTurnGesture } from '#machines/chat-session.machine.js';
 import type { ProjectSessionActorRef } from '#machines/project-session.machine.js';
 import { projectSessionMachine } from '#machines/project-session.machine.js';
 import { spyOnSend } from '#lib/xstate-test.utils.js';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
 import {
   chatTurnAdmission,
   publishChatTurnAdmission,
@@ -290,15 +289,9 @@ async function settle(): Promise<void> {
   }
 }
 
-/* The host settles every turn (W8 TS-S6); these rows assert which run the chat's session actor ends, and how. */
-const recordedSettlements = new Map<string, ChatTurnSettlementInput[]>();
-const recordingSettlement = fromSafeAsync<void, ChatTurnSettlementInput>(async ({ input }) => {
-  recordedSettlements.get(input.chatId)?.push(input);
-});
-
 /** Every store here runs its chats on this logic, so a row can record the turns a chat ends (PV-S5: the store owns each chat's root). */
 const chatSession = chatSessionMachine.provide({
-  actors: { admitTurn: chatTurnAdmission, settleTurn: recordingSettlement },
+  actors: { admitTurn: chatTurnAdmission },
 });
 
 function createStore(): StoreType {
@@ -326,18 +319,6 @@ function startTurnOwner(store: StoreType, projectId: string): void {
   turnOwners.push(session);
   store.setFocusedProject(projectId);
   store.setProjectSession(projectId, session);
-}
-
-/**
- * Record any page-side settlement attempt; a projected terminal run must not make one.
- *
- * @param chatId - The chat whose settlements to record.
- * @returns The settlements the chat's session actor asked for, in order.
- */
-function publishSettlementRecorder(chatId: string): ChatTurnSettlementInput[] {
-  const settlements: ChatTurnSettlementInput[] = [];
-  recordedSettlements.set(chatId, settlements);
-  return settlements;
 }
 
 /**
@@ -465,7 +446,6 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     const store = createStore();
     const chatId = 'chat_live_command';
     const projectId = 'project_live_command';
-    const settlements = publishSettlementRecorder(chatId);
     const command: HostCommand = {
       type: 'start',
       commandId: 'req_live_command',
@@ -504,7 +484,6 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     await vi.waitFor(() => {
       expect(chat.sendMessage).toHaveBeenCalledTimes(1);
     });
-    expect(settlements).toEqual([]);
     expect(close).toHaveBeenCalledTimes(1);
     unpublish();
   });
@@ -553,7 +532,6 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
         return () => undefined;
       },
     });
-    const settlements = publishSettlementRecorder(chatId);
 
     const open = async () => {
       const store = new ChatSessionStore({ chatSession });
@@ -589,7 +567,6 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     await open();
     await open();
     expect(hostCommand).not.toHaveBeenCalled();
-    expect(settlements).toEqual([]);
   });
 
   it('keeps the chat root idle after an empty caught-up log retires a legacy error', async () => {

@@ -19,7 +19,9 @@ const restatedGeometry =
 
 describe('focus outline entry point', () => {
   it('defines the geometry once, as tokens', () => {
-    const declarations = [...tokenStyles.matchAll(/(--focus-outline[a-z-]*):\s*([^;]+);/g)].map(
+    /* Token declarations only: filled surfaces recolour the outline in their own utility. */
+    const tokenBlock = tokenStyles.slice(0, tokenStyles.indexOf('@utility'));
+    const declarations = [...tokenBlock.matchAll(/(--focus-outline[a-z-]*):\s*([^;]+);/g)].map(
       ([, name, value]) => `${name}: ${value?.trim()}`,
     );
 

@@ -526,9 +526,9 @@ export const registerAgentHostRunReset = (
 const readRunMessage = async (events: readonly AgentLogEvent[]): Promise<MyUIMessage | undefined> => {
   const streamedBlocks = new Map();
   // The projection emits MyUIMessage chunks, but its shared return type is the broader UIMessageChunk.
-  const chunks = events.flatMap((event) => [
-    ...projectAgentHostEvent(event, streamedBlocks),
-  ]) as InferUIMessageChunk<MyUIMessage>[];
+  const chunks = events.flatMap((event) => [...projectAgentHostEvent(event, streamedBlocks)]) as Array<
+    InferUIMessageChunk<MyUIMessage>
+  >;
   if (chunks.length === 0) {
     return undefined;
   }
@@ -540,12 +540,13 @@ const readRunMessage = async (events: readonly AgentLogEvent[]): Promise<MyUIMes
       chunk.type !== 'finish-step' &&
       chunk.type !== 'error' &&
       chunk.type !== 'abort' &&
-      !(chunk.type === 'finish' && chunk.messageMetadata == null) &&
-      !(chunk.type === 'start' && chunk.messageId == null && chunk.messageMetadata == null) &&
-      !(chunk.type === 'message-metadata' && chunk.messageMetadata == null) &&
+      !(chunk.type === 'finish' && chunk.messageMetadata === undefined) &&
+      !(chunk.type === 'start' && chunk.messageId === undefined && chunk.messageMetadata === undefined) &&
       !('transient' in chunk && chunk.transient === true),
   );
-  if (lastWrite < 0) return undefined;
+  if (lastWrite === -1) {
+    return undefined;
+  }
   const trailingSteps = chunks.slice(lastWrite + 1).filter((chunk) => chunk.type === 'start-step').length;
   const stream = (): ReadableStream<InferUIMessageChunk<MyUIMessage>> =>
     new ReadableStream<InferUIMessageChunk<MyUIMessage>>({
@@ -557,23 +558,27 @@ const readRunMessage = async (events: readonly AgentLogEvent[]): Promise<MyUIMes
       },
     });
   let message: MyUIMessage | undefined;
-  let failed = false;
+  let streamError: unknown;
   await consumeStream({
     stream: createUIMessageStream<MyUIMessage>({
-      execute: ({ writer }) => writer.merge(stream()),
+      execute: ({ writer }) => {
+        writer.merge(stream());
+      },
       generateId: () => '',
       onError: () => 'An error occurred.',
       onFinish: ({ responseMessage }) => {
         message = responseMessage;
       },
     }),
-    onError: () => {
-      failed = true;
+    onError: (error) => {
+      streamError = error;
     },
   });
-  if (failed) {
+  if (streamError !== undefined) {
     message = undefined;
-    for await (const next of readUIMessageStream<MyUIMessage>({ stream: stream() })) message = next;
+    for await (const next of readUIMessageStream<MyUIMessage>({ stream: stream() })) {
+      message = next;
+    }
   } else if (message && trailingSteps > 0) {
     message = { ...message, parts: message.parts.slice(0, -trailingSteps) };
   }

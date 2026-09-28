@@ -113,7 +113,7 @@ describe('CommunityProjectGrid', () => {
     expect(screen.getAllByRole('link')).toHaveLength(1);
     const cardLink = screen.getByRole('link', { name: 'Preview Community Demo' });
     expect(cardLink).toHaveAttribute('href', '/s/builtin~replicad.community-demo');
-    expect(cardLink.parentElement).toHaveClass('hover:border-primary/60');
+    expect(cardLink.parentElement).toHaveClass('hover:border-foreground/30');
     expect(screen.getByText('Community Demo')).toBeInTheDocument();
     expect(screen.getByText('Tau Team')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Remix' })).toBeInTheDocument();
@@ -136,7 +136,7 @@ describe('CommunityProjectGrid', () => {
     await userEvent.click(previewToggle);
     expect(screen.getByTestId('cad-preview-provider')).toBeInTheDocument();
     expect(screen.getByTestId('cad-preview-provider').parentElement).toHaveAttribute('hidden');
-    expect(screen.getByRole('img', { name: 'Community Demo' })).toBeInTheDocument();
+    expect(screen.getByRole('presentation')).toHaveAttribute('alt', '');
     expect(screen.getByTestId('location')).toHaveTextContent('/community');
   });
 

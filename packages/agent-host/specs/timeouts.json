@@ -207,15 +207,6 @@
       "fixedBy": "W7"
     },
     {
-      "id": "D9",
-      "bound": "Turn service",
-      "site": "apps/ui/app/chat-clients/_internal/chat-host-binding.ts",
-      "token": "turnServiceWaitTimeout",
-      "class": "Peer",
-      "owner": "W9",
-      "fixedBy": "W9"
-    },
-    {
       "id": "E1",
       "bound": "rpc hello",
       "site": "packages/rpc/src/channel.ts",

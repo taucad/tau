@@ -128,6 +128,8 @@ export function UserButton({
                 <div className='grid flex-1 text-left text-sm leading-tight'>{localization.auth.account}</div>
               </>
             )}
+            {/* The pending view is only skeletons: keep the trigger named while the session loads. */}
+            {!session && sessionPending ? <span className='sr-only'>{localization.auth.account}</span> : null}
 
             {isCompact ? null : <ChevronsUpDown className='ml-auto' />}
           </Button>

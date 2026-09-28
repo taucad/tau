@@ -36,8 +36,8 @@ describe('no-arbitrary-pixel-size', () => {
         },
         {
           name: 'template class string',
-          code: 'const className = `h-[300px] ${extra}`;',
-          output: 'const className = `h-75 ${extra}`;',
+          code: `const className = \`h-[300px] \${extra}\`;`,
+          output: `const className = \`h-75 \${extra}\`;`,
           errors: [{ messageId: 'spacing' }],
         },
         {

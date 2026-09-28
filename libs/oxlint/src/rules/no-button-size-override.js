@@ -66,7 +66,7 @@ export const noButtonSizeOverrideRule = {
           const source = context.sourceCode.getText(literal);
           for (const match of source.matchAll(SIZE_OVERRIDE)) {
             const [found] = match;
-            const start = literal.range[0] + match.index;
+            const start = /** @type {number} */ (literal.range[0]) + match.index;
             /* Take one neighbouring space with the utility so the class string stays tidy. */
             const end = source[match.index + found.length] === ' ' ? start + found.length + 1 : start + found.length;
             context.report({

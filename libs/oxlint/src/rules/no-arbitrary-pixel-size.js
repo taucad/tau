@@ -28,7 +28,7 @@ export const noArbitraryPixelSizeRule = {
       const source = context.sourceCode.getText(node);
       for (const match of source.matchAll(ARBITRARY_PIXEL_SIZE)) {
         const [found, utility, pixels] = match;
-        const start = node.range[0] + match.index;
+        const start = /** @type {number} */ (node.range[0]) + match.index;
         const loc = {
           start: context.sourceCode.getLocFromIndex(start),
           end: context.sourceCode.getLocFromIndex(start + found.length),

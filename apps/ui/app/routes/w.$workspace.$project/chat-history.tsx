@@ -56,16 +56,12 @@ function agentInvocationsKey(messages: readonly MyUIMessage[]): string {
 // consumer is `TurnGroup` (`min-h-(--chat-live-turn-min-h)`). Applied as
 // inline style on `ChatScroller` so it cascades to every Virtuoso item.
 //
-// `--chat-live-turn-min-h` is the min-height for the last turn group so the
-// user message stays pinned at the scroller top while the assistant reply
-// streams in. The min-height is intentionally approximate — `min-height` is
-// elastic, so a slight over/under just affects how much breathing room sits
-// below the assistant reply before content grows past it. Composition: page
-// header (--header-height) + chat panel chrome (~10.25rem: panel header +
-// status bar + chat input + margins).
+// Reserve exactly the transcript viewport for the last turn, including when
+// the pane is resized or the composer/adornments grow. ChatScroller establishes
+// the size container; a window-height estimate creates phantom overflow.
 // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- React.CSSProperties does not type custom-property keys
 const chatScrollerCssVariables = {
-  '--chat-live-turn-min-h': 'calc(100dvh - var(--header-height, 64px) - 10.25rem)',
+  '--chat-live-turn-min-h': '100cqh',
 } as React.CSSProperties;
 
 // Virtuoso's `scrollToIndex` types restrict `behavior` to `'auto' | 'smooth'`,
@@ -122,7 +118,14 @@ const TurnGroup = memo(function ({
 // `<Virtuoso className=...>`), but the public type omits it. We widen here.
 const ChatScroller = forwardRef<HTMLDivElement, ScrollerProps & { className?: string }>(function (props, ref) {
   return (
-    <div {...props} ref={ref} style={{ ...props.style, ...chatScrollerCssVariables }} className={cn(props.className)} />
+    <div
+      {...props}
+      ref={ref}
+      role='region'
+      aria-label='Chat history'
+      style={{ ...props.style, ...chatScrollerCssVariables }}
+      className={cn('[container-type:size] [scrollbar-gutter:stable]', props.className)}
+    />
   );
 });
 
@@ -289,7 +292,7 @@ export const ChatHistory = memo(function (props: {
       <FloatingPanel isOpen={isExpanded} side='right' className={className} onOpenChange={setIsExpanded}>
         <FloatingPanelContent
           // `ph-no-capture`: session replay never records chat transcripts.
-          className={cn('ph-no-capture min-h-0 overflow-hidden', !isExpanded && 'hidden')}
+          className={cn('ph-no-capture min-h-0 overflow-hidden [container-type:size]', !isExpanded && 'hidden')}
           errorFallback={(errorProps) => (
             <FloatingPanelErrorContent
               {...errorProps}
@@ -341,7 +344,11 @@ export const ChatHistory = memo(function (props: {
           {groups.length === 0 ? <ChatError className='mx-4 mb-1 shrink-0' /> : null}
           {/* Chat input area. The agent's task list sits directly above the
               composer, keyed by chat so its fold never carries across chats (D8). */}
-          <div className='relative mx-auto mb-2 w-[calc(100%_-_1rem)] max-w-xl shrink-0'>
+          <div
+            role='region'
+            aria-label='Chat composer'
+            className='relative mx-auto mb-2 w-[calc(100%_-_1rem)] max-w-xl shrink-0'
+          >
             <ScrollDownButton
               hasContent={messageIds.length > 0}
               isVisible={!atBottom}

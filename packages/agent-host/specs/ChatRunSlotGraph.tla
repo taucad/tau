@@ -72,4 +72,11 @@ GraphNext ==
     \/ S!logClosed /\ A("logClosed", "")
 
 GraphSpec == GraphInit /\ [][GraphNext]_<<S!vars, act>>
+
+\* No reservation, driver, command, or settlement is still in flight.
+Quiescent ==
+    /\ res = S!None /\ drivers = {} /\ steerQ = {} /\ waiters = {} /\ tools = {}
+    /\ \A r \in S!Runs : ending[r] = S!None
+    /\ \A k \in S!Sendable : pc[k] \in {"idle", "done"}
+    /\ lease = {} /\ callState = "idle" /\ hostState # "closing"
 ====

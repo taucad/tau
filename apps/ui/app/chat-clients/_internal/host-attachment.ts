@@ -1,7 +1,7 @@
 import { createCallbackLogic } from 'xstate';
 import type { EventObject } from 'xstate';
 import type { AgentHostClient } from '#services/agent-host-client.js';
-import { selectPosition } from '#machines/chat-projection.logic.js';
+import { selectCaughtUp, selectPosition } from '#machines/chat-projection.logic.js';
 import type { ChatProjection, ChatProjectionEvent } from '#machines/chat-projection.logic.js';
 
 /** A read-only connection into one chat's projection. @public */
@@ -22,6 +22,7 @@ export type HostAttachmentInput = Readonly<{
 export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInput>(({ input, sendBack }) => {
   let closed = false;
   let terminalRefusal = false;
+  let attached = false;
   let unsubscribe: (() => void) | undefined;
   let client: Pick<AgentHostClient, 'read' | 'subscribe' | 'close'> | undefined;
   const report = (event: {
@@ -66,11 +67,13 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
             selectPosition(input.projection.getSnapshot().context).cursor < answer.nextCursor
           ) {
             report({ type: 'attachment.lost', reason: 'read made no progress' });
+          } else if (!attached && selectCaughtUp(input.projection.getSnapshot().context)) {
+            attached = true;
+            report({ type: 'attachment.attached' });
           }
           return selectPosition(input.projection.getSnapshot().context).last;
         },
       );
-      report({ type: 'attachment.attached' });
     } catch (error) {
       report({ type: 'attachment.lost', reason: error instanceof Error ? error.message : String(error) });
     }

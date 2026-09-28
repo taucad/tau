@@ -43,6 +43,7 @@ import { useSelector } from '@xstate/react';
 import { useCallback, useMemo, useRef, useSyncExternalStore } from 'react';
 import type { CadAgentExecution, MyUIMessage } from '@taucad/chat';
 import type { ChatError } from '@taucad/types';
+import type { ChatProjection } from '#machines/chat-projection.logic.js';
 import type { KernelId } from '@taucad/types/constants';
 import type { ActorRefFrom } from 'xstate';
 import { useActiveChatSession, useChatComposer } from '#hooks/active-chat-provider.js';
@@ -194,6 +195,9 @@ export type CombinedChatState = {
   error: Error | undefined;
   /** Persisted error survives reload (from the chat entity in IndexedDB). */
   persistedError: ChatError | undefined;
+  /** Durable host facts and the current read-only attachment, not SDK stream state. */
+  projection?: ChatProjection;
+  attachmentStatus?: ReturnType<ReturnType<typeof useChatSessionStore>['getAttachmentStatus']>;
   isLoading: boolean;
   /** Chat-scoped execution target mirrored from durable persistence. */
   activeExecution: CadAgentExecution | undefined;
@@ -257,10 +261,12 @@ export function useChatSelector<T>(selector: (state: CombinedChatState) => T, ch
   const subscribe = useCallback(
     (listener: () => void) => {
       const unsubscribeChat = store.subscribeChat(activeChatId, listener);
+      const unsubscribeProjection = store.subscribeProjection(activeChatId, listener);
       const draftSubscription = draftActorRef.subscribe(listener);
       const persistenceSubscription = persistenceActorRef?.subscribe(listener);
       return () => {
         unsubscribeChat();
+        unsubscribeProjection();
         draftSubscription.unsubscribe();
         persistenceSubscription?.unsubscribe();
       };
@@ -284,6 +290,8 @@ export function useChatSelector<T>(selector: (state: CombinedChatState) => T, ch
       status,
       error: chat?.error,
       persistedError: persistenceContext?.persistedError,
+      projection: store.getProjection(activeChatId),
+      attachmentStatus: store.getAttachmentStatus(activeChatId),
       isLoading: status === 'streaming',
       activeExecution: persistenceContext?.activeExecution,
       activeKernel: persistenceContext?.activeKernel,

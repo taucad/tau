@@ -26,7 +26,9 @@ describe('hostAttachment', () => {
       },
     }).start();
 
-    await vi.waitFor(() => expect(onStatus).toHaveBeenCalledWith({ type: 'attachment.refused', reason: 'unreadable' }));
+    await vi.waitFor(() => {
+      expect(onStatus).toHaveBeenCalledWith({ type: 'attachment.refused', reason: 'unreadable' });
+    });
     expect(onStatus).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'attachment.lost' }));
     actor.stop();
     projection.stop();
@@ -39,7 +41,19 @@ describe('hostAttachment', () => {
           /* An empty long poll must never be opened by the attachment. */
         }),
     );
-    const subscribe = vi.fn(() => vi.fn());
+    const subscribe = vi.fn((...parameters: Parameters<AgentHostClient['subscribe']>) => {
+      queueMicrotask(() =>
+        parameters[3]?.({
+          status: 'batch',
+          chatId: 'chat_idle',
+          cursor: 0,
+          nextCursor: 0,
+          endCursor: 0,
+          events: [],
+        }),
+      );
+      return vi.fn();
+    });
     const onStatus = vi.fn();
     const actor = createActor(hostAttachment, {
       input: {
@@ -60,6 +74,25 @@ describe('hostAttachment', () => {
       expect.any(Function),
     );
     expect(read).not.toHaveBeenCalled();
+    actor.stop();
+    projection.stop();
+  });
+  it('does not call a connected socket caught up before its first answer', async () => {
+    const projection = createActor(chatProjectionLogic).start();
+    const onStatus = vi.fn();
+    const subscribe = vi.fn(() => vi.fn());
+    const actor = createActor(hostAttachment, {
+      input: {
+        chatId: 'chat_idle',
+        connect: async () => ({ read: vi.fn(), subscribe, close: async () => undefined }),
+        projection,
+        onStatus,
+      },
+    }).start();
+    await vi.waitFor(() => {
+      expect(subscribe).toHaveBeenCalledOnce();
+    });
+    expect(onStatus).not.toHaveBeenCalledWith({ type: 'attachment.attached' });
     actor.stop();
     projection.stop();
   });
@@ -209,6 +242,73 @@ describe('hostAttachment', () => {
     expect(read).not.toHaveBeenCalled();
     second.stop();
     expect(close).toHaveBeenCalledTimes(2);
+    projection.stop();
+  });
+
+  it('ignores a retired attachment’s late success and loss after its replacement observed a newer failure', async () => {
+    const projection = createActor(chatProjectionLogic).start();
+    const oldStatus = vi.fn();
+    let oldAnswer: Parameters<AgentHostClient['subscribe']>[3];
+    let oldEnded: Parameters<AgentHostClient['subscribe']>[2];
+    const old = createActor(hostAttachment, {
+      input: {
+        chatId: 'chat_1',
+        connect: async () => ({
+          read: vi.fn(),
+          subscribe: (...parameters: Parameters<AgentHostClient['subscribe']>) => {
+            oldEnded = parameters[2];
+            oldAnswer = parameters[3];
+            return vi.fn();
+          },
+          close: async () => undefined,
+        }),
+        projection,
+        onStatus: oldStatus,
+      },
+    }).start();
+    await vi.waitFor(() => {
+      expect(oldAnswer).toBeDefined();
+    });
+    old.stop();
+    const replacement = createActor(hostAttachment, {
+      input: {
+        chatId: 'chat_1',
+        connect: async () => ({
+          read: vi.fn(),
+          subscribe: (...parameters: Parameters<AgentHostClient['subscribe']>) => {
+            queueMicrotask(() => {
+              parameters[3]?.({
+                status: 'batch',
+                chatId: 'chat_1',
+                cursor: 0,
+                nextCursor: 1,
+                endCursor: 1,
+                events: [{ ...lifecycleRow(0, 'failed'), detail: { message: 'Current failure' } }],
+              });
+            });
+            return vi.fn();
+          },
+          close: async () => undefined,
+        }),
+        projection,
+      },
+    }).start();
+    await vi.waitFor(() => {
+      expect(projection.getSnapshot().context.ledger.position.cursor).toBe(1);
+    });
+    oldAnswer?.({
+      status: 'batch',
+      chatId: 'chat_1',
+      cursor: 1,
+      nextCursor: 2,
+      endCursor: 2,
+      events: [lifecycleRow(1, 'completed')],
+    });
+    oldEnded?.();
+    expect(projection.getSnapshot().context.ledger.position.cursor).toBe(1);
+    expect(projection.getSnapshot().context.failure?.text).toBe('Current failure');
+    expect(oldStatus).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'attachment.lost' }));
+    replacement.stop();
     projection.stop();
   });
 });

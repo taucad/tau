@@ -17,7 +17,11 @@ import {
   measureFeature,
   measureTargetPair,
 } from '#components/geometry/graphics/three/utils/measurement-features.js';
-import type { MeasurementTarget, MeshFeature } from '#components/geometry/graphics/three/utils/measurement-features.js';
+import type {
+  MeasurementTarget,
+  MeshFeature,
+  MeshFeatureGraph,
+} from '#components/geometry/graphics/three/utils/measurement-features.js';
 import type { MeasurementAnchor, MeasurementRecord } from '#constants/measurement.types.js';
 import { computeAxisRotationForCamera } from '#components/geometry/graphics/three/utils/rotation.utils.js';
 import { matcapMaterial } from '#components/geometry/graphics/three/materials/matcap-material.js';
@@ -52,6 +56,42 @@ import { generatePrefixedId } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
 
 const measurementPickBlockingSceneTags = new Set<SceneTagKey>([sceneTag.measurementUi, sceneTag.sectionViewHelper]);
+const featureOrdinals = new WeakMap<MeshFeatureGraph, Map<string, number>>();
+
+/** Human-facing target names use build-local feature order while opaque IDs remain the selection values. */
+export function describeMeasurementTarget(
+  target: MeasurementTarget,
+  mesh: THREE.Object3D & { geometry: THREE.BufferGeometry },
+  manifest?: { nodesById: Record<string, { name?: string }> },
+): string {
+  const metadata = mesh.userData['measurementFeatures'] as { componentId?: string; kind?: string } | undefined;
+  const owner =
+    [metadata?.componentId ? manifest?.nodesById[metadata.componentId]?.name : undefined, mesh.name].find(Boolean) ??
+    'Model';
+  const graph =
+    metadata?.kind === 'line' ? getLineMeasurementFeatures(mesh) : getMeshMeasurementFeatures(mesh as THREE.Mesh);
+  let ordinals = featureOrdinals.get(graph);
+  if (!ordinals) {
+    ordinals = new Map<string, number>();
+    const counts = new Map<MeshFeature['kind'], number>();
+    for (const feature of graph.features) {
+      const ordinal = (counts.get(feature.kind) ?? 0) + 1;
+      counts.set(feature.kind, ordinal);
+      ordinals.set(feature.id, ordinal);
+    }
+    featureOrdinals.set(graph, ordinals);
+  }
+  const ordinal = ordinals.get(target.featureId) ?? 1;
+  const endpoint =
+    target.kind === 'endpoint'
+      ? target.id.endsWith(':start')
+        ? ' · start'
+        : target.id.endsWith(':end')
+          ? ' · end'
+          : ''
+      : '';
+  return `${owner}: ${target.label} ${ordinal}${endpoint}`;
+}
 
 function isSupportVisible(hit: THREE.Intersection | undefined, ray: THREE.Ray, support: THREE.Vector3): boolean {
   if (!hit) {
@@ -238,10 +278,7 @@ export function MeasureTool(): React.JSX.Element {
   >(undefined);
   const describeTarget = useCallback(
     (target: MeasurementTarget, mesh: THREE.Object3D): string => {
-      const metadata = mesh.userData['measurementFeatures'] as { componentId?: string } | undefined;
-      const component = metadata?.componentId ? manifest?.nodesById[metadata.componentId] : undefined;
-      const owner = [component?.name, mesh.name, metadata?.componentId].find(Boolean) ?? 'Model';
-      return `${owner}: ${target.label} (${target.featureId}, ${target.kind})`;
+      return describeMeasurementTarget(target, mesh as THREE.Object3D & { geometry: THREE.BufferGeometry }, manifest);
     },
     [manifest],
   );

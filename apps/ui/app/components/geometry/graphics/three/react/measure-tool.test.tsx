@@ -6,7 +6,9 @@ import * as THREE from 'three';
 import { createActor } from 'xstate';
 import type { Actor } from 'xstate';
 import type { Mechanism } from '@taucad/kinematics';
-import { MeasureTool } from '#components/geometry/graphics/three/react/measure-tool.js';
+import { MeasureTool, describeMeasurementTarget } from '#components/geometry/graphics/three/react/measure-tool.js';
+import { getMeshMeasurementFeatures } from '#components/geometry/graphics/three/utils/measurement-features.js';
+import type { EdgeFeature, MeasurementTarget } from '#components/geometry/graphics/three/utils/measurement-features.js';
 import { kinematicsMachine } from '#machines/kinematics.machine.js';
 
 const mocks = vi.hoisted(() => ({
@@ -146,5 +148,35 @@ describe('MeasureTool', () => {
     });
     expect(mocks.send).toHaveBeenCalledWith(expect.objectContaining({ type: 'measurementPoseChanged' }));
     expect(mocks.send).toHaveBeenCalledWith({ type: 'cancelCurrentMeasurement' });
+  });
+
+  it('names same-edge endpoints and distinct edges without exposing feature IDs', () => {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2));
+    mesh.name = 'Frame';
+    const graph = getMeshMeasurementFeatures(mesh);
+    const edges = graph.features.filter(
+      (feature): feature is EdgeFeature => feature.kind === 'edge' && !feature.closed,
+    );
+    expect(edges.length).toBeGreaterThan(1);
+    const target = (feature: (typeof edges)[number], suffix: 'start' | 'end'): MeasurementTarget => ({
+      id: `${mesh.uuid}:${graph.revision}:${feature.id}:endpoint:${suffix}`,
+      featureId: feature.id,
+      kind: 'endpoint',
+      position: feature.points[0]!.clone(),
+      localPosition: feature.points[0]!.clone(),
+      evidence: feature.evidence,
+      distancePx: 0,
+      label: 'Edge endpoint',
+      feature,
+      sourceMesh: mesh,
+      revision: graph.revision,
+    });
+    const start = describeMeasurementTarget(target(edges[0]!, 'start'), mesh);
+    const end = describeMeasurementTarget(target(edges[0]!, 'end'), mesh);
+    const nextEdge = describeMeasurementTarget(target(edges[1]!, 'start'), mesh);
+    expect(start).toMatch(/^Frame: Edge endpoint \d+ · start$/);
+    expect(end).toMatch(/^Frame: Edge endpoint \d+ · end$/);
+    expect(new Set([start, end, nextEdge]).size).toBe(3);
+    expect(start).not.toContain('edge:');
   });
 });

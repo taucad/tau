@@ -357,6 +357,8 @@
     "imports": {}
   },
   "imports": {
+    "#components/*.variants.js": "./src/components/*.variants.ts",
+    "#components/*.js": "./src/components/*.tsx",
     "#*.js": "./src/*.ts",
     "#*": "./src/*"
   },

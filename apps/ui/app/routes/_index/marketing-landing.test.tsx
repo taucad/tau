@@ -2,6 +2,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MarketingLanding } from '#routes/_index/marketing-landing.js';
 
 // Mock the interactive / data-fetching leaves so the presentational marketing
@@ -31,10 +32,13 @@ vi.mock('#components/ui/lazy-section.js', () => ({
 }));
 
 function renderLanding(): HTMLElement {
+  // The app root provides the shared QueryClient; the pricing cards read entitlements through it.
   const { container } = render(
-    <MemoryRouter>
-      <MarketingLanding />
-    </MemoryRouter>,
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter>
+        <MarketingLanding />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
   return container;
 }

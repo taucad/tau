@@ -287,9 +287,10 @@ export type HostToolInvocation = {
  * Under a Tau host the request is the run's native durable interrupt: asking
  * records `interrupt.recorded` and pauses the run, which ends this attempt (D10,
  * TS-R10), so the call never returns an answer; it rejects as the attempt is
- * aborted. The person's decision resolves the interrupt, and the run continues
- * as its next attempt, where the tool asks again and `recall` finds the answer.
- * A denial ends the paused run (`resolved`, `cancelled`), so no tool reads it.
+ * aborted. The person's decision resolves the interrupt and reaches the
+ * registry's `answerApproval` at once; the run continues as its next attempt,
+ * which is told the answer, and a call asking again under the same key reads it
+ * through `recall`. A denial ends the paused run (`resolved`, `cancelled`).
  *
  * The whole resolution, not just its outcome: a request that offered options is
  * answered by one of them, and re-deriving the choice from `approved` would
@@ -304,7 +305,7 @@ export type HostToolApproval = ((request: {
   readonly payload?: JsonObject | undefined;
 }) => Promise<InterruptResolution>) & {
   /**
-   * The person's answer to this run's request under `key`, until this tool records a result after it.
+   * The person's answer to this run's request under `key`, until a call recalls it: the recalling call spends it.
    *
    * @param key - The key the request was asked under.
    * @returns The payload that was asked and its resolution, or `undefined` when none is waiting to be used.
@@ -325,10 +326,37 @@ export type HostToolResult = {
   readonly content: JsonValue;
   /** Whether the tool completed with a model-visible failure. */
   readonly isError: boolean;
+  /**
+   * The recalled approval this call used (D5). The host sets it and records it on the call's output row, so one
+   * answer is spent by the call that recalled it and by no other.
+   */
+  readonly approval?: Readonly<{ interruptId: string }> | undefined;
 };
+
+/**
+ * A person's answer to an approval a registry's tool asked for (D5), as the host hands it back to that registry.
+ *
+ * @public
+ */
+export type HostToolApprovalAnswer = Readonly<{
+  /** The tool that asked. */
+  toolName: string;
+  /** The payload its request carried. */
+  payload: JsonObject;
+  /** The answer: `approved`, `denied`, or `cancelled` with the run. */
+  resolution: InterruptResolution;
+}>;
 
 /** W4: canonical schemas plus direct environment-owned tool dispatch. @public */
 export type ToolRegistry = {
+  /**
+   * Act on the person's answer to an approval one of these tools asked for (D5).
+   *
+   * The host calls it when the answer is recorded (`resolve-interrupt`, or `cancel` of the paused run), so what the
+   * tool guards (a print request) follows the chat's answer whether or not the run continues. It must be idempotent:
+   * the answer may also reach the tool through `recall` when the run continues.
+   */
+  readonly answerApproval?: ((answer: HostToolApprovalAnswer) => Promise<void>) | undefined;
   /** Return every tool currently visible to the run. */
   list(): readonly HostToolDefinition[];
   /** Validate and dispatch one tool invocation. */

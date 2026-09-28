@@ -193,10 +193,12 @@ const screenshotContent = (value: JsonValue): Array<TextContent | ImageContent> 
   if (images.length === 0) {
     return undefined;
   }
+  // What the images leave out of the viewer, such as a section cut they cannot draw.
+  const message = typeof value['message'] === 'string' ? ` ${value['message']}` : '';
   return [
     {
       type: 'text',
-      text: `Captured ${images.length} screenshot(s). You are now a quality inspector, not the designer. Examine every surface for defects, discontinuities, artifacts, or geometry that does not match design intent.`,
+      text: `Captured ${images.length} screenshot(s).${message} You are now a quality inspector, not the designer. Examine every surface for defects, discontinuities, artifacts, or geometry that does not match design intent.`,
     },
     ...images,
   ];

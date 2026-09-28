@@ -131,7 +131,12 @@ import {
   resolveParameterBinding,
   resolveParameterInputValues,
 } from '@taucad/parameters';
-import type { ParameterDeclaration, ParameterManifest, ParameterResolutionOptions } from '@taucad/parameters';
+import type {
+  ParameterAdmissionExpectation,
+  ParameterDeclaration,
+  ParameterManifest,
+  ParameterResolutionOptions,
+} from '@taucad/parameters';
 import { validateJsonSchemaValue } from '@taucad/parameters/schema';
 import type {
   DependencyResolutionContext,
@@ -162,6 +167,12 @@ type ObservedFileRevision = {
   readonly hash: string;
   readonly content?: Uint8Array<ArrayBuffer>;
   readonly expectedPrior?: Readonly<{ hash: string | undefined }>;
+};
+
+/** The paths one settled dependency set was resolved from, and whether they feed parameter extraction. */
+type DependencyPaths = {
+  readonly paths: ReadonlySet<string>;
+  readonly affectsParameters: boolean;
 };
 
 type RenderCancellationRecord = {
@@ -258,7 +269,7 @@ const unitlessTextParameter = (
     pointer: string,
   ): { pointer: string; text: string } | undefined => {
     if (typeof value === 'string') {
-      if (node && validateJsonSchemaValue({ ...node }, value)) {
+      if (node && validateJsonSchemaValue(node, value)) {
         return undefined;
       }
       return schemaIsNumeric(node) &&
@@ -620,8 +631,12 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private parameterResultCache:
     | { readonly key: string; readonly result: Extract<GetParametersResult, { success: true }> }
     | undefined;
+  /** The last effective manifest this worker admitted, keyed by its revision and trusted execution context. */
+  private admittedManifest: { readonly key: string; readonly manifest: ParameterManifest } | undefined;
   private readonly commonDependencyCache = new Map<string, Promise<CommonDependencySet>>();
   private readonly middlewareDependencyCache = new Map<string, Promise<MiddlewareDependencySet>>();
+  /** Paths each settled dependency set above was resolved from; a cached set absent here is still pending. */
+  private readonly settledDependencyPaths = new WeakMap<Promise<unknown>, DependencyPaths>();
 
   /**
    * Dynamically loaded middleware instances with their resolved configs.
@@ -730,6 +745,12 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   /** Current render generation for abort detection. */
   private renderGeneration = 0;
 
+  /** Last issued `KernelRuntime.operationId`. */
+  private operationSequence = 0;
+
+  /** `KernelRuntime.operationId` shared by every kernel call inside the running operation. */
+  private currentOperationId: number | undefined;
+
   /** Current file for autonomous render loop. */
   private currentFile: RuntimeFileLocator | undefined;
 
@@ -738,6 +759,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
   /** Current parameters for autonomous render loop. */
   private currentParameters: Record<string, unknown> = {};
+
+  /** The parameters of the last non-transient request, which an autonomous render restores after a drag. */
+  private committedParameters: Record<string, unknown> = {};
 
   /** Exact artifact identity for the currently published preview render. */
   private currentPublishedRender: MaterializedRender | undefined;
@@ -1016,6 +1040,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         return;
       }
       this.currentParameters = request.parameters;
+      if (!this.currentRenderTransient) {
+        this.committedParameters = request.parameters;
+      }
       this.scheduleRender(parameterDebounce, record);
     });
   }
@@ -1064,6 +1091,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     this.currentRenderOptions = operation?.options;
     this.currentRenderContent = operation?.content;
     this.currentRenderTransient = input.transient === true;
+    if (!this.currentRenderTransient) {
+      this.committedParameters = this.currentParameters;
+    }
     this.clearScheduledRender();
 
     this.setActiveFile(canonicalFile);
@@ -1221,6 +1251,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     await previous;
     try {
       this.operationSignal = signal;
+      this.currentOperationId = ++this.operationSequence;
       // One probe per path per operation (W22/D15): an operation is the coherence window the
       // rest of the render already assumes, so a file appearing mid-operation is unobserved
       // either way.
@@ -1229,6 +1260,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       return await operation();
     } finally {
       this.operationSignal = undefined;
+      this.currentOperationId = undefined;
       this.pendingNativeHandle = undefined;
       // Operations are serialized, so an operation boundary is the one point
       // where every surviving reference to a native handle lives in a worker
@@ -1466,7 +1498,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
      * second observation, if one ever does. */
     const divergent = [...revisions.keys()];
     this._applyObservedRevisions(divergent, revisions);
-    this.onFileChanged(divergent);
   }
 
   /**
@@ -1674,7 +1705,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       owner: operationOwner,
     });
     const dependencyHash = await this.computeDependencyHash(dependencies);
-    const parameterDependencyHash = await sha256String(canonicalJson({ dependencyHash, resolution }));
     depsSpan.end();
     const parameterMiddlewareKey = canonicalJson(
       resolvedArray.map(({ id, middleware, options }) => ({
@@ -1695,6 +1725,17 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       dependencyHash,
       canonicalJson(resolution),
     ].join('|');
+    if (operationOwner.kind === 'render-artifact') {
+      this.onProgress?.('extractingParams');
+    }
+    const cached = this.parameterResultCache;
+    if (cached?.key === parameterCacheKey) {
+      // The manifest and source revision are frozen; only the issue list is the caller's to change.
+      return { ...cached.result, issues: [...cached.result.issues] };
+    }
+
+    // The manifest identity is hashed only for a result that has to be computed.
+    const parameterDependencyHash = await sha256String(canonicalJson({ dependencyHash, resolution }));
     const parameterScope = {
       kind: 'source',
       authority: this.filesystem.id,
@@ -1740,12 +1781,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         resolution: parameterIdentity.resolution,
       }),
     );
-    if (operationOwner.kind === 'render-artifact') {
-      this.onProgress?.('extractingParams');
-    }
-    if (this.parameterResultCache?.key === parameterCacheKey) {
-      return structuredClone(this.parameterResultCache.result);
-    }
 
     const runtimes = new Map<string, KernelMiddlewareRuntime>();
     for (const { middleware, options: middlewareOptions, enabled, id } of resolvedArray) {
@@ -1865,7 +1900,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         }
         result = {
           ...chainedResult,
-          data: await admitParameterManifest(chainedResult.data, {
+          data: await this.admitEffectiveManifest(chainedResult.data, {
             scope: parameterScope,
             source: parameterSource,
             identity: parameterIdentity,
@@ -1888,8 +1923,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       /* R4/I5: the manifest identity already names every source file this lane hashed, so the
        * result's provenance is that identity, not a second digest scheme. Attached before the
        * cache is written, so a cache hit replays the revision it was computed from. */
-      result = { ...result, sourceRevision: { entry: entryPath, files: parameterSourceFiles } };
-      this.parameterResultCache = { key: parameterCacheKey, result: structuredClone(result) };
+      result = {
+        ...result,
+        sourceRevision: Object.freeze({ entry: entryPath, files: Object.freeze(parameterSourceFiles) }),
+      };
+      this.parameterResultCache = { key: parameterCacheKey, result: { ...result, issues: [...result.issues] } };
     }
 
     this.logger.debug('getParameters completed', {
@@ -1897,6 +1935,30 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     });
 
     return result;
+  }
+
+  /**
+   * Admit an effective manifest, reusing the last admission when the revision, context and
+   * producer declaration all match it.
+   *
+   * The revision digests the manifest's whole semantic content, so a match with the same
+   * trusted context and producer declaration is the manifest already admitted.
+   *
+   * @param candidate - Effective manifest returned through the middleware chain.
+   * @param expectation - Trusted scope, source, identity and producer declaration.
+   * @returns The admitted, deep-frozen manifest.
+   */
+  private async admitEffectiveManifest(
+    candidate: ParameterManifest,
+    expectation: ParameterAdmissionExpectation,
+  ): Promise<ParameterManifest> {
+    const key = canonicalJson({ revision: candidate.revision, expectation });
+    if (this.admittedManifest?.key === key) {
+      return this.admittedManifest.manifest;
+    }
+    const manifest = await admitParameterManifest(candidate, expectation);
+    this.admittedManifest = { key, manifest };
+    return manifest;
   }
 
   /**
@@ -3031,7 +3093,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         { ...resolvedParameters },
         entry.parameterSchema,
       );
-      if (!validateJsonSchemaValue({ ...entry.parameterSchema }, parameters)) {
+      if (!validateJsonSchemaValue(entry.parameterSchema, parameters)) {
         computeSpan.end();
         return createKernelError([
           {
@@ -3586,7 +3648,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   }
 
   /**
-   * Hook called after file change notification.
+   * Hook called when a file change may alter what was derived from source files. A change only a
+   * geometry-stage middleware depends on does not call it.
    * Subclasses can override to perform additional invalidation (e.g., selection cache).
    *
    * @param _changedPaths - Paths within the runtime filesystem that changed.
@@ -4027,15 +4090,20 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const createdDirectories = new Set<string>();
     try {
       for (const [rootedPath, bytes] of entries) {
-        const separator = rootedPath.lastIndexOf('/');
-        const directory = separator === -1 ? '' : rootedPath.slice(0, separator);
-        if (directory && !createdDirectories.has(directory)) {
-          // oxlint-disable-next-line no-await-in-loop -- staging must preserve filesystem order for deterministic tests
-          await this.filesystem.mkdir(directory, { recursive: true });
-          createdDirectories.add(directory);
-        }
+        /* A host usually stages bytes it has just persisted itself. Those are an observation:
+         * writing them again would only repeat the write and its watch broadcast. */
         // oxlint-disable-next-line no-await-in-loop -- staging must complete before dependency resolution
-        await this.filesystem.writeFile(rootedPath, bytes);
+        if (!(await this.holdsBytes(rootedPath, bytes))) {
+          const separator = rootedPath.lastIndexOf('/');
+          const directory = separator === -1 ? '' : rootedPath.slice(0, separator);
+          if (directory && !createdDirectories.has(directory)) {
+            // oxlint-disable-next-line no-await-in-loop -- staging must preserve filesystem order for deterministic tests
+            await this.filesystem.mkdir(directory, { recursive: true });
+            createdDirectories.add(directory);
+          }
+          // oxlint-disable-next-line no-await-in-loop -- staging must complete before dependency resolution
+          await this.filesystem.writeFile(rootedPath, bytes);
+        }
         changedPaths.push(rootedPath);
         if (this.fileHashCache.has(rootedPath) || this.watchedPaths.has(rootedPath)) {
           // oxlint-disable-next-line no-await-in-loop -- staging order and cache publication stay deterministic
@@ -4044,7 +4112,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       }
       if (changedPaths.length > 0) {
         this._applyObservedRevisions(changedPaths, revisions);
-        this.onFileChanged(changedPaths);
       }
     } finally {
       publication.resolve();
@@ -4052,6 +4119,24 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         this.stagedWritePublication = undefined;
       }
     }
+  }
+
+  /**
+   * Whether the filesystem already holds exactly these bytes at a path.
+   *
+   * @param path - Rooted path to compare.
+   * @param bytes - Bytes about to be staged there.
+   * @returns False when the path is absent, unreadable or holds other bytes.
+   */
+  private async holdsBytes(path: string, bytes: Uint8Array<ArrayBuffer>): Promise<boolean> {
+    let current: Uint8Array<ArrayBuffer>;
+    try {
+      current = await this.filesystem.readFile(path);
+    } catch {
+      // Unreadable is not evidence of the bytes; the write reports whatever is wrong.
+      return false;
+    }
+    return current.byteLength === bytes.byteLength && current.every((value, index) => value === bytes[index]);
   }
 
   private createExportRequestPlan(
@@ -4956,14 +5041,77 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   }
 
   /**
+   * Drop what was derived from the changed paths' dependency graph.
+   *
+   * A path only a geometry-stage middleware declared (a parameter record, say) cannot change
+   * dependency discovery, parameters or kernel selection, so only the middleware dependency
+   * sets that name it go. Any other change, including a path no settled set names yet, clears
+   * everything as before.
+   *
+   * ponytail: the narrowing is all-or-nothing per change, keyed on the geometry-only case the
+   * edit path needs; a source edit still clears every entry's caches, not just its own.
+   *
+   * @param changedPaths - Rooted paths whose bytes changed.
+   */
+  private invalidateDependencyDerivedState(changedPaths: readonly string[]): void {
+    const middlewareSets = [...this.middlewareDependencyCache].map(([key, pending]) => ({
+      key,
+      set: this.settledDependencyPaths.get(pending),
+    }));
+    const sets = [
+      ...[...this.commonDependencyCache.values()].map((pending) => this.settledDependencyPaths.get(pending)),
+      ...middlewareSets.map(({ set }) => set),
+    ];
+    const settled = sets.filter((set) => set !== undefined);
+    const geometryOnly =
+      changedPaths.length > 0 &&
+      settled.length === sets.length &&
+      changedPaths.every(
+        (path) =>
+          settled.some(({ paths }) => paths.has(path)) &&
+          !settled.some(({ paths, affectsParameters }) => affectsParameters && paths.has(path)),
+      );
+    if (geometryOnly) {
+      for (const { key, set } of middlewareSets) {
+        if (set && changedPaths.some((path) => set.paths.has(path))) {
+          this.middlewareDependencyCache.delete(key);
+        }
+      }
+      return;
+    }
+    this.commonDependencyCache.clear();
+    this.middlewareDependencyCache.clear();
+    this.parameterResultCache = undefined;
+    this.onFileChanged(changedPaths);
+  }
+
+  /**
+   * Record the paths a dependency set was resolved from once it settles.
+   *
+   * @param pending - The dependency computation about to be cached.
+   * @param describe - Reads the paths, and whether they feed parameters, from the settled set.
+   * @returns The promise to cache in place of `pending`.
+   */
+  // oxlint-disable-next-line typescript/promise-function-async -- the record is keyed by the returned promise's own identity.
+  private recordDependencyPaths<Value>(
+    pending: Promise<Value>,
+    describe: (value: Value) => DependencyPaths,
+  ): Promise<Value> {
+    // oxlint-disable-next-line promise/prefer-await-to-then -- an async body cannot name the promise it returns.
+    const recorded: Promise<Value> = pending.then((value) => {
+      this.settledDependencyPaths.set(recorded, describe(value));
+      return value;
+    });
+    return recorded;
+  }
+
+  /**
    * Invalidate file-level caches for the given changed paths.
    * Shared by both `notifyFileChanged` (command-driven) and the watch handler (autonomous).
    * @param changedPaths - Root-relative paths of files that changed.
    */
   private _invalidateCachesForPaths(changedPaths: readonly string[]): void {
-    this.commonDependencyCache.clear();
-    this.middlewareDependencyCache.clear();
-    this.parameterResultCache = undefined;
+    this.invalidateDependencyDerivedState(changedPaths);
     for (const path of changedPaths) {
       this.fileHashCache.delete(path);
       this.fileContentCache.delete(path);
@@ -4975,9 +5123,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     changedPaths: readonly string[],
     revisions: ReadonlyMap<string, ObservedFileRevision | undefined>,
   ): void {
-    this.commonDependencyCache.clear();
-    this.middlewareDependencyCache.clear();
-    this.parameterResultCache = undefined;
+    this.invalidateDependencyDerivedState(changedPaths);
     for (const path of changedPaths) {
       const revision = revisions.get(path);
       if (revision === undefined) {
@@ -5161,7 +5307,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     } else {
       this._invalidateCachesForPaths(paths);
     }
-    this.onFileChanged(paths);
     const preview =
       record ??
       (this.activeRenderRecord === undefined && this.shouldScheduleExactPreview(paths)
@@ -5171,6 +5316,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       return;
     }
     this.invalidatePublishedArtifactState();
+    // A render nobody requested publishes what the host last committed, never a drag sample.
+    if (this.currentRenderTransient) {
+      this.currentRenderTransient = false;
+      this.currentParameters = this.committedParameters;
+    }
     let renderDebounce = fileChangeDebounce;
     for (const path of paths) {
       renderDebounce = Math.min(renderDebounce, this.currentPreviewWatchPaths.get(path) ?? fileChangeDebounce);
@@ -5945,7 +6095,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     if (!commonDependencies) {
       commonDependencies = this.commonDependencyCache.get(commonDependencyKey);
       if (!commonDependencies) {
-        const pending = this.computeCommonDependencies(input.owner);
+        const pending = this.recordDependencyPaths(this.computeCommonDependencies(input.owner), ({ paths }) => ({
+          paths,
+          affectsParameters: true,
+        }));
         this.commonDependencyCache.set(commonDependencyKey, pending);
         commonDependencies = this.evictRejectedCacheEntry({
           cache: this.commonDependencyCache,
@@ -5964,7 +6117,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       const middlewareDependencyKey = `${commonDependencyKey}|${executionListKey}`;
       middlewareDependencies = this.middlewareDependencyCache.get(middlewareDependencyKey);
       if (!middlewareDependencies) {
-        const pending = this.computeMiddlewareDependencies(input.owner, executionList, input.operations);
+        const pending = this.recordDependencyPaths(
+          this.computeMiddlewareDependencies(input.owner, executionList, input.operations),
+          ({ watchPaths }) => ({
+            paths: new Set(watchPaths.keys()),
+            affectsParameters: input.operations.includes('getParameters'),
+          }),
+        );
         this.middlewareDependencyCache.set(middlewareDependencyKey, pending);
         middlewareDependencies = this.evictRejectedCacheEntry({
           cache: this.middlewareDependencyCache,
@@ -6051,10 +6210,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    * @param owner - Kernel/file owner for this dependency-resolution operation
    * @returns Common file and trailing identity dependencies with content hashes.
    */
-  private async computeCommonDependencies(owner: OperationOwner): Promise<{
-    readonly fileDependencies: Dependency[];
-    readonly trailingDependencies: Dependency[];
-  }> {
+  private async computeCommonDependencies(owner: OperationOwner): Promise<CommonDependencySet> {
     const ownerFilePath = assertRootedPath(joinRelativePath(owner.file.path, owner.file.filename));
 
     // 1. Discover file dependencies from kernel module
@@ -6159,6 +6315,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     return {
       fileDependencies: fileDeps,
       trailingDependencies: [...kernelDeps, frameworkDep, ...optionDeps, ...assetDeps],
+      paths: new Set([...rootedPaths, ...unresolvedPaths]),
     };
   }
 
@@ -6420,6 +6577,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private createRuntime(signal = this.operationSignal ?? neverAbortedSignal): KernelRuntime {
     return {
       signal,
+      // A call outside any operation shares its identity with nothing.
+      operationId: this.currentOperationId ?? ++this.operationSequence,
       filesystem: this.filesystem,
       logger: this.logger,
       fileContentCache: this.fileContentCache,

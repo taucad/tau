@@ -260,9 +260,24 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
         // closes, so a host crash costs a resync instead of wedging the
         // filesystem for the rest of the session.
         const nodeWorker = worker;
+        // A refused replacement is answered too, so the worker can settle and ask again.
+        const replaceNodeFsPort = async (): Promise<void> => {
+          try {
+            await deliverNodeFsPort(nodeWorker);
+          } catch (error) {
+            try {
+              nodeWorker.postMessage({
+                type: 'nodeFsPortError',
+                message: error instanceof Error ? error.message : String(error),
+              });
+            } catch {
+              // The worker may already be disposed while the desktop is closing.
+            }
+          }
+        };
         nodeWorker.addEventListener('message', (event: MessageEvent<{ type?: string }>) => {
           if (event.data.type === 'nodeFsPortRequest') {
-            void deliverNodeFsPort(nodeWorker);
+            void replaceNodeFsPort();
           }
         });
         await deliverNodeFsPort(nodeWorker);

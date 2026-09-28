@@ -194,6 +194,7 @@ export function SidebarRowLink({
   isActive,
   isPending,
   onClick,
+  state,
 }: {
   readonly to: string;
   readonly name: string;
@@ -202,10 +203,12 @@ export function SidebarRowLink({
   readonly isActive: boolean;
   readonly isPending: boolean;
   readonly onClick?: () => void;
+  readonly state?: { readonly openChat: true };
 }): React.JSX.Element {
   const link = (
     <Link
       to={to}
+      state={state}
       aria-current={isActive ? 'page' : undefined}
       aria-busy={isPending}
       aria-describedby={sentence === undefined ? undefined : descriptionId}

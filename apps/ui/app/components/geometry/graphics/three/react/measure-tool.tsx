@@ -31,7 +31,11 @@ import {
 } from '#hooks/use-graphics.js';
 import { createRafCoalescer } from '#components/geometry/graphics/three/utils/raf-coalescer.js';
 import type { RafCoalescer } from '#components/geometry/graphics/three/utils/raf-coalescer.js';
-import { raycastFirstVisibleMeshHit } from '#components/geometry/graphics/three/utils/bvh-raycast.js';
+import { setRaycasterFromCamera } from '#components/geometry/graphics/three/utils/raycaster-from-camera.js';
+import {
+  createRaycastClipTest,
+  raycastFirstVisibleMeshHit,
+} from '#components/geometry/graphics/three/utils/bvh-raycast.js';
 import { resolveSectionViewRaycastClip } from '#components/geometry/graphics/three/use-section-view.js';
 import { measureInputMachine } from '#machines/measure-input.machine.js';
 import { selectPresentedGeometryKey } from '#machines/graphics.machine.js';
@@ -53,7 +57,7 @@ function calculateScaleFromCamera(position: THREE.Vector3, camera: THREE.Camera)
     factor = distanceToCamera * Math.min((1.9 * Math.tan((Math.PI * perspCamera.fov) / 360)) / perspCamera.zoom, 7);
   }
 
-  const size = 1; // Base size (equivalent to this.size in transform-controls)
+  const size = 1; // Base size
   return (factor * size) / 4000;
 }
 
@@ -109,6 +113,15 @@ const measureHoverReducer = (_state: MeasureHoverState, action: MeasureHoverActi
   };
 };
 
+const noMeasureHover: MeasureHoverState = { hoveredSnapPoints: [] };
+
+/** Whether two hovers draw the same marks: the same snaps, the same active snap and the same pointer point. */
+const isSameMeasureHover = (a: MeasureHoverState, b: MeasureHoverState): boolean =>
+  a.activeSnapPoint === b.activeSnapPoint &&
+  a.hoveredSnapPoints.length === b.hoveredSnapPoints.length &&
+  a.hoveredSnapPoints.every((snapPoint, index) => snapPoint === b.hoveredSnapPoints[index]) &&
+  (a.mousePosition && b.mousePosition ? a.mousePosition.equals(b.mousePosition) : a.mousePosition === b.mousePosition);
+
 type MeasurePointerCoordinates = {
   readonly clientX: number;
   readonly clientY: number;
@@ -149,7 +162,9 @@ export function MeasureTool(): React.JSX.Element {
     activeSnapPoint: undefined,
     mousePosition: undefined,
   });
-  const lastSnapPointsRef = useRef<SnapPoint[] | undefined>(undefined);
+  // The hover last dispatched: an unchanged one dispatches nothing, so a cut step under a resting pointer renders
+  // nothing.
+  const hoverRef = useRef(noMeasureHover);
 
   const currentStartRef = useRef(currentStart);
 
@@ -157,6 +172,8 @@ export function MeasureTool(): React.JSX.Element {
   const mouseRef = useRef(new THREE.Vector2());
   const measureInputActor = useMemo(() => createActor(measureInputMachine), []);
   const pointerMoveCoalescerRef = useRef<RafCoalescer<MeasurePointerCoordinates> | undefined>(undefined);
+  // Where the pointer last moved, so a cut change can raycast its snaps again from there.
+  const lastPointerRef = useRef<MeasurePointerCoordinates | undefined>(undefined);
   const wasCameraMovingRef = useRef(cameraMoving);
 
   // Cache mesh list to avoid expensive scene.traverse() on every mouse event.
@@ -220,13 +237,14 @@ export function MeasureTool(): React.JSX.Element {
       mouseRef.current.x = ((clientX - rect.left) / rect.width) * 2 - 1;
       mouseRef.current.y = -((clientY - rect.top) / rect.height) * 2 + 1;
 
-      raycasterRef.current.setFromCamera(mouseRef.current, camera);
+      setRaycasterFromCamera(raycasterRef.current, mouseRef.current, camera);
 
+      // Read here, not selected: a section drag step must not re-render the tool or reset its pointer coalescer.
+      const clipping = resolveSectionViewRaycastClip(graphicsActor.getSnapshot().context, renderFrame);
       const firstIntersection = raycastFirstVisibleMeshHit({
         raycaster: raycasterRef.current,
         meshes: getCachedMeshes(),
-        // Read here, not selected: a section drag step must not re-render the tool or reset its pointer coalescer.
-        clipping: resolveSectionViewRaycastClip(graphicsActor.getSnapshot().context, renderFrame),
+        clipping,
       });
 
       let allSnapPoints: SnapPoint[] = [];
@@ -241,9 +259,10 @@ export function MeasureTool(): React.JSX.Element {
           snapCacheRef.current.set(cacheKey, allSnapPoints);
         }
 
-        lastSnapPointsRef.current = allSnapPoints;
-      } else {
-        lastSnapPointsRef.current = undefined;
+        // A face's snaps are cached whole, and the cuts move without a new cache key: the raycast's own clip test
+        // drops the vertices, edge midpoints and face centres the section removes, every raycast.
+        const isKept = createRaycastClipTest(clipping);
+        allSnapPoints = isKept ? allSnapPoints.filter(({ position }) => isKept(position)) : allSnapPoints;
       }
 
       const closest = findClosestSnapPoint(allSnapPoints, {
@@ -253,14 +272,15 @@ export function MeasureTool(): React.JSX.Element {
         snapDistancePx: snapDistance,
         snapPointBufferPx: 15,
       });
-      const nextMousePosition = closest?.position ?? firstIntersection?.point;
-
-      dispatchHoverState({
-        type: 'set',
+      const hover = {
         hoveredSnapPoints: allSnapPoints,
         activeSnapPoint: closest,
-        mousePosition: nextMousePosition,
-      });
+        mousePosition: closest?.position ?? firstIntersection?.point,
+      };
+      if (!isSameMeasureHover(hoverRef.current, hover)) {
+        hoverRef.current = hover;
+        dispatchHoverState({ type: 'set', ...hover });
+      }
       invalidate();
 
       return {
@@ -287,10 +307,32 @@ export function MeasureTool(): React.JSX.Element {
   useEffect(() => {
     if (!isMeasureActive) {
       pointerMoveCoalescerRef.current?.cancel();
+      hoverRef.current = noMeasureHover;
       dispatchHoverState({ type: 'clear' });
-      lastSnapPointsRef.current = undefined;
+      lastPointerRef.current = undefined;
     }
   }, [isMeasureActive]);
+
+  // A committed cut change (S adds a cut, Delete removes one) raycasts the resting pointer's snaps again. Subscribed
+  // rather than selected, so a cut step renders nothing unless the snaps change.
+  useEffect(() => {
+    if (!isMeasureActive) {
+      return undefined;
+    }
+    let cuts = graphicsActor.getSnapshot().context.committedSectionCuts;
+    const subscription = graphicsActor.subscribe(({ context }) => {
+      if (context.committedSectionCuts === cuts) {
+        return;
+      }
+      cuts = context.committedSectionCuts;
+      if (lastPointerRef.current) {
+        pointerMoveCoalescerRef.current?.schedule(lastPointerRef.current);
+      }
+    });
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [graphicsActor, isMeasureActive]);
 
   useEffect(() => {
     if (isMeasureActive && cameraMoving && !wasCameraMovingRef.current) {
@@ -308,10 +350,8 @@ export function MeasureTool(): React.JSX.Element {
     }
 
     const handleMouseMove = (event: MouseEvent): void => {
-      pointerMoveCoalescerRef.current?.schedule({
-        clientX: event.clientX,
-        clientY: event.clientY,
-      });
+      lastPointerRef.current = { clientX: event.clientX, clientY: event.clientY };
+      pointerMoveCoalescerRef.current?.schedule(lastPointerRef.current);
     };
 
     const handlePointerDown = (event: MouseEvent): void => {
@@ -614,7 +654,7 @@ function MeasurementLine({
   const isHovered = isLabelHovered || isExternallyHovered;
   const graphicsActor = useGraphics();
 
-  // Create matcap materials following transform-controls pattern.
+  // Matcap materials for the line, cones and label.
   // Split into base materials (created once) and hover color update (cheap, per-hover).
   const derivedMaterials = useMemo(() => {
     if (materials && 'backgroundMaterial' in materials && 'textMaterial' in materials && 'coneMaterial' in materials) {

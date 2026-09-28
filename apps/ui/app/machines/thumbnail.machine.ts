@@ -54,8 +54,11 @@ type ThumbnailContext = Required<Omit<ThumbnailInput, 'debounceDelay'>> & {
   lastRenderedHash: string | undefined;
 };
 
-/** Events driving {@link thumbnailMachine}. */
-export type ThumbnailEvent = { type: 'settled'; hash: string } | { type: 'regenerate' };
+/**
+ * Events driving {@link thumbnailMachine}. `renderRequested` says newer geometry is on its way, so a
+ * pending automatic thumbnail waits a full debounce window again instead of landing on that render.
+ */
+export type ThumbnailEvent = { type: 'settled'; hash: string } | { type: 'regenerate' } | { type: 'renderRequested' };
 
 type ThumbnailEnqueue = EnqueueObject<ThumbnailEvent, EventObject>;
 
@@ -150,6 +153,7 @@ export const thumbnailMachine = setup({
           event.hash === context.lastRenderedHash
             ? { target: 'idle', context: { pendingAutomaticHash: undefined } }
             : { target: 'debouncing', reenter: true, context: rememberLatestAutomatic(context, event) },
+        renderRequested: { target: 'debouncing', reenter: true },
         regenerate: { target: 'rendering', context: startManual },
       },
       after: {

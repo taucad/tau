@@ -42,12 +42,16 @@ export function NewProjectChatComposer({
   /* Mount autofocus alone misses a return to an already-mounted Home
    * ("New Project" or ⌃N while on `/`), so honour the navigation request too. */
   const { key: locationKey, state: locationState } = useLocation() as { key: string; state: unknown };
-  const isFocusRequested = (locationState as { focusChatComposer?: unknown } | undefined)?.focusChatComposer === true;
+  // Each navigation that asks for focus is its own request, identified by its location key.
+  const focusRequestKey =
+    (locationState as { focusChatComposer?: unknown } | undefined)?.focusChatComposer === true
+      ? locationKey
+      : undefined;
   useEffect(() => {
-    if (enableAutoFocus && isFocusRequested) {
+    if (enableAutoFocus && focusRequestKey !== undefined) {
       focusComposer();
     }
-  }, [enableAutoFocus, focusComposer, isFocusRequested, locationKey]);
+  }, [enableAutoFocus, focusComposer, focusRequestKey]);
 
   /* Returning to the window restores the last focused element; when that is
    * nothing, the draft is what the user came back for. */

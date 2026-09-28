@@ -91,14 +91,14 @@ export function ForkAction({ publication, files }: ForkActionProps): React.JSX.E
         size='sm'
         variant='secondary'
         aria-label='Remix'
-        className='max-sm:size-8 max-sm:px-0'
+        className='max-md:size-8 max-md:px-0'
         disabled={busy || files.size === 0}
         onClick={() => {
           setOpen(true);
         }}
       >
-        <GitFork className='size-3.5 sm:mr-1.5' aria-hidden />
-        <span className='hidden sm:inline'>Remix</span>
+        <GitFork className='size-3.5 md:mr-1.5' aria-hidden />
+        <span className='hidden md:inline'>Remix</span>
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className='max-w-md'>

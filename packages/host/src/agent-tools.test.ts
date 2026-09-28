@@ -261,6 +261,46 @@ describe('createHostToolRegistry', () => {
     expect(JSON.stringify(result.content)).toContain('cube > is watertight');
   });
 
+  it('closes a GeoSpec worker when its MCP request is cancelled', async () => {
+    const workspaceRoot = await makeWorkspace();
+    await writeFile(join(workspaceRoot, 'cube.geospec.ts'), 'export const spec = 1;\n', 'utf8');
+    const started = Promise.withResolvers<void>();
+    const finished = Promise.withResolvers<Awaited<ReturnType<GeoSpecRunner['run']>>>();
+    // `abort` is cooperative: the run settles once the current file stops, and only then is the runner closed.
+    const abort = vi.fn(() => {
+      finished.resolve({ success: false, passed: 0, failed: 1, selectedTests: 0, files: [] });
+    });
+    const close = vi.fn(async () => undefined);
+    const registry = createHostToolRegistry({
+      workspaceRoot,
+      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the fake supplies the runner lifecycle being cancelled.
+      geospecRunner: async () =>
+        ({
+          run: async () => {
+            started.resolve();
+            return finished.promise;
+          },
+          abort,
+          close,
+        }) as unknown as GeoSpecRunner,
+    });
+    const controller = new AbortController();
+    const request = registry.invoke({
+      toolCallId: 'cancel-geospec',
+      toolName: 'test_model',
+      input: {},
+      signal: controller.signal,
+    });
+    await started.promise;
+    const cancelled = expect(request).rejects.toMatchObject({ name: 'AbortError' });
+    controller.abort();
+    await cancelled;
+    expect(abort).toHaveBeenCalledWith('test_model request cancelled');
+    await vi.waitFor(() => {
+      expect(close).toHaveBeenCalled();
+    });
+  });
+
   it('names the source revision of every model test_model loaded (R4)', async () => {
     const workspaceRoot = await makeWorkspace();
     await writeFile(join(workspaceRoot, 'cube.geospec.ts'), 'export const spec = 1;\n', 'utf8');
@@ -450,6 +490,7 @@ describe('createHostToolRegistry', () => {
       createdAt: timestamp,
       updatedAt: timestamp,
     }));
+    const withdrawPrintRequest = vi.fn<MachineClient['withdrawPrintRequest']>();
     const machines = {
       available: true,
       list: async () => ({
@@ -458,6 +499,11 @@ describe('createHostToolRegistry', () => {
       }),
       listProviders: async () => [provider],
       requestPrint,
+      listPrintRequests: async () =>
+        Promise.all(
+          requestPrint.mock.results.map(async (result) => result.value as ReturnType<MachineClient['requestPrint']>),
+        ),
+      withdrawPrintRequest,
     } as unknown as NonNullable<HostToolRegistryOptions['machines']>;
 
     const names = (options: Partial<HostToolRegistryOptions>) =>
@@ -522,6 +568,14 @@ describe('createHostToolRegistry', () => {
     });
     expect(slice).toHaveBeenCalledOnce();
     expect(requestPrint).toHaveBeenCalledOnce();
+
+    /* A chat's answer to the request reaches the registry that asked, whichever root the run used (D5, GM.r1 H2). */
+    await registry.answerApproval?.({
+      toolName: 'request_print',
+      payload: { kind: 'print-request', requestId: 'call-1' },
+      resolution: { interruptId: 'interrupt-1', outcome: 'cancelled' },
+    });
+    expect(withdrawPrintRequest).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ requestId: 'call-1' }));
   });
 
   it('offers both parameter tools only with a native parameter actor and preserves its outcome', async () => {
@@ -961,6 +1015,31 @@ describe('createHostToolRegistry', () => {
     const result = await invoke(registry, 'screenshot', { targetFile: 'main.ts', mode: 'single' });
     expect(result.isError).toBe(true);
     expect(JSON.stringify(result.content)).toContain('No glb to webp route');
+  });
+
+  it('names the renderer accessor guard as an over-limit capture', async () => {
+    const registry = createHostToolRegistry({
+      workspaceRoot: await makeWorkspace(),
+      runtimeClient: async () =>
+        fakeRuntime({
+          transcode: vi.fn<HostRuntimeClient['transcode']>(async () => ({
+            success: false,
+            issues: [
+              {
+                code: 'RUNTIME',
+                type: 'runtime',
+                severity: 'error',
+                message: 'parse: accessor 2 count 4545948 exceeds 4000000',
+                details: { type: 'render', code: 'parse' },
+              },
+            ],
+          })),
+        }),
+    });
+
+    const result = await invoke(registry, 'screenshot', { targetFile: 'main.ts', mode: 'single' });
+    expect(result.content).toMatchObject({ success: false, errorCode: 'RESULT_TOO_LARGE' });
+    expect(JSON.stringify(result.content)).toContain('4545948 exceeds 4000000');
   });
 
   /*

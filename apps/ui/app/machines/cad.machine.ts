@@ -21,7 +21,6 @@ import { getComputeReuseMode } from '#lib/compute-reuse-preference.js';
 import type { logMachine } from '#machines/logs.machine.js';
 import type { fileManagerMachine } from '#machines/file-manager.machine.js';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
-import { deriveAvailableFormats } from '#utils/export-formats.utils.js';
 import type {
   AppCapabilitiesManifest,
   AppRuntimeClient,
@@ -71,8 +70,6 @@ export type CadContext = {
    * `lastRequestedRenderId`.
    */
   lastSettledRenderId: number;
-  /** Last availability sent to the parent; the send is suppressed while it is unchanged. */
-  notifiedExportAvailability?: boolean;
 };
 
 type KernelConnectedEvent = {
@@ -362,9 +359,9 @@ const renderModelActor = fromSafeAsync<void, RenderModelInput>(async ({ input })
   /* Stored values are never a second copy in this machine: a committed edit carries the sidecar
    * bytes the authority just wrote (D1) and the runtime resolves the values from them, and a drag
    * sample carries values that are on no disk at all and are never persisted (D2). */
+  const entry = { source: { path: input.entryPath }, content: { includeEdges: true } } as const;
   const request = {
-    source: { path: input.entryPath },
-    content: { includeEdges: true },
+    ...entry,
     ...(input.parameterRender?.kind === 'commit' ? { stage: input.parameterRender.stage } : {}),
     ...(input.parameterRender?.kind === 'initial' ? { parameters: input.parameterRender.parameters } : {}),
     ...(input.parameterRender?.kind === 'scrub'
@@ -377,9 +374,10 @@ const renderModelActor = fromSafeAsync<void, RenderModelInput>(async ({ input })
   // drops a concurrent open of another file (a rename races the watcher reporting the old path
   // gone). Re-assert this unit's file once.
   // ponytail: one retry; loop only if a render can keep losing to repeated external edits.
-  // A superseded drag sample is simply stale; only a committed render re-asserts itself.
+  // A superseded drag sample is simply stale; only a committed render re-asserts itself. The first
+  // attempt already staged a commit's bytes, so the re-assert renders what storage now holds.
   if (outcome.superseded && input.parameterRender?.kind !== 'scrub' && input.isLatestRequest()) {
-    await input.client.render(request);
+    await input.client.render(input.parameterRender?.kind === 'commit' ? entry : request);
   }
 });
 
@@ -408,11 +406,6 @@ const boundTelemetryEntries = (entries: TelemetrySpanRecord[]): TelemetrySpanRec
   return windowed;
 };
 
-const hasExportAvailability = (context: CadContext): boolean =>
-  context.latestGeometryOutcome === 'success' &&
-  Boolean(context.geometry) &&
-  deriveAvailableFormats(context.kernelClient, context.activeKernelId).length > 0;
-
 const cadActors = {
   connectKernelActor,
   renderModelActor,
@@ -425,41 +418,11 @@ type ActorIdentity = AnyActorRef;
 type CadArgs<EventType extends CadEvent['type']> = Readonly<{
   context: CadContext;
   event: Extract<CadEvent, { type: EventType }>;
-  self: ActorIdentity;
 }>;
 type RenderTrigger = Extract<
   CadEvent,
   { type: 'initializeModel' | 'setEntryPath' | 'commitParameters' | 'scrubParameters' }
 >;
-
-/**
- * Tell the parent whether this unit can export, after the transition's own
- * patch: availability reads the geometry, outcome and client that patch leaves.
- *
- * The parent's handler is a no-op when nothing changed, but a handled event
- * still mints a new snapshot for all of its subscribers, so the send is
- * suppressed while the answer is unchanged.
- */
-const withExportAvailability = (
-  context: CadContext,
-  enq: CadEnqueue,
-  transition: Readonly<{ self: ActorIdentity; patch: CadPatch }>,
-): CadPatch => {
-  const { self, patch } = transition;
-  if (!context.parentRef) {
-    return patch;
-  }
-  const available = hasExportAvailability({ ...context, ...patch });
-  if (available === context.notifiedExportAvailability) {
-    return patch;
-  }
-  enq.sendTo(context.parentRef, {
-    type: 'geometryUnit.exportAvailabilityChanged',
-    actorId: actorIdOf(self),
-    available,
-  });
-  return { ...patch, notifiedExportAvailability: available };
-};
 
 /*
  * R4: why this unit has no kernel, told to the project that owns it.
@@ -532,19 +495,15 @@ const renderRequestPatch = (context: CadContext, event: RenderTrigger): CadPatch
   }
 };
 
-/** A render-triggering event: record it, tell the parent, and go where the state sends it. */
+/** A render-triggering event: record it and go where the state sends it. */
 const renderRequest =
   (target?: string, options: Readonly<{ reenter?: boolean; destroy?: boolean }> = {}) =>
-  (
-    { context, event, self }: Readonly<{ context: CadContext; event: RenderTrigger; self: ActorIdentity }>,
-    enq: CadEnqueue,
-  ) => {
+  ({ context, event }: Readonly<{ context: CadContext; event: RenderTrigger }>, enq: CadEnqueue) => {
     const destroyed = options.destroy === true ? destroyKernel(context, enq) : {};
-    const patch = { ...destroyed, ...renderRequestPatch({ ...context, ...destroyed }, event) };
     return {
       ...(target === undefined ? {} : { target }),
       ...(options.reenter === true ? { reenter: true } : {}),
-      context: withExportAvailability(context, enq, { self, patch }),
+      context: { ...destroyed, ...renderRequestPatch({ ...context, ...destroyed }, event) },
     };
   };
 
@@ -592,20 +551,21 @@ const runtimeSignals = {
   kernelLog,
   kernelProgress: ({ event }: CadArgs<'kernelProgress'>) => ({ context: { renderPhase: event.phase } }),
   kernelTelemetry,
-  capabilitiesUpdated: ({ context, event, self }: CadArgs<'capabilitiesUpdated'>, enq: CadEnqueue) => ({
-    context: withExportAvailability(context, enq, { self, patch: { capabilities: event.capabilities } }),
+  capabilitiesUpdated: ({ event }: CadArgs<'capabilitiesUpdated'>) => ({
+    context: { capabilities: event.capabilities },
   }),
-  activeKernelChanged: ({ context, event, self }: CadArgs<'activeKernelChanged'>, enq: CadEnqueue) => ({
-    context: withExportAvailability(context, enq, { self, patch: { activeKernelId: event.kernelId } }),
-  }),
+  activeKernelChanged: ({ event }: CadArgs<'activeKernelChanged'>) => ({ context: { activeKernelId: event.kernelId } }),
 };
 
 /** Results and issues a unit with a kernel records in every state after connecting. */
 const resultSignals = {
   ...runtimeSignals,
   setCodeIssues: ({ event }: CadArgs<'setCodeIssues'>) => ({ context: { codeIssues: event.errors } }),
-  geometryComputed: ({ context, event, self }: CadArgs<'geometryComputed'>, enq: CadEnqueue) => {
-    enq.emit({ type: 'geometryEvaluated', geometry: event.geometry });
+  geometryComputed: ({ context, event }: CadArgs<'geometryComputed'>, enq: CadEnqueue) => {
+    // A drag sample is never persisted, so it is not the model's geometry to publish.
+    if (context.parameterRender?.kind !== 'scrub') {
+      enq.emit({ type: 'geometryEvaluated', geometry: event.geometry });
+    }
     const patch: CadPatch = {
       geometry: event.geometry,
       latestGeometryOutcome: 'success',
@@ -620,9 +580,9 @@ const resultSignals = {
       // settled watermark advances to whatever the UI has asked for.
       lastSettledRenderId: context.lastRequestedRenderId,
     };
-    return { context: withExportAvailability(context, enq, { self, patch }) };
+    return { context: patch };
   },
-  geometryFailed: ({ context, event, self }: CadArgs<'geometryFailed'>, enq: CadEnqueue) => {
+  geometryFailed: ({ context, event }: CadArgs<'geometryFailed'>) => {
     const patch: CadPatch = {
       latestGeometryOutcome: 'failure',
       kernelIssues: withEntryIssues(context, (issues, entryPath) => {
@@ -630,7 +590,7 @@ const resultSignals = {
       }),
       lastSettledRenderId: context.lastRequestedRenderId,
     };
-    return { context: withExportAvailability(context, enq, { self, patch }) };
+    return { context: patch };
   },
   parametersParsed: ({ event }: CadArgs<'parametersParsed'>) => ({ context: { parameterManifest: event.manifest } }),
   kernelIssue: ({ context, event }: CadArgs<'kernelIssue'>) => ({
@@ -702,16 +662,13 @@ export const cadMachine = setup({
   }),
   exit: ({ context }, enq) => ({ context: destroyKernel(context, enq) }),
   on: {
-    restoreParameters: ({ context, self }, enq) => ({
+    restoreParameters: ({ context }) => ({
       target: '.rendering.submitting',
-      context: withExportAvailability(context, enq, {
-        self,
-        patch: {
-          lastRequestedRenderId: context.lastRequestedRenderId + 1,
-          parameterRender: undefined,
-          latestGeometryOutcome: undefined,
-        },
-      }),
+      context: {
+        lastRequestedRenderId: context.lastRequestedRenderId + 1,
+        parameterRender: undefined,
+        latestGeometryOutcome: undefined,
+      },
     }),
     /* Re-entering from the root runs the root's `exit`, which releases the
      * kernel; releasing it here as well would dispose the same client twice,
@@ -754,7 +711,7 @@ export const cadMachine = setup({
         },
       },
       on: {
-        kernelConnected: ({ context, event, self }, enq) => {
+        kernelConnected: ({ context, event }, enq) => {
           const { client } = event;
           const { renderTimeout } = context;
           enq(() => {
@@ -762,10 +719,7 @@ export const cadMachine = setup({
           });
           return {
             target: context.entryPath ? '#cad.rendering.submitting' : 'idle',
-            context: withExportAvailability(context, enq, {
-              self,
-              patch: { kernelClient: event.client, eventCleanups: event.cleanups },
-            }),
+            context: { kernelClient: event.client, eventCleanups: event.cleanups },
           };
         },
         initializeModel: renderRequest(),
@@ -783,10 +737,7 @@ export const cadMachine = setup({
          * session re-enters `live.idle`, which for a project that stays hidden is
          * EQ15's 30-minute window — so such a unit can hold its utility for ~32
          * minutes (V1-5). Bounding the common case is what R3 is for. */
-        parkRuntime: ({ context, self }, enq) => ({
-          target: 'parked',
-          context: withExportAvailability(context, enq, { self, patch: destroyKernel(context, enq) }),
-        }),
+        parkRuntime: ({ context }, enq) => ({ target: 'parked', context: destroyKernel(context, enq) }),
         initializeModel: renderRequest('#cad.rendering.submitting'),
         setEntryPath: renderRequest('#cad.rendering.submitting'),
         commitParameters: renderRequest('#cad.rendering.submitting'),
@@ -882,15 +833,12 @@ export const cadMachine = setup({
         /* The root's `restoreParameters` renders, and there is no client to render
          * with: take the intent (drop the staged values) and leave the render to
          * the reconnect, instead of failing into `error` (V1-4). */
-        restoreParameters: ({ context, self }, enq) => ({
-          context: withExportAvailability(context, enq, {
-            self,
-            patch: {
-              lastRequestedRenderId: context.lastRequestedRenderId + 1,
-              parameterRender: undefined,
-              latestGeometryOutcome: undefined,
-            },
-          }),
+        restoreParameters: ({ context }) => ({
+          context: {
+            lastRequestedRenderId: context.lastRequestedRenderId + 1,
+            parameterRender: undefined,
+            latestGeometryOutcome: undefined,
+          },
         }),
         setCodeIssues: resultSignals.setCodeIssues,
       },
@@ -899,10 +847,7 @@ export const cadMachine = setup({
     error: {
       tags: ['cad-runtime-error'],
       on: {
-        parkRuntime: ({ context, self }, enq) => ({
-          target: 'parked',
-          context: withExportAvailability(context, enq, { self, patch: destroyKernel(context, enq) }),
-        }),
+        parkRuntime: ({ context }, enq) => ({ target: 'parked', context: destroyKernel(context, enq) }),
         /* Every way a parked unit can fall into `error` ends here, so the session's
          * next resume has to be heard from `error` too, or the unit dead-ends
          * until an unrelated entry change arrives (V1-4). */
@@ -929,17 +874,22 @@ export const selectCadFailureIssues = (snapshot: CadSnapshot): readonly KernelIs
   return selectIssuesByPrecedence(snapshot.context, ['__connection__', snapshot.context.entryPath, '__render__']);
 };
 
-/** The phase a viewer shows while the CAD actor is busy, or `undefined` when it is not. */
+/**
+ * The phase a viewer shows while the CAD actor is busy, or `undefined` when it is not.
+ *
+ * A drag sample renders under the same tag but is a live preview, not a load, so it shows no phase.
+ */
 export const selectCadLoadingPhase = (snapshot: CadSnapshot): 'buffering' | 'connecting' | 'rendering' | undefined => {
   if (!snapshot.hasTag('cad-loading')) {
     return undefined;
   }
-  for (const phase of ['connecting', 'buffering', 'rendering'] as const) {
-    if (snapshot.matches(phase)) {
-      return phase;
-    }
+  if (snapshot.matches('connecting')) {
+    return 'connecting';
   }
-  return undefined;
+  if (snapshot.context.parameterRender?.kind === 'scrub') {
+    return undefined;
+  }
+  return snapshot.matches('buffering') ? 'buffering' : 'rendering';
 };
 
 /** Select one entry's kernel issues. A factory because the entry path is the caller's, not the machine's. */

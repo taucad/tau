@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { InvocationFunding, ModelStreamEvent, ModelStreamRequest, ModelTransport } from '#waist/ports.js';
+import type {
+  InvocationFunding,
+  ModelStreamEvent,
+  ModelStreamRequest,
+  ModelTransport,
+  ToolRegistry,
+} from '#waist/ports.js';
 import { appendChatRows, createTauAgentHost } from '#host/tau-agent-host.js';
 import { chatRunState, emptyChatLedger, foldChatLedger } from '#log/chat-ledger.js';
 import type { LogRowBody } from '#log/chat-ledger.js';
@@ -1118,6 +1124,401 @@ the cancelled tools left the system unchanged.
       'cancelled',
     ]);
     expect(events.findLast((event) => event.type === 'run.lifecycle')?.state).toBe('cancelled');
+    await host.close();
+  });
+
+  it.each([
+    ['approved', 'approves'],
+    ['denied', 'declines'],
+    ['cancelled', 'cancels the paused run'],
+  ] as const)('hands the answer to the tool that asked when the person %s it (%s)', async (outcome, _gesture) => {
+    const file = createMemoryLogFile();
+    const answerApproval = vi.fn<NonNullable<ToolRegistry['answerApproval']>>(async () => undefined);
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport: new ScriptedParityModelTransport(printResponses),
+        toolRegistry: { ...printTool([]), answerApproval },
+        idPrefix: `answer-${outcome}`,
+      }),
+    );
+    await host.admit({
+      chatId: 'chat-answer',
+      runId: 'run-answer',
+      trigger: 'submit',
+      message: { id: 'turn-answer', role: 'user', content: 'Print it.' },
+    });
+    const [pending] = await host.pendingInterrupts('run-answer');
+    expect(answerApproval).not.toHaveBeenCalled();
+
+    await (outcome === 'cancelled'
+      ? host.cancel({ runId: 'run-answer' })
+      : host.resolveInterrupt({ runId: 'run-answer', interruptId: pending!.interruptId, outcome }));
+
+    await vi.waitFor(() => {
+      expect(answerApproval).toHaveBeenCalledTimes(1);
+    });
+    expect(answerApproval).toHaveBeenCalledWith({
+      toolName: 'read_file',
+      payload: { kind: 'print-request', requestId: 'request-1' },
+      resolution: { interruptId: pending!.interruptId, outcome },
+    });
+    await host.close();
+  });
+
+  it('hands a Stop only the answers its own rows record, never an earlier approval (GM.r2 M2, mutant C)', async () => {
+    const file = createMemoryLogFile();
+    const answerApproval = vi.fn<NonNullable<ToolRegistry['answerApproval']>>(async () => undefined);
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport: new ScriptedParityModelTransport(printResponses),
+        toolRegistry: { ...printTool([]), answerApproval },
+        idPrefix: 'stop-after-approve',
+      }),
+    );
+    await host.admit({
+      chatId: 'chat-stop-approved',
+      runId: 'run-stop-approved',
+      trigger: 'submit',
+      message: { id: 'turn-stop-approved', role: 'user', content: 'Print it.' },
+    });
+    const [pending] = await host.pendingInterrupts('run-stop-approved');
+    await host.resolveInterrupt({ runId: 'run-stop-approved', interruptId: pending!.interruptId, outcome: 'approved' });
+    await vi.waitFor(() => {
+      expect(answerApproval).toHaveBeenCalledTimes(1);
+    });
+
+    await host.cancel({ runId: 'run-stop-approved' });
+    await host.snapshot('chat-stop-approved');
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 50);
+    });
+
+    expect(answerApproval.mock.calls.map(([answer]) => answer.resolution.outcome)).toEqual(['approved']);
+    await host.close();
+  });
+
+  it('hands an approval over again when its run continues, if the first hand-over was lost (GM.r2 M2)', async () => {
+    const file = createMemoryLogFile();
+    const answerApproval = vi
+      .fn<NonNullable<ToolRegistry['answerApproval']>>()
+      .mockRejectedValueOnce(new Error('The machine host was restarting.'))
+      .mockResolvedValue(undefined);
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport: new ScriptedParityModelTransport(printResponses),
+        toolRegistry: { ...printTool([]), answerApproval },
+        idPrefix: 'lost-hand-over',
+      }),
+    );
+    await host.admit({
+      chatId: 'chat-lost',
+      runId: 'run-lost',
+      trigger: 'submit',
+      message: { id: 'turn-lost', role: 'user', content: 'Print it.' },
+    });
+    const [pending] = await host.pendingInterrupts('run-lost');
+    await host.resolveInterrupt({ runId: 'run-lost', interruptId: pending!.interruptId, outcome: 'approved' });
+    await vi.waitFor(() => {
+      expect(errors).toHaveBeenCalled();
+    });
+
+    await host.resume('chat-lost');
+
+    await vi.waitFor(() => {
+      expect(answerApproval).toHaveBeenCalledTimes(2);
+    });
+    expect(answerApproval.mock.calls[1]![0]).toMatchObject({ resolution: { outcome: 'approved' } });
+    errors.mockRestore();
+    await host.close();
+  });
+
+  it('tells the continued attempt the answer its call paused on, not only that the call was aborted', async () => {
+    const file = createMemoryLogFile();
+    const transport = new ScriptedParityModelTransport([...printResponses.slice(0, 1), ...printResponses.slice(2)]);
+    const host = createTauAgentHost(
+      hostOptions({ openEventLog: file.open, transport, toolRegistry: printTool([]), idPrefix: 'told' }),
+    );
+    await host.admit({
+      chatId: 'chat-told',
+      runId: 'run-told',
+      trigger: 'submit',
+      message: { id: 'turn-told', role: 'user', content: 'Print it.' },
+    });
+    const [pending] = await host.pendingInterrupts('run-told');
+    await host.resolveInterrupt({ runId: 'run-told', interruptId: pending!.interruptId, outcome: 'approved' });
+    await host.resume('chat-told');
+
+    const continued = JSON.stringify(transport.requests.at(-1));
+    expect(continued).toContain('paused for the person');
+    expect(continued).toMatch(/approved: \W{0,3}Print main\.gcode\.3mf on Workshop X1C\?/u);
+    await expect(host.snapshot('chat-told')).resolves.toMatchObject({ state: 'completed' });
+    await host.close();
+  });
+
+  const promptsOf = async (host: TauAgentHost, runId: string): Promise<string[]> => {
+    const pending = await host.pendingInterrupts(runId);
+    return pending.map((request) => request.prompt);
+  };
+  /** A tool keyed by its target file, as `request_print` keys by machine and file (D5). */
+  const keyedTool = (outcomes: string[]) =>
+    tools(async (invocation) => {
+      const file = (invocation.input as { targetFile: string }).targetFile;
+      const resolution = await invocation.approve!({
+        key: `print:${file}`,
+        prompt: `Print ${file}?`,
+        payload: { kind: 'print-request', requestId: `request-${file}` },
+      });
+      outcomes.push(`${file}:${resolution.outcome}`);
+      return { content: { approval: resolution.outcome }, isError: false };
+    });
+  const readCall = (id: string, file: string) => ({ id, name: 'read_file', input: { targetFile: file } });
+  const usage = { inputTokens: 1, outputTokens: 1 };
+  /* The tools: a keyed print tool recording its outcomes, or a registry of the test's own. */
+  const keyedHost = (label: string, responses: readonly ScriptedParityResponse[], tools: string[] | ToolRegistry) => {
+    const file = createMemoryLogFile();
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport: new ScriptedParityModelTransport(responses),
+        toolRegistry: Array.isArray(tools) ? keyedTool(tools) : tools,
+        idPrefix: label,
+      }),
+    );
+    const admit = async (runId: string) =>
+      host.admit({
+        chatId: `chat-${label}`,
+        runId,
+        trigger: 'submit',
+        message: { id: `turn-${runId}`, role: 'user', content: 'Print it.' },
+      });
+    const approveAndResume = async (runId: string) => {
+      const [pending] = await host.pendingInterrupts(runId);
+      await host.resolveInterrupt({ runId, interruptId: pending!.interruptId, outcome: 'approved' });
+      await host.resume(`chat-${label}`);
+    };
+    return { host, file, admit, approveAndResume };
+  };
+
+  it('spends an approval only on the call that recalled it, not on another key asked first (GM.r1 M1)', async () => {
+    const outcomes: string[] = [];
+    const { host, admit, approveAndResume } = keyedHost(
+      'spend-other',
+      [
+        { id: 'a1', toolCalls: [readCall('c1', 'a.ts')], usage },
+        { id: 'a2', toolCalls: [readCall('c2', 'b.ts')], usage },
+        { id: 'a3', toolCalls: [readCall('c3', 'a.ts')], usage },
+        { id: 'a4', text: 'done', usage },
+      ],
+      outcomes,
+    );
+    await admit('run-spend-other');
+    await approveAndResume('run-spend-other');
+    expect(await promptsOf(host, 'run-spend-other')).toEqual(['Print b.ts?']);
+    await approveAndResume('run-spend-other');
+
+    expect(await host.pendingInterrupts('run-spend-other')).toEqual([]);
+    expect(outcomes).toEqual(['a.ts:approved']);
+    await expect(host.snapshot('chat-spend-other')).resolves.toMatchObject({ state: 'completed' });
+    await host.close();
+  });
+
+  it('tells each attempt only the answers given since it last ran (GM.r2 L-a, mutant D)', async () => {
+    const { host, file, admit, approveAndResume } = keyedHost(
+      'told-once',
+      [
+        { id: 'a1', toolCalls: [readCall('c1', 'a.ts')], usage },
+        { id: 'a2', toolCalls: [readCall('c2', 'b.ts')], usage },
+        { id: 'a3', text: 'done', usage },
+      ],
+      [],
+    );
+    await admit('run-told-once');
+    await approveAndResume('run-told-once');
+    await approveAndResume('run-told-once');
+
+    const eventLog = await file.open();
+    const messages = await eventLog.messages();
+    const reminders = messages.filter(
+      (message) => message.role === 'user' && message.metadata?.tauInternal?.['kind'] === 'approval-answer',
+    );
+    expect(reminders.map((message) => JSON.stringify(message.content))).toEqual([
+      expect.stringContaining('Print a.ts?'),
+      expect.not.stringContaining('Print a.ts?'),
+    ]);
+    expect(JSON.stringify(reminders[1]?.content)).toContain('Print b.ts?');
+    await host.close();
+  });
+
+  it('releases an approval whose recalling call threw, so the next call recalls it (GM.r2 L-c)', async () => {
+    const outcomes: string[] = [];
+    let failed = false;
+    const flaky = tools(async (invocation) => {
+      const file = (invocation.input as { targetFile: string }).targetFile;
+      const resolution = await invocation.approve!({ key: `print:${file}`, prompt: `Print ${file}?` });
+      if (!failed) {
+        failed = true;
+        throw new Error('The upload failed.');
+      }
+      outcomes.push(`${file}:${resolution.outcome}`);
+      return { content: { approval: resolution.outcome }, isError: false };
+    });
+    const { host, admit, approveAndResume } = keyedHost(
+      'release-thrown',
+      [
+        { id: 'a1', toolCalls: [readCall('c1', 'a.ts')], usage },
+        { id: 'a2', toolCalls: [readCall('c2', 'a.ts')], usage },
+        { id: 'a3', toolCalls: [readCall('c3', 'a.ts')], usage },
+        { id: 'a4', text: 'done', usage },
+      ],
+      flaky,
+    );
+    await admit('run-release-thrown');
+    await approveAndResume('run-release-thrown');
+
+    expect(outcomes).toEqual(['a.ts:approved']);
+    expect(await promptsOf(host, 'run-release-thrown')).toEqual([]);
+    await expect(host.snapshot('chat-release-thrown')).resolves.toMatchObject({ state: 'completed' });
+    await host.close();
+  });
+
+  it('asks again for a second call under a key whose approval a first call used (GM.r1 M2, mutant B)', async () => {
+    const outcomes: string[] = [];
+    const { host, admit, approveAndResume } = keyedHost(
+      'spend-twice',
+      [
+        { id: 'a1', toolCalls: [readCall('c1', 'a.ts')], usage },
+        { id: 'a2', toolCalls: [readCall('c2', 'a.ts')], usage },
+        { id: 'a3', toolCalls: [readCall('c3', 'a.ts')], usage },
+        { id: 'a4', text: 'done', usage },
+      ],
+      outcomes,
+    );
+    await admit('run-spend-twice');
+    await approveAndResume('run-spend-twice');
+
+    expect(outcomes).toEqual(['a.ts:approved']);
+    expect(await promptsOf(host, 'run-spend-twice')).toEqual(['Print a.ts?']);
+    await host.close();
+  });
+
+  it('keeps an approval a call used spent for the next host that opens the chat (GM.r1 M1)', async () => {
+    const file = createMemoryLogFile();
+    const outcomes: string[] = [];
+    const hostOver = (label: string, responses: readonly ScriptedParityResponse[]) =>
+      createTauAgentHost(
+        hostOptions({
+          openEventLog: file.open,
+          transport: new ScriptedParityModelTransport(responses),
+          toolRegistry: keyedTool(outcomes),
+          idPrefix: label,
+        }),
+      );
+    const first = hostOver('spent-first', [
+      { id: 'a1', toolCalls: [readCall('c1', 'a.ts')], usage },
+      { id: 'a2', toolCalls: [readCall('c2', 'a.ts')], usage },
+      { id: 'a3', toolCalls: [readCall('c3', 'b.ts')], usage },
+    ]);
+    await first.admit({
+      chatId: 'chat-spent',
+      runId: 'run-spent',
+      trigger: 'submit',
+      message: { id: 'turn-spent', role: 'user', content: 'Print it.' },
+    });
+    const [asked] = await first.pendingInterrupts('run-spent');
+    await first.resolveInterrupt({ runId: 'run-spent', interruptId: asked!.interruptId, outcome: 'approved' });
+    await first.resume('chat-spent');
+    const [second] = await first.pendingInterrupts('run-spent');
+    expect(second?.prompt).toBe('Print b.ts?');
+    await first.close();
+
+    const next = hostOver('spent-next', [
+      { id: 'a4', toolCalls: [readCall('c4', 'a.ts')], usage },
+      { id: 'a5', text: 'done', usage },
+    ]);
+    await expect(next.snapshot('chat-spent')).resolves.toMatchObject({ state: 'paused' });
+    await next.resolveInterrupt({ runId: 'run-spent', interruptId: second!.interruptId, outcome: 'approved' });
+    await next.resume('chat-spent');
+
+    expect(outcomes).toEqual(['a.ts:approved']);
+    expect(await promptsOf(next, 'run-spent')).toEqual(['Print a.ts?']);
+    await next.close();
+  });
+
+  it('answers only one of two parallel calls under the same key with one approval (GM.r1 L4)', async () => {
+    const outcomes: string[] = [];
+    const { host, admit, approveAndResume } = keyedHost(
+      'spend-parallel',
+      [
+        { id: 'a1', toolCalls: [readCall('c1', 'a.ts')], usage },
+        { id: 'a2', toolCalls: [readCall('c2', 'a.ts'), readCall('c3', 'a.ts')], usage },
+        { id: 'a3', text: 'done', usage },
+        { id: 'a4', text: 'done', usage },
+      ],
+      outcomes,
+    );
+    await admit('run-spend-parallel');
+    await approveAndResume('run-spend-parallel');
+
+    expect(outcomes).toEqual(['a.ts:approved']);
+    expect(await promptsOf(host, 'run-spend-parallel')).toEqual(['Print a.ts?']);
+    await host.close();
+  });
+
+  it("tells the chat's next run the answer a denial ended the last run with (GM.r3 clause 10)", async () => {
+    const { host, file, admit } = keyedHost(
+      'denied-next-run',
+      [
+        { id: 'a1', toolCalls: [readCall('c1', 'a.ts')], usage },
+        { id: 'a2', text: 'Understood, no print.', usage },
+      ],
+      [],
+    );
+    await admit('run-denied');
+    const [pending] = await host.pendingInterrupts('run-denied');
+    await host.resolveInterrupt({ runId: 'run-denied', interruptId: pending!.interruptId, outcome: 'denied' });
+    await expect(host.snapshot('chat-denied-next-run')).resolves.toMatchObject({ state: 'cancelled' });
+
+    await admit('run-after-denial');
+
+    const eventLog = await file.open();
+    const messages = await eventLog.messages();
+    const told = messages.filter(
+      (message) => message.role === 'user' && message.metadata?.tauInternal?.['kind'] === 'approval-answer',
+    );
+    expect(told).toHaveLength(1);
+    expect(told[0]!.content).toContain('- denied: "Print a.ts?"');
+    expect(told[0]!.content).toContain('That run has ended');
+    /* Told before the person's new message, and only once: a third run is not told again. */
+    expect(messages.indexOf(told[0]!)).toBeLessThan(
+      messages.findIndex((message) => message.id === 'turn-run-after-denial'),
+    );
+    await host.close();
+  });
+
+  it("does not carry an earlier run's unused approval into a later run of the chat (GM.r1 M2, mutant A)", async () => {
+    const outcomes: string[] = [];
+    const { host, admit } = keyedHost(
+      'spend-runs',
+      [
+        { id: 'a1', toolCalls: [readCall('c1', 'a.ts')], usage },
+        { id: 'a2', toolCalls: [readCall('c2', 'a.ts')], usage },
+        { id: 'a3', text: 'done', usage },
+      ],
+      outcomes,
+    );
+    await admit('run-first');
+    const [first] = await host.pendingInterrupts('run-first');
+    await host.resolveInterrupt({ runId: 'run-first', interruptId: first!.interruptId, outcome: 'approved' });
+    await host.cancel({ runId: 'run-first' });
+
+    await admit('run-second');
+
+    expect(outcomes).toEqual([]);
+    expect(await promptsOf(host, 'run-second')).toEqual(['Print a.ts?']);
     await host.close();
   });
 

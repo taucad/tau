@@ -8,6 +8,7 @@ import {
   tauFileDragMime,
   tauViewerPanelDragMime,
 } from '@taucad/types/constants';
+import type { CadAgentExecution } from '@taucad/chat';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import type { ChatComposerContextValue } from '#hooks/active-chat-provider.js';
 import type { DraftAttachmentOptions } from '#hooks/use-chat.js';
@@ -48,6 +49,7 @@ const makeResolvedModel = (
 const stableModel = makeResolvedModel();
 
 let mockActiveModel: ResolvedModel = stableModel;
+let mockExecution: CadAgentExecution | undefined;
 
 const chatActionsMock = {
   stop: vi.fn<() => void>(),
@@ -100,7 +102,7 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
       draftActorRef: undefined,
       model: { modelId: mockActiveModel.id, model: mockActiveModel, setActiveModel: vi.fn() },
       execution: {
-        execution: { kind: 'tau', model: mockActiveModel.id },
+        execution: mockExecution ?? { kind: 'tau', model: mockActiveModel.id },
         setActiveExecution: vi.fn(),
       },
       kernel: { kernelId: 'openscad', kernel: resolveKernel('openscad'), setActiveKernel: vi.fn() },
@@ -128,6 +130,7 @@ describe('useChatTextareaLogic — onSubmit surface', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockActiveModel = stableModel;
+    mockExecution = undefined;
     draftState = defaultDraftState;
   });
 
@@ -140,6 +143,32 @@ describe('useChatTextareaLogic — onSubmit surface', () => {
     );
 
     expect(result.current.selectedModel.id).toBe('chat-scoped-model');
+  });
+
+  it('should admit ACP images and PDFs offline without using the stale Tau model', () => {
+    mockActiveModel = { ...makeResolvedModel('anthropic-claude-haiku-4.5'), isResolved: false, model: undefined };
+    draftState = { ...defaultDraftState, draftAttachments: [{ hash: 'a'.repeat(64), mediaType: 'image/png' }] };
+
+    const { result, rerender } = renderHook(() =>
+      useChatTextareaLogic({ ref: undefined, onSubmit: vi.fn(async () => undefined) }),
+    );
+
+    expect(result.current.imageInputSupported).toBe(false);
+    mockExecution = { kind: 'acp', hostId: 'desktop', agentId: 'codex' };
+    rerender();
+
+    expect(result.current.imageInputSupported).toBe(true);
+    expect(result.current.attachmentInputSupported).toBe(true);
+    expect(result.current.attachmentAccept).toContain('image/png');
+    expect(result.current.attachmentAccept).toContain('application/pdf');
+    expect(result.current.sendBlockReason).toBeUndefined();
+    act(() => {
+      result.current.handleAddImage('data:image/png;base64,AAA');
+    });
+    expect(chatActionsMock.addDraftAttachment).toHaveBeenCalledWith('data:image/png;base64,AAA', {
+      model: { name: 'codex', support: { modalities: { input: ['text', 'image', 'pdf'], output: ['text'] } } },
+    });
+    expect(toastErrorMock).not.toHaveBeenCalled();
   });
 
   it('should invoke onSubmit with ONLY content and attachments when handleSubmit fires (no model / no metadata)', async () => {

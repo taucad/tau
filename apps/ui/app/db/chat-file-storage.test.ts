@@ -10,7 +10,7 @@ import type { FileSystemProvider } from '@taucad/filesystem';
 import { createChatFileStore } from '#db/chat-file-storage.js';
 import { IndexedDbStorageProvider } from '#db/indexeddb-storage.js';
 import type { ChatStorage } from '#types/storage.types.js';
-import type { ProjectLibraryState } from '#types/project.types.js';
+import type { ProjectLibraryState } from '#types/project-library.types.js';
 
 /**
  * The chat store's behaviour, re-pointed from `indexeddb-storage.test.ts`.

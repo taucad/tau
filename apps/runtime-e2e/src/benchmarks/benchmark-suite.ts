@@ -26,6 +26,11 @@ export type BenchmarkCase = {
   operation?: 'export' | 'render';
   /** Parameter values cycled across runs for parameter-only rerender cases. */
   parameterSequence?: ReadonlyArray<Record<string, unknown>>;
+  /**
+   * Parameter values cycled across runs as a committed parameter record: the sidecar is staged
+   * with each render and no override is sent, which is how the Parameters pane commits an edit.
+   */
+  stageSequence?: ReadonlyArray<Record<string, unknown>>;
 };
 
 const defaultMainFile = 'main.ts';
@@ -46,6 +51,15 @@ function inlineCase(name: string, category: string, code: string): BenchmarkCase
     mainFile: defaultMainFile,
   };
 }
+
+/** A box whose parameter form has 100 fields, one of which drives the geometry. */
+const hundredFieldBox = `
+  import { makeBaseBox } from 'replicad';
+  export const defaultParams = { width: 50, ${Array.from({ length: 99 }, (_, index) => `field${index}: 1`).join(', ')} };
+  export default function main({ width }) {
+    return makeBaseBox(width, 30, 20);
+  }
+`;
 
 const primitives: BenchmarkCase[] = [
   {
@@ -85,6 +99,17 @@ const primitives: BenchmarkCase[] = [
     ),
     operation: 'render',
     parameterSequence: [{ width: 40 }, { width: 50 }],
+  },
+  {
+    ...inlineCase('box-parameter-override-100', 'parameters', hundredFieldBox),
+    operation: 'render',
+    parameterSequence: [{ width: 40 }, { width: 50 }],
+  },
+  {
+    // Same model and values as the override case; a commit should cost no more than an override.
+    ...inlineCase('box-parameter-commit', 'parameters', hundredFieldBox),
+    operation: 'render',
+    stageSequence: [{ width: 40 }, { width: 50 }],
   },
   inlineCase(
     'cylinder',

@@ -1,4 +1,5 @@
-import { AtSign, Eye, EyeOff, FileBox, Focus, EllipsisVertical, RotateCcw, Target } from 'lucide-react';
+import { AtSign, Eye, EyeOff, FileBox, Focus, EllipsisVertical, Rotate3d, RotateCcw, Target } from 'lucide-react';
+import { findLinkByComponent } from '@taucad/kinematics';
 import type { ActorRefFrom } from 'xstate';
 import type {
   GeometryComponentAppearance,
@@ -62,6 +63,7 @@ type ModelComponentActionContextContentProperties = ModelComponentActionMenuData
 type ModelComponentActions = {
   readonly addToChat: () => void;
   readonly revealInExplorer: () => void;
+  readonly showKinematics: () => void;
   readonly focusComponent: () => void;
   readonly hideComponent: () => void;
   readonly toggleIsolation: () => void;
@@ -73,7 +75,15 @@ type ModelComponentActions = {
 type ModelComponentActionDescriptor =
   | {
       readonly type: 'item';
-      readonly id: 'focus' | 'addToChat' | 'revealInExplorer' | 'hide' | 'isolate' | 'showAll' | 'resetOpacity';
+      readonly id:
+        | 'focus'
+        | 'addToChat'
+        | 'revealInExplorer'
+        | 'showKinematics'
+        | 'hide'
+        | 'isolate'
+        | 'showAll'
+        | 'resetOpacity';
       readonly label: string;
       readonly icon: React.ReactNode;
       readonly isDisabled?: boolean;
@@ -119,6 +129,28 @@ export function buildModelComponentGeometryReference(
     label: node.name,
     kind: node.kind,
   };
+}
+
+/**
+ * The part, or the first part inside it, that belongs to a link of the unit's mechanism: what "Show kinematics"
+ * reveals. `undefined` disables the item.
+ */
+export function findModelComponentKinematicsTarget(
+  manifest: GeometryComponentManifest,
+  node: GeometryComponentNode,
+): string | undefined {
+  const { mechanism } = manifest;
+  if (!mechanism) {
+    return undefined;
+  }
+  const pending = [node.id];
+  for (let id = pending.shift(); id !== undefined; id = pending.shift()) {
+    if (findLinkByComponent({ mechanism, componentId: id })) {
+      return id;
+    }
+    pending.push(...(manifest.nodesById[id]?.childIds ?? []));
+  }
+  return undefined;
 }
 
 export function ModelComponentActionDropdown({
@@ -354,6 +386,14 @@ function useModelComponentActionDescriptors(
       onSelect: actions.addToChat,
     },
     ...revealInExplorerDescriptor,
+    {
+      type: 'item',
+      id: 'showKinematics',
+      label: 'Show kinematics',
+      icon: <Rotate3d className='size-3.5' />,
+      isDisabled: findModelComponentKinematicsTarget(data.manifest, data.node) === undefined,
+      onSelect: actions.showKinematics,
+    },
     { type: 'separator', id: 'primary' },
     {
       type: 'item',
@@ -564,6 +604,22 @@ function useModelComponentActions({
           entryPath: manifest.sourceFile!,
           unitId,
           componentId: node.id,
+        });
+      });
+    },
+    showKinematics: () => {
+      const componentId = findModelComponentKinematicsTarget(manifest, node);
+      if (componentId === undefined || !manifest.sourceFile || !project) {
+        return;
+      }
+      workspace?.openPanel('kinematics');
+      // The pane listens once mounted; a frame lets a newly opened pane subscribe, as Reveal in Explorer does.
+      requestAnimationFrame(() => {
+        project.editorRef.send({
+          type: 'revealModelComponentInKinematics',
+          entryPath: manifest.sourceFile!,
+          unitId,
+          componentId,
         });
       });
     },

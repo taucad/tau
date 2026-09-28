@@ -15,6 +15,19 @@ import {
   probeWebGpuSupport,
   resolveGraphicsBackendPreference,
 } from '#components/geometry/graphics/graphics-backend.js';
+import {
+  applySectionCutPatch,
+  createDefaultPlaneCut,
+  createDefaultRevolutionCut,
+  maxSectionCuts,
+} from '#components/geometry/graphics/section-cuts.js';
+import type {
+  SectionAxis,
+  SectionCut,
+  SectionCutPatch,
+  SectionPlane,
+  SectionVector,
+} from '#components/geometry/graphics/section-cuts.js';
 import { recordRendererSpan } from '#lib/renderer-telemetry.js';
 import { deriveModelInteractionUnitId, modelInteractionMachine } from '#machines/model-interaction.machine.js';
 import type { ModelInteractionSource, ViewerHoverSuppressionReason } from '#machines/model-interaction.machine.js';
@@ -92,19 +105,19 @@ const removeSuppressionReason = <T extends string>(reasons: readonly T[], reason
  * - **durable** -- in `GraphicsViewSettings`, seeded once at spawn and restored identically by an
  *   in-app revisit and a page reload: `enableSurfaces`, `enableLines`, `enableGizmo`, `enableGrid`,
  *   `enableAxes`, `enableMatcap`, `enablePostProcessing`, `upDirection`, `graphicsBackendPreference`,
- *   the pinned half of `measurements`, and the section view -- `isSectionViewActive`,
- *   `selectedSectionViewId`, `sectionViewPivot`, `sectionViewRotation`, `sectionViewDirection`
- *   (entry-scoped) with `enableClippingLines`, `enableClippingMesh` and `planeName` (pane-scoped).
+ *   the pinned half of `measurements`, and the section view -- `isSectionViewActive` and the values of
+ *   `sectionCuts` (entry-scoped; the cut ids are made anew at every seed).
  * - **session** -- survives an in-app revisit because this actor is retained, and is lost on reload
  *   by decision: `displayUnits.length` (the grid unit symbol, session-scoped by ruling E4),
  *   `isGridSizeLocked`, `isMeasureActive`, the unpinned half of `measurements`,
- *   `currentMeasurementStart` and `modelInteractionUnitId`.
+ *   `currentMeasurementStart`, `modelInteractionUnitId` and `selectedSectionCutId`.
  * - **ephemeral** -- derived from geometry, the canvas or a pointer on every mount, never seeded:
  *   `gridSizes`, `gridSizesComputed`, `cadUnits`, `cameraVisibleSpan`, `geometryRadius`,
- *   `geometryCenter`, `resolvedGraphicsBackend`, `webGpuAvailable`, `availableSectionViews`,
- *   `hoveredSectionViewId`, `sectionViewVisualization`, `sectionViewTranslation` (the pivot's
- *   projection on the plane axis), `hoveredMeasurementId`, `measureSnapDistance`, every suppression
- *   and interaction flag, `pickableMeshesVersion`, `geometry`, `geometryKey` and `gltfPresentation`.
+ *   `geometryCenter`, `resolvedGraphicsBackend`, `webGpuAvailable`, `hoveredSectionCutId`,
+ *   `committedSectionCuts` and `sectionCertification` (what the caps last certified),
+ *   `hoveredMeasurementId`, `measureSnapDistance`, every
+ *   suppression and interaction flag, `pickableMeshesVersion`, `geometry`, `geometryKey` and
+ *   `gltfPresentation`.
  *
  * No field here stores a copy of a value another actor owns; the camera's field of view and pose
  * belong to the view's camera session, and the render timeout to the entry's CAD actor.
@@ -158,31 +171,21 @@ export type GraphicsContext = {
   /** Active rendering backend consumed by `@react-three/fiber`. */
   resolvedGraphicsBackend: ResolvedGraphicsBackend;
 
-  // Clipping plane state
+  // Section view state
   isSectionViewActive: boolean;
-  availableSectionViews: Array<{
-    id: 'xy' | 'xz' | 'yz';
-    normal: [number, number, number]; // Vector3 as tuple
-    constant: number;
-  }>;
-  selectedSectionViewId: 'xy' | 'xz' | 'yz' | undefined;
-  /** Display naming for planes */
-  planeName: 'cartesian' | 'face';
-  /** Currently hovered section view selector id (including inverse faces) */
-  hoveredSectionViewId?: 'xy' | 'xz' | 'yz' | 'yx' | 'zx' | 'zy';
-  sectionViewVisualization: {
-    stripeColor: string;
-    stripeSpacing: number;
-    stripeWidth: number;
-  };
-  /** Current section translation in physical metres. */
-  sectionViewTranslation: number;
-  sectionViewRotation: [number, number, number]; // Euler rotation as tuple [x, y, z]
-  sectionViewDirection: 1 | -1; // Normal direction multiplier
-  /** Physical Tau-root pivot in metres that the clipping plane passes through. */
-  sectionViewPivot: [number, number, number];
-  enableClippingLines: boolean; // Whether to cut lines
-  enableClippingMesh: boolean; // Whether to cut meshes
+  /** The section's cuts in order, at most `maxSectionCuts`; the removed volume is their union. */
+  sectionCuts: readonly SectionCut[];
+  /** The cut whose editor and handles show. */
+  selectedSectionCutId: string | undefined;
+  /** The cut hovered in the section row or the scene; both highlight it. */
+  hoveredSectionCutId: string | undefined;
+  /** The cut list the clip, caps and raycasts show: the latest one whose every cap face certified. */
+  committedSectionCuts: readonly SectionCut[];
+  /**
+   * Whether the caps certified the latest cut list they drew, or refused it and still show `committedSectionCuts`.
+   * A certified list's caps are complete, though its exact overlap result may still be pending.
+   */
+  sectionCertification: 'certified' | 'rejected';
 
   // Measure state
   isMeasureActive: boolean;
@@ -240,25 +243,22 @@ export type GraphicsEvent =
   | { type: 'setPostProcessingVisibility'; payload: boolean }
   | { type: 'setUpDirection'; payload: 'x' | 'y' | 'z' }
   | { type: 'setGraphicsBackendPreference'; payload: GraphicsBackendPreference }
-  // Clipping plane events
-  | { type: 'setSectionViewActive'; payload: boolean }
-  | { type: 'selectSectionView'; payload: 'xy' | 'xz' | 'yz' | undefined }
-  | { type: 'setSectionViewTranslation'; payload: number }
-  | { type: 'setSectionViewRotation'; payload: [number, number, number] }
-  | { type: 'toggleSectionViewDirection' }
-  | { type: 'setSectionViewDirection'; payload: 1 | -1 }
-  | { type: 'setSectionViewPivot'; payload: [number, number, number] }
-  | { type: 'setPlaneName'; payload: 'cartesian' | 'face' }
+  // Section view events
+  /** Turning the section on with no cuts adds the default plane, removing the side `viewDirection` faces. */
+  | { type: 'setSectionViewActive'; payload: boolean; viewDirection?: SectionVector }
+  /** Adds a cut with the defaults, selects it and turns the section on. Refused at `maxSectionCuts`. */
+  | { type: 'addSectionCut'; payload: AddSectionCutPayload }
+  /** A patch that changes no value keeps the snapshot. */
+  | { type: 'updateSectionCut'; payload: { id: string; patch: SectionCutPatch } }
+  /** Removing the last cut turns the section off. */
+  | { type: 'removeSectionCut'; payload: string }
+  | { type: 'selectSectionCut'; payload: string | undefined }
+  | { type: 'hoverSectionCut'; payload: string | undefined }
+  /** From the caps, in the frame they certify or refuse a cut list. A repeated value keeps the snapshot. */
   | {
-      type: 'setHoveredSectionView';
-      payload: 'xy' | 'xz' | 'yz' | 'yx' | 'zx' | 'zy' | undefined;
+      type: 'setSectionCertification';
+      payload: { status: 'certified' | 'rejected'; cuts: readonly SectionCut[] };
     }
-  | {
-      type: 'setSectionViewVisualization';
-      payload: Partial<GraphicsContext['sectionViewVisualization']>;
-    }
-  | { type: 'setClippingLinesEnabled'; payload: boolean }
-  | { type: 'setClippingMeshEnabled'; payload: boolean }
   // Measure events
   | { type: 'setMeasureActive'; payload: boolean }
   | { type: 'startMeasurement'; payload: [number, number, number] }
@@ -403,6 +403,15 @@ export type GraphicsEvent =
       centerMeters: [number, number, number];
     };
 
+/**
+ * The cut to add. A plane defaults to the first of XZ, YZ and XY the list lacks, and a cutaway to the up axis;
+ * both pass through the geometry centre. `viewDirection` points from the view's target toward the camera (the camera
+ * view's `direction`): a plane then removes the side facing the camera and a cutaway opens toward it.
+ */
+export type AddSectionCutPayload =
+  | { kind: 'plane'; plane?: SectionPlane; viewDirection?: SectionVector }
+  | { kind: 'revolution'; axis?: SectionAxis; viewDirection?: SectionVector };
+
 // Emitted events
 export type GraphicsEmitted =
   | { type: 'gridUpdated'; sizes: GridSizes }
@@ -489,125 +498,22 @@ function calculateGridSizes({
   };
 }
 
-// Clamp a radian angle to the nearest whole degree and return radians
-function clampRadiansToNearestDegree(radians: number): number {
-  const degrees = (radians * 180) / Math.PI;
-  const rounded = Math.round(degrees);
-  return (rounded * Math.PI) / 180;
-}
-
-// Return the fixed base axis for a given plane id. This axis is used for
-// computing the displayed translation from the world-space pivot so that
-// rotation does not change the displayed value.
-function getBaseAxis(planeId: 'xy' | 'xz' | 'yz' | undefined): [number, number, number] {
-  if (planeId === 'xz') {
-    return [0, 1, 0];
-  }
-
-  if (planeId === 'yz') {
-    return [1, 0, 0];
-  }
-
-  // Default and 'xy'
-  return [0, 0, 1];
-}
-
-function dot(a: [number, number, number], b: [number, number, number]): number {
-  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-}
-
 /**
- * Create-only section-view seed (E2). The persisted cut is applied to context directly -- replaying
- * `selectSectionView` would re-derive the pivot and rotation from the geometry centre. The
- * translation is the pivot's projection on the plane axis, so it is derived rather than restored.
+ * Create-only section-view seed. The persisted cuts are applied to context directly, each under a new id, and the
+ * section is on only with a cut to show.
  */
 function createSectionViewSeed(
   sectionView: GraphicsOwnedSettings['sectionView'],
-  sectionDisplay: GraphicsOwnedSettings['sectionDisplay'],
-): Pick<
-  GraphicsContext,
-  | 'isSectionViewActive'
-  | 'selectedSectionViewId'
-  | 'planeName'
-  | 'sectionViewTranslation'
-  | 'sectionViewRotation'
-  | 'sectionViewDirection'
-  | 'sectionViewPivot'
-  | 'enableClippingLines'
-  | 'enableClippingMesh'
-> {
-  const plane = sectionView?.plane;
-  const pivot: [number, number, number] = sectionView?.pivot ?? [0, 0, 0];
+): Pick<GraphicsContext, 'isSectionViewActive' | 'sectionCuts' | 'selectedSectionCutId' | 'hoveredSectionCutId'> {
+  const sectionCuts = (sectionView?.cuts ?? []).map(
+    (cut): SectionCut => ({ ...cut, id: generatePrefixedId(idPrefix.sectionCut) }),
+  );
   return {
-    isSectionViewActive: sectionView?.active ?? false,
-    selectedSectionViewId: plane,
-    planeName: sectionDisplay?.planeName ?? 'face',
-    sectionViewTranslation: plane ? dot(getBaseAxis(plane), pivot) : 0,
-    sectionViewRotation: sectionView?.rotation ?? [0, 0, 0],
-    sectionViewDirection: sectionView?.direction ?? -1,
-    sectionViewPivot: pivot,
-    enableClippingLines: sectionDisplay?.clipLines ?? true,
-    enableClippingMesh: sectionDisplay?.clipMesh ?? true,
+    isSectionViewActive: (sectionView?.active ?? false) && sectionCuts.length > 0,
+    sectionCuts,
+    selectedSectionCutId: undefined,
+    hoveredSectionCutId: undefined,
   };
-}
-
-function scale(v: [number, number, number], s: number): [number, number, number] {
-  return [v[0] * s, v[1] * s, v[2] * s];
-}
-
-function sub(a: [number, number, number], b: [number, number, number]): [number, number, number] {
-  return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
-}
-
-function add(a: [number, number, number], b: [number, number, number]): [number, number, number] {
-  return [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
-}
-
-function length(v: [number, number, number]): number {
-  return Math.hypot(v[0], v[1], v[2]);
-}
-
-function normalize(v: [number, number, number]): [number, number, number] {
-  const length_ = length(v) || 1;
-  return [v[0] / length_, v[1] / length_, v[2] / length_];
-}
-
-// Apply XYZ-order Euler rotation to a vector
-function rotateVectorByEuler(v: [number, number, number], euler: [number, number, number]): [number, number, number] {
-  const [x, y, z] = v;
-  const [rx, ry, rz] = euler;
-
-  // Rotate around X
-  const cx = Math.cos(rx);
-  const sx = Math.sin(rx);
-  const y1 = y * cx - z * sx;
-  const z1 = y * sx + z * cx;
-
-  // Rotate around Y
-  const cy = Math.cos(ry);
-  const sy = Math.sin(ry);
-  const x2 = x * cy + z1 * sy;
-  const y2 = y1;
-  const z2 = -x * sy + z1 * cy;
-
-  // Rotate around Z
-  const cz = Math.cos(rz);
-  const sz = Math.sin(rz);
-  const x3 = x2 * cz - y2 * sz;
-  const y3 = x2 * sz + y2 * cz;
-  const z3 = z2;
-
-  return [x3, y3, z3];
-}
-
-// Round a translation value to a given number of decimals in the current unit,
-// then convert it back to the metre world unit.
-function roundTranslationToUnitDecimals(valueInBase: number, unitFactor: number, decimals = 2): number {
-  const factor = unitFactor === 0 ? 1 : unitFactor;
-  const valueInUnit = valueInBase / factor;
-  const multiplier = 10 ** decimals;
-  const roundedInUnit = Math.round(valueInUnit * multiplier) / multiplier;
-  return roundedInUnit * factor;
 }
 
 const graphicsActors = {
@@ -643,29 +549,6 @@ const clearViewerHover = (context: GraphicsContext, enq: GraphicsEnqueue, source
 const gltfRequestMatches = (context: GraphicsContext, event: Readonly<{ revision: number; key: string }>): boolean =>
   event.revision === context.gltfPresentation.requestedRevision && event.key === context.gltfPresentation.requestedKey;
 
-/* The displayed translation is the pivot's projection on the base axis, rounded
- * at the selected display-unit precision. */
-const projectedTranslation = (context: GraphicsContext, pivot: [number, number, number]): number =>
-  roundTranslationToUnitDecimals(
-    dot(getBaseAxis(context.selectedSectionViewId), pivot),
-    context.displayUnits.length.metersPerUnit,
-    2,
-  );
-
-/* A drag reports its position on every pointer move, often unchanged. Keeping the stored tuple for an
- * equal value is what lets an unchanged step reach no selector, effect or persisted record. */
-const keepEqualTuple = (current: [number, number, number], next: [number, number, number]): [number, number, number] =>
-  current[0] === next[0] && current[1] === next[1] && current[2] === next[2] ? current : next;
-
-/** Moves the cut's pivot and its displayed projection; a step that lands where the cut already is changes nothing. */
-const moveSectionPivot = (context: GraphicsContext, pivot: [number, number, number]): { context?: GraphicsPatch } => {
-  const sectionViewPivot = keepEqualTuple(context.sectionViewPivot, pivot);
-  const sectionViewTranslation = projectedTranslation(context, sectionViewPivot);
-  return sectionViewPivot === context.sectionViewPivot && sectionViewTranslation === context.sectionViewTranslation
-    ? {}
-    : { context: { sectionViewPivot, sectionViewTranslation } };
-};
-
 const beginMeasureHoverSuppression = (context: GraphicsContext, enq: GraphicsEnqueue): GraphicsPatch => {
   if (!context.viewerHoverSuppressionReasons.includes('measureTool')) {
     clearViewerHover(context, enq, 'viewer');
@@ -687,75 +570,63 @@ const endMeasureHoverSuppression = (context: GraphicsContext): GraphicsPatch => 
   viewerHoverSuppressionReasons: removeSuppressionReason(context.viewerHoverSuppressionReasons, 'measureTool'),
 });
 
-const selectSectionView = (
+/** Appends a cut made with the defaults, selects it and marks the section on; the caller checks the budget. */
+const appendSectionCut = (
   context: GraphicsContext,
-  payload: GraphicsContext['selectedSectionViewId'],
-): GraphicsPatch => ({
-  selectedSectionViewId: payload,
-  // Reset translation, pivot and rotation when changing planes
-  sectionViewTranslation: payload === undefined ? 0 : dot(getBaseAxis(payload), context.geometryCenter),
-  sectionViewPivot: payload === undefined ? [0, 0, 0] : [...context.geometryCenter],
-  sectionViewRotation: [0, 0, 0],
-});
+  payload: AddSectionCutPayload,
+): Pick<GraphicsContext, 'isSectionViewActive' | 'sectionCuts' | 'selectedSectionCutId'> => {
+  const id = generatePrefixedId(idPrefix.sectionCut);
+  const cut =
+    payload.kind === 'plane'
+      ? createDefaultPlaneCut({
+          id,
+          plane: payload.plane,
+          existing: context.sectionCuts,
+          center: context.geometryCenter,
+          viewDirection: payload.viewDirection,
+        })
+      : createDefaultRevolutionCut({
+          id,
+          axis: payload.axis ?? context.upDirection,
+          center: context.geometryCenter,
+          viewDirection: payload.viewDirection,
+        });
+  return { isSectionViewActive: true, sectionCuts: [...context.sectionCuts, cut], selectedSectionCutId: id };
+};
 
-/** Enter measuring from a section view: the cut switches off, the tool's hover suppression starts. */
-const measureFromSectionView = (
-  {
-    context,
-    event,
-  }: Readonly<{ context: GraphicsContext; event: Extract<GraphicsEvent, { type: 'setMeasureActive' }> }>,
-  enq: GraphicsEnqueue,
-) =>
-  event.payload
-    ? {
-        target: '#graphics.operational.measure.selecting',
-        context: { isSectionViewActive: false, isMeasureActive: true, ...beginMeasureHoverSuppression(context, enq) },
-      }
-    : undefined;
-
-const leaveSectionView = ({ event }: Readonly<{ event: Extract<GraphicsEvent, { type: 'setSectionViewActive' }> }>) =>
-  event.payload ? undefined : { target: '#graphics.operational.ready', context: { isSectionViewActive: false } };
-
-/** Enter a section view from measuring; the measurements stay where they are. */
-const sectionViewFromMeasure = ({
-  context,
-  event,
-}: Readonly<{ context: GraphicsContext; event: Extract<GraphicsEvent, { type: 'setSectionViewActive' }> }>) => {
-  if (!event.payload) {
+/** Drops the cut and the selection and hover that name it; `undefined` when no cut has that id. */
+const withoutSectionCut = (
+  context: GraphicsContext,
+  id: string,
+): Pick<GraphicsContext, 'sectionCuts' | 'selectedSectionCutId' | 'hoveredSectionCutId'> | undefined => {
+  const sectionCuts = context.sectionCuts.filter((cut) => cut.id !== id);
+  if (sectionCuts.length === context.sectionCuts.length) {
     return undefined;
   }
   return {
-    target:
-      context.selectedSectionViewId === undefined
-        ? '#graphics.operational.section-view.pending'
-        : '#graphics.operational.section-view.active',
-    context: {
-      isMeasureActive: false,
-      currentMeasurementStart: undefined,
-      ...endMeasureHoverSuppression(context),
-      isSectionViewActive: true,
-    },
+    sectionCuts,
+    selectedSectionCutId: context.selectedSectionCutId === id ? undefined : context.selectedSectionCutId,
+    hoveredSectionCutId: context.hoveredSectionCutId === id ? undefined : context.hoveredSectionCutId,
   };
 };
 
-const setSectionViewVisualization = ({
-  context,
-  event,
-}: Readonly<{ context: GraphicsContext; event: Extract<GraphicsEvent, { type: 'setSectionViewVisualization' }> }>) => ({
-  context: { sectionViewVisualization: { ...context.sectionViewVisualization, ...event.payload } },
-});
+/**
+ * Turning the section off: nothing is cut, so nothing is committed or refused until the caps draw again, and no cut
+ * stays hovered for when it turns back on.
+ */
+const sectionOffContext: Pick<
+  GraphicsContext,
+  'isSectionViewActive' | 'committedSectionCuts' | 'sectionCertification' | 'hoveredSectionCutId'
+> = {
+  isSectionViewActive: false,
+  committedSectionCuts: [],
+  sectionCertification: 'certified',
+  hoveredSectionCutId: undefined,
+};
 
-const setClippingLinesEnabled = ({
-  event,
-}: Readonly<{ event: Extract<GraphicsEvent, { type: 'setClippingLinesEnabled' }> }>) => ({
-  context: { enableClippingLines: event.payload },
-});
-
-const setClippingMeshEnabled = ({
-  event,
-}: Readonly<{ event: Extract<GraphicsEvent, { type: 'setClippingMeshEnabled' }> }>) => ({
-  context: { enableClippingMesh: event.payload },
-});
+/** Selecting or hovering names a cut in the list, or none; naming the current one again changes nothing. */
+const isSectionCutReference = (context: GraphicsContext, current: string | undefined, next: string | undefined) =>
+  next !== current && (next === undefined || context.sectionCuts.some((cut) => cut.id === next));
 
 /**
  * Graphics Machine
@@ -768,20 +639,19 @@ const setClippingMeshEnabled = ({
  *
  * State Architecture:
  *
- * operational (parent state)
- *   ├── ready (default state)
- *   ├── section-view (modal viewing mode) [mutually exclusive]
- *   │   ├── pending (waiting for plane selection)
- *   │   └── active (plane selected, can manipulate)
- *   └── measure (measurement mode) [mutually exclusive]
- *       ├── selecting (clicking first points)
- *       └── selected (points selected, can add more)
+ * operational (parallel: the tools run together)
+ *   ├── section
+ *   │   ├── off (default; the cuts are kept)
+ *   │   └── on (at least one cut)
+ *   └── measure
+ *       ├── off (default; the measurements are kept)
+ *       └── on
+ *           ├── selecting (clicking first points)
+ *           └── selected (a first point is placed)
  *
- * Future modes can be added as siblings:
- *   ├── annotation (future)
- *
- * Common events (grid, camera, visibility, screenshots) are handled
- * once at the operational parent level to avoid duplication.
+ * Common events (grid, camera, visibility, screenshots) and the cut data events are handled once at
+ * the operational level. A transition that turns a tool on or off lives inside that tool's region, so it
+ * never exits and resets the other region.
  */
 export const graphicsMachine = setup({
   actors: graphicsActors,
@@ -863,19 +733,10 @@ export const graphicsMachine = setup({
       webGpuAvailable: false,
       resolvedGraphicsBackend: resolveGraphicsBackendPreference(preference, false),
 
-      // Clipping plane state (durable per E2; the cut is entry-scoped, its display pane-scoped)
-      ...createSectionViewSeed(input.sectionView, input.sectionDisplay),
-      availableSectionViews: [
-        { id: 'xy', normal: [0, 0, 1], constant: 0 },
-        { id: 'xz', normal: [0, 1, 0], constant: 0 },
-        { id: 'yz', normal: [1, 0, 0], constant: 0 },
-      ],
-      hoveredSectionViewId: undefined,
-      sectionViewVisualization: {
-        stripeColor: '#00ff00',
-        stripeSpacing: 0.01,
-        stripeWidth: 0.001,
-      },
+      // Section view state (the cuts are durable and entry-scoped)
+      ...createSectionViewSeed(input.sectionView),
+      committedSectionCuts: [],
+      sectionCertification: 'certified',
 
       // Measure state
       isMeasureActive: false,
@@ -918,14 +779,13 @@ export const graphicsMachine = setup({
   initial: 'operational',
   states: {
     operational: {
-      /* A seeded cut sets context directly -- replaying `selectSectionView` would reset the pivot and
-       * rotation to geometry-derived values. This raise only re-enters the matching state node. */
+      /* Seeded cuts set context directly; this raise only enters the section region's `on` state. */
       entry: ({ context }, enq) => {
         if (context.isSectionViewActive) {
           enq.raise({ type: 'setSectionViewActive', payload: true });
         }
       },
-      initial: 'ready',
+      type: 'parallel',
       on: {
         // Grid events
         updateGridSize: ({ context, event }, enq) => {
@@ -1010,10 +870,6 @@ export const graphicsMachine = setup({
             resolvedGraphicsBackend: resolveGraphicsBackendPreference(event.payload, context.webGpuAvailable),
           }),
         },
-
-        // Plane naming and hover are global in operational state
-        setPlaneName: { context: ({ event }) => ({ planeName: event.payload }) },
-        setHoveredSectionView: { context: ({ event }) => ({ hoveredSectionViewId: event.payload }) },
 
         // Controls events
         controlsInteractionStart: {
@@ -1316,8 +1172,39 @@ export const graphicsMachine = setup({
           forwardToModelInteraction(context, enq, { type: 'clearFocus', unitId: event.unitId, source: event.source });
           return {};
         },
-        // Section view physical pivot updates.
-        setSectionViewPivot: ({ context, event }) => moveSectionPivot(context, event.payload),
+
+        // Section cuts are data: editing one never changes a region.
+        updateSectionCut: ({ context, event }) => {
+          const cut = context.sectionCuts.find((candidate) => candidate.id === event.payload.id);
+          if (!cut) {
+            return {};
+          }
+          const next = applySectionCutPatch(cut, event.payload.patch, context.geometryCenter);
+          return next === cut
+            ? {}
+            : {
+                context: {
+                  sectionCuts: context.sectionCuts.map((candidate) => (candidate === cut ? next : candidate)),
+                },
+              };
+        },
+        selectSectionCut: ({ context, event }) =>
+          isSectionCutReference(context, context.selectedSectionCutId, event.payload)
+            ? { context: { selectedSectionCutId: event.payload } }
+            : {},
+        hoverSectionCut: ({ context, event }) =>
+          isSectionCutReference(context, context.hoveredSectionCutId, event.payload)
+            ? { context: { hoveredSectionCutId: event.payload } }
+            : {},
+        setSectionCertification: ({ context, event }) =>
+          event.payload.cuts === context.committedSectionCuts && event.payload.status === context.sectionCertification
+            ? {}
+            : {
+                context: {
+                  committedSectionCuts: event.payload.cuts,
+                  sectionCertification: event.payload.status,
+                },
+              },
 
         // Measurement events (available in all operational states)
         clearMeasurement: {
@@ -1341,171 +1228,129 @@ export const graphicsMachine = setup({
         },
       },
       states: {
-        ready: {
-          on: {
-            setSectionViewActive: ({ context, event }) => {
-              if (!event.payload) {
-                return undefined;
-              }
-              return {
-                target: context.selectedSectionViewId === undefined ? 'section-view.pending' : 'section-view.active',
-                context: { isSectionViewActive: true },
-              };
-            },
-            setMeasureActive: ({ context, event }, enq) =>
-              event.payload
-                ? {
-                    target: 'measure.selecting',
-                    context: { isMeasureActive: true, ...beginMeasureHoverSuppression(context, enq) },
-                  }
-                : undefined,
-          },
-        },
-
-        'section-view': {
-          initial: 'pending',
+        section: {
+          initial: 'off',
           states: {
-            pending: {
+            off: {
               on: {
-                setSectionViewActive: leaveSectionView,
-                setMeasureActive: measureFromSectionView,
-                selectSectionView: ({ context, event }) =>
-                  event.payload === undefined
-                    ? undefined
-                    : { target: 'active', context: selectSectionView(context, event.payload) },
-                setSectionViewVisualization,
-                setClippingLinesEnabled,
-                setClippingMeshEnabled,
+                setSectionViewActive: ({ context, event }) => {
+                  if (!event.payload) {
+                    return undefined;
+                  }
+                  return {
+                    target: 'on',
+                    context:
+                      context.sectionCuts.length === 0
+                        ? appendSectionCut(context, { kind: 'plane', viewDirection: event.viewDirection })
+                        : { isSectionViewActive: true },
+                  };
+                },
+                addSectionCut: ({ context, event }) =>
+                  context.sectionCuts.length >= maxSectionCuts
+                    ? {}
+                    : { target: 'on', context: appendSectionCut(context, event.payload) },
+                removeSectionCut: ({ context, event }) => {
+                  const patch = withoutSectionCut(context, event.payload);
+                  return patch ? { context: patch } : {};
+                },
               },
             },
 
-            active: {
+            on: {
               on: {
-                setSectionViewActive: leaveSectionView,
-                setMeasureActive: measureFromSectionView,
-                selectSectionView: ({ context, event }) =>
-                  event.payload === undefined
-                    ? { target: 'pending', context: selectSectionView(context, event.payload) }
-                    : { context: selectSectionView(context, event.payload) },
-                /* Move the pivot along the CURRENT rotated normal, preserving the component
-                 * perpendicular to that normal so no jump occurs. The displayed translation is the
-                 * moved pivot's projection, which is the rounded requested value. */
-                setSectionViewTranslation: ({ context, event }) => {
-                  // Round the physical metre value at the selected display-unit precision.
-                  const desired = roundTranslationToUnitDecimals(
-                    event.payload,
-                    context.displayUnits.length.metersPerUnit,
-                    2,
-                  );
-
-                  const a = getBaseAxis(context.selectedSectionViewId); // Base axis
-                  const r = normalize(rotateVectorByEuler(a, context.sectionViewRotation)); // Rotated normal
-
-                  const p = context.sectionViewPivot;
-                  const pr = dot(p, r);
-                  const pParallelR = scale(r, pr);
-                  const pPerpR = sub(p, pParallelR);
-
-                  const denom = dot(a, r);
-                  const s = Math.abs(denom) > 1e-6 ? (desired - dot(a, pPerpR)) / denom : desired;
-                  return moveSectionPivot(context, add(pPerpR, scale(r, s)));
-                },
-                /* Rotation does not change the pivot. Ensure displayed translation stays
-                 * consistent with pivot projection onto the base axis. */
-                setSectionViewRotation: ({ context, event }) => {
-                  const [rx, ry, rz] = event.payload;
-                  const sectionViewRotation = keepEqualTuple(context.sectionViewRotation, [
-                    clampRadiansToNearestDegree(rx),
-                    clampRadiansToNearestDegree(ry),
-                    clampRadiansToNearestDegree(rz),
-                  ]);
-                  const sectionViewTranslation = projectedTranslation(context, context.sectionViewPivot);
-                  return sectionViewRotation === context.sectionViewRotation &&
-                    sectionViewTranslation === context.sectionViewTranslation
+                setSectionViewActive: ({ event }) =>
+                  event.payload ? undefined : { target: 'off', context: { ...sectionOffContext } },
+                addSectionCut: ({ context, event }) =>
+                  context.sectionCuts.length >= maxSectionCuts
                     ? {}
-                    : { context: { sectionViewRotation, sectionViewTranslation } };
+                    : { context: appendSectionCut(context, event.payload) },
+                removeSectionCut: ({ context, event }) => {
+                  const patch = withoutSectionCut(context, event.payload);
+                  if (!patch) {
+                    return {};
+                  }
+                  return patch.sectionCuts.length === 0
+                    ? { target: 'off', context: { ...patch, ...sectionOffContext } }
+                    : { context: patch };
                 },
-                toggleSectionViewDirection: {
-                  context: ({ context }) => ({ sectionViewDirection: context.sectionViewDirection === 1 ? -1 : 1 }),
-                },
-                setSectionViewDirection: { context: ({ event }) => ({ sectionViewDirection: event.payload }) },
-                setSectionViewVisualization,
-                setClippingLinesEnabled,
-                setClippingMeshEnabled,
               },
             },
           },
         },
 
         measure: {
-          initial: 'selecting',
+          initial: 'off',
           states: {
-            selecting: {
+            off: {
               on: {
-                setMeasureActive: ({ context, event }) =>
+                setMeasureActive: ({ context, event }, enq) =>
                   event.payload
-                    ? undefined
-                    : {
-                        target: '#graphics.operational.ready',
-                        context: { isMeasureActive: false, ...endMeasureHoverSuppression(context) },
-                      },
-                setSectionViewActive: sectionViewFromMeasure,
-                startMeasurement: {
-                  target: 'selected',
-                  context: ({ event }) => ({ currentMeasurementStart: event.payload }),
-                },
-                clearAllMeasurements: { context: { measurements: [], currentMeasurementStart: undefined } },
+                    ? {
+                        target: 'on',
+                        context: { isMeasureActive: true, ...beginMeasureHoverSuppression(context, enq) },
+                      }
+                    : undefined,
               },
             },
 
-            selected: {
+            on: {
+              initial: 'selecting',
               on: {
+                // Leaving keeps every measurement; only a half-placed one is dropped.
                 setMeasureActive: ({ context, event }) =>
                   event.payload
                     ? undefined
                     : {
-                        target: '#graphics.operational.ready',
+                        target: 'off',
                         context: {
-                          measurements: [],
-                          currentMeasurementStart: undefined,
                           isMeasureActive: false,
+                          currentMeasurementStart: undefined,
                           ...endMeasureHoverSuppression(context),
                         },
                       },
-                setSectionViewActive: sectionViewFromMeasure,
-                completeMeasurement: ({ context, event }) => {
-                  const start = context.currentMeasurementStart;
-                  if (!start) {
-                    return { target: 'selecting', context: { currentMeasurementStart: undefined } };
-                  }
-                  const end = event.payload;
-                  return {
-                    target: 'selecting',
-                    context: {
-                      measurements: [
-                        ...context.measurements,
-                        {
-                          id: generatePrefixedId(idPrefix.measurement),
-                          frameId: 'tau:root',
-                          startPoint: start,
-                          endPoint: end,
-                          distance: Math.hypot(end[0] - start[0], end[1] - start[1], end[2] - start[2]),
-                          isPinned: false,
-                        },
-                      ],
-                      currentMeasurementStart: undefined,
-                    },
-                  };
-                },
-                cancelCurrentMeasurement: { target: 'selecting', context: { currentMeasurementStart: undefined } },
-                clearMeasurement: {
-                  context: ({ context, event }) => ({
-                    measurements: context.measurements.filter((m) => m.id !== event.payload),
-                  }),
-                },
                 clearAllMeasurements: {
-                  target: 'selecting',
+                  target: '.selecting',
                   context: { measurements: [], currentMeasurementStart: undefined },
+                },
+              },
+              states: {
+                selecting: {
+                  on: {
+                    startMeasurement: {
+                      target: 'selected',
+                      context: ({ event }) => ({ currentMeasurementStart: event.payload }),
+                    },
+                  },
+                },
+
+                selected: {
+                  on: {
+                    completeMeasurement: ({ context, event }) => {
+                      const start = context.currentMeasurementStart;
+                      if (!start) {
+                        return { target: 'selecting', context: { currentMeasurementStart: undefined } };
+                      }
+                      const end = event.payload;
+                      return {
+                        target: 'selecting',
+                        context: {
+                          measurements: [
+                            ...context.measurements,
+                            {
+                              id: generatePrefixedId(idPrefix.measurement),
+                              frameId: 'tau:root',
+                              startPoint: start,
+                              endPoint: end,
+                              distance: Math.hypot(end[0] - start[0], end[1] - start[1], end[2] - start[2]),
+                              isPinned: false,
+                            },
+                          ],
+                          currentMeasurementStart: undefined,
+                        },
+                      };
+                    },
+                    cancelCurrentMeasurement: { target: 'selecting', context: { currentMeasurementStart: undefined } },
+                  },
                 },
               },
             },

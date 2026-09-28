@@ -487,6 +487,10 @@ describe('projectRevisionsMachine', () => {
     /* The caller's wait expired; it names the attempt it gave up on. */
     harness.actor.send({ type: 'turnAbandoned', key: key1 });
     expect(harness.actor.getSnapshot().context.pendingAdmissions).toEqual([]);
+    /* The dropped admission is still answered, as every admission is (RM-R1, GM.r1 L1). */
+    expect(harness.emitted.filter((event) => event.type === 'turnRefused')).toMatchObject([
+      { type: 'turnRefused', key: key1, runId: key1.runId, code: undefined },
+    ]);
 
     await readyRegistry(harness);
 

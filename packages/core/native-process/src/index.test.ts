@@ -863,6 +863,28 @@ describe('createWorkspaceMirror', () => {
     expect(process.listenerCount('SIGTERM')).toBe(terminateListeners);
   });
 
+  it('walks the workspace once per runtime operation', async () => {
+    const filesystem = createMockFileSystem({ readFileResult: () => new TextEncoder().encode('one') });
+    mockListing(
+      filesystem,
+      () => ['main.cs'],
+      () => ({ type: 'file', size: 3, mtimeMs: 1000 }),
+    );
+    const mirror = await createWorkspaceMirror({ temporaryPrefix: 'tau-mirror-test-', displayName: 'Test' });
+    roots.push(mirror.rootPath);
+    try {
+      await mirror.sync(filesystem, undefined, 1);
+      await mirror.sync(filesystem, undefined, 1);
+      expect(filesystem.mocks.readdirStat).toHaveBeenCalledOnce();
+
+      await mirror.sync(filesystem, undefined, 2);
+      await mirror.sync(filesystem);
+      expect(filesystem.mocks.readdirStat).toHaveBeenCalledTimes(3);
+    } finally {
+      await mirror.cleanup();
+    }
+  });
+
   it('takes bytes the runtime already read from its content cache', async () => {
     const filesystem = createMockFileSystem({ readFileResult: () => new TextEncoder().encode('from disk') });
     mockListing(

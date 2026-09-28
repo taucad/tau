@@ -54,12 +54,12 @@ Every wrap hook receives a fresh operation-scoped `signal` on `KernelMiddlewareR
 
 ## Factories
 
-`@taucad/middleware` exports the `middleware()` toolkit (presets `default` and `cache`) plus four role factories:
+`@taucad/middleware` exports the `middleware()` toolkit (presets `default`, `cache` and `units`) plus these role factories:
 
 | Factory                   | Purpose                                               |
 | ------------------------- | ----------------------------------------------------- |
 | `parameterFileResolver()` | Resolve per-file parameter documents beside the entry |
-| `parameterCache()`        | Cache parameter definitions by dependency hash        |
+| `parameterUnits()`        | Infer units for parameters without a declared unit    |
 | `geometryCache()`         | Cache geometry output by dependency hash              |
 | `gltfEdgeDetection()`     | Add requested edge geometry to glTF meshes            |
 

@@ -4,6 +4,13 @@ import { parametersDirectory } from '@taucad/types';
 import { parameterFileResolver } from '#parameter-file-resolver.middleware.js';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import { createMockCreateGeometryHandler, createMockInput, createMockRuntime } from '@taucad/runtime-testing';
+import { requireParameterRecord } from '@taucad/parameters';
+import type * as ParametersModule from '@taucad/parameters';
+
+vi.mock('@taucad/parameters', async (importOriginal) => {
+  const actual = await importOriginal<typeof ParametersModule>();
+  return { ...actual, requireParameterRecord: vi.fn(actual.requireParameterRecord) };
+});
 
 type ParameterFileOptions = { watchDebounce: number };
 
@@ -362,6 +369,32 @@ describe('parameterFileResolverMiddleware', () => {
       });
       expect(input.parameters).toEqual(originalParameters);
     });
+  });
+
+  it('decodes an unchanged record once across renders and again when its text changes', async () => {
+    const decode = vi.mocked(requireParameterRecord);
+    const record = (width: number): string =>
+      makeEntry({ activeGroup: 'default', groups: { default: { values: { size: { width } } } } });
+    const render = async (content: string) => {
+      const { input, handler, runtime } = createTestContext({ readFileResult: content });
+      await parameterFileResolverMiddleware.wrapCreateGeometry!(input, handler, runtime);
+      const { parameters } = vi.mocked(handler).mock.calls[0]![0] as { parameters: Record<string, unknown> };
+      // A handler that mutates its input must not reach the next render's values.
+      (parameters['size'] as { width: number }).width = -1;
+      return parameters;
+    };
+    decode.mockClear();
+
+    await render(record(31));
+    await render(record(31));
+    expect(await render(record(31))).toEqual({ size: { width: -1 } });
+    expect(decode).toHaveBeenCalledOnce();
+    const { input, handler, runtime } = createTestContext({ readFileResult: record(31) });
+    await parameterFileResolverMiddleware.wrapCreateGeometry!(input, handler, runtime);
+    expect(handler).toHaveBeenCalledWith(expect.objectContaining({ parameters: { size: { width: 31 } } }));
+
+    await render(record(32));
+    expect(decode).toHaveBeenCalledTimes(2);
   });
 
   it('should propagate a handler SyntaxError without retrying it as malformed JSON', async () => {

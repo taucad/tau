@@ -759,7 +759,8 @@ export class MutationPipeline {
         if (conflicts.length > 0) {
           return { status: 'conflict', conflicts };
         }
-        const current = await readFileOrAbsent(resolution.provider, resolution.path);
+        // The destination is always a precondition and every precondition matched, so it holds the expected bytes.
+        const current = physical.get(resolution.path) ?? null;
         if (current !== null && bytesEqual(current, ownedData)) {
           return { status: 'unchanged', content: current };
         }

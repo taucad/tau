@@ -191,7 +191,14 @@ function CalibrationProbe({
   const renderFrame = useRenderFrame();
   const presented = useGraphicsSelector((state) => state.context.gltfPresentation.presentedRevision);
   const requested = useGraphicsSelector((state) => state.context.gltfPresentation.requestedRevision);
+  /* What the probe is asked to measure. The frame loop restarts when this changes. */
+  const measurement = useMemo(
+    () => ({ benchmark, cameraSettings, capture, metadata, pixelRatio, presented }),
+    [benchmark, cameraSettings, capture, metadata, pixelRatio, presented],
+  );
   const state = useRef({
+    measurement,
+    measured: undefined as typeof measurement | undefined,
     frame: 0,
     pendingFrames: 0,
     projectionSwitch: false,
@@ -270,29 +277,47 @@ function CalibrationProbe({
     };
   }, [gl]);
   useEffect(() => {
-    const timer = gl instanceof WebGLRenderer ? createFrameGpuTimer(gl) : undefined;
-    gpuTimer.current = timer;
-    state.current.benchmarkResult = undefined;
-    state.current.samples = [];
-    state.current.gpuSamples = [];
-    state.current.gpuPendingPeak = 0;
-    state.current.drainStarted = 0;
+    // A new renderer restarts the measurement on its own GPU timer.
+    gpuTimer.current = gl instanceof WebGLRenderer ? createFrameGpuTimer(gl) : undefined;
+    state.current.measured = undefined;
     return () => {
-      timer?.dispose();
+      gpuTimer.current?.dispose();
+      gpuTimer.current = undefined;
     };
-  }, [benchmark, gl]);
+  }, [gl]);
   useEffect(() => {
-    state.current.benchmarkResult = undefined;
-    state.current.saved = undefined;
-  }, [metadata, cameraSettings, pixelRatio]);
-  useEffect(() => {
-    state.current.frame = 0;
-    state.current.pendingFrames = 0;
-    setDpr(pixelRatio);
+    state.current.measurement = measurement;
+    setDpr(measurement.pixelRatio);
     invalidate();
-  }, [benchmark, cameraSettings, capture, invalidate, metadata, pixelRatio, presented, setDpr]);
+  }, [invalidate, measurement, setDpr]);
   useFrame(() => {
     const { current } = state;
+    const { measurement: next, measured } = current;
+    if (next !== measured) {
+      if (next.benchmark !== measured?.benchmark) {
+        if (measured !== undefined) {
+          // Each benchmark starts on its own GPU timer, so no query from the last one resolves into it.
+          gpuTimer.current?.dispose();
+          gpuTimer.current = gl instanceof WebGLRenderer ? createFrameGpuTimer(gl) : undefined;
+        }
+        current.benchmarkResult = undefined;
+        current.samples = [];
+        current.gpuSamples = [];
+        current.gpuPendingPeak = 0;
+        current.drainStarted = 0;
+      }
+      if (
+        next.metadata !== measured?.metadata ||
+        next.cameraSettings !== measured.cameraSettings ||
+        next.pixelRatio !== measured.pixelRatio
+      ) {
+        current.benchmarkResult = undefined;
+        current.saved = undefined;
+      }
+      current.frame = 0;
+      current.pendingFrames = 0;
+      current.measured = next;
+    }
     current.start = performance.now();
     current.projectionSwitch = false;
     // Renderer remounts restore the production DPR; keep diagnostic captures at their selected DPR.

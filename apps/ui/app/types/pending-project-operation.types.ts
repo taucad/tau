@@ -1,7 +1,7 @@
 import type { Chat } from '@taucad/chat';
 import type { FileSystemBackend, ProjectManifest } from '@taucad/types';
 import type { EditorState } from '#types/editor.types.js';
-import type { ProjectLibraryState } from '#types/project.types.js';
+import type { ProjectLibraryState } from '#types/project-library.types.js';
 
 export type PendingProjectBackend = Exclude<FileSystemBackend, 'memory'>;
 

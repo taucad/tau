@@ -8,9 +8,9 @@ import {
   getSectionViewTestCapOverlapDiagnostics,
   getSectionViewTestCapPerformanceDiagnostics,
   getSectionViewTestHelperSummary,
-  getSectionViewTestSelectorLabels,
-  projectSectionViewTestTransformHandle,
+  projectSectionViewTestHandle,
 } from '#components/geometry/graphics/three/react/section-view-test-bridge.js';
+import { createSectionHandles } from '#components/geometry/graphics/three/controls/section-handles.js';
 import { sectionCapOverlapDebugUserDataKey } from '#components/geometry/graphics/three/utils/section-cap-overlap-debug.js';
 import {
   appendSectionCapPerformanceFrame,
@@ -43,17 +43,6 @@ describe('getSectionViewTestControlState', () => {
       controlsEnabled: true,
       viewportGizmoLockActive: false,
     });
-  });
-
-  it('should report selector atlas labels from the debug scene', () => {
-    const scene = new THREE.Scene();
-    const top = new THREE.Mesh(new THREE.PlaneGeometry(), new THREE.MeshBasicMaterial());
-    const left = new THREE.Mesh(new THREE.PlaneGeometry(), new THREE.MeshBasicMaterial());
-    top.geometry.userData['selectorLabel'] = 'Top';
-    left.geometry.userData['selectorLabel'] = 'Left';
-    scene.add(top, left, new THREE.Object3D());
-
-    expect(getSectionViewTestSelectorLabels(scene).sort()).toEqual(['Left', 'Top']);
   });
 
   it('should report section helper LineSegments2 objects from the debug scene', () => {
@@ -90,26 +79,37 @@ describe('getSectionViewTestControlState', () => {
     );
   });
 
-  it('projects the visible tagged transform handle center into viewport coordinates', () => {
+  it('should project a drawn handle of the selected cut by its kind and cut, and nothing for one not drawn', () => {
+    const handles = createSectionHandles({ backend: 'webgl' });
+    handles.update({
+      cuts: [
+        { id: 'selected', kind: 'plane', plane: 'xy', offset: 0.01, isFlipped: false },
+        { id: 'other', kind: 'plane', plane: 'yz', offset: 0, isFlipped: false },
+      ],
+      selectedId: 'selected',
+      bounds: { min: [-0.05, -0.05, -0.05], max: [0.05, 0.05, 0.05] },
+      renderFrame: { anchorFrameId: 'tau:root', originMeters: [0, 0, 0], metersPerRenderUnit: 0.001 },
+    });
     const scene = new THREE.Scene();
-    const handle = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshBasicMaterial());
-    handle.name = 'X';
-    handle.userData = sceneTagData(sceneTag.sectionViewHelper);
-    scene.add(handle);
-    const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
-    camera.position.z = 10;
+    scene.add(handles.root);
+    const camera = new THREE.PerspectiveCamera(60, 1, 1, 1000);
+    camera.up.set(0, 0, 1);
+    camera.position.set(0, -200, 0);
     camera.lookAt(0, 0, 0);
-    camera.updateProjectionMatrix();
     camera.updateMatrixWorld();
+    handles.layout(camera, 200);
+    const rect = { height: 200, left: 10, top: 20, width: 200 };
+    const project = (kind: 'plane' | 'select', cutId: string) =>
+      projectSectionViewTestHandle({ target: { kind, cutId }, camera, rect, scene });
+    // The push-pull arrow stands on the plane at the bounds centre: 10 render units up.
+    const arrow = new THREE.Vector3(0, 0, 10).project(camera);
 
-    expect(
-      projectSectionViewTestTransformHandle({
-        axis: 'X',
-        camera,
-        rect: { height: 200, left: 10, top: 20, width: 200 },
-        scene,
-      }),
-    ).toEqual({ x: 110, y: 120, visible: true });
+    expect(project('plane', 'selected')?.x).toBeCloseTo(110, 6);
+    expect(project('plane', 'selected')?.y).toBeCloseTo(20 + ((1 - arrow.y) / 2) * 200, 6);
+    expect(project('plane', 'selected')?.visible).toBe(true);
+    expect(project('plane', 'other')).toBeUndefined();
+
+    handles.dispose();
   });
 
   it('should report exact-only section cap overlap diagnostics from the debug scene', () => {

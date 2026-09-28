@@ -76,7 +76,12 @@ vi.mock('monaco-editor/esm/vs/basic-languages/typescript/typescript.contribution
 vi.mock('monaco-editor/esm/vs/basic-languages/python/python.contribution.js', () => ({}));
 vi.mock('monaco-editor/esm/vs/basic-languages/csharp/csharp.contribution.js', () => ({}));
 vi.mock('monaco-editor/esm/vs/language/json/monaco.contribution.js', () => ({
-  jsonDefaults: { modeConfiguration: {}, setModeConfiguration: vi.fn() },
+  jsonDefaults: {
+    modeConfiguration: {},
+    setModeConfiguration: vi.fn(),
+    diagnosticsOptions: {},
+    setDiagnosticsOptions: vi.fn(),
+  },
 }));
 vi.mock('monaco-editor/esm/vs/language/typescript/monaco.contribution.js', () => ({}));
 

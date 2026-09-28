@@ -931,6 +931,25 @@ describe('FileTreeService mergeChildren / isDirectoryResolved', () => {
     disposeChannel();
   });
 
+  /* A thumbnail capture rewrites `thumbnail.webp` on every render; dropping the
+   * stamp until the parent re-read redrew every file-tree row twice per commit. */
+  it.each(['machine', 'user', 'editor'] as const)(
+    "should keep a listed file's provenance when the %s writes its content",
+    (source) => {
+      const provenance = provenanceOf(false);
+      const { tree, disposeChannel } = createTreeHarness({
+        initialEntries: [{ ...textEntry('thumbnail.webp'), provenance }],
+      });
+      const emit = connectContentService(tree);
+
+      emit({ type: 'written', path: 'thumbnail.webp', data: new Uint8Array([1, 2, 3]), source });
+
+      expect(tree.getTreeSnapshot().get('thumbnail.webp')).toMatchObject({ size: 3, provenance });
+      tree.dispose();
+      disposeChannel();
+    },
+  );
+
   it('should drop directory descendants on directoryDeleted content events', () => {
     const { tree, disposeChannel } = createTreeHarness({
       initialEntries: [directoryEntry('old'), textEntry('old/file.ts')],

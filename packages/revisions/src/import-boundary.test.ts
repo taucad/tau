@@ -31,7 +31,7 @@ const withoutComments = (source: string): string =>
 /**
  * The one module allowed to name Tau's own layout.
  *
- * It exports `tauRevisionPolicy`, the classifier-and-rows pair every default
+ * It exports `tauRevisionPolicy`, the classifier-and-layout pair every default
  * reads, so moving the import here is what makes the rule below true of
  * everything else — including the two adapters, which write a Tau store and so
  * take the default rather than a policy of their own.

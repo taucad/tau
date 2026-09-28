@@ -51,6 +51,13 @@ export const shaderSites = [
     risks: ['camera', 'depth', 'clipping', 'upstream-drift'],
   },
   {
+    id: 'section-clip',
+    modules: ['#components/geometry/graphics/three/materials/section-clip.ts'],
+    authoring: ['on-before-compile', 'tsl'],
+    backends: ['webgl', 'webgpu'],
+    risks: ['camera', 'spatial-frame', 'clipping', 'lifecycle', 'hot-path', 'upstream-drift'],
+  },
+  {
     id: 'fat-lines',
     modules: ['#components/geometry/graphics/three/materials/line2.material.ts'],
     authoring: ['tsl', 'upstream-fork'],
@@ -115,6 +122,11 @@ const metalMorphLoaderEndToEnd = 'apps/ui-e2e/src/metal-morph-loader.spec.ts';
 const glassPrismLoaderEndToEnd = 'apps/ui-e2e/src/glass-prism-loader.spec.ts';
 const metalMorphLoaderRoot = 'apps/ui/app/components/geometry/loader';
 const generatedShaderEndToEnd = 'apps/ui-e2e/src/shader-fixture.spec.ts';
+const sectionClipUnit = 'apps/ui/app/components/geometry/graphics/three/materials/section-clip.test.ts';
+const sectionClippingGroupUnit = 'apps/ui/app/components/geometry/graphics/three/react/section-clipping-group.test.tsx';
+const sectionClipBrowser = 'apps/ui/app/components/geometry/graphics/three/materials/section-clip.browser.test.ts';
+const gltfMeshLifecycleUnit =
+  'apps/ui/app/components/geometry/graphics/three/react/gltf-mesh.camera-lifecycle.test.tsx';
 const evidence = (unit: string, semantic: string, generatedSource = `${unit}::${semantic}`) => ({
   reference: [`${unit}::${semantic}`],
   'generated-source': [
@@ -158,6 +170,39 @@ export const shaderEvidence = {
     'fails compilation when the expected log-depth chunk is absent or duplicated',
     'apps/ui/app/components/geometry/graphics/three/materials/gltf-surface-depth-bias.test.ts::also separates orthographic surfaces when the renderer writes fragment depth',
   ),
+  'section-clip': {
+    ...evidence(sectionClipUnit, 'should remove what the cut model removes for'),
+    reference: [
+      `${sectionClipUnit}::should remove what the cut model removes for`,
+      `${sectionClipUnit}::should take the fat-line position from the trimmed view-space segment end`,
+    ],
+    'generated-source': [
+      `${sectionClipUnit}::should compile the clip into the`,
+      `${sectionClipUnit}::should fail compilation when a clipping chunk is`,
+    ],
+    'real-compile': [
+      `${graphicsBackendEndToEnd}::no WebGPU validation errors emit during a Birdhouse preview render`,
+      `${sectionClipBrowser}::should compile and draw the clip without a shader or pipeline error`,
+    ],
+    pixels: [`${sectionClipBrowser}::should draw exactly what the cut model keeps, away from each boundary`],
+    'depth-clipping': [`${sectionClipBrowser}::should let the backdrop show through every removed part of a surface`],
+    lifecycle: [
+      `${sectionClipUnit}::should keep the clip when the surface depth bias composed under it turns off`,
+      `${sectionClipUnit}::should give each viewer its own clip and refuse to share a material between them`,
+      `${sectionClippingGroupUnit}::should compile the clip into every model surface, line and point on`,
+      `${gltfMeshLifecycleUnit}::should warm a model whose surfaces, edges, line strips and points already carry the section clip on`,
+      `${gltfMeshLifecycleUnit}::should present the same geometry hash again with every material clipped at commit on`,
+    ],
+    'structural-perf': [
+      `${sectionClipBrowser}::should never relink as the cuts go from none to one to three pieces and back`,
+      `${sectionClipUnit}::should keep every WebGL program input as cuts go from none to one to three to none`,
+      `${sectionClipUnit}::should keep the WebGPU material cache keys and versions as cuts go from none to one to three to none`,
+      `${sectionClippingGroupUnit}::should return early on a frame whose pieces are unchanged`,
+    ],
+    'gpu-whole-frame': [
+      'apps/ui-e2e/src/section-view-overlap-performance-diagnostics.spec.ts::captures overlap and no-overlap diagnostics in',
+    ],
+  },
   'fat-lines': evidence(
     'apps/ui/app/components/geometry/graphics/three/materials/line2.material.test.ts',
     'fails deterministically when the exact Three revision',

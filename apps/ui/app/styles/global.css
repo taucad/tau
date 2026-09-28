@@ -157,6 +157,8 @@
   --diagram-note: oklch(0.96 0.012 calc(var(--hue-primary) + 60deg));
   --diagram-note-border: oklch(0.78 0.04 calc(var(--hue-primary) + 60deg));
   --diagram-accent: var(--muted-foreground);
+  /* The running viewer tool's glyph (Section, Measure): 3:1 on accent and sidebar at every primary hue. */
+  --viewer-tool-active: oklch(0.53 0.12 var(--hue-primary));
 }
 
 @keyframes chat-streaming-fade {
@@ -190,6 +192,7 @@
   --diagram-line: oklch(0.5 0.03 var(--hue-primary));
   --diagram-note: oklch(0.26 0.015 calc(var(--hue-primary) + 60deg));
   --diagram-note-border: oklch(0.38 0.025 calc(var(--hue-primary) + 60deg));
+  --viewer-tool-active: oklch(0.75 0.1 var(--hue-primary));
 }
 
 .black,
@@ -212,6 +215,7 @@
   --diagram-line: oklch(0.82 0.04 var(--hue-primary));
   --diagram-note: oklch(0.2 0.012 calc(var(--hue-primary) + 60deg));
   --diagram-note-border: oklch(0.72 0.04 calc(var(--hue-primary) + 60deg));
+  --viewer-tool-active: oklch(0.85 0.06 var(--hue-primary));
 }
 
 @media (prefers-contrast: more) {
@@ -224,6 +228,7 @@
     --diagram-line: oklch(0.38 0.04 var(--hue-primary));
     --diagram-note: oklch(0.9 0.012 calc(var(--hue-primary) + 60deg));
     --diagram-note-border: oklch(0.46 0.04 calc(var(--hue-primary) + 60deg));
+    --viewer-tool-active: oklch(0.41 0.12 var(--hue-primary));
   }
 
   .dark,
@@ -236,6 +241,7 @@
     --diagram-line: oklch(0.82 0.04 var(--hue-primary));
     --diagram-note: oklch(0.2 0.012 calc(var(--hue-primary) + 60deg));
     --diagram-note-border: oklch(0.72 0.04 calc(var(--hue-primary) + 60deg));
+    --viewer-tool-active: oklch(0.85 0.06 var(--hue-primary));
   }
 }
 
@@ -275,9 +281,7 @@
 /* Dark variant is provided by fumadocs-ui/css/preset.css: @variant dark (&:where(.dark, .dark *)) */
 
 @theme inline {
-  --color-blue: oklch(63.82% 0.1949 265.76);
-  --color-purple: oklch(60.29% 0.1875 289.06);
-  --color-yellow: oklch(86.76% 0.6 93.18);
+  --color-viewer-tool-active: var(--viewer-tool-active);
 
   --animate-pulse-subtle: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   --animate-gradient: gradient 5s ease infinite;
@@ -486,6 +490,10 @@
  * (Chrome/Edge 115+, Safari 26+). Browsers without support degrade
  * gracefully to no fade (initial-value: black = fully opaque mask).
  *
+ * Every animation spells out its `auto` duration: Lightning CSS expands a
+ * duration-less shorthand to `animation-duration: 0s`, which collapses the
+ * scroll range so `both` fill pins the edges to their `to` keyframe.
+ *
  * Usage: scroll-shadows-x, scroll-shadows-y, or scroll-shadows (both)
  * Override --scroll-fade-size to control the fade distance.
  *
@@ -523,18 +531,25 @@
   initial-value: black;
 }
 
-@keyframes scroll-fade-y {
-  0% {
+/*
+ * Vertical edges fade over the first/last --scroll-fade-size pixels of
+ * scroll rather than a percentage of it, so a region that overflows by a
+ * sub-pixel rounding sliver (then pinned to its bottom) shows no fade.
+ */
+@keyframes scroll-fade-top {
+  from {
     --scroll-fade-top: black;
+  }
+  to {
+    --scroll-fade-top: var(--scroll-fade-end);
+  }
+}
+
+@keyframes scroll-fade-bottom {
+  from {
     --scroll-fade-bottom: var(--scroll-fade-end);
   }
-  3%,
-  97% {
-    --scroll-fade-top: var(--scroll-fade-end);
-    --scroll-fade-bottom: var(--scroll-fade-end);
-  }
-  100% {
-    --scroll-fade-top: var(--scroll-fade-end);
+  to {
     --scroll-fade-bottom: black;
   }
 }
@@ -564,7 +579,7 @@
     black calc(100% - var(--scroll-fade-size)),
     var(--scroll-fade-right)
   );
-  animation: scroll-fade-x linear;
+  animation: auto scroll-fade-x linear;
   animation-timeline: scroll(self x);
 }
 
@@ -577,8 +592,13 @@
     black calc(100% - var(--scroll-fade-size)),
     var(--scroll-fade-bottom)
   );
-  animation: scroll-fade-y linear;
+  animation:
+    auto scroll-fade-top linear both,
+    auto scroll-fade-bottom linear both;
   animation-timeline: scroll(self y);
+  animation-range:
+    0 var(--scroll-fade-size),
+    calc(100% - var(--scroll-fade-size)) 100%;
 }
 
 @utility scroll-shadows {
@@ -600,9 +620,14 @@
     );
   mask-composite: intersect;
   animation:
-    scroll-fade-y linear,
-    scroll-fade-x linear;
-  animation-timeline: scroll(self y), scroll(self x);
+    auto scroll-fade-top linear both,
+    auto scroll-fade-bottom linear both,
+    auto scroll-fade-x linear;
+  animation-timeline: scroll(self y), scroll(self y), scroll(self x);
+  animation-range:
+    0 var(--scroll-fade-size),
+    calc(100% - var(--scroll-fade-size)) 100%,
+    normal;
 }
 
 /*

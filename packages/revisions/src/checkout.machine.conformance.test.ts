@@ -14,7 +14,7 @@ import type { CoveringSuite } from '@taucad/formal/graph';
 import { replaySuite } from '@taucad/formal/replay';
 
 import { checkoutMachine } from '#checkout.machine.js';
-import { actionOf, checkoutAdapter, checkoutPaths } from '#test/conformance/checkout-adapter.js';
+import { actionOf, captureTreeAnswers, checkoutAdapter, checkoutPaths } from '#test/conformance/checkout-adapter.js';
 
 const specs = path.resolve(import.meta.dirname, '../specs/checkout');
 const graph = readSpecGraph(path.join(specs, 'CheckoutRequests/graph.json'));
@@ -33,6 +33,8 @@ describe('checkout.machine conforms to CheckoutRequests.tla', () => {
 
     expect(paths).toHaveLength(2175);
     expect(walkPaths(graph, paths).slice(0, 3)).toEqual([]);
+    /* The D4 comparisons are answered, so `comparing` leaves on `onDone`, not only on a missing actor (GM.r1 L5). */
+    expect(captureTreeAnswers.count).toBeGreaterThan(0);
   }, 120_000);
 
   it('should match the committed drift manifest', () => {

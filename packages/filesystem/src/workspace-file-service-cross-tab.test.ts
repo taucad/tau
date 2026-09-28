@@ -135,6 +135,35 @@ describe('WorkspaceFileService cross-tab authority delivery', () => {
     vi.unstubAllGlobals();
   });
 
+  it('reads a checked write destination once when it is the only precondition', async () => {
+    vi.stubGlobal('navigator', {
+      locks: {
+        request: async (_name: string, _options: LockOptions, operation: () => Promise<unknown>) => operation(),
+      },
+    });
+    const authority = await createAuthority(`checked-single-read-${databaseSequence++}`, { disableChannel: true });
+    await authority.service.writeFile('/target.txt', 'old');
+    const readFile = vi.spyOn(authority.provider, 'readFile');
+
+    await expect(
+      authority.service.writeFileChecked({
+        path: '/target.txt',
+        data: 'new',
+        preconditions: [{ path: '/target.txt', expected: 'old' }],
+      }),
+    ).resolves.toMatchObject({ status: 'applied' });
+    expect(readFile).toHaveBeenCalledTimes(1);
+    await expect(
+      authority.service.writeFileChecked({
+        path: '/target.txt',
+        data: 'new',
+        preconditions: [{ path: '/target.txt', expected: 'new' }],
+      }),
+    ).resolves.toMatchObject({ status: 'unchanged', content: new TextEncoder().encode('new') });
+    expect(readFile).toHaveBeenCalledTimes(2);
+    vi.unstubAllGlobals();
+  });
+
   it('fails a checked write closed without browser locks', async () => {
     vi.stubGlobal('navigator', {});
     const authority = await createAuthority(`checked-unsupported-${databaseSequence++}`, { disableChannel: true });

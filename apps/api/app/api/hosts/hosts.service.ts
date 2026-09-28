@@ -202,9 +202,9 @@ export class HostsService implements OnModuleDestroy {
   private readonly onlineDevices = new Map<string, OnlineDevice>();
   private readonly relayHandles = new Map<WebSocket, DistributedRelayHandle>();
   private readonly sessionSockets = new Map<string, SessionRelay>();
-  readonly #logger = new Logger(HostsService.name);
   /** Devices whose control socket this process closed when it began to stop. */
   private readonly departedAtStop = new Set<string>();
+  readonly #logger = new Logger(HostsService.name);
 
   public constructor(
     private readonly databaseService: DatabaseService,

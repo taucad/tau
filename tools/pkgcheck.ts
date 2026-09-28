@@ -512,6 +512,12 @@ const internalImportsExceptions: Readonly<Record<string, Readonly<Record<string,
   '@taucad/tau-examples': {
     '#scripts/*.js': 'thumbnail/manifest generators outside src/; relative imports are banned workspace-wide',
   },
+  // The canonical `#*.js` target is a literal `.ts` file, which never reaches a `.tsx`
+  // component; a tsconfig alias would, but it leaks into every program compiling this source.
+  '@taucad/ui': {
+    '#components/*.variants.js': 'variant modules are .ts and share components/ with the .tsx components',
+    '#components/*.js': 'components are .tsx, which the canonical #*.js -> ./src/*.ts target cannot reach',
+  },
 };
 
 /** Projects whose sources live under `src/`; `type:app` layouts are deliberately outside the rule. */

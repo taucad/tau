@@ -36,7 +36,14 @@
       "lid": { "components": ["component:lid"] }
     },
     "joints": {
-      "hinge": { "type": "revolute", "parent": "cover", "child": "lid", "origin": [0, 0.02, 0], "axis": [1, 0, 0] }
+      "hinge": {
+        "type": "revolute",
+        "name": "Lid hinge",
+        "parent": "cover",
+        "child": "lid",
+        "origin": [0, 0.02, 0],
+        "axis": [1, 0, 0]
+      }
     }
   }
 }

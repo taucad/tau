@@ -321,6 +321,34 @@ describe('chatProjectionLogic (PV-S7)', () => {
     expect(selectRunFailure(project(rows.slice(0, reopened + 1), 1), failed.runId)).toBeUndefined();
   });
 
+  it('should replay only the new attempt after a failed run reopens, while retaining a paused continuation', async () => {
+    const rows = readLog('seeded/legal-attempts');
+    const failedAt = rows.findIndex((row) => row.type === 'run.lifecycle' && row.state === 'failed');
+    const reopenedAt = rows.findIndex(
+      (row, index) => index > failedAt && row.type === 'run.lifecycle' && row.state === 'running',
+    );
+    const pausedAt = rows.findIndex(
+      (row, index) => index > reopenedAt && row.type === 'run.lifecycle' && row.state === 'paused',
+    );
+    const continuedAt = rows.findIndex(
+      (row, index) => index > pausedAt && row.type === 'run.lifecycle' && row.state === 'running',
+    );
+    const { runId } = rows[failedAt]!;
+    const failed = project(rows.slice(0, failedAt + 1), 1).views[runId]!;
+    expect(failed.chunks.some((chunk) => chunk.type === 'error')).toBe(true);
+
+    const reopened = project(rows.slice(0, reopenedAt + 1), 1).views[runId]!;
+    expect(reopened.chunks.map((chunk) => chunk.type)).toEqual(['start', 'start-step']);
+    const paused = project(rows.slice(0, pausedAt + 1), 1).views[runId]!;
+    const continued = project(rows.slice(0, continuedAt + 1), 1).views[runId]!;
+    expect(continued.chunks.slice(0, paused.chunks.length)).toEqual(paused.chunks);
+
+    const completed = project(rows.slice(0, rows.findIndex((row) => row.type === 'turn.finalized') + 1), 1);
+    expect(completed.views[runId]?.chunks.some((chunk) => chunk.type === 'error')).toBe(false);
+    const messages = await materializeTranscript(completed);
+    expect(messages.some((message) => message.role === 'assistant')).toBe(true);
+  });
+
   it('keeps the newest row that asks for the person, and never a cancelled run (PV-S8)', () => {
     const rows = readLog('seeded/cancel-after-settled-pause');
     const requested = rows.findIndex((row) => row.type === 'interrupt.recorded' && row.phase === 'requested');

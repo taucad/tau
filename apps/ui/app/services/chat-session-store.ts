@@ -1560,6 +1560,14 @@ export class ChatSessionStore {
         return;
       }
       session.watch?.stop();
+      if (command.type === 'resume') {
+        // The accepted command can answer before the follower folds its new running row.
+        // Watching the old terminal attempt would replay its error into the SDK.
+        session.watch = undefined;
+        session.watchedRunId = undefined;
+        this.#syncProjection(session.chatId, 'none');
+        return;
+      }
       const via =
         request.kind === 'send' && !session.chat.messages.some((message) => message.id === request.message.id)
           ? 'send'

@@ -449,7 +449,6 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
      * capability that travels into a vendor adapter's process. */
     const endpoint = createHostMcpEndpoint({
       secret: randomBytes(32).toString('base64url'),
-      workspaceRoot,
       registry,
       /* The chat attachments a screenshot or an oversized GeoSpec report is saved as live under this root. */
       workspaceRoot,

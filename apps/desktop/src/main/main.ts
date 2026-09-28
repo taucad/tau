@@ -669,11 +669,10 @@ const bootstrapElectronApp = async (): Promise<void> => {
    * boot pays the slower one; 1.5 s is ~17x the worst observed and only bites a
    * CLI that hangs, which is the case the timeout exists for.
    *
-   * The *model* probe runs beside it on its own 5 s clock (V5 / EQ1 A): it
-   * opens a real vendor session, which Claude answered in 1.9 s here, so one
-   * shared budget would either kill it or make every boot wait on it. A probe
-   * that fails or times out leaves the agent advertised with no model list — a
-   * logged-out CLI must never remove the row. */
+   * The *model* probe runs beside it on its own 15 s clock (V5 / EQ1 A): it
+   * opens a real vendor session, which can take over 5 s through a cold
+   * packaged app.asar adapter. A failure or timeout leaves the agent
+   * advertised with no model list; a logged-out CLI cannot remove the row. */
   /**
    * Discover the external agents and configure the host with them.
    *

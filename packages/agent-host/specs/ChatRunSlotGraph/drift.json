@@ -133,7 +133,7 @@
   ],
   "specs": {
     "ChatRunSlot.tla": "b9f3a8c69d1305afa58bee7148d41df1cb7b2bbf9c434565333c44411143994e",
-    "ChatRunSlotGraph.tla": "0b7771d77712c10d9fc786bd89dccc5a6d9b464b68ddbe1bc589f6f5bd4084fd"
+    "ChatRunSlotGraph.tla": "8e0ead5432b435e03bfec31863999214835040bccdc52f96928aba79f5d84a81"
   },
   "tables": {},
   "versions": {

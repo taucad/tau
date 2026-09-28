@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { tauCadTopologyExtension } from '@taucad/types/constants';
 import {
   buildGltfComponentManifest,
+  buildGltfMeasurementFeatures,
   listReachableGltfPrimitiveReferences,
 } from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
 
@@ -15,6 +16,142 @@ function encodeJson(value: unknown): Uint8Array<ArrayBuffer> {
 }
 
 describe('buildGltfComponentManifest', () => {
+  it('keeps instance-specific face groups and normalizes Replicad non-indexed line scalar spans', () => {
+    const bytes = encodeJson({
+      nodes: [{ mesh: 0 }, { mesh: 0 }],
+      meshes: [
+        {
+          primitives: [
+            { mode: 4, indices: 0, attributes: { [positionAttribute]: 1 }, extras: { tauFaceGroupUnit: 'indices-v1' } },
+            { mode: 1, attributes: { [positionAttribute]: 2 }, extras: { tauEdgeGroupUnit: 'xyz-scalars-v1' } },
+          ],
+        },
+      ],
+      accessors: [
+        { componentType: 5123, count: 6, type: 'SCALAR' },
+        { componentType: 5126, count: 4, type: 'VEC3' },
+        { componentType: 5126, count: 4, type: 'VEC3' },
+      ],
+      extensions: {
+        [tauCadTopologyExtension]: {
+          components: [
+            {
+              id: 'part-a',
+              name: 'A',
+              kind: 'part',
+              selector: 'node/0',
+              nodeIndex: 0,
+              faceGroups: [{ start: 0, count: 6, faceId: 7 }],
+              edgeGroups: [{ start: 0, count: 12, edgeId: 9 }],
+            },
+            {
+              id: 'part-b',
+              name: 'B',
+              kind: 'part',
+              selector: 'node/1',
+              nodeIndex: 1,
+              faceGroups: [{ start: 3, count: 3, faceId: 3 }],
+              edgeGroups: [{ start: 6, count: 6, edgeId: 4 }],
+            },
+          ],
+        },
+      },
+    });
+    const manifest = buildGltfComponentManifest(bytes);
+    const features = buildGltfMeasurementFeatures(bytes, manifest);
+
+    expect(features.get('0/0/0')).toMatchObject({
+      occurrenceId: 'part-a@node:0',
+      kind: 'surface',
+      faces: [{ id: 'face:7', start: 0, count: 6 }],
+    });
+    expect(features.get('0/0/1')).toMatchObject({
+      occurrenceId: 'part-a@node:0',
+      kind: 'line',
+      edges: [{ id: 'edge:9', start: 0, count: 4 }],
+    });
+    expect(features.get('1/0/0')).toMatchObject({
+      occurrenceId: 'part-b@node:1',
+      kind: 'surface',
+      faces: [{ id: 'face:3', start: 3, count: 3 }],
+    });
+    expect(features.get('1/0/1')).toMatchObject({
+      occurrenceId: 'part-b@node:1',
+      kind: 'line',
+      edges: [{ id: 'edge:4', start: 2, count: 2 }],
+    });
+  });
+
+  it('rejects unknown span units, overlapping groups, and indexed line scalar spans', () => {
+    const base = {
+      nodes: [{ mesh: 0 }],
+      meshes: [
+        {
+          primitives: [
+            { mode: 4, indices: 0, attributes: { [positionAttribute]: 1 }, extras: { tauFaceGroupUnit: 'indices-v1' } },
+            { mode: 1, attributes: { [positionAttribute]: 2 }, extras: { tauEdgeGroupUnit: 'xyz-scalars-v1' } },
+          ],
+        },
+      ],
+      accessors: [
+        { componentType: 5123, count: 6, type: 'SCALAR' },
+        { componentType: 5126, count: 4, type: 'VEC3' },
+        { componentType: 5126, count: 4, type: 'VEC3' },
+      ],
+      extensions: {
+        [tauCadTopologyExtension]: {
+          components: [
+            {
+              id: 'part',
+              name: 'part',
+              kind: 'part',
+              nodeIndex: 0,
+              selector: 'node/0',
+              faceGroups: [
+                { start: 0, count: 6, faceId: 1 },
+                { start: 3, count: 3, faceId: 2 },
+              ],
+              edgeGroups: [{ start: 0, count: 12, edgeId: 1 }],
+            },
+          ],
+        },
+      },
+    };
+    const bytes = encodeJson(base);
+    const manifest = buildGltfComponentManifest(bytes);
+    expect(buildGltfMeasurementFeatures(bytes, manifest).has('0/0/0')).toBe(false);
+    const indexedLine = encodeJson({
+      ...base,
+      meshes: [
+        {
+          primitives: [
+            base.meshes[0]!.primitives[0],
+            {
+              ...base.meshes[0]!.primitives[1],
+              indices: 0,
+            },
+          ],
+        },
+      ],
+    });
+    expect(buildGltfMeasurementFeatures(indexedLine, buildGltfComponentManifest(indexedLine)).has('0/0/1')).toBe(false);
+    const unknownUnit = encodeJson({
+      ...base,
+      meshes: [
+        {
+          primitives: [
+            base.meshes[0]!.primitives[0],
+            {
+              mode: 1,
+              attributes: { [positionAttribute]: 2 },
+            },
+          ],
+        },
+      ],
+    });
+    expect(buildGltfMeasurementFeatures(unknownUnit, buildGltfComponentManifest(unknownUnit)).has('0/0/1')).toBe(false);
+  });
+
   it('should enumerate active-scene primitive instances, including shared meshes', () => {
     const bytes = encodeJson({
       scene: 0,

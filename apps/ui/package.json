@@ -47,6 +47,7 @@
     "@taucad/manifold": "workspace:*",
     "@taucad/memory": "workspace:*",
     "@taucad/middleware": "workspace:*",
+    "@taucad/occt-core": "workspace:*",
     "@taucad/opencascade": "workspace:*",
     "@taucad/openrscad": "workspace:*",
     "@taucad/parameters": "workspace:*",

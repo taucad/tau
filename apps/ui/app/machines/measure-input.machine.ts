@@ -6,13 +6,21 @@ export type MeasureInputResult = 'acceptPoint' | 'cancelCurrent' | 'ignore';
 
 export type MeasureInputContext = {
   isPointerDown: boolean;
+  pointerId?: number;
   pointerDownHadTarget: boolean;
   discardGesture: boolean;
   result?: MeasureInputResult;
 };
 
 export type MeasureInputEvent =
-  | { type: 'pointerDown'; button: number; hasTarget: boolean; cameraMoving: boolean }
+  | {
+      type: 'pointerDown';
+      button: number;
+      hasTarget: boolean;
+      cameraMoving: boolean;
+      pointerId?: number;
+      isPrimary?: boolean;
+    }
   | {
       type: 'pointerUp';
       button: number;
@@ -20,13 +28,17 @@ export type MeasureInputEvent =
       hasCurrentStart: boolean;
       isZeroLength: boolean;
       hasActiveSnapTarget: boolean;
+      pointerId?: number;
     }
   | { type: 'cameraMoved' }
   | { type: 'cancel' }
+  | { type: 'pointerCancel'; pointerId?: number }
+  | { type: 'blur' }
   | { type: 'clearResult' };
 
 const resetPointerState = (result: MeasureInputResult): Partial<MeasureInputContext> => ({
   isPointerDown: false,
+  pointerId: undefined,
   pointerDownHadTarget: false,
   discardGesture: false,
   result,
@@ -35,12 +47,13 @@ const resetPointerState = (result: MeasureInputResult): Partial<MeasureInputCont
 const recordPointerDown = (
   event: Extract<MeasureInputEvent, { type: 'pointerDown' }>,
 ): Partial<MeasureInputContext> => {
-  if (event.button !== 0 && event.button !== 2) {
+  if ((event.button !== 0 && event.button !== 2) || event.isPrimary === false) {
     return { result: 'ignore' };
   }
 
   return {
     isPointerDown: true,
+    pointerId: event.pointerId,
     pointerDownHadTarget: event.hasTarget,
     discardGesture: event.cameraMoving,
     result: undefined,
@@ -51,7 +64,7 @@ const resolvePointerUp = (
   context: MeasureInputContext,
   event: Extract<MeasureInputEvent, { type: 'pointerUp' }>,
 ): Partial<MeasureInputContext> => {
-  if (!context.isPointerDown) {
+  if (!context.isPointerDown || (context.pointerId !== undefined && event.pointerId !== context.pointerId)) {
     return resetPointerState('ignore');
   }
 
@@ -88,6 +101,7 @@ export const measureInputMachine = setup({
   id: 'measureInput',
   context: {
     isPointerDown: false,
+    pointerId: undefined,
     pointerDownHadTarget: false,
     discardGesture: false,
     result: undefined,
@@ -99,6 +113,11 @@ export const measureInputMachine = setup({
       context: ({ context }) => (context.isPointerDown ? { discardGesture: true, result: undefined } : {}),
     },
     cancel: { context: resetPointerState('cancelCurrent') },
+    pointerCancel: {
+      context: ({ context, event }) =>
+        context.pointerId === undefined || context.pointerId === event.pointerId ? resetPointerState('ignore') : {},
+    },
+    blur: { context: resetPointerState('ignore') },
     clearResult: { context: { result: undefined } },
   },
 });

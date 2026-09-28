@@ -13,15 +13,11 @@ import type { AgentLauncher } from '@taucad/agent-host/launcher';
 import { agentWireVersion } from '@taucad/agent-host/wire';
 import type { CommandAnswer, HostCommand, ReadAnswer, ReadInput } from '@taucad/agent-host/wire';
 import {
-  AgentHostWorkerError,
-  createAgentHostClient,
   createBrowserAgentHostClient,
   getBrowserAgentHostCapability,
   probeBrowserAgentHostCapability,
-  resendWhileSettling,
   residentAgentWorker,
 } from '#services/agent-host-client.js';
-import type { AgentHostTransport } from '#services/agent-host-transport.js';
 import type { AgentHostWorkerProtocol } from '#workers/agent-host.contract.js';
 import { agentHostWorkerProtocolSchemas, parseAgentHostWorkerConnect } from '#workers/agent-host.contract.js';
 
@@ -362,15 +358,6 @@ class FakeResidentWorker {
   }
 }
 
-const liveDelta = (chatId: string, runId: string, delta: string): AgentLiveEvent => ({
-  type: 'text-delta',
-  chatId,
-  runId,
-  messageId: `message-${runId}`,
-  contentIndex: 0,
-  delta,
-});
-
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -432,12 +419,36 @@ const trackedBridges = () => {
 const requestsNamed = (worker: FakeResidentWorker, name: string): FakeRequest[] =>
   worker.requests.filter((request) => request.name === name);
 
+type TestClient = ReturnType<typeof createTestClient>;
+// oxlint-disable-next-line eslint/max-params -- Test helper names the exact keyed Start fields.
+const startRun = async (client: TestClient, chatId: string, runId: string, message: string) =>
+  client.hostCommand({
+    type: 'start',
+    commandId: runId,
+    payload: {
+      chatId,
+      runId,
+      trigger: 'submit',
+      message: { id: `user-${runId}`, role: 'user', content: message },
+    },
+  });
+const cancelRun = async (client: TestClient, chatId: string, runId: string) =>
+  client.hostCommand({ type: 'cancel', commandId: `cancel-${runId}`, payload: { chatId, runId } });
+const attachChat = async (client: TestClient, chatId: string) =>
+  client.hostCommand({ type: 'attach', commandId: `attach-${chatId}`, payload: { chatId } });
+
 const workerOf =
   (worker: FakeResidentWorker): (() => Worker) =>
   () =>
     worker as unknown as Worker;
 
 describe('createBrowserAgentHostClient', () => {
+  it('exposes only keyed commands and durable reads, with no page run map', async () => {
+    const client = createTestClient(workerOf(new FakeResidentWorker()));
+    expect(Object.keys(client).sort()).toEqual(['close', 'hostCommand', 'read', 'subscribe']);
+    await client.close();
+  });
+
   it('forwards a sender-minted command id and returns the host refusal unchanged', async () => {
     const worker = new FakeResidentWorker();
     worker.refusals.set('cancel', {
@@ -470,14 +481,22 @@ describe('createBrowserAgentHostClient', () => {
   it('keeps the approval and follow-up resume ids minted by the click', async () => {
     const worker = new FakeResidentWorker();
     const client = createTestClient(workerOf(worker));
-    await client.start({ chatId: 'chat-approval-id', runId: 'run-approval-id', trigger: 'submit', message: 'Print.' });
-
-    await client.resolveInterrupt('chat-approval-id', 'run-approval-id', {
-      interruptId: 'interrupt-1',
-      outcome: 'approved',
+    await startRun(client, 'chat-approval-id', 'run-approval-id', 'Print.');
+    await client.hostCommand({
+      type: 'resolve-interrupt',
       commandId: 'answer-1',
+      payload: {
+        chatId: 'chat-approval-id',
+        runId: 'run-approval-id',
+        interruptId: 'interrupt-1',
+        outcome: 'approved',
+      },
     });
-    await client.resume('chat-approval-id', 'run-approval-id', 'resume-1');
+    await client.hostCommand({
+      type: 'resume',
+      commandId: 'resume-1',
+      payload: { chatId: 'chat-approval-id', runId: 'run-approval-id' },
+    });
 
     expect(
       worker.requests
@@ -493,10 +512,8 @@ describe('createBrowserAgentHostClient', () => {
   it('uses a start gesture’s run id as its stable command id on a re-send', async () => {
     const worker = new FakeResidentWorker();
     const client = createTestClient(workerOf(worker));
-    const input = { chatId: 'chat-replay-key', runId: 'run-replay-key', trigger: 'submit', message: 'Build.' } as const;
-
-    await client.start(input);
-    await client.start(input);
+    await startRun(client, 'chat-replay-key', 'run-replay-key', 'Build.');
+    await startRun(client, 'chat-replay-key', 'run-replay-key', 'Build.');
 
     expect(
       worker.requests.filter((request) => request.name === 'start').map((request) => request.args['commandId']),
@@ -564,7 +581,7 @@ describe('createBrowserAgentHostClient', () => {
     },
   );
 
-  it('provides the project host once and drives start, steer, cancel, resume and live events over one stream', async () => {
+  it('provides the project host once and drives keyed commands and durable rows over one stream', async () => {
     const worker = new FakeResidentWorker();
     const openComputeStorePort = vi.fn();
     const client = createTestClient(workerOf(worker), {
@@ -575,7 +592,6 @@ describe('createBrowserAgentHostClient', () => {
     const events: unknown[] = [];
     const positions: Array<number | undefined> = [];
     const answers: ReadAnswer[] = [];
-    const liveEvents: unknown[] = [];
     const unsubscribe = client.subscribe(
       { chatId: 'chat-1', cursor: 0 },
       (_chatId, event, position) => {
@@ -587,18 +603,22 @@ describe('createBrowserAgentHostClient', () => {
         answers.push(answer);
       },
     );
-    const unsubscribeLive = client.subscribeLive?.('chat-1', (_chatId, event) => {
-      liveEvents.push(event);
-    });
-
-    worker.emitLive(liveDelta('chat-1', 'run-1', 'live'));
-
+    await expect(startRun(client, 'chat-1', 'run-1', 'Build it.')).resolves.toMatchObject({ status: 'applied' });
     await expect(
-      client.start({ chatId: 'chat-1', runId: 'run-1', trigger: 'submit', message: 'Build it.' }),
-    ).resolves.toMatchObject({ chatId: 'chat-1', runId: 'run-1', state: 'completed' });
-    await expect(client.steer('run-1', 'Use 20 mm.')).resolves.toMatchObject({ runId: 'run-1' });
-    await expect(client.cancel('run-1')).resolves.toMatchObject({ state: 'cancelled' });
-    await expect(client.resume('chat-1', 'resumed-run')).resolves.toMatchObject({ runId: 'resumed-run' });
+      client.hostCommand({
+        type: 'steer',
+        commandId: 'steer-1',
+        payload: { chatId: 'chat-1', runId: 'run-1', message: 'Use 20 mm.' },
+      }),
+    ).resolves.toMatchObject({ status: 'applied' });
+    await expect(cancelRun(client, 'chat-1', 'run-1')).resolves.toMatchObject({ status: 'applied' });
+    await expect(
+      client.hostCommand({
+        type: 'resume',
+        commandId: 'resume-1',
+        payload: { chatId: 'chat-1', runId: 'resumed-run' },
+      }),
+    ).resolves.toMatchObject({ status: 'applied' });
 
     const control = worker.requests.filter((request) => ['init', 'provide', 'connect'].includes(request.name));
     expect(control.map((request) => request.name)).toEqual(['init', 'provide', 'connect']);
@@ -619,25 +639,13 @@ describe('createBrowserAgentHostClient', () => {
     const commands = worker.requests.filter(
       (request) => !['init', 'provide', 'connect', 'read', 'visibility'].includes(request.name),
     );
-    expect(commands.map((request) => request.name)).toEqual([
-      'start',
-      'attach',
-      'steer',
-      'attach',
-      'cancel',
-      'attach',
-      'resume',
-      'attach',
-    ]);
+    expect(commands.map((request) => request.name)).toEqual(['start', 'steer', 'cancel', 'resume']);
     expect(new Set(commands.map((request) => request.args['commandId'])).size).toBe(commands.length);
     await expect.poll(() => events).toHaveLength(4);
     /* Each row carries its position in the log, which the page's projection folds at (PV-S7). */
     expect(positions).toEqual([0, 1, 2, 3]);
     expect(answers.filter((answer) => answer.status === 'batch' && answer.events.length > 0)).toHaveLength(4);
-    expect(liveEvents).toEqual([liveDelta('chat-1', 'run-1', 'live')]);
-
     unsubscribe();
-    unsubscribeLive?.();
     await client.close();
     /* A client's close only detaches (D17): the resident worker and its project host keep running. */
     expect(worker.terminate).not.toHaveBeenCalled();
@@ -650,8 +658,8 @@ describe('createBrowserAgentHostClient', () => {
     const first = createTestClient(createWorker);
     const second = createTestClient(createWorker);
 
-    await first.start({ chatId: 'chat-a', runId: 'run-a', trigger: 'submit', message: 'A.' });
-    await second.start({ chatId: 'chat-b', runId: 'run-b', trigger: 'submit', message: 'B.' });
+    await startRun(first, 'chat-a', 'run-a', 'A.');
+    await startRun(second, 'chat-b', 'run-b', 'B.');
 
     expect(createWorker).toHaveBeenCalledOnce();
     expect(worker.requests.filter((request) => request.name === 'provide')).toHaveLength(1);
@@ -663,7 +671,7 @@ describe('createBrowserAgentHostClient', () => {
   it('reads with the wire bounds and never asks a worker for more than one page', async () => {
     const worker = new FakeResidentWorker();
     const client = createTestClient(workerOf(worker));
-    await client.start({ chatId: 'chat-bounds', runId: 'run-bounds', trigger: 'submit', message: 'Build.' });
+    await startRun(client, 'chat-bounds', 'run-bounds', 'Build.');
 
     await expect(client.read({ chatId: 'chat-bounds', cursor: 0 })).resolves.toMatchObject({
       status: 'batch',
@@ -684,7 +692,7 @@ describe('createBrowserAgentHostClient', () => {
       undefined,
       (answer) => (answer.status === 'batch' && answer.events.length > 0 ? last : undefined),
     );
-    await client.start({ chatId: 'chat-identity', runId: 'run-identity', trigger: 'submit', message: 'Build.' });
+    await startRun(client, 'chat-identity', 'run-identity', 'Build.');
 
     await vi.waitFor(() => {
       expect(requestsNamed(worker, 'read').at(-1)?.args).toMatchObject({
@@ -697,12 +705,12 @@ describe('createBrowserAgentHostClient', () => {
     await client.close();
   });
 
-  /* Offline the catalog names no model; opening a chat still attaches and replays its log. */
+  /* Offline the catalog names no model; opening a host still permits read-only attachment. */
   it('should provide the project host without a default model row while the catalog is unavailable', async () => {
     const worker = new FakeResidentWorker();
     const client = createTestClient(workerOf(worker), { model: undefined });
 
-    await client.attach({ chatId: 'chat-offline', cursor: 0 });
+    await attachChat(client, 'chat-offline');
 
     const provide = requestsNamed(worker, 'provide')[0];
     expect(provide?.args).toMatchObject({ authority: { projectId: 'project-one', workspaceId: 'workspace-one' } });
@@ -730,233 +738,21 @@ describe('createBrowserAgentHostClient', () => {
     expect(quiet).not.toHaveBeenCalled();
   });
 
-  /* W8.r1 item 6: a decision, a resume or a cancel refused while the previous attempt settles is retry class `wait`,
-   * re-sent until the host admits it; a live run's refusal is thrown at once. */
-  it.each([
-    ['resolve-interrupt', 'settling'],
-    ['resume', 'terminal'],
-    ['cancel', 'settling'],
-  ] as const)('should re-send a %s refused CHAT_RUN_LIVE{%s} until it is admitted', async (verb, state) => {
+  it('returns a keyed host refusal once without a page-side settlement retry', async () => {
     const worker = new FakeResidentWorker();
-    const client = createTestClient(workerOf(worker));
-    await client.start({ chatId: 'chat-1', runId: 'run-1', trigger: 'submit', message: 'Build.' });
-    worker.refusals.set(verb, {
-      code: 'CHAT_RUN_LIVE',
-      message: `Chat chat-1 has a ${state} run; send the command again after it ends.`,
-      details: { state, runId: 'run-1' },
-    });
-    const sent = (): number => worker.requests.filter((request) => request.name === verb).length;
-
-    const answered =
-      verb === 'resolve-interrupt'
-        ? client.resolveInterrupt('chat-1', 'run-1', { interruptId: 'interrupt-1', outcome: 'approved' })
-        : verb === 'resume'
-          ? client.resume('chat-1', 'run-1')
-          : client.cancel('run-1');
-    await vi.waitFor(() => {
-      expect(sent()).toBeGreaterThanOrEqual(3);
-    });
-    worker.refusals.delete(verb);
-
-    await expect(answered).resolves.toMatchObject({ chatId: 'chat-1' });
-    expect(sent()).toBeGreaterThanOrEqual(4);
-    await client.close();
-  });
-
-  /* W8.r1 round 5 (MU35): a stop during the back-off sends nothing more and rejects with the last refusal. */
-  it('should send nothing more once aborted during the settling back-off', async () => {
-    vi.useFakeTimers();
-    try {
-      const refusal = new AgentHostWorkerError('CHAT_RUN_LIVE', 'Chat chat-1 has a settling run.', {
-        state: 'settling',
-      });
-      const send = vi.fn(async (): Promise<string> => {
-        throw refusal;
-      });
-      const stop = new AbortController();
-
-      const answered = expect(resendWhileSettling(send, stop.signal)).rejects.toBe(refusal);
-      await vi.advanceTimersByTimeAsync(0);
-      expect(send).toHaveBeenCalledOnce();
-      stop.abort();
-      await vi.advanceTimersByTimeAsync(1000);
-
-      await answered;
-      expect(send).toHaveBeenCalledOnce();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  /* W8.r1 round 5 (MU36): the re-send stops at the 30 s settlement bound, with the last refusal. */
-  it('should give up re-sending at the 30 s settlement bound', async () => {
-    vi.useFakeTimers();
-    try {
-      const refusal = new AgentHostWorkerError('CHAT_RUN_LIVE', 'Chat chat-1 has a settling run.', {
-        state: 'settling',
-      });
-      const send = vi.fn(async (): Promise<string> => {
-        throw refusal;
-      });
-
-      const answered = expect(resendWhileSettling(send)).rejects.toBe(refusal);
-      await vi.advanceTimersByTimeAsync(29_000);
-      expect(send.mock.calls.length).toBeLessThan(124);
-      await vi.advanceTimersByTimeAsync(2000);
-
-      await answered;
-      /* 20, 40, 80 and 160 ms, then 250 ms until the next wait would pass 30 s. */
-      expect(send.mock.calls.length).toBeGreaterThanOrEqual(120);
-      expect(send.mock.calls.length).toBeLessThanOrEqual(125);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('should throw a CHAT_RUN_LIVE refusal naming a running run without re-sending it', async () => {
-    const worker = new FakeResidentWorker();
-    const client = createTestClient(workerOf(worker));
-    await client.start({ chatId: 'chat-1', runId: 'run-1', trigger: 'submit', message: 'Build.' });
     worker.refusals.set('cancel', {
       code: 'CHAT_RUN_LIVE',
-      message: 'Chat chat-1 has a running run; send the command again after it ends.',
-      details: { state: 'running', runId: 'run-1' },
-    });
-
-    await expect(client.cancel('run-1')).rejects.toMatchObject({ code: 'CHAT_RUN_LIVE' });
-    expect(worker.requests.filter((request) => request.name === 'cancel')).toHaveLength(1);
-    await client.close();
-  });
-
-  it('throws a refusal with its code and details', async () => {
-    const worker = new FakeResidentWorker();
-    worker.refusals.set('resume', {
-      code: 'RESUME_UNAVAILABLE',
-      message: 'Run run-9 is not this chat’s current run.',
-      details: { currentRunId: 'run-1' },
+      message: 'The run is settling.',
+      details: { state: 'settling', runId: 'run-1' },
     });
     const client = createTestClient(workerOf(worker));
-
-    await expect(client.resume('chat-1', 'run-9')).rejects.toMatchObject({
-      name: 'AgentHostWorkerError',
-      code: 'RESUME_UNAVAILABLE',
-      details: { currentRunId: 'run-1' },
+    await expect(cancelRun(client, 'chat-1', 'run-1')).resolves.toMatchObject({
+      status: 'refused',
+      code: 'CHAT_RUN_LIVE',
+      details: { state: 'settling' },
     });
+    expect(requestsNamed(worker, 'cancel')).toHaveLength(1);
     await client.close();
-  });
-
-  it('renews the run idle lease from live activity and settles through terminal replay', async () => {
-    const worker = new FakeResidentWorker();
-    worker.deferRunCompletion = true;
-    /* ponytail: real timers, since the fake worker's MessageChannel delivery is not on a fakeable clock; the heartbeat
-     * is 20x inside the bound, and the wait spans 3.5 bounds, so only a stall over 100 ms fails it. */
-    const client = createTestClient(workerOf(worker), { runIdleTimeout: 100 });
-    const completion = client.start({
-      chatId: 'chat-live-lease',
-      runId: 'run-live-lease',
-      trigger: 'submit',
-      message: 'Build slowly.',
-    });
-    await vi.waitFor(() => {
-      expect(worker.requests.some((request) => request.name === 'attach')).toBe(true);
-    });
-    worker.dropRunningAttach = true;
-    const heartbeatId = globalThis.setInterval(() => {
-      worker.emitLive(liveDelta('chat-live-lease', 'run-live-lease', '.'));
-    }, 5);
-    await new Promise<void>((resolve) => {
-      globalThis.setTimeout(resolve, 350);
-    });
-    worker.complete('chat-live-lease');
-    globalThis.clearInterval(heartbeatId);
-
-    await expect(completion).resolves.toMatchObject({ runId: 'run-live-lease', state: 'completed' });
-    await client.close();
-  });
-
-  it('finds a terminal durable snapshot after the terminal stream event is lost', async () => {
-    const worker = new FakeResidentWorker();
-    worker.deferRunCompletion = true;
-    const client = createTestClient(workerOf(worker), { runIdleTimeout: 5 });
-    const completion = client.start({
-      chatId: 'chat-lost-terminal',
-      runId: 'run-lost-terminal',
-      trigger: 'submit',
-      message: 'Build quietly.',
-    });
-    await vi.waitFor(() => {
-      expect(worker.requests.some((request) => request.name === 'attach')).toBe(true);
-    });
-    worker.complete('chat-lost-terminal', false);
-
-    await expect(completion).resolves.toMatchObject({ runId: 'run-lost-terminal', state: 'completed' });
-    expect(worker.requests.filter((request) => request.name === 'attach').length).toBeGreaterThan(1);
-    await client.close();
-  });
-
-  it('retries one timed-out liveness attachment but fails after three', async () => {
-    const check = async (timeouts: number): Promise<void> => {
-      let attaches = 0;
-      const execute = vi.fn(async (command: HostCommand): Promise<CommandAnswer> => {
-        if (command.type !== 'attach') {
-          return { commandId: command.commandId, generation: 1, status: 'applied', effect: 'durable', cursor: 0 };
-        }
-        attaches += 1;
-        if (attaches > 1 && attaches <= timeouts + 1) {
-          throw new AgentHostWorkerError('COMMAND_TIMEOUT', 'The attachment did not answer.');
-        }
-        const snapshot: HostRunSnapshot = {
-          chatId: 'chat-probe',
-          runId: 'run-probe',
-          turnId: 'turn-probe',
-          state: attaches === 1 ? 'running' : 'completed',
-          messages: [],
-        };
-        return {
-          commandId: command.commandId,
-          generation: 1,
-          status: 'applied',
-          effect: 'not-applied',
-          details: { snapshot, endCursor: 0 },
-        };
-      });
-      const transport: AgentHostTransport = {
-        ready: Promise.resolve(),
-        execute,
-        read: async ({ signal }) =>
-          new Promise<ReadAnswer>((_resolve, reject) => {
-            signal?.addEventListener(
-              'abort',
-              () => {
-                reject(new Error('Read stopped.'));
-              },
-              { once: true },
-            );
-          }),
-        async *liveEvents() {
-          yield* [];
-        },
-        close: () => undefined,
-      };
-      const client = createAgentHostClient(transport, { runIdleTimeout: 1 });
-      try {
-        const completion = client.start({
-          chatId: 'chat-probe',
-          runId: 'run-probe',
-          trigger: 'submit',
-          message: 'Build slowly.',
-        });
-        await (timeouts === 1
-          ? expect(completion).resolves.toMatchObject({ state: 'completed' })
-          : expect(completion).rejects.toMatchObject({ code: 'RUN_IDLE_TIMEOUT' }));
-        expect(attaches).toBe(timeouts === 1 ? 3 : 4);
-        expect(execute.mock.calls.filter(([command]) => command.type === 'start')).toHaveLength(1);
-      } finally {
-        await client.close();
-      }
-    };
-    await check(1);
-    await check(3);
   });
 });
 
@@ -967,12 +763,12 @@ describe('resident worker death', () => {
     const worker = new FakeResidentWorker();
     const createWorker = vi.fn(workerOf(worker));
     const client = createTestClient(createWorker);
-    await client.start({ chatId: 'chat-error', runId: 'run-1', trigger: 'submit', message: 'Build.' });
+    await startRun(client, 'chat-error', 'run-1', 'Build.');
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
     worker.raiseError();
 
-    await expect(client.cancel('run-1')).resolves.toMatchObject({ state: 'cancelled' });
+    await expect(cancelRun(client, 'chat-error', 'run-1')).resolves.toMatchObject({ status: 'applied' });
     expect(worker.terminate).not.toHaveBeenCalled();
     expect(createWorker).toHaveBeenCalledOnce();
     await client.close();
@@ -983,13 +779,13 @@ describe('resident worker death', () => {
     const replacement = new FakeResidentWorker();
     const workers = [frozen, replacement];
     const client = createTestClient(() => workers.shift() as unknown as Worker);
-    await client.start({ chatId: 'chat-dead', runId: 'run-1', trigger: 'submit', message: 'Build.' });
+    await startRun(client, 'chat-dead', 'run-1', 'Build.');
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
     frozen.freeze();
 
     /* Past the liveness bound the old worker is terminated, and the unanswered command reaches the replacement. */
-    const cancelled = client.cancel('run-1');
+    const cancelled = cancelRun(client, 'chat-dead', 'run-1');
     await vi.waitFor(
       () => {
         expect(frozen.terminate).toHaveBeenCalled();
@@ -997,7 +793,7 @@ describe('resident worker death', () => {
       { timeout: 8000 },
     );
     expect(warn).toHaveBeenCalledWith(expect.any(String), 'PEER_UNRESPONSIVE');
-    await expect(cancelled).resolves.toMatchObject({ state: 'cancelled' });
+    await expect(cancelled).resolves.toMatchObject({ status: 'applied' });
     expect(replacement.requests.map((request) => request.name)).toEqual(
       expect.arrayContaining(['init', 'provide', 'connect', 'cancel']),
     );
@@ -1008,7 +804,7 @@ describe('resident worker death', () => {
     const worker = new FakeResidentWorker();
     const createWorker = vi.fn(workerOf(worker));
     const client = createTestClient(createWorker);
-    await client.start({ chatId: 'chat-thaw', runId: 'run-1', trigger: 'submit', message: 'Build.' });
+    await startRun(client, 'chat-thaw', 'run-1', 'Build.');
 
     worker.freeze();
     await new Promise<void>((resolve) => {
@@ -1016,7 +812,7 @@ describe('resident worker death', () => {
     });
     worker.thaw();
 
-    await expect(client.cancel('run-1')).resolves.toMatchObject({ state: 'cancelled' });
+    await expect(cancelRun(client, 'chat-thaw', 'run-1')).resolves.toMatchObject({ status: 'applied' });
     expect(worker.terminate).not.toHaveBeenCalled();
     expect(createWorker).toHaveBeenCalledOnce();
     await client.close();
@@ -1033,7 +829,7 @@ describe('re-brokering project hosts', () => {
       openFileSystemBridge: bridges.open,
       openProjectRootBridge: bridges.open,
     });
-    await client.start({ chatId: 'chat-reprovide', runId: 'run-1', trigger: 'submit', message: 'Build.' });
+    await startRun(client, 'chat-reprovide', 'run-1', 'Build.');
 
     await residentAgentWorker(createWorker).reprovide();
 
@@ -1046,7 +842,7 @@ describe('re-brokering project hosts', () => {
     expect(rebridges[0]?.args['projectRootPort']).toBeInstanceOf(MessagePort);
     expect(bridges.counts()).toEqual([1, 1, 0, 0]);
     /* The same stream still reaches the same host. */
-    await expect(client.cancel('run-1')).resolves.toMatchObject({ state: 'cancelled' });
+    await expect(cancelRun(client, 'chat-reprovide', 'run-1')).resolves.toMatchObject({ status: 'applied' });
     expect(requestsNamed(worker, 'connect')).toHaveLength(1);
     await client.close();
   });
@@ -1060,7 +856,7 @@ describe('re-brokering project hosts', () => {
       openFileSystemBridge: bridges.open,
       openProjectRootBridge: bridges.open,
     });
-    await client.start({ chatId: 'chat-drain', runId: 'run-1', trigger: 'submit', message: 'Build.' });
+    await startRun(client, 'chat-drain', 'run-1', 'Build.');
     const drained = Promise.withResolvers<void>();
     worker.holdRelease = drained.promise;
     await client.close();
@@ -1087,7 +883,7 @@ describe('re-brokering project hosts', () => {
       openFileSystemBridge: bridges.open,
       openProjectRootBridge: bridges.open,
     });
-    await client.start({ chatId: 'chat-gone', runId: 'run-1', trigger: 'submit', message: 'Build.' });
+    await startRun(client, 'chat-gone', 'run-1', 'Build.');
     /* The worker lost the host (a newer provide from elsewhere replaced it). */
     worker.registerHost('project-one', 'someone-else');
 
@@ -1107,8 +903,8 @@ describe('releasing project hosts', () => {
     const options = { openFileSystemBridge: bridges.open, openProjectRootBridge: bridges.open };
     const first = createTestClient(createWorker, options);
     const second = createTestClient(createWorker, options);
-    await first.start({ chatId: 'chat-a', runId: 'run-a', trigger: 'submit', message: 'A.' });
-    await second.start({ chatId: 'chat-b', runId: 'run-b', trigger: 'submit', message: 'B.' });
+    await startRun(first, 'chat-a', 'run-a', 'A.');
+    await startRun(second, 'chat-b', 'run-b', 'B.');
     const hostId = requestsNamed(worker, 'provide')[0]?.args['hostId'];
 
     await first.close();
@@ -1135,7 +931,7 @@ describe('releasing project hosts', () => {
     /* It rejects once the client closes: the close ends the run's wait, which is not what this case checks. */
     const startQuietly = async (): Promise<void> => {
       try {
-        await first.start({ chatId: 'chat-a', runId: 'run-a', trigger: 'submit', message: 'A.' });
+        await startRun(first, 'chat-a', 'run-a', 'A.');
       } catch {
         /* See above. */
       }
@@ -1150,7 +946,7 @@ describe('releasing project hosts', () => {
     });
     worker.deferRunCompletion = true;
     const second = createTestClient(createWorker);
-    await expect(second.attach({ chatId: 'chat-b', cursor: 0 })).resolves.toMatchObject({ status: 'batch' });
+    await expect(attachChat(second, 'chat-b')).resolves.toMatchObject({ status: 'applied' });
     const provides = (): unknown[] => requestsNamed(worker, 'provide').map(({ args }) => args['hostId']);
     expect(provides()).toHaveLength(2);
 
@@ -1168,7 +964,7 @@ describe('releasing project hosts', () => {
     const worker = new FakeResidentWorker();
     const createWorker = workerOf(worker);
     const first = createTestClient(createWorker);
-    await first.start({ chatId: 'chat-a', runId: 'run-a', trigger: 'submit', message: 'A.' });
+    await startRun(first, 'chat-a', 'run-a', 'A.');
     await first.close();
     await vi.waitFor(() => {
       expect(requestsNamed(worker, 'release')).toHaveLength(1);
@@ -1178,7 +974,7 @@ describe('releasing project hosts', () => {
     expect(requestsNamed(worker, 'rebridge')).toEqual([]);
 
     const next = createTestClient(createWorker);
-    await next.start({ chatId: 'chat-b', runId: 'run-b', trigger: 'submit', message: 'B.' });
+    await startRun(next, 'chat-b', 'run-b', 'B.');
     const provides = requestsNamed(worker, 'provide');
     expect(provides).toHaveLength(2);
     expect(provides[1]?.args['hostId']).not.toBe(provides[0]?.args['hostId']);
@@ -1192,9 +988,9 @@ describe('the placement session', () => {
     const worker = new FakeResidentWorker();
     const client = createTestClient(workerOf(worker), { openPlacementPort: () => undefined });
 
-    await expect(
-      client.start({ chatId: 'chat-unplaced', runId: 'run-1', trigger: 'submit', message: 'Build.' }),
-    ).rejects.toMatchObject({ code: 'REVISIONS_UNAVAILABLE' });
+    await expect(startRun(client, 'chat-unplaced', 'run-1', 'Build.')).rejects.toMatchObject({
+      code: 'REVISIONS_UNAVAILABLE',
+    });
     expect(requestsNamed(worker, 'provide')).toEqual([]);
     await client.close();
   });
@@ -1206,7 +1002,7 @@ describe('the funding principal', () => {
     const worker = new FakeResidentWorker();
     const client = createTestClient(workerOf(worker), { principal: async () => 'user-signed-in' });
 
-    await client.start({ chatId: 'chat-principal', runId: 'run-1', trigger: 'submit', message: 'Build.' });
+    await startRun(client, 'chat-principal', 'run-1', 'Build.');
 
     expect(requestsNamed(worker, 'provide')[0]?.args).toMatchObject({ principal: 'user-signed-in' });
     await client.close();
@@ -1216,7 +1012,7 @@ describe('the funding principal', () => {
     const worker = new FakeResidentWorker();
     const client = createTestClient(workerOf(worker));
 
-    await client.start({ chatId: 'chat-anonymous', runId: 'run-1', trigger: 'submit', message: 'Build.' });
+    await startRun(client, 'chat-anonymous', 'run-1', 'Build.');
 
     expect(requestsNamed(worker, 'provide')[0]?.args).not.toHaveProperty('principal');
     await client.close();

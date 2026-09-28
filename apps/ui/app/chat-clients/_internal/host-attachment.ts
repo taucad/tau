@@ -7,7 +7,7 @@ import type { ChatProjection, ChatProjectionEvent } from '#machines/chat-project
 /** A read-only connection into one chat's projection. @public */
 export type HostAttachmentInput = Readonly<{
   chatId: string;
-  client: Pick<AgentHostClient, 'read' | 'subscribe' | 'close'>;
+  connect: () => Promise<Pick<AgentHostClient, 'read' | 'subscribe' | 'close'>>;
   projection: Readonly<{
     getSnapshot: () => Readonly<{ context: ChatProjection }>;
     send: (event: ChatProjectionEvent) => void;
@@ -20,6 +20,7 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
   let reading = false;
   let pending = false;
   let unsubscribe: (() => void) | undefined;
+  let client: Pick<AgentHostClient, 'read' | 'subscribe' | 'close'> | undefined;
   const isClosed = (): boolean => closed;
   const hasPending = (): boolean => pending;
 
@@ -40,7 +41,8 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
           }
           const position = selectPosition(input.projection.getSnapshot().context);
           // oxlint-disable-next-line eslint/no-await-in-loop -- log pages must be read in cursor order.
-          const answer = await input.client.read({
+          if (client === undefined) return false;
+          const answer = await client.read({
             chatId: input.chatId,
             cursor: position.cursor,
             last: position.last,
@@ -89,10 +91,21 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
   };
 
   const begin = async (): Promise<void> => {
+    try {
+      client = await input.connect();
+    } catch (error) {
+      if (!closed)
+        sendBack({ type: 'attachment.lost', reason: error instanceof Error ? error.message : String(error) });
+      return;
+    }
+    if (closed) {
+      void client.close();
+      return;
+    }
     if (!(await readAll()) || closed) {
       return;
     }
-    unsubscribe = input.client.subscribe(
+    unsubscribe = client.subscribe(
       { chatId: input.chatId, cursor: selectPosition(input.projection.getSnapshot().context).cursor },
       () => {
         void readAll();
@@ -107,6 +120,6 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
   return () => {
     closed = true;
     unsubscribe?.();
-    void input.client.close();
+    if (client !== undefined) void client.close();
   };
 });

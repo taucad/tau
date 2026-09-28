@@ -33,9 +33,6 @@ const folding = [
  * closed, so a new scan fails this test until it is justified here.
  */
 const pushedRowChecks: Readonly<Record<string, string>> = {
-  // Also its attach loop (`replaySnapshot`) follows `nextCursor` without `foldReadAnswer`: a declared W9 deferral, as
-  // W9's page projection replaces the loop.
-  'apps/ui/app/services/agent-host-client.ts': 'live wake signal and attach loop (W9 deferral)',
   'packages/cli/src/tui/app.ts': 'view reducer over pushed rows (W9)',
   // Relays each pushed transition to the run directory; it keeps no fold and must read nothing but lifecycle (PH19).
   'packages/host/src/run-reporter.ts': 'directory relay (PH19)',

@@ -103,6 +103,7 @@
   --menu-ring: color-mix(in oklch, black 10%, var(--popover));
   --menu-highlight: color-mix(in oklch, var(--neutral) 20%, var(--popover));
   --menu-highlight-destructive: color-mix(in oklch, var(--destructive) 10%, var(--popover));
+  --menu-destructive-foreground: color-mix(in oklch, var(--foreground) 5%, var(--destructive));
   --card: oklch(var(--l-base) 0 none);
   --card-foreground: oklch(var(--l-deepest) 0 none);
   --sidebar-background: oklch(0.99 0 none);
@@ -169,6 +170,7 @@
   --menu-ring: color-mix(in oklch, white 25%, var(--popover));
   --menu-highlight: color-mix(in oklch, var(--neutral) 30%, var(--popover));
   --menu-highlight-destructive: color-mix(in oklch, var(--destructive) 20%, var(--popover));
+  --menu-destructive-foreground: color-mix(in oklch, var(--foreground) 25%, var(--destructive));
   --secondary-foreground: oklch(var(--l-deepest) 0 none);
   --highlighter: oklch(var(--l-highlighter) var(--c-highlighter) var(--hue-highlighter) / 0.5);
   --highlighter-foreground: oklch(var(--l-deepest) 0 none / 0.85);
@@ -235,6 +237,7 @@
   --menu-ring: color-mix(in oklch, white 70%, var(--popover));
   --menu-highlight: color-mix(in oklch, white 20%, var(--popover));
   --menu-highlight-destructive: color-mix(in oklch, var(--destructive) 35%, var(--popover));
+  --menu-destructive-foreground: color-mix(in oklch, var(--foreground) 50%, var(--destructive));
   --sidebar-background: oklch(0.1 0 none);
   --sidebar-border: oklch(var(--l-subtle) 0 none);
   --sidebar-accent: oklch(0.28 0 none);
@@ -270,6 +273,7 @@
     --menu-ring: color-mix(in oklch, black 55%, var(--popover));
     --menu-highlight: color-mix(in oklch, black 14%, var(--popover));
     --menu-highlight-destructive: color-mix(in oklch, var(--destructive) 25%, var(--popover));
+    --menu-destructive-foreground: color-mix(in oklch, var(--foreground) 5%, var(--destructive));
     --sidebar-background: oklch(0.96 0 none);
     --sidebar-border: oklch(var(--l-subtle) 0 none);
     --sidebar-accent: oklch(0.82 0 none);
@@ -305,6 +309,7 @@
     --menu-ring: color-mix(in oklch, white 70%, var(--popover));
     --menu-highlight: color-mix(in oklch, white 20%, var(--popover));
     --menu-highlight-destructive: color-mix(in oklch, var(--destructive) 35%, var(--popover));
+    --menu-destructive-foreground: color-mix(in oklch, var(--foreground) 50%, var(--destructive));
     --sidebar-background: oklch(0.1 0 none);
     --sidebar-border: oklch(var(--l-subtle) 0 none);
     --sidebar-accent: oklch(0.28 0 none);
@@ -563,6 +568,7 @@
   --color-popover-foreground: var(--popover-foreground);
   --color-menu-highlight: var(--menu-highlight);
   --color-menu-highlight-destructive: var(--menu-highlight-destructive);
+  --color-menu-destructive-foreground: var(--menu-destructive-foreground);
   --color-highlighter: var(--highlighter);
   --color-highlighter-foreground: var(--highlighter-foreground);
   --color-chart-1: var(--chart-1);

@@ -16,6 +16,8 @@ type CadPreviewContext = {
   projectId: string;
   mainFile: string;
   files?: Record<string, { content: Uint8Array<ArrayBuffer> }>;
+  /** Bytes the first render stages; set only where the kernel cannot read the preview mount. */
+  stage?: Record<string, Uint8Array<ArrayBuffer>>;
   parameters: Record<string, unknown>;
   initError?: Error;
 };
@@ -25,6 +27,7 @@ type CadPreviewInput = {
   projectId: string;
   mainFile: string;
   files?: Record<string, { content: Uint8Array<ArrayBuffer> }>;
+  stage?: Record<string, Uint8Array<ArrayBuffer>>;
   parameters?: Record<string, unknown>;
 };
 
@@ -68,6 +71,7 @@ export const cadPreviewMachine = setup({
     projectId: input.projectId,
     mainFile: input.mainFile,
     files: input.files,
+    stage: input.stage,
     parameters: input.parameters ?? {},
     initError: undefined,
   }),
@@ -90,6 +94,7 @@ export const cadPreviewMachine = setup({
             type: 'initializeModel',
             entryPath: context.mainFile,
             ...(Object.keys(context.parameters).length === 0 ? {} : { parameters: context.parameters }),
+            ...(context.stage ? { stage: context.stage } : {}),
           });
           return { target: 'active' };
         },

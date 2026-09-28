@@ -35,6 +35,8 @@ export type ProjectContext = {
   kernelOptionsFactory: LazyKernelOptionsFactory;
   fileManagerRef: ActorRefFrom<typeof fileManagerMachine>;
   fileSystemRoot: string;
+  /** Bytes each geometry unit's first render stages (see {@link ProjectInput}). */
+  stage: Record<string, Uint8Array<ArrayBuffer>> | undefined;
   /** Per-viewer-panel graphics machines, keyed by Dockview panel ID */
   viewGraphics: Map<string, ActorRefFrom<typeof graphicsMachine>>;
   /** Project-scoped model appearance shared by every viewer of the same geometry unit. */
@@ -65,6 +67,8 @@ type ProjectInput = {
   fileManagerRef: ActorRefFrom<typeof fileManagerMachine>;
   fileSystemRoot: string;
   kernelOptionsFactory: LazyKernelOptionsFactory;
+  /** Bytes each geometry unit's first render stages, for a memory-mounted project whose kernel cannot see the mount. */
+  stage?: Record<string, Uint8Array<ArrayBuffer>>;
 };
 
 export type ProjectLoadInput = { readonly projectId: string };
@@ -240,7 +244,7 @@ const spawnGeometryUnit = (
       ...(options.renderTimeout === undefined ? {} : { renderTimeout: options.renderTimeout }),
     },
   });
-  enq.sendTo(cadUnit, { type: 'initializeModel', entryPath });
+  enq.sendTo(cadUnit, { type: 'initializeModel', entryPath, ...(context.stage ? { stage: context.stage } : {}) });
   return cadUnit;
 };
 
@@ -371,7 +375,14 @@ export const projectMachine = setup({
 }).createMachine({
   id: 'project',
   context: ({ input, spawn, actors }) => {
-    const { projectId, shouldLoadModelOnStart = true, fileManagerRef, fileSystemRoot, kernelOptionsFactory } = input;
+    const {
+      projectId,
+      shouldLoadModelOnStart = true,
+      fileManagerRef,
+      fileSystemRoot,
+      kernelOptionsFactory,
+      stage,
+    } = input;
 
     const logRef = spawn(actors.logs, {
       id: `log-${projectId}`,
@@ -398,6 +409,7 @@ export const projectMachine = setup({
       kernelOptionsFactory,
       fileManagerRef,
       fileSystemRoot,
+      stage,
       viewGraphics,
       modelInteractionRef,
       geometryUnits,

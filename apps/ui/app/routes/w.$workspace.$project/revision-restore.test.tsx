@@ -27,6 +27,8 @@ vi.mock('#components/ui/sonner.js', () => ({
 }));
 const capture = vi.hoisted(() => vi.fn<(event: string, payload?: Record<string, unknown>) => void>());
 vi.mock('#hooks/use-analytics.js', () => ({ useAnalytics: () => ({ capture }) }));
+const raiseHeldSave = vi.hoisted(() => vi.fn());
+vi.mock('#routes/w.$workspace.$project/held-save-toast.js', () => ({ useHeldSaveToast: () => raiseHeldSave }));
 
 const plan = (over: Partial<(typeof revisionStatusHarness)['status']['restore']>): void => {
   revisionStatusHarness.status = {
@@ -42,6 +44,7 @@ beforeEach(() => {
   toastInfo.mockReset();
   toastWarning.mockReset();
   capture.mockReset();
+  raiseHeldSave.mockReset();
 });
 
 describe('RevisionRestore', () => {
@@ -125,6 +128,23 @@ describe('RevisionRestore', () => {
     const [title, options] = toastSuccess.mock.calls[0] ?? [];
     expect(title).toBe('Restored Rev 3');
     expect(options).toMatchObject({ action: { label: 'Undo restore' } });
+  });
+
+  /* V5 A6, TS-R17: a save another run's lease held names that run, never "Nothing to save". */
+  it('names the run a held save waits for, and says Nothing to save only for a clean tree', () => {
+    render(<RevisionRestore />);
+    const heldBy = { chatId: 'chat-mount', turnId: 'u7', runId: 'run-7', attempt: 1 };
+
+    for (const listener of revisionStatusHarness.toasts) {
+      listener({ type: 'nothingToSave', heldBy });
+    }
+    expect(raiseHeldSave).toHaveBeenCalledWith(heldBy);
+    expect(toastInfo).not.toHaveBeenCalled();
+
+    for (const listener of revisionStatusHarness.toasts) {
+      listener({ type: 'nothingToSave' });
+    }
+    expect(toastInfo).toHaveBeenCalledWith('Nothing to save');
   });
 
   /* HQ1, HQ2: a merge that collided says the one conflict sentence, naming the line the decision lands on. */

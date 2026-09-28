@@ -416,6 +416,8 @@ export class ChatSessionStore {
   /** Any chat's unread answer may have moved (PV-S8). */
   readonly #unreadTopic = new Topic<void>({ name: 'ChatSessionStore.unread' });
   readonly #chatTopics = new Map<string, Topic<void>>();
+  /** Readers of one chat's projection (PV-S9). */
+  readonly #projectionTopics = new Map<string, Topic<void>>();
   #snapshot: readonly string[] = [];
   /**
    * Coalesces membership notifications onto a microtask so an `acquire`/
@@ -717,6 +719,29 @@ export class ChatSessionStore {
 
   public subscribeChat(chatId: string, listener: () => void): () => void {
     return this.#addPerChatListener({ bucket: this.#chatTopics, namePrefix: 'chat', chatId, listener });
+  }
+
+  /**
+   * The chat's projection of its log (PV-S9), for a render-safe read through `useSyncExternalStore`.
+   *
+   * @param chatId - The chat.
+   * @returns Its projection, or `undefined` before this page read any of its log.
+   * @public
+   */
+  public getProjection(chatId: string): ChatProjection | undefined {
+    return this.#projectionContext(chatId);
+  }
+
+  /**
+   * Wake a reader each time the chat's projection folds a batch.
+   *
+   * @param chatId - The chat.
+   * @param listener - Called on each change.
+   * @returns Unsubscribe.
+   * @public
+   */
+  public subscribeProjection(chatId: string, listener: () => void): () => void {
+    return this.#addPerChatListener({ bucket: this.#projectionTopics, namePrefix: 'projection', chatId, listener });
   }
 
   public getDurableRunState(chatId: string): InternalSession['durableRunState'] {
@@ -1359,6 +1384,7 @@ export class ChatSessionStore {
       const moved = key !== presented;
       presented = key;
       this.#syncProjection(chatId, moved ? 'moved' : 'none');
+      this.#projectionTopics.get(chatId)?.emit();
     });
     projection.start();
     return projection;

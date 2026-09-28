@@ -764,8 +764,8 @@ describe('sessions composition — sidebar rows across eight live projects (S48(
   });
 });
 
-describe('sessions composition — host-attested chat completion (P71)', () => {
-  it('keeps an edit made after lifecycle completion out of done until turn.finalized', async () => {
+describe('sessions composition — a finished run reads Done at its terminal row (P71, PV-S9)', () => {
+  it('reads Done while the settlement is still on its way, and stays Done once it lands', async () => {
     const view = await renderRoute('finishing-project');
     let chat: ReturnType<typeof openChatRoot> | undefined;
     await act(async () => {
@@ -793,8 +793,9 @@ describe('sessions composition — host-attested chat completion (P71)', () => {
       await Promise.resolve();
     });
 
-    expect(row.getByText('finishing')).toBeInTheDocument();
-    expect(row.queryByText('done')).not.toBeInTheDocument();
+    /* The machine still waits on the settlement (PV-S13 deletes the wait); the row never says so (PV-A7). */
+    expect(chat?.getSnapshot().matches({ run: 'finishing' })).toBe(true);
+    expect(row.getByText('done')).toBeInTheDocument();
 
     await act(async () => {
       chat?.send({ type: 'turnFinalizedObserved', runId: 'run-finishing', branch: 'main' });

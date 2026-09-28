@@ -102,9 +102,6 @@ const paneState: Readonly<Record<ChatSidebarState, AgentProjectionState>> = {
   approval: 'waiting',
   question: 'waiting',
   reconnecting: 'waiting',
-  /* P71: the run reported completion but the host has not attested the turn's
-   * cut and lease retirement yet — still the agent's. */
-  finishing: 'running',
   done: 'idle',
   failed: 'error',
   stopped: 'idle',

@@ -53,6 +53,7 @@ import type {
   RevisionStreamHandlers,
   RevisionTag,
   RevisionUserActor,
+  TurnAttemptKey,
 } from '@taucad/revisions';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import {
@@ -288,7 +289,8 @@ export type RevisionToast =
   | Readonly<{ type: 'restored'; revisionNumber: number | undefined }>
   /** *Undo* landed; the number is the revision it undid (D15). */
   | Readonly<{ type: 'undone'; revisionNumber: number | undefined }>
-  | Readonly<{ type: 'nothingToSave' }>
+  /** `heldBy`: the run whose lease held the save; its edits land in that run's revision (TS-R17, V5 A6). */
+  | Readonly<{ type: 'nothingToSave'; heldBy?: TurnAttemptKey }>
   | Readonly<{
       type: 'branch';
       operation: BranchOperation;
@@ -906,7 +908,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   });
   actor.on('nothingToSave', (event) => {
     if (event.trigger === 'save') {
-      toasts.emit({ type: 'nothingToSave' });
+      toasts.emit({ type: 'nothingToSave', ...(event.heldBy === undefined ? {} : { heldBy: event.heldBy }) });
     }
   });
   actor.on('switchRefused', (refusal) => {

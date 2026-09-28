@@ -14,7 +14,7 @@
 
 import { createLogic } from 'xstate';
 import { emptyChatLedger, foldReadAnswer } from '@taucad/agent-host';
-import type { ChatLedger, RowKey } from '@taucad/agent-host';
+import type { ChatLedger, RowKey, TurnPlacement } from '@taucad/agent-host';
 import { runFailureText } from '#services/agent-host-event-projection.js';
 
 /** One read's answer, as the host's `read` and `attach` return it (W3 CL-R13). @public */
@@ -326,3 +326,49 @@ export const selectAttentionRow = (projection: ChatProjection): RowKey | undefin
  * @public
  */
 export const selectPosition = (projection: ChatProjection): ChatLedger['position'] => projection.ledger.position;
+
+/** What a turn's newest attempt says about its revision (§5.8): the log facts the revision card reads. @public */
+export type TurnRevisionLog = Readonly<{
+  attempt: number;
+  /** The attempt's terminal lifecycle, once its terminal row is folded. */
+  terminal?: 'completed' | 'failed' | 'cancelled';
+  /** The attempt waits on the person: it paused, or an interrupt it opened is still open. */
+  isWaiting: boolean;
+  /** Attempt 1's placement of record; a run without one never settles (legacy). */
+  placement?: TurnPlacement;
+  /** The attempt's settlement row, and the revision it names. */
+  settlement?: Readonly<{ type: 'turn.finalized' | 'turn.conflicted' | 'turn.failed'; revisionId?: string }>;
+}>;
+
+const isTerminal = (lifecycle: string): lifecycle is 'completed' | 'failed' | 'cancelled' =>
+  lifecycle === 'completed' || lifecycle === 'failed' || lifecycle === 'cancelled';
+
+/**
+ * One turn's revision facts, from the newest run that names it (PV-S9), replacing the revision card's seven sources
+ * (PV-F17).
+ *
+ * @param projection - The chat's projection.
+ * @param turnId - The turn's user-message id.
+ * @returns The newest attempt's facts, or `undefined` while the log holds no run for the turn.
+ * @public
+ */
+export const selectTurnRevision = (projection: ChatProjection, turnId: string): TurnRevisionLog | undefined => {
+  const run = Object.values(projection.ledger.runs).findLast((entry) => entry.turnId === turnId);
+  if (run === undefined) {
+    return undefined;
+  }
+  const lifecycle = run.lifecycle ?? 'admitted';
+  const event = run.settlements.find((settlement) => settlement.attempt === run.attempt)?.event;
+  /* A `turn.failed` names the base its placement minted (TS-S9); the log's row type does not declare it yet. */
+  const revisionId =
+    event !== undefined && 'revisionId' in event && typeof event.revisionId === 'string' ? event.revisionId : undefined;
+  return {
+    attempt: run.attempt,
+    ...(isTerminal(lifecycle) ? { terminal: lifecycle } : {}),
+    isWaiting: lifecycle === 'paused' || Object.keys(run.pendingInterrupts).length > 0,
+    ...(run.placement === undefined ? {} : { placement: run.placement }),
+    ...(event === undefined
+      ? {}
+      : { settlement: { type: event.type, ...(revisionId === undefined ? {} : { revisionId }) } }),
+  };
+};

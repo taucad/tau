@@ -1,5 +1,5 @@
-import { createCallbackLogic, setup, types } from 'xstate';
-import type { ActorRefFrom, EnqueueObject, EventObject, SystemRegistry } from 'xstate';
+import { setup, types } from 'xstate';
+import type { ActorRefFrom, EnqueueObject, SystemRegistry } from 'xstate';
 import type { CadAgentExecution, MyUIMessage } from '@taucad/chat';
 import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
 import type { StoredAttachmentRef } from '#utils/attachment.utils.js';
@@ -13,12 +13,6 @@ import type { HostCommand } from '@taucad/agent-host/wire';
  * here, reached by the source signal named in that row. Nothing derives a
  * second status from flags — `use-agent-projections.ts` and W20's sidebar read
  * these snapshots.
- *
- * The `host` region is this machine's first owned resource: one
- * {@link ChatHostServices} binding per chat, held for the actor's life and
- * re-invoked only when the turn's placement changes, so the chat's agent-host
- * registration can no longer be emptied by a transcript that truncates under
- * it (policy §16 — the chat session owns the agent-host binding).
  *
  * The `run` region owns the chat's turn, as policy §16 requires: `queued`
  * invokes `admitTurn` — which derives the rewind point, waits out host
@@ -149,8 +143,6 @@ export type ChatSessionMachineInput = Readonly<{
 export type ChatSessionMachineContext = Readonly<{
   chatId: string;
   projectId: string;
-  /** Why the chat's host binding failed, while it is unbound (L3 D8). */
-  hostFailure: string | undefined;
   /** An effect or child failure no transition modelled; the actor keeps answering (MC-R12). */
   fault: string | undefined;
   /** Approvals the transport says are outstanding, batched per event (F8). */
@@ -167,8 +159,6 @@ export type ChatSessionMachineContext = Readonly<{
   activeRunId: string | undefined;
   /** Transitional store debug field; settlement is not page state. */
   pendingSettlement: ChatTurnSettlementObservation | undefined;
-  /** Where this chat's next turn runs; the `host` region re-binds when it moves. */
-  placement: string;
   /** The turn this chat holds. One slot, so a chat can only hold one (V1). */
   turn: ChatTurn | undefined;
   /** A gesture made while a turn was live; admitted when that run ends (V2). */
@@ -197,8 +187,6 @@ export type ChatSessionMachineEvent =
   | { readonly type: 'adoptRun'; readonly runId: string }
   /** Transitional store event; host reconciliation is not a page action. */
   | { readonly type: 'reconcileSettlement'; readonly runId: string; readonly outcome: ChatTurnOutcome }
-  /** The route's live agent selection for this chat; only its placement is state. */
-  | { readonly type: 'agentConfigChanged'; readonly placement: string }
   | { readonly type: 'interruptRecorded'; readonly state: 'requested' | 'resolved'; readonly count?: number }
   | { readonly type: 'toolParts'; readonly inFlight: number; readonly approvals: number; readonly toolName?: string }
   | { readonly type: 'requestLifecycle'; readonly phase: ChatRequestLifecycle }
@@ -221,12 +209,6 @@ export type ChatSessionMachineEmitted =
 export type ChatSessionActorRef = ActorRefFrom<typeof chatSessionMachine>;
 
 const chatSessionActors = {
-  /* Replaced by `sessions-store.ts` with the real registration. The default
-   * keeps this file free of the transport, the DOM and React, which is what
-   * lets the machine's own rows run headless. */
-  hostBinding: createCallbackLogic<EventObject, { readonly chatId: string; readonly placement: string }>(
-    () => () => undefined,
-  ),
   /* Also replaced by `sessions-store.ts`. The defaults refuse rather than
    * pretend: a chat whose turn host has not published its services cannot
    * admit a turn, and saying so is what puts the reason on the banner. */
@@ -410,7 +392,6 @@ export const chatSessionMachine = setup({
   context: ({ input }) => ({
     chatId: input.chatId,
     projectId: input.projectId,
-    hostFailure: undefined,
     fault: undefined,
     pendingApprovalCount: 0,
     toolsInFlight: 0,
@@ -419,7 +400,6 @@ export const chatSessionMachine = setup({
     branch: undefined,
     activeRunId: undefined,
     pendingSettlement: undefined,
-    placement: '',
     turn: undefined,
     pendingGesture: undefined,
   }),
@@ -614,48 +594,6 @@ export const chatSessionMachine = setup({
         close: ({ context }, enq) => {
           announce(context, enq);
           return { target: '.stopped', context: clearRunDetail };
-        },
-      },
-    },
-    /*
-     * The chat's agent-host binding (C1, V6).
-     *
-     * One invocation for the actor's life, re-entered only when the placement
-     * moves — a chat that switches from this browser to a daemon rebinds once,
-     * not once per render of every transcript message.
-     */
-    host: {
-      initial: 'bound',
-      states: {
-        bound: {
-          invoke: {
-            id: 'hostBinding',
-            src: 'hostBinding',
-            input: ({ context }) => ({ chatId: context.chatId, placement: context.placement }),
-            /* A registration that fails leaves the chat, its project and the registry alive (L3 D8). */
-            onError: ({ context, event }, enq) => {
-              announce(context, enq);
-              return {
-                target: 'unbound',
-                context: { hostFailure: failureMessage(event.error, 'the host binding failed') },
-              };
-            },
-          },
-          on: {
-            agentConfigChanged: ({ context, event }) =>
-              event.placement === context.placement
-                ? { context: { placement: event.placement } }
-                : { target: 'bound', reenter: true, context: { placement: event.placement } },
-          },
-        },
-        /* The next placement tries again. */
-        unbound: {
-          on: {
-            agentConfigChanged: ({ event }) => ({
-              target: 'bound',
-              context: { placement: event.placement, hostFailure: undefined },
-            }),
-          },
         },
       },
     },

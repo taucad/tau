@@ -140,7 +140,7 @@ vi.mock('#routes/w.$workspace.$project/chat-revision-marker.js', () => ({
 }));
 
 vi.mock('#routes/w.$workspace.$project/scroll-down-button.js', () => ({
-  ScrollDownButton: () => null,
+  ScrollDownButton: () => <button type='button' aria-label='Scroll to bottom' />,
 }));
 
 vi.mock('#routes/w.$workspace.$project/revision-seams.js', () => ({
@@ -273,6 +273,9 @@ describe('ChatHistory — submit routes through useCadChatClient', () => {
 
     expect(capturedTextarea.className).toBeUndefined();
     expect(screen.getByTestId('chat-textarea').parentElement).toHaveClass('max-w-xl');
+    expect(screen.getByRole('button', { name: 'Scroll to bottom' }).parentElement).toBe(
+      screen.getByTestId('chat-textarea').parentElement,
+    );
   });
 
   it('calls cadChat.submit with the text and attachment references from the textarea', async () => {

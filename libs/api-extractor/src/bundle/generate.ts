@@ -208,6 +208,8 @@ export type BundleOwner = {
   readonly groupBy?: (entry: ApiEntry) => string;
   /** Named groups materialize eagerly; every other group becomes cold. */
   readonly eagerGroups?: () => readonly string[];
+  /** Source files beside doctrine to copy into the on-demand bundle tier. */
+  readonly authoredReferences?: readonly string[];
 };
 
 /**
@@ -222,10 +224,11 @@ export const bundleOwners: readonly BundleOwner[] = [
     name: 'Replicad authoring',
     title: 'Replicad authoring',
     description:
-      'Guides precise Replicad BRep authoring in main.ts. Use when creating or editing TypeScript geometry imported from replicad.',
-    whenToUse: 'Use when creating or editing TypeScript geometry imported from replicad.',
+      'Guides Replicad BRep and kinematics authoring. Use for TypeScript geometry imported from replicad, especially assemblies with moving parts.',
+    whenToUse: 'Use for Replicad models, especially assemblies with moving parts that need joints and animations.',
     corpus: typescriptCorpus('replicad', 'dist/replicad.d.ts'),
     groupBy: byKind,
+    authoredReferences: ['kinematics-reference.md'],
   },
   {
     slug: 'cad-jscad',
@@ -376,6 +379,14 @@ export const generateBundles = async (
       // oxlint-disable-next-line no-await-in-loop -- Sequential by design: one owner compiles 12 MB of declarations, so overlapping the nine would multiply peak memory for no wall-clock gain.
       doctrine: await readDoctrine(join(sourceAgent, doctrineFile)),
     };
+    const authoredFiles = Object.fromEntries(
+      // oxlint-disable-next-line no-await-in-loop -- Owners are generated sequentially to bound declaration memory.
+      await Promise.all(
+        (owner.authoredReferences ?? []).map(
+          async (file): Promise<readonly [string, string]> => [file, await readFile(join(sourceAgent, file), 'utf8')],
+        ),
+      ),
+    );
 
     const bundle =
       owner.corpus === undefined || owner.groupBy === undefined
@@ -385,6 +396,7 @@ export const generateBundles = async (
           await writeCorpusBundle(owner.corpus(), join(outputAgent, owner.slug), {
             ...shared,
             groupBy: owner.groupBy,
+            authoredFiles,
             ...(owner.eagerGroups === undefined ? {} : { eagerGroups: owner.eagerGroups() }),
           });
 

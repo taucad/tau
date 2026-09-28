@@ -33,6 +33,8 @@ export type BundleOptions = {
   readonly maxShardTokens?: number;
   /** Groups materialized eagerly; the rest are generated but fetched on demand. */
   readonly eagerGroups?: readonly string[];
+  /** Authored on-demand references copied into the generated bundle. */
+  readonly authoredFiles?: Readonly<Record<string, string>>;
 };
 
 /** A written bundle: its declaration, and what it cost. @public */
@@ -85,6 +87,12 @@ export const writeCorpusBundle = async (
   ]);
   for (const shard of shards) {
     written.set(`${shard.slug}.md`, renderShard(shard, corpus));
+  }
+  for (const [file, contents] of Object.entries(options.authoredFiles ?? {})) {
+    if (written.has(file)) {
+      throw new Error(`authored reference collides with generated file: ${file}`);
+    }
+    written.set(file, contents);
   }
 
   await rm(directory, { recursive: true, force: true });

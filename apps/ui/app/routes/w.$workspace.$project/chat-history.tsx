@@ -289,7 +289,7 @@ export const ChatHistory = memo(function (props: {
       <FloatingPanel isOpen={isExpanded} side='right' className={className} onOpenChange={setIsExpanded}>
         <FloatingPanelContent
           // `ph-no-capture`: session replay never records chat transcripts.
-          className={cn('ph-no-capture', !isExpanded && 'hidden')}
+          className={cn('ph-no-capture min-h-0 overflow-hidden', !isExpanded && 'hidden')}
           errorFallback={(errorProps) => (
             <FloatingPanelErrorContent
               {...errorProps}
@@ -329,12 +329,6 @@ export const ChatHistory = memo(function (props: {
               components={virtuosoComponents}
             />
           </AtReferenceProvider>
-          <ScrollDownButton
-            hasContent={messageIds.length > 0}
-            isVisible={!atBottom}
-            onScrollToBottom={scrollToBottom}
-          />
-
           {/*
           A refusal on an empty chat has to land somewhere (I12, W19-b).
 
@@ -348,6 +342,11 @@ export const ChatHistory = memo(function (props: {
           {/* Chat input area. The agent's task list sits directly above the
               composer, keyed by chat so its fold never carries across chats (D8). */}
           <div className='relative mx-auto mb-2 w-[calc(100%_-_1rem)] max-w-xl shrink-0'>
+            <ScrollDownButton
+              hasContent={messageIds.length > 0}
+              isVisible={!atBottom}
+              onScrollToBottom={scrollToBottom}
+            />
             <ChatTodoList key={activeChatId} />
             <ChatTextarea ref={chatTextareaRef} mode='main' enableAutoFocus={false} onSubmit={onSubmit} />
           </div>

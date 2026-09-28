@@ -1,4 +1,4 @@
-import type { z } from 'zod';
+import { z } from 'zod';
 import {
   namedLayoutSchema,
   workbenchDeviceSchema,
@@ -24,6 +24,11 @@ export type WorkbenchRecordCodec<Schema extends z.ZodType> = Readonly<{
 }>;
 
 const maxBytes = 64 * 1024;
+const projectIdSchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(/^[A-Za-z0-9_-]+$/u);
 const encoder = new TextEncoder();
 const decoder = new TextDecoder('utf-8', { fatal: true });
 
@@ -132,5 +137,5 @@ export const workbenchPaths = {
   namedLayout: (name: string): `.tau/workbench/layouts/${string}.json` =>
     `.tau/workbench/layouts/${workbenchIdSchema.parse(name)}.json`,
   device: (projectId: string): `/.tau/workbench/${string}.json` =>
-    `/.tau/workbench/${workbenchIdSchema.parse(projectId)}.json`,
+    `/.tau/workbench/${projectIdSchema.parse(projectId)}.json`,
 } as const;

@@ -9,7 +9,6 @@ const baseConfig: UserConfig = {
   minify: true,
   tsconfig: 'tsconfig.build.json',
   unbundle: true,
-  deps: { alwaysBundle: ['@taucad/utils'] },
 };
 
 const packageConfig: UserConfig = {

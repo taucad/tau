@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
+import { assertRootedPath } from '@taucad/utils/path';
 import {
   componentDisplaySchema,
   entrySettingsSchema,
@@ -7,10 +8,13 @@ import {
   paneTabSchema,
   pinnedMeasurementSchema,
   projectPathSchema,
+  sectionCutSchema,
   sectionSchema,
+  viewFieldsSchema,
+  viewerTabSchema,
+  workbenchLaneTabSchema,
   viewCameraSchema,
   viewDisplaySchema,
-  viewFieldsSchema,
   viewGridSchema,
   workbenchLayoutSchema,
   workbenchPaths,
@@ -50,6 +54,116 @@ const layout = {
 } as const;
 
 describe('approved record grammar', () => {
+  it('matches filesystem path ingress for bounded nonempty project paths', () => {
+    const paths = [
+      'bracket.ts',
+      'docs/review.md',
+      'a b/é.ts',
+      '.tau/workbench/layout.json',
+      '',
+      '/a.ts',
+      '../a.ts',
+      'a/../b.ts',
+      'a/./b.ts',
+      'a//b.ts',
+      'a/',
+      String.raw`a\b.ts`,
+      'C:foo',
+      'file:foo',
+      'a\nb',
+      'a\u007Fb',
+      'a\u0080b',
+      'a\0b',
+    ];
+    for (const path of paths) {
+      let canonical = false;
+      try {
+        canonical = path.length > 0 && path.length <= 1024 && assertRootedPath(path) === path;
+      } catch {
+        /* Refused by filesystem ingress. */
+      }
+      expect(projectPathSchema.safeParse(path).success, path).toBe(canonical);
+    }
+  });
+
+  it('accepts every approved records agent sketch', () => {
+    const review = layout;
+    const examples = [
+      [
+        workbenchRecords.view.schema,
+        { version: 1, entryPath: 'bracket.ts', camera: { kind: 'preset', preset: 'front' }, fieldOfView: 0 },
+      ],
+      [workbenchRecords.view.schema, view],
+      [workbenchRecords.layout.schema, review],
+      [
+        workbenchRecords.entries.schema,
+        {
+          version: 1,
+          entries: {
+            'bracket.ts': {
+              renderTimeout: 300_000,
+              components: { hidden: ['lid'], opacity: [{ id: 'housing', opacity: 0.4 }] },
+            },
+          },
+        },
+      ],
+      [
+        workbenchRecords.namedLayout.schema,
+        {
+          version: 1,
+          viewer: review.viewer,
+          views: [
+            { id: 'front', name: 'Front', entryPath: 'bracket.ts', camera: { kind: 'preset', preset: 'front' } },
+            { id: 'top', name: 'Top', entryPath: 'bracket.ts', camera: { kind: 'preset', preset: 'top' } },
+          ],
+        },
+      ],
+    ] as const;
+    for (const [schema, sample] of examples) {
+      expect(schema.safeParse(sample).success).toBe(true);
+    }
+  });
+
+  it('accepts control-tool agent inputs projected to record parts', () => {
+    for (const camera of [
+      { kind: 'preset', preset: 'isometric' },
+      { kind: 'preset', preset: 'front' },
+      { kind: 'preset', preset: 'top' },
+      { kind: 'look', direction: [-0.5, 0.7, -0.5] },
+    ]) {
+      expect(viewCameraSchema.safeParse(camera).success).toBe(true);
+    }
+    for (const tab of [
+      { kind: 'view', view: 'iso' },
+      { kind: 'view', view: 'front' },
+      { kind: 'view', view: 'top' },
+    ]) {
+      expect(viewerTabSchema.safeParse(tab).success).toBe(true);
+    }
+    for (const tab of [
+      { kind: 'pane', pane: 'parameters' },
+      { kind: 'file', path: 'docs/review.md', presentation: 'preview' },
+    ]) {
+      expect(workbenchLaneTabSchema.safeParse(tab).success).toBe(true);
+    }
+    expect(
+      viewFieldsSchema.safeParse({
+        entryPath: 'bracket.ts',
+        name: 'Joint',
+        camera: { kind: 'look', direction: [-0.5, 0.7, -0.5] },
+        section: { active: true, cuts: [{ kind: 'plane', plane: 'xz', offset: 0.012, isFlipped: false }] },
+        grid: { unit: 'in' },
+        display: { lines: false },
+      }).success,
+    ).toBe(true);
+    expect(
+      entrySettingsSchema.safeParse({
+        renderTimeout: 300_000,
+        components: { hidden: ['lid'], opacity: [{ id: 'housing', opacity: 0.4 }] },
+      }).success,
+    ).toBe(true);
+  });
+
   it('accepts hand-written, look, layout, entries and file-only shapes', () => {
     expect(workbenchViewSchema.safeParse({ version: 1, entryPath: 'bracket.ts' }).success).toBe(true);
     expect(workbenchViewSchema.safeParse(view).success).toBe(true);
@@ -91,6 +205,8 @@ describe('approved record grammar', () => {
       expect(projectPathSchema.safeParse(path).success).toBe(false);
     }
     expect(() => workbenchPaths.view('../front')).toThrow();
+    expect(workbenchPaths.device('proj_Aa09_Zz')).toBe('/.tau/workbench/proj_Aa09_Zz.json');
+    expect(() => workbenchPaths.device('../proj_bad')).toThrow();
     expect(paneTabSchema.safeParse({ kind: 'pane', pane: 'settings' }).success).toBe(false);
     expect(
       workbenchLayoutSchema.safeParse({
@@ -159,6 +275,36 @@ describe('approved record grammar', () => {
     expect(workbenchRecords.layout.read(bytes('{"version":2}'))).toMatchObject({
       status: 'invalid-preserved',
       code: 'NEWER_RECORD',
+      message: 'The layout record was written by a newer Tau. Update Tau to use it.',
+    });
+    expect(workbenchRecords.view.read(new Uint8Array(65 * 1024))).toMatchObject({
+      message: 'The view record is invalid: it exceeds 64 KiB.',
+    });
+    expect(workbenchRecords.view.read(new Uint8Array([0xff]))).toMatchObject({
+      message: 'The view record is invalid: it is not UTF-8 JSON.',
+    });
+    expect(workbenchRecords.view.read(bytes('{"version":1,"entryPath":"a.ts","__proto__":{}}'))).toMatchObject({
+      message: 'The view record is invalid: it contains __proto__.',
+    });
+    expect(
+      workbenchRecords.layout.read(
+        bytes(
+          JSON.stringify({
+            ...layout,
+            viewer: {
+              kind: 'group',
+              tabs: [
+                { kind: 'view', view: 'front' },
+                { kind: 'view', view: 'front' },
+              ],
+            },
+          }),
+        ),
+      ),
+    ).toMatchObject({
+      code: 'INVALID_RECORD',
+      message:
+        'The layout record is invalid: viewer: viewer names view front twice; a lane shows each view, pane or file once.',
     });
     expect(workbenchRecords.layout.read(bytes(`${'['.repeat(20_000)}0${']'.repeat(20_000)}`))).toMatchObject({
       status: 'invalid-preserved',
@@ -172,6 +318,12 @@ describe('approved record grammar', () => {
         },
       }),
     ).toThrow(RangeError);
+    const canonical = workbenchRecords.entries.serialize({
+      version: 1,
+      entries: { 'z.ts': { components: { hidden: ['b', 'a'] } }, 'a.ts': { renderTimeout: 1 } },
+    });
+    expect(canonical.indexOf('"a.ts"')).toBeLessThan(canonical.indexOf('"z.ts"'));
+    expect(canonical.indexOf('"components"')).toBeLessThan(canonical.indexOf('"version"'));
   });
 
   it('keeps provider-safe subparts free of schema keywords providers reject', () => {
@@ -185,6 +337,7 @@ describe('approved record grammar', () => {
       pinnedMeasurementSchema,
       componentDisplaySchema,
       entrySettingsSchema,
+      sectionCutSchema,
       sectionSchema,
     ]) {
       const json = JSON.stringify(z.toJSONSchema(schema, { target: 'draft-7', io: 'input' }));

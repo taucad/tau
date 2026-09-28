@@ -184,7 +184,7 @@ describe('chatRun conforms to ChatRunSlot.tla', () => {
     expect(await replay({ inspect: guard.inspect })).toEqual([]);
   });
 
-  it.runIf(simulated !== undefined && existsSync(path.join(simulated, 'ChatRunSlotGraph.ndjson')))(
+  it.runIf(simulated !== undefined && !existsSync(path.join(simulated, '.skipped')))(
     'should replay the simulated behaviours without divergence',
     async () => {
       const traces = readFileSync(path.join(simulated ?? '', 'ChatRunSlotGraph.ndjson'), 'utf8')

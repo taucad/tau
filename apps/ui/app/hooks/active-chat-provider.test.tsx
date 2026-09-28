@@ -644,7 +644,7 @@ describe('HomeNewProjectComposerProvider', () => {
       </StrictMode>,
     );
 
-    expect(view.getByTestId('home-composer')).toBeInTheDocument();
+    expect(view.getByTestId('home-composer')).toBeTruthy();
     expect(view.container.textContent).toBe('ready');
     await act(async () => {
       release();
@@ -969,13 +969,14 @@ describe('ActiveChatProvider', () => {
     act(() => {
       publishLogRows(result.current.store, 'chat_working', runningRows());
     });
-    expect(result.current.composer.status).toBe('ready');
+    expect(result.current.composer.status).toBe('streaming');
     expect(result.current.composer.agentActivity).toBe('working');
 
     act(() => {
       publishLogRows(result.current.store, 'chat_working', [lifecycleRow(2, 'completed')], 2);
     });
     expect(result.current.composer.agentActivity).toBe('ready');
+    expect(result.current.composer.status).toBe('ready');
   });
 
   it('should surface approval and cancellation activity independently from the execution provider', () => {

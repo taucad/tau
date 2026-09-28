@@ -481,6 +481,7 @@ export const createTransportStreamFunction =
           funded && options.prepareInvocation
             ? await options.prepareInvocation(invocationPurpose, model.id, signal)
             : options.createId();
+        signal.throwIfAborted();
         const committedContext = options.committedContext?.();
         const documents = options.documents?.();
         /* The transport's own signal: pi's abort reaches it, and so does the stall bound's. */

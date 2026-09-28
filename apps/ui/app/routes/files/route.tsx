@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { Link } from 'react-router';
 import type { MetaFunction } from 'react-router';
+import { PageContent } from '#components/layout/page-content.js';
 import {
   CheckCircle2,
   AlertCircle,
@@ -25,7 +25,7 @@ import { useFileManager, useHomeStorageBackend } from '#hooks/use-file-manager.j
 import { nodeHomeRoot } from '#filesystem/desktop-bridge.js';
 import { useProjects } from '#hooks/use-projects.js';
 import { isFileSystemAccessSupported } from '#constants/browser.constants.js';
-import type { Handle } from '#types/matches.types.js';
+import { PageHeader } from '#components/layout/page-header.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { cn } from '@taucad/ui/utils/cn';
 import { checkHandlePermission, getWorkspace, listWorkspaces } from '#filesystem/handle-store.js';
@@ -41,16 +41,6 @@ import type { FileTreeNode, WorkspaceScope } from '@taucad/filesystem';
 import type { WorkspaceConnectionState } from '#hooks/workspace-connection.machine.js';
 
 export const meta: MetaFunction = () => [{ title: 'Files · Tau' }];
-
-export const handle: Handle = {
-  breadcrumb() {
-    return (
-      <Button asChild variant='ghost'>
-        <Link to='/files'>Files</Link>
-      </Button>
-    );
-  },
-};
 
 /**
  * One product-level Home column. Its physical engine is resolved per profile.
@@ -847,10 +837,8 @@ export default function FilesRoute(): React.JSX.Element {
   }, [connectionCanBrowse, connectionWorkspace, loadColumnTree]);
 
   return (
-    <div className='flex h-full flex-col gap-4 px-6 py-8'>
-      <div className='flex items-center justify-between gap-4'>
-        <h1 className='shrink-0 text-3xl font-medium tracking-tight'>Files</h1>
-      </div>
+    <PageContent className='flex h-full flex-col gap-4'>
+      <PageHeader title='Files' />
 
       <div className='grid min-h-0 flex-1 auto-rows-fr grid-cols-1 gap-4 overflow-x-auto md:grid-cols-[repeat(auto-fit,minmax(280px,1fr))]'>
         <ColumnShell
@@ -994,6 +982,6 @@ export default function FilesRoute(): React.JSX.Element {
           )
         ) : undefined}
       </div>
-    </div>
+    </PageContent>
   );
 }

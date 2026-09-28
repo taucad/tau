@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MetaFunction } from 'react-router';
-import { Link, NavLink, useLocation, useNavigate } from 'react-router';
+import { PageContent } from '#components/layout/page-content.js';
+import { NavLink, useLocation, useNavigate } from 'react-router';
 import { SearchX, X } from 'lucide-react';
 import { z } from 'zod';
 import { getCoreRowModel, getPaginationRowModel, useReactTable } from '@tanstack/react-table';
@@ -30,13 +31,6 @@ import { isFunction } from '#utils/function.utils.js';
 import type { Handle } from '#types/matches.types.js';
 
 export const handle: Handle = {
-  breadcrumb() {
-    return (
-      <Button asChild variant='ghost'>
-        <Link to='/community'>Community</Link>
-      </Button>
-    );
-  },
   enableOverflowY: true,
 };
 
@@ -190,7 +184,7 @@ export default function CadCommunity(): React.JSX.Element {
   const pageProjects = table.getRowModel().rows.map((row) => row.original);
 
   return (
-    <div className='container mx-auto space-y-3 px-4 pt-5 pb-8'>
+    <PageContent className='space-y-3'>
       <PageHeader
         title='Community'
         count={galleryProjects.length}
@@ -301,6 +295,6 @@ export default function CadCommunity(): React.JSX.Element {
           />
         </>
       )}
-    </div>
+    </PageContent>
   );
 }

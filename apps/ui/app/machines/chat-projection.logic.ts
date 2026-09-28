@@ -13,9 +13,11 @@
  */
 
 import { createLogic } from 'xstate';
-import { emptyChatLedger, foldReadAnswer } from '@taucad/agent-host';
+import type { UIMessageChunk } from 'ai';
+import { agentLogEventSchema, emptyChatLedger, foldReadAnswer } from '@taucad/agent-host';
 import type { ChatLedger, RowKey, TurnPlacement } from '@taucad/agent-host';
-import { runFailureText } from '#services/agent-host-event-projection.js';
+import { projectAgentHostEvent, runFailureText } from '#services/agent-host-event-projection.js';
+import type { AgentHostLiveBlocks } from '#services/agent-host-event-projection.js';
 
 /** One read's answer, as the host's `read` and `attach` return it (W3 CL-R13). @public */
 export type ChatProjectionReadAnswer = Parameters<typeof foldReadAnswer>[1];
@@ -23,11 +25,20 @@ export type ChatProjectionReadAnswer = Parameters<typeof foldReadAnswer>[1];
 /** A tool call the log opened (`tool-input`) and has not closed (`tool-output` or its run's end). @public */
 export type OpenToolCall = Readonly<{ runId: string; toolName: string }>;
 
+type Block = AgentHostLiveBlocks extends Map<string, infer Value> ? Value : never;
+
+/** One run's durable UI stream, consumed by a detachable watch (PV-S11). @public */
+export type RunView = Readonly<{ chunks: readonly UIMessageChunk[] }>;
+
 /** @public */
 export type ChatProjection = Readonly<{
   ledger: ChatLedger;
   /** Open tool calls by call id, in the order they opened. */
   openTools: Readonly<Record<string, OpenToolCall>>;
+  /** Durable chunks by run; the watch and transcript materializer share this one projection. */
+  views: Readonly<Record<string, RunView>>;
+  /** Open/closed block identities, stored as a JSON-safe record rather than a live Map. */
+  blocks: Readonly<Record<string, Block>>;
   /** The log's end as the last answer stated it; the projection holds the whole log once its cursor reaches it. */
   endCursor: number;
   /** What the last `failed` row said, for the run it failed; cleared by that run's next lifecycle row. */
@@ -55,6 +66,8 @@ export type ChatProjectionEmitted =
 export const initialChatProjection: ChatProjection = Object.freeze({
   ledger: emptyChatLedger,
   openTools: {},
+  views: {},
+  blocks: {},
   endCursor: 0,
 });
 
@@ -182,16 +195,31 @@ export const reduceChatProjection = (state: ChatProjection, event: ChatProjectio
         return { state: held };
       }
       let open: Record<string, OpenToolCall> | undefined;
+      let { views } = state;
+      /* ponytail: O(open blocks) per batch; a persistent map only if a run keeps hundreds open. */
+      const blocks: AgentHostLiveBlocks = new Map(
+        Object.entries(state.blocks).map(([key, block]) => [key, { ...block }]),
+      );
       let { failure, attentionRow } = state;
       for (const row of answer.events) {
         open = applyToolRow(open ?? { ...state.openTools }, row);
         failure = applyFailureRow(failure, row);
         attentionRow = attentionKeyOf(row) ?? attentionRow;
+        const parsed = agentLogEventSchema.safeParse(row);
+        if (parsed.success) {
+          const chunks = projectAgentHostEvent(parsed.data, blocks);
+          if (chunks.length > 0) {
+            const previous = views[parsed.data.runId]?.chunks ?? [];
+            views = { ...views, [parsed.data.runId]: { chunks: [...previous, ...chunks] } };
+          }
+        }
       }
       return {
         state: {
           ledger: fold.ledger,
           openTools: open ?? state.openTools,
+          views,
+          blocks: Object.fromEntries(blocks),
           endCursor,
           ...(failure === undefined ? {} : { failure }),
           ...(attentionRow === undefined ? {} : { attentionRow }),

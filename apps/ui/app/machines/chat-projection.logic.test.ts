@@ -135,6 +135,19 @@ describe('chatProjectionLogic (PV-S7)', () => {
     }
   });
 
+  it('keeps each run’s durable UI chunks for a watch without a second log reader', () => {
+    const rows = readLog('recorded/in-project-ping-pong-turn');
+    const state = project(rows, 7);
+    const { runId } = rows.find((row) => row.type === 'run.lifecycle' && row.state === 'admitted')!;
+    const chunks = state.views[runId]?.chunks ?? [];
+
+    expect(chunks[0]).toMatchObject({ type: 'start', messageId: runId });
+    expect(chunks.some((chunk) => chunk.type === 'finish')).toBe(true);
+    expect(chunks.some((chunk) => chunk.type === 'text-delta')).toBe(true);
+    // oxlint-disable-next-line unicorn/prefer-structured-clone -- the JSON round trip proves watch state is serializable.
+    expect(JSON.parse(JSON.stringify(state.views))).toEqual(state.views);
+  });
+
   it('never revisits a row it already folded: O(1) work per row (L3 D19)', () => {
     const rows = readLog('recorded/daemon-reattach-hexnut-4runs');
     const reads = rows.map(() => 0);
@@ -163,6 +176,8 @@ describe('chatProjectionLogic (PV-S7)', () => {
     const replayed = reduceChatProjection(held, { type: 'batch', answer: batch(rows.slice(0, 4), 0, rows.length) });
     expect(replayed.state.ledger).toBe(held.ledger);
     expect(replayed.state.openTools).toBe(held.openTools);
+    expect(replayed.state.views).toBe(held.views);
+    expect(replayed.state.blocks).toBe(held.blocks);
     /* It still learns where the log ends, so it knows it no longer holds all of it. */
     expect(replayed.state.endCursor).toBe(rows.length);
   });

@@ -621,6 +621,14 @@
       "owner": "W6"
     },
     {
+      "id": "D17",
+      "bound": "Observed chat attachment retry after loss (250 ms doubling to a 30 s delay ceiling)",
+      "site": "apps/ui/app/services/chat-session-store.ts",
+      "token": "retryDelayMilliseconds",
+      "class": "Backoff",
+      "owner": "W9"
+    },
+    {
       "id": "A14",
       "bound": "Restore's own cut, before and after the tree is applied (30 s, restoreCutMilliseconds; geospec D15). The cut is answered by its request id, so this waits on a peer that always answers",
       "site": "packages/revisions/src/restore.machine.ts",

@@ -204,7 +204,7 @@ describe('ChatTextareaBar', () => {
   });
 
   it('shows an external agent’s permission mode, named, and steps it with ⌘. (C5)', () => {
-    execution.current = { kind: 'acp', hostId: 'desktop', agentId: 'codex', model: 'gpt-6-astra' };
+    execution.current = { kind: 'acp', hostId: 'desktop', agentId: 'codex' };
     renderBar({ acpSessionData: codexSession });
 
     expect(screen.getByRole('button', { name: 'Mode: Ask for approval' })).toBeInTheDocument();
@@ -223,7 +223,7 @@ describe('ChatTextareaBar', () => {
   });
 
   it('passes the host-discovered reasoning option to the pre-project agent control', () => {
-    execution.current = { kind: 'acp', hostId: 'desktop', agentId: 'codex' };
+    execution.current = { kind: 'acp', hostId: 'desktop', agentId: 'codex', model: 'gpt-6-astra' };
     placements.current = [
       {
         hostId: 'desktop',

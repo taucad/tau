@@ -50,6 +50,7 @@ import { useActiveChatSession, useChatComposer } from '#hooks/active-chat-provid
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { useChatSessionSnapshot } from '#hooks/use-chat-session.js';
 import type { ChatSession } from '#services/chat-session-store.js';
+import { selectVisibleChatStatus } from '#services/chat-visible-status.js';
 import type { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
 import type {
   DraftAttachment,
@@ -276,7 +277,8 @@ export function useChatSelector<T>(selector: (state: CombinedChatState) => T, ch
   const getSnapshot = useCallback((): T => {
     const chat = store.get(activeChatId)?.chat;
     const messages = chat?.messages ?? emptyMessages;
-    const status = chat?.status ?? 'ready';
+    const projection = store.getProjection(activeChatId);
+    const status = selectVisibleChatStatus(chat?.status ?? 'ready', projection);
     const draftContext = draftActorRef.getSnapshot().context;
     const persistenceContext = persistenceActorRef?.getSnapshot().context;
     const state: CombinedChatState = {
@@ -290,7 +292,7 @@ export function useChatSelector<T>(selector: (state: CombinedChatState) => T, ch
       status,
       error: chat?.error,
       persistedError: persistenceContext?.persistedError,
-      projection: store.getProjection(activeChatId),
+      projection,
       attachmentStatus: store.getAttachmentStatus(activeChatId),
       isLoading: status === 'streaming',
       activeExecution: persistenceContext?.activeExecution,

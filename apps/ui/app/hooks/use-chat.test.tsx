@@ -9,6 +9,7 @@ import type { ChatError } from '@taucad/types';
 import { resolveKernel } from '@taucad/types/constants';
 import { createActor } from 'xstate';
 import { projectSessionMachine } from '#machines/project-session.machine.js';
+import { lifecycleRow, publishLogRows, runningRows } from '#machines/chat-projection.fixture.js';
 import type { ChatTurn, ChatTurnGesture } from '#machines/chat-session.machine.js';
 import { publishChatTurnAdmission, resetChatTurnServices } from '#chat-clients/_internal/chat-host-binding.js';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
@@ -129,7 +130,8 @@ vi.mock('@ai-sdk/react', () => ({
   },
 }));
 
-vi.mock('ai', () => ({
+vi.mock('ai', async (importOriginal) => ({
+  ...(await importOriginal()),
   // oxlint-disable-next-line typescript-eslint/no-extraneous-class -- mock requires a `new`able value
   DefaultChatTransport: class {},
   lastAssistantMessageIsCompleteWithApprovalResponses: vi.fn(() => false),
@@ -512,6 +514,22 @@ describe('hooks resolution rules', () => {
     });
     expect(result.current).toBe('streaming');
     expect(renderCount).toBe(beforeMessageUpdate + 1);
+  });
+
+  it('shows Stop status for a reattached host run when the SDK is ready', () => {
+    const { result } = renderHook(
+      () => ({ status: useChatSelector((state) => state.status), store: useChatSessionStore() }),
+      { wrapper: createWrapper('chat_reattached_stop') },
+    );
+    expect(result.current.status).toBe('ready');
+    act(() => {
+      publishLogRows(result.current.store, 'chat_reattached_stop', runningRows());
+    });
+    expect(result.current.status).toBe('streaming');
+    act(() => {
+      publishLogRows(result.current.store, 'chat_reattached_stop', [lifecycleRow(2, 'completed')], 2);
+    });
+    expect(result.current.status).toBe('ready');
   });
 
   it('does not hide same-sized message order and map replacements', async () => {

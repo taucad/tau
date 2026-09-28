@@ -388,6 +388,38 @@ describe('BrowserPlacementChatTransport', () => {
     ).rejects.toMatchObject({ name: 'AgentHostWorkerError', code: 'BROWSER_HOST_ADMISSION_INVALID' });
   });
 
+  it('hands an armed projection watch to the SDK without placing another run', async () => {
+    const transport = new BrowserPlacementChatTransport();
+    const watch = new ReadableStream<UIMessageChunk>({
+      start(controller) {
+        controller.enqueue({ type: 'start', messageId: 'run_armed' });
+        controller.close();
+      },
+    });
+    transport.arm(watch);
+    const options: Parameters<typeof transport.sendMessages>[0] = {
+      chatId: 'chat_armed',
+      trigger: 'submit-message',
+      messageId: undefined,
+      messages: [],
+      abortSignal: undefined,
+      body: {},
+    };
+    expect(await transport.sendMessages(options)).toBe(watch);
+    await expect(transport.sendMessages(options)).rejects.toThrow(/not armed/u);
+    await expect(transport.reconnectToStream({ chatId: 'chat_armed' })).resolves.toBeNull();
+  });
+
+  it('disarms a detached watch before the SDK can consume it', async () => {
+    const transport = new BrowserPlacementChatTransport();
+    const detached = new ReadableStream<UIMessageChunk>();
+    const replacement = new ReadableStream<UIMessageChunk>();
+    transport.arm(detached);
+    transport.disarm(detached);
+    transport.arm(replacement);
+    expect(await transport.reconnectToStream({ chatId: 'chat_armed' })).toBe(replacement);
+  });
+
   it('places an external-agent turn on its host', async () => {
     installBrowserGlobals();
     const chatId = 'chat-external-placement';

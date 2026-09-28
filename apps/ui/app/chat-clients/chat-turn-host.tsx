@@ -141,10 +141,12 @@ export function ChatTurnHost(): ReactNode {
     [activeChatId, admitExecution, chat, store, surfaceDispatchFailure],
   );
 
-  /* The session can retain a turn after the focused view unmounts. */
+  /* The admitted turn retains its callback; future seeds need a live focused publisher. */
   useEffect(() => {
-    publishChatTurnAdmission(activeChatId, admit);
-  }, [activeChatId, admit]);
+    const unpublish = publishChatTurnAdmission(activeChatId, admit);
+    store.startPendingSeed(activeChatId);
+    return unpublish;
+  }, [activeChatId, admit, store]);
 
   return null;
 }

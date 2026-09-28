@@ -81,6 +81,7 @@ export default defineConfig({
       'app/machines/revisions-opfs.browser.test.ts',
       'app/components/geometry/loader/metal-morph-spinner.browser.test.tsx',
       'app/components/geometry/graphics/three/materials/section-clip.browser.test.ts',
+      'app/components/markdown/chat-markdown-hyperlink.browser.test.tsx',
     ],
     fileParallelism: false,
     browser: {

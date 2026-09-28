@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { menuContentVariants, menuItemVariants } from '#components/menu.variants.js';
 import { popoverSurfaceVariants } from '#components/popover.variants.js';
+import { cn } from '#utils/cn.js';
 
 describe('menu variants', () => {
   it('composes shared menu surface chrome with menu-specific layout', () => {
@@ -22,5 +23,22 @@ describe('menu variants', () => {
   it('keeps animation opt-in', () => {
     expect(menuContentVariants().split(' ')).not.toContain('data-[state=open]:animate-in');
     expect(menuContentVariants({ animated: true }).split(' ')).toContain('data-[state=open]:animate-in');
+  });
+
+  it('keeps destructive hover and keyboard highlight after class merging', () => {
+    const classes = cn(menuItemVariants({ variant: 'destructive' })).split(' ');
+
+    expect(classes).toEqual(
+      expect.arrayContaining([
+        'hover:bg-menu-highlight-destructive',
+        'hover:text-menu-destructive-foreground',
+        'hover:[&_svg]:text-menu-destructive-foreground!',
+        'focus:bg-menu-highlight-destructive',
+        'focus:text-menu-destructive-foreground',
+        'focus:[&_svg]:text-menu-destructive-foreground!',
+        'data-[highlighted]:bg-menu-highlight-destructive',
+      ]),
+    );
+    expect(classes).not.toContain('focus:bg-menu-highlight');
   });
 });

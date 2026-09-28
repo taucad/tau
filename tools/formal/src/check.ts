@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import type { Expectation, ExpectedLocation, Outcome, Tier } from '#expected.js';
 import { compareOutcome, describeOutcome, findExpectedFiles, lintExpectedFile } from '#expected.js';
@@ -398,11 +398,30 @@ export const updateProject = async (
   return tests.status ?? 1;
 };
 
-/** `formal mutants <projectRoot>`: machine mutants through Vitest, Lean mutants through the oracle when Lean is present. */
+const assertSafeSimulationPath = (root: string, target: string): void => {
+  const relative = path.relative(root, target);
+  if (relative === '' || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new Error(`simulation path escapes the workspace: ${target}`);
+  }
+  const rootStat = lstatSync(root, { throwIfNoEntry: false });
+  if (!rootStat?.isDirectory() || rootStat.isSymbolicLink()) {
+    throw new Error(`simulation workspace root is not a real directory: ${root}`);
+  }
+  let current = root;
+  for (const part of relative.split(path.sep)) {
+    current = path.join(current, part);
+    const stat = lstatSync(current, { throwIfNoEntry: false });
+    if (stat?.isSymbolicLink()) {
+      throw new Error(`simulation path contains a symlink: ${current}`);
+    }
+  }
+};
+
 /**
  * Nightly: TLC random simulation of every exported graph from one fresh, printed seed, written to
  * `out/test-results/formal/<projectRoot>/simulated/<Module>.ndjson`. Owner conformance tests replay
- * these when `FORMAL_SIMULATED` names the directory, and so do the mutant runs.
+ * these when `FORMAL_SIMULATED` names the directory, and so do the mutant runs. Only a local
+ * missing-tool skip writes `.skipped`; an absent declared trace without that marker must fail replay.
  */
 const simulateProject = async (
   context: FormalContext,
@@ -412,27 +431,62 @@ const simulateProject = async (
   const graphs = findExpectedFiles(projectRoot).flatMap(({ directory, file }) =>
     Object.entries(file.graphs ?? {}).map(([module, graph]) => ({ directory, module, graph })),
   );
+  const invalid = graphs.find(({ module }) => !/^[A-Za-z]\w*$/.test(module));
+  if (invalid) {
+    log(`FAIL simulation graph module name is invalid: ${invalid.module}`);
+    return { status: 1 };
+  }
+  const projectRelative = path.relative(context.root, projectRoot);
+  if (
+    projectRelative === '' ||
+    projectRelative === '..' ||
+    projectRelative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(projectRelative)
+  ) {
+    log(`FAIL simulation project root is outside the workspace: ${projectRoot}`);
+    return { status: 1 };
+  }
+  const output = path.join(context.root, 'out/test-results/formal', projectRelative, 'simulated');
+  const outputIsSafe = (target: string): boolean => {
+    try {
+      assertSafeSimulationPath(context.root, target);
+      return true;
+    } catch (error) {
+      log(`FAIL unsafe simulation output: ${String(error)}`);
+      return false;
+    }
+  };
+  if (!outputIsSafe(output)) {
+    return { status: 1 };
+  }
+  // This directory belongs only to simulation; remove traces for graphs deleted from expected.json too.
+  rmSync(output, { recursive: true, force: true });
   if (graphs.length === 0) {
     return { status: 0 };
   }
   const tools = locateTools(context);
   if (!tools.java || !tools.tlc) {
+    const status =
+      missingTools(context, { tools, needed: ['java', 'tlc'], target: `${projectRelative} simulation` }, log) ?? 1;
+    if (status === 0) {
+      if (!outputIsSafe(output)) {
+        return { status: 1 };
+      }
+      mkdirSync(output, { recursive: true });
+      const marker = path.join(output, '.skipped');
+      if (!outputIsSafe(marker)) {
+        return { status: 1 };
+      }
+      writeFileSync(marker, 'java or tlc unavailable\n');
+    }
     return {
-      status:
-        missingTools(
-          context,
-          { tools, needed: ['java', 'tlc'], target: `${path.relative(context.root, projectRoot)} simulation` },
-          log,
-        ) ?? 1,
+      status,
     };
   }
   const seed = Number(context.env['FORMAL_SEED'] ?? Math.floor(Math.random() * 2_147_483_647));
-  const output = path.join(
-    context.root,
-    'out/test-results/formal',
-    path.relative(context.root, projectRoot),
-    'simulated',
-  );
+  if (!outputIsSafe(output)) {
+    return { status: 1 };
+  }
   mkdirSync(output, { recursive: true });
   let status = 0;
   for (const { directory, module, graph } of graphs) {
@@ -446,10 +500,11 @@ const simulateProject = async (
       traces: 2000,
       depth: 40,
     });
-    writeFileSync(
-      path.join(output, `${module}.ndjson`),
-      simulated.behaviours.map((behaviour) => JSON.stringify(behaviour)).join('\n'),
-    );
+    const traceFile = path.join(output, `${module}.ndjson`);
+    if (!outputIsSafe(traceFile)) {
+      return { status: 1 };
+    }
+    writeFileSync(traceFile, simulated.behaviours.map((behaviour) => JSON.stringify(behaviour)).join('\n'));
     const ok = simulated.outcome === 'pass' && simulated.behaviours.length > 0;
     status = ok ? status : 1;
     log(
@@ -459,6 +514,7 @@ const simulateProject = async (
   return { status, directory: output };
 };
 
+/** `formal mutants <projectRoot>`: machine mutants through Vitest, Lean mutants through the oracle when Lean is present. */
 export const mutantsProject = (context: FormalContext, projectRoot: string, log?: (line: string) => void): number => {
   const { lean } = locateTools(context);
   const spec = findExpectedFiles(projectRoot).find((location) => location.file.lean !== undefined)?.file.lean;

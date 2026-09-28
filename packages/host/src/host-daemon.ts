@@ -74,6 +74,14 @@ type ParameterActor = ActorRefFrom<typeof parameterSetMachine>;
 const socketOpenTimeout = 15_000;
 /** Milliseconds. */
 const reconnectDelayMaximum = 30_000;
+/**
+ * Milliseconds a control connection must stay open before its close resets the
+ * reconnect backoff. A server that keeps accepting and then closing (a replica
+ * failing every control frame) would otherwise be redialled about once a second
+ * forever; a connection that lived this long closed for a reason worth an
+ * immediate reconnect, such as a deploy.
+ */
+const stableControlConnection = 30_000;
 /** Milliseconds allowed for a child exit to explain its closing loopback routes. */
 const childExitAttributionGrace = 50;
 
@@ -1564,7 +1572,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     await openSession(parsed.data);
   };
 
-  const runControlConnection = async (credential: HostCredential, child: RuntimeChildHandle): Promise<void> => {
+  const runControlConnection = async (credential: HostCredential, child: RuntimeChildHandle): Promise<number> => {
     /*
      * `close()` closes whatever `controlSocket` holds *at the instant it
      * aborts*, so a connection dialled after that instant is one nothing ever
@@ -1579,7 +1587,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
      * synchronous, so this guard and `close()` cannot interleave.
      */
     if (shutdown.signal.aborted) {
-      return;
+      return 0;
     }
     emit({ type: 'control', state: 'connecting' });
     const socket = authorizedSocket(asWebSocketUrl(options.relayUrl, '/v1/agents/control'), credential.credential);
@@ -1629,6 +1637,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       throw error;
     }
     emit({ type: 'control', state: 'connected' });
+    const connectedAt = Date.now();
     /* Ruling 4: the API mints the agent grant and the offer's `agentUrl` only
      * for a device that advertised the capability, so an older daemon — or this
      * one started without `--agent-port` — still pairs and gets no agent route. */
@@ -1658,10 +1667,18 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       controlSocket = undefined;
     }
     emit({ type: 'control', state: 'disconnected' });
-    closeSessions('RELAY_CLOSED');
+    /* Sessions ride their own relay sockets, which may sit on a Machine that is
+     * staying while this control socket's Machine restarts (1012), so losing
+     * control alone ends none of them: each ends when its own relay closes. Only
+     * a close that says this device is gone ends them all: a refused credential
+     * (4401) or a revocation (4003). */
+    if (closeResult.code === 4401 || closeResult.code === 4003) {
+      closeSessions('RELAY_CLOSED');
+    }
     if (closeResult.code === 4401) {
       throw new HostAuthenticationError('Tau Host device credential was rejected.');
     }
+    return Date.now() - connectedAt;
   };
 
   const run = async (): Promise<HostDaemonCloseResult> => {
@@ -1708,8 +1725,10 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
         // oxlint-disable-next-line typescript/no-unnecessary-condition -- close can abort while ensureRuntimeChild awaits.
         if (child && !shutdown.signal.aborted) {
           // oxlint-disable-next-line no-await-in-loop -- one control connection owns the current attempt.
-          await runControlConnection(credential, child);
-          reconnectAttempt = 0;
+          const lived = await runControlConnection(credential, child);
+          if (lived >= stableControlConnection) {
+            reconnectAttempt = 0;
+          }
         }
       } catch (error) {
         if (error instanceof HostAuthenticationError) {

@@ -114,7 +114,10 @@ export type DaemonAgentHostTransportOptions = {
   /**
    * How many times the placement may be re-dialled before the death is
    * reported. Spent for the lifetime of this transport, not per disconnection:
-   * a transport is created per stream, so the bound cannot spin.
+   * a transport is created per stream, so the bound cannot spin. The default,
+   * 5, re-dials at 0, 0.25, 0.75, 1.75 and 3.75 s: a daemon whose control
+   * socket sat on an API Machine that restarted takes 1 to 1.25 s to reconnect
+   * elsewhere, which three attempts within 0.75 s never outlasted.
    */
   readonly redialAttempts?: number | undefined;
   /**
@@ -170,7 +173,7 @@ export const createDaemonAgentHostTransport = (
 ): AgentHostTransport => {
   const dial = typeof source === 'function' ? source : undefined;
   const alreadyOpen = typeof source === 'function' ? undefined : source;
-  const attemptLimit = options.redialAttempts ?? 3;
+  const attemptLimit = options.redialAttempts ?? 5;
   const backoff = options.redialBackoff ?? 250;
   const closeEvents = new Topic<AgentHostTransportCloseReason>({ name: 'DaemonAgentHostTransport.close' });
   let death: AgentHostTransportCloseReason | undefined;

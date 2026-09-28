@@ -169,6 +169,9 @@ export const createCanvasConfig = (
   const appRoot = resolve(repoRoot, 'apps/ui/app');
   const uiRoot = resolve(repoRoot, 'packages/ui/src');
   const sourceRoots = [appRoot, realpathSync(allowedRoot)];
+  // A linked worktree's `docs/research` resolves into the owning checkout's Brain, outside
+  // this checkout, so a canvas's own fixtures may live under the resolved artifacts root.
+  const fixtureRoots = [realpathSync(repoRoot), realpathSync(allowedRoot)];
   const aliases = new Map<string, string>();
   const aliasesPath = resolve(root, 'canvas.aliases.json');
   if (existsSync(aliasesPath)) {
@@ -181,7 +184,7 @@ export const createCanvasConfig = (
         throw new Error('Canvas aliases require # imports and repository-relative fixture paths');
       }
       const fixture = realpathSync(resolve(repoRoot, target));
-      if (!fixture.startsWith(`${repoRoot}${sep}`)) {
+      if (!fixtureRoots.some((directory) => fixture.startsWith(`${directory}${sep}`))) {
         throw new Error('Canvas fixture aliases must remain inside the Tau checkout');
       }
       aliases.set(specifier, fixture);

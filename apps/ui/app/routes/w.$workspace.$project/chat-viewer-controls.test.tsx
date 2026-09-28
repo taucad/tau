@@ -175,8 +175,8 @@ describe('ChatViewerControls', () => {
         // None of these holds another, so each follows the last and nothing more.
         expect(order[index]!.compareDocumentPosition(element)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
       }
-      expect(within(sectionRow()).getByRole('button', { name: 'Done' })).toBeInTheDocument();
-      expect(within(measuringRow()).getByRole('button', { name: 'Done' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Done with section' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Done with measure' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Section view', pressed: true })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Measure', pressed: true })).toBeInTheDocument();
     });
@@ -279,7 +279,7 @@ describe('ChatViewerControls', () => {
       await user.click(screen.getByRole('button', { name: 'Measure' }));
 
       // Clear all is disabled with nothing measured, so Done is the row's first control.
-      expect(within(measuringRow()).getByRole('button', { name: 'Done' })).toHaveFocus();
+      expect(within(measuringRow()).getByRole('button', { name: 'Done with measure' })).toHaveFocus();
     });
 
     it('should move focus into the row when Enter starts the tool', async () => {
@@ -291,7 +291,7 @@ describe('ChatViewerControls', () => {
       });
       await user.keyboard('{Enter}');
 
-      expect(within(measuringRow()).getByRole('button', { name: 'Done' })).toHaveFocus();
+      expect(within(measuringRow()).getByRole('button', { name: 'Done with measure' })).toHaveFocus();
     });
 
     it('should leave focus where it is when S or M starts a tool', async () => {
@@ -315,7 +315,7 @@ describe('ChatViewerControls', () => {
       renderBar(startGraphics());
 
       await user.click(screen.getByRole('button', { name: 'Section view' }));
-      await user.click(within(sectionRow()).getByRole('button', { name: 'Done' }));
+      await user.click(within(sectionRow()).getByRole('button', { name: 'Done with section' }));
 
       expect(screen.queryByRole('group', { name: 'Section view options' })).not.toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Section view', pressed: false })).toHaveFocus();

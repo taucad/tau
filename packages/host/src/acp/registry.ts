@@ -406,10 +406,9 @@ const probeAgentModels = async (adapter: AcpAdapter, modelProbeTimeout: number):
   /* Its own clock: an adapter that answers `--version` in 10 ms can still hang
    * its handshake, and the boot must not wait on one that will not settle. */
   let probeExpiry: NodeJS.Timeout | undefined;
-  let isExpired = false;
+  const deadline = Date.now() + modelProbeTimeout;
   const expired = new Promise<undefined>((resolve) => {
     probeExpiry = setTimeout(() => {
-      isExpired = true;
       resolve(undefined);
     }, modelProbeTimeout);
     probeExpiry.unref();
@@ -447,16 +446,17 @@ const probeAgentModels = async (adapter: AcpAdapter, modelProbeTimeout: number):
         ? undefined
         : externalAgentDescriptorSchema.shape.thoughtLevel.safeParse({ ...option, category: 'thought_level' }).data;
     const thoughtLevel = thoughtLevelOf(thoughtOption);
-    const models: ExternalAgentDescriptor['models'][number][] = [];
+    const models: Array<ExternalAgentDescriptor['models'][number]> = [];
     for (const model of choice?.models ?? []) {
-      if (isExpired) {
+      if (Date.now() >= deadline) {
         models.push(model);
         continue;
       }
       const options =
         model.id === choice?.currentValue
           ? session.configOptions
-          : await Promise.race([session.probeModel(model.id).catch(() => undefined), expired]);
+          : // oxlint-disable-next-line no-await-in-loop -- One ACP session must select its models in order.
+            await Promise.race([session.probeModel(model.id).catch(() => undefined), expired]);
       const offered = options?.find(
         (option): option is Extract<SessionConfigOption, { type: 'select' }> =>
           option.category === 'thought_level' && option.type === 'select',

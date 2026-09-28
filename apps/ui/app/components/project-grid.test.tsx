@@ -148,7 +148,7 @@ describe('CommunityProjectGrid', () => {
     expect(screen.queryByRole('link', { name: 'Open Second Demo' })).not.toBeInTheDocument();
   });
 
-  it('should mount the preview once and preserve it while hidden', async () => {
+  it('should unmount the preview pipeline when its eye is toggled off', async () => {
     renderGrid();
 
     const previewToggle = screen.getByRole('button', { name: 'Preview model' });
@@ -162,10 +162,32 @@ describe('CommunityProjectGrid', () => {
     expect(screen.getByTestId('location')).toHaveTextContent('/community');
 
     await userEvent.click(previewToggle);
-    expect(screen.getByTestId('cad-preview-provider')).toBeInTheDocument();
-    expect(screen.getByTestId('cad-preview-provider').parentElement).toHaveAttribute('hidden');
+    expect(screen.queryByTestId('cad-preview-provider')).not.toBeInTheDocument();
+    expect(previewToggle).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByRole('presentation')).toHaveAttribute('alt', '');
     expect(screen.getByTestId('location')).toHaveTextContent('/community');
+
+    await userEvent.click(previewToggle);
+    expect(await screen.findByTestId('cad-preview-provider')).toBeInTheDocument();
+  });
+
+  it('should keep one live preview: opening a second eye releases the first', async () => {
+    renderGrid({ projects: [project, secondProject] });
+
+    const [firstToggle, secondToggle] = screen.getAllByRole('button', { name: 'Preview model' });
+    if (!firstToggle || !secondToggle) {
+      throw new Error('Expected two preview toggles');
+    }
+    await userEvent.click(firstToggle);
+    expect(await screen.findByTestId('cad-preview-provider')).toHaveAttribute('data-project-id', 'community-project');
+
+    await userEvent.click(secondToggle);
+    await waitFor(() => {
+      expect(screen.getAllByTestId('cad-preview-provider')).toHaveLength(1);
+    });
+    expect(screen.getByTestId('cad-preview-provider')).toHaveAttribute('data-project-id', 'second-project');
+    expect(firstToggle).toHaveAttribute('aria-pressed', 'false');
+    expect(secondToggle).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('should Remix with the portable project payload without opening the preview route', async () => {

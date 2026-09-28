@@ -64,13 +64,13 @@ export function ProjectCardMedia({
     <div
       className={cn('overflow-hidden bg-muted', shouldFill ? 'absolute inset-0' : 'relative aspect-4/3 h-fit w-full')}
     >
-      {/* The card link names the card, so the thumbnail is decorative. */}
-      {isPreviewVisible ? null : (
+      {/* The card link names the card, so the thumbnail is decorative. A hidden preview is
+          unmounted rather than kept, so its kernel workers and memory are released. */}
+      {isPreviewVisible ? (
+        <div className='relative z-20 size-full'>{children}</div>
+      ) : (
         <img src={thumbnailSource ?? '/placeholder.svg'} alt='' className='size-full object-cover' loading='lazy' />
       )}
-      <div className='relative z-20 size-full' hidden={!isPreviewVisible}>
-        {children}
-      </div>
       <Tooltip>
         <TooltipTrigger asChild>
           <Button

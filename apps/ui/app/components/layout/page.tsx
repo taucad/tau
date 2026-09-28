@@ -1,4 +1,4 @@
-import { Link, Outlet, useLocation } from 'react-router';
+import { Link, NavigationType, Outlet, useLocation, useNavigationType } from 'react-router';
 import { Fragment } from 'react/jsx-runtime';
 import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 import type { CSSProperties, ReactNode, UIEvent } from 'react';
@@ -226,14 +226,27 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
     enablePageFooter: handles.enablePageFooter.some((match) => match.handle.enablePageFooter === true),
     enablePageHeaderMatches: handles.enablePageHeader,
   }));
-  const { key: locationKey } = useLocation();
+  const { key: locationKey, pathname } = useLocation();
+  const navigationType = useNavigationType();
   const pageScrollRef = useRef<HTMLDivElement>(null);
+  const previousPathnameRef = useRef(pathname);
   useLayoutEffect(() => {
-    if (enableOverflowY && pageScrollRef.current) {
-      // A new entry starts at the top: the scroller outlives the navigation.
-      pageScrollRef.current.scrollTop = readSavedScroll(locationKey);
+    const scroller = pageScrollRef.current;
+    const isSamePage = previousPathnameRef.current === pathname;
+    previousPathnameRef.current = pathname;
+    if (!enableOverflowY || !scroller) {
+      return;
     }
-  }, [enableOverflowY, locationKey]);
+    if (navigationType === NavigationType.Replace && isSamePage) {
+      // A filter or dialog written to the URL replaces the entry: stay put and
+      // carry the offset over to the new key.
+      saveScroll(locationKey, scroller.scrollTop);
+      return;
+    }
+    // Back and Forward restore the entry's offset; a new entry starts at the top
+    // (the scroller outlives the navigation).
+    scroller.scrollTop = navigationType === NavigationType.Pop ? readSavedScroll(locationKey) : 0;
+  }, [enableOverflowY, locationKey, navigationType, pathname]);
   const handlePageScroll = useCallback(
     (event: UIEvent) => {
       saveScroll(locationKey, event.currentTarget.scrollTop);

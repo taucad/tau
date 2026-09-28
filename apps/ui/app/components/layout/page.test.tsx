@@ -19,6 +19,8 @@ const state = vi.hoisted(() => ({
   sidebarMounts: 0,
   enableOverflowY: false,
   locationKey: 'default',
+  pathname: '/',
+  navigationType: 'POP' as 'POP' | 'PUSH' | 'REPLACE',
 }));
 
 vi.mock('react-router', () => ({
@@ -28,7 +30,9 @@ vi.mock('react-router', () => ({
     </a>
   ),
   Outlet: () => <div>Page content</div>,
-  useLocation: () => ({ key: state.locationKey }),
+  useLocation: () => ({ key: state.locationKey, pathname: state.pathname }),
+  NavigationType: { Pop: 'POP', Push: 'PUSH', Replace: 'REPLACE' },
+  useNavigationType: () => state.navigationType,
 }));
 vi.mock('allotment', () => {
   const Pane = ({ children, visible = true }: React.PropsWithChildren<{ readonly visible?: boolean }>) => (
@@ -143,6 +147,8 @@ beforeEach(() => {
   state.sidebarMounts = 0;
   state.enableOverflowY = false;
   state.locationKey = 'default';
+  state.pathname = '/';
+  state.navigationType = 'POP';
   sessionStorage.clear();
   vi.unstubAllEnvs();
 });
@@ -395,17 +401,45 @@ describe('Page scroll restoration', () => {
     state.enableOverflowY = true;
     state.enablePageWrapper = enablePageWrapper;
     state.locationKey = 'community';
+    state.pathname = '/community';
     const { rerender } = render(<Page />);
     scrollTo(1400);
 
     state.locationKey = 'example';
+    state.pathname = '/s/builtin~replicad.bench-vise';
+    state.navigationType = 'PUSH';
     rerender(<Page />);
     expect(scroller().scrollTop).toBe(0);
     scrollTo(200);
 
     state.locationKey = 'community';
+    state.pathname = '/community';
+    state.navigationType = 'POP';
     rerender(<Page />);
     expect(scroller().scrollTop).toBe(1400);
+  });
+
+  it('should keep the offset when a filter or dialog replaces the entry on the same page', () => {
+    state.enableOverflowY = true;
+    state.locationKey = 'community';
+    state.pathname = '/community';
+    const { rerender } = render(<Page />);
+    scrollTo(700);
+
+    state.locationKey = 'community-filtered';
+    state.navigationType = 'REPLACE';
+    rerender(<Page />);
+    expect(scroller().scrollTop).toBe(700);
+
+    state.locationKey = 'example';
+    state.pathname = '/s/builtin~replicad.bench-vise';
+    state.navigationType = 'PUSH';
+    rerender(<Page />);
+    state.locationKey = 'community-filtered';
+    state.pathname = '/community';
+    state.navigationType = 'POP';
+    rerender(<Page />);
+    expect(scroller().scrollTop).toBe(700);
   });
 
   it('should start a new entry at the top when the store is blocked', () => {
@@ -421,6 +455,8 @@ describe('Page scroll restoration', () => {
     try {
       scrollTo(900);
       state.locationKey = 'projects';
+      state.pathname = '/projects';
+      state.navigationType = 'PUSH';
       rerender(<Page />);
 
       expect(scroller().scrollTop).toBe(0);

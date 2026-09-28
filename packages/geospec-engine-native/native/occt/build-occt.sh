@@ -232,6 +232,8 @@ cmake -S "${build_source}" -B "${build_dir}" -G Ninja \
   -DINSTALL_DIR_LAYOUT=Unix \
   -DINSTALL_DIR_WITH_VERSION=OFF \
   -DBUILD_LIBRARY_TYPE=Static \
+  -DBUILD_OPT_PROFILE=Default \
+  -DBUILD_USE_PCH=OFF \
   -DBUILD_ADDITIONAL_TOOLKITS=TKDESTEP \
   -DBUILD_MODULE_ApplicationFramework=OFF \
   -DBUILD_MODULE_DataExchange=OFF \

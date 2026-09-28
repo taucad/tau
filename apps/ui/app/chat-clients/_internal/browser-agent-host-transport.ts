@@ -1493,6 +1493,25 @@ export const resolveBrowserAgentHostInterrupt = async (input: {
  * real reason, never a delegation that replaces it with someone else's.
  */
 export class BrowserPlacementChatTransport<Message extends UIMessage> implements ChatTransport<Message> {
+  #watchMode = false;
+  #armed: ReadableStream<UIMessageChunk> | undefined;
+
+  /** Give the next SDK request only this projection watch; it never issues a host command. */
+  public arm(stream: ReadableStream<UIMessageChunk>): void {
+    if (this.#armed !== undefined) {
+      throw new Error('A chat watch is already armed.');
+    }
+    this.#watchMode = true;
+    this.#armed = stream;
+  }
+
+  /** Forget only this unconsumed watch when its stream actor detaches. */
+  public disarm(stream: ReadableStream<UIMessageChunk>): void {
+    if (this.#armed === stream) {
+      this.#armed = undefined;
+    }
+  }
+
   public bindRun(chatId: string, runId: string): void {
     boundRunIds.set(chatId, runId);
   }
@@ -1504,6 +1523,13 @@ export class BrowserPlacementChatTransport<Message extends UIMessage> implements
   public async sendMessages(
     options: Parameters<ChatTransport<Message>['sendMessages']>[0],
   ): Promise<ReadableStream<UIMessageChunk>> {
+    if (this.#watchMode) {
+      const stream = this.#takeArmed();
+      if (stream === undefined) {
+        throw new Error('The chat transport was not armed with a run watch.');
+      }
+      return stream;
+    }
     const parsed = browserAdmissionBodySchema.safeParse(options.body);
     if (!parsed.success) {
       throw new AgentHostWorkerError(
@@ -1524,6 +1550,9 @@ export class BrowserPlacementChatTransport<Message extends UIMessage> implements
   public async reconnectToStream(
     options: Parameters<ChatTransport<Message>['reconnectToStream']>[0],
   ): ReturnType<ChatTransport<Message>['reconnectToStream']> {
+    if (this.#watchMode) {
+      return this.#takeArmed() ?? null;
+    }
     const runId = boundRunIds.get(options.chatId) ?? browserRuns.get(options.chatId)?.runId;
     // A chat's runs live in its durable log, never in the API. A reload drops
     // the in-memory binding, and resuming through the API then asked for a run
@@ -1589,6 +1618,12 @@ export class BrowserPlacementChatTransport<Message extends UIMessage> implements
         return null;
       }
     }
+    return stream;
+  }
+
+  #takeArmed(): ReadableStream<UIMessageChunk> | undefined {
+    const stream = this.#armed;
+    this.#armed = undefined;
     return stream;
   }
 }

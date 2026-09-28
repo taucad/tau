@@ -17,6 +17,8 @@ const state = vi.hoisted(() => ({
   providers: [] as Array<{ handle: { providers: () => React.JSXElementConstructor<React.PropsWithChildren> } }>,
   commandPalette: [] as Array<{ id: string; handle: { commandPalette: () => ReactNode } }>,
   sidebarMounts: 0,
+  enableOverflowY: false,
+  locationKey: 'default',
 }));
 
 vi.mock('react-router', () => ({
@@ -26,6 +28,7 @@ vi.mock('react-router', () => ({
     </a>
   ),
   Outlet: () => <div>Page content</div>,
+  useLocation: () => ({ key: state.locationKey }),
 }));
 vi.mock('allotment', () => {
   const Pane = ({ children, visible = true }: React.PropsWithChildren<{ readonly visible?: boolean }>) => (
@@ -59,7 +62,7 @@ vi.mock('#hooks/use-typed-matches.js', () => ({
         state.enablePageWrapper === undefined ? [] : [{ handle: { enablePageWrapper: state.enablePageWrapper } }],
       enablePageHeader:
         state.enablePageHeader === undefined ? [] : [{ handle: { enablePageHeader: state.enablePageHeader } }],
-      enableOverflowY: [],
+      enableOverflowY: state.enableOverflowY ? [{ handle: { enableOverflowY: true } }] : [],
       providers: state.providers,
       enablePageFooter: [],
     }),
@@ -138,6 +141,9 @@ beforeEach(() => {
   state.providers = [];
   state.commandPalette = [];
   state.sidebarMounts = 0;
+  state.enableOverflowY = false;
+  state.locationKey = 'default';
+  sessionStorage.clear();
   vi.unstubAllEnvs();
 });
 
@@ -370,5 +376,65 @@ describe('Page auth-aware wrapper contract', () => {
     } else {
       expect(screen.queryByText('Sidebar')).not.toBeInTheDocument();
     }
+  });
+});
+
+describe('Page scroll restoration', () => {
+  /* `html, body { overflow: hidden }` makes the shell's inner scroller the page's
+   * scroller, which React Router's `ScrollRestoration` never sees (lane C P4). */
+  const scroller = (): HTMLElement => screen.getByText('Page content').closest<HTMLElement>('.overflow-y-auto')!;
+  const scrollTo = (top: number): void => {
+    scroller().scrollTop = top;
+    fireEvent.scroll(scroller());
+  };
+
+  it.each([
+    ['inside the application shell', undefined],
+    ['without the application shell', false],
+  ] as const)('should restore the saved offset when Back returns to an entry %s', (_label, enablePageWrapper) => {
+    state.enableOverflowY = true;
+    state.enablePageWrapper = enablePageWrapper;
+    state.locationKey = 'community';
+    const { rerender } = render(<Page />);
+    scrollTo(1400);
+
+    state.locationKey = 'example';
+    rerender(<Page />);
+    expect(scroller().scrollTop).toBe(0);
+    scrollTo(200);
+
+    state.locationKey = 'community';
+    rerender(<Page />);
+    expect(scroller().scrollTop).toBe(1400);
+  });
+
+  it('should start a new entry at the top when the store is blocked', () => {
+    state.enableOverflowY = true;
+    state.locationKey = 'community';
+    const { rerender } = render(<Page />);
+    const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new DOMException('blocked', 'SecurityError');
+    });
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('blocked', 'SecurityError');
+    });
+    try {
+      scrollTo(900);
+      state.locationKey = 'projects';
+      rerender(<Page />);
+
+      expect(scroller().scrollTop).toBe(0);
+    } finally {
+      getItem.mockRestore();
+      setItem.mockRestore();
+    }
+  });
+
+  it('should leave a route that does not scroll the shell untouched', () => {
+    state.locationKey = 'workspace';
+    const { container } = render(<Page />);
+
+    expect(container.querySelector('section')).not.toHaveClass('overflow-y-auto');
+    expect(sessionStorage).toHaveLength(0);
   });
 });

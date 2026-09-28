@@ -40,6 +40,7 @@ export const kernelIssueCodeValues = [
   'SOURCE_SNAPSHOT_CHANGED',
   'SOURCE_SNAPSHOT_INVALID',
   'GEOMETRY_INVALID',
+  'AUTHENTICATION_ERROR',
   'RUNTIME',
   'UNKNOWN',
 ] as const;

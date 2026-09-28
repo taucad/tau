@@ -19,6 +19,7 @@ const builtInKernelIds = [
   'openrscad',
   'jscad',
   'manifold',
+  'picovoxel',
   'gltf',
   'brep',
   'rhino',
@@ -92,6 +93,12 @@ describe('createCliRuntime', () => {
     const actual = taucadImports(source).filter((name) => name !== '@taucad/runtime');
 
     expect(actual.toSorted()).toEqual(expected.toSorted());
+  });
+
+  it('keeps the built-in PicoVoxel kernel on its default wasm selection', async () => {
+    const runtime = await composeCli();
+
+    expect(runtime.kernels.find(({ id }) => id === 'picovoxel')).not.toHaveProperty('options.wasm');
   });
 
   it('composes every built-in plugin in declared order', async () => {

@@ -22,6 +22,27 @@ describe('kernel configuration identity', () => {
     expect(build123d?.emptyCode).toContain('return None');
   });
 
+  it('should start PicoVoxel projects with an empty scene', () => {
+    const picovoxel = kernelConfigurations.find(({ id }) => id === 'picovoxel');
+
+    expect(picovoxel?.emptyCode).toContain('return [];');
+    expect(picovoxel?.emptyCode).toContain('export const defaultParams = { voxelSize: 0.5 };');
+  });
+
+  it('should keep PicoGK and PicoVoxel distinct offerings of the same engine', () => {
+    const picogk = kernelConfigurations.find(({ id }) => id === 'picogk');
+    const picovoxel = kernelConfigurations.find(({ id }) => id === 'picovoxel');
+    const ids = kernelConfigurations.map(({ id }) => id);
+
+    // Native C# on the desktop versus TypeScript in the browser; one engine, no conversion between them.
+    expect(picogk).toMatchObject({ language: 'csharp', mainFile: 'main.cs', requiresRuntimeKernelId: 'picogk' });
+    expect(picovoxel).toMatchObject({ language: 'typescript', mainFile: 'main.ts', backendProvider: 'picogk' });
+    expect(picovoxel).not.toHaveProperty('requiresRuntimeKernelId');
+    expect(picogk?.description).toBe('Native C# voxel CAD for computational engineering');
+    expect(picovoxel?.description).toBe('TypeScript voxel and implicit CAD that runs in the browser');
+    expect(ids.indexOf('picovoxel')).toBe(ids.indexOf('picogk') + 1);
+  });
+
   it('presents exactly one OpenSCAD-language kernel with engine-independent copy', () => {
     const scadKernels = kernelConfigurations.filter(({ language }) => language === 'openscad');
 

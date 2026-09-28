@@ -3,8 +3,8 @@
  * the model-based PostgreSQL test compares the ledger with. Time is whole milliseconds on a virtual clock that stays
  * at 0; `tick` moves the row's deadlines back instead, as the test's privileged connection does in SQL.
  *
- * ponytail: T12 and T13 (recovery failure back-off and absorption) are not modelled; nothing in the model-based test
- * makes recovery fail. Add them with a fault-injecting command.
+ * The SQL model-based writer below does not inject recovery faults (T12/T13); the one-key TLC replay at the end of
+ * this file does model both failure back-off and unresolvable absorption.
  */
 
 /** Evidence kinds as the model sees them: final usage, an unknown outcome and a provider rejection. */
@@ -203,6 +203,147 @@ export const step = (
         },
         answer: 'applied',
       };
+    }
+  }
+};
+
+/** The SQL-row projection used by GatewayInvocationOracleGraph's one-key TLC replay. */
+export type GatewayTraceRow = {
+  readonly ex: boolean;
+  readonly cust: string;
+  readonly disp: string;
+  readonly gen: number;
+  readonly lease: number;
+  readonly due: number;
+  readonly intent: number;
+  readonly igen: number;
+  readonly cancel: number;
+  readonly ev: readonly string[];
+  readonly tgen: number;
+  readonly charged: number;
+  readonly terminalTtl: boolean;
+  readonly rat: number;
+  readonly fails: number;
+};
+
+/** A bounded projection: one key, one account hold and at most one worker claim. */
+export type GatewayTraceState = {
+  readonly now: number;
+  readonly row: GatewayTraceRow;
+  readonly held: number;
+  readonly supplier: 'none' | 'generating' | 'completed' | 'failed' | 'cut';
+  readonly voided: boolean;
+  readonly claim?: { readonly gen: number; readonly t: number };
+};
+
+/** Independent row transition table for the TLC-labelled owner actions. */
+export const replayGatewayTraceStep = (state: GatewayTraceState, action: string): readonly GatewayTraceState[] => {
+  const { row } = state;
+  const unchanged = [state];
+  const terminal = (cust: string, evidence: string, terminalTtl: boolean): GatewayTraceState => ({
+    ...state,
+    row: {
+      ...row,
+      cust,
+      charged: cust === 'settled' ? 1 : 0,
+      ev: [...new Set([...row.ev, evidence])].sort(),
+      terminalTtl,
+      rat: state.now,
+      tgen: state.claim?.gen ?? row.gen,
+    },
+    held: state.held - 1,
+    claim: undefined,
+  });
+  switch (action) {
+    case 'Tick': {
+      return [{ ...state, now: state.now + 1 }];
+    }
+    case 'HostResume': {
+      return [{ ...state, voided: state.voided || !row.ex }];
+    }
+    case 'ApiAdmit': {
+      return row.ex || state.voided
+        ? unchanged
+        : [
+            {
+              ...state,
+              row: { ...row, ex: true, cust: 'pending', disp: 'admitted', gen: 1, due: state.now + 1 },
+              held: state.held + 1,
+            },
+          ];
+    }
+    case 'ApiMarkIntent': {
+      return row.cust === 'pending' && row.disp === 'admitted' && row.due > state.now
+        ? [{ ...state, row: { ...row, disp: 'intent_recorded', intent: state.now, igen: row.gen } }]
+        : unchanged;
+    }
+    case 'ApiDispatch': {
+      return row.cust === 'pending' && row.disp === 'intent_recorded' && row.due > state.now
+        ? [{ ...state, row: { ...row, disp: 'accepted' }, supplier: 'generating' }]
+        : unchanged;
+    }
+    case 'SupplierEnd': {
+      return [
+        { ...state, supplier: 'completed' },
+        { ...state, supplier: 'failed' },
+      ];
+    }
+    case 'ApiObserve': {
+      const evidence = state.supplier === 'completed' ? 'final' : 'unknown';
+      return [
+        {
+          ...state,
+          supplier: state.supplier === 'generating' ? 'cut' : state.supplier,
+          row: { ...row, ev: [...new Set([...row.ev, evidence])].sort() },
+        },
+      ];
+    }
+    case 'ApiFinish': {
+      return row.cust === 'pending' && row.gen === 1 && row.ev.includes('final')
+        ? [terminal('settled', 'final', false)]
+        : unchanged;
+    }
+    case 'SweepClaim': {
+      return [state.now - 1, state.now]
+        .filter((t) => t >= 0 && row.cust === 'pending' && row.due <= t && (row.lease < 0 || row.lease <= t))
+        .map((t) => ({
+          ...state,
+          row: { ...row, gen: row.gen + 1, disp: 'recovery_required', lease: t + 1 },
+          claim: { gen: row.gen + 1, t },
+        }));
+    }
+    case 'SweepResolve': {
+      return [state.now - 1, state.now]
+        .filter((t) => state.claim !== undefined && t >= state.claim.t)
+        .map((t) => {
+          if (row.ev.length === 0 && row.intent >= 0 && t < row.due + 1) {
+            return { ...state, row: { ...row, lease: row.due + 1 }, claim: undefined };
+          }
+          if (row.intent < 0) {
+            return terminal('released', 'rejected', false);
+          }
+          if (row.ev.includes('final')) {
+            return terminal('settled', 'final', false);
+          }
+          return row.ev.length > 0 ? terminal('absorbed', 'unknown', false) : terminal('absorbed', 'expired', true);
+        });
+    }
+    case 'SweepFail': {
+      return [state.now - 1, state.now]
+        .filter((t) => state.claim !== undefined && t >= state.claim.t)
+        .map((t) =>
+          row.fails + 1 < 2
+            ? { ...state, row: { ...row, lease: Math.min(t + 1, 3), fails: row.fails + 1 }, claim: undefined }
+            : terminal('absorbed', 'unresolvable', false),
+        );
+    }
+    case 'HostPrepare':
+    case 'HostSend':
+    case 'HostCrash': {
+      return unchanged;
+    }
+    default: {
+      throw new Error(`Unmapped GatewayInvocation oracle action: ${action}`);
     }
   }
 };

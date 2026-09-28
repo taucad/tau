@@ -1,0 +1,4 @@
+{"version":1,"leaderEpoch":"epoch-a","sequence":0,"recordedAt":"2026-09-26T00:00:00.000Z","runId":"r1","type":"run.lifecycle","state":"admitted","attempt":1}
+{"version":1,"leaderEpoch":"epoch-a","sequence":1,"recordedAt":"2026-09-26T00:00:00.000Z","runId":"r1","type":"interrupt.recorded","interruptId":"i1","phase":"requested","reason":"ask"}
+{"version":1,"leaderEpoch":"epoch-a","sequence":2,"recordedAt":"2026-09-26T00:00:00.000Z","runId":"r1","type":"interrupt.recorded","interruptId":"i1","phase":"resolved","reason":"approved","payload":{"outcome":"approved"}}
+{"version":1,"leaderEpoch":"epoch-a","sequence":3,"recordedAt":"2026-09-26T00:00:00.000Z","runId":"r1","type":"interrupt.recorded","interruptId":"i1","phase":"resolved","reason":"denied","payload":{"outcome":"denied"}}

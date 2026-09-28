@@ -1017,30 +1017,33 @@ describe('createHostToolRegistry', () => {
     expect(JSON.stringify(result.content)).toContain('No glb to webp route');
   });
 
-  it('names the renderer accessor guard as an over-limit capture', async () => {
-    const registry = createHostToolRegistry({
-      workspaceRoot: await makeWorkspace(),
-      runtimeClient: async () =>
-        fakeRuntime({
-          transcode: vi.fn<HostRuntimeClient['transcode']>(async () => ({
-            success: false,
-            issues: [
-              {
-                code: 'RUNTIME',
-                type: 'runtime',
-                severity: 'error',
-                message: 'parse: accessor 2 count 4545948 exceeds 4000000',
-                details: { type: 'render', code: 'parse' },
-              },
-            ],
-          })),
-        }),
-    });
+  it.each(['parse: accessor 2 count 4545948 exceeds 4000000', 'parse: declared accessor values exceed 8000000'])(
+    'names the renderer accessor guard as an over-limit capture: %s',
+    async (message) => {
+      const registry = createHostToolRegistry({
+        workspaceRoot: await makeWorkspace(),
+        runtimeClient: async () =>
+          fakeRuntime({
+            transcode: vi.fn<HostRuntimeClient['transcode']>(async () => ({
+              success: false,
+              issues: [
+                {
+                  code: 'RUNTIME',
+                  type: 'runtime',
+                  severity: 'error',
+                  message,
+                  details: { type: 'render', code: 'parse' },
+                },
+              ],
+            })),
+          }),
+      });
 
-    const result = await invoke(registry, 'screenshot', { targetFile: 'main.ts', mode: 'single' });
-    expect(result.content).toMatchObject({ success: false, errorCode: 'RESULT_TOO_LARGE' });
-    expect(JSON.stringify(result.content)).toContain('4545948 exceeds 4000000');
-  });
+      const result = await invoke(registry, 'screenshot', { targetFile: 'main.ts', mode: 'single' });
+      expect(result.content).toMatchObject({ success: false, errorCode: 'RESULT_TOO_LARGE' });
+      expect(JSON.stringify(result.content)).toContain(message);
+    },
+  );
 
   /*
    * The G4 live proof answered six `get_kernel_result` calls and one

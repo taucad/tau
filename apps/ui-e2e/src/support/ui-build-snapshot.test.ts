@@ -47,17 +47,17 @@ const createBuild = async (): Promise<string> => {
   );
   await writeFile(
     join(build, 'server/assets/wasm-exception-nClfmULj.js'),
-    // The second line is the false positive the lowercase-hash rule exists for:
-    // a bundled package's own path, quoted inside an inlined module source.
-    'import { n } from "./chunk-D6YOYt7c.js";\nconst d = "./dist/nextjs/browser-node-builtins.mjs";\nexport { n, d };\n',
+    // The later lines are the false positives the lowercase-hash rule exists for:
+    // a bundled package's own path, and an example's relative import, quoted inside inlined sources.
+    'import { n } from "./chunk-D6YOYt7c.js";\nconst d = "./dist/nextjs/browser-node-builtins.mjs";\nconst e = `import { task } from \'./ex-base-box.js\';`;\nexport { n, d, e };\n',
   );
   return build;
 };
 
 describe('UI build snapshot verification', () => {
-  it('accepts a complete build, and ignores a package path quoted inside a bundle', async () => {
-    // `browser-node-builtins.mjs` has an all-lowercase "hash"; treating it as an
-    // emitted asset would reject every complete build.
+  it('accepts a complete build, and ignores package paths and example imports quoted inside a bundle', async () => {
+    // `browser-node-builtins.mjs` and `ex-base-box.js` have "hashes" of lowercase letters and hyphens;
+    // treating either as an emitted asset would reject every complete build.
     expect(missingSnapshotFiles(await createBuild())).toEqual([]);
   });
 

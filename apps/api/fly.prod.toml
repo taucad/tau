@@ -6,7 +6,11 @@
 app = 'tau-api'
 primary_region = 'syd'
 kill_signal = 'SIGTERM'
-kill_timeout = '30s'
+# 120 s, not Fly's 5 s default nor the 30 s it was: the API drains in-flight model
+# steps before it stops (`app/lifecycle/graceful-shutdown.ts`, `shutdownPhases`), and a
+# step cut by a deploy costs the person the step. A longer window slows a rolling
+# deploy only while a step is still streaming. Change both together.
+kill_timeout = '120s'
 
 [build]
 dockerfile = 'Dockerfile'

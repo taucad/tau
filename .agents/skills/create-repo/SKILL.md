@@ -79,22 +79,22 @@ contains a pnpm `catalog:` specifier; otherwise bind it to an empty string.
 
 Copy files without rewriting their bodies except placeholder substitution. The release skill template deliberately uses `SKILL.md__tmpl__` so native recursive discovery cannot advertise its unbound placeholders; copy it to the mapped `SKILL.md` destination only after binding:
 
-| Template path                                                                                         | Repository destination                                                     |
-| ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| `ci.yml`, `bench.yml`, `claude.yml`, `cache-cleanup.yml`, `osv-scan.yml`, `dependabot-auto-merge.yml` | `.github/workflows/`                                                       |
-| `dependabot.yml`                                                                                      | `.github/dependabot.yml`                                                   |
-| `setup-action/action.yml`                                                                             | `.github/actions/setup/action.yml`                                         |
-| `issue-forms/*`                                                                                       | `.github/ISSUE_TEMPLATE/`                                                  |
-| `PULL_REQUEST_TEMPLATE.md`                                                                            | `.github/PULL_REQUEST_TEMPLATE.md`                                         |
-| `scripts/*`                                                                                           | `scripts/`                                                                 |
-| `tests/ci-release.test.mjs`, `tests/release-attestations.test.mjs`                                    | `tests/ci/`                                                                |
-| `tests/packaging.test.mjs`, `tests/extract-candidate-packages.test.mjs`                               | `tests/`                                                                   |
-| `release-skill/SKILL.md__tmpl__`                                                                      | `.agents/skills/release-<slug>/SKILL.md`                                   |
-| `prose-rules.js`, `jsdoc-quality.js`, `eslint-plugin.js`                                              | `tools/eslint-plugin/` as `prose-rules.js`, `jsdoc-quality.js`, `index.js` |
-| `vale/<pack>/*`                                                                                       | `.vale/styles/<pack>/`                                                     |
-| `prose-quality.test.ts`, `readme-shape.test.ts`                                                       | Repository root                                                            |
-| `docs-site/**`                                                                                        | `docs-site/`                                                               |
-| Remaining root templates                                                                              | Repository root                                                            |
+| Template path                                                                                                           | Repository destination                                                     |
+| ----------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `ci.yml`, `release-pr.yml`, `bench.yml`, `claude.yml`, `cache-cleanup.yml`, `osv-scan.yml`, `dependabot-auto-merge.yml` | `.github/workflows/`                                                       |
+| `dependabot.yml`                                                                                                        | `.github/dependabot.yml`                                                   |
+| `setup-action/action.yml`                                                                                               | `.github/actions/setup/action.yml`                                         |
+| `issue-forms/*`                                                                                                         | `.github/ISSUE_TEMPLATE/`                                                  |
+| `PULL_REQUEST_TEMPLATE.md`                                                                                              | `.github/PULL_REQUEST_TEMPLATE.md`                                         |
+| `scripts/*`                                                                                                             | `scripts/`                                                                 |
+| `tests/ci-release.test.mjs`, `tests/release-attestations.test.mjs`, `tests/registry-wait.test.mjs`                      | `tests/ci/`                                                                |
+| `tests/packaging.test.mjs`, `tests/extract-candidate-packages.test.mjs`                                                 | `tests/`                                                                   |
+| `release-skill/SKILL.md__tmpl__`                                                                                        | `.agents/skills/release-<slug>/SKILL.md`                                   |
+| `prose-rules.js`, `jsdoc-quality.js`, `eslint-plugin.js`                                                                | `tools/eslint-plugin/` as `prose-rules.js`, `jsdoc-quality.js`, `index.js` |
+| `vale/<pack>/*`                                                                                                         | `.vale/styles/<pack>/`                                                     |
+| `prose-quality.test.ts`, `readme-shape.test.ts`                                                                         | Repository root                                                            |
+| `docs-site/**`                                                                                                          | `docs-site/`                                                               |
+| Remaining root templates                                                                                                | Repository root                                                            |
 
 Delete non-applicable conditional templates only after recording
 `not-applicable` in the checklist; for example, a `none` native toolchain does
@@ -148,8 +148,15 @@ tests together.
    and platform packages form one fixed release group.
 3. Copy `prepare-release.mjs`, `ci-release.mjs`, their tests, and the repo-local
    `release-@@CREATE_REPO_slug@@` skill. Keep release policy pure and unit tested.
+   `prepare-release.mjs` runs `quality` once itself, so `nx.json` carries no
+   `preVersionCommand`. A `workflow_dispatch` run is evidence only and never
+   publishes; a release commit may touch `pnpm-lock.yaml` but need not.
 4. The sole automatic publish trigger is the exact commit subject
-   `chore(release): @@CREATE_REPO_slug@@ v<version>`.
+   `chore(release): @@CREATE_REPO_slug@@ v<version>`. `release-pr.yml` runs after
+   each successful `main` CI run, regenerates that commit from pending Version
+   Plans as `tau-release-bot`, and upserts the pull request from `release/next`.
+   Its staging allow-list equals the files `ci-release.mjs` admits. A squash
+   merge titled from the pull request (`PR_TITLE`) lands the subject on `main`.
 5. GitHub Actions is the only publisher. Never run `npm publish` on a laptop,
    add `NPM_TOKEN`, or re-register an existing trusted publisher.
 
@@ -171,23 +178,52 @@ the npm Trusted Publisher identity.
    capability; API presence without a usable adapter is not a passing smoke.
 4. For same-repository pull requests, expand the tested candidate tarballs and
    publish every package directory in one locked `pkg-pr-new` invocation with
-   `--previewVersion --comment=update --commentWithSha --no-template`. Install
-   a hosted root preview in an isolated npm project, verify rewritten sibling
-   URLs and preview versions, and require both jobs in `ci-gate`; fork pull
-   requests skip them. Add `--pnpm` only when the packed manifests still contain
-   pnpm `catalog:` specifiers. Install the GitHub App with read access to Actions,
-   code, and metadata plus write access to checks, commit statuses, and pull
-   requests, scoped to the repository.
+   `--previewVersion --comment=update --commentWithSha --json preview.json --no-template`.
+   Install a hosted root preview in an isolated npm project, verify rewritten
+   sibling URLs and preview versions, run `npm pack` on every published URL so
+   packages the runner's platform filter skips are still checked, and require
+   both jobs in `ci-gate`; fork pull requests skip them. Add `--pnpm` only when
+   the packed manifests still contain pnpm `catalog:` specifiers. Install the
+   GitHub App with read access to Actions, code, and metadata plus write access
+   to checks, commit statuses, and pull requests, scoped to the repository.
 5. Publish idempotently through OIDC. If the version exists, compare registry
    bytes and provenance instead of overwriting it.
-6. `registry-verify` installs from the registry and checks the provenance
-   source repository, workflow filename, commit, and package integrity.
+6. `registry-verify` waits with bounded backoff until the registry serves each
+   candidate's integrity and attestation, installs from the registry, and checks
+   the provenance source repository, workflow filename, commit, and package
+   integrity. Bind provenance to the publishing run and accept any attempt, so a
+   partial re-run still verifies.
 7. `ci-gate` asserts every required result, including expected skips, and is
    the only branch-protection check.
 8. Split concurrency: cancel stale pull-request runs; serialize publish work.
 
 For wasm, test source correctness natively and smoke the wasm shell. Never
 rebuild-and-diff wasm bytes across tool versions.
+
+### Emscripten toolchain
+
+The template `native` job is NAPI-shaped. For `emscripten`, replace it with
+one `build-wasm` job on the bound Linux runner, and keep the wasm build in CI
+scripts rather than an Nx target:
+
+1. Pin the toolchain by digest-pinned `emscripten/emsdk` container or by a
+   runner-hosted emsdk whose cache key hashes the file holding the pin. An
+   installer that skips an existing emsdk must still check its version.
+2. Key each build cache on every pure input (toolchain pin, build scripts,
+   `patches/**`, sources) plus the variant, with no `restore-keys`: a near miss
+   is a wrong binary.
+3. Build every shipped variant (for example serial and `-pthread`) in that one
+   job, keep any SIMD or feature assertion, and use portable Linux commands
+   (`getconf _NPROCESSORS_ONLN`, `wc -c`) instead of `sysctl` or `stat -f`.
+4. Upload one `wasm` artifact with `if-no-files-found: error`, holding every
+   module plus a manifest of the emcc version, byte sizes, and sha256 digests.
+5. Quality, host, candidate, and browser jobs download that artifact and never
+   run emcc. In `release-pr.yml`, grant `actions: read` and download it from
+   the triggering run (`github.event.workflow_run.id`, or a required `ci_run_id`
+   input on `workflow_dispatch`) before `release:prepare`.
+6. Bind `native-toolchain-version-command` to
+   `command -v emcc >/dev/null 2>&1 && emcc --version | head -n1 || echo emcc-absent`
+   so contributors without emsdk keep cache hits.
 
 ## 4. Quality and Coverage
 
@@ -269,8 +305,10 @@ link to `https://tau.new`. Never add postinstall messages or telemetry.
 4. Create or verify the Vercel project when docs are enabled.
 5. Apply repository governance through the `tau-cloud` stack: read-only
    default token, Actions cannot approve pull requests, secret scanning, push
-   protection, private vulnerability reporting, and a `main` ruleset with
-   linear history, no force-push, `ci-gate`, and zero required approvals.
+   protection, private vulnerability reporting, squash-only merges titled from
+   the pull request (`PR_TITLE`), a `release-pr` environment holding the
+   `tau-release-bot` credentials, and a `main` ruleset with linear history, no
+   force-push, `ci-gate`, and zero required approvals.
 6. Before making a repository public, make all prose Vale-clean, then enable
    secret scanning and push protection, then change visibility.
 

@@ -49,6 +49,9 @@ const errorText = (value: unknown, fallback: string): string => {
   }
   if (isRecord(value) && typeof value['message'] === 'string') {
     const { code, status, details } = value;
+    if (typeof value['errorCode'] === 'string') {
+      return JSON.stringify(value);
+    }
     // A coded refusal is a card, not prose: the code is what the card's copy is
     // keyed on, and a host refusal such as `NO_EVICTABLE_HISTORY` carries
     // neither an HTTP status nor structured fields.

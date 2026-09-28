@@ -129,6 +129,22 @@ describe('ChatToolError parsed errors', () => {
 });
 
 describe('ChatToolError unparseable fallback', () => {
+  it.each([
+    ['UNKNOWN', 'unknown'],
+    ['AUTHENTICATION_ERROR', 'authentication error'],
+    ['IO_ERROR', 'io error'],
+    ['MCP_TRANSPORT_ERROR', 'mcp transport error'],
+  ])('shows the preserved %s category on the tool row', (errorCode, label) => {
+    render(
+      <ChatToolError
+        errorText={JSON.stringify({ errorCode, message: 'Failed.' })}
+        icon={TriangleAlert}
+        noun='screenshot'
+      />,
+    );
+    expect(screen.getByText(label)).toBeInTheDocument();
+  });
+
   it('should render Attempted with caller noun in the header', () => {
     render(<ChatToolError errorText='not json at all' icon={TriangleAlert} noun='file read' />);
 

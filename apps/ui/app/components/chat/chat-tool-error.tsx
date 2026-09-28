@@ -1,7 +1,12 @@
 import { Clock, Unplug, WifiOff, TriangleAlert, CircleStop, SearchX, OctagonAlert } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { ToolExecutionError } from '@taucad/chat';
-import { getToolErrorTitle, getToolErrorDescription, parseToolErrorText } from '@taucad/chat/utils';
+import {
+  getToolErrorTitle,
+  getToolErrorDescription,
+  parseToolErrorEnvelope,
+  parseToolErrorText,
+} from '@taucad/chat/utils';
 import {
   ChatToolCard,
   ChatToolCardHeader,
@@ -85,9 +90,14 @@ export function ChatToolError({ errorText, icon, noun, className }: ChatToolErro
   const error = parseToolErrorText(errorText);
 
   if (!error) {
+    const code = parseToolErrorEnvelope(errorText)?.errorCode;
     return (
       <ChatToolCard variant='minimal' status='error' isDefaultOpen={false} className={className}>
-        <ToolErrorHeader icon={icon} verb={unparseableErrorVerb} noun={noun} />
+        <ToolErrorHeader
+          icon={icon}
+          verb={code?.replaceAll('_', ' ').toLowerCase() ?? unparseableErrorVerb}
+          noun={noun}
+        />
         <ChatToolCardContent>
           <div className='space-y-2 px-2 py-2 text-xs'>
             <CodeBlockContent>

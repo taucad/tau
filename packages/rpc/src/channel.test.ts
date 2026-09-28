@@ -3,7 +3,7 @@
  * cross-file MessageChannel sharing harnesses. */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { MessageChannel } from 'node:worker_threads';
-import type { Port } from '#port.js';
+import type { MessagePortLike, Port } from '#port.js';
 import {
   createChannelClient,
   createChannelClientOptions,
@@ -1803,5 +1803,99 @@ describe('createChannelClient / createChannelServer', () => {
     expect(ntFrame!.transfer).toEqual([bytes.buffer]);
     expect(ntFrame!.data).toMatchObject({ v: 1, k: 'nt', n: 'blob', a: { bytes: expect.any(Uint8Array) as unknown } });
     expect(bytes.buffer.byteLength).toBe(0);
+  });
+});
+
+describe('terminal outcomes for calls queued before the hello', () => {
+  let channel: MessageChannel;
+
+  beforeEach(() => {
+    channel = new MessageChannel();
+  });
+
+  afterEach(() => {
+    channel.port1.close();
+    channel.port2.close();
+  });
+
+  const startedPort = (port: MessagePortLike): Port<unknown> => {
+    const wrapped = wrapMessagePort<unknown>(port);
+    wrapped.start?.();
+    return wrapped;
+  };
+
+  it('should fail only the queued call whose frame the port refuses and still send the calls behind it', async () => {
+    const client = createChannelClient({ port: startedPort(channel.port2), sessionKey: 's' });
+    const first = client.call('echo', 1);
+    const refused = client.call('echo', { uncloneable: () => 1 });
+    const behind = client.call('echo', 3);
+
+    const server = createChannelServer({
+      port: startedPort(channel.port1),
+      sessionKey: 's',
+      impl: {
+        call: async (_context, _name, args) => args,
+        async *listen() {
+          yield 0;
+        },
+      },
+    });
+
+    try {
+      const [firstOutcome, refusedOutcome, behindOutcome] = await Promise.allSettled([first, refused, behind]);
+      expect(firstOutcome).toEqual({ status: 'fulfilled', value: 1 });
+      expect(refusedOutcome).toMatchObject({ status: 'rejected', reason: { name: 'DataCloneError' } });
+      expect(behindOutcome).toEqual({ status: 'fulfilled', value: 3 });
+    } finally {
+      client.close();
+      server.dispose();
+    }
+  });
+
+  it('should drop a queued call aborted before the hello so the server never runs it', async () => {
+    const client = createChannelClient({ port: startedPort(channel.port2), sessionKey: 's' });
+    const abort = new AbortController();
+    const aborted = client.call('work', {}, abort.signal);
+    abort.abort();
+    await expect(aborted).rejects.toMatchObject({ name: 'AbortError' });
+
+    const handled = vi.fn(async (_context: unknown, name: string) => name);
+    const server = createChannelServer({
+      port: startedPort(channel.port1),
+      sessionKey: 's',
+      impl: {
+        call: handled,
+        async *listen() {
+          yield 0;
+        },
+      },
+    });
+
+    try {
+      await expect(client.call('ping')).resolves.toBe('ping');
+      expect(handled.mock.calls.map(([, name]) => name)).toEqual(['ping']);
+    } finally {
+      client.close();
+      server.dispose();
+    }
+  });
+
+  it('should reject ready and queued calls with a typed closure naming the reason', async () => {
+    const client = createChannelClient({ port: startedPort(channel.port2), sessionKey: 's' });
+    const queued = client.call('echo', 1);
+
+    client.close('owner-shutdown');
+
+    await expect(queued).rejects.toMatchObject({
+      code: 'CHANNEL_CLOSED',
+      message: 'Channel closed',
+      info: { origin: 'local', code: 'CHANNEL_CLOSED', reason: 'owner-shutdown' },
+    });
+    await expect(client.ready).rejects.toMatchObject({
+      code: 'CHANNEL_CLOSED',
+      message: 'Channel closed',
+      info: { origin: 'local', code: 'CHANNEL_CLOSED', reason: 'owner-shutdown' },
+    });
+    await expect(client.call('echo', 2)).rejects.toMatchObject({ code: 'CHANNEL_CLOSED' });
   });
 });

@@ -45,6 +45,11 @@
     // and checks them against a baked evidence digest, so any byte change makes the
     // splash throw "Design story evidence is stale". They are model data, not app code.
     "apps/ui/app/components/geometry/splash/planetary/**",
+    // Same class: PicoVoxel example sources are byte-pinned upstream ports (`provenance.json`
+    // hashes, `picovoxel-provenance.test.ts`). Only Tau's `main.ts` adapters and GeoSpec suites are linted.
+    "libs/tau-examples/src/kernels/picovoxel/*/*.ts",
+    "!libs/tau-examples/src/kernels/picovoxel/*/main.ts",
+    "!libs/tau-examples/src/kernels/picovoxel/*/*.geospec.ts",
     "**/fixtures/scripts/**"
   ],
   "plugins": [

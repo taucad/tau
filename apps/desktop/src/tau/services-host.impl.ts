@@ -366,6 +366,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
    * connection to it: a run keeps executing with zero clients attached, which is
    * the whole point of the portable host. It leaves the map when it ends. */
   const projectHosts = new Map<string, ProjectHostActor>();
+  const retiredProjectHosts = new Set<ProjectHostActor>();
   /* Renderer ports held for the actor that serves or refuses them, by connection id. */
   const connections = new Map<string, UtilityPort>();
   let connectionCount = 0;
@@ -970,6 +971,13 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       if (projectHosts.get(workspaceRoot) === actor) {
         projectHosts.delete(workspaceRoot);
       }
+      retiredProjectHosts.add(actor);
+      const settleRetired = async (): Promise<void> => {
+        await actor.settled();
+        retiredProjectHosts.delete(actor);
+      };
+      // async-iife: bootstrap -- completion has no caller; quiesce and dispose also await this actor.
+      void settleRetired();
       mcpEndpoints.delete(route);
       machines.close();
       const checkoutsRoot = resolve(join(dirname(workspaceRoot), '.tau', 'checkouts', projectId));
@@ -993,19 +1001,18 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
    */
   const shutdownProjectHost = async (actor: ProjectHostActor): Promise<void> => {
     if (actor.getSnapshot().status !== 'active') {
+      await actor.settled();
       return;
     }
     const requestId = `shutdown-${randomUUID()}`;
-    await new Promise<void>((resolve, reject) => {
-      shutdowns.set(requestId, (failure) => {
-        if (failure === undefined) {
-          resolve();
-        } else {
-          reject(new Error(failure));
-        }
-      });
+    const failure = await new Promise<string | undefined>((resolve) => {
+      shutdowns.set(requestId, resolve);
       actor.send({ type: 'shutdown', requestId });
     });
+    await actor.settled();
+    if (failure !== undefined) {
+      throw new Error(failure);
+    }
   };
 
   const handleControlFrame = (frame: Record<string, unknown>): void => {
@@ -1237,6 +1244,10 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
      * clients and MCP routes rooted beneath it are released with it. */
     const closingHosts = owned.map(async (actor) => shutdownProjectHost(actor));
     await settleAll(closingHosts, failures);
+    await settleAll(
+      [...retiredProjectHosts].map(async (actor) => actor.settled()),
+      failures,
+    );
     /* After the hosts: a print in flight is the host's own journaled
      * effect, and closing drains its queue before the writer lock is released. */
     await settleAll([closeMachineHost()], failures);
@@ -1323,6 +1334,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
             ? [...closingFileSystems, ...closingLaunchers, closingMachines]
             : [gracefulSettlement, ...closingFileSystems, ...closingLaunchers, closingMachines],
         );
+        await Promise.allSettled([...retiredProjectHosts].map(async (actor) => actor.settled()));
         try {
           await stopAuthority();
         } catch (error) {

@@ -293,6 +293,17 @@ export const bundleOwners: readonly BundleOwner[] = [
     groupBy: (entry) => entry.path ?? 'other',
   },
   {
+    slug: 'cad-picovoxel',
+    packageDirectory: 'packages/plugins/picovoxel',
+    name: 'PicoVoxel authoring',
+    title: 'PicoVoxel authoring',
+    description:
+      'Guides PicoVoxel voxel, SDF and lattice CAD in main.ts. Use when creating or editing TypeScript models that import picovoxel.',
+    whenToUse: 'Use when creating or editing TypeScript models that import picovoxel.',
+    corpus: bundledTypescriptCorpus('picovoxel/picovoxel.bundled.json', 'picovoxel', 'packages/plugins/picovoxel'),
+    groupBy: byKind,
+  },
+  {
     slug: 'cad-openscad',
     packageDirectory: 'packages/plugins/openrscad',
     name: 'OpenSCAD authoring',

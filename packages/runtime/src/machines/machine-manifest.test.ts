@@ -55,6 +55,13 @@ describe('parseMachineManifest', () => {
       },
     ],
     ['a version other than 1', { ...machineManifestFixture, version: 2 }],
+    [
+      'an external spool slot beyond 255',
+      {
+        ...machineManifestFixture,
+        materialSystem: { ...machineManifestFixture.materialSystem, externalSpoolSlot: 256 },
+      },
+    ],
   ])('refuses %s', (_label, candidate) => {
     expect(() => parseMachineManifest(candidate)).toThrow();
   });

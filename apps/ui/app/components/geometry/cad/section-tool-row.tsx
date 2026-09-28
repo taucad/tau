@@ -113,9 +113,36 @@ const sectionIcons: Record<SectionCut['kind'], LucideIcon> = { plane: FlipHorizo
 const sectionKindNames: Record<SectionCut['kind'], string> = { plane: 'Plane', revolution: 'Revolution cutaway' };
 
 const sectionAxisOf = (cut: SectionCut): SectionAxis => (cut.kind === 'plane' ? sectionPlaneAxes[cut.plane] : cut.axis);
+
+/**
+ * An axis's colour for UI chrome: the scene colour with 40% of the text colour, which keeps a mark or glyph above 3:1
+ * on every surface its text reads on, in every theme.
+ * ponytail: scene axis colours mixed toward the text colour; theme-aware axis tokens are the upgrade path.
+ */
+const axisChromeColor = (axis: SectionAxis): string => `color-mix(in oklch, ${axesColors[axis]} 60%, currentColor)`;
+
 const findCut = (cuts: readonly SectionCut[], id: string): SectionCut | undefined => cuts.find((cut) => cut.id === id);
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 const angleStep = (shift: boolean): number => (shift ? 15 : 1);
+
+/**
+ * A cut's name for assistive technology: its kind and reading, then ` (n)` among cuts that read the same, so no two
+ * chips or × buttons share a name.
+ */
+const nameSectionCut = (
+  cuts: readonly SectionCut[],
+  cutId: string,
+  formatLength: (metres: number) => string,
+): string | undefined => {
+  const nameOf = (cut: SectionCut): string => `${sectionKindNames[cut.kind]} ${describeSectionCut(cut, formatLength)}`;
+  const cut = findCut(cuts, cutId);
+  if (!cut) {
+    return undefined;
+  }
+  const name = nameOf(cut);
+  const twins = cuts.filter((each) => nameOf(each) === name);
+  return twins.length > 1 ? `${name} (${twins.indexOf(cut) + 1})` : name;
+};
 
 const readPlane = (cut: SectionCut): SectionPlane | undefined => (cut.kind === 'plane' ? cut.plane : undefined);
 const readOffset = (cut: SectionCut): number | undefined => (cut.kind === 'plane' ? cut.offset : undefined);
@@ -217,6 +244,7 @@ const SectionChip = memo(function SectionChip({ cutId }: CutProps): React.ReactN
   const cut = useGraphicsSelector((state) => findCut(state.context.sectionCuts, cutId));
   const isSelected = useGraphicsSelector((state) => state.context.selectedSectionCutId === cutId);
   const isHovered = useGraphicsSelector((state) => state.context.hoveredSectionCutId === cutId);
+  const name = useGraphicsSelector((state) => nameSectionCut(state.context.sectionCuts, cutId, formatLength));
   const chipRef = useRef<HTMLDivElement>(null);
   useFocusHandOff(chipRef, resolveNextChip);
 
@@ -227,13 +255,12 @@ const SectionChip = memo(function SectionChip({ cutId }: CutProps): React.ReactN
     [graphicsRef],
   );
 
-  if (!cut) {
+  if (!cut || !name) {
     return null;
   }
 
   const Icon = sectionIcons[cut.kind];
   const label = describeSectionCut(cut, formatLength);
-  const kindName = sectionKindNames[cut.kind];
 
   const handleToggle = (event: React.MouseEvent<HTMLButtonElement>): void => {
     const isOpening = !isSelected;
@@ -270,7 +297,7 @@ const SectionChip = memo(function SectionChip({ cutId }: CutProps): React.ReactN
       <button
         type='button'
         aria-expanded={isSelected}
-        aria-label={`${kindName} ${label}`}
+        aria-label={name}
         className='flex h-full items-center gap-1 rounded-md pr-1 pl-2 outline-none focus-visible:focus-outline'
         onClick={handleToggle}
         // Keyboard focus previews the cut as hover does; a click's focus does not keep it lit.
@@ -286,7 +313,7 @@ const SectionChip = memo(function SectionChip({ cutId }: CutProps): React.ReactN
           }
         }}
       >
-        <Icon className='size-3.5' style={{ color: axesColors[sectionAxisOf(cut)] }} />
+        <Icon className='size-3.5' style={{ color: axisChromeColor(sectionAxisOf(cut)) }} />
         <span
           className={cn('font-mono tabular-nums', isSelected ? 'font-medium text-foreground' : 'text-muted-foreground')}
         >
@@ -296,7 +323,7 @@ const SectionChip = memo(function SectionChip({ cutId }: CutProps): React.ReactN
       <Button
         variant='ghost'
         size='icon-xs'
-        aria-label={`Remove ${kindName.toLowerCase()} ${label}`}
+        aria-label={`Remove ${name.charAt(0).toLowerCase()}${name.slice(1)}`}
         className={cn(
           nestedActionVariants(),
           'text-muted-foreground',
@@ -363,7 +390,7 @@ const AddSectionMenu = memo(function AddSectionMenu(): React.JSX.Element {
               addCut({ kind: 'plane', plane });
             }}
           >
-            <FlipHorizontal style={{ color: axesColors[sectionPlaneAxes[plane]] }} />
+            <FlipHorizontal style={{ color: axisChromeColor(sectionPlaneAxes[plane]) }} />
             {plane.toUpperCase()} plane
           </DropdownMenuItem>
         ))}
@@ -374,7 +401,7 @@ const AddSectionMenu = memo(function AddSectionMenu(): React.JSX.Element {
             addCut({ kind: 'revolution' });
           }}
         >
-          <PieChart style={{ color: axesColors[upDirection] }} />
+          <PieChart style={{ color: axisChromeColor(upDirection) }} />
           <div className='flex flex-col'>
             Revolution cutaway
             <span className='text-xs text-muted-foreground'>Remove a wedge about the axis</span>
@@ -555,18 +582,14 @@ function PlaneFields({ cutId }: CutProps): React.JSX.Element {
   );
 }
 
-/**
- * An axis's letter in the text colour, after a mark in the axis's colour. The mark takes 40% of the text colour, which
- * keeps it above 3:1 on every surface the letter reads on, in every theme.
- */
+/** An axis's letter in the text colour, after a mark in {@link axisChromeColor}. */
 export function AxisLabel({ axis }: Readonly<{ axis: SectionAxis }>): React.JSX.Element {
   return (
     <span className='inline-flex items-center gap-1'>
       <span
         aria-hidden='true'
         className='size-1.5 shrink-0 rounded-full'
-        // ponytail: scene axis colours mixed toward the text colour; theme-aware axis tokens are the upgrade path.
-        style={{ backgroundColor: `color-mix(in oklch, ${axesColors[axis]} 60%, currentColor)` }}
+        style={{ backgroundColor: axisChromeColor(axis) }}
       />
       {axis.toUpperCase()}
     </span>

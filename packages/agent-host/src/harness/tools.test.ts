@@ -48,6 +48,43 @@ describe('ToolInputCompatibility', () => {
 });
 
 describe('EagerDispatch', () => {
+  it('records a thrown tool abort as USER_INTERRUPTED', async () => {
+    const controller = new AbortController();
+    const registry: ToolRegistry = {
+      list: () => [{ name: 'screenshot', description: 'Capture', inputSchema: { type: 'object' } }],
+      invoke: async () => {
+        controller.abort();
+        throw new DOMException('signal is aborted without reason', 'AbortError');
+      },
+    };
+    const [tool] = createAgentTools({ registry, runId: 'run-abort' });
+    const result = await tool!.execute('call-abort', {}, controller.signal);
+    expect(result.details).toMatchObject({
+      isError: true,
+      content: { errorCode: 'USER_INTERRUPTED', message: 'Interrupted by user.' },
+    });
+    expect(result.content).toEqual([
+      { type: 'text', text: '{"errorCode":"USER_INTERRUPTED","message":"Interrupted by user."}' },
+    ]);
+  });
+
+  it('preserves a returned tool outcome after the signal aborts', async () => {
+    const controller = new AbortController();
+    const registry: ToolRegistry = {
+      list: () => [{ name: 'edit_file', description: 'Edit', inputSchema: { type: 'object' } }],
+      invoke: async () => {
+        controller.abort();
+        return { content: { errorCode: 'WRITE_FAILED', message: 'Write outcome is known.' }, isError: true };
+      },
+    };
+    const [tool] = createAgentTools({ registry, runId: 'run-abort' });
+    const result = await tool!.execute('call-write', {}, controller.signal);
+    expect(result.details).toMatchObject({
+      isError: true,
+      content: { errorCode: 'WRITE_FAILED', message: 'Write outcome is known.' },
+    });
+  });
+
   it('ports SP-8 T4 by substituting inside AgentTool.execute', async () => {
     const invoke = vi.fn(async () => ({ content: { real: true }, isError: false }));
     const registry: ToolRegistry = {

@@ -209,6 +209,8 @@ for (const entry of isolated ? renderable : []) {
     const outcome = await client.render({
       source: { path: sourcePath },
       content: { includeEdges: true },
+      // Pinned bytes come from PicoVoxel's exact lane, never the fast viewer preview.
+      ...(entry.kernel === 'picovoxel' && { renderOptions: { lane: 'exact' } }),
     });
     if (outcome.superseded) {
       throw new Error(`Thumbnail render failed for ${entry.kernel}/${entry.name}: render was superseded`);

@@ -25,10 +25,46 @@ const PROJECTS = PACKAGE_DIRECTORIES.map((directory) => {
     : JSON.parse(readFileSync(new URL('./package.json', directory), 'utf8')).name;
 });
 const PLATFORM_PACKAGES = PACKAGE_PATHS.slice(1).map((path) => JSON.parse(readFileSync(path, 'utf8')).name);
+const CHANGELOG_PATH = new URL('./CHANGELOG.md', ROOT_DIRECTORY);
 const GIT_OPTIONS = { gitCommit: false, gitPush: false, gitTag: false, stageChanges: false };
+const THANK_YOU = '### ❤️ Thank You';
+/**
+ * Authors that are not people: the `tau-release-bot` that commits the release,
+ * Dependabot, and the coding assistants whose `Co-Authored-By` trailer nx reads
+ * as an author.
+ */
+const NON_HUMAN_AUTHOR = /^- (?:claude\b|openai codex\b|.*\[bot\])/iu;
 
 const assert = (condition, message) => {
   if (!condition) throw new Error(message);
+};
+
+/**
+ * Drop non-human authors from the newest changelog entry's Thank You list.
+ * Commit trailers keep that provenance; published entries stay untouched.
+ */
+export const withoutNonHumanAuthors = (changelog) => {
+  const lines = changelog.split('\n');
+  const nextEntry = lines.findIndex((line, index) => index > 0 && line.startsWith('## '));
+  const limit = nextEntry === -1 ? lines.length : nextEntry;
+  const heading = lines.findIndex((line, index) => index < limit && line === THANK_YOU);
+  if (heading === -1) return changelog;
+
+  let end = heading + 1;
+  while (end < limit && lines[end] === '') end += 1;
+  const authors = [];
+  while (end < limit && lines[end].startsWith('- ')) {
+    authors.push(lines[end]);
+    end += 1;
+  }
+
+  const people = authors.filter((author) => !NON_HUMAN_AUTHOR.test(author));
+  if (people.length === authors.length) return changelog;
+
+  // With nobody left to thank, the heading and its separating blank line go too.
+  const start = people.length > 0 || lines[heading - 1] !== '' ? heading : heading - 1;
+  const kept = people.length > 0 ? [THANK_YOU, '', ...people] : [];
+  return [...lines.slice(0, start), ...kept, ...lines.slice(end)].join('\n');
 };
 
 const packageVersions = () => PACKAGE_PATHS.map((path) => JSON.parse(readFileSync(path, 'utf8')).version);
@@ -43,6 +79,26 @@ const syncOptionalDependencies = (version) => {
 const assertClean = () => {
   const status = execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' });
   assert(status.length === 0, 'release preparation requires a clean worktree');
+};
+
+/**
+ * Run the quality gate once, against the committed tree, with its output shown.
+ * An nx `preVersionCommand` would run on both `releaseVersion` calls below,
+ * grading the second time a tree the first regenerated, and nx pipes that
+ * command's stdout away, so a failing gate printed no findings.
+ */
+const runQualityGate = () => {
+  execFileSync('pnpm', ['nx', 'run', '@@CREATE_REPO_slug@@:quality'], { stdio: 'inherit' });
+};
+
+/** The one version every pending Version Plan agrees on, for `--from-plans` runs. */
+export const versionFromPlans = (plannedVersions) => {
+  assert(
+    plannedVersions.length > 0 && plannedVersions.every(Boolean),
+    'no pending Version Plan affects the fixed release group',
+  );
+  assert(new Set(plannedVersions).size === 1, 'Version Plans did not produce one fixed version');
+  return plannedVersions[0];
 };
 
 export const validateRequestedVersion = ({
@@ -79,13 +135,19 @@ export const validateRequestedVersion = ({
 };
 
 const prepare = async ({ dryRun, requestedVersion }) => {
+  // Asserted on entry: the quality gate can regenerate committed artifacts, so
+  // the tree cannot stay clean once preparation starts. Release-commit purity
+  // is enforced by staging only release files and by the CI release policy.
+  if (!dryRun) assertClean();
+  runQualityGate();
   const currentVersions = packageVersions();
   const rootManifest = JSON.parse(readFileSync(PACKAGE_PATHS[0], 'utf8'));
   const optionalDependencyVersions = PLATFORM_PACKAGES.map((name) => rootManifest.optionalDependencies[name]);
   const preview = await releaseVersion({ ...GIT_OPTIONS, deleteVersionPlans: false, dryRun: true });
   const plannedVersions = PROJECTS.map((project) => preview.projectsVersionData[project]?.newVersion);
-  assert(plannedVersions.every(Boolean), 'no pending Version Plan affects the fixed release group');
-  validateRequestedVersion({ currentVersions, optionalDependencyVersions, plannedVersions, requestedVersion });
+  const plannedVersion = versionFromPlans(plannedVersions);
+  const version = requestedVersion ?? plannedVersion;
+  validateRequestedVersion({ currentVersions, optionalDependencyVersions, plannedVersions, requestedVersion: version });
 
   await releaseChangelog({
     ...GIT_OPTIONS,
@@ -93,41 +155,47 @@ const prepare = async ({ dryRun, requestedVersion }) => {
     deleteVersionPlans: true,
     dryRun: true,
     releaseGraph: preview.releaseGraph,
-    version: requestedVersion,
+    version,
   });
-  if (dryRun) return;
+  if (dryRun) return version;
 
-  assertClean();
   await releaseVersion({
     ...GIT_OPTIONS,
     deleteVersionPlans: true,
-    version: requestedVersion,
+    version,
   });
-  syncOptionalDependencies(requestedVersion);
+  syncOptionalDependencies(version);
   execFileSync('pnpm', ['install', '--lockfile-only'], { stdio: 'inherit' });
   await releaseChangelog({
     ...GIT_OPTIONS,
     createRelease: false,
     deleteVersionPlans: false,
     releaseGraph: preview.releaseGraph,
-    version: requestedVersion,
+    version,
   });
+  writeFileSync(CHANGELOG_PATH, withoutNonHumanAuthors(readFileSync(CHANGELOG_PATH, 'utf8')));
+  execFileSync('pnpm', ['exec', 'oxfmt', '--write', fileURLToPath(CHANGELOG_PATH)]);
   assert(
-    packageVersions().every((version) => version === requestedVersion),
-    `fixed release did not prepare every package at ${requestedVersion}`,
+    packageVersions().every((prepared) => prepared === version),
+    `fixed release did not prepare every package at ${version}`,
   );
+  return version;
 };
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const requestedVersion = process.argv.slice(2).find((value) => !value.startsWith('-'));
   const dryRun = process.argv.includes('--dry-run');
+  const fromPlans = process.argv.includes('--from-plans');
 
   try {
-    assert(requestedVersion, 'usage: pnpm release:prepare -- <version> [--dry-run]');
-    await prepare({ dryRun, requestedVersion });
-    console.log(`${dryRun ? 'Would prepare' : 'Prepared'} @@CREATE_REPO_slug@@ v${requestedVersion}`);
+    assert(
+      fromPlans ? !requestedVersion : requestedVersion,
+      'usage: pnpm release:prepare -- <version> [--dry-run], or pnpm release:prepare -- --from-plans [--dry-run]',
+    );
+    const version = await prepare({ dryRun, requestedVersion });
+    console.log(`${dryRun ? 'Would prepare' : 'Prepared'} @@CREATE_REPO_slug@@ v${version}`);
     if (!dryRun) {
-      console.log(`Commit generated release files as: chore(release): @@CREATE_REPO_slug@@ v${requestedVersion}`);
+      console.log(`Commit generated release files as: chore(release): @@CREATE_REPO_slug@@ v${version}`);
     }
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));

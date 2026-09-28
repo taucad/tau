@@ -223,6 +223,7 @@ describe('chatTurnRequestSchema JSON Schema contract (R13)', () => {
             "kernel": {
               "enum": [
                 "picogk",
+                "picovoxel",
                 "build123d",
                 "openscad",
                 "replicad",

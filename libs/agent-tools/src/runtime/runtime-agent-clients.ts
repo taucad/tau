@@ -276,6 +276,11 @@ export function createRuntimeParameterAgentClient(input: CreateRuntimeParameterA
 const issueMessage = (issues: ReadonlyArray<{ readonly message: string }>, fallback: string): string =>
   issues.map((issue) => issue.message).join('; ') || fallback;
 
+const issueErrorCode = (issues: readonly KernelIssue[]) =>
+  issues.some((issue) => issue.code === 'AUTHENTICATION_ERROR')
+    ? rpcClientErrorCode.authenticationError
+    : rpcClientErrorCode.unknown;
+
 const requireImageFiles = (
   files: readonly ExportFile[] | undefined,
   options: Readonly<{
@@ -368,7 +373,7 @@ export const createRuntimeAgentClients = (
           ? { success: true, files: [...result.data], issues: [...result.issues] }
           : {
               success: false,
-              errorCode: rpcClientErrorCode.unknown,
+              errorCode: issueErrorCode(result.issues),
               message: issueMessage(result.issues, 'Geometry export failed'),
             };
       } catch (error) {
@@ -386,7 +391,7 @@ export const createRuntimeAgentClients = (
         if (!result.success) {
           return {
             success: false,
-            errorCode: rpcClientErrorCode.unknown,
+            errorCode: issueErrorCode(result.issues),
             message: issueMessage(result.issues, 'Render failed'),
           };
         }

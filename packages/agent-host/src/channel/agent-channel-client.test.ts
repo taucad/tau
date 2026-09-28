@@ -206,8 +206,8 @@ describe('createAgentChannelClient', () => {
     });
 
     await expect(client.execute(cancel)).rejects.toBeInstanceOf(ChannelClosedError);
-    // The first dial and three redials (T9 E7).
-    expect(dials).toBe(4);
+    // The first dial plus five redials reaches 3.75 s, outlasting a daemon reconnect after an API restart.
+    expect(dials).toBe(6);
   });
 
   it('should refuse an owner that speaks another wire version, without redialling', async () => {

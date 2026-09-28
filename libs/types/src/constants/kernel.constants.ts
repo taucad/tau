@@ -72,6 +72,34 @@ public static class Params
     requiresRuntimeKernelId: 'picogk',
   },
   {
+    id: 'picovoxel',
+    name: 'PicoVoxel',
+    dimensions: [3],
+    language: 'typescript',
+    description: 'TypeScript voxel and implicit CAD that runs in the browser',
+    mainFile: 'main.ts',
+    // PicoVoxel is the PicoGK engine compiled to WebAssembly; the field is display-only.
+    backendProvider: 'picogk',
+    longDescription:
+      "PicoGK's OpenVDB voxel engine compiled to WebAssembly. Author voxel, implicit and lattice models in TypeScript with ShapeKernel and LatticeLibrary, in the browser, the desktop app or the CLI. The viewer shows a fast preview; exports and GeoSpec checks replay the model exactly.",
+    emptyCode: `import type { Pico, Voxels } from 'picovoxel';
+
+export const defaultParams = { voxelSize: 0.5 };
+
+export default function main(pico: Pico, params = defaultParams): Voxels[] {
+  return [];
+}
+`,
+    recommended: 'Voxel & Lattice CAD in the Browser',
+    tags: ['TypeScript', 'PicoGK', 'OpenVDB', 'Voxels', 'Implicit', 'Lattices', 'Browser'],
+    features: [
+      'ShapeKernel & LatticeLibrary',
+      'SDF expressions',
+      'Fast preview with exact export',
+      'Interactive parameters',
+    ],
+  },
+  {
     id: 'build123d',
     name: 'Build123d',
     dimensions: [2, 3],

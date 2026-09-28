@@ -5,7 +5,7 @@ import type { AgentHostTransport } from '#services/agent-host-transport.js';
 const isAborted = (signal: AbortSignal): boolean => signal.aborted;
 
 /** Resubscriptions of a live stream after its connection died, before the stream ends (T9 E7's budget). */
-const liveResubscribeLimit = 3;
+const liveResubscribeLimit = 5;
 
 /**
  * Drive the shared agent-host client over a paired daemon's agent channel.

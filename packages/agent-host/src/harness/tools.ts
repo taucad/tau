@@ -275,8 +275,17 @@ export const createAgentTools = (options: CreateAgentToolsOptions): HostAgentToo
               },
             }),
       };
-      const substituted = await options.substitute?.(invocation);
-      const result = substituted ?? (await options.registry.invoke(invocation));
+      let substituted: HostToolResult | undefined;
+      let result: HostToolResult;
+      try {
+        substituted = await options.substitute?.(invocation);
+        result = substituted ?? (await options.registry.invoke(invocation));
+      } catch (error) {
+        if (!invocation.signal.aborted) {
+          throw error;
+        }
+        result = { content: { errorCode: 'USER_INTERRUPTED', message: 'Interrupted by user.' }, isError: true };
+      }
       return {
         content: toPiToolContent(result.content),
         details: { ...result, substituted: substituted !== undefined },

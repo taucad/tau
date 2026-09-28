@@ -9,7 +9,11 @@ import * as target from '#support/external-target.js';
  * target page, so each one is self-contained.
  */
 
-/** The sweep's axe rule set: WCAG 2.0–2.2 A/AA plus best practice. */
+/**
+ * The sweep's axe rule set: WCAG 2.0–2.2 A/AA plus best practice. `wcag22aa`
+ * brings `target-size`, the policy's target gate: 24 × 24 px, or spaced per
+ * WCAG 2.5.8's exception (DESIGN, Accessibility).
+ */
 const sweepTags = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa', 'best-practice'];
 
 export type AxeFinding = {
@@ -211,38 +215,6 @@ export const measureFilledButtonFocusRings = async (): Promise<FocusRing[]> => {
     return rings;
   });
 };
-
-export type TargetSize = { readonly name: string; readonly width: number; readonly height: number };
-
-/**
- * Visible, enabled interactive targets in `<main>` smaller than 24 × 24 px.
- * Links inline in a sentence are exempt (WCAG 2.5.8), as are screen-reader-only
- * and aria-hidden controls.
- */
-export const undersizedTargets = async (): Promise<TargetSize[]> =>
-  target.evaluate(() =>
-    [
-      ...document.querySelectorAll<HTMLElement>(
-        'main :is(a[href], button, input:not([type="hidden"]), select, textarea, [role="button"], [role="radio"], [role="checkbox"], [role="switch"], [role="tab"], [role="combobox"], [role="menuitem"], [tabindex="0"])',
-      ),
-    ]
-      .filter(
-        (element) =>
-          element.checkVisibility() &&
-          !element.matches(':disabled, [aria-hidden="true"] *, [aria-hidden="true"]') &&
-          !(getComputedStyle(element).display === 'inline' && element.closest('p')),
-      )
-      .map((element) => {
-        const rect = element.getBoundingClientRect();
-        return {
-          name: (element.getAttribute('aria-label') ?? element.textContent).trim().slice(0, 40),
-          width: Math.round(rect.width * 10) / 10,
-          height: Math.round(rect.height * 10) / 10,
-        };
-      })
-      // One-pixel boxes are screen-reader-only text, not targets.
-      .filter(({ width, height }) => width > 1 && height > 1 && (width < 24 || height < 24)),
-  );
 
 /**
  * Hovers up to `limit` visible buttons and links in `<main>` and returns the

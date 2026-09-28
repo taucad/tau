@@ -3,7 +3,7 @@
 
 /* eslint-disable max-params-no-constructor/max-params-no-constructor -- bounded SQL helper arguments */
 /* eslint-disable @typescript-eslint/naming-convention -- raw PostgreSQL aliases use snake case */
-import { BadRequestException, Inject, Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Optional, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createCipheriv, createDecipheriv, createHash, hkdfSync, randomBytes } from 'node:crypto';
 import { sql } from 'drizzle-orm';
@@ -22,6 +22,7 @@ import {
 import type { WireBalanceExplanation, WireOpenHolds, WireOperationReceipt, WireUsageSnapshot } from '@taucad/billing';
 import { CreditLedgerService, recoveryGraceMinutes } from '#api/billing/credit-ledger.service.js';
 import type { BillingEnvironment } from '#api/billing/credit-ledger.types.js';
+import { MetricsService } from '#telemetry/metrics.js';
 import { DatabaseService } from '#database/database.service.js';
 import type { DatabaseType } from '#database/database.service.js';
 
@@ -390,6 +391,8 @@ export class BillingUsageService {
     @Inject(DatabaseService) private readonly databaseService: { database: QueryDatabase },
     @Inject(ConfigService) private readonly configService: QueryConfig,
     @Inject(CreditLedgerService) private readonly ledger: Pick<CreditLedgerService, 'resolveAttempt'>,
+    // oxlint-disable-next-line new-cap -- NestJS parameter decorator
+    @Optional() private readonly metrics?: MetricsService,
   ) {}
 
   /** Reads an immutable, account-revision-scoped usage snapshot. */
@@ -835,6 +838,10 @@ export class BillingUsageService {
       authUserId: input.authUserId,
       surface: input.surface,
       attemptKey: input.attemptKey,
+    });
+    this.metrics?.billingAttemptResolutions.add(1, {
+      'deployment.environment': this.configuredEnvironment(),
+      'tau.billing.attempt_resolution.outcome': 'voided' in resolved ? 'voided' : 'found',
     });
     return 'voided' in resolved
       ? { state: 'not_found', voided: true }

@@ -511,6 +511,25 @@ export const TauMetrics = {
 
   // --- Billing / credit ledger (blueprint C11/C12; no per-user labels — cardinality) ---
 
+  billingAttemptResolutions: defineCounter({
+    name: 'tau.billing.attempt_resolution',
+    unit: '{resolution}',
+    description: 'Owner attempt lookups by bounded found or voided outcome',
+    attributes: z.object({
+      'deployment.environment': z.enum(['development', 'staging', 'prod-us', 'prod-eu']),
+      'tau.billing.attempt_resolution.outcome': z.enum(['found', 'voided']),
+    }),
+  }),
+
+  billingVoidedAdmissions: defineCounter({
+    name: 'tau.billing.voided_admissions',
+    unit: '{admission}',
+    description: 'Model admissions refused because an owner lookup already voided the key',
+    attributes: z.object({
+      'deployment.environment': z.enum(['development', 'staging', 'prod-us', 'prod-eu']),
+    }),
+  }),
+
   billingReservationFailures: defineCounter({
     name: 'tau.billing.credit_reservation_failures',
     unit: '{failure}',

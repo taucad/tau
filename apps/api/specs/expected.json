@@ -1,5 +1,10 @@
 {
   "configs": {
+    "GatewayInvocationOracleGraph.export.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "GI-A5 one-key graph for the credit operation oracle"
+    },
     "GatewayInvocation.failure-message-ChargeAfterRecordedLoss-3.cfg": {
       "tier": "nightly",
       "expect": {
@@ -273,5 +278,11 @@
         "MC_GatewayInvocation.tla"
       ]
     }
-  ]
+  ],
+  "graphs": {
+    "GatewayInvocationOracleGraph": {
+      "config": "GatewayInvocationOracleGraph.export.cfg",
+      "phase": "row.a.cust"
+    }
+  }
 }

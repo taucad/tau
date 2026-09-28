@@ -63,6 +63,7 @@ type TopologyPayload = {
     nodeIndex: number;
     faceGroups?: Array<{ faceId: number }>;
     edgeGroups?: Array<{ edgeId: number }>;
+    sourceRefs?: { kernelId: string; faceGroupUnit: string; edgeGroupUnit: string };
     capabilities?: { hasPreciseTopology: boolean };
   }>;
   mechanism?: {
@@ -418,12 +419,14 @@ describe('convertReplicadGeometriesToGltf', () => {
       tauComponentKind: 'body',
       tauComponentSelector: 'node/0/surface',
       faceGroups: [{ start: 0, count: 3, faceId: 0 }],
+      tauFaceGroupUnit: 'indices-v1',
     });
     expect(json.meshes[0]!.primitives[1]!.extras).toMatchObject({
       tauComponentId: 'component:planet-gear',
       tauComponentKind: 'line',
       tauComponentSelector: 'node/0/edges',
       edgeGroups: [{ start: 0, count: 6, edgeId: 0 }],
+      tauEdgeGroupUnit: 'xyz-scalars-v1',
     });
   });
 
@@ -458,6 +461,7 @@ describe('convertReplicadGeometriesToGltf', () => {
       nodeIndex: 0,
       faceGroups: [{ faceId: 0 }],
       edgeGroups: [{ edgeId: 0 }],
+      sourceRefs: { kernelId: 'replicad', faceGroupUnit: 'indices-v1', edgeGroupUnit: 'xyz-scalars-v1' },
       capabilities: { hasPreciseTopology: true },
     });
   });

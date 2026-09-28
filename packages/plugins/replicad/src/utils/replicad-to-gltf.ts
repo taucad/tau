@@ -228,6 +228,7 @@ function buildNodeFromReplicadGeometry({
               tauComponentKind: 'body',
               tauComponentSelector: formatPrimitiveSelector(nodeIndex, 'surface'),
               faceGroups,
+              tauFaceGroupUnit: 'indices-v1',
             },
           }
         : {}),
@@ -260,6 +261,7 @@ function buildNodeFromReplicadGeometry({
               tauComponentKind: 'line',
               tauComponentSelector: formatPrimitiveSelector(nodeIndex, 'edges'),
               edgeGroups,
+              tauEdgeGroupUnit: 'xyz-scalars-v1',
             },
           }
         : {}),
@@ -301,6 +303,7 @@ function buildNodeFromReplicadGeometry({
       selector,
       faceGroups,
       edgeGroups,
+      sourceRefs: { kernelId: 'replicad', faceGroupUnit: 'indices-v1', edgeGroupUnit: 'xyz-scalars-v1' },
       capabilities: {
         exports: [
           { fidelity: 'mesh', formats: ['glb', 'stl'], available: true },

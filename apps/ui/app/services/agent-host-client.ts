@@ -440,17 +440,29 @@ export const createAgentHostClient = (
       }
     });
     const replaySnapshot = async (): Promise<HostRunSnapshot> => {
-      let attached: Awaited<ReturnType<AgentHostClient['attach']>>;
-      try {
-        attached = await attach({ chatId: initial.chatId, cursor, limit: agentHostTailBatchLimit });
-      } catch (error) {
-        if (error instanceof AgentHostWorkerError && error.code === 'COMMAND_TIMEOUT') {
-          throw new AgentHostWorkerError(
-            'RUN_IDLE_TIMEOUT',
-            `Agent host run ${initial.runId} stopped answering liveness probes.`,
-          );
+      let attached: Awaited<ReturnType<AgentHostClient['attach']>> | undefined;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- A missed read is retried with the same cursor, never a second admission.
+          attached = await attach({ chatId: initial.chatId, cursor, limit: agentHostTailBatchLimit });
+          break;
+        } catch (error) {
+          if (!(error instanceof AgentHostWorkerError) || error.code !== 'COMMAND_TIMEOUT') {
+            throw error;
+          }
+          if (attempt === 2) {
+            throw new AgentHostWorkerError(
+              'RUN_IDLE_TIMEOUT',
+              `Agent host control connection for run ${initial.runId} did not answer three liveness probes.`,
+            );
+          }
         }
-        throw error;
+      }
+      if (!attached) {
+        throw new AgentHostWorkerError(
+          'RUN_IDLE_TIMEOUT',
+          `Agent host replay for run ${initial.runId} did not return.`,
+        );
       }
       const { snapshot } = attached;
       cursor = attached.nextCursor;

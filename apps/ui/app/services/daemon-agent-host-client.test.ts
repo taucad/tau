@@ -39,6 +39,23 @@ const fakeChannel = (options: { readonly hold?: Promise<void> } = {}): FakeChann
       throw Object.assign(new Error('closed'), { code: 'CHANNEL_CLOSED' });
     }
   };
+  const waitForHold = async (signal?: AbortSignal): Promise<void> => {
+    if (!options.hold) {
+      return;
+    }
+    await Promise.race([
+      options.hold,
+      new Promise<never>((_resolve, reject) => {
+        signal?.addEventListener(
+          'abort',
+          () => {
+            reject(new Error('Read aborted.'));
+          },
+          { once: true },
+        );
+      }),
+    ]);
+  };
 
   const stream = <Event>(sinks: Set<(event: Event) => void>, signal?: AbortSignal): AsyncIterable<Event> => {
     const pending: Event[] = [];
@@ -95,12 +112,12 @@ const fakeChannel = (options: { readonly hold?: Promise<void> } = {}): FakeChann
       }
       closeHandlers.clear();
     },
-    execute: async (command: AgentChannelCommand): Promise<AgentChannelResponse> => {
+    execute: async (command: AgentChannelCommand, signal?: AbortSignal): Promise<AgentChannelResponse> => {
       seen.push(command);
       /* Checked on both sides of the hold: a wire that dies with a command in
        * flight is the window a re-dial has to cover. */
       refuseIfDead();
-      await options.hold;
+      await waitForHold(signal);
       refuseIfDead();
       if (command.type === 'tail' || command.type === 'attach') {
         const batch = { cursor: command.cursor, nextCursor: command.cursor, endCursor: command.cursor, events: [] };
@@ -305,6 +322,29 @@ describe('createDaemonAgentHostTransport re-dial', () => {
     hold.resolve();
 
     await expect(attached).resolves.toMatchObject({ cursor: 4 });
+    expect(channels).toHaveLength(2);
+    expect(channels[1]?.seen).toEqual([{ type: 'attach', chatId: 'chat-1', cursor: 4, limit: 16 }]);
+    await client.close();
+  });
+
+  it('should re-dial a silent channel after a read deadline', async () => {
+    const channels: FakeChannel[] = [];
+    const client = createAgentHostClient(
+      createDaemonAgentHostTransport(
+        async () => {
+          const channel = fakeChannel(channels.length === 0 ? { hold: Promise.withResolvers<void>().promise } : {});
+          channels.push(channel);
+          return channel;
+        },
+        { redialBackoff: 0 },
+      ),
+      { commandTimeout: 10 },
+    );
+
+    await expect(client.attach({ chatId: 'chat-1', cursor: 4, limit: 16 })).rejects.toMatchObject({
+      code: 'COMMAND_TIMEOUT',
+    });
+    await expect(client.attach({ chatId: 'chat-1', cursor: 4, limit: 16 })).resolves.toMatchObject({ cursor: 4 });
     expect(channels).toHaveLength(2);
     expect(channels[1]?.seen).toEqual([{ type: 'attach', chatId: 'chat-1', cursor: 4, limit: 16 }]);
     await client.close();

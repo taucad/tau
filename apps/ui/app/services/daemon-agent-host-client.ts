@@ -317,6 +317,15 @@ export const createDaemonAgentHostTransport = (
         return response;
       } catch (error) {
         const died = record.dead || (error as { readonly code?: unknown }).code === 'CHANNEL_CLOSED';
+        if (dial && replayable(request) && signal?.aborted && !record.dead) {
+          /* A silent port can miss its deadline without reporting closure. The
+           * caller retries this read with a fresh deadline; give it a new port. */
+          record.dead = true;
+          if (current === record) {
+            current = undefined;
+          }
+          record.client.close();
+        }
         if (!died || !dial || (signal?.aborted ?? false) || !replayable(request)) {
           /* Only reads are replayed (ponytail): `start`, `steer`, `cancel` and
            * `resolve-interrupt` are not provably idempotent on the host, and the

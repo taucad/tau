@@ -174,12 +174,16 @@ const readWithSdkSnapshots = async (events: readonly AgentLogEvent[]): Promise<M
   const chunks = events.flatMap((event) => [...projectAgentHostEvent(event, streamedBlocks)]);
   const stream = new ReadableStream<UIMessageChunk>({
     start(controller) {
-      for (const chunk of chunks) controller.enqueue(chunk);
+      for (const chunk of chunks) {
+        controller.enqueue(chunk);
+      }
       controller.close();
     },
   });
   let message: MyUIMessage | undefined;
-  for await (const next of readUIMessageStream<MyUIMessage>({ stream })) message = next;
+  for await (const next of readUIMessageStream<MyUIMessage>({ stream })) {
+    message = next;
+  }
   return message;
 };
 
@@ -283,7 +287,8 @@ describe('BrowserPlacementChatTransport', () => {
   it('should preserve the SDK final message for tool-rich and partial durable runs', async () => {
     const full = hexagonalNutEvents();
     const fullMessage = await readWithSdkSnapshots(full);
-    expect((await deriveChatTranscript(full)).filter((message) => message.role === 'assistant')).toEqual([fullMessage]);
+    const fullTranscript = await deriveChatTranscript(full);
+    expect(fullTranscript.filter((message) => message.role === 'assistant')).toEqual([fullMessage]);
 
     const base = {
       version: 1,
@@ -313,9 +318,14 @@ describe('BrowserPlacementChatTransport', () => {
         isError: false,
       },
     } as const;
-    for (const events of [[], [running], [failed], [admitted], [admitted, running, failed], [admitted, orphanTool]]) {
-      const expected = await readWithSdkSnapshots(events);
-      const actual = await deriveChatTranscript(events);
+    const cases = [[], [running], [failed], [admitted], [admitted, running, failed], [admitted, orphanTool]];
+    const results = await Promise.all(
+      cases.map(async (events) => ({
+        expected: await readWithSdkSnapshots(events),
+        actual: await deriveChatTranscript(events),
+      })),
+    );
+    for (const { expected, actual } of results) {
       expect(actual).toEqual(expected === undefined ? [] : [expected]);
     }
   });

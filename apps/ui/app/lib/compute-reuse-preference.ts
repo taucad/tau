@@ -6,11 +6,11 @@ export type ComputeReuseMode = 'off' | 'memory' | 'durable';
 const storageKey = 'tau-compute-reuse-mode';
 const topic = new Topic<void>({ name: 'compute-reuse-preference' });
 /**
- * Reuse is opt-in: the durable store costs more than it saves on a cold open
- * (charter D3), so an unset preference bypasses it. Every kernel-options path
- * derives its mode from here — no caller carries its own default.
+ * Workspace hosts use durable reuse by default (compute charter D14).
+ * Every kernel-options path derives its mode from here; explicit Off and
+ * Memory selections remain stored preferences.
  */
-const defaultMode: ComputeReuseMode = 'off';
+const defaultMode: ComputeReuseMode = 'durable';
 
 const read = (): ComputeReuseMode => {
   try {

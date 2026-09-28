@@ -1693,7 +1693,23 @@
         "tau-lint/no-arbitrary-pixel-size": "error",
         "tau-lint/no-accent-hover": "warn",
         "tau-lint/no-button-size-override": "warn",
-        "tau-lint/no-raw-page-heading": "warn"
+        "tau-lint/no-raw-page-heading": "warn",
+        // The jsx-a11y subset that fits Tau's patterns (Page Composition Policy Rules 7 and 13).
+        // Left off: prefer-tag-over-role (codified role="status"), anchor-is-valid (Link `to`),
+        // no-autofocus (UX Policy inline editors), control-has-associated-label and
+        // label-has-associated-control (cannot see Button/SearchInput; require-accessible-name covers them).
+        "jsx-a11y/tabindex-no-positive": "error",
+        "jsx-a11y/no-noninteractive-tabindex": "error",
+        "jsx-a11y/aria-props": "error",
+        "jsx-a11y/aria-proptypes": "error",
+        "jsx-a11y/aria-role": "error",
+        "jsx-a11y/role-has-required-aria-props": "error",
+        "jsx-a11y/role-supports-aria-props": "error",
+        "jsx-a11y/alt-text": "error",
+        "jsx-a11y/heading-has-content": "error",
+        "jsx-a11y/anchor-has-content": "error",
+        "jsx-a11y/iframe-has-title": "error",
+        "jsx-a11y/no-access-key": "error"
       }
     },
     {
@@ -1708,6 +1724,16 @@
     }
   ],
   "settings": {
+    // Let jsx-a11y see the design-system primitives as the elements they render.
+    "jsx-a11y": {
+      "components": {
+        "Button": "button",
+        "Input": "input",
+        "SearchInput": "input",
+        "Link": "a",
+        "NavLink": "a"
+      }
+    },
     "jsdoc": {
       "definedTags": ["vitest-environment", "remarks", "internal"]
     }

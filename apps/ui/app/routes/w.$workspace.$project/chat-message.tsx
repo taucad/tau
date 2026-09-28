@@ -662,6 +662,7 @@ function ChatMessageTimestamp({
       <TooltipTrigger asChild>
         <time
           dateTime={date.toISOString()}
+          // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- keyboard users reach the absolute-time tooltip through focus
           tabIndex={0}
           className='mx-1 flex h-7 items-center rounded-md px-1 text-xs outline-none focus-visible:focus-outline'
         >

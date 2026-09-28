@@ -166,6 +166,7 @@ function FileComparison({
       id={id}
       role='region'
       aria-label={label}
+      // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a scrollable region must be keyboard reachable (WCAG 2.1.1)
       tabIndex={0}
       /* An empty Shiki line keeps its height, and the hidden-lines label keeps the 12 px floor (round 5). */
       className='[scrollbar-width:thin] overflow-x-auto border-t bg-background focus-visible:focus-outline [&_.line:empty]:min-h-[1.6em] [&_.whitespace-nowrap]:text-xs'

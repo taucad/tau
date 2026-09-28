@@ -431,6 +431,7 @@ function PrinterSimulation({
             role='img'
             aria-label={`${manifest.identity.displayName} printing ${name}`}
             aria-describedby={hintId}
+            // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- focus target for the scene's keyboard camera controls
             tabIndex={0}
             className='absolute inset-0 outline-none focus-visible:focus-outline'
           >

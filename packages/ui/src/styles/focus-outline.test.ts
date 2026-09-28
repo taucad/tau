@@ -6,9 +6,17 @@ const stylesDirectory = join(import.meta.dirname, '.');
 const componentsDirectory = join(import.meta.dirname, '../components');
 const tokenStyles = readFileSync(join(stylesDirectory, 'tokens.css'), 'utf8');
 
-const componentSources = readdirSync(componentsDirectory)
-  .filter((name) => /\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name))
-  .map((name) => [name, readFileSync(join(componentsDirectory, name), 'utf8')] as const);
+/* The app composes the same indicators, so the scan covers it too (Page Composition Policy, Rule 8). */
+const appDirectory = join(import.meta.dirname, '../../../../apps/ui/app');
+
+const sourcesIn = (directory: string, recursive = false) =>
+  readdirSync(directory, { recursive })
+    .map(String)
+    .filter((name) => /\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name))
+    .map((name) => [name, readFileSync(join(directory, name), 'utf8')] as const);
+
+const componentSources = sourcesIn(componentsDirectory);
+const appSources = sourcesIn(appDirectory, true);
 
 /**
  * Any focus-state utility that restates indicator geometry instead of composing `focus-outline`.
@@ -39,8 +47,10 @@ describe('focus outline entry point', () => {
     expect(body.slice(0, body.indexOf('}'))).toContain('outline: var(--focus-outline-width) solid');
   });
 
-  it('routes every component focus indicator through the utility', () => {
-    const offenders = componentSources.flatMap(([name, source]) =>
+  it('routes every component and app focus indicator through the utility', () => {
+    /* An unresolved app path would pass vacuously. */
+    expect(appSources.length).toBeGreaterThan(100);
+    const offenders = [...componentSources, ...appSources].flatMap(([name, source]) =>
       [...source.matchAll(restatedGeometry)].map((match) => `${name}: ${match[0]}`),
     );
 

@@ -1,4 +1,5 @@
 import { Link } from 'react-router';
+import type { MetaFunction } from 'react-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Blocks,
@@ -21,6 +22,7 @@ import { Button } from '@taucad/ui/components/button';
 import { Input } from '@taucad/ui/components/input';
 import { Separator } from '@taucad/ui/components/separator';
 import type { Handle } from '#types/matches.types.js';
+import { PageHeader } from '#components/layout/page-header.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useSkillsCatalog } from '#hooks/use-skills-catalog.js';
@@ -28,6 +30,8 @@ import { systemSkillsCatalog } from '#lib/system-skills-catalog.js';
 import { tauStoreSkills } from '#lib/tau-plugin-store-catalog.js';
 import type { SystemSkill } from '#lib/system-skills-catalog.js';
 import type { TauStoreSkill } from '#lib/tau-plugin-store-catalog.js';
+
+export const meta: MetaFunction = () => [{ title: 'Plugins · Tau' }];
 
 export const handle: Handle = {
   breadcrumb() {
@@ -298,32 +302,38 @@ export default function PluginsRoute(): React.JSX.Element {
   );
 
   return (
-    <main className='mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 pt-14 pb-16'>
-      <div className='flex items-center gap-1 self-start'>
-        <Button size='xs' variant='secondary' className='h-7 rounded-md px-2 text-xs'>
-          Plugins
-        </Button>
-        <Button size='xs' variant='ghost' className='h-7 rounded-md px-2 text-xs text-muted-foreground'>
-          Skills
-        </Button>
-      </div>
-
-      <header className='space-y-6 text-center'>
-        <h1 className='text-2xl font-medium tracking-normal'>Make Tau work your way</h1>
-        <div className='flex items-center gap-2'>
-          <div className='relative min-w-0 flex-1'>
-            <Search className='pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground' />
-            <Input className='h-7 rounded-md pl-8 text-xs md:text-xs' placeholder='Search plugins' />
+    <div className='container mx-auto space-y-6 px-4 pt-5 pb-8'>
+      <PageHeader
+        title='Plugins'
+        action={
+          <div className='ml-auto flex w-full flex-wrap items-center gap-2 sm:w-auto'>
+            <div className='flex items-center gap-1'>
+              <Button size='sm' variant='secondary'>
+                Plugins
+              </Button>
+              <Button size='sm' variant='ghost'>
+                Skills
+              </Button>
+            </div>
+            <div className='relative min-w-0 grow sm:w-64'>
+              <Search className='pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground' />
+              <Input aria-label='Search plugins' className='pl-8' placeholder='Search plugins…' />
+            </div>
+            <Button variant='secondary' size='sm'>
+              Built by Tau
+            </Button>
+            <Button variant='secondary' size='sm'>
+              All
+            </Button>
           </div>
-          <Button variant='secondary' size='xs' className='h-7 gap-1.5 rounded-md px-2 text-xs'>
-            Built by Tau
-          </Button>
-          <Button variant='secondary' size='xs' className='h-7 rounded-md px-2 text-xs'>
-            All
-          </Button>
-        </div>
-      </header>
+        }
+      />
 
+      <StoreSection title='Featured' items={featuredPlugins} />
+      <StoreSection title='System' items={systemSkills} />
+      <StoreSection title='Skills' items={storeSkills} getStatus={getSkillInstallStatus} onInstall={installSkill} />
+
+      {/* Below the collections: the first viewport belongs to the lists (page composition Rule 14). */}
       <section className='flex h-40 items-center justify-center overflow-hidden rounded-md border bg-[linear-gradient(135deg,color-mix(in_oklab,var(--information)_18%,var(--background)),color-mix(in_oklab,var(--feature)_14%,var(--background)),color-mix(in_oklab,var(--warning)_12%,var(--background)))]'>
         <div className='flex flex-col items-center gap-4'>
           <Badge
@@ -341,10 +351,6 @@ export default function PluginsRoute(): React.JSX.Element {
         </div>
       </section>
 
-      <StoreSection title='Featured' items={featuredPlugins} />
-      <StoreSection title='System' items={systemSkills} />
-      <StoreSection title='Skills' items={storeSkills} getStatus={getSkillInstallStatus} onInstall={installSkill} />
-
       <section className='flex items-center gap-3 rounded-md border border-dashed px-4 py-3'>
         <PackagePlus className='size-4 shrink-0 text-muted-foreground' />
         <div className='min-w-0 flex-1'>
@@ -357,6 +363,6 @@ export default function PluginsRoute(): React.JSX.Element {
           Add
         </Button>
       </section>
-    </main>
+    </div>
   );
 }

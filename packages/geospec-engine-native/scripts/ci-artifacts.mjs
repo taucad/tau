@@ -2,7 +2,7 @@
 /**
  * Prepare or verify the complete Node/mixed package payload for CI transport.
  * Uses existing Nx producers; hashes establish transport identity, not qualification.
- * Usage: node packages/geospec-engine-native/scripts/ci-artifacts.mjs prepare|verify|verify-delivery
+ * Usage: node packages/geospec-engine-native/scripts/ci-artifacts.mjs prepare|verify|verify-delivery|ensure-delivery
  * Optional env: GEOSPEC_DELIVERY_CACHE and existing delivery tool selectors.
  * GEOSPEC_NATIVE_DELIVERY_CACHE selects independent retained native-prefix reuse;
  * GEOSPEC_NATIVE_OCCT_PRODUCER_BUILDER/RECIPE and GEOSPEC_NATIVE_GIT_CEILING_DIRECTORIES
@@ -147,10 +147,26 @@ const checkReceipt = (root, inventory) => {
   };
   assert.deepEqual(inputs.wasmEh, nativeEh, 'Mixed inputs lack selected native WASM EH flags.');
   assert.deepEqual(wasmEh, nativeEh, 'Mixed receipt native WASM EH flags differ from inputs.');
+  assert.ok(
+    inputs.environment !== null && typeof inputs.environment === 'object' && !Array.isArray(inputs.environment),
+    'Mixed inputs lack the producer environment.',
+  );
+  const { CARGO_HOME: cargoHome } = /** @type {Record<string, unknown>} */ (inputs.environment);
+  assert.ok(typeof cargoHome === 'string' && posix.isAbsolute(cargoHome), 'Mixed inputs lack Cargo source root.');
+  assert.ok(
+    typeof inputs.rustPrefix === 'string' && posix.isAbsolute(inputs.rustPrefix),
+    'Mixed inputs lack Rust source root.',
+  );
   assert.deepEqual(
     buildEnvironment,
     {
-      CARGO_ENCODED_RUSTFLAGS: '-C\u001Ftarget-feature=+simd128',
+      CARGO_ENCODED_RUSTFLAGS: [
+        '-C',
+        'target-feature=+simd128',
+        `--remap-path-prefix=${sourceRoot}=tau`,
+        `--remap-path-prefix=${cargoHome}=cargo`,
+        `--remap-path-prefix=${posix.join(inputs.rustPrefix, 'lib/rustlib/src/rust')}=rust-src`,
+      ].join('\u001F'),
       CXXFLAGS_wasm32_unknown_emscripten:
         '-msimd128 -frtti -fwasm-exceptions -sWASM_LEGACY_EXCEPTIONS=1 -sSUPPORT_LONGJMP=wasm',
       GEOSPEC_WASM_SIMD_PROFILE: 'simd128-v1',
@@ -506,22 +522,37 @@ export const prepareArtifacts = (root) => {
   return verifyDelivery(root);
 };
 
+/** Reuse a verified delivery or rebuild it through the existing producers.
+ * @type {(root: string) => ReturnType<typeof verifyDelivery>}
+ * @internal
+ */
+export const ensureDelivery = (root) => {
+  try {
+    return verifyDelivery(root);
+  } catch (error) {
+    console.log(`Preparing GeoSpec delivery: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return prepareArtifacts(root);
+};
+
 const invokedScript = process.argv.at(1);
 if (invokedScript !== undefined && resolve(invokedScript) === fileURLToPath(import.meta.url)) {
   try {
     const root = resolve(import.meta.dirname, '../../..');
-    assert.ok(process.argv.length === 3, 'Usage: ci-artifacts.mjs prepare|verify|verify-delivery');
+    assert.ok(process.argv.length === 3, 'Usage: ci-artifacts.mjs prepare|verify|verify-delivery|ensure-delivery');
     const mode = process.argv[2];
     assert.ok(
-      mode === 'prepare' || mode === 'verify' || mode === 'verify-delivery',
-      'Usage: ci-artifacts.mjs prepare|verify|verify-delivery',
+      mode === 'prepare' || mode === 'verify' || mode === 'verify-delivery' || mode === 'ensure-delivery',
+      'Usage: ci-artifacts.mjs prepare|verify|verify-delivery|ensure-delivery',
     );
     const inventory =
-      mode === 'prepare'
-        ? prepareArtifacts(root)
-        : mode === 'verify-delivery'
-          ? verifyDelivery(root)
-          : verifyArtifacts(root);
+      mode === 'ensure-delivery'
+        ? ensureDelivery(root)
+        : mode === 'prepare'
+          ? prepareArtifacts(root)
+          : mode === 'verify-delivery'
+            ? verifyDelivery(root)
+            : verifyArtifacts(root);
     console.log(`Verified ${inventory.artifacts.length} GeoSpec artifacts for ${inventory.source.revision}.`);
   } catch (error) {
     console.error(error instanceof Error ? error.message : error);

@@ -5,8 +5,10 @@ import type { UIMatch } from 'react-router';
 import type { CommandPaletteItem } from '#components/layout/command-palette.js';
 
 let registered: CommandPaletteItem[] = [];
+// eslint-disable-next-line @typescript-eslint/naming-convention -- Environment variable name.
 const environment = vi.hoisted(() => ({ TAU_DEBUG: false }));
 
+// eslint-disable-next-line @typescript-eslint/naming-convention -- Mocked export name.
 vi.mock('#environment.config.js', () => ({ ENV: environment }));
 vi.mock('@better-auth-ui/react', () => ({ useSession: () => ({ data: undefined }) }));
 vi.mock('#lib/auth-client.js', () => ({ authClient: {} }));
@@ -47,5 +49,18 @@ describe('RootCommandPaletteItems', () => {
       visible: enabled,
     });
     environment.TAU_DEBUG = false;
+  });
+
+  it('should hide the GeoSpec lab in packaged desktop builds', () => {
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    vi.stubEnv('PROD', true);
+    try {
+      environment.TAU_DEBUG = true;
+      render(<RootCommandPaletteItems match={{ id: 'root' } as UIMatch} />);
+      expect(registered.find(({ id }) => id === 'geospec-performance')?.visible).toBe(false);
+    } finally {
+      environment.TAU_DEBUG = false;
+      vi.unstubAllEnvs();
+    }
   });
 });

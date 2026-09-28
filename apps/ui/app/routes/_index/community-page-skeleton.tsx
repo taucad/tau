@@ -1,4 +1,5 @@
 import { Skeleton } from '@taucad/ui/components/skeleton';
+import { PageContent } from '#components/layout/page-content.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { sidebarDefaultOpen, sidebarPreferredWidth } from '#constants/sidebar.constants.js';
 import { useCookie } from '#hooks/use-cookie.js';
@@ -33,8 +34,8 @@ export function CommunityPageSkeleton(): React.JSX.Element {
         />
       ) : null}
       <div aria-hidden='true' className='min-w-0 flex-1 overflow-hidden'>
-        <div className='h-12 border-b bg-sidebar md:h-9' />
-        <div className='container mx-auto space-y-3 px-4 pt-5 pb-8'>
+        <div className='h-12 md:h-9' />
+        <PageContent className='space-y-3'>
           <div className='flex flex-wrap items-center justify-between gap-x-4 gap-y-3'>
             <Skeleton className='h-9 w-44' />
             <div className='flex w-full items-center gap-2 sm:w-auto'>
@@ -57,7 +58,7 @@ export function CommunityPageSkeleton(): React.JSX.Element {
               </div>
             ))}
           </div>
-        </div>
+        </PageContent>
       </div>
     </div>
   );

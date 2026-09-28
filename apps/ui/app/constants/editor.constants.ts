@@ -1,13 +1,8 @@
 import { z } from 'zod';
 import { createCameraView } from '@taucad/camera';
 import type { CameraView } from '@taucad/camera';
-import {
-  maxSectionCuts,
-  maxSectionSweep,
-  minSectionSweep,
-  sectionAxisIndices,
-  sectionPlaneAxes,
-} from '#components/geometry/graphics/section-cuts.js';
+import { sectionSchema } from '@taucad/workbench';
+import { sectionAxisIndices, sectionPlaneAxes } from '#components/geometry/graphics/section-cuts.js';
 import type { SectionCutValues, SectionVector } from '#components/geometry/graphics/section-cuts.js';
 
 // ============================================================================
@@ -202,21 +197,6 @@ export const componentDisplayStateSchema = z.object({
   unitsById: z.record(z.string(), componentDisplayUnitSchema),
 });
 
-const sectionCutSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('plane'), plane: z.enum(['xy', 'xz', 'yz']), offset: z.number(), isFlipped: z.boolean() }),
-  z.object({
-    kind: z.literal('revolution'),
-    axis: z.enum(['x', 'y', 'z']),
-    origin: vector3Schema,
-    // The ranges the machine keeps: a start wrapped into [0, 360), which may be fractional after a drag, and the
-    // editor's sweep. Anything else drops the section view, as any other bad cut does.
-    start: z.number().min(0).lt(360),
-    sweep: z.number().min(minSectionSweep).max(maxSectionSweep),
-  }),
-]);
-
-const sectionViewSchema = z.object({ active: z.boolean(), cuts: z.array(sectionCutSchema).max(maxSectionCuts) });
-
 /** The schema v11 single cut, read only to migrate it. */
 const legacySectionViewSchema = z.object({
   active: z.boolean(),
@@ -226,7 +206,7 @@ const legacySectionViewSchema = z.object({
   direction: z.union([z.literal(1), z.literal(-1)]),
 });
 
-const persistedSectionViewSchema = z.union([sectionViewSchema, legacySectionViewSchema]);
+const persistedSectionViewSchema = z.union([sectionSchema, legacySectionViewSchema]);
 
 export const graphicsViewSettingsSchema = z.object({
   enableSurfaces: z.boolean(),

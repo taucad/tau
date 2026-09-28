@@ -106,7 +106,7 @@ export const parameterStageForSettlement = ({
     ? { [parameterEntryPath(entryPath)]: bytes }
     : undefined;
 
-type FocusedChatWorker = Pick<ChatStorage, 'getChatsForResource' | 'createNavigationRepairChat'>;
+type FocusedChatWorker = Pick<ChatStorage, 'getChatRecordsForResource' | 'createNavigationRepairChat'>;
 
 export async function ensureFocusedChatForProject({
   projectId,
@@ -121,7 +121,7 @@ export async function ensureFocusedChatForProject({
   readonly worker: FocusedChatWorker;
   readonly onCreatedChat?: () => void;
 }): Promise<{ type: 'focusedChatEnsured'; focusedChatId: string }> {
-  const chats = await worker.getChatsForResource(projectId);
+  const chats = await worker.getChatRecordsForResource(projectId);
 
   for (const candidateChatId of [requestedChatId, persistedChatId]) {
     const match = chats.find((chat) => chat.id === candidateChatId);
@@ -147,8 +147,9 @@ export async function ensureFocusedChatForProject({
 
 /**
  * Whether `chatId` is a chat the client already holds — freshly created here, or
- * present in a cached `['chats', projectId, …]` list. Such a chat needs no async
- * ensure round trip, so the editor can focus it synchronously.
+ * present in a current non-deleted chat list. Such a chat needs no async
+ * ensure round trip, so the editor can focus it synchronously. Deleted-inclusive
+ * and invalidated lists cannot authorize a stale route.
  *
  * @returns True when the chat is already known.
  */
@@ -166,9 +167,14 @@ export function isKnownChatId({
   if (chatId === createdChatId) {
     return true;
   }
-  return queryClient
-    .getQueriesData<Chat[]>({ queryKey: ['chats', projectId] })
-    .some(([, chats]) => chats?.some((chat) => chat.id === chatId));
+  const visibleChatKeys = [
+    ['chats', projectId, { includeDeleted: false }],
+    ['chats', projectId, 'records', { includeDeleted: false }],
+  ];
+  return visibleChatKeys.some((queryKey) => {
+    const state = queryClient.getQueryState<Array<Pick<Chat, 'id'>>>(queryKey);
+    return state !== undefined && !state.isInvalidated && state.data?.some((chat) => chat.id === chatId) === true;
+  });
 }
 
 /** What the workspace holds: the manifest it renders and why the bytes on disk are not that manifest. */

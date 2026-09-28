@@ -7,7 +7,8 @@
  */
 
 import { readFileSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { dirname, join, relative } from 'node:path';
@@ -15,9 +16,34 @@ import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 // oxlint-disable-next-line no-restricted-imports -- Exercise the package script's actual staging boundary.
-import { copyGeoSpecNative, copyGeoSpecNativeAssembly } from '../scripts/runtime-closure.mjs';
+import { copyGeoSpecNative, copyGeoSpecNativeAssembly, copyGeoSpecSourceRelink } from '../scripts/runtime-closure.mjs';
 
 const appRoot = join(import.meta.dirname, '..');
+
+describe('macOS GeoSpec assembly selection', () => {
+  it('should ensure the current delivery only for the default assembly before staging', () => {
+    const source = readFileSync(join(appRoot, 'scripts/package-macos.mts'), 'utf8');
+    const mode = source.indexOf('parseMacosPackageMode(process.argv.slice(2))');
+    const unsafeOutput = source.indexOf('Refusing unsafe package output root:');
+    const selection = source.indexOf(
+      "const selectedGeoSpecAssembly = process.env['TAU_GEOSPEC_NATIVE_ASSEMBLY_ROOT'];",
+    );
+    const fallback = source.indexOf("'out/artifacts/geospec-native-engine/ci/assembly'", selection);
+    const conditional = source.indexOf('if (selectedGeoSpecAssembly === undefined)', fallback);
+    const ensure = source.indexOf("'ensure-delivery'", conditional);
+    const realPath = source.indexOf('const geospecAssemblyRoot = await realpath(', ensure);
+    const stage = source.indexOf('await rm(outputRoot, { recursive: true, force: true })', realPath);
+
+    expect(mode).toBeGreaterThan(-1);
+    expect(unsafeOutput).toBeGreaterThan(mode);
+    expect(selection).toBeGreaterThan(unsafeOutput);
+    expect(fallback).toBeGreaterThan(selection);
+    expect(conditional).toBeGreaterThan(fallback);
+    expect(ensure).toBeGreaterThan(conditional);
+    expect(realPath).toBeGreaterThan(ensure);
+    expect(stage).toBeGreaterThan(realPath);
+  });
+});
 
 type ElectronViteApi = {
   resolveConfig(
@@ -183,6 +209,8 @@ describe('electron-vite main externalization', () => {
 });
 
 /** Inert archive fixtures exercise packaging only; no native code is loaded. */
+const sourceRelinkName = 'geospec-engine-native-source-relink.tar.gz';
+const sourceRelinkBytes = 'inert source/relink fixture';
 const writeNativeAssemblyFixture = async (assemblyRoot: string, platformVersion = '0.0.1'): Promise<void> => {
   const name = '@taucad/geospec-engine-native';
   const commonFiles: Array<[string, string]> = [
@@ -190,6 +218,17 @@ const writeNativeAssemblyFixture = async (assemblyRoot: string, platformVersion 
     ['NOTICE', 'packaging fixture notice'],
     ['licenses/OCCT-LICENSE_LGPL_21.txt', 'packaging fixture OCCT license'],
     ['licenses/OCCT-EXCEPTION.txt', 'packaging fixture OCCT exception'],
+    [
+      'licenses/SOURCE-RELINK.json',
+      JSON.stringify({
+        schema: 'geospec-native-source-relink-asset-v2',
+        artifact: {
+          fileName: sourceRelinkName,
+          bytes: Buffer.byteLength(sourceRelinkBytes),
+          sha256: createHash('sha256').update(sourceRelinkBytes).digest('hex'),
+        },
+      }),
+    ],
   ];
   const packages: Record<string, Array<[string, string]>> = {
     root: [
@@ -224,6 +263,7 @@ const writeNativeAssemblyFixture = async (assemblyRoot: string, platformVersion 
     ],
   };
   await mkdir(join(assemblyRoot, 'tarballs'), { recursive: true });
+  await writeFile(join(assemblyRoot, 'tarballs', sourceRelinkName), sourceRelinkBytes);
   await Promise.all(
     Object.entries(packages).map(async ([target, files]) => {
       const directory = join(assemblyRoot, target);
@@ -277,6 +317,70 @@ describe('GeoSpec native assembly staging', () => {
           );
         }),
       );
+      const resources = join(directory, 'Tau.app/Contents/Resources');
+      await copyGeoSpecSourceRelink(
+        assemblyRoot,
+        await readFile(join(root, 'licenses/SOURCE-RELINK.json'), 'utf8'),
+        resources,
+      );
+      expect(await readFile(join(resources, 'SOURCES', sourceRelinkName), 'utf8')).toBe(sourceRelinkBytes);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['missing', 'corrupt'])('should reject a %s source/relink archive before co-delivery', async (condition) => {
+    const directory = await mkdtemp(join(tmpdir(), 'tau-native-packaging-'));
+    try {
+      const assemblyRoot = join(directory, 'assembly');
+      const modulesRoot = join(directory, 'stage/node_modules');
+      const resources = join(directory, 'Tau.app/Contents/Resources');
+      await writeNativeAssemblyFixture(assemblyRoot);
+      await copyGeoSpecNativeAssembly(assemblyRoot, modulesRoot);
+      const archive = join(assemblyRoot, 'tarballs', sourceRelinkName);
+      if (condition === 'missing') {
+        await rm(archive);
+      } else {
+        const corruptBytes = sourceRelinkBytes.replace('inert', 'alter');
+        expect(Buffer.byteLength(corruptBytes)).toBe(Buffer.byteLength(sourceRelinkBytes));
+        await writeFile(archive, corruptBytes);
+      }
+      await expect(
+        copyGeoSpecSourceRelink(
+          assemblyRoot,
+          await readFile(join(modulesRoot, '@taucad/geospec-engine-native/licenses/SOURCE-RELINK.json'), 'utf8'),
+          resources,
+        ),
+      ).rejects.toThrow(condition === 'missing' ? 'ENOENT' : 'source/relink archive differs');
+      await expect(readFile(join(resources, 'SOURCES', sourceRelinkName))).rejects.toThrow('ENOENT');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('should co-deliver regular archive bytes when the selected source is a symlink', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'tau-native-packaging-'));
+    try {
+      const assemblyRoot = join(directory, 'assembly');
+      const modulesRoot = join(directory, 'stage/node_modules');
+      const resources = join(directory, 'Tau.app/Contents/Resources');
+      await writeNativeAssemblyFixture(assemblyRoot);
+      await copyGeoSpecNativeAssembly(assemblyRoot, modulesRoot);
+      const archive = join(assemblyRoot, 'tarballs', sourceRelinkName);
+      const payload = join(directory, 'source-relink-payload');
+      await rm(archive);
+      await writeFile(payload, sourceRelinkBytes);
+      await symlink(payload, archive);
+      const destination = join(resources, 'SOURCES', sourceRelinkName);
+      await copyGeoSpecSourceRelink(
+        assemblyRoot,
+        await readFile(join(modulesRoot, '@taucad/geospec-engine-native/licenses/SOURCE-RELINK.json'), 'utf8'),
+        resources,
+      );
+      const destinationInfo = await lstat(destination);
+      expect(destinationInfo.isSymbolicLink()).toBe(false);
+      await rm(payload);
+      expect(await readFile(destination, 'utf8')).toBe(sourceRelinkBytes);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

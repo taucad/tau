@@ -8,7 +8,7 @@ import { ClientOnly } from '#components/ui/utils/client-only.js';
 import { ChatTextareaSkeleton } from '#components/chat/chat-textarea-skeleton.js';
 import { useProject } from '#hooks/use-project.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
-import { useChats } from '#hooks/use-chats.js';
+import { useChatRecords } from '#hooks/use-chat-records.js';
 import { useDraftActions } from '#hooks/use-chat.js';
 import { toast } from '#components/ui/sonner.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
@@ -88,7 +88,7 @@ export const ChatTextarea = memo(function ({
   const projectContext = useProject({ enableNoContext: true });
   const { treeService } = useFileManager();
   const imageService = useHeadlessImageService();
-  const { chats } = useChats(projectContext?.projectId ?? '');
+  const { chats } = useChatRecords(projectContext?.projectId ?? '');
   const {
     session,
     execution: { execution },

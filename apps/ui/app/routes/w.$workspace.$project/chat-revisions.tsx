@@ -74,7 +74,7 @@ import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
 import { setAnonymousRevisions, useAnonymousRevisions } from '#lib/revision-actor.js';
 import { clearTurnOutcome, useTurnOutcomes } from '#routes/w.$workspace.$project/revision-outcomes.js';
 import { useRevisionReveal } from '#routes/w.$workspace.$project/revision-reveal.js';
-import { useChats } from '#hooks/use-chats.js';
+import { useChatRecords } from '#hooks/use-chat-records.js';
 import { useOptionalChatWorkspaceAuthority } from '#providers/chat-workspace-authority-provider.js';
 import { projectChatIdFromSearch } from '#utils/project-url.utils.js';
 import { useProject } from '#hooks/use-project.js';
@@ -988,7 +988,7 @@ export function RevisionsPanelBody(): React.JSX.Element {
   const status = useRevisionStatus();
   const commands = useRevisionCommands();
   const projectRole = useProjectRole();
-  const { chats } = useChats(projectId);
+  const { chats } = useChatRecords(projectId);
   /* A29: *Sync* appears when a remote exists, or when the person opens it. */
   const [isConnectOpen, setIsConnectOpen] = useState(false);
   /* N4: the plan, read once here — the region itself stays presentational. */

@@ -11,10 +11,10 @@ import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const getChatsForResource = vi.hoisted(() => vi.fn());
+const getChatRecordsForResource = vi.hoisted(() => vi.fn());
 const getAllChats = vi.hoisted(() => vi.fn());
 vi.mock('#hooks/use-project-manager.js', () => ({
-  useProjectManager: () => ({ getChatsForResource, getAllChats }),
+  useProjectManager: () => ({ getChatRecordsForResource, getAllChats }),
 }));
 
 const { useChatName } = await import('#routes/usage/use-chat-name.js');
@@ -30,7 +30,7 @@ const chat = (id: string, name: string): unknown => ({ id, name, resourceId: 'pr
 
 beforeEach(() => {
   vi.clearAllMocks();
-  getChatsForResource.mockResolvedValue([chat('chat_one', 'Bracket redesign'), chat('chat_two', 'Gear ratios')]);
+  getChatRecordsForResource.mockResolvedValue([chat('chat_one', 'Bracket redesign'), chat('chat_two', 'Gear ratios')]);
 });
 
 describe('useChatName', () => {
@@ -41,7 +41,7 @@ describe('useChatName', () => {
     await waitFor(() => {
       expect(result.current).toBe('Gear ratios');
     });
-    expect(getChatsForResource).toHaveBeenCalledWith('proj_gearbox', { includeDeleted: true });
+    expect(getChatRecordsForResource).toHaveBeenCalledWith('proj_gearbox', { includeDeleted: true });
     expect(getAllChats).not.toHaveBeenCalled();
   });
 
@@ -54,14 +54,14 @@ describe('useChatName', () => {
   });
 
   it('settles on nothing rather than retrying when storage cannot answer', async () => {
-    getChatsForResource.mockRejectedValue(new Error('storage unavailable'));
+    getChatRecordsForResource.mockRejectedValue(new Error('storage unavailable'));
 
     const { result } = renderHook(() => useChatName('proj_gearbox', 'chat_two'), { wrapper });
 
     await waitFor(() => {
       expect(result.current).toBeNull();
     });
-    expect(getChatsForResource).toHaveBeenCalledTimes(1);
+    expect(getChatRecordsForResource).toHaveBeenCalledTimes(1);
   });
 
   it.each([
@@ -71,7 +71,7 @@ describe('useChatName', () => {
     const { result } = renderHook(() => useChatName(projectHint, chatHint), { wrapper });
 
     expect(result.current).toBeNull();
-    expect(getChatsForResource).not.toHaveBeenCalled();
+    expect(getChatRecordsForResource).not.toHaveBeenCalled();
   });
 
   /*

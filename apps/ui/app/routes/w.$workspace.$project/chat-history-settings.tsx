@@ -8,7 +8,7 @@ import {
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
 import { useChatContext } from '#hooks/use-chat.js';
-import { useChats } from '#hooks/use-chats.js';
+import { useChatRecords } from '#hooks/use-chat-records.js';
 import { useProject } from '#hooks/use-project.js';
 import { ChatOptionsMeta } from '#routes/w.$workspace.$project/chat-options-meta.js';
 import { downloadBlob } from '@taucad/utils/file';
@@ -25,7 +25,7 @@ import { toSnakeCase } from '#utils/string.utils.js';
 export function ChatHistorySettings({ onRename }: { readonly onRename: () => void }): React.ReactNode {
   const { chat, activeChatId } = useChatContext();
   const { projectId } = useProject();
-  const { chats } = useChats(projectId);
+  const { chats } = useChatRecords(projectId);
   const chatName = chats.find((c) => c.id === activeChatId)?.name ?? 'Chat Transcript';
 
   const handleExport = useCallback(() => {

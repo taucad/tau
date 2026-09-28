@@ -20,6 +20,7 @@ import type {
 import { resolveStorageRootKey } from '@taucad/filesystem/storage-root-key';
 import { consumableBytes } from '@taucad/fs-bridge';
 import type { CadAgentExecution, Chat } from '@taucad/chat';
+import type { ChatRecord } from '@taucad/chat/schemas';
 import { uint8ArrayToBase64 } from 'uint8array-extras';
 import { generatePrefixedId } from '@taucad/utils/id';
 import type { Remote } from 'comlink';
@@ -269,6 +270,8 @@ type ProjectManagerContextType = {
   softDeleteChat: (chatId: string) => Promise<Chat | undefined>;
   getAllChats: (options?: { includeDeleted?: boolean }) => Promise<Chat[]>;
   getChatsForResource: (resourceId: string, options?: { includeDeleted?: boolean }) => Promise<Chat[]>;
+  getAllChatRecords: (options?: { includeDeleted?: boolean }) => Promise<ChatRecord[]>;
+  getChatRecordsForResource: (resourceId: string, options?: { includeDeleted?: boolean }) => Promise<ChatRecord[]>;
   getChat: (chatId: string) => Promise<Chat | undefined>;
   invalidateProjectedChats: (resourceId: string, chatIds: readonly string[]) => void;
   deleteChat: (chatId: string) => Promise<void>;
@@ -1595,7 +1598,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       await ensureDiscoveryReady();
       const worker = await getReadiedWorker();
       // A manifest/root event can supersede a shared pass while it is in flight.
-      /* eslint-disable no-await-in-loop -- A route must retry sequentially until its discovery epoch is current. */
+      /* oxlint-disable no-await-in-loop -- A route must retry sequentially until its discovery epoch is current. */
       for (;;) {
         const recovery = [...recoveriesRef.current.values()].find((entry) => entry.projectId === projectId);
         if (recovery?.status === 'recovering') {
@@ -1653,7 +1656,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         }
         return { status: 'missing' };
       }
-      /* eslint-enable no-await-in-loop -- Subsequent callbacks use the normal rule. */
+      /* oxlint-enable no-await-in-loop */
     },
     [discoverProjects, ensureDiscoveryReady, ensureProjectLibraryState, getReadiedWorker],
   );
@@ -1755,12 +1758,11 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         workspaceSlug = homeWorkspaceSlug;
       }
 
-      /* The project's own composed view, `versionedOnly`: the duplicate carries
-         the source's authored bytes and none of the control plane, records or
-         cache beside them (charter D11, ZIP follow-up F-2). The fresh manifest
-         is written by the commit, so the source's own `tau.json` is dropped. */
+      /* The source's own composed view supplies authored files and the
+         registry-selected writable records. The fresh manifest is written by
+         the commit, so the source's own `tau.json` is dropped. */
       const sourceFiles = Object.fromEntries(
-        Object.entries(await fileManager.readVersionedProjectFiles(`/projects/${projectId}`))
+        Object.entries(await fileManager.readDuplicateProjectFiles(`/projects/${projectId}`))
           .filter(([path]) => path !== 'tau.json')
           .map(([path, content]) => [path, { content }]),
       );
@@ -2416,6 +2418,17 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     [chatStore],
   );
 
+  const getChatRecordsForResource = useCallback(
+    async (resourceId: string, options?: { includeDeleted?: boolean }): Promise<ChatRecord[]> =>
+      chatStore.getChatRecordsForResource(resourceId, options),
+    [chatStore],
+  );
+
+  const getAllChatRecords = useCallback(
+    async (options?: { includeDeleted?: boolean }): Promise<ChatRecord[]> => chatStore.getAllChatRecords(options),
+    [chatStore],
+  );
+
   const getChat = useCallback(
     async (chatId: string): Promise<Chat | undefined> => {
       return chatStore.getChat(chatId);
@@ -2477,6 +2490,8 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       softDeleteChat,
       getAllChats,
       getChatsForResource,
+      getAllChatRecords,
+      getChatRecordsForResource,
       getChat,
       invalidateProjectedChats,
       deleteChat,
@@ -2522,6 +2537,8 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     softDeleteChat,
     getAllChats,
     getChatsForResource,
+    getAllChatRecords,
+    getChatRecordsForResource,
     getChat,
     invalidateProjectedChats,
     deleteChat,

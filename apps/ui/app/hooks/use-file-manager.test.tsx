@@ -63,6 +63,11 @@ const mockProxyMove = vi.fn<(source: string, target: string) => Promise<unknown>
   size: 0,
   mtimeMs: 0,
 }));
+const mockProxyContents =
+  vi.fn<(path: string, filter?: { versionedOnly?: boolean }) => Promise<Record<string, Uint8Array<ArrayBuffer>>>>();
+const mockProxyExists = vi.fn<(path: string) => Promise<boolean>>();
+const mockProxyReadFile = vi.fn<(path: string) => Promise<Uint8Array<ArrayBuffer>>>();
+const mockProxyDispose = vi.fn();
 const mockWaitForWorkerReady = vi.fn<() => Promise<void>>();
 const mockListProjectManifests = vi.fn<() => Promise<{ roots: readonly unknown[]; entries: readonly unknown[] }>>();
 const mockCreateFileSystemBridge = vi.fn(() => ({
@@ -116,6 +121,9 @@ vi.mock('@taucad/fs-bridge', () => ({
     readdirWithStats: vi.fn(async () => []),
     canDelete: mockProxyCanDelete,
     move: mockProxyMove,
+    contents: mockProxyContents,
+    exists: mockProxyExists,
+    readFile: mockProxyReadFile,
     /* The rooted half of the same proxy: the file services read the project
        through its composed view, and a mutation asks it who owns the path. */
     provenance: vi.fn(async (path: string) =>
@@ -127,7 +135,7 @@ vi.mock('@taucad/fs-bridge', () => ({
     mkdir: mockProxyMkdir,
     rmdir: mockProxyRmdir,
     writeFile: mockProxyWriteFile,
-    dispose: vi.fn(),
+    dispose: mockProxyDispose,
     listen: vi.fn(() => vi.fn()),
   })),
 }));
@@ -594,6 +602,59 @@ describe('FileManagerProvider — client + workspace facades', () => {
     );
     return renderHook(() => useFileManager(), { wrapper });
   };
+
+  it('reads versioned files and only registry-selected writable record subtrees for duplication', async () => {
+    mockProxyExists.mockResolvedValue(true);
+    mockProxyContents.mockImplementation(
+      async (path): Promise<Record<string, Uint8Array<ArrayBuffer>>> =>
+        path === ''
+          ? { 'main.ts': new Uint8Array([1]), 'tau.json': new Uint8Array([2]) }
+          : {
+              'layout.json': new Uint8Array([3]),
+              'views/v-abc12345.json': new Uint8Array([4]),
+              'entries.json': new Uint8Array([5]),
+            },
+    );
+    const { result } = renderProvider();
+    await vi.waitFor(() => {
+      expect(result.current.contentService).toBeDefined();
+    });
+
+    const files = await result.current.readDuplicateProjectFiles('/projects/source');
+
+    expect(files).toEqual({
+      'main.ts': new Uint8Array([1]),
+      'tau.json': new Uint8Array([2]),
+      '.tau/workbench/layout.json': new Uint8Array([3]),
+      '.tau/workbench/views/v-abc12345.json': new Uint8Array([4]),
+      '.tau/workbench/entries.json': new Uint8Array([5]),
+    });
+    expect(mockOpenFileSystemBridge).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ root: '/projects/source', consumer: 'user' }),
+    );
+    expect(mockProxyContents.mock.calls).toEqual([['', { versionedOnly: true }], ['.tau/workbench']]);
+    expect(mockProxyExists.mock.calls).toEqual([['.tau/workbench']]);
+    expect(mockProxyReadFile).not.toHaveBeenCalled();
+    expect(mockProxyDispose).toHaveBeenCalledOnce();
+  });
+
+  it('skips absent writable records without reading chats, control plane or cache', async () => {
+    mockProxyExists.mockResolvedValue(false);
+    mockProxyContents.mockResolvedValue({ 'main.ts': new Uint8Array([1]) });
+    const { result } = renderProvider();
+    await vi.waitFor(() => {
+      expect(result.current.contentService).toBeDefined();
+    });
+
+    await expect(result.current.readDuplicateProjectFiles('/projects/source')).resolves.toEqual({
+      'main.ts': new Uint8Array([1]),
+    });
+    expect(mockProxyContents.mock.calls).toEqual([['', { versionedOnly: true }]]);
+    expect(mockProxyExists.mock.calls).toEqual([['.tau/workbench']]);
+    expect(mockProxyReadFile).not.toHaveBeenCalled();
+    expect(mockProxyDispose).toHaveBeenCalledOnce();
+  });
 
   it('exposes a scope-required storage facade whose reads route through the worker proxy', async () => {
     const { result } = renderProvider();

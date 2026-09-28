@@ -80,8 +80,12 @@ vi.mock('#components/files/file-selector.js', () => ({
   ),
 }));
 
+const chatUsage = vi.hoisted(() => vi.fn());
 vi.mock('#routes/w.$workspace.$project/chat-details-usage.js', () => ({
-  ChatDetailsUsage: () => <section aria-label='Chat usage' />,
+  ChatDetailsUsage: (props: { readonly enabled?: boolean }) => {
+    chatUsage(props);
+    return <section aria-label='Chat usage' />;
+  },
 }));
 
 const { DetailsPanelBody } = await import('#routes/w.$workspace.$project/chat-details.js');
@@ -89,6 +93,11 @@ const { DetailsPanelBody } = await import('#routes/w.$workspace.$project/chat-de
 describe('DetailsPanelBody', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('passes hidden-panel visibility to transcript usage', () => {
+    render(<DetailsPanelBody enableHistory={false} />);
+    expect(chatUsage).toHaveBeenCalledWith({ enabled: false });
   });
 
   it('groups project, storage, and usage information into named sections', () => {

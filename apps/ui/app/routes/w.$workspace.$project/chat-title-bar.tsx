@@ -7,6 +7,8 @@ import { ChatHistorySettings } from '#routes/w.$workspace.$project/chat-history-
 import { useActiveChatNaming } from '#routes/w.$workspace.$project/use-active-chat-naming.js';
 import { useOpenNewChat } from '#routes/w.$workspace.$project/use-open-new-chat.js';
 import { useChats } from '#hooks/use-chats.js';
+import { useChatRecords } from '#hooks/use-chat-records.js';
+import { useChatSelector } from '#hooks/use-chat.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
 import { useProject } from '#hooks/use-project.js';
 import type { KeyCombination } from '#utils/keys.utils.js';
@@ -40,10 +42,13 @@ export function ChatTitleBar({ closeButton }: { readonly closeButton?: ReactNode
   const { editorRef, projectRef, projectId } = useProject();
   const activeChatId = useSelector(editorRef, (state) => state.context.focusedChatId);
   const isProjectLoading = useSelector(projectRef, (state) => state.context.isLoading);
-  const { chats, applyGeneratedChatName, updateChatName, isLoading: isChatsLoading } = useChats(projectId);
+  const { chats, isLoading: isChatsLoading } = useChatRecords(projectId);
+  const { applyGeneratedChatName, updateChatName } = useChats(projectId, { enabled: false });
+  const firstMessage = useChatSelector((state) => state.messages[0]);
   const activeChat = useMemo(() => chats.find((chat) => chat.id === activeChatId), [chats, activeChatId]);
   const isGeneratingName = useActiveChatNaming({
     activeChat,
+    firstMessage,
     isProjectLoading,
     isChatsLoading,
     applyGeneratedChatName,

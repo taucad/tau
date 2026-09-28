@@ -324,7 +324,10 @@ describe('ChatAgentSheet', () => {
       hostId: 'desktop',
       agentId: 'codex',
       model: 'gpt-5.6-sol',
-      config: { reasoning_effort: 'ultra' },
+      config: {
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- ACP retains the adapter's wire option id.
+        reasoning_effort: 'ultra',
+      },
     };
     const placement = codex();
     state.placements = [

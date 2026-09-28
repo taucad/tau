@@ -1,5 +1,5 @@
-import { Link } from 'react-router';
 import type { MetaFunction } from 'react-router';
+import { PageContent } from '#components/layout/page-content.js';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Blocks,
@@ -34,13 +34,6 @@ import type { TauStoreSkill } from '#lib/tau-plugin-store-catalog.js';
 export const meta: MetaFunction = () => [{ title: 'Plugins · Tau' }];
 
 export const handle: Handle = {
-  breadcrumb() {
-    return (
-      <Button asChild variant='ghost'>
-        <Link to='/plugins'>Plugins</Link>
-      </Button>
-    );
-  },
   enableOverflowY: true,
 };
 
@@ -302,7 +295,7 @@ export default function PluginsRoute(): React.JSX.Element {
   );
 
   return (
-    <div className='container mx-auto space-y-6 px-4 pt-5 pb-8'>
+    <PageContent className='space-y-6'>
       <PageHeader
         title='Plugins'
         action={
@@ -363,6 +356,6 @@ export default function PluginsRoute(): React.JSX.Element {
           Add
         </Button>
       </section>
-    </div>
+    </PageContent>
   );
 }

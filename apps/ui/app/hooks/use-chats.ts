@@ -6,7 +6,7 @@ import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 
 // oxlint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- let types be inferred
-export function useChats(resourceId: string, options?: { includeDeleted?: boolean }) {
+export function useChats(resourceId: string, options?: { includeDeleted?: boolean; enabled?: boolean }) {
   const queryClient = useQueryClient();
   const includeDeleted = options?.includeDeleted ?? false;
   const {
@@ -32,7 +32,7 @@ export function useChats(resourceId: string, options?: { includeDeleted?: boolea
     async queryFn() {
       return getChatsForResource(resourceId, { includeDeleted });
     },
-    enabled: !isWorkerLoading && Boolean(resourceId),
+    enabled: options?.enabled !== false && !isWorkerLoading && Boolean(resourceId),
   });
 
   const createChat = useCallback(

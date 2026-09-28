@@ -1366,26 +1366,27 @@ describe('hostControlMessageSchema', () => {
        or the refusal code that says why an agent cannot run — reaches the
        browser exactly as the daemon wrote it. VI9: there is no string form to
        fall back to, so one is a parse failure rather than a silent downgrade. */
+    const thoughtLevel = {
+      type: 'select',
+      id: 'reasoning_effort',
+      name: 'Reasoning effort',
+      category: 'thought_level',
+      currentValue: 'medium',
+      options: [
+        { value: 'medium', name: 'Medium' },
+        { value: 'high', name: 'High' },
+      ],
+    };
     const externalAgents = [
       {
         id: 'codex',
         displayName: 'Codex',
         models: [
-          { id: 'gpt-5.6-sol', name: 'GPT-5.6-Sol' },
+          { id: 'gpt-5.6-sol', name: 'GPT-5.6-Sol', thoughtLevel },
           { id: 'gpt-5.3-codex-spark', name: 'GPT-5.3-Codex-Spark' },
         ],
         defaultModel: 'gpt-5.6-sol',
-        thoughtLevel: {
-          type: 'select',
-          id: 'thought_level',
-          name: 'Thinking',
-          category: 'thought_level',
-          currentValue: 'medium',
-          options: [
-            { value: 'medium', name: 'Medium' },
-            { value: 'high', name: 'High' },
-          ],
-        },
+        thoughtLevel,
       },
       { id: 'claude', displayName: 'Claude Code', models: [], refusal: 'CLI_TOO_OLD' },
     ];

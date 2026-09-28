@@ -30,7 +30,7 @@ import { ChatHistoryEmpty } from '#routes/w.$workspace.$project/chat-history-emp
 import { AtReferenceProvider } from '#components/chat/at-reference-context.js';
 import { ChatAttachmentDirectoriesContext, chatAttachmentDirectories } from '#components/chat/attachment-preview.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
-import { useChats } from '#hooks/use-chats.js';
+import { useChatRecords } from '#hooks/use-chat-records.js';
 import { useProject } from '#hooks/use-project.js';
 import { useSkillsCatalog } from '#hooks/use-skills-catalog.js';
 import { commandInvocation } from '#utils/at-reference.utils.js';
@@ -151,7 +151,7 @@ export const ChatHistory = memo(function (props: {
   const cadChat = useCadChatClient();
   const { treeService } = useFileManager();
   const { projectId } = useProject();
-  const { chats } = useChats(projectId);
+  const { chats } = useChatRecords(projectId);
   const { activeChatId, persistenceActorRef } = useChatContext();
   const skillsCatalog = useSkillsCatalog();
   const agentInvocations = useChatSelector((state) => agentInvocationsKey(state.messages));

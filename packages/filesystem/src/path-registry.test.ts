@@ -97,6 +97,18 @@ describe('path registry', () => {
     expect(classify(path)).toMatchObject({ class: 'records', agentAccess: 'read-only' });
   });
 
+  it.each(['.tau/workbench/layout.json', '.tau/workbench/views/x.json', '.tau/workbench/entries.json'])(
+    'allows agent edits to unversioned UI workbench record %s',
+    (path) => {
+      expect(classify(path)).toStrictEqual({
+        class: 'records',
+        versioned: false,
+        agentAccess: 'read-write',
+        watch: 'ui',
+      });
+    },
+  );
+
   it.each([
     'main.ts',
     'src/parts/bracket.ts',

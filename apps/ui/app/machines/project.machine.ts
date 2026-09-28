@@ -116,13 +116,12 @@ export type ProjectFileActivityOperation =
 /**
  * Whether a filesystem event is activity on the project's own content.
  *
- * The path registry answers it: authored bytes are content, records, caches
- * and the control plane are not. `tau.json` is the one exception — it is
- * authored, but it is the project's metadata, and a rename or a description
+ * The path registry answers it: versioned bytes are content. `tau.json` is
+ * the one exception — it is project metadata, so a rename or description
  * edit is not work on the design.
  *
  * @param projectRelativePath - Path relative to the project root.
- * @returns `true` when the path is authored project content.
+ * @returns `true` when the path is versioned project content.
  */
 export function isProjectContentActivityPath(projectRelativePath: string): boolean {
   const normalized = normalizePath(projectRelativePath).replace(/^\/+/, '');
@@ -130,7 +129,7 @@ export function isProjectContentActivityPath(projectRelativePath: string): boole
     return false;
   }
 
-  return classify(normalized).class === 'authored';
+  return classify(normalized).versioned;
 }
 
 /**

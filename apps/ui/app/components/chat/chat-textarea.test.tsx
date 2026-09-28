@@ -57,7 +57,7 @@ vi.mock('#hooks/use-project.js', () => ({
   }),
 }));
 vi.mock('#hooks/use-file-manager.js', () => ({ useFileManager: () => ({ treeService: undefined }) }));
-vi.mock('#hooks/use-chats.js', () => ({ useChats: () => ({ chats: [] }) }));
+vi.mock('#hooks/use-chat-records.js', () => ({ useChatRecords: () => ({ chats: [] }) }));
 vi.mock('#hooks/use-chat.js', () => ({
   useDraftActions: () => ({ setDraftText: vi.fn(), setEditDraftText: vi.fn() }),
 }));

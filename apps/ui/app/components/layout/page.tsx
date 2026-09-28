@@ -58,6 +58,40 @@ const readSavedScroll = (locationKey: string): number => {
   }
 };
 
+/** Milliseconds a restored offset is held while the page settles, unless the person scrolls first. */
+const restoreHoldDuration = 1000;
+const restoreReleaseEvents = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
+
+/**
+ * Holds `scroller` at `top` while its content settles. The shell remounts on Back
+ * from a wrapper-less route and its sidebar pane sizes itself a frame later, so the
+ * content first lays out at another width and height; the browser's scroll
+ * anchoring then moves the offset. Re-applying on every resize keeps the saved
+ * place; the hold ends on the person's first scroll input or after `restoreHoldDuration`.
+ */
+const holdScrollPosition = (scroller: HTMLElement, top: number, onRelease: () => void): (() => void) => {
+  const observer = new ResizeObserver(() => {
+    scroller.scrollTop = top;
+  });
+  observer.observe(scroller);
+  for (const child of scroller.children) {
+    observer.observe(child);
+  }
+  const release = (): void => {
+    observer.disconnect();
+    clearTimeout(holdTimeout);
+    for (const type of restoreReleaseEvents) {
+      scroller.removeEventListener(type, release);
+    }
+    onRelease();
+  };
+  const holdTimeout = setTimeout(release, restoreHoldDuration);
+  for (const type of restoreReleaseEvents) {
+    scroller.addEventListener(type, release, { passive: true });
+  }
+  return release;
+};
+
 // ponytail: one sessionStorage write per scroll event; batch on `scrollend` if it ever shows in a profile.
 const saveScroll = (locationKey: string, scrollTop: number): void => {
   try {
@@ -226,10 +260,11 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
     enablePageFooter: handles.enablePageFooter.some((match) => match.handle.enablePageFooter === true),
     enablePageHeaderMatches: handles.enablePageHeader,
   }));
-  const { key: locationKey, pathname } = useLocation();
+  const { key: locationKey, pathname, hash } = useLocation();
   const navigationType = useNavigationType();
   const pageScrollRef = useRef<HTMLDivElement>(null);
   const previousPathnameRef = useRef(pathname);
+  const isRestoringRef = useRef(false);
   useLayoutEffect(() => {
     const scroller = pageScrollRef.current;
     const isSamePage = previousPathnameRef.current === pathname;
@@ -245,11 +280,27 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
     }
     // Back and Forward restore the entry's offset; a new entry starts at the top
     // (the scroller outlives the navigation).
-    scroller.scrollTop = navigationType === NavigationType.Pop ? readSavedScroll(locationKey) : 0;
-  }, [enableOverflowY, locationKey, navigationType, pathname]);
+    if (navigationType !== NavigationType.Pop) {
+      scroller.scrollTop = 0;
+      return;
+    }
+    const savedTop = readSavedScroll(locationKey);
+    scroller.scrollTop = savedTop;
+    // The top needs no hold, and a fragment names its own place, which the route scrolls to after this.
+    if (savedTop === 0 || hash !== '') {
+      return;
+    }
+    // Scrolls the settling layout causes are not the person's, so they are not saved.
+    isRestoringRef.current = true;
+    return holdScrollPosition(scroller, savedTop, () => {
+      isRestoringRef.current = false;
+    });
+  }, [enableOverflowY, hash, locationKey, navigationType, pathname]);
   const handlePageScroll = useCallback(
     (event: UIEvent) => {
-      saveScroll(locationKey, event.currentTarget.scrollTop);
+      if (!isRestoringRef.current) {
+        saveScroll(locationKey, event.currentTarget.scrollTop);
+      }
     },
     [locationKey],
   );

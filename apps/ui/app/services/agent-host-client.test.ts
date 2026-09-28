@@ -445,7 +445,31 @@ const workerOf =
 describe('createBrowserAgentHostClient', () => {
   it('exposes only keyed commands and durable reads, with no page run map', async () => {
     const client = createTestClient(workerOf(new FakeResidentWorker()));
-    expect(Object.keys(client).sort()).toEqual(['close', 'hostCommand', 'read', 'subscribe']);
+    expect(Object.keys(client).sort()).toEqual(['close', 'hostCommand', 'read', 'subscribe', 'subscribeLive']);
+    await client.close();
+  });
+
+  it('forwards read-only live deltas without sending another host command', async () => {
+    const worker = new FakeResidentWorker();
+    const client = createTestClient(workerOf(worker));
+    const seen: AgentLiveEvent[] = [];
+    const stop = client.subscribeLive('chat-preview', (_chatId, event) => seen.push(event));
+    const delta: AgentLiveEvent = {
+      type: 'text-delta',
+      chatId: 'chat-preview',
+      runId: 'run-preview',
+      messageId: 'assistant-1',
+      contentIndex: 0,
+      delta: 'Partial',
+    };
+    worker.emitLive(delta);
+    await vi.waitFor(() => {
+      expect(seen).toEqual([delta]);
+    });
+    expect(requestsNamed(worker, 'start')).toHaveLength(0);
+    stop();
+    worker.emitLive({ ...delta, delta: ' later' });
+    expect(seen).toEqual([delta]);
     await client.close();
   });
 

@@ -56,4 +56,12 @@ Steps ==
 GraphNext == Steps /\ m2' = M2View'
 
 GraphSpec == GraphInit /\ [][GraphNext]_<<L!vars, act, m2>>
+
+\* The run and every writer request have settled, and the chat lock is released.
+Quiescent ==
+    /\ lock = L!None /\ run.s # "live"
+    /\ \A w \in Workers :
+         ~want[w] /\ drives[w] = 0 /\ ~queued[w] /\ pending[w] = 0
+         /\ lead[w] = 0 /\ ~reading[w] /\ ~noticeDue[w]
+    /\ \A k \in Keys : status[k] # "waiting"
 ====

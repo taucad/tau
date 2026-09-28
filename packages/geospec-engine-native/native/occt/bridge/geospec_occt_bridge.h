@@ -583,10 +583,10 @@ int geospec_occt_selected_continuous_domain(
     geospec_occt_selected_continuous_domain_result* output,
     geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;
 
-// STEP admissions may run concurrently on different threads; the bytes are
-// borrowed until the call returns. A document is thread-confined: its const
-// getters fill lazy slots and transfer buffers, so only one thread at a time
-// may use it (the Rust owner is !Send and !Sync).
+// Concurrent callers are accepted; OCCT STEP admission is serialized inside
+// the bridge. Bytes are borrowed until the call returns. A document is
+// thread-confined: its const getters fill lazy slots and transfer buffers,
+// so only one thread at a time may use it (the Rust owner is !Send and !Sync).
 int geospec_occt_open_step(const uint8_t* bytes, size_t length,
                            geospec_occt_document** out_document,
                            geospec_occt_string* error) GEOSPEC_OCCT_NOEXCEPT;

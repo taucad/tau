@@ -231,6 +231,7 @@ export type GatewayTraceState = {
   readonly now: number;
   readonly row: GatewayTraceRow;
   readonly held: number;
+  readonly supplier: 'none' | 'generating' | 'completed' | 'failed' | 'cut';
   readonly voided: boolean;
   readonly claim?: { readonly gen: number; readonly t: number };
 };
@@ -278,11 +279,29 @@ export const replayGatewayTraceStep = (state: GatewayTraceState, action: string)
     }
     case 'ApiDispatch': {
       return row.cust === 'pending' && row.disp === 'intent_recorded' && row.due > state.now
-        ? [{ ...state, row: { ...row, disp: 'accepted' } }]
+        ? [{ ...state, row: { ...row, disp: 'accepted' }, supplier: 'generating' }]
         : unchanged;
     }
+    case 'SupplierEnd': {
+      return [
+        { ...state, supplier: 'completed' },
+        { ...state, supplier: 'failed' },
+      ];
+    }
     case 'ApiObserve': {
-      return [{ ...state, row: { ...row, ev: [...new Set([...row.ev, 'unknown'])].sort() } }];
+      const evidence = state.supplier === 'completed' ? 'final' : 'unknown';
+      return [
+        {
+          ...state,
+          supplier: state.supplier === 'generating' ? 'cut' : state.supplier,
+          row: { ...row, ev: [...new Set([...row.ev, evidence])].sort() },
+        },
+      ];
+    }
+    case 'ApiFinish': {
+      return row.cust === 'pending' && row.gen === 1 && row.ev.includes('final')
+        ? [terminal('settled', 'final', false)]
+        : unchanged;
     }
     case 'SweepClaim': {
       return [state.now - 1, state.now]
@@ -320,8 +339,7 @@ export const replayGatewayTraceStep = (state: GatewayTraceState, action: string)
     }
     case 'HostPrepare':
     case 'HostSend':
-    case 'HostCrash':
-    case 'ApiFinish': {
+    case 'HostCrash': {
       return unchanged;
     }
     default: {

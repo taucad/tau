@@ -9,7 +9,6 @@ import {
   readPageSemantics,
   seriousAxeViolations,
   setTextZoom,
-  undersizedTargets,
 } from '#support/page-audit.js';
 
 /*
@@ -59,12 +58,11 @@ describe.each(routes)('%s', (route) => {
       const semantics = await readPageSemantics();
       const axeFindings = await seriousAxeViolations();
       const rings = await measureFilledButtonFocusRings();
-      const smallTargets = await undersizedTargets();
       const hover = await hoverContrastViolations();
       const slug = `${route.replaceAll('/', '')}-${String(viewport.width)}`;
       await target.writeArtifact(
         `route-accessibility/${slug}.json`,
-        `${JSON.stringify({ route, viewport, semantics, axeFindings, rings, smallTargets, hover }, null, 2)}\n`,
+        `${JSON.stringify({ route, viewport, semantics, axeFindings, rings, hover }, null, 2)}\n`,
       );
 
       expect.soft(semantics.headingOnes, 'exactly one h1').toHaveLength(1);
@@ -79,13 +77,13 @@ describe.each(routes)('%s', (route) => {
           .soft(semantics.firstListItemTop, 'first list item within the first-row budget')
           .toBeLessThanOrEqual(firstRowBudget);
       }
+      // Includes `target-size` (wcag22aa), which applies WCAG 2.5.8's spacing exception.
       expect.soft(axeFindings, 'serious or critical axe violations').toEqual([]);
       for (const ring of rings) {
         expect.soft(ring.focusVisible, `${ring.name}: focus-visible`).toBe(true);
         expect.soft(ring.outline, `${ring.name}: a painted outline`).toMatch(/^solid [1-9]/u);
         expect.soft(ring.contrast, `${ring.name}: ring against its fill`).toBeGreaterThanOrEqual(3);
       }
-      expect.soft(smallTargets, 'interactive targets under 24 px').toEqual([]);
       expect.soft(hover.findings, `hover text contrast over ${String(hover.tested)} controls`).toEqual([]);
     });
   }

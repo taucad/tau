@@ -391,7 +391,7 @@ Use `lucide-react` icons for interface glyphs; they take the token stylesheet's 
 | `focus-outline.test.ts` regex over `apps/ui/app`                                                                                                                                                                                                                                                                          | unit                               | 8                  |
 | `apps/ui-e2e/src/route-accessibility.spec.ts`: axe over `/community`, `/projects`, `/files`, `/plugins`, `/usage` at 1280×720 and 390×844, plus one `h1`, non-default title, first-`listitem` budget, filled-button ring ≥ 3:1, hover text ≥ 4.5:1, targets ≥ 24 px, no horizontal overflow at 320 px and 200 % text zoom | e2e                                | 1, 4, 7, 9, 13, 14 |
 
-Lint rules scope to `apps/ui/app/**/*.tsx` and `packages/ui/src/**/*.tsx`, excluding tests and `[__e2e]` routes, and register per `create-lint-rule`. These gates land with the [community page refresh blueprint](../research/community-page-refresh-blueprint.md) (W3.2–W3.5); until a rule's gate lands, rendered and code review enforce it.
+Lint rules scope to `apps/ui/app/**/*.tsx` and `packages/ui/src/**/*.tsx`, excluding tests and `[__e2e]` routes, and register per `create-lint-rule`. These gates land with the [community page refresh blueprint](../research/community-page-refresh-blueprint.md) (W3.2–W3.5); until the route accessibility sweep (W3.5) lands, rendered and code review enforce its rules.
 
 ## Anti-Patterns
 

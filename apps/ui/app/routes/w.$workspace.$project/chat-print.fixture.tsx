@@ -230,6 +230,7 @@ export function ParametersFake({
           type='checkbox'
           role='switch'
           aria-label={`Toggle for ${formatDisplayLabel(key)}`}
+          aria-checked={shown[key] === true}
           checked={shown[key] === true}
           readOnly
         />

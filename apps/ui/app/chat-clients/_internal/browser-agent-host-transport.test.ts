@@ -34,14 +34,17 @@ describe('BrowserPlacementChatTransport', () => {
     );
   });
 
-  it('should return no reconnect stream without consuming an armed watch', async () => {
+  it('should hand the armed projection watch to one SDK resume', async () => {
     const transport = new BrowserPlacementChatTransport<MyUIMessage>();
     const stream = watch();
 
     transport.arm(stream);
 
+    expect(await transport.reconnectToStream({ chatId: 'chat_watch' })).toBe(stream);
     await expect(transport.reconnectToStream({ chatId: 'chat_watch' })).resolves.toBeNull();
-    expect(await transport.sendMessages(sendOptions)).toBe(stream);
+    await expect(transport.sendMessages(sendOptions)).rejects.toThrow(
+      'The chat transport was not armed with a run watch.',
+    );
   });
 
   it('should disarm only the matching unconsumed watch', async () => {

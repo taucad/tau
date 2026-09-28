@@ -57,8 +57,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
 }
 
-export const shouldRevalidate: ShouldRevalidateFunction = ({ nextUrl, defaultShouldRevalidate }) =>
-  isOfflineShellPath(nextUrl.pathname) ? false : defaultShouldRevalidate;
+/**
+ * The root loader reads request headers, cookies and the pathname only, so a navigation
+ * that changes nothing but the query string (a gallery search, a filter) cannot change its
+ * result. Explicit revalidation and submissions keep the default.
+ */
+export const shouldRevalidate: ShouldRevalidateFunction = ({
+  currentUrl,
+  nextUrl,
+  formMethod,
+  defaultShouldRevalidate,
+}) => {
+  if (isOfflineShellPath(nextUrl.pathname)) {
+    return false;
+  }
+  const isQueryOnlyNavigation =
+    formMethod === undefined && currentUrl.pathname === nextUrl.pathname && currentUrl.search !== nextUrl.search;
+  return isQueryOnlyNavigation ? false : defaultShouldRevalidate;
+};
 
 export function Layout({ children }: { readonly children: ReactNode }): React.JSX.Element {
   return (

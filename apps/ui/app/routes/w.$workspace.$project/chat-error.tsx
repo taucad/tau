@@ -4,7 +4,7 @@ import { Bot, ChevronRight, CircleAlert, RefreshCcw, WifiOff } from 'lucide-reac
 import { errorCategory } from '@taucad/types/constants';
 import type { ChatError as NormalizedChatError } from '@taucad/types';
 import { Button } from '@taucad/ui/components/button';
-import { useChatActions, useChatRetrySnapshot, useChatSelector } from '#hooks/use-chat.js';
+import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { CodeViewer } from '#components/code/code-viewer.js';
 import { MarkdownViewer } from '#components/markdown/markdown-viewer.js';
@@ -293,7 +293,6 @@ function codedErrorCard({
 
 export const ChatError = memo(function ({ className }: { readonly className?: string }): React.ReactNode {
   const [genericDetailsOpen, setGenericDetailsOpen] = useState(false);
-  const { retryAttempt } = useChatRetrySnapshot();
   // Derive parsed error inside selector - prefer runtime error, fallback to persisted
   const parsedError = useChatSelector((state): NormalizedChatError | undefined => {
     if (state.error) {
@@ -304,16 +303,6 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
   });
   const { regenerate } = useChatActions();
   const { openNewChat, isReady: canOpenNewChat } = useOpenNewChat();
-
-  // R7: hide the banner during transparent auto-retry; the reconnecting affordance
-  // is `ChatMessagePlanning`, not this component. The early return MUST sit below
-  // every hook call -- crossing the hook list with a conditional return triggers
-  // React error #300 ("Rendered fewer hooks than expected") on the
-  // retryAttempt 0 -> N transition, which the FloatingPanel boundary then
-  // surfaces as the "Chat Unavailable" screen.
-  if (retryAttempt > 0) {
-    return null;
-  }
 
   if (!parsedError) {
     return null;

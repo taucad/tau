@@ -21,7 +21,6 @@ const chatState = vi.hoisted(() => ({
   error: undefined as Error | undefined,
   persistedError: undefined as unknown,
 }));
-const retry = vi.hoisted(() => ({ retryAttempt: 0, retryMaxAttempts: 5 }));
 const continueChat = vi.hoisted(() => vi.fn());
 const openPanel = vi.hoisted(() => vi.fn());
 const restore = vi.hoisted(() => vi.fn());
@@ -31,7 +30,6 @@ const chatLog = vi.hoisted(() => ({ projection: undefined as unknown, listeners:
 vi.mock('#hooks/use-chat.js', () => ({
   useChatContext: () => ({ activeChatId: 'chat-1' }),
   useChatSelector: (selector: (state: typeof chatState) => unknown) => selector(chatState),
-  useChatRetrySnapshot: () => retry,
   useChatActions: () => ({ continueChat }),
 }));
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'p' }) }));
@@ -143,7 +141,6 @@ beforeEach(() => {
   chatState.status = 'ready';
   chatState.error = undefined;
   chatState.persistedError = undefined;
-  retry.retryAttempt = 0;
   chatLog.projection = undefined;
   chatLog.listeners.clear();
   setRun(undefined);
@@ -299,7 +296,6 @@ describe('ChatRevisionMarker', () => {
     expect(screen.getByRole('status').textContent).toBe('Starting from Rev 4 · Waiting for you');
 
     setRun('reconnecting');
-    retry.retryAttempt = 1;
     /* A replay after the reconnect has not reached the interrupt yet. */
     setLog(placed());
     rerender(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);

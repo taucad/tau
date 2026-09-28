@@ -1,9 +1,4 @@
-/**
- * R7: Hide the chat error banner while the persistence machine is between
- * transparent auto-retry attempts (`retryAttempt > 0`).
- */
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import type { MockInstance } from 'vitest';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
@@ -22,8 +17,6 @@ const continueChat = vi.fn();
 const regenerate = vi.fn();
 const resumableFailureOverrides = vi.hoisted(() => new Set<string>());
 
-let mockRetryAttempt = 0;
-
 const googleInvalidArgumentBody = [
   {
     error: {
@@ -40,7 +33,6 @@ const googleInvalidArgumentByteList = [...new TextEncoder().encode(JSON.stringif
 
 vi.mock('#hooks/use-chat.js', () => ({
   useChatActions: () => ({ continueChat, regenerate }),
-  useChatRetrySnapshot: () => ({ retryAttempt: mockRetryAttempt, retryMaxAttempts: 5 }),
   useChatSelector: vi.fn(),
 }));
 
@@ -95,7 +87,6 @@ const persisted = (error: ChatErrorPayload): void => {
 
 describe('ChatError', () => {
   beforeEach(() => {
-    mockRetryAttempt = 0;
     resumableFailureOverrides.clear();
     vi.clearAllMocks();
   });
@@ -513,7 +504,7 @@ describe('ChatError', () => {
     expect(screen.getByText('codex stopped unexpectedly: Internal error')).toBeInTheDocument();
   });
 
-  it('T23: renders null when retryAttempt > 0 even with a persisted resumable error', () => {
+  it('renders the network banner for a dropped request', () => {
     const networkError: ChatErrorPayload = {
       category: errorCategory.network,
       title: 'Connection Error',
@@ -525,43 +516,6 @@ describe('ChatError', () => {
         persistedError: networkError,
       } as unknown as CombinedChatState),
     );
-    mockRetryAttempt = 2;
-
-    const { container } = render(<ChatErrorBanner />);
-    expect(container.firstChild).toBeNull();
-  });
-
-  it('T23: renders null for generic category when retrying', () => {
-    const genericError: ChatErrorPayload = {
-      category: errorCategory.generic,
-      title: 'Error',
-      message: 'network error',
-    };
-    vi.mocked(useChatSelector).mockImplementation((selector) =>
-      selector({
-        error: undefined,
-        persistedError: genericError,
-      } as unknown as CombinedChatState),
-    );
-    mockRetryAttempt = 1;
-
-    const { container } = render(<ChatErrorBanner />);
-    expect(container.firstChild).toBeNull();
-  });
-
-  it('renders the network banner when retryAttempt is 0', () => {
-    const networkError: ChatErrorPayload = {
-      category: errorCategory.network,
-      title: 'Connection Error',
-      message: 'Unable to connect',
-    };
-    vi.mocked(useChatSelector).mockImplementation((selector) =>
-      selector({
-        error: undefined,
-        persistedError: networkError,
-      } as unknown as CombinedChatState),
-    );
-    mockRetryAttempt = 0;
 
     render(<ChatErrorBanner />);
     expect(screen.getByText('Unable to reach Tau')).toBeInTheDocument();
@@ -580,7 +534,6 @@ describe('ChatError', () => {
         persistedError: serverError,
       } as unknown as CombinedChatState),
     );
-    mockRetryAttempt = 0;
 
     render(<ChatErrorBanner />);
     await user.click(screen.getByRole('button', { name: /try again/i }));
@@ -604,7 +557,6 @@ describe('ChatError', () => {
         persistedError: genericError,
       } as unknown as CombinedChatState),
     );
-    mockRetryAttempt = 0;
 
     render(<ChatErrorBanner />);
 
@@ -629,7 +581,6 @@ describe('ChatError', () => {
         persistedError: unknownError,
       } as unknown as CombinedChatState),
     );
-    mockRetryAttempt = 0;
 
     render(<ChatErrorBanner />);
 
@@ -659,7 +610,6 @@ describe('ChatError', () => {
         } satisfies ChatErrorPayload,
       } as unknown as CombinedChatState),
     );
-    mockRetryAttempt = 0;
 
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(<ChatErrorBanner />, {
@@ -696,7 +646,6 @@ describe('ChatError', () => {
       snapshots.push([value, selector(state)]);
       return value;
     });
-    mockRetryAttempt = 0;
 
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(<ChatErrorBanner />, {
@@ -730,7 +679,6 @@ describe('ChatError', () => {
         persistedError: creditError,
       } as unknown as CombinedChatState),
     );
-    mockRetryAttempt = 0;
 
     /* `ChatErrorCredits` reads live entitlements to choose its top-up route. */
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -762,75 +710,10 @@ describe('ChatError', () => {
         persistedError: undefined,
       } as unknown as CombinedChatState),
     );
-    mockRetryAttempt = 0;
 
     render(<ChatErrorBanner />);
 
     expect(screen.getByText('Request contains an invalid argument.')).toBeInTheDocument();
     expect(screen.queryByText(/91,123,10/)).not.toBeInTheDocument();
-  });
-
-  describe('hook-order stability across retryAttempt transitions', () => {
-    /**
-     * Regression for React error #300 ("Rendered fewer hooks than expected").
-     *
-     * Earlier versions of this component placed the `if (retryAttempt > 0) return null;`
-     * gate ABOVE the `useChatSelector` / `useChatActions` calls, so a transient
-     * 0 -> N -> 0 retry burst on the SAME fiber changed the hook count between
-     * renders and the surrounding `<FloatingPanel>` boundary surfaced the
-     * "Chat Unavailable" screen. This test re-renders the same fiber across
-     * the transition and asserts React stays silent on hook diffs.
-     */
-    let consoleErrorSpy: MockInstance<typeof console.error>;
-
-    beforeEach(() => {
-      consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {
-        return undefined;
-      });
-    });
-
-    afterEach(() => {
-      consoleErrorSpy.mockRestore();
-    });
-
-    it('survives retryAttempt 0 -> 2 -> 0 on the same fiber without a hook-order warning', () => {
-      const networkError: ChatErrorPayload = {
-        category: errorCategory.network,
-        title: 'Connection Error',
-        message: 'Unable to connect',
-      };
-      vi.mocked(useChatSelector).mockImplementation((selector) =>
-        selector({
-          error: undefined,
-          persistedError: networkError,
-        } as unknown as CombinedChatState),
-      );
-
-      mockRetryAttempt = 0;
-      const { rerender, container } = render(<ChatErrorBanner key='same-fiber' />);
-      expect(screen.getByText('Unable to reach Tau')).toBeInTheDocument();
-
-      mockRetryAttempt = 2;
-      rerender(<ChatErrorBanner key='same-fiber' className='force-rerender' />);
-      expect(container.firstChild).toBeNull();
-
-      mockRetryAttempt = 0;
-      rerender(<ChatErrorBanner key='same-fiber' />);
-      expect(screen.getByText('Unable to reach Tau')).toBeInTheDocument();
-
-      const calls = consoleErrorSpy.mock.calls as ReadonlyArray<readonly unknown[]>;
-      const hookErrors = calls.filter((call) =>
-        call.some(
-          (argument) =>
-            typeof argument === 'string' &&
-            (argument.includes('Rendered fewer hooks than expected') ||
-              argument.includes('Rendered more hooks than expected') ||
-              argument.includes('change in the order of Hooks') ||
-              argument.includes('Minified React error #300') ||
-              argument.includes('Minified React error #310')),
-        ),
-      );
-      expect(hookErrors).toEqual([]);
-    });
   });
 });

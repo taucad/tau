@@ -17,7 +17,6 @@ const regenerate = vi.fn();
 
 vi.mock('#hooks/use-chat.js', () => ({
   useChatActions: () => ({ continueChat, regenerate }),
-  useChatRetrySnapshot: () => ({ retryAttempt: 0, retryMaxAttempts: 5 }),
   useChatSelector: vi.fn(),
 }));
 vi.mock('#routes/w.$workspace.$project/use-open-new-chat.js', () => ({

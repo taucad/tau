@@ -4237,7 +4237,7 @@ describe('ChatSessionStore', () => {
   });
 
   describe('tool cause attribution (TT3)', () => {
-    it('does not persist on disconnect retry; completion persists after streamResumed + messages', async () => {
+    it('finalizes and persists in-flight tools on disconnect without auto-resuming', async () => {
       vi.useFakeTimers();
       try {
         const chatId = 'chat_tt3_retry';
@@ -4279,46 +4279,21 @@ describe('ChatSessionStore', () => {
           isDisconnect: true,
         });
 
-        expect(session.persistenceActorRef.getSnapshot().matches({ requestLifecycle: 'retrying' })).toBe(true);
-        expect((fake.messages[0]!.parts[0] as { state: string }).state).toBe('input-streaming');
-        expect(deps.patchChat).not.toHaveBeenCalled();
-
-        const output = {
-          message: '',
-          diffStats: {
-            linesAdded: 1,
-            linesRemoved: 0,
-            originalContent: '',
-            modifiedContent: '// ok',
-          },
-        };
-
-        fake.messages = [
-          {
-            ...fake.messages[0]!,
-            parts: [
-              {
-                type: 'tool-create_file',
-                toolCallId: 'tc_tt3',
-                state: 'output-available',
-                input: { targetFile: 'z.scad', content: '//' },
-                output,
-              },
-            ],
-          },
-        ];
-
-        session.persistenceActorRef.send({ type: 'streamResumed' });
-        fake.emitMessagesChange();
+        expect(session.persistenceActorRef.getSnapshot().matches({ requestLifecycle: 'idle' })).toBe(true);
+        expect(fake.messages[0]?.parts[0]).toMatchObject({
+          type: 'tool-create_file',
+          toolCallId: 'tc_tt3',
+          state: 'output-error',
+        });
 
         await vi.advanceTimersByTimeAsync(100);
         await vi.runOnlyPendingTimersAsync();
 
         expect(deps.patchChat).toHaveBeenCalled();
         const persisted = deps.patchChat.mock.calls.at(-1)![2] as MyUIMessage[];
-        const persistedPart = persisted.at(-1)?.parts[0] as { state: string; output: typeof output };
-        expect(persistedPart.state).toBe('output-available');
-        expect(persistedPart.output).toEqual(output);
+        const persistedPart = persisted.at(-1)?.parts[0];
+        expect(persistedPart).toMatchObject({ type: 'tool-create_file', toolCallId: 'tc_tt3', state: 'output-error' });
+        expect(fake.resumeStream).not.toHaveBeenCalled();
 
         store.release(chatId);
       } finally {

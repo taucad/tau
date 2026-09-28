@@ -328,6 +328,90 @@ describe('createGeoSpecWorkerRpcClient', () => {
     }
   });
 
+  it('should abort the matching worker run when its outer request is cancelled', async () => {
+    const fileManagerWorker = new FakeFileManagerWorker();
+    const geoSpecWorker = new FakeGeoSpecWorker();
+    geoSpecWorker.autoResolveRuns = false;
+    const client = createGeoSpecWorkerRpcClient({
+      openFileSystemBridge: createOpenFileSystemBridge(fileManagerWorker),
+      runtimeConfig,
+      createWorker: () => geoSpecWorker as unknown as Worker,
+      abortGrace: 50,
+    });
+    const controller = new AbortController();
+    const resultPromise = client.runTests({ files: ['slow.geospec.ts'] }, { signal: controller.signal });
+    try {
+      await vi.waitFor(() => {
+        expect(geoSpecWorker.postMessage.mock.calls.some((call) => call[0].type === 'run')).toBe(true);
+      });
+      const [runMessage] = geoSpecPostMessageCall(geoSpecWorker, 1);
+      expect(runMessage.type).toBe('run');
+      controller.abort();
+      const [abortMessage] = geoSpecPostMessageCall(geoSpecWorker, 2);
+      expect(abortMessage).toMatchObject({ type: 'abort', targetRequestId: runMessage.requestId });
+      await expect(resultPromise).resolves.toMatchObject({ success: false });
+      expect(geoSpecWorker.terminate).toHaveBeenCalledOnce();
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('should return cancellation when the worker finishes after the outer request aborts', async () => {
+    const fileManagerWorker = new FakeFileManagerWorker();
+    const geoSpecWorker = new FakeGeoSpecWorker();
+    geoSpecWorker.autoResolveRuns = false;
+    const client = createGeoSpecWorkerRpcClient({
+      openFileSystemBridge: createOpenFileSystemBridge(fileManagerWorker),
+      runtimeConfig,
+      createWorker: () => geoSpecWorker as unknown as Worker,
+      abortGrace: 50,
+    });
+    const controller = new AbortController();
+    const resultPromise = client.runTests({ files: ['slow.geospec.ts'] }, { signal: controller.signal });
+    try {
+      await vi.waitFor(() => {
+        expect(geoSpecWorker.postMessage.mock.calls.some((call) => call[0].type === 'run')).toBe(true);
+      });
+      const [runMessage] = geoSpecPostMessageCall(geoSpecWorker, 1);
+      expect(runMessage.type).toBe('run');
+      controller.abort();
+      geoSpecWorker.emitMessage(successResult(runMessage.requestId));
+      await expect(resultPromise).resolves.toEqual({
+        success: false,
+        errorCode: 'UNKNOWN',
+        message: 'GeoSpec request cancelled.',
+      });
+      expect(geoSpecWorker.terminate).not.toHaveBeenCalled();
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('should preserve a worker result that settled before the outer request aborts', async () => {
+    const fileManagerWorker = new FakeFileManagerWorker();
+    const geoSpecWorker = new FakeGeoSpecWorker();
+    const client = createGeoSpecWorkerRpcClient({
+      openFileSystemBridge: createOpenFileSystemBridge(fileManagerWorker),
+      runtimeConfig,
+      createWorker: () => geoSpecWorker as unknown as Worker,
+    });
+    const controller = new AbortController();
+    try {
+      await expect(
+        client.runTests({ files: ['main.geospec.ts'] }, { signal: controller.signal }),
+      ).resolves.toMatchObject({
+        success: true,
+        passed: 1,
+      });
+      controller.abort();
+      expect(geoSpecWorker.postMessage.mock.calls.some((call) => call[0].type === 'abort')).toBe(false);
+      expect(geoSpecWorker.terminate).not.toHaveBeenCalled();
+    } finally {
+      await client.close();
+    }
+    expect(geoSpecPostMessageCall(geoSpecWorker, 2)[0].type).toBe('close');
+  });
+
   it('should recreate the worker after a crash', async () => {
     const fileManagerWorker = new FakeFileManagerWorker();
     const firstWorker = new FakeGeoSpecWorker();

@@ -42,9 +42,9 @@ Do not turn a partial call into a new call merely to make validation pass.
 
 ### 4. Finalize only the interrupted UI tail
 
-`finalizeInterruptedToolParts` in `apps/ui/app/utils/chat.utils.ts` may settle in-progress parts only on the interrupted assistant tail. It must consult `RpcLedger` before assigning an error: if execution already produced an output, preserve that settled outcome.
+`finalizeInterruptedToolParts` in `apps/ui/app/utils/chat.utils.ts` may settle in-progress parts only on the interrupted assistant tail. For a live UI tail, consult `RpcLedger` before assigning an error; for a transcript rebuilt from a terminal host log, use that log's input and output rows as authority. Preserve an output already recorded by either source.
 
-Map stop, preemption, disconnect, and failure causes to their explicit structured termination code. Persist the finalized tail through `ChatSessionStore` before accepting a follow-up that depends on it.
+Map stop, preemption, disconnect, and failure causes to their explicit structured termination code. Derive the finalized display tail from the host log; never persist a second UI-message transcript. A follow-up that depends on a tool outcome waits for the host's durable recovery or settlement.
 
 ### 5. Treat the host event log as durable authority
 
@@ -88,6 +88,7 @@ A Tau host's tool that asks for approval pauses the run on a native `interrupt.r
 - UI lifecycle helpers: `libs/chat/src/utils/tool-part.utils.ts`
 - Tail finalization: `apps/ui/app/utils/chat.utils.ts`
 - Settled-call ledger: `apps/ui/app/services/rpc-ledger.ts`
-- UI persistence: `apps/ui/app/services/chat-session-store.ts`
+- UI transcript projection: `apps/ui/app/machines/chat-projection.logic.ts`
+- Refused-command persistence: `apps/ui/app/services/chat-session-store.ts`
 - Portable recovery: `packages/agent-host/src/harness/interrupt-recovery.ts`
 - Resume orchestration: `packages/agent-host/src/host/tau-agent-host.ts`

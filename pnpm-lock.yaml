@@ -4664,6 +4664,18 @@ importers:
         specifier: 'catalog:'
         version: 7.1.9
 
+  packages/workbench:
+    devDependencies:
+      '@taucad/camera':
+        specifier: workspace:*
+        version: link:../camera
+      '@taucad/utils':
+        specifier: workspace:*
+        version: link:../../libs/utils
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
+
   scripts:
     dependencies:
       '@inkjs/ui':

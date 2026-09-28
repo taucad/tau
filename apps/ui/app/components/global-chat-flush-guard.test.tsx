@@ -111,9 +111,8 @@ function spyOnActorSends(session: AcquiredSession): {
   persistenceSend: Mock<AcquiredSession['persistenceActorRef']['send']>;
   draftSend: Mock<AcquiredSession['draftActorRef']['send']>;
 } {
-  // Replacing `.send` with a mock is the cleanest way to assert the guard's
-  // fan-out without depending on machine internals — the guard's contract
-  // is that it `.send({ type: 'flushNow' })` to every actor.
+  // The composer flushes through the draft actor; the lean persistence actor
+  // must receive no obsolete message flush event.
   const persistenceSend = spyOnSend(session.persistenceActorRef, () => undefined);
   const draftSend = spyOnSend(session.draftActorRef, () => undefined);
   return { persistenceSend, draftSend };
@@ -146,11 +145,11 @@ describe('GlobalChatFlushGuard', () => {
 
     dispatchVisibilityHidden();
 
-    expect(persistenceSend).toHaveBeenCalledWith({ type: 'flushNow' });
+    expect(persistenceSend).not.toHaveBeenCalledWith({ type: 'flushNow' });
     expect(draftSend).toHaveBeenCalledWith({ type: 'flushNow' });
   });
 
-  it('fans out flushNow to every live chat session', () => {
+  it('fans out composer flushNow to every live chat session', () => {
     const { store } = renderWithStore();
     const sessions = ['chat_a', 'chat_b', 'chat_c'].map((id) => {
       const session = store.acquire(id, 'project_test');
@@ -160,7 +159,7 @@ describe('GlobalChatFlushGuard', () => {
     dispatchVisibilityHidden();
 
     for (const spies of sessions) {
-      expect(spies.persistenceSend).toHaveBeenCalledWith({ type: 'flushNow' });
+      expect(spies.persistenceSend).not.toHaveBeenCalledWith({ type: 'flushNow' });
       expect(spies.draftSend).toHaveBeenCalledWith({ type: 'flushNow' });
     }
   });
@@ -176,7 +175,7 @@ describe('GlobalChatFlushGuard', () => {
 
     dispatchVisibilityHidden();
 
-    expect(a.persistenceSend).toHaveBeenCalledWith({ type: 'flushNow' });
+    expect(a.persistenceSend).not.toHaveBeenCalledWith({ type: 'flushNow' });
     expect(a.draftSend).toHaveBeenCalledWith({ type: 'flushNow' });
     expect(b.persistenceSend).not.toHaveBeenCalledWith({ type: 'flushNow' });
     expect(b.draftSend).not.toHaveBeenCalledWith({ type: 'flushNow' });

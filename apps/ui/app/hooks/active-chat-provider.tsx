@@ -45,6 +45,7 @@ import { resizeImageActor } from '#hooks/resize-image.actor.js';
 import { useDraftImageErrorToast } from '#hooks/use-draft-image-error-toast.js';
 import { inspect } from '#machines/inspector.js';
 import { useChatSession, useChatSessionSnapshot } from '#hooks/use-chat-session.js';
+import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ChatSession } from '#services/chat-session-store.js';
 import type { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
 import { useModels } from '#hooks/use-models.js';
@@ -708,13 +709,13 @@ function useSessionAgentActivity(session: ChatSession): ChatAgentActivity {
 }
 
 /**
- * Stable `stop()` callback that dispatches `stopRequest` to the
- * persistence machine for the active session.
+ * Stable `stop()` callback for the active session's projected host run.
  */
 function useSessionStop(session: ChatSession): () => void {
+  const store = useChatSessionStore();
   return useCallback(() => {
-    session.persistenceActorRef.send({ type: 'stopRequest' });
-  }, [session.persistenceActorRef]);
+    store.stopRun(session.chatId);
+  }, [session.chatId, store]);
 }
 
 /**

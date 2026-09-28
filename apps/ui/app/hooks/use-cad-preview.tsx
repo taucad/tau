@@ -8,7 +8,7 @@ import type { JSONSchema7 } from '@taucad/json-schema';
 import type { ParameterManifest } from '@taucad/parameters';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import type { MachineActors } from '#lib/xstate.lib.js';
-import { cadMachine, selectCadFailureIssues } from '#machines/cad.machine.js';
+import { cadMachine, disposeCadRuntime, selectCadFailureIssues } from '#machines/cad.machine.js';
 import { cadPreviewMachine } from '#machines/cad-preview.machine.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
@@ -250,8 +250,12 @@ function CadPreviewPipeline({
               // Regenerated from the shared bundle on every mount.
               class: 'derived',
             });
+            if (signal.aborted) {
+              // The pipeline unmounted while the mount was pending; its cleanup saw no prefix.
+              unmountRef.current(previewPrefix);
+              signal.throwIfAborted();
+            }
             mountedPrefixRef.current = previewPrefix;
-            signal.throwIfAborted();
             await previewFiles.writeFiles(projectFiles);
           }
         }),
@@ -277,21 +281,20 @@ function CadPreviewPipeline({
     }
   }, [isEnabled, previewRef]);
 
-  // Unmount the preview-owned ephemeral prefix on React teardown.
-  // The effect intentionally has an empty dependency array — it should run
-  // exactly once at unmount (or `projectId` change, which remounts the
-  // provider via the `key={projectId-mainFile}` callers use). React invokes
-  // cleanup on unmount; the actor is what sets the ref between mount and
-  // cleanup.
+  // Release the preview on React teardown: the ephemeral prefix, and the kernel
+  // client (stopping the CAD actor runs no exit actions, so it is released here,
+  // as ProjectProvider does for workbench units). `cadRef` is stable, so this runs
+  // once at unmount; callers remount via `key={projectId-mainFile}`.
   useEffect(() => {
     return () => {
+      disposeCadRuntime(cadRef.getSnapshot().context);
       const previewPrefix = mountedPrefixRef.current;
       if (previewPrefix !== undefined) {
         mountedPrefixRef.current = undefined;
         unmountRef.current(previewPrefix);
       }
     };
-  }, []);
+  }, [cadRef]);
 
   // Selectors on cadRef for reactive state
   const geometry = useSelector(cadRef, (s) => s.context.geometry);

@@ -19,11 +19,7 @@ export const surfaceModulation3 = (phi: number, _lr: number): number => 8 + 5 * 
 export const surfaceModulation4 = (phi: number, lr: number): number =>
   9 - 1 * Math.cos(3 * (phi + Math.PI * lr)) + 7 * lr;
 
-const transformation = (pt: Vec3): Vec3 => [
-  pt[1] + 0.2 * pt[2] - 50,
-  0.5 * pt[2] + 50,
-  0.5 * pt[0],
-];
+const transformation = (pt: Vec3): Vec3 => [pt[1] + 0.2 * pt[2] - 50, 0.5 * pt[2] + 50, 0.5 * pt[0]];
 
 export function task(pk: Pico): Voxels[] {
   const results: Voxels[] = [];

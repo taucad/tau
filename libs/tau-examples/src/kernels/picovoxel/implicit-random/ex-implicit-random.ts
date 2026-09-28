@@ -1,7 +1,6 @@
 // Port of LEAP71_LatticeLibrary Examples/Ex_ImplicitLibraryRandomTask.cs (Apache-2.0, © LEAP 71).
-// The C# ambient randomness becomes an explicit seeded stream (blueprint
-// rule: no Math.random in library code; the seeded corpus is
-// self-referential). Callback-only preset — the tape has no data gather.
+// The C# ambient randomness becomes an explicit seeded stream (no
+// Math.random in library code; the seeded corpus is self-referential). Callback-only preset — the tape has no data gather.
 
 import type { Pico, Voxels } from 'picovoxel';
 import { ImplicitRandomizedSchwarzPrimitive, RandomDeformationField } from 'picovoxel/latticelibrary';

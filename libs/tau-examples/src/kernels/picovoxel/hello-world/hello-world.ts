@@ -1,4 +1,4 @@
-// Tier-0 smoke example (blueprint R2/D4): PicoGK_Examples HelloWorld.cs
+// Smoke example: PicoGK_Examples HelloWorld.cs
 // (CC0-1.0) on the explicit-session API. C# builds a cube mesh with
 // Utils.mshCreateCube and shows it in the viewer; headless we build the same
 // unit cube through the bulk mesh path and hand back its stats.

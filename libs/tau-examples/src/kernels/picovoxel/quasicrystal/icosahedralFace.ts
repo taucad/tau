@@ -33,7 +33,7 @@ export class IcosehedralFace {
 
     const pointer: Vec3 = [side, 0, 0];
     const pointer01 = vecOps.rotateAroundAxis(pointer, -0.5 * PSI, vec3.unitZ);
-    const pointer02 = vecOps.rotateAroundAxis(pointer, +0.5 * PSI, vec3.unitZ);
+    const pointer02 = vecOps.rotateAroundAxis(pointer, 0.5 * PSI, vec3.unitZ);
 
     // vertices
     this.pt1 = [0, 0, 0];

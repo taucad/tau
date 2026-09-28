@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/taucad/picovoxel",
-  "commit": "802d86da6e6120a472b045fddb306ce0dfa5d5f8",
+  "commit": "11c51188a8f4cc754a25bde77e07c107523f7986",
   "package": "picovoxel@0.1.0",
   "upstreams": [
     {
@@ -57,23 +57,17 @@
   ],
   "inventory": [
     {
-      "sha256": "6aee498a61ea3cb0d9831841a7823c3d99c14e5349a6c6d17fa0ca2a9774382b",
+      "sha256": "c710e461da186c591db9429cedd49c68267c44e14e46b2f07654e0e4a6b407da",
       "source": "examples/helixheatx/helixHeatX.ts",
-      "destinations": ["helix-heat-x/helixHeatX.ts"],
-      "adaptations": {
-        "helix-heat-x/helixHeatX.ts": {
-          "sha256": "02756c8dfa7d21ca5abecce28936d6b8ac855239bff2b7f54ed0c6fccd088226",
-          "note": "The flange no longer builds the preview-only thread cutters the C# Task discards (blueprint D33); the exact GLB is byte-identical (sha256 23a74c9dc89063d212e459a4750e855dc75ae7214640b545d01546a9cff4c5aa at voxelSize 2)."
-        }
-      }
+      "destinations": ["helix-heat-x/helixHeatX.ts"]
     },
     {
-      "sha256": "fcd25df85db7cdfbf68e47cbd596f34549ccbceeb69d329843f7200eddf52fbd",
+      "sha256": "f256cfc3009cc04f8883455203b414f95e53b4bb4a0454dba7af500e6a1307c1",
       "source": "examples/helixheatx/helpers.ts",
       "destinations": ["helix-heat-x/helpers.ts"]
     },
     {
-      "sha256": "24a7151744108c3c27577ab22f081f6a3ebd31cb10cc50f6dce58affaa5e28b7",
+      "sha256": "b09f8e437d333ad07df0e20ee0f7a99ca1720a794174984b345aca5d1cf94f3c",
       "source": "examples/helixheatx/run.ts",
       "destinations": ["helix-heat-x/run.ts"]
     },
@@ -93,12 +87,12 @@
       "destinations": ["implicit-radial/ex-implicit-radial.ts"]
     },
     {
-      "sha256": "f6c8e62fea1364397c399ead27b9c1c66e5c7ebdcf18ac543780a0aeebb0cf2a",
+      "sha256": "2537954347c54bce41cf4b6c955fb3b78fd59643984f77327efe145e39c7ad10",
       "source": "examples/latticelibrary/ex-implicit-random.ts",
       "destinations": ["implicit-random/ex-implicit-random.ts"]
     },
     {
-      "sha256": "ec60e0e55117aa7b1f34ae75bfe5c6eb18431606560e20d916bb4bab891681f4",
+      "sha256": "c52d47670c8fecc46ff023d37c6fa985d957c1fea2ff3c5a87ae045254335159",
       "source": "examples/latticelibrary/ex-implicit-regular.ts",
       "destinations": ["implicit-regular/ex-implicit-regular.ts"]
     },
@@ -113,37 +107,37 @@
       "destinations": ["lattice-regular/ex-lattice-regular.ts"]
     },
     {
-      "sha256": "8c970f830ceb95ed8e00e62ed7ac8a8a9feb0cc76ce5d8f9f71fa03fdb231ae0",
+      "sha256": "fa13c3a87e627ff94e91560d5f3c79849b8042433d33397cc55819a9b24324c6",
       "source": "examples/pico/boolean-showcase.ts",
       "destinations": ["boolean-showcase/boolean-showcase.ts"]
     },
     {
-      "sha256": "13da6f67d80a22f5c3f6ce1cc08cd33f23ddf0215251215b440a0f88917336ac",
+      "sha256": "dba0008bf40e535d7632b00101d0dcdd67163e95f415f682c70dc05009922f00",
       "source": "examples/pico/gear.ts",
       "destinations": ["gear/gear.ts"]
     },
     {
-      "sha256": "aa737cd1e7aba73beb47c2391f21be4204c095256d96474e0559840b5e256364",
+      "sha256": "86bb569e4d0957be28f720fd6a22e46113d0dba4b1736357c8cb8007e9e44c69",
       "source": "examples/pico/hello-world.ts",
       "destinations": ["hello-world/hello-world.ts"]
     },
     {
-      "sha256": "e07891f15fff76a1f46b83d127ec247317cc2b25e28ffa83c952a6f741ab3e2b",
+      "sha256": "510a44f299f7d6ed7fdd333404d98c9811491f7130aebc87c3800e2898614857",
       "source": "examples/quasicrystals/icosahedralFace.ts",
       "destinations": ["quasicrystal/icosahedralFace.ts"]
     },
     {
-      "sha256": "b5a4f5b735412a35090531fef23a97a420194ea3e7e3ee3b35eb609063cca8e0",
+      "sha256": "335afc93b64db608cf4a12ea849453e40ba7056ae536234395ddc49669788073",
       "source": "examples/quasicrystals/quasiCrystal.ts",
       "destinations": ["quasicrystal/quasiCrystal.ts"]
     },
     {
-      "sha256": "e31647bd9d1de01cde765fb8461fdcbe19d1520398787342fce9126bc72bfcc1",
+      "sha256": "be9fbfde2859f69c49110915ca814ec30781793f87fb71d345c81a11fd7a0f2c",
       "source": "examples/quasicrystals/quasiTile.ts",
       "destinations": ["quasicrystal/quasiTile.ts"]
     },
     {
-      "sha256": "7ef5a69d3eedcbbbf822746440e657c0722be5c8707fd5aaa248f4647b02e12f",
+      "sha256": "0cbec8d90cd6f9adfd5554411106dfb3e3a1d698e757529422a9175f367f9cb3",
       "source": "examples/quasicrystals/quasiTileInflation.ts",
       "destinations": ["quasicrystal/quasiTileInflation.ts"]
     },
@@ -153,7 +147,7 @@
       "destinations": ["quasicrystal/run.ts"]
     },
     {
-      "sha256": "09e7588439ec23052c1663cd4c848d5f2c51adcddf66f90f944d0fde3db2735b",
+      "sha256": "db7551513664d8d7c11797b13e08ae6ebcb89aa22cf82e84106e2e8effdd1757",
       "source": "examples/roverwheel/randomWheel.ts",
       "destinations": ["rover-wheel/randomWheel.ts"]
     },
@@ -163,27 +157,27 @@
       "destinations": ["rover-wheel/run.ts"]
     },
     {
-      "sha256": "b29f093062d06a432c1e2071d834dfc8552150c3daef8f1cb85b24df1167e421",
+      "sha256": "857268e5e1a7e58c9bcc3349aaea3cf0133fe23d92d11850a4a546433db68fb8",
       "source": "examples/roverwheel/treadPatterns.ts",
       "destinations": ["rover-wheel/treadPatterns.ts"]
     },
     {
-      "sha256": "3fd8146a788f3f1c31daca106454b5b7e2cc9c7ccc917f43d5667acfbfa5d7ca",
+      "sha256": "c91e9e92bd4318f4de9376e81497448a94ec642f563fb72e7c7108d5851b9555",
       "source": "examples/roverwheel/wheelContext.ts",
       "destinations": ["rover-wheel/wheelContext.ts"]
     },
     {
-      "sha256": "e2b45f7f2f8c9c5d2e72168a553fb1a719fb1d3eea71373422e8ffd99b184cc9",
+      "sha256": "6f3743d53ef50098c85fefffb59200a891728d31652a458b0bfff2e7d2e908d2",
       "source": "examples/roverwheel/wheelElements.ts",
       "destinations": ["rover-wheel/wheelElements.ts"]
     },
     {
-      "sha256": "bb8135020040d1d164dc832de39b92a0e43181b68977f65f0e48ed8f83d236d4",
+      "sha256": "d8e0c6f67d0953cabf3da22126ac8baaed7a0ea09d257a5d3c76654024d894f4",
       "source": "examples/roverwheel/wheelTread.ts",
       "destinations": ["rover-wheel/wheelTread.ts"]
     },
     {
-      "sha256": "2c99d2c2cb7f4641ec5ad70ae99f26bbb1195665bbb77a277663ac37751f0b79",
+      "sha256": "dd2e5e1dee8d0d1f76d55450fa2614d1bd762a980b3161fffa66b393317fd6cf",
       "source": "examples/roverwheel/wheels.ts",
       "destinations": ["rover-wheel/wheels.ts"]
     },
@@ -208,7 +202,7 @@
       "destinations": ["base-pipe-segment/ex-base-pipe-segment.ts"]
     },
     {
-      "sha256": "91ac01ae514a459c1d3fc7907450b75ecc44491e9c091b5d63f018953f1b03b9",
+      "sha256": "16228e17b352d4048f4df9270b2a02c672635ae6baef8b6b30ff6b718c8ab842",
       "source": "examples/shapekernel/ex-base-pipe.ts",
       "destinations": [
         "base-pipe/ex-base-pipe.ts",
@@ -236,7 +230,7 @@
       "destinations": ["implicit-gyroid-genus/ex-implicit-gyroid-genus.ts"]
     },
     {
-      "sha256": "902d0657c0fe65f1dff3764d3fd8fe1c16b8fbb36b342b6b7622a30b4544210a",
+      "sha256": "8acded87ebf9525c689d2172242fa76d93cb58490c9aa3d2ee6e5f75e31f305d",
       "source": "examples/shapekernel/ex-implicit-gyroid-sphere.ts",
       "destinations": ["implicit-gyroid-sphere/ex-implicit-gyroid-sphere.ts"]
     },
@@ -258,7 +252,7 @@
       "destinations": ["lattice-pipe/ex-lattice-pipe.ts"]
     },
     {
-      "sha256": "39df6158a1e824715352ce8d78cb00330a2b41eaa09c965b04a4f50f4cddf660",
+      "sha256": "6a05da5c04cc55db6829df67c98b64ab3cfe5426ed30719e7b7ace125889b6ca",
       "source": "examples/shapekernel/ex-mesh-painter.ts",
       "destinations": ["mesh-painter/ex-mesh-painter.ts"]
     },
@@ -289,12 +283,12 @@
       "destinations": ["simple-fluid-simulation/run.ts"]
     },
     {
-      "sha256": "38edceff38938c3350f4e198af08753c04949a95adf14861197e2209c545559d",
+      "sha256": "cd5112e9d64005cce71675692c33c4bf3b6341cc85e2ac5c4b756a7206d3e131",
       "source": "examples/simulation/simpleFlowDevice.ts",
       "destinations": ["simple-fluid-simulation/simpleFlowDevice.ts"]
     },
     {
-      "sha256": "c355e7f45c9b514fe12e34babeb720dd98db1be69fe7629f4808c3dfc0a86c48",
+      "sha256": "8ee7c951d6917523d2f43d1bb9062c09dc1cfcf6f50428372f63cdd34f581f05",
       "source": "examples/simulation/simpleFluidSimulationInput.ts",
       "destinations": ["simple-fluid-simulation/simpleFluidSimulationInput.ts"]
     },

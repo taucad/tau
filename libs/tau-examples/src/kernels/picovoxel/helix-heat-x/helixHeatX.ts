@@ -2,14 +2,14 @@
 // class merged into one module, out-params → returned objects)
 // Copyright (c) 2023-2026 LEAP 71 — https://leap71.com
 // SPDX-License-Identifier: Apache-2.0
-// Ported to TypeScript for picovoxel (blueprint R11); see NOTICE.
+// Ported to TypeScript for picovoxel; see NOTICE.
 //
 // The flagship benchmark subject: ~10^5 lattice beams (20,000 z-samples with
 // fin bursts), boolean assembly, and the full finishing family (offset,
 // fillet, smoothen, projectZSlice). Viewer previews/screenshots are dropped;
 // C# mutating voxel calls map to the pure copy-first facade. The `authorMs`
 // stopwatch accumulates pure-JS authoring time (lattice/point loops) so the
-// benchmark can report the Finding 8 authoring-vs-kernel phase split.
+// benchmark can report the authoring-vs-kernel phase split.
 
 import type { Lattice, Pico, Vec3, Voxels } from 'picovoxel';
 import { vec3 } from 'picovoxel/numerics';
@@ -85,7 +85,9 @@ export class HelixHeatX {
 
     const hotStraightFins = this.measureKernel('straight-fins.hot', () => this.straightFins('hot'));
     const coolStraightFins = this.measureKernel('straight-fins.cool', () => this.straightFins('cool'));
-    const allStraightFins = this.measureKernel('straight-fins.union', () => hotStraightFins.union(coolStraightFins));
+    const allStraightFins = this.measureKernel('straight-fins.union', () =>
+      hotStraightFins.union(coolStraightFins),
+    );
 
     const fins = this.measureKernel('fins.union', () => allCornerFins.union(allStraightFins));
 
@@ -97,18 +99,23 @@ export class HelixHeatX {
     const coolInner = this.measureKernel('cool-inner.offset', () =>
       cool.innerVolume.offset({ distance: this.wallThickness }),
     );
-    const hotFluidVoid = this.measureKernel('hot-fluid-void.subtract', () => hot.innerVolume.subtract(coolInner));
+    const hotFluidVoid = this.measureKernel('hot-fluid-void.subtract', () =>
+      hot.innerVolume.subtract(coolInner),
+    );
     const hotInner = this.measureKernel('hot-inner.offset', () =>
       hot.innerVolume.offset({ distance: this.wallThickness }),
     );
-    const coolFluidVoid = this.measureKernel('cool-fluid-void.subtract', () => cool.innerVolume.subtract(hotInner));
+    const coolFluidVoid = this.measureKernel('cool-fluid-void.subtract', () =>
+      cool.innerVolume.subtract(hotInner),
+    );
 
     const innerVolume = this.measureKernel('inner-volume.union', () => hotFluidVoid.union(coolFluidVoid));
     const splitters = this.measureKernel('splitters.union', () => hot.splitters.union(cool.splitters));
     let outerVolume = this.measureKernel('outer-volume.offset', () => innerVolume.offset({ distance: 0.9 }));
 
-    const { flange, screwHoles } = this.measureKernel('flange.create', () => this.flange());
-    // (voxFlangeScrewCutters is preview-only in the C# Task.)
+    // '-v2': the stage no longer builds the preview-only thread cutters (see flange()),
+    // so its timings are a new series, not a step change in the old one.
+    const { flange, screwHoles } = this.measureKernel('flange.create-v2', () => this.flange());
 
     const filletedFlange = this.measureKernel('finished-flange.fillet', () => flange.fillet({ rounding: 5 }));
     const finishedFlange = this.measureKernel('finished-flange.smoothen', () =>
@@ -124,7 +131,9 @@ export class HelixHeatX {
     outerVolume = this.measureKernel('centre-piece.add', () => this.withCentrePiece(outerVolume));
 
     outerVolume = this.measureKernel('outer-volume.union-structure', () => outerVolume.union(structure));
-    outerVolume = this.measureKernel('outer-volume.subtract-screw-holes', () => outerVolume.subtract(screwHoles));
+    outerVolume = this.measureKernel('outer-volume.subtract-screw-holes', () =>
+      outerVolume.subtract(screwHoles),
+    );
     outerVolume = this.measureKernel('outer-volume.project-z-slice', () =>
       outerVolume.projectZSlice({ startZ: 4, endZ: -4 }),
     );
@@ -234,7 +243,10 @@ export class HelixHeatX {
         (phiDeg > 180 - dAngle && phiDeg < 180 + dAngle)
       ) {
         this.addFinBurst(lattice, 8, phi, lengthRatio, z, beam);
-      } else if ((phiDeg > 90 - dAngle && phiDeg < 90 + dAngle) || (phiDeg > 270 - dAngle && phiDeg < 270 + dAngle)) {
+      } else if (
+        (phiDeg > 90 - dAngle && phiDeg < 90 + dAngle) ||
+        (phiDeg > 270 - dAngle && phiDeg < 270 + dAngle)
+      ) {
         this.addFinBurst(lattice, 8, phi, lengthRatio, z, beam, phiDeg, dAngle);
       }
     }
@@ -400,7 +412,12 @@ export class HelixHeatX {
       const splitterPt3 = vec3.add(pt3, [0, 0, beam2 + 10]);
       const topSplitterBeam = uf.transFixed(0.4, 1, lengthRatio);
       latSplitter.addBeam({ start: splitterPt0, end: splitterPt1, radius: 0.4 });
-      latSplitter.addBeam({ start: splitterPt1, end: splitterPt2, startRadius: 0.4, endRadius: topSplitterBeam });
+      latSplitter.addBeam({
+        start: splitterPt1,
+        end: splitterPt2,
+        startRadius: 0.4,
+        endRadius: topSplitterBeam,
+      });
       latSplitter.addBeam({ start: splitterPt2, end: splitterPt3, radius: topSplitterBeam });
 
       latPipe.addBeam({ start: pt1, end: pt2, radius: beam2 });
@@ -443,8 +460,16 @@ export class HelixHeatX {
   // ── Flange.cs ──────────────────────────────────────────────────────────────
 
   /**
-   * Bottom flange + screw holes. Tau adaptation: the C# Task's thread cutters only feed a preview
-   * the Task discards, so they are not built here; the part is unchanged.
+   * Bottom flange + screw holes.
+   *
+   * Provenance: the C# Task also builds six flat-capped `ThreadCutter`s here and
+   * unions them into `voxFlangeScrewCutters`, a preview-only stage whose result
+   * never enters the part. This port omits that stage, so its composition diverges
+   * from the C# Task while the output is unchanged (D33 / PV-FC2 of the picovoxel
+   * production close-out). The cutters were ≈82% of the old `flange.create`
+   * stage, now timed as `flange.create-v2`: flat caps have no tube-complex form
+   * and render on the serial lattice fallback (`src/pico-lattice.cpp`).
+   * `ThreadCutter` stays in `helpers.ts` for the flat-cap lattice benchmark.
    */
   private flange(): { flange: Voxels; screwHoles: Voxels } {
     const screwThreadRadius = 3.5;
@@ -481,7 +506,12 @@ export class HelixHeatX {
     const minBeam = 1;
     const started = performance.now();
     const lattice = this.pk.createLattice();
-    const frames = [this.firstInletFrame, this.firstOutletFrame, this.secondInletFrame, this.secondOutletFrame];
+    const frames = [
+      this.firstInletFrame,
+      this.firstOutletFrame,
+      this.secondInletFrame,
+      this.secondOutletFrame,
+    ];
     for (const ioFrame of frames) {
       let backwardAngle1 = (-50 / 180) * Math.PI;
       if (ioFrame.pos[0] > 0) backwardAngle1 = -backwardAngle1;
@@ -517,7 +547,12 @@ export class HelixHeatX {
     const list: Voxels[] = [];
     const cutRadius = 2.5;
     const cutLength = 12;
-    const ioFrames = [this.firstInletFrame, this.secondInletFrame, this.firstOutletFrame, this.secondOutletFrame];
+    const ioFrames = [
+      this.firstInletFrame,
+      this.secondInletFrame,
+      this.firstOutletFrame,
+      this.secondOutletFrame,
+    ];
     for (const f of ioFrames) {
       const cut = new LatticeManifold(f, { length: cutLength, radius: cutRadius });
       list.push(cut.voxConstruct(this.pk));
@@ -526,7 +561,14 @@ export class HelixHeatX {
       const shifted = localFrame.translated(f, vec3.scale(f.lz, cutLength + 2));
       list.push(
         sh
-          .latFromTaperedBeam(this.pk, shifted.pos, vec3.sub(shifted.pos, vec3.scale(shifted.lz, 4)), 7, 2, false)
+          .latFromTaperedBeam(
+            this.pk,
+            shifted.pos,
+            vec3.sub(shifted.pos, vec3.scale(shifted.lz, 4)),
+            7,
+            2,
+            false,
+          )
           .toVoxels(),
       );
     }
@@ -538,7 +580,12 @@ export class HelixHeatX {
     const list: Voxels[] = [];
     const outerRadius = 14;
     const length = 12;
-    const ioFrames = [this.firstInletFrame, this.secondInletFrame, this.firstOutletFrame, this.secondOutletFrame];
+    const ioFrames = [
+      this.firstInletFrame,
+      this.secondInletFrame,
+      this.firstOutletFrame,
+      this.secondOutletFrame,
+    ];
     for (const f of ioFrames) {
       let threadFrame = localFrame.translated(f, [0, 0, 1]);
       threadFrame = localFrame.inverted(threadFrame, true, false);

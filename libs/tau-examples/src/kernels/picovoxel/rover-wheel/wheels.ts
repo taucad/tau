@@ -1,7 +1,7 @@
 // Derived from LEAP71_RoverWheel — RoverWheel/Wheels/Wheel_{01,02,03,04}.cs
 // Copyright (c) 2023-2026 LEAP 71 — https://leap71.com
 // SPDX-License-Identifier: Apache-2.0
-// Ported to TypeScript for picovoxel (blueprint R10); see NOTICE.
+// Ported to TypeScript for picovoxel; see NOTICE.
 //
 // Each C# preset class (ctor writes the statics, voxConstruct assembles)
 // becomes one function building an explicit WheelContext and assembling from
@@ -11,13 +11,7 @@ import type { Pico, Vec3, Voxels } from 'picovoxel';
 import { ControlPointSpline } from 'picovoxel/shapekernel';
 import { treadPattern02, treadPattern03 } from './treadPatterns.ts';
 import { WheelContext, type WheelLayer } from './wheelContext.ts';
-import {
-  egyptianStruts,
-  rectHoles,
-  rosettaStruts,
-  spiralStruts,
-  tubeStruts,
-} from './wheelElements.ts';
+import { egyptianStruts, rectHoles, rosettaStruts, spiralStruts, tubeStruts } from './wheelElements.ts';
 import { WheelTread } from './wheelTread.ts';
 
 /**

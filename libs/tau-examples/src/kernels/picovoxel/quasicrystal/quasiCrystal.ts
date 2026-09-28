@@ -25,7 +25,10 @@ export class QuasiCrystal {
   constructor(generations: number, initial: QuasiTile[] | IcosehedralFace) {
     if (!Number.isInteger(generations) || generations < 1) {
       // C# would crash indexing a zero-length generation array.
-      throw new PicoError('PICO_INVALID_ARGUMENT', `QuasiCrystal needs at least 1 generation, got ${generations}.`);
+      throw new PicoError(
+        'PICO_INVALID_ARGUMENT',
+        `QuasiCrystal needs at least 1 generation, got ${generations}.`,
+      );
     }
     this.tileGenerations = [Array.isArray(initial) ? initial : inflatedFace(initial)];
 

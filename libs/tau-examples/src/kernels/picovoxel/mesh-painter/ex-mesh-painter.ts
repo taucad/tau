@@ -1,5 +1,5 @@
 // Port of LEAP71_ShapeKernel Examples/Ex_MeshPainterShowCase.cs (Apache-2.0, © LEAP 71).
-// The painting itself is viewer-bound (MeshPainter/ColorScales — N/A per R16);
+// The painting itself is viewer-bound (MeshPainter/ColorScales are not ported);
 // headless we build the three sphere meshes and evaluate the custom
 // per-triangle property the third scale would have visualized.
 

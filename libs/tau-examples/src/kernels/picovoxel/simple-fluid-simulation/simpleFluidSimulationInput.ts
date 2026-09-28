@@ -45,7 +45,8 @@ export function readSimpleFluidSimulationInput(pk: Pico, bytes: Uint8Array): Sim
     if (field.type === 'vectorField') vectorFields += 1;
     else if (field.type === 'voxels') voxelFields += 1;
     else if (field.type === 'scalarField') scalarFields += 1;
-    else throw new Error('Unsupported field found. VDB file content is not suitable for this simulation input.');
+    else
+      throw new Error('Unsupported field found. VDB file content is not suitable for this simulation input.');
   }
   if (vectorFields !== 1 || voxelFields !== 2 || scalarFields !== 2) {
     throw new Error(
@@ -64,9 +65,12 @@ export function readSimpleFluidSimulationInput(pk: Pico, bytes: Uint8Array): Sim
     const { name, type } = fields[index]!;
     if (type === 'voxels' && name.includes(simulationKeyWords.fluid)) fluidDomain = vdb.getVoxels(index);
     else if (type === 'voxels' && name.includes(simulationKeyWords.solid)) solidDomain = vdb.getVoxels(index);
-    else if (type === 'vectorField' && name.includes(simulationKeyWords.velocity)) velocityField = vdb.getVectorField(index);
-    else if (type === 'scalarField' && name.includes(simulationKeyWords.density)) densityField = vdb.getScalarField(index);
-    else if (type === 'scalarField' && name.includes(simulationKeyWords.viscosity)) viscosityField = vdb.getScalarField(index);
+    else if (type === 'vectorField' && name.includes(simulationKeyWords.velocity))
+      velocityField = vdb.getVectorField(index);
+    else if (type === 'scalarField' && name.includes(simulationKeyWords.density))
+      densityField = vdb.getScalarField(index);
+    else if (type === 'scalarField' && name.includes(simulationKeyWords.viscosity))
+      viscosityField = vdb.getScalarField(index);
   }
 
   // C# MissingFieldException family

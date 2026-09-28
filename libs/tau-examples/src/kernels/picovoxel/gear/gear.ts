@@ -1,10 +1,13 @@
-// Involute spur gear, ported from PicoGK's own models/02_Gears/InvoluteGear.cs so
-// the wasm port is exercised through the same construction the C# example uses:
-// profile in JS -> Mesh_hCreate / nAddVertex / nAddTriangle across the ABI.
+// Involute spur gear built as a mesh: the tooth profile is computed in JS and
+// crosses the ABI through Mesh_hCreate / nAddVertex / nAddTriangle.
+// Port of LEAP 71 PicoGK example code; the original C# source file is not
+// identified.
+// Copyright (c) LEAP 71 and the picovoxel contributors
+// SPDX-License-Identifier: Apache-2.0
 //
-// Note this model touches ZERO Voxels — that is exactly why it cannot be the
-// acceptance gate for the port (conformance-suite Finding 1). It proves the ABI
-// boundary, handle lifetime, and mesh transfer, and nothing about OpenVDB.
+// This model touches no Voxels, so it cannot serve as an acceptance gate for
+// the voxel kernel. It exercises the ABI boundary, handle lifetime and mesh
+// transfer, and nothing about OpenVDB.
 
 export interface GearOptions {
   teeth: number;
@@ -76,8 +79,11 @@ export function createGearOutline(opts: Partial<GearOptions> = {}): Point2[] {
       addPolar(points, radius, centerAngle - (baseFlankAngle - involuteAngle(radius, baseRadius)));
     }
     for (let step = 1; step <= o.topArcSteps; step++) {
-      addPolar(points, outerRadius,
-        lerp(centerAngle - outerFlankAngle, centerAngle + outerFlankAngle, step / o.topArcSteps));
+      addPolar(
+        points,
+        outerRadius,
+        lerp(centerAngle - outerFlankAngle, centerAngle + outerFlankAngle, step / o.topArcSteps),
+      );
     }
     for (let step = o.involuteSteps - 1; step >= 0; step--) {
       const radius = lerp(flankStartRadius, outerRadius, step / o.involuteSteps);
@@ -123,12 +129,17 @@ export function triangulate(polygon: Point2[]): Array<[number, number, number]> 
       const ia = remaining[(i + remaining.length - 1) % remaining.length]!;
       const ib = remaining[i]!;
       const ic = remaining[(i + 1) % remaining.length]!;
-      const a = polygon[ia]!, b = polygon[ib]!, c = polygon[ic]!;
+      const a = polygon[ia]!,
+        b = polygon[ib]!,
+        c = polygon[ic]!;
       if (cross(a, b, c) <= 0) continue; // reflex
       let contains = false;
       for (const j of remaining) {
         if (j === ia || j === ib || j === ic) continue;
-        if (pointInTriangle(polygon[j]!, a, b, c)) { contains = true; break; }
+        if (pointInTriangle(polygon[j]!, a, b, c)) {
+          contains = true;
+          break;
+        }
       }
       if (contains) continue;
       tris.push([ia, ib, ic]);

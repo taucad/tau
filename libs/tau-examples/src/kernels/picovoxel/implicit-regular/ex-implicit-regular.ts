@@ -1,6 +1,6 @@
 // Port of LEAP71_LatticeLibrary Examples/Ex_ImplicitLibraryRegularTask.cs (Apache-2.0, © LEAP 71).
 // C# default preset: ImplicitSchwarzDiamond. The mask runs through
-// maskedByImplicit's tape variant (R9) — the accelerated path.
+// maskedByImplicit's tape variant — the accelerated path.
 
 import type { Pico, Voxels } from 'picovoxel';
 import { ImplicitSchwarzDiamond } from 'picovoxel/latticelibrary';

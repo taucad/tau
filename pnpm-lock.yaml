@@ -568,8 +568,8 @@ catalogs:
       specifier: 2.4.5
       version: 2.4.5
     picovoxel:
-      specifier: https://pkg.pr.new/picovoxel@09a1108
-      version: 0.0.0-preview-09a1108
+      specifier: 0.1.0
+      version: 0.1.0
     pino-pretty:
       specifier: ^13.1.3
       version: 13.1.3
@@ -2974,7 +2974,7 @@ importers:
     devDependencies:
       picovoxel:
         specifier: 'catalog:'
-        version: https://pkg.pr.new/picovoxel@09a1108(three@0.184.0)
+        version: 0.1.0(three@0.184.0)
 
   libs/chat:
     dependencies:
@@ -3128,7 +3128,7 @@ importers:
         version: 3.4.1(@gltf-transform/core@4.4.0)(@gltf-transform/extensions@4.4.0)(@gltf-transform/functions@4.4.0)(esbuild-wasm@0.28.2)
       picovoxel:
         specifier: 'catalog:'
-        version: https://pkg.pr.new/picovoxel@09a1108(three@0.184.0)
+        version: 0.1.0(three@0.184.0)
       replicad:
         specifier: npm:@taulabs/replicad@0.23.4-beta.2
         version: '@taulabs/replicad@0.23.4-beta.2(patch_hash=4d55bfdc8696f36ff5efc30607071d0337d46d49c57920c275b9dd15aa4ef07b)'
@@ -4096,7 +4096,7 @@ importers:
         version: link:../../core/geometry
       picovoxel:
         specifier: 'catalog:'
-        version: https://pkg.pr.new/picovoxel@09a1108(three@0.184.0)
+        version: 0.1.0(three@0.184.0)
     devDependencies:
       '@taucad/esbuild':
         specifier: workspace:*
@@ -22826,9 +22826,8 @@ packages:
     resolution: {integrity: sha512-lGA1TNsmy2bxvRsTI2cV01kfTwKzZjnZSDmF9llYNyMHMrU4sP87lQ5taiIKm88L3cbswjl008nwyGc3WpNvzg==}
     engines: {node: '>=18.0.0'}
 
-  picovoxel@https://pkg.pr.new/picovoxel@09a1108:
-    resolution: {integrity: sha512-/rfBQbpHnXHLD1zIFgETzm4fl2OTcRPQbjm6k9WutDTJvy/hJqX7X+Ups7tjWpnaR4Qg7i8wX++AZCUQDi454g==, tarball: https://pkg.pr.new/picovoxel@09a1108}
-    version: 0.0.0-preview-09a1108
+  picovoxel@0.1.0:
+    resolution: {integrity: sha512-X8Q4YlKfIuNc8HbH8KusVUW1T/nz8xJUFjJ2pvh3KTCB8gev24gf0EQZzdB8IDE6px8aGp5z266vm6tTmJ56PQ==}
     engines: {node: '>=22.14.0'}
     peerDependencies:
       three: '>=0.160'
@@ -47968,7 +47967,7 @@ snapshots:
 
   picospinner@3.0.0: {}
 
-  picovoxel@https://pkg.pr.new/picovoxel@09a1108(three@0.184.0):
+  picovoxel@0.1.0(three@0.184.0):
     optionalDependencies:
       three: 0.184.0
 

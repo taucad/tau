@@ -1502,7 +1502,14 @@ export const resolveBrowserAgentHostInterrupt = async (input: {
       ...(input.reason ? { payload: { reason: input.reason } } : {}),
       commandId: input.commandId,
     });
-    if (!input.approved || answered.runId !== input.runId || answered.state !== 'paused') {
+    /* A native run alone needs a follow-up Resume. Its sender minted that id
+     * from the recorded RunEntry.kind; an external driver continues itself. */
+    if (
+      !input.approved ||
+      input.resumeCommandId === undefined ||
+      answered.runId !== input.runId ||
+      answered.state !== 'paused'
+    ) {
       return;
     }
     const continueRun = attached === undefined ? undefined : continuations.get(input.chatId);

@@ -27,6 +27,7 @@ import {
 import type { ChatTurn, ChatTurnGesture } from '#machines/chat-session.machine.js';
 import type { StoredAttachmentRef } from '#utils/attachment.utils.js';
 import { storedRef } from '#utils/attachment.test-utils.js';
+import type { ChatProjection } from '#machines/chat-projection.logic.js';
 
 /* Whether the project's revision root is connected yet (W8 TS-S5): the host places turns through it. */
 const revisionRoot = vi.hoisted(() => ({ connected: true }));
@@ -38,6 +39,7 @@ const browserHostHarness = vi.hoisted(() => ({
   resumable: false,
   /** The run the host last named for this chat when no stream of this page publishes one (a daemon-placed chat). */
   hostRunId: undefined as string | undefined,
+  runKind: 'tau' as 'tau' | 'external',
   createClient: vi.fn((_options: AgentHostClientOptions): AgentHostClient => {
     const client = Object.create(null) as AgentHostClient;
     client.close = vi.fn(async () => undefined);
@@ -340,6 +342,17 @@ const installSessionStore = (partial: Partial<ChatSessionStore>): void => {
     requestTurn: vi.fn(),
     setTurnPlacement: vi.fn(),
     reattachHostChat,
+    getProjection: () => {
+      const projection = {
+        ledger: {
+          currentRunId: browserHostHarness.run?.runId ?? browserHostHarness.hostRunId,
+          runs: {
+            [browserHostHarness.run?.runId ?? browserHostHarness.hostRunId ?? '']: { kind: browserHostHarness.runKind },
+          },
+        },
+      };
+      return projection as unknown as ChatProjection;
+    },
     ...partial,
   } as ChatSessionStore);
 };
@@ -434,6 +447,7 @@ beforeEach(() => {
   browserHostHarness.placed = false;
   browserHostHarness.resumable = false;
   browserHostHarness.hostRunId = undefined;
+  browserHostHarness.runKind = 'tau';
   availabilityHarness.gate = undefined;
   revisionRoot.connected = true;
   mountAgentMock(buildAgent());
@@ -1009,6 +1023,22 @@ describe('useCadChatClient', () => {
 
     const { result } = renderClient();
     await act(async () => result.current.respondToToolApproval('interrupt-1', false));
+
+    const approval = browserHostHarness.resolveInterrupt.mock.calls[0]?.[0] as Readonly<Record<string, unknown>>;
+    expect(typeof approval['commandId']).toBe('string');
+    expect(approval['resumeCommandId']).toBeUndefined();
+  });
+
+  it('resolves an external run without minting a native Resume command', async () => {
+    browserHostHarness.run = { runId: 'run-external-paused', state: 'paused', eventCount: 4 };
+    browserHostHarness.runKind = 'external';
+    const chat = mock<Chat<MyUIMessage>>();
+    Object.defineProperty(chat, 'messages', { get: () => [] });
+    useActiveChatInstanceMock.mockReturnValue(chat);
+    installActions(buildActions());
+
+    const { result } = renderClient();
+    await act(async () => result.current.respondToToolApproval('interrupt-1', true));
 
     const approval = browserHostHarness.resolveInterrupt.mock.calls[0]?.[0] as Readonly<Record<string, unknown>>;
     expect(typeof approval['commandId']).toBe('string');

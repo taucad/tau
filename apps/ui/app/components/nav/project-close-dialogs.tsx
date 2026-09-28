@@ -1,7 +1,7 @@
 /**
  * The two questions closing a project can ask (S46, I24, I28, A35).
  *
- * *Close* with runs in flight asks first, because stopping somebody's agents is
+ * *Close* with runs in flight asks first, because stopping somebody's work is
  * not a side effect of tidying the sidebar. And a refused open says what to
  * close, by name, with what each candidate is doing — a budget nobody can see
  * is a budget nobody can act on.
@@ -29,35 +29,76 @@ import { useLiveProjectIds, useSessions } from '#hooks/use-sessions.js';
 import { pluralize, useProjectSidebarRow, useSidebarCommands } from '#hooks/use-sidebar-status.js';
 import type { ProjectSidebarRow } from '#hooks/use-sidebar-status.js';
 
+/** The close action's known effects; an aggregate sidebar row cannot classify runs. */
+type ClosePlan = Readonly<{
+  stoppableRunCount: number;
+  continuingRuns: ReadonlyArray<Readonly<{ id: string; label: string; reason: 'other-build' | 'background-window' }>>;
+}>;
+
 /**
- * *Stop n agents and close X?* — asked only while agents are running.
+ * *Close X?* — name only the runs this window can actually stop.
  *
- * @param props - The project's row (read once by the item, R10), its name, and the caller's control.
+ * @param props - The project's row, name, classified close effects, and caller's control.
  * @returns The dialog, while it is open.
  * @public
  */
 export function CloseProjectDialog({
   row,
   name,
+  closePlan,
   isOpen,
   onOpenChange,
   onConfirm,
 }: {
   readonly row: ProjectSidebarRow;
   readonly name: string;
+  readonly closePlan?: ClosePlan;
   readonly isOpen: boolean;
   readonly onOpenChange: (next: boolean) => void;
   readonly onConfirm?: () => void;
 }): React.JSX.Element {
   const { closeProject } = useSidebarCommands();
+  const stopsRuns = closePlan !== undefined && closePlan.stoppableRunCount > 0;
   return (
     <AlertDialog open={isOpen} onOpenChange={onOpenChange}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>{`Stop ${pluralize(row.runs, 'agent')} and close ${name}?`}</AlertDialogTitle>
-          <AlertDialogDescription>
-            Their work so far is saved locally as revisions. If backup is unavailable, it stays queued for the next
-            connection. You can reopen the project any time.
+          <AlertDialogTitle>
+            {stopsRuns ? `Stop ${pluralize(closePlan.stoppableRunCount, 'run')} and close ${name}?` : `Close ${name}?`}
+          </AlertDialogTitle>
+          <AlertDialogDescription asChild>
+            <div>
+              {closePlan === undefined ? (
+                <p>
+                  Closing this project asks reachable runs to stop. Runs in another version of Tau or a background
+                  window may continue.
+                </p>
+              ) : (
+                <>
+                  {stopsRuns && <p>{`This window will stop ${pluralize(closePlan.stoppableRunCount, 'run')}.`}</p>}
+                  {closePlan.continuingRuns.length > 0 && (
+                    <>
+                      <p>
+                        {closePlan.continuingRuns.length === 1
+                          ? 'This one keeps running, because this window can’t stop it:'
+                          : 'These keep running, because this window can’t stop them:'}
+                      </p>
+                      <ul className='list-disc pl-5'>
+                        {closePlan.continuingRuns.map((run) => (
+                          <li key={run.id}>
+                            {`${run.label} — ${run.reason === 'other-build' ? 'another version of Tau is running it' : 'its window is in the background'}`}
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+                </>
+              )}
+              <p>
+                Work already saved as revisions stays on this device. If backup is unavailable, those revisions stay
+                queued for the next connection. You can reopen the project any time.
+              </p>
+            </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -71,7 +112,7 @@ export function CloseProjectDialog({
               }
             }}
           >
-            Stop and close
+            {stopsRuns ? 'Stop and close' : 'Close'}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -91,8 +132,8 @@ function BudgetCandidate({
 }): React.JSX.Element {
   const row = useProjectSidebarRow(projectId);
   /* Only the two things a person weighs: somebody is waiting on them, or
-   * agents are working. A live project with neither is idle. */
-  const doing = row.attention > 0 ? 'needs you' : row.runs > 0 ? pluralize(row.runs, 'agent') : 'idle';
+   * runs are working. A live project with neither is idle. */
+  const doing = row.attention > 0 ? 'needs you' : row.runs > 0 ? pluralize(row.runs, 'run') : 'idle';
   return (
     <button
       type='button'

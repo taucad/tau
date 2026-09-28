@@ -157,4 +157,17 @@ describe('desktop share links', () => {
     await wait(3000);
     expect(page.url(), 'R4: a link outside the four the app publishes must not move the window').toBe(opened);
   }, 300_000);
+
+  /* A builtin slug carries a dot, and the shell once read `.birdhouse` as a
+   * missing asset's extension: the deep link's document load answered 404 and
+   * left a blank window (community-page-refresh audit, Finding 1 F8). */
+  it('should render a builtin example opened through a tau:// share link', async () => {
+    const { page } = live();
+
+    await deliverDesktopDeepLink(live(), 'tau://s/builtin~replicad.birdhouse');
+    await expect
+      .poll(() => page.url(), { message: 'R4: an admitted deep link must navigate the window', timeout: 60_000 })
+      .toBe('app://tau/s/builtin~replicad.birdhouse');
+    await expectVisible(page.getByText('Birdhouse').first(), 120_000);
+  }, 300_000);
 });

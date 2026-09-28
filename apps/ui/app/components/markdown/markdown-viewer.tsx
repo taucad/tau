@@ -28,6 +28,8 @@ type MarkdownViewerProps = {
    * Use this to override Streamdown's hardcoded spacing.
    */
   readonly streamdownClassName?: string;
+  /** Plugins that must inspect raw links before Streamdown's URL hardening. */
+  readonly rehypePluginsBeforeHarden?: StreamdownProps['rehypePlugins'];
 } & StreamdownProps;
 
 // oxlint-disable-next-line typescript/consistent-type-assertions -- Streamdown v2's string index signature conflicts with React Three Fiber's global JSX elements.
@@ -46,8 +48,8 @@ const tauRemarkPlugins: StreamdownProps['remarkPlugins'] = Object.values({
   ...streamdownRemarkPlugins,
 });
 
-const { sanitize: _sanitize, ...unsanitizedRehypePlugins } = defaultRehypePlugins;
-const tauRehypePlugins: StreamdownProps['rehypePlugins'] = Object.values(unsanitizedRehypePlugins);
+const { sanitize: _sanitize, harden: hardenPlugin, ...beforeHardenPlugins } = defaultRehypePlugins;
+const tauRehypePlugins = Object.values(beforeHardenPlugins);
 const shikiThemes = {
   default: ['github-light', 'github-dark'],
   highContrast: ['github-light-high-contrast', 'github-dark-high-contrast'],
@@ -66,6 +68,7 @@ export const MarkdownViewer = memo(function ({
   controls = defaultMarkdownControls,
   components,
   rehypePlugins: additionalRehypePlugins,
+  rehypePluginsBeforeHarden,
   className,
   streamdownClassName,
   plugins = streamdownPlugins,
@@ -83,8 +86,13 @@ export const MarkdownViewer = memo(function ({
   );
 
   const mergedRehypePlugins = useMemo(
-    () => (additionalRehypePlugins ? [...tauRehypePlugins, ...additionalRehypePlugins] : tauRehypePlugins),
-    [additionalRehypePlugins],
+    () => [
+      ...tauRehypePlugins,
+      ...(rehypePluginsBeforeHarden ?? []),
+      ...(hardenPlugin === undefined ? [] : [hardenPlugin]),
+      ...(additionalRehypePlugins ?? []),
+    ],
+    [additionalRehypePlugins, rehypePluginsBeforeHarden],
   );
 
   return (

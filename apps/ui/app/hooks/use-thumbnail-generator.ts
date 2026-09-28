@@ -189,8 +189,16 @@ export function useThumbnailGenerator(): { regenerate: () => Promise<ThumbnailRe
       identityRef.current = `${projectId}:${mainEntryPath}:${event.geometry.hash}:webp:q0.9:768x576:m0.1:lw${thumbnailLineWidth}:camera-bounds-v1:edges:studio-v5`;
       thumbnailActor.send({ type: 'settled', hash: identityRef.current });
     });
+    let requestId = mainCadActor.getSnapshot().context.lastRequestedRenderId;
+    const requests = mainCadActor.subscribe((snapshot) => {
+      if (snapshot.context.lastRequestedRenderId !== requestId) {
+        requestId = snapshot.context.lastRequestedRenderId;
+        thumbnailActor.send({ type: 'renderRequested' });
+      }
+    });
     return () => {
       subscription.unsubscribe();
+      requests.unsubscribe();
     };
   }, [mainCadActor, mainEntryPath, projectId, thumbnailActor]);
 

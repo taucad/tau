@@ -15,6 +15,16 @@ const environmentSchemaBase = z.object({
   TAU_CLOUD_ENABLED: strictEnvironmentBoolean(false).describe(
     'Start Tau Cloud billing and funded-admission services. Defaults false for self-hosted deployments.',
   ),
+  /*
+   * Charter D23: sync opens to the free tier only after the deployment gate
+   * (DG1–DG4) closes. Off, a free account projects `canSyncFiles: false`
+   * whatever the code's free tier says. `BillingService` ignores it under
+   * `NODE_ENV=production` until the go-live commit deletes that clause; the
+   * value then arrives through the Terraform secrets map, never a `fly.*.toml`.
+   */
+  TAU_FREE_TIER_SYNC_ENABLED: strictEnvironmentBoolean(false).describe(
+    'Open Tau Cloud backup and publishing to the free tier (charter D23). Ignored under NODE_ENV=production until the go-live checklist opens it.',
+  ),
   PORT: z.string().default('3000'),
   DATABASE_URL: z.string(),
   // Bounded runtime pool (B8 R3). Every value fails closed: a non-numeric or out-of-range

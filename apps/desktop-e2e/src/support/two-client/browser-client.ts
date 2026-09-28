@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import { expect } from 'vitest';
 import { chromium } from 'playwright';
 import type { Browser, BrowserContext, Locator, Page } from 'playwright';
 import { desktopE2EApiUrl, desktopE2EFrontendUrl } from '#support/config.js';
@@ -85,6 +86,92 @@ export const chatRowLink = (page: Page, chatId: string): Locator =>
 export const openBrowserChat = async (client: Pick<BrowserClient, 'page'>, chatId: string): Promise<void> => {
   await chatRowLink(client.page, chatId).click({ timeout: 120_000 });
   await client.page.waitForURL((url) => url.searchParams.get('chat') === chatId, { timeout: 60_000 });
+};
+
+/**
+ * Find one project in the library (D20), narrowed by its own search box: the
+ * library pages at 20 rows and a suite account holds more than that.
+ *
+ * @param page - A page of either client.
+ * @param options - Where the library is and the project's name.
+ * @param options.projectsUrl - `/projects` on the browser, `app://tau/projects` on the desktop.
+ * @param options.name - The project's name.
+ */
+export const searchLibrary = async (
+  page: Page,
+  options: Readonly<{ projectsUrl: string; name: string }>,
+): Promise<void> => {
+  await page.goto(options.projectsUrl, { waitUntil: 'domcontentloaded' });
+  await page.getByPlaceholder('Search projects...').first().fill(options.name);
+};
+
+/** A library card this device holds: its link is *Open <name>* (D20). */
+export const localLibraryCard = (page: Page, name: string): Locator =>
+  page
+    .locator('[data-slot="card"]')
+    .filter({ has: page.getByRole('link', { name: `Open ${name}`, exact: true }) })
+    .first();
+
+/** A library card only Tau Cloud holds: its *Open <name>* is a button that clones it (D20). */
+export const cloudOnlyLibraryCard = (page: Page, name: string): Locator =>
+  page
+    .locator('[data-slot="cloud-project-card"]')
+    .filter({ has: page.getByRole('button', { name: `Open ${name}`, exact: true }) })
+    .first();
+
+/**
+ * Open a project only Tau Cloud holds through its library card, which creates
+ * it on this device under the remote's own id and pulls (D20, DEF-2).
+ *
+ * @param page - A page of either client.
+ * @param options - Where the library is, the project's name and the row's words for a failure.
+ * @param options.projectsUrl - `/projects` on the browser, `app://tau/projects` on the desktop.
+ * @param options.name - The project's name.
+ * @param options.message - What the calling row expected.
+ * @returns The opened project route's slug.
+ */
+export const openCloudOnlyProject = async (
+  page: Page,
+  options: Readonly<{ projectsUrl: string; name: string; message: string }>,
+): Promise<string> => {
+  const { name, message } = options;
+  await searchLibrary(page, options);
+  const card = cloudOnlyLibraryCard(page, name);
+  await expect
+    .poll(async () => card.count(), { message: `${message}: the library must list it as Tau Cloud's`, timeout: 60_000 })
+    .toBeGreaterThan(0);
+  await card.getByRole('button', { name: `Open ${name}`, exact: true }).click();
+  await expect
+    .poll(async () => page.url(), { message: `${message}: Open must reach the project route`, timeout: 120_000 })
+    .toMatch(/\/w\//u);
+  const slug = new URL(page.url()).pathname.split('/').at(-1);
+  if (!slug) {
+    throw new Error(`${message}: the project route has no slug: ${page.url()}`);
+  }
+  return decodeURIComponent(slug);
+};
+
+/**
+ * Upload authored bytes through the Files pane, beside `main.scad`.
+ *
+ * @param page - The project page.
+ * @param name - The new file's name.
+ * @param bytes - Its contents.
+ */
+export const uploadFileInPage = async (page: Page, name: string, bytes: Uint8Array<ArrayBuffer>): Promise<void> => {
+  await page.keyboard.press('Control+KeyF');
+  await page
+    .getByRole('treeitem', { name: /main\.scad/u })
+    .first()
+    .click({ button: 'right' });
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('menuitem', { name: 'Upload Files' }).first().click();
+  const fileChooser = await chooser;
+  await fileChooser.setFiles({ buffer: Buffer.from(bytes), mimeType: 'model/step', name });
+  await page
+    .getByRole('treeitem', { name: new RegExp(name, 'u') })
+    .first()
+    .waitFor({ timeout: 60_000 });
 };
 
 /** How long the merged transcript has to render every turn it was told to hold. */

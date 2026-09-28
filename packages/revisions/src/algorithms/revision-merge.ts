@@ -39,6 +39,61 @@ export type TextConflict = Readonly<{
   theirs: string;
 }>;
 
+/**
+ * Both sides of a `.tau/parameters/**` record changed the same key differently.
+ *
+ * The record merges per key (charter D12): disjoint key edits settle on their
+ * own, so what is left is a person choosing one side of the file — a parametric
+ * file is choose-one, never marker text (revisions policy rule 8).
+ *
+ * @public
+ */
+export type ParameterConflict = Readonly<{
+  type: 'parameters';
+  path: string;
+  /**
+   * Why the record did not settle: `overlap` when both sides changed the keys in
+   * {@link ParameterConflict.pointers}; `invalid` when a side, or the per-key
+   * result, is not a record a reader accepts (a dangling `activeGroup`, no
+   * groups, a source unit that is not the chosen unit); `unvalidated` when the
+   * merge was given no {@link ParameterRecordCodec} to prove the result valid.
+   */
+  reason: 'overlap' | 'invalid' | 'unvalidated';
+  /** RFC 6901 pointers both sides changed to different values, in document order; empty unless `overlap`. */
+  pointers: readonly string[];
+  base: Uint8Array<ArrayBuffer>;
+  ours: Uint8Array<ArrayBuffer>;
+  theirs: Uint8Array<ArrayBuffer>;
+}>;
+
+/**
+ * How a host reads, validates and writes a `.tau/parameters/**` record, for the
+ * per-key merge (charter D12). The host injects `@taucad/parameters`'
+ * `requireParameterRecord` and `serializeParameterRecord`; this package never
+ * depends on that one.
+ *
+ * @public
+ */
+export type ParameterRecordCodec = Readonly<{
+  /** Decode and validate stored bytes; throws when no reader would accept them. */
+  read: (bytes: Uint8Array<ArrayBuffer>) => unknown;
+  /**
+   * Validate a record and write its canonical bytes; throws when it is invalid.
+   * Method syntax, so the host's typed serializer is assignable: a merged value
+   * is only ever handed over for this validation.
+   */
+  serialize(record: unknown): Uint8Array<ArrayBuffer>;
+}>;
+
+/** What {@link mergeRevisionTrees} may be given beside its three trees. @public */
+export type MergeRevisionTreesOptions = Readonly<{
+  /**
+   * Without it, a parameter record both sides changed is a `parameters`
+   * conflict: an unvalidated record is never merged silently.
+   */
+  parameters?: ParameterRecordCodec;
+}>;
+
 /** Identical added bytes whose executable modes disagree. @public */
 export type ModeConflict = Readonly<{
   type: 'mode';
@@ -73,6 +128,7 @@ export type RevisionTreeConflict =
   | ModifyDeleteConflict
   | BinaryConflict
   | TextConflict
+  | ParameterConflict
   | ModeConflict
   | FileDirectoryConflict;
 
@@ -136,7 +192,7 @@ type StructuralMergeResult =
 
 type ChangedFileMergeResult =
   | Readonly<{ status: 'merged'; content: Uint8Array<ArrayBuffer> }>
-  | Readonly<{ status: 'conflicted'; conflict: BinaryConflict | TextConflict }>;
+  | Readonly<{ status: 'conflicted'; conflict: BinaryConflict | TextConflict | ParameterConflict }>;
 
 const textDecoder = new TextDecoder('utf-8', { fatal: true });
 const textEncoder = new TextEncoder();
@@ -257,7 +313,14 @@ const diffHunks = (base: readonly string[], target: readonly string[]): readonly
   return hunks;
 };
 
-const mergeText = (base: string, ours: string, theirs: string): TextMergeResult => {
+/** Which side wins where both changed, when a person has chosen one (D14, RV-W5b2 R2-4). */
+type Preference = 'ours' | 'theirs';
+
+const mergeText = (
+  texts: Readonly<{ base: string; ours: string; theirs: string }>,
+  prefer?: Preference,
+): TextMergeResult => {
+  const { base, ours, theirs } = texts;
   const baseLines = splitLines(base);
   const oursHunks = diffHunks(baseLines, splitLines(ours));
   const theirsHunks = diffHunks(baseLines, splitLines(theirs));
@@ -265,17 +328,16 @@ const mergeText = (base: string, ours: string, theirs: string): TextMergeResult 
     return { status: 'conflicted', reason: 'analysis-limit' };
   }
 
-  for (const oursHunk of oursHunks) {
-    for (const theirsHunk of theirsHunks) {
-      if (hunksOverlap(oursHunk, theirsHunk) && !hunkEqual(oursHunk, theirsHunk)) {
-        return { status: 'conflicted', reason: 'overlap' };
-      }
-    }
+  const [kept, other] = prefer === 'theirs' ? [theirsHunks, oursHunks] : [oursHunks, theirsHunks];
+  const collides = (hunk: TextHunk): boolean =>
+    kept.some((candidate) => hunksOverlap(candidate, hunk) && !hunkEqual(candidate, hunk));
+  if (prefer === undefined && other.some((hunk) => collides(hunk))) {
+    return { status: 'conflicted', reason: 'overlap' };
   }
 
-  const hunks = [...oursHunks];
-  for (const hunk of theirsHunks) {
-    if (!hunks.some((candidate) => hunkEqual(candidate, hunk))) {
+  const hunks = [...kept];
+  for (const hunk of other) {
+    if (!collides(hunk) && !hunks.some((candidate) => hunkEqual(candidate, hunk))) {
       hunks.push(hunk);
     }
   }
@@ -333,6 +395,156 @@ const resolveStructuralMerge = (input: StructuralMergeInput): StructuralMergeRes
   return { status: 'both-modified', base, ours, theirs };
 };
 
+/** Where the parameter records live (`docs/policy/parameter-record-policy.md`). */
+const parametersPrefix = '.tau/parameters/';
+
+/** A key one side does not hold, distinct from every JSON value including `null`. */
+const absent = Symbol('absent');
+
+const isJsonObject = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const jsonEqual = (left: unknown, right: unknown): boolean => {
+  if (left === right) {
+    return true;
+  }
+  if (Array.isArray(left) && Array.isArray(right)) {
+    return left.length === right.length && left.every((value, index) => jsonEqual(value, right[index]));
+  }
+  if (isJsonObject(left) && isJsonObject(right)) {
+    const keys = Object.keys(left);
+    return (
+      keys.length === Object.keys(right).length &&
+      keys.every((key) => Object.hasOwn(right, key) && jsonEqual(left[key], right[key]))
+    );
+  }
+  return false;
+};
+
+const member = (value: Readonly<Record<string, unknown>>, key: string): unknown =>
+  Object.hasOwn(value, key) ? value[key] : absent;
+
+/**
+ * Ours' key order, with each key only theirs holds placed after the key it
+ * follows there. Two sorted maps stay sorted, so the parameters writer's
+ * canonical order (sorted `values`, display-ordered `groups`) survives.
+ *
+ * @param ours - First descendant object.
+ * @param theirs - Second descendant object.
+ * @returns Every key either side holds, in merged order.
+ */
+const mergedKeyOrder = (
+  ours: Readonly<Record<string, unknown>>,
+  theirs: Readonly<Record<string, unknown>>,
+): string[] => {
+  const order = Object.keys(ours);
+  let previous: string | undefined;
+  for (const key of Object.keys(theirs)) {
+    if (!Object.hasOwn(ours, key)) {
+      order.splice(previous === undefined ? 0 : order.indexOf(previous) + 1, 0, key);
+    }
+    previous = key;
+  }
+  return order;
+};
+
+/**
+ * Three-way merge of one JSON value, recursing through objects that all three
+ * sides hold. Anything else — a scalar, an array, a key one side deleted while
+ * the other changed it — is one leaf, and a leaf both sides changed differently
+ * is recorded in `conflicts` by its pointer.
+ *
+ * @param sides - The value on each side, or `absent` where that side has no such key.
+ * @param pointer - The RFC 6901 pointer of this value.
+ * @param outcome - `conflicts` collects the pointers of leaves both sides changed differently; `prefer` is the side such a leaf takes, when a person chose one.
+ * @returns The merged value, or `absent` when the key is gone.
+ */
+const mergeJsonValue = (
+  sides: Readonly<{ base: unknown; ours: unknown; theirs: unknown }>,
+  pointer: string,
+  outcome: Readonly<{ conflicts: string[]; prefer?: Preference }>,
+): unknown => {
+  const { conflicts, prefer } = outcome;
+  const { base, ours, theirs } = sides;
+  if (jsonEqual(ours, theirs)) {
+    return ours;
+  }
+  if (jsonEqual(base, ours)) {
+    return theirs;
+  }
+  if (jsonEqual(base, theirs)) {
+    return ours;
+  }
+  if (isJsonObject(base) && isJsonObject(ours) && isJsonObject(theirs)) {
+    /* `fromEntries` defines own properties, so a `__proto__` key stays a key. */
+    return Object.fromEntries(
+      mergedKeyOrder(ours, theirs).flatMap((key) => {
+        const value = mergeJsonValue(
+          { base: member(base, key), ours: member(ours, key), theirs: member(theirs, key) },
+          `${pointer}/${key.replaceAll('~', '~0').replaceAll('/', '~1')}`,
+          outcome,
+        );
+        return value === absent ? [] : [[key, value]];
+      }),
+    );
+  }
+  conflicts.push(pointer);
+  return prefer === 'theirs' ? theirs : ours;
+};
+
+/**
+ * `.tau/parameters/**` merges per key (charter D12, L7 M5): a line merge of the
+ * record manufactures conflicts out of disjoint edits (a trailing comma is
+ * enough), and a key is the unit a person edits. The result is settled only
+ * when the host's codec accepts it and writes it canonically; everything else
+ * is a choose-one `parameters` conflict.
+ *
+ * @param path - The record's path in the tree.
+ * @param bytes - The three sides' bytes.
+ * @param options - `codec` is the host's record codec, when it gave one; `prefer` is the side a key both changed takes, when a person chose one.
+ * @returns The merged record, or the conflict naming why it did not settle.
+ */
+const mergeParameterRecord = (
+  path: string,
+  bytes: Readonly<{ base: Uint8Array<ArrayBuffer>; ours: Uint8Array<ArrayBuffer>; theirs: Uint8Array<ArrayBuffer> }>,
+  options: Readonly<{ codec: ParameterRecordCodec | undefined; prefer?: Preference }>,
+): ChangedFileMergeResult => {
+  const { codec, prefer } = options;
+  const conflict = (reason: ParameterConflict['reason'], pointers: readonly string[] = []): ChangedFileMergeResult => ({
+    status: 'conflicted',
+    conflict: {
+      type: 'parameters',
+      path,
+      reason,
+      pointers,
+      base: own(bytes.base),
+      ours: own(bytes.ours),
+      theirs: own(bytes.theirs),
+    },
+  });
+  if (codec === undefined) {
+    return conflict('unvalidated');
+  }
+  let sides: Readonly<{ base: unknown; ours: unknown; theirs: unknown }>;
+  try {
+    sides = { base: codec.read(bytes.base), ours: codec.read(bytes.ours), theirs: codec.read(bytes.theirs) };
+  } catch {
+    return conflict('invalid');
+  }
+  const pointers: string[] = [];
+  const merged = mergeJsonValue(sides, '', { conflicts: pointers, prefer });
+  if (pointers.length > 0 && prefer === undefined) {
+    return conflict('overlap', pointers);
+  }
+  try {
+    return { status: 'merged', content: codec.serialize(merged) };
+  } catch {
+    /* Every key settled and the record as a whole is still not one a reader
+       accepts — one side removed the group the other made active. */
+    return conflict('invalid');
+  }
+};
+
 const mergeChangedFile = (
   path: string,
   bytes: Readonly<{
@@ -340,7 +552,12 @@ const mergeChangedFile = (
     ours: Uint8Array<ArrayBuffer>;
     theirs: Uint8Array<ArrayBuffer>;
   }>,
+  options: MergeRevisionTreesOptions & Readonly<{ prefer?: Preference }>,
 ): ChangedFileMergeResult => {
+  const { prefer } = options;
+  if (path.startsWith(parametersPrefix)) {
+    return mergeParameterRecord(path, bytes, { codec: options.parameters, prefer });
+  }
   const baseText = seemsBinary(bytes.base) ? undefined : decodeText(bytes.base);
   const oursText = seemsBinary(bytes.ours) ? undefined : decodeText(bytes.ours);
   const theirsText = seemsBinary(bytes.theirs) ? undefined : decodeText(bytes.theirs);
@@ -357,7 +574,7 @@ const mergeChangedFile = (
     };
   }
 
-  const textMerge = mergeText(baseText, oursText, theirsText);
+  const textMerge = mergeText({ base: baseText, ours: oursText, theirs: theirsText }, prefer);
   return textMerge.status === 'conflicted'
     ? {
         status: 'conflicted',
@@ -371,6 +588,35 @@ const mergeChangedFile = (
         },
       }
     : { status: 'merged', content: textEncoder.encode(textMerge.text) };
+};
+
+/**
+ * One file both sides changed, merged with a chosen side winning where they
+ * collide (D14, RV-W5b2 R2-4).
+ *
+ * *Keep mine* on a text file keeps the other side's clean hunks, and on a
+ * parameter record the other side's other keys; the collisions take the chosen
+ * side. A file with no such merge — binary, past the analysis limit, or a
+ * record the codec refuses — answers `undefined`, and the caller keeps that
+ * side's whole file.
+ *
+ * @param path - The file's path; it decides the parameter codec.
+ * @param bytes - The three sides' bytes.
+ * @param options - The side that wins a collision (`prefer`), with the host's merge options.
+ * @returns The merged bytes, or `undefined` when only a whole side will do.
+ * @public
+ */
+export const mergeFilePreferring = (
+  path: string,
+  bytes: Readonly<{
+    base: Uint8Array<ArrayBuffer>;
+    ours: Uint8Array<ArrayBuffer>;
+    theirs: Uint8Array<ArrayBuffer>;
+  }>,
+  options: MergeRevisionTreesOptions & Readonly<{ prefer: 'ours' | 'theirs' }>,
+): Uint8Array<ArrayBuffer> | undefined => {
+  const result = mergeChangedFile(path, bytes, options);
+  return result.status === 'merged' ? result.content : undefined;
 };
 
 /**
@@ -504,13 +750,18 @@ const applyHunks = (
  * @param base - Common immutable ancestor.
  * @param ours - First descendant tree.
  * @param theirs - Second descendant tree.
+ * @param options - The host's parameter record codec (D12). Every merge of one
+ *   graph passes the same one, or a conflicted revision re-read later settles
+ *   differently from the merge that recorded it.
  * @returns A merged immutable tree or stable, path-sorted conflicts.
  * @public
  */
+// oxlint-disable-next-line max-params -- the three trees are the merge's terms; the options bag is the fourth
 export const mergeRevisionTrees = (
   base: ImmutableRevisionTree,
   ours: ImmutableRevisionTree,
   theirs: ImmutableRevisionTree,
+  options: MergeRevisionTreesOptions = {},
 ): RevisionTreeMergeResult => {
   const paths = new Set([
     ...base.entries().map(({ path }) => path),
@@ -542,7 +793,7 @@ export const mergeRevisionTrees = (
       conflicts.push(structural.conflict);
       continue;
     }
-    const changed = mergeChangedFile(path, structural);
+    const changed = mergeChangedFile(path, structural, options);
     if (changed.status === 'conflicted') {
       conflicts.push(changed.conflict);
       continue;

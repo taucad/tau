@@ -6,9 +6,10 @@
     "types": ["node", "vite/client"],
     "target": "ESNext",
     "paths": {
-      "#*": ["./src/*"],
       "libcascade": ["../api-extractor/src/generated/opencascade/modules/libcascade/index.d.ts"]
     }
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts"],
+  // A bundler fixture: its asset queries, JSX and untyped modules are checked by the bundler suites, not tsc.
+  "exclude": ["src/kernels/replicad/bundler-feature-matrix/**"]
 }

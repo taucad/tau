@@ -39,13 +39,13 @@ import {
 import type { MaterializedPublication, MaterializerDependencies } from '#api/publications/publication-materializer.js';
 import type { ResolvedViewerIdentity } from '#api/publications/viewer-identity.types.js';
 import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
-import { hydrateLease } from '#api/git/store/lease.js';
 import type { RepositoryLease } from '#api/git/store/lease.js';
 import { decodeManifest } from '#api/git/store/manifest.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
 import type { RepositoryStore } from '#api/git/store/port.js';
 import { repositoryStoreKey } from '#api/git/git.constants.js';
 import { resolveLfsObjectLocation } from '#api/git/lfs-keys.js';
+import { GitRepositoryService } from '#api/git/git.service.js';
 import { DatabaseService } from '#database/database.service.js';
 import { EmailService } from '#email/email.service.js';
 import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
@@ -90,6 +90,9 @@ const splitNamespaceKey = (storedKey: string): { namespace: StorageNamespace; ke
   return { namespace: storedKey.slice(0, slash) as StorageNamespace, key: storedKey.slice(slash + 1) };
 };
 
+/** The hydrate-budget caller a publication viewer's derived-state repair is charged as. */
+const publicationRepairCaller = 'publication-repair';
+
 @Injectable()
 export class PublicationsService {
   private readonly logger = new Logger(this.constructor.name);
@@ -120,6 +123,11 @@ export class PublicationsService {
      * code above the adapter names a provider (D25, NI14).
      */
     @Inject(repositoryStoreKey) private readonly repositoryStore: RepositoryStore,
+    /*
+     * Leases only, so publishing and a viewer's repair take the same disk
+     * admission, owner fairness and hydrate budget as every git route (I11).
+     */
+    private readonly repositories: GitRepositoryService,
   ) {}
 
   /**
@@ -233,49 +241,75 @@ export class PublicationsService {
        disposed here (D9). It stays open across the transaction below because
        that is where the tagged tree is read and the blobs are written — the
        reference counts must be taken before any of it (D10). */
-    const published = await this.withLease({ projectId: request.projectId, ownerId }, async (lease) =>
-      db.transaction(async (tx) => {
-        /* One writer of this project's publications at a time, the same lock a
+    const published = await this.withLease(
+      { projectId: request.projectId, ownerId, callerId: ownerId },
+      async (lease) =>
+        db.transaction(async (tx) => {
+          /* One writer of this project's publications at a time, the same lock a
            read-side repair takes: the row this reads decides which manifest is
            released below, and two writers reading it before either commits
            would release that manifest twice (review F2). */
-        await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${request.projectId}, 0))`);
+          await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${request.projectId}, 0))`);
 
-        const [currentRow] = await tx
-          .select()
-          .from(schema.publication)
-          .where(and(eq(schema.publication.projectId, request.projectId), eq(schema.publication.tag, request.tag)))
-          .limit(1);
-        const publicationId = currentRow?.id ?? generatePrefixedId(idPrefix.publication);
+          /* The ref-removal verb retires a publication under this same lock
+           (D24). A lease hydrated before a removal still holds the removed
+           name, so the name is re-read from the store under the lock: a
+           publish never brings back a name removed while it was running. */
+          const tagRef = `refs/tags/${request.tag}`;
+          const stored = await this.repositoryStore.readManifest(
+            repositoryLocator({ ownerId, projectId: request.projectId }),
+          );
+          const storedTip = stored === undefined ? undefined : decodeManifest(stored.manifest).refs[tagRef]?.oid;
+          if (storedTip === undefined || storedTip !== lease.manifest?.refs[tagRef]?.oid) {
+            throw new ConflictException({
+              code: publicationApiCode.REVISION_MOVED,
+              message: `${request.tag} changed while it was being published. Publish again to pick it up.`,
+            });
+          }
 
-        const version = await materializePublication(
-          this.materializer,
-          {
-            publicationId,
-            projectId: request.projectId,
-            ownerId,
-            directory: lease.directory,
-            tag: request.tag,
-            visibility: request.visibility,
-            entryPath: request.entryPath,
-          },
-          tx,
-        );
+          const [currentRow] = await tx
+            .select()
+            .from(schema.publication)
+            .where(and(eq(schema.publication.projectId, request.projectId), eq(schema.publication.tag, request.tag)))
+            .limit(1);
+          const publicationId = currentRow?.id ?? generatePrefixedId(idPrefix.publication);
 
-        /* The row records the revision the server resolved, never the client's
+          const version = await materializePublication(
+            this.materializer,
+            {
+              publicationId,
+              projectId: request.projectId,
+              ownerId,
+              directory: lease.directory,
+              tag: request.tag,
+              visibility: request.visibility,
+              entryPath: request.entryPath,
+            },
+            tx,
+          );
+
+          /* The row records the revision the server resolved, never the client's
            claim, and a mismatch is a refusal rather than a silent disagreement
            between the row and the bytes a viewer is served (review R6). The
            throw rolls the counts above back with it. */
-        if (version.revisionId !== request.revisionId) {
-          throw new ConflictException({
-            code: publicationApiCode.REVISION_MOVED,
-            message: `${request.tag} now points at a different revision. Publish again to pick it up.`,
-          });
-        }
+          if (version.revisionId !== request.revisionId) {
+            throw new ConflictException({
+              code: publicationApiCode.REVISION_MOVED,
+              message: `${request.tag} now points at a different revision. Publish again to pick it up.`,
+            });
+          }
 
-        await this.writePublicationRows({ tx, ownerId, request, publicationId, sharedEmails, ownerSnapshot, version });
-        return { version, publicationId, superseded: currentRow?.manifestKey };
-      }),
+          await this.writePublicationRows({
+            tx,
+            ownerId,
+            request,
+            publicationId,
+            sharedEmails,
+            ownerSnapshot,
+            version,
+          });
+          return { version, publicationId, superseded: currentRow?.manifestKey };
+        }),
     );
     const { version: materialized, publicationId } = published;
 
@@ -760,23 +794,19 @@ export class PublicationsService {
    * names are the repository, and this directory is a disposable copy of them
    * (charter D9, NI1).
    *
-   * @param args - Whose repository, and which project.
+   * Taken through `GitRepositoryService.withLease`, so it is admitted like
+   * every other lease on this worker (I11): disk, owner fairness, and the
+   * hydrate budget of whoever asked.
+   *
+   * @param args - Whose repository, which project, and who asked.
    * @param body - What to do with the lease.
    * @returns Whatever the body returned.
    */
   private async withLease<T>(
-    args: { readonly projectId: string; readonly ownerId: string },
+    args: { readonly projectId: string; readonly ownerId: string; readonly callerId: string },
     body: (lease: RepositoryLease) => Promise<T>,
   ): Promise<T> {
-    const lease = await hydrateLease({
-      store: this.repositoryStore,
-      locator: repositoryLocator({ ownerId: args.ownerId, projectId: args.projectId }),
-    });
-    try {
-      return await body(lease);
-    } finally {
-      await lease.dispose();
-    }
+    return this.repositories.withLease({ ...args, role: 'owner', remainingBytes: 0, storageLimitBytes: 0 }, body);
   }
 
   /**
@@ -832,7 +862,9 @@ export class PublicationsService {
         return false;
       }
 
-      return await this.withLease(publication, async (lease) => {
+      /* A viewer is nobody's account, so the repair is charged as one named
+         caller in the owner's third-party aggregate (D22). */
+      return await this.withLease({ ...publication, callerId: publicationRepairCaller }, async (lease) => {
         /* Every tag the manifest holds, not just the ones a push moved: after a
            crash nobody knows which ones were done, and a tag whose publication
            already records that oid is skipped without reading a byte. */

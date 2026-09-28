@@ -353,7 +353,7 @@ describe('editorMachine', () => {
       expect(actor.getSnapshot().context.viewSettings['view-a']?.graphicsSettings).not.toHaveProperty(
         'componentDisplay',
       );
-      expect(actor.getSnapshot().context.viewSettings['view-a']?.graphicsSettings.schemaVersion).toBe(11);
+      expect(actor.getSnapshot().context.viewSettings['view-a']?.graphicsSettings.schemaVersion).toBe(12);
       actor.stop();
     });
 
@@ -385,6 +385,28 @@ describe('editorMachine', () => {
           entryPath: 'src/main.ts',
           unitId: 'file:src/main.ts',
           componentId: 'component:housing',
+        },
+      ]);
+      actor.stop();
+    });
+
+    it('should emit Kinematics reveal requests', async () => {
+      const actor = await startAndLoad({ loadResult: undefined });
+      const emitted: unknown[] = [];
+      actor.on('kinematicsRevealRequested', (event) => emitted.push(event));
+
+      actor.send({
+        type: 'revealModelComponentInKinematics',
+        entryPath: 'src/main.ts',
+        unitId: 'file:src/main.ts',
+        componentId: 'component:blocker-door-3',
+      });
+      expect(emitted).toEqual([
+        {
+          type: 'kinematicsRevealRequested',
+          entryPath: 'src/main.ts',
+          unitId: 'file:src/main.ts',
+          componentId: 'component:blocker-door-3',
         },
       ]);
       actor.stop();
@@ -458,7 +480,7 @@ describe('editorMachine', () => {
         'src/utils.ts': { renderTimeout: 45_000 },
       });
       expect(actor.getSnapshot().context.viewSettings['view-a']?.graphicsSettings).not.toHaveProperty('renderTimeout');
-      expect(actor.getSnapshot().context.viewSettings['view-a']?.graphicsSettings.schemaVersion).toBe(11);
+      expect(actor.getSnapshot().context.viewSettings['view-a']?.graphicsSettings.schemaVersion).toBe(12);
       actor.stop();
     });
 
@@ -494,7 +516,7 @@ describe('editorMachine', () => {
 
       const settings = actor.getSnapshot().context.viewSettings['view1']?.graphicsSettings;
       expect(settings?.sectionView).toBeUndefined();
-      expect(settings?.sectionDisplay).toBeUndefined();
+      expect(settings).not.toHaveProperty('sectionDisplay');
       actor.stop();
     });
 

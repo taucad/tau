@@ -2379,17 +2379,15 @@ export class ChatSessionStore {
     const runId = admission.success
       ? admission.data.idempotencyKey
       : (getBoundDurableChatRunId(session.chatId) ?? session.durableRunId);
-    /* A reattach that found nothing to resume still drives the SDK through
-     * `submitted → ready`. OPENING a run on that left the chat's machine in
-     * `run.finishing` waiting for a settlement no run can send — the sidebar's
-     * permanent "Finishing…" (F4b). A run phase has to name a run, so a chat
-     * that reattached with no run identity opens none and stays idle. Only the
-     * opening: a settlement always reports, because the run it settles was
-     * already reported open and its identity is gone by then — `startRun`
-     * stamps an admission key the release clears before the SDK's `ready`
-     * arrives (R3-F2) — and because a reattach that refuses outright settles
-     * as `failed` about a chat that cannot stream (R1-F1). */
-    if (runId === undefined && session.reattachedHostId !== undefined && opensRun(next)) {
+    /* A host reattach drives the SDK through `submitted` before it knows
+     * whether the log holds a live run. That is transport activity, not an
+     * admission: even an already-terminal run keeps its id so the transcript
+     * can be rebuilt, and treating that id as liveness revived it into a
+     * permanent `finishing`. A live reattach advances to `streaming`; an owned
+     * turn has `activeRunBody` before its own `submitted`. Settlements still
+     * report after that body clears, and a refused reattach still reports its
+     * `failed` status. */
+    if (next === 'admitted' && session.reattachedHostId !== undefined && session.activeRunBody === undefined) {
       return;
     }
     lastState.phase = next;

@@ -12,7 +12,8 @@ import type {
   SectionCutPlaneBasis,
 } from '#components/geometry/graphics/three/utils/section-cap-region.js';
 import type { SectionCapBooleanOperations } from '#components/geometry/graphics/three/utils/section-cap-polygon-boolean-backend.js';
-import { decodeSectionCapWorkerSources } from '#components/geometry/graphics/three/utils/section-cap-overlap-worker-protocol.js';
+import type { SectionCapDiagnostic } from '#components/geometry/graphics/three/utils/section-cap-polygon-types.js';
+import { decodeSectionCapWorkerFaces } from '#components/geometry/graphics/three/utils/section-cap-overlap-worker-protocol.js';
 import type {
   PlainSectionCutPlaneBasis,
   SectionCapWorkerRequest,
@@ -52,11 +53,17 @@ const appendUint32 = (target: number[], source: Uint32Array): void => {
   }
 };
 
+type Mutable<T> = { -readonly [Key in keyof T]: T[Key] };
+
 const now = (): number => (typeof performance === 'undefined' ? Date.now() : performance.now());
 const neutralWorkerStripeFrequency = 1;
 const neutralWorkerStripeWidth = 0.1;
 const neutralWorkerTintHex = 0xff_ff_ff;
 
+/**
+ * Classifies overlaps, splits render parts and packs geometry for every face of a request. Sources overlap only within
+ * a face, so each face is classified on its own; the counters and diagnostics add up over the faces.
+ */
 export const computeSectionCapWorkerResponse = (
   request: SectionCapWorkerRequest,
   options: Readonly<{
@@ -64,8 +71,7 @@ export const computeSectionCapWorkerResponse = (
   }> = {},
 ): SectionCapWorkerSuccessResponse => {
   const totalStartedAt = now();
-  const basis = toBasis(request.basis);
-  const sources = decodeSectionCapWorkerSources(request);
+  const faces = decodeSectionCapWorkerFaces(request);
   const sectionCapBooleanOperations = options.booleanOperations ?? defaultSectionCapBooleanOperations;
   const booleanOperations = createSectionCapBooleanOperationStats();
   const packing = createSectionCapPackingStats();
@@ -88,39 +94,22 @@ export const computeSectionCapWorkerResponse = (
     },
   };
 
-  const regions: SectionCapPolygon[] = sources.map((source) => ({
-    sourceKey: source.sourceKey,
-    ownerKey: source.ownerKey,
-    geometryKey: source.geometryKey,
-    multiPolygon: source.sourcePolygon,
-    bbox: source.bbox,
-    area: source.area,
-    trueCut: source.trueCut,
-    diagnostics: [],
-  }));
-
-  const classifyStartedAt = now();
-  const overlapResult = classifySectionCapOverlaps(regions, {
-    booleanOperations: sectionCapBooleanOperations,
-    debugSink: booleanDebugSink,
-  });
-  const overlapClassify = now() - classifyStartedAt;
-
-  const splitStartedAt = now();
-  const renderPartsResult = buildSectionCapRenderParts({
-    stripeFrequency: neutralWorkerStripeFrequency,
-    stripeWidth: neutralWorkerStripeWidth,
-    booleanOperations: sectionCapBooleanOperations,
-    debugSink: booleanDebugSink,
-    sources: sources.map((source) => ({
-      sourceKey: source.sourceKey,
-      sourcePolygon: source.sourcePolygon,
-      overlapPolygon: overlapResult.overlapBySourceKey.get(source.sourceKey),
-      visibleOverlapPolygon: overlapResult.visibleOverlapBySourceKey.get(source.sourceKey),
-      tintHex: neutralWorkerTintHex,
-    })),
-  });
-  const renderPartSplit = now() - splitStartedAt;
+  const overlapCounters: Mutable<SectionCapWorkerSuccessResponse['overlapCounters']> = {
+    sourcePairCount: 0,
+    classifiableSourceCount: 0,
+    trueCutPrunedRegionCount: 0,
+    xPrunedPairCount: 0,
+    ownerPrunedPairCount: 0,
+    yPrunedPairCount: 0,
+    candidatePointCount: 0,
+    broadphaseCandidatePairCount: 0,
+    exactIntersectionPairCount: 0,
+    positiveAreaPairCount: 0,
+  };
+  let renderedOverlapArea = 0;
+  let splitFailed = false;
+  const diagnostics: SectionCapDiagnostic[] = [];
+  const timings = { overlapClassify: 0, renderPartSplit: 0, geometryPack: 0 };
 
   const sourceVertexOffsets: number[] = [0];
   const sourceIndexOffsets: number[] = [0];
@@ -133,36 +122,79 @@ export const computeSectionCapWorkerResponse = (
   const regionKinds: number[] = [];
   const indices: number[] = [];
 
-  const packStartedAt = now();
-  for (const source of sources) {
-    const buffers = buildPackedSectionCapGeometry({
-      parts: renderPartsResult.partsBySourceKey.get(source.sourceKey) ?? [],
-      basis,
-      meshWorldInverse: toMatrix4(source.meshWorldInverse),
-      debugSink: packingDebugSink,
-    });
+  for (const face of faces) {
+    const basis = toBasis(face.basis);
+    const regions: SectionCapPolygon[] = face.sources.map((source) => ({
+      sourceKey: source.sourceKey,
+      ownerKey: source.ownerKey,
+      geometryKey: source.geometryKey,
+      multiPolygon: source.sourcePolygon,
+      bbox: source.bbox,
+      area: source.area,
+      trueCut: source.trueCut,
+      diagnostics: [],
+    }));
 
-    appendFloat32(positions, buffers.positions);
-    appendFloat32(planeUv, buffers.planeUv);
-    appendFloat32(baseColors, buffers.baseColors);
-    appendFloat32(stripeColors, buffers.stripeColors);
-    appendFloat32(patternStrengths, buffers.patternStrengths);
-    appendFloat32(stripeAxes, buffers.stripeAxes);
-    for (const regionKind of buffers.regionKinds) {
-      regionKinds.push(regionKind);
+    const classifyStartedAt = now();
+    const overlapResult = classifySectionCapOverlaps(regions, {
+      booleanOperations: sectionCapBooleanOperations,
+      debugSink: booleanDebugSink,
+    });
+    timings.overlapClassify += now() - classifyStartedAt;
+    for (const counter of Object.keys(overlapCounters) as Array<keyof typeof overlapCounters>) {
+      overlapCounters[counter] += overlapResult[counter];
     }
-    appendUint32(indices, buffers.indices);
-    sourceVertexOffsets.push(positions.length / 3);
-    sourceIndexOffsets.push(indices.length);
+
+    const splitStartedAt = now();
+    const renderPartsResult = buildSectionCapRenderParts({
+      stripeFrequency: neutralWorkerStripeFrequency,
+      stripeWidth: neutralWorkerStripeWidth,
+      booleanOperations: sectionCapBooleanOperations,
+      debugSink: booleanDebugSink,
+      sources: face.sources.map((source) => ({
+        sourceKey: source.sourceKey,
+        sourcePolygon: source.sourcePolygon,
+        overlapPolygon: overlapResult.overlapBySourceKey.get(source.sourceKey),
+        visibleOverlapPolygon: overlapResult.visibleOverlapBySourceKey.get(source.sourceKey),
+        tintHex: neutralWorkerTintHex,
+      })),
+    });
+    timings.renderPartSplit += now() - splitStartedAt;
+    renderedOverlapArea += renderPartsResult.renderedOverlapArea;
+    splitFailed ||= renderPartsResult.splitFailed;
+    diagnostics.push(...overlapResult.diagnostics, ...renderPartsResult.diagnostics);
+
+    const packStartedAt = now();
+    for (const source of face.sources) {
+      const buffers = buildPackedSectionCapGeometry({
+        parts: renderPartsResult.partsBySourceKey.get(source.sourceKey) ?? [],
+        basis,
+        meshWorldInverse: toMatrix4(source.meshWorldInverse),
+        debugSink: packingDebugSink,
+      });
+
+      appendFloat32(positions, buffers.positions);
+      appendFloat32(planeUv, buffers.planeUv);
+      appendFloat32(baseColors, buffers.baseColors);
+      appendFloat32(stripeColors, buffers.stripeColors);
+      appendFloat32(patternStrengths, buffers.patternStrengths);
+      appendFloat32(stripeAxes, buffers.stripeAxes);
+      for (const regionKind of buffers.regionKinds) {
+        regionKinds.push(regionKind);
+      }
+      appendUint32(indices, buffers.indices);
+      sourceVertexOffsets.push(positions.length / 3);
+      sourceIndexOffsets.push(indices.length);
+    }
+    timings.geometryPack += now() - packStartedAt;
   }
-  const geometryPack = now() - packStartedAt;
 
   return {
     type: 'result',
     sequence: request.sequence,
     requestKey: request.requestKey,
-    planeKey: request.planeKey,
-    sourceSetKey: request.sourceSetKey,
+    faceKeys: request.faceKeys,
+    faceSourceOffsets: new Uint32Array(request.faceSourceOffsets),
     sourceKeys: request.sourceKeys,
     sourceVertexOffsets: new Uint32Array(sourceVertexOffsets),
     sourceIndexOffsets: new Uint32Array(sourceIndexOffsets),
@@ -175,35 +207,19 @@ export const computeSectionCapWorkerResponse = (
     regionKinds: new Uint8Array(regionKinds),
     indices: new Uint32Array(indices),
     overlapDebug: {
-      sourceCount: sources.length,
-      sourcePairCount: overlapResult.sourcePairCount,
-      broadphaseCandidatePairCount: overlapResult.broadphaseCandidatePairCount,
-      exactIntersectionPairCount: overlapResult.exactIntersectionPairCount,
-      positiveAreaPairCount: overlapResult.positiveAreaPairCount,
-      renderedOverlapArea: renderPartsResult.renderedOverlapArea,
-      splitFailed: renderPartsResult.splitFailed,
-      diagnostics: [...overlapResult.diagnostics, ...renderPartsResult.diagnostics],
+      sourceCount: request.sourceKeys.length,
+      sourcePairCount: overlapCounters.sourcePairCount,
+      broadphaseCandidatePairCount: overlapCounters.broadphaseCandidatePairCount,
+      exactIntersectionPairCount: overlapCounters.exactIntersectionPairCount,
+      positiveAreaPairCount: overlapCounters.positiveAreaPairCount,
+      renderedOverlapArea,
+      splitFailed,
+      diagnostics,
     },
-    overlapCounters: {
-      sourcePairCount: overlapResult.sourcePairCount,
-      classifiableSourceCount: overlapResult.classifiableSourceCount,
-      trueCutPrunedRegionCount: overlapResult.trueCutPrunedRegionCount,
-      xPrunedPairCount: overlapResult.xPrunedPairCount,
-      ownerPrunedPairCount: overlapResult.ownerPrunedPairCount,
-      yPrunedPairCount: overlapResult.yPrunedPairCount,
-      candidatePointCount: overlapResult.candidatePointCount,
-      broadphaseCandidatePairCount: overlapResult.broadphaseCandidatePairCount,
-      exactIntersectionPairCount: overlapResult.exactIntersectionPairCount,
-      positiveAreaPairCount: overlapResult.positiveAreaPairCount,
-    },
+    overlapCounters,
     booleanOperations,
     booleanBackend: sectionCapBooleanOperations.info,
     packing,
-    timings: {
-      overlapClassify,
-      renderPartSplit,
-      geometryPack,
-      total: now() - totalStartedAt,
-    },
+    timings: { ...timings, total: now() - totalStartedAt },
   };
 };

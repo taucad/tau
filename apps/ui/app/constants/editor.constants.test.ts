@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { isSectionRemoved, resolveSectionPieces } from '#components/geometry/graphics/section-cuts.js';
 import {
   mobilePanelIds,
   defaultPanelState,
@@ -87,7 +88,7 @@ describe('graphics view settings parsing', () => {
     } as const;
     const settings = parseGraphicsViewSettings(persisted);
 
-    expect(settings.schemaVersion).toBe(11);
+    expect(settings.schemaVersion).toBe(12);
     expect(settings.cameraFovAngle).toBe(0);
     expect(settings.cameraView).toEqual({
       frameId: 'tau:root',
@@ -110,14 +111,14 @@ describe('graphics view settings parsing', () => {
     });
   });
 
-  it.each([2, 3, 4, 5, 6, 8, 9] as const)('should migrate schema v%s settings to v11', (schemaVersion) => {
+  it.each([2, 3, 4, 5, 6, 8, 9] as const)('should migrate schema v%s settings to v12', (schemaVersion) => {
     const settings = parseGraphicsViewSettings({
       ...defaultGraphicsSettings,
       schemaVersion,
       graphicsBackend: schemaVersion === 3 ? 'auto' : 'webgl',
     });
 
-    expect(settings.schemaVersion).toBe(11);
+    expect(settings.schemaVersion).toBe(12);
     expect(settings.cameraView).toBeUndefined();
     expect(settings.graphicsBackend).toBe('webgl');
   });
@@ -132,7 +133,7 @@ describe('graphics view settings parsing', () => {
         enableGrid: false,
       });
 
-      expect(settings.schemaVersion).toBe(11);
+      expect(settings.schemaVersion).toBe(12);
       expect(settings.graphicsBackend).toBe('webgl');
       expect(settings.enableGrid).toBe(false);
     },
@@ -169,7 +170,7 @@ describe('graphics view settings parsing', () => {
       cameraView,
     });
 
-    expect(settings).toMatchObject({ schemaVersion: 11, enableGrid: false, cameraFovAngle: 42 });
+    expect(settings).toMatchObject({ schemaVersion: 12, enableGrid: false, cameraFovAngle: 42 });
     expect(settings.cameraView).toBeUndefined();
   });
 
@@ -192,7 +193,7 @@ describe('graphics view settings parsing', () => {
       enableGrid: false,
       cameraView: { ...cameraView, perspectiveZoom: 0 },
     });
-    expect(invalid).toMatchObject({ schemaVersion: 11, enableGrid: false });
+    expect(invalid).toMatchObject({ schemaVersion: 12, enableGrid: false });
     expect(invalid.cameraView).toBeUndefined();
   });
 
@@ -272,5 +273,129 @@ describe('graphics view settings parsing', () => {
         },
       },
     });
+  });
+});
+
+describe('section view settings', () => {
+  const axisOf = { xy: [0, 0, 1], xz: [0, 1, 0], yz: [1, 0, 0] } as const;
+
+  /*
+   * A version 11 record removed the side of the pivot its `direction` times its rotated +axis normal points to; the
+   * rotation turned the normal about X, then Y, then Z. `removed` is that side along the plane's axis, read from the
+   * v11 resolver.
+   */
+  it.each([
+    // A small turn leaves each normal on the side of the plane it started on.
+    { plane: 'xy', turn: 'slightly', rotation: [0.4, 0.5, 0.6], direction: 1, removed: 1 },
+    { plane: 'xy', turn: 'slightly', rotation: [0.4, 0.5, 0.6], direction: -1, removed: -1 },
+    { plane: 'xz', turn: 'slightly', rotation: [0.4, 0.5, 0.6], direction: 1, removed: 1 },
+    { plane: 'xz', turn: 'slightly', rotation: [0.4, 0.5, 0.6], direction: -1, removed: -1 },
+    { plane: 'yz', turn: 'slightly', rotation: [0.4, 0.5, 0.6], direction: 1, removed: 1 },
+    { plane: 'yz', turn: 'slightly', rotation: [0.4, 0.5, 0.6], direction: -1, removed: -1 },
+    // Turned past 90°, the normal points the other way along the axis, so v11 removed the other side.
+    { plane: 'xy', turn: '180° about X', rotation: [Math.PI, 0, 0], direction: 1, removed: -1 },
+    { plane: 'xy', turn: '180° about X', rotation: [Math.PI, 0, 0], direction: -1, removed: 1 },
+    { plane: 'xy', turn: '120° about Y', rotation: [0, (2 * Math.PI) / 3, 0], direction: 1, removed: -1 },
+    { plane: 'xy', turn: '120° about Y', rotation: [0, (2 * Math.PI) / 3, 0], direction: -1, removed: 1 },
+    // Turned about Z, then Y, then X instead, this normal would end up on the other side.
+    { plane: 'xz', turn: 'about all three axes', rotation: [Math.PI / 2, Math.PI / 2, 1], direction: 1, removed: 1 },
+    { plane: 'xz', turn: 'about all three axes', rotation: [Math.PI / 2, Math.PI / 2, 1], direction: -1, removed: -1 },
+  ] as const)(
+    'should migrate a v11 $plane plane turned $turn with direction $direction to a cut that removes the side it removed',
+    ({ plane, rotation, direction, removed }) => {
+      const pivot: [number, number, number] = [0.1, 0.2, 0.3];
+      const settings = parseGraphicsViewSettings({
+        ...defaultGraphicsSettings,
+        schemaVersion: 11,
+        sectionView: { active: true, plane, pivot, rotation, direction },
+        sectionDisplay: { clipLines: false, clipMesh: true, planeName: 'cartesian' },
+      });
+
+      expect(settings.schemaVersion).toBe(12);
+      expect(settings).not.toHaveProperty('sectionDisplay');
+      expect(settings.sectionView?.active).toBe(true);
+      const pieces = resolveSectionPieces((settings.sectionView?.cuts ?? []).map((cut) => ({ ...cut, id: 'cut' })));
+      expect(pieces).toHaveLength(1);
+      const step = (sign: number): [number, number, number] => [
+        pivot[0] + axisOf[plane][0] * 0.01 * sign,
+        pivot[1] + axisOf[plane][1] * 0.01 * sign,
+        pivot[2] + axisOf[plane][2] * 0.01 * sign,
+      ];
+      expect(isSectionRemoved(step(removed), pieces)).toBe(true);
+      expect(isSectionRemoved(step(-removed), pieces)).toBe(false);
+    },
+  );
+
+  it('should drop a v11 rotation and keep the offset through the pivot', () => {
+    const settings = parseGraphicsViewSettings({
+      ...defaultGraphicsSettings,
+      schemaVersion: 11,
+      sectionView: { active: false, plane: 'xz', pivot: [1, 2, 3], rotation: [0, 0.5, 0], direction: -1 },
+    });
+
+    expect(settings.sectionView).toEqual({
+      active: false,
+      cuts: [{ kind: 'plane', plane: 'xz', offset: 2, isFlipped: true }],
+    });
+  });
+
+  it('should migrate a v11 view with no plane to no cuts, inactive', () => {
+    const settings = parseGraphicsViewSettings({
+      ...defaultGraphicsSettings,
+      schemaVersion: 11,
+      sectionView: { active: true, pivot: [0, 0, 0], rotation: [0, 0, 0], direction: 1 },
+    });
+
+    expect(settings.sectionView).toEqual({ active: false, cuts: [] });
+  });
+
+  it('should keep v12 cuts as written', () => {
+    const sectionView = {
+      active: true,
+      cuts: [
+        { kind: 'plane', plane: 'yz', offset: -0.25, isFlipped: false },
+        { kind: 'revolution', axis: 'z', origin: [1, 2, 3], start: 30, sweep: 200 },
+      ],
+    } as const;
+
+    expect(parseGraphicsViewSettings({ ...defaultGraphicsSettings, sectionView }).sectionView).toEqual(sectionView);
+  });
+
+  const cut = { kind: 'plane', plane: 'xy', offset: 0, isFlipped: false } as const;
+  const revolution = { kind: 'revolution', axis: 'z', origin: [0, 0, 0], start: 359.5, sweep: 355 } as const;
+
+  it('should keep a revolution at the edges of its ranges', () => {
+    const sectionView = { active: true, cuts: [revolution, { ...revolution, start: 0, sweep: 5 }] };
+
+    expect(parseGraphicsViewSettings({ ...defaultGraphicsSettings, sectionView }).sectionView).toEqual(sectionView);
+  });
+
+  it.each([
+    { invalid: 'more cuts than a section holds', cuts: [cut, cut, cut, cut, cut] },
+    { invalid: 'a null cut', cuts: [cut, null] },
+    { invalid: 'a sweep above the editor range', cuts: [{ ...revolution, sweep: 400 }] },
+    { invalid: 'a sweep below the editor range', cuts: [{ ...revolution, sweep: 0 }] },
+    { invalid: 'a start past a full turn', cuts: [{ ...revolution, start: 720 }] },
+    { invalid: 'a negative start', cuts: [{ ...revolution, start: -1 }] },
+  ])('should drop only the section view from a record with $invalid', ({ cuts }) => {
+    const cameraView = { target: [1, 2, 3], direction: [1, 0, 0], up: [0, 0, 1], verticalSpan: 12, perspectiveZoom: 1 };
+    const pinnedMeasurements = [
+      { id: 'measurement-1', frameId: 'tau:root', startPoint: [0, 0, 0], endPoint: [1, 0, 0], distance: 1 },
+    ];
+    const settings = parseGraphicsViewSettings({
+      ...defaultGraphicsSettings,
+      enableGrid: false,
+      cameraView,
+      pinnedMeasurements,
+      sectionView: { active: true, cuts },
+    });
+
+    expect(settings).toEqual({
+      ...defaultGraphicsSettings,
+      enableGrid: false,
+      cameraView: { frameId: 'tau:root', ...cameraView },
+      pinnedMeasurements,
+    });
+    expect(settings).not.toHaveProperty('sectionView');
   });
 });

@@ -271,6 +271,7 @@ function PostProcessingWebGpuActive({ settings, aoAllowed, toneMapping }: PostPr
   const resourcesRef = useRef<Map<Camera, PostProcessingPipelineResources> | undefined>(undefined);
   const allResourcesRef = useRef<readonly PostProcessingPipelineResources[] | undefined>(undefined);
   const selectedCameraRef = useRef<ThreeCamera>(cameraRig.activeCamera);
+  const aoOutputRef = useRef(aoAllowed && aoEnabled);
   const renderFrame = useRenderFrame();
 
   const warmInactiveEndpoints = useCallback((): void => {
@@ -334,6 +335,7 @@ function PostProcessingWebGpuActive({ settings, aoAllowed, toneMapping }: PostPr
   }, [cameraRig, gl, invalidate, scene, toneMapping, warmInactiveEndpoints]);
 
   useLayoutEffect(() => {
+    aoOutputRef.current = aoAllowed && aoEnabled;
     for (const resource of allResourcesRef.current ?? []) {
       // oxlint-disable-next-line react/immutability -- These retained GPU uniforms are owned by this post-processing mount and are updated without rebuilding its graph.
       resource.aoNode.scale.value = gtaoIntensity;
@@ -400,7 +402,7 @@ function PostProcessingWebGpuActive({ settings, aoAllowed, toneMapping }: PostPr
     const selected = resourcesRef.current?.get(selectedCameraRef.current);
     if (selected) {
       selected.updateAoCamera();
-      (aoAllowed && aoEnabled ? selected.outputQuad : selected.outputQuadWithoutAo).render(
+      (aoOutputRef.current ? selected.outputQuad : selected.outputQuadWithoutAo).render(
         state.gl as unknown as WebGPURenderer,
       );
       return;

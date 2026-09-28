@@ -4,6 +4,7 @@ import type { ResolvedGraphicsBackend } from '#constants/editor.constants.js';
 import { MeshMatcapNodeMaterial } from 'three/webgpu';
 import { matcapMaterial } from '#components/geometry/graphics/three/materials/matcap-material.js';
 import { applyModelMaterialOpacityOverride } from '#components/geometry/graphics/three/materials/model-component-appearance.js';
+import { transferSectionClip } from '#components/geometry/graphics/three/materials/section-clip.js';
 
 /**
  * Dispose a material or array of materials, releasing GPU resources.
@@ -96,9 +97,10 @@ function applyMatcapMaterialToMesh({
   const meshMatcap = createMeshMatcapReplacement(backend, matcapTexture);
   const sourceRenderState = resolveSourceMaterialRenderState(mesh.material);
 
-  // Preserve clipping planes so section-view clipping survives matcap replacement
-  if (!Array.isArray(mesh.material) && mesh.material.clippingPlanes?.length) {
-    meshMatcap.clippingPlanes = mesh.material.clippingPlanes;
+  // The section clip carries over to the replacement.
+  const [clipped] = getSourceMaterials(mesh.material);
+  if (clipped) {
+    transferSectionClip(clipped, meshMatcap);
   }
 
   const hasVertexColors = Boolean(mesh.geometry.attributes['color'] ?? mesh.geometry.attributes['COLOR_0']);

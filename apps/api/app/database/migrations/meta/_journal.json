@@ -309,6 +309,20 @@
       "when": 1790138637541,
       "tag": "0044_retire_subscription_plugin",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1790359560344,
+      "tag": "0045_host_git_credential",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1790396398932,
+      "tag": "0046_project_git_retained_bytes",
+      "breakpoints": true
     }
   ]
 }

@@ -352,13 +352,29 @@ describe('parameter set service behaviours', () => {
     const fixture = serviceFixture();
     const manifest = await fixture.manifestFor();
     await fixture.service.resolve('main.ts', manifest);
-    const changes = vi.fn();
-    fixture.service.subscribeDrafts(changes);
     fixture.service.setDraft(fixture.draftKey('/width'), { text: '30', valid: true });
 
     expect(fixture.service.draft(fixture.draftKey('/width'))).toEqual({ text: '30', valid: true });
-    expect(changes).toHaveBeenCalledOnce();
     fixture.service.discardDrafts();
+    await fixture.service.close();
+  });
+
+  it('notifies draft listeners only when a draft is cleared or discarded', async () => {
+    const fixture = serviceFixture();
+    const changes = vi.fn();
+    fixture.service.subscribeDrafts(changes);
+    fixture.service.setDraft(fixture.draftKey('/width'), { text: '3', valid: true });
+    fixture.service.setDraft(fixture.draftKey('/width'), { text: '30', valid: true });
+    fixture.service.setDraft(fixture.draftKey('/depth'), { text: '4', valid: true });
+
+    expect(changes).not.toHaveBeenCalled();
+
+    fixture.service.setDraft(fixture.draftKey('/width'), undefined);
+    fixture.service.setDraft(fixture.draftKey('/width'), undefined);
+    expect(changes).toHaveBeenCalledOnce();
+
+    fixture.service.discardDrafts('main.ts');
+    expect(changes).toHaveBeenCalledTimes(2);
     await fixture.service.close();
   });
 

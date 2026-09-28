@@ -37,6 +37,37 @@ describe('@taucad/rpc/bridge', () => {
     proxy.dispose();
   });
 
+  it('settles concurrent multi-megabyte MessagePort calls without losing a frame', async () => {
+    const channel = new MessageChannel();
+    const server = createBridgeServer(
+      {
+        async inspect(
+          index: number,
+          bytes: Uint8Array<ArrayBuffer>,
+        ): Promise<{ index: number; length: number; marker: number }> {
+          return { index, length: bytes.byteLength, marker: bytes[bytes.byteLength - 1]! };
+        },
+      },
+      wrapBridgePort(channel.port1),
+    );
+    const client = createBridgeCall(wrapBridgePort(channel.port2));
+    try {
+      const outcomes = await Promise.all(
+        Array.from({ length: 4 }, async (_, index) => {
+          const bytes = new Uint8Array(4 * 1024 * 1024);
+          bytes[bytes.length - 1] = index + 1;
+          return client.call('inspect', [index, bytes]);
+        }),
+      );
+      expect(outcomes).toEqual(
+        Array.from({ length: 4 }, (_, index) => ({ index, length: 4 * 1024 * 1024, marker: index + 1 })),
+      );
+    } finally {
+      client.dispose();
+      server.dispose();
+    }
+  });
+
   it('should deliver server events to listen subscribers', async () => {
     const channel = new MessageChannel();
     const server = createBridgeServer({}, wrapBridgePort(channel.port1));

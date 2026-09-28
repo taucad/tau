@@ -1,5 +1,7 @@
 import { memo, useEffect, useCallback, useMemo, useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
+import type { SnapshotFrom } from 'xstate';
+import type { FileEntry } from '@taucad/types';
 import type { IDockviewPanelHeaderProps } from 'dockview-react';
 import { FileX, FolderOpen, PlayCircle } from 'lucide-react';
 import { CadViewer } from '#components/geometry/cad/cad-viewer.js';
@@ -11,7 +13,7 @@ import { FileSelector } from '#components/files/file-selector.js';
 import { Button } from '@taucad/ui/components/button';
 import { popoverSurfaceVariants } from '@taucad/ui/components/popover.variants';
 import { useProject } from '#hooks/use-project.js';
-import { useFileTreeMap } from '#hooks/use-file-tree.js';
+import { useFileTreeSelector } from '#hooks/use-file-tree.js';
 import { useFileContent } from '#hooks/use-file-content.js';
 import { defaultGraphicsSettings } from '#constants/editor.constants.js';
 import { CadProvider, useCad, useCadSelector } from '#hooks/use-cad.js';
@@ -26,9 +28,6 @@ import type { ViewCameraSeed } from '#services/graphics-camera-registry.js';
 import { ChatStackTrace } from '#routes/w.$workspace.$project/chat-stack-trace.js';
 import { ChatViewerStatus } from '#routes/w.$workspace.$project/chat-viewer-status.js';
 import { ChatViewerControls } from '#routes/w.$workspace.$project/chat-viewer-controls.js';
-import { ChatInterfaceGraphics } from '#routes/w.$workspace.$project/chat-interface-graphics.js';
-import { ChatInterfaceStatus } from '#routes/w.$workspace.$project/chat-interface-status.js';
-import { useResizeObserver } from '#hooks/use-resize-observer.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { ArButton } from '#components/cad/ar-button.js';
 import { deriveModelInteractionUnitId, getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
@@ -36,10 +35,10 @@ import { describeKinematicsHover, getKinematicsUnitState } from '#machines/kinem
 import {
   selectCadGeometry,
   selectCadKernelClient,
-  selectCadUnits,
   selectCadFailureIssues,
   selectIsCadLoading,
 } from '#machines/cad.machine.js';
+import type { cadMachine } from '#machines/cad.machine.js';
 import {
   attachViewerSecondaryGestureTarget,
   beginViewerSecondaryGesture,
@@ -54,10 +53,9 @@ import type {
   ViewerSecondaryGestureState,
 } from '#routes/w.$workspace.$project/chat-viewer-secondary-gesture.js';
 
-/** Horizontal inset sum for bottom controls (`left-2` + `right-2`); pairs with `max-w-[calc(100%-1rem)]` on the overlay. */
-const bottomControlsGutterPx = 16;
 const componentNameBadgeRightEdgeThresholdPx = 220;
-const componentNameBadgeBottomEdgeThresholdPx = 56;
+/** Within this distance of the bottom controls' top edge the badge flips above the pointer. */
+const componentNameBadgeBottomThresholdPx = 56;
 
 const getViewerSecondaryGesturePoint = (event: React.PointerEvent<HTMLDivElement>): ViewerSecondaryGesturePoint => ({
   clientX: event.clientX,
@@ -117,31 +115,33 @@ export const ChatViewer = memo(function ({
   // Get the geometry unit for this view's entry path
   const cadActor = entryPath ? geometryUnits.get(entryPath) : undefined;
 
-  // Lazy tree snapshot for isDirectory checks (prefix / loaded dir entry)
-  const fileTree = useFileTreeMap();
-
-  // Detect if the entry path is a directory.
-  // The fileTree only stores file entries (not directories), so we check
-  // whether entryPath is a prefix of any file path in the tree.
-  const isDirectory = useMemo(() => {
-    if (!entryPath) {
-      return false;
-    }
-
-    const entry = fileTree.get(entryPath);
-    if (entry) {
-      return entry.type === 'dir';
-    }
-
-    const directoryPrefix = `${entryPath}/`;
-    for (const key of fileTree.keys()) {
-      if (key.startsWith(directoryPrefix)) {
-        return true;
+  // Detect if the entry path is a directory: a listed directory entry, or a
+  // prefix of a listed path when its directory has not been listed itself.
+  // Selected as a boolean so a tree publication (every file write) re-renders
+  // the viewer only when the answer changes.
+  const selectIsDirectory = useCallback(
+    (fileTree: ReadonlyMap<string, FileEntry>): boolean => {
+      if (!entryPath) {
+        return false;
       }
-    }
 
-    return false;
-  }, [entryPath, fileTree]);
+      const entry = fileTree.get(entryPath);
+      if (entry) {
+        return entry.type === 'dir';
+      }
+
+      const directoryPrefix = `${entryPath}/`;
+      for (const key of fileTree.keys()) {
+        if (key.startsWith(directoryPrefix)) {
+          return true;
+        }
+      }
+
+      return false;
+    },
+    [entryPath],
+  );
+  const isDirectory = useFileTreeSelector(selectIsDirectory);
 
   // Derive isMissing from content service orphan outcome (VS Code pattern).
   // useFileContent auto-loads on cache miss; missing files resolve to the
@@ -174,10 +174,18 @@ export const ChatViewer = memo(function ({
         });
       }
 
-      /* The cut is entry-scoped and the graphics actor is retained across a file switch, so the
-       * live cut is closed here too. Clearing only the record would let the next persist write the
-       * previous file's cut -- pivoted on geometry that is gone -- straight back into it. */
-      graphicsActor?.send({ type: 'setSectionViewActive', payload: false });
+      /* Cuts and measurements are entry-scoped and the graphics actor is retained across a file switch,
+       * so the live ones are removed here too; removing the last cut ends Section. Turning Section off
+       * would keep the cuts, and the next persist would write the previous file's cuts and pinned
+       * measurements -- placed on geometry that is gone -- into the new file's record. */
+      const graphicsContext = graphicsActor?.getSnapshot().context;
+      for (const { id } of graphicsContext?.sectionCuts ?? []) {
+        graphicsActor?.send({ type: 'removeSectionCut', payload: id });
+      }
+      for (const { id } of graphicsContext?.measurements ?? []) {
+        graphicsActor?.send({ type: 'clearMeasurement', payload: id });
+      }
+      graphicsActor?.send({ type: 'cancelCurrentMeasurement' });
 
       // Preserve existing view settings (FOV, visibility, environment preset, etc.)
       // But clear geometry-dependent state (camera pose, measurements) on file switch
@@ -289,6 +297,19 @@ export const ChatViewer = memo(function ({
   );
 });
 
+/** Stands in for geometry that has not arrived; subscribes to loading so the viewer does not. */
+function GeometryPlaceholder(): React.JSX.Element {
+  const isCadLoading = useCadSelector(selectIsCadLoading, false);
+  return (
+    <div
+      role='status'
+      aria-label={isCadLoading ? 'Loading geometry' : 'Waiting for geometry'}
+      aria-busy={isCadLoading || undefined}
+      className='size-full bg-background'
+    />
+  );
+}
+
 /**
  * Inner content of a viewer panel with an active file.
  * Separated to avoid conditional hook usage in the parent.
@@ -308,8 +329,6 @@ const ViewerContent = memo(function ({
   const cadRef = useCad();
   const geometry = useCadSelector(selectCadGeometry, undefined);
   const failureIssues = useCadSelector(selectCadFailureIssues, undefined);
-  const isCadLoading = useCadSelector(selectIsCadLoading, false);
-  const units = useCadSelector(selectCadUnits, undefined);
   const kernelClient = useCadSelector(selectCadKernelClient, undefined);
   const failureMessage =
     failureIssues?.find((issue) => issue.severity === 'error')?.message ?? failureIssues?.[0]?.message;
@@ -329,18 +348,32 @@ const ViewerContent = memo(function ({
     });
   }, [projectRef, entryPath, unitSettings]);
 
-  // Bridge geometry data from the headless CadMachine to the per-view GraphicsMachine
+  // Bridge geometry from the headless CadMachine to the per-view GraphicsMachine in
+  // the same tick the cad machine publishes it. The canvas then renders a new
+  // geometry together with the presentation revision the graphics machine
+  // assigns it; bridged after the commit instead, the mesh would render (and
+  // start preparing) the new geometry under the previous revision first, then
+  // again under its own.
   const graphicsActor = useGraphics();
   useEffect(() => {
-    if (units && geometry) {
-      graphicsActor.send({
-        type: 'updateGeometry',
-        geometry,
-        units,
-        sourceFile: entryPath,
-      });
+    if (!cadRef) {
+      return undefined;
     }
-  }, [entryPath, graphicsActor, geometry, units]);
+
+    let forwarded: Pick<SnapshotFrom<typeof cadMachine>['context'], 'geometry' | 'units'> | undefined;
+    const forward = ({ context: { geometry, units } }: SnapshotFrom<typeof cadMachine>): void => {
+      if (!geometry || (geometry === forwarded?.geometry && units === forwarded.units)) {
+        return;
+      }
+      forwarded = { geometry, units };
+      graphicsActor.send({ type: 'updateGeometry', geometry, units, sourceFile: entryPath });
+    };
+    forward(cadRef.getSnapshot());
+    const subscription = cadRef.subscribe(forward);
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [cadRef, entryPath, graphicsActor]);
 
   // Select individual primitive values so that useSelector's reference equality
   // check works correctly. An object-returning selector creates a new reference
@@ -353,11 +386,9 @@ const ViewerContent = memo(function ({
   const enableMatcap = useGraphicsSelector((state) => state.context.enableMatcap);
   const upDirection = useGraphicsSelector((state) => state.context.upDirection);
   const viewerLayoutRef = useRef<HTMLDivElement>(null);
+  const bottomControlsRef = useRef<HTMLDivElement>(null);
   const canvasRegionRef = useRef<HTMLDivElement>(null);
   const canvasEventSource = canvasRegionRef as React.RefObject<HTMLElement>;
-  const { width: viewerLayoutWidth } = useResizeObserver({ ref: viewerLayoutRef });
-  const toolbarAvailableWidth =
-    viewerLayoutWidth === undefined ? undefined : Math.max(0, viewerLayoutWidth - bottomControlsGutterPx);
   const [isPointerOverViewer, setIsPointerOverViewer] = useState(false);
   const [viewerActionMenu, setViewerActionMenu] = useState<ViewerSecondaryGestureMenu | undefined>(undefined);
   const secondaryGestureRef = useRef<ViewerSecondaryGestureState>(idleViewerSecondaryGestureState);
@@ -419,6 +450,9 @@ const ViewerContent = memo(function ({
 
     const x = Math.max(0, Math.min(event.clientX - viewerBounds.left, viewerBounds.width));
     const y = Math.max(0, Math.min(event.clientY - viewerBounds.top, viewerBounds.height));
+    // Read at each move rather than kept: the bar grows and shrinks as tools start and stop.
+    const controlsTop =
+      (bottomControlsRef.current?.getBoundingClientRect().top ?? viewerBounds.bottom) - viewerBounds.top;
     layout.style.setProperty('--viewer-hover-label-x', `${x}px`);
     layout.style.setProperty('--viewer-hover-label-y', `${y}px`);
     layout.style.setProperty(
@@ -427,7 +461,7 @@ const ViewerContent = memo(function ({
     );
     layout.style.setProperty(
       '--viewer-hover-label-translate-y',
-      y > viewerBounds.height - componentNameBadgeBottomEdgeThresholdPx ? 'calc(-100% - 10px)' : '10px',
+      y > controlsTop - componentNameBadgeBottomThresholdPx ? 'calc(-100% - 10px)' : '10px',
     );
     setIsPointerOverViewer(true);
   }, []);
@@ -521,10 +555,14 @@ const ViewerContent = memo(function ({
   }, [isGeometryUnitClosed]);
 
   return (
-    <div ref={viewerLayoutRef} data-testid='chat-viewer-layout' className='group/viewer relative flex h-full flex-col'>
+    <div
+      ref={viewerLayoutRef}
+      data-testid='chat-viewer-layout'
+      data-viewer-frame
+      className='group/viewer @container/viewer relative flex h-full flex-col'
+    >
       {/* Status overlays */}
       <div className='absolute top-[10%] right-2 left-2 z-10 mx-auto flex w-fit max-w-full flex-col gap-2'>
-        <ChatInterfaceStatus />
         <ChatViewerStatus />
       </div>
 
@@ -569,12 +607,7 @@ const ViewerContent = memo(function ({
             className='size-full flex-col justify-center gap-3 bg-background text-center [&>svg]:size-10'
           />
         ) : (
-          <div
-            role='status'
-            aria-label={isCadLoading ? 'Loading geometry' : 'Waiting for geometry'}
-            aria-busy={isCadLoading || undefined}
-            className='size-full bg-background'
-          />
+          <GeometryPlaceholder />
         )}
         {geometry && overlayFailureMessage ? (
           <RuntimeErrorOverlay
@@ -610,21 +643,18 @@ const ViewerContent = memo(function ({
         </div>
       )}
 
-      {/* AR button — mobile iOS only, positioned bottom-right above controls */}
-      <ArButton geometry={geometry} kernelClient={kernelClient} className='absolute right-3 bottom-14 z-10' />
-
-      {/* Bottom controls */}
+      {/* Bottom controls: the bar is centred on the last line and grows upward as tools start. The issues card and
+          the AR button (mobile iOS only) share the line above it, so the bar never covers them. In a pane narrower
+          than the bar, the bar starts at the left edge, keeping the grid readout and Section in view. */}
       <div
-        data-testid='chat-viewer-bottom-controls-overlay'
-        className='pointer-events-none absolute bottom-2 left-2 z-10 flex max-w-[calc(100%-1rem)] shrink-0 flex-col items-start gap-2 [&>*]:pointer-events-auto'
+        ref={bottomControlsRef}
+        className='pointer-events-none absolute inset-x-2 bottom-2 z-10 flex flex-col items-center-safe gap-2'
       >
-        <ChatInterfaceGraphics />
-        {profile === 'editor' ? <ChatStackTrace entryPath={entryPath} side='bottom' /> : null}
-        <ChatViewerControls
-          availableWidth={toolbarAvailableWidth}
-          className='self-stretch'
-          shouldEnableCapture={profile === 'editor'}
-        />
+        <div className='flex w-full items-end gap-2 [&>*]:pointer-events-auto'>
+          {profile === 'editor' ? <ChatStackTrace entryPath={entryPath} side='bottom' /> : null}
+          <ArButton geometry={geometry} kernelClient={kernelClient} className='ml-auto shrink-0' />
+        </div>
+        <ChatViewerControls shouldEnableCapture={profile === 'editor'} />
       </div>
     </div>
   );

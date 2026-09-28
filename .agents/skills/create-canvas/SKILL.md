@@ -47,6 +47,9 @@ description: >-
 - Keep review controls outside the product frame. Provide scenario selection,
   theme selection, a reset path and an honest “What is real?” explanation.
   Distinguish shipping components, proposed compositions and simulated data.
+- Put `data-review-scenario={scenarioId}` on the element that shows the active
+  scenario and `data-review-id` on regions reviewers will discuss, so review pins
+  record the scenario and keep their anchor through layout edits.
 - Every visible action works locally, is clearly disabled with an explanation,
   or is labeled outside-scope. Never call agents, mutate projects, publish or
   imply a real save from a fixture. No fake success toasts for unperformed work.
@@ -77,6 +80,13 @@ description: >-
 4. Update the existing artifact index with launch command, scenarios, source
    component map, fixture limitations, verification and successor links. Keep
    build products/traces in `out/research`, not Brain. Show the working preview.
+5. The runner injects a review layer into every served canvas: the operator
+   presses C, pins comments, and "Finish review" commits them under
+   `<canvas>/review/` in Brain. Before revising a reviewed canvas, run
+   `pnpm canvas:review list <canvas> --open`, reproduce each thread at its
+   recorded scenario, theme and viewport, and after the fix record
+   `pnpm canvas:review resolve <canvas> <thread> --note <what changed> --change <commit-or-path>`.
+   Never edit or delete a review event; reply or reopen instead.
 
 When delegation is authorized, assign disjoint canvas directories to workers
 and keep one coordinator-owned inventory. Each worker reads this skill, returns

@@ -193,8 +193,8 @@ const writeVendor = async (root: string, version: string, origin: string): Promi
 
 /**
  * Stand-in for the Bambu Studio command line. `--help` prints a version and
- * counts itself; a slice records its arguments, working directory and loaded
- * presets, then behaves as `control.json` next to it says.
+ * counts itself; a slice records its arguments, working directory, loaded
+ * presets and part STLs, then behaves as `control.json` next to it says.
  */
 const fakeCommandLine = `#!${process.execPath}
 const fs = require('node:fs');
@@ -218,7 +218,7 @@ for (const file of [...option('--load-settings').split(';'), ...option('--load-f
 fs.appendFileSync(control.log, 'start\\n');
 fs.writeFileSync(control.record, JSON.stringify({
   args, cwd: process.cwd(), pid: process.pid, files,
-  stl: fs.readFileSync(args.at(-1)).toString('base64'),
+  stls: args.filter((arg) => arg.endsWith('.stl')).map((file) => fs.readFileSync(file).toString('base64')),
   datadir: fs.readdirSync(option('--datadir')),
 }));
 const out = option('--outputdir');

@@ -103,6 +103,13 @@ describe('GithubGistManagement', () => {
     expect(screen.queryByText(/provider copy/i)).not.toBeInTheDocument();
   });
 
+  it('should show its label from md, the width at which every shared top-bar action switches', async () => {
+    renderManagement();
+
+    const manage = await screen.findByRole('button', { name: 'Manage GitHub Gist' });
+    expect(manage.querySelector('span')).toHaveClass('hidden', 'md:inline');
+  });
+
   it('republishes to the same Gist and emits the new pinned Tau URL', async () => {
     const onRepublished = vi.fn();
     renderManagement({ onRepublished });

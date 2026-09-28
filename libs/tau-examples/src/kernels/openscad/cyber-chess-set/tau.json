@@ -1,0 +1,13 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_H8SDajWNOMbL3KEjZaAIb",
+  "name": "Cyber Chess Set",
+  "description": "An 8 × 8 gunmetal board and 32 modular pieces with glowing bases and a distinct crown for each rank, all built from shared OpenSCAD modules.",
+  "tags": ["games", "generative", "openscad"],
+  "assets": {
+    "main": {
+      "entryPath": "main.scad",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

@@ -56,6 +56,20 @@ describe('ForkAction', () => {
     });
   });
 
+  it('should show its label from md, the width at which every shared top-bar action switches', () => {
+    render(
+      <MemoryRouter>
+        <ForkAction
+          publication={{ id: 'pub_1', title: 'Shared', entryPath: 'main.ts' }}
+          files={new Map()}
+          parameters={{}}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText('Remix')).toHaveClass('hidden', 'md:inline');
+  });
+
   it('uses the creation preference and navigates to the returned canonical URL', async () => {
     const files = new Map([['main.ts', { filename: 'main.ts', content: new Uint8Array([1, 2, 3]) }]]);
 

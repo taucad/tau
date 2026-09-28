@@ -52,7 +52,12 @@ import type { HeadlessImageService } from '#services/headless-image.service.js';
 import type { RuntimeFileSystem } from '@taucad/runtime/filesystem';
 import { ResourceQueue } from '@taucad/filesystem';
 import { z } from 'zod';
-import { canonicalCaptureViews, captureCadImages, captureFilesToDataUrls } from '#services/headless-capture.js';
+import {
+  canonicalCaptureViews,
+  captureCadImages,
+  captureFilesToDataUrls,
+  omittedSectionCutsNotice,
+} from '#services/headless-capture.js';
 
 /** Source of file write operations */
 type FileWriteSource = 'editor' | 'user' | 'machine';
@@ -466,7 +471,7 @@ function createBrowserGraphicsClient(
           return { success: false, errorCode: rpcClientErrorCode.unknown, message };
         }
 
-        return { success: true, files: exportResult.data };
+        return { success: true, files: exportResult.data, issues: exportResult.issues };
       } catch (error) {
         return {
           success: false,
@@ -509,7 +514,7 @@ function createBrowserImageClient(
 
       const includeEdges = input.includeEdges ?? true;
       try {
-        const files = await captureCadImages({
+        const { files, omittedSectionCutIds } = await captureCadImages({
           cadRef: resolved.cadUnit,
           graphicsRef: findGraphicsRef(input.targetFile),
           imageService,
@@ -530,7 +535,12 @@ function createBrowserImageClient(
           view,
           dataUrl: dataUrls[index]!,
         }));
-        return { success: true, images };
+        // One line, so the agent never describes a cut the images do not show.
+        return {
+          success: true,
+          images,
+          ...(omittedSectionCutIds.length > 0 ? { message: omittedSectionCutsNotice } : {}),
+        };
       } catch (error) {
         return {
           success: false,

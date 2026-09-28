@@ -448,8 +448,8 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
 
   /**
    * Deletes the named keys in `DeleteObjects` batches. Deleting a key that was
-   * never written is not an error, so this is safe to call with a manifest's
-   * retired-pack list after a partial sweep.
+   * never written is not an error, so a sweep that stopped part-way can run
+   * again over the same retired packs, their indexes and `retired/` markers.
    */
   public async deleteBlobs(args: {
     namespace: StorageNamespace;

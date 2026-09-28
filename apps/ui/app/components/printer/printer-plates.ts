@@ -10,11 +10,12 @@
  * @module
  */
 
-import { Matrix4 } from 'three';
+import { Color, Matrix4 } from 'three';
 import { resolveCoordinateTransform } from '@taucad/spatial';
 import { bambuX1cHotend, bambuX1cPlates } from '@taucad/bambu/plate';
 import type { BambuPlateModel } from '@taucad/bambu/plate';
 import { canonicalGltfWorld } from '#components/geometry/graphics/three/gltf-world.js';
+import { printerBody } from '#components/printer/printer-colors.constants.js';
 
 /** One X1C build plate id, as Tau's slicers name it. */
 export type PrinterPlateId = BambuPlateModel['id'];
@@ -44,6 +45,16 @@ export const x1cPlates: readonly PrinterPlateModel[] = bambuX1cPlates.map(
     model,
   }),
 );
+
+/**
+ * How far the print surface lifts toward white. The plates' true surfaces are near black, so the
+ * first layers and the empty build area vanish against them; the viewer draws them lighter.
+ */
+const plateSurfaceLift = 0.3;
+const plateSurfaceLiftTarget = new Color(printerBody.plateSurfaceLift);
+
+/** The print surface's colour as the viewer draws it; `color` is changed in place. */
+export const liftPlateSurface = (color: Color): Color => color.lerp(plateSurfaceLiftTarget, plateSurfaceLift);
 
 /** The X1C hotend tip drawn at the extruding nozzle: its origin is the nozzle tip. */
 export const printerHotendModel: URL = bambuX1cHotend.model;

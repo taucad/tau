@@ -418,6 +418,9 @@ const config = [
       // text: their imports deliberately name packages that do not resolve,
       // and they live in no tsconfig project.
       'scripts/src/fixtures/**',
+      // Same class: a bundler fixture whose asset queries, JSX and untyped modules
+      // the bundler suites check; it is outside the tau-examples tsconfig.
+      'libs/tau-examples/src/kernels/replicad/bundler-feature-matrix/**',
       // Opt-in benchmark experiments: engine-internal, unpublished, and outside
       // the package tsconfig until PE2 rebuilds what they measure.
       'packages/geospec-engine/experiments/**',

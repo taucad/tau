@@ -70,6 +70,11 @@ describe('package generator', () => {
     // Exactly two keys: every package-specific alias is drift the pkgcheck
     // `tau-internal-imports-shape` rule rejects.
     expect(packageJson.imports).toEqual({ '#*.js': './src/*.ts', '#*': './src/*' });
+    // `compilerOptions.paths` applies to every file in the program, so a `#*` alias would
+    // rewrite the `#` imports of workspace packages compiled from source here.
+    for (const config of ['tsconfig.lib.json', 'tsconfig.spec.json']) {
+      expect(readText(tree, `packages/example/${config}`)).not.toContain('"paths"');
+    }
     expect(packageJson.exports?.['./package.json']).toBe('./package.json');
     expect(packageJson.publishConfig?.exports?.['./package.json']).toBe('./package.json');
     // The source subpath-import map must never reach the registry — see R14/R15.
@@ -216,6 +221,12 @@ describe('package generator', () => {
       lib: ['ES2024', 'DOM', 'DOM.Iterable'],
     });
     expect(tsconfig.include).toContain('src/**/*.tsx');
+    // A `.tsx` module behind `#` gets its own imports key, never a program-wide `#*` alias.
+    for (const config of ['tsconfig.lib.json', 'tsconfig.spec.json']) {
+      expect(readText(tree, `${root}/${config}`)).not.toContain('"paths"');
+    }
+    // Vite resolves `#` from the imports map; nxViteTsPaths would apply tsconfig paths to every importer.
+    expect(vitestConfig).not.toContain('nxViteTsPaths');
     const instructions = readText(tree, `${root}/AGENTS.md`);
     expect(instructions).toContain('Build mode: source-consumed; no build target');
     expect(instructions).toContain('React mode: enabled with jsdom test setup');

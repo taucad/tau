@@ -99,12 +99,14 @@ export class ProjectsController {
    * Claim this project id for the caller and give it a bare repository.
    *
    * Idempotent: a second call from the owner is a no-op that still reconciles
-   * the repository's hooks, which is what makes *Connect* safe to retry.
+   * the repository's hooks, which is what makes *Connect* safe to retry. A
+   * collaborator's call on the project is the same answer with no side effect
+   * at all: no field, no plan check, no budget (FX2).
    *
    * Bounded twice (review R5), because this route is what made repository
    * creation reachable without a publish: a per-account ceiling on how many
-   * projects may exist, and a daily ceiling on how often the route may be
-   * called at all.
+   * projects may exist, and a daily ceiling on how often the owner may
+   * register, spent only by a call that passed the ownership and plan checks.
    *
    * @param projectId - The project id, which is also its repository name.
    * @param body - The name to record when the row is created.
@@ -112,7 +114,7 @@ export class ProjectsController {
    * @returns The registered project's id.
    * @throws BadRequestException When the id cannot name a repository.
    * @throws NotFoundException When the id belongs to an account the caller has no relation to (P55).
-   * @throws ForbiddenException When the caller is a collaborator rather than the owner, when the plan does not entitle syncing (N5), or when the account is at its project ceiling.
+   * @throws ForbiddenException When the plan does not entitle syncing (N5), or when the account is at its project ceiling.
    * @throws HttpException When the account is over its daily registration budget.
    */
   @Put(':projectId')
@@ -128,27 +130,22 @@ export class ProjectsController {
       });
     }
 
-    const budget = await this.rateLimiter.consumeDailyBudget({
-      key: `project:register:${userId}`,
-      limit: projectRegistrationsPerOwnerPerDay,
-    });
-    if (!budget.allowed) {
-      throw new HttpException(
-        { code: 'PROJECT_REGISTRATION_RATE_LIMITED', message: 'Too many project registrations today' },
-        HttpStatus.TOO_MANY_REQUESTS,
-      );
-    }
-
     const { database } = this.databaseService;
     /* D27: the id's existence is this route's question — it may have to create
        the row — but *whose* it is belongs to `ProjectAccessService`, the single
-       authority. Registration is the owner's act, so `owner` is the need: a
-       caller with no relation to the id gets the ruling-P55 `404`, and a
-       collaborator on somebody else's project is refused `403` — they already
-       know the project exists, so hiding it would only mislead. */
+       authority. A caller with no relation to the id gets the ruling-P55 `404`.
+
+       A member is answered as registered and nothing else happens (FX2): the
+       client's *Connect* always registers, so a collaborator opening a shared
+       project lands here. Their body is ignored, their plan is not asked (a
+       collaborator needs none, D27), and no budget is spent, because nothing
+       was registered. The git surface enforces what their role may do next. */
     const exists = await this.projectExists(projectId);
     if (exists) {
-      await this.access.authorize(projectId, userId, 'owner');
+      const { role } = await this.access.authorize(projectId, userId, 'read');
+      if (role !== 'owner') {
+        return { id: projectId };
+      }
     }
 
     /* Before the row and before the repository (N5). Registration is the write
@@ -168,6 +165,21 @@ export class ProjectsController {
         code: 'GIT_SYNC_NOT_ENTITLED',
         message: 'Syncing files to Tau Cloud is a paid plan feature.',
       });
+    }
+
+    /* After the ownership and entitlement checks (D22, L6-F15): a refused call
+       is not a registration, so it spends nothing. The key is the caller's own
+       id, so the order only decides whether a refused caller drains its own
+       budget; both checks are cheap reads. */
+    const budget = await this.rateLimiter.consumeDailyBudget({
+      key: `project:register:${userId}`,
+      limit: projectRegistrationsPerOwnerPerDay,
+    });
+    if (!budget.allowed) {
+      throw new HttpException(
+        { code: 'PROJECT_REGISTRATION_RATE_LIMITED', message: 'Too many project registrations today' },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
     }
 
     if (!exists) {

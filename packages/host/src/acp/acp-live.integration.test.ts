@@ -12,9 +12,10 @@
  * the suite still skips unless both adapters resolve and both CLIs answer.
  */
 
-import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -24,7 +25,13 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { createNodeAgentLauncher } from '@taucad/agent-host/node-launcher';
 import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
 import { reduceEventLog } from '@taucad/agent-host';
-import type { AgentChannelLiveEvent, AgentLogEvent, ProviderMessage } from '@taucad/agent-host';
+import type {
+  AgentChannelLiveEvent,
+  AgentLogEvent,
+  ExternalAgentLogEvent,
+  ProviderMessage,
+  ToolRegistry,
+} from '@taucad/agent-host';
 
 import { createAcpExternalAgentPort } from '#acp/run.js';
 import { discoverAcpAgents } from '#acp/registry.js';
@@ -32,6 +39,7 @@ import type { AcpAdapter } from '#acp/registry.js';
 import type { AcpWireFrame } from '#acp/spawn.js';
 import { openAcpSession } from '#acp/session.js';
 import { defaultConfigDirectory } from '#credential-store.js';
+import { createHostMcpEndpoint } from '#mcp-server.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -284,6 +292,110 @@ describe.skipIf(!liveEnabled)('a live ACP turn', () => {
 });
 
 const codexAdapter = adapters.find((adapter) => adapter.id === 'codex');
+
+describe.skipIf(!liveEnabled || codexAdapter === undefined)('live Codex screenshot carrier', () => {
+  it('opens all six persisted MCP images through the installed ACP client', async () => {
+    if (!codexAdapter) {
+      throw new Error('The selected Codex adapter is unavailable.');
+    }
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-acp-capture-'));
+    roots.push(workspaceRoot);
+    const views = ['front', 'back', 'right', 'left', 'top', 'bottom'] as const;
+    const pixels = [
+      'iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAADUlEQVR4nGP4z8AARAAI/gH/xp559wAAAABJRU5ErkJggg==',
+      'iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAADUlEQVR4nGNg+M8ARAAHAAH/YKtA0QAAAABJRU5ErkJggg==',
+      'iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAADUlEQVR4nGNgYPgPRAAFAgH/wSuWnwAAAABJRU5ErkJggg==',
+      'iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAADUlEQVR4nGP4/58BiAAP9wP96sqNrAAAAABJRU5ErkJggg==',
+      'iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAADUlEQVR4nGP4z/AfiAAN+QP9Wkb9ewAAAABJRU5ErkJggg==',
+      'iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAADUlEQVR4nGNg+P8fiAAL+wP9PaUBYwAAAABJRU5ErkJggg==',
+    ];
+    const registry: ToolRegistry = {
+      list: () => [],
+      invoke: async () => ({
+        isError: false,
+        content: {
+          success: true,
+          images: views.map((view, index) => ({ view, dataUrl: `data:image/png;base64,${pixels[index]}` })),
+        },
+      }),
+    };
+    const endpoint = createHostMcpEndpoint({ secret: randomBytes(32).toString('base64url'), workspaceRoot, registry });
+    const server = createServer((request, response) => {
+      void endpoint.handle(request, response);
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const address = server.address();
+    if (!address || typeof address === 'string') {
+      throw new Error('The capture MCP server did not open a TCP port.');
+    }
+    const chatId = 'chat-live-capture';
+    const runId = 'run-live-capture';
+    const capability = endpoint.mint({ chatId, runId });
+    const release = endpoint.activate({ token: capability.token, chatId, runId, signal: new AbortController().signal });
+    let session: Awaited<ReturnType<typeof openAcpSession>> | undefined;
+    const events: ExternalAgentLogEvent[] = [];
+    try {
+      session = await openAcpSession({
+        adapter: codexAdapter,
+        cwd: workspaceRoot,
+        createId: randomUUID,
+        mcpServers: [
+          {
+            type: 'http',
+            name: 'tau',
+            url: `http://127.0.0.1:${String(address.port)}/mcp`,
+            headers: [{ name: 'Authorization', value: `Bearer ${capability.token}` }],
+          },
+        ],
+      });
+      await session.prompt(
+        'Call mcp.tau.screenshot with targetFile main.scad and mode multi_angle. Open each of the six returned local PNG files with your image viewing tool, then list the six view names. Do not edit files.',
+        {
+          append: async (batch) => {
+            events.push(...batch);
+          },
+          approve: async () => ({ interruptId: 'capture', outcome: 'approved' }),
+          publishLive: async () => undefined,
+          signal: AbortSignal.timeout(180_000),
+        },
+        selectedModel('codex'),
+      );
+      const messages = events.flatMap((event) => (event.type === 'message.appended' ? [event.message] : []));
+      expect(
+        messages.some(
+          (message) => message.role === 'tool-output' && message.toolName === 'screenshot' && !message.isError,
+        ),
+      ).toBe(true);
+      const attachments = await readdir(join(workspaceRoot, '.tau', 'chats', chatId, 'attachments'));
+      expect(attachments).toHaveLength(6);
+      const stored = await Promise.all(
+        attachments.map(async (name) => readFile(join(workspaceRoot, '.tau', 'chats', chatId, 'attachments', name))),
+      );
+      expect(stored.map((bytes) => bytes.toString('base64')).sort()).toEqual([...pixels].sort());
+      const imageViews = messages.flatMap((message) =>
+        message.role === 'tool-input' && message.toolName.startsWith('View Image ') ? [message.toolName] : [],
+      );
+      expect(imageViews).toHaveLength(6);
+      expect(new Set(imageViews).size).toBe(6);
+      expect(
+        messages.filter(
+          (message) => message.role === 'tool-output' && message.toolName.startsWith('View Image ') && !message.isError,
+        ),
+      ).toHaveLength(6);
+    } finally {
+      await session?.close();
+      await release();
+      await endpoint.close();
+      await new Promise<void>((resolve) => {
+        server.close(() => {
+          resolve();
+        });
+      });
+    }
+  }, 240_000);
+});
 
 describe.skipIf(!liveEnabled || codexAdapter === undefined)('native Codex skill discovery through ACP', () => {
   it('keeps a manual-only native skill out of implicit context and loads it on explicit invocation', async () => {

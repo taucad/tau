@@ -10,12 +10,18 @@
 
 import { randomBytes } from 'node:crypto';
 import { once } from 'node:events';
+import { mkdtempSync } from 'node:fs';
+import { readFile, rm } from 'node:fs/promises';
 import { createServer, request } from 'node:http';
 import type { IncomingMessage } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
+import { screenshotMcpOutputSchema } from '@taucad/chat/schemas/tools/screenshot';
+import { testModelOutputSchema } from '@taucad/chat/schemas/tools/test-model';
 
 import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
 import type { HostToolInvocation, ToolRegistry } from '@taucad/agent-host';
@@ -30,6 +36,9 @@ import { connectMcpOverFetch } from '#acp/fixtures/mcp-fetch-client.js';
 
 const token = 'agent-server-token-with-at-least-32-characters';
 const secret = randomBytes(32).toString('base64url');
+const workspaceRoot = mkdtempSync(join(tmpdir(), 'tau-mcp-test-'));
+
+afterAll(async () => rm(workspaceRoot, { recursive: true, force: true }));
 
 const jsonRpcReplySchema = z.object({
   id: z.number(),
@@ -111,8 +120,14 @@ const stubLauncher = (): NodeAgentLauncher =>
 const invocations: HostToolInvocation[] = [];
 const registry: ToolRegistry = {
   list: () => [],
-  invoke: async (invocation) => {
+  invoke: async (invocation): ReturnType<ToolRegistry['invoke']> => {
     invocations.push(invocation);
+    if (invocation.toolName === 'screenshot') {
+      return {
+        content: { success: true, images: [{ view: 'isometric', dataUrl: 'data:image/webp;base64,QUJD' }] },
+        isError: false,
+      };
+    }
     return {
       content: {
         success: true,
@@ -149,6 +164,7 @@ describe('createHostMcpEndpoint capability', () => {
     const order: string[] = [];
     endpoint = createHostMcpEndpoint({
       secret,
+      workspaceRoot,
       registry: {
         list: () => [],
         invoke: async (input) => {
@@ -159,7 +175,7 @@ describe('createHostMcpEndpoint capability', () => {
         },
       },
     });
-    server = startAgentServer({ launcher: stubLauncher(), token, workspaceRoot: '/tmp/tau-mcp-test', mcp: endpoint });
+    server = startAgentServer({ launcher: stubLauncher(), token, workspaceRoot, mcp: endpoint });
     await server.ready;
     const capability = endpoint.mint({ runId: 'candidate', chatId: 'chat-1' });
     const release = endpoint.activate({
@@ -200,7 +216,7 @@ describe('createHostMcpEndpoint capability', () => {
 
   it('verifies its own capability and refuses tampered, expired and foreign ones', () => {
     let clock = 1_000_000;
-    const mcp = createHostMcpEndpoint({ secret, registry, now: () => clock });
+    const mcp = createHostMcpEndpoint({ secret, workspaceRoot, registry, now: () => clock });
     const capability = mcp.mint({ runId: 'run-1', chatId: 'chat-1' });
 
     const claims = mcp.verify(capability.token);
@@ -227,7 +243,12 @@ describe('createHostMcpEndpoint capability', () => {
     );
 
     // Another daemon's secret never verifies here.
-    const other = createHostMcpEndpoint({ secret: randomBytes(32).toString('base64url'), registry, now: () => clock });
+    const other = createHostMcpEndpoint({
+      secret: randomBytes(32).toString('base64url'),
+      workspaceRoot,
+      registry,
+      now: () => clock,
+    });
     expect(() => mcp.verify(other.mint({ runId: 'run-1', chatId: 'chat-1' }).token)).toThrow(HostMcpCapabilityError);
 
     clock += hostMcpCapabilityLifetime + 1;
@@ -235,7 +256,7 @@ describe('createHostMcpEndpoint capability', () => {
   });
 
   it('fences MCP sessions by chat session, never by session id alone', () => {
-    const mcp = createHostMcpEndpoint({ secret, registry });
+    const mcp = createHostMcpEndpoint({ secret, workspaceRoot, registry });
     const session = mcp.mint({ runId: 'run-1', chatId: 'chat-1' });
     const key = mcp.authorityKey(mcp.verify(session.token));
 
@@ -251,7 +272,7 @@ describe('createHostMcpEndpoint capability', () => {
    * every turn of a chat, so a capability keyed to the run that opened it would
    * refuse the chat's second turn. */
   it('keeps serving a chat under the capability its session was opened with', () => {
-    const mcp = createHostMcpEndpoint({ secret, registry });
+    const mcp = createHostMcpEndpoint({ secret, workspaceRoot, registry });
     const opened = mcp.mint({ runId: 'run-1', chatId: 'chat-1' });
 
     const claims = mcp.verify(opened.token);
@@ -266,6 +287,7 @@ describe('the mounted /mcp route', () => {
     const runIds: string[] = [];
     endpoint = createHostMcpEndpoint({
       secret,
+      workspaceRoot,
       registry: {
         list: () => [],
         invoke: async (invocation) => {
@@ -355,11 +377,11 @@ describe('the mounted /mcp route', () => {
   }, 30_000);
 
   it('dispatches a tool call into the daemon registry and refuses an unauthorized one', async () => {
-    endpoint = createHostMcpEndpoint({ secret, registry });
+    endpoint = createHostMcpEndpoint({ secret, workspaceRoot, registry });
     server = startAgentServer({
       launcher: stubLauncher(),
       token,
-      workspaceRoot: '/tmp/tau-mcp-test',
+      workspaceRoot,
       mcp: endpoint,
     });
     await server.ready;
@@ -401,6 +423,133 @@ describe('the mounted /mcp route', () => {
     expect(idle.isError).toBe(true);
     expect(JSON.stringify(idle)).toContain('MCP_RUN_INACTIVE');
     expect(invocations).toHaveLength(1);
+  }, 30_000);
+
+  it('keeps six screenshots and an oversized GeoSpec report readable outside MCP payloads', async () => {
+    const views = ['front', 'back', 'right', 'left', 'top', 'bottom'];
+    endpoint = createHostMcpEndpoint({
+      secret,
+      workspaceRoot,
+      registry: {
+        list: () => [],
+        invoke: async (invocation): ReturnType<ToolRegistry['invoke']> => {
+          if (invocation.toolName === 'screenshot') {
+            return {
+              isError: false,
+              content: {
+                success: true,
+                images: views.map((view) => ({ view, dataUrl: 'data:image/webp;base64,QUJD' })),
+                sourceRevision: { entry: 'main.cs', files: { 'main.cs': `sha256:${'a'.repeat(64)}` } },
+                message: 'Section cutaways narrower than 180° are not shown in captures.',
+              },
+            };
+          }
+          return {
+            isError: false,
+            content: {
+              success: true,
+              passed: 0,
+              total: 1,
+              passes: [],
+              failures: [
+                {
+                  id: 'large-1',
+                  requirement: 'Mesh is sound',
+                  reason: 'Failed',
+                  suggestion: 'Inspect details',
+                  targetFile: 'main.cs',
+                  diagnostics: [
+                    {
+                      code: 'GEOMETRY',
+                      severity: 'error',
+                      message: 'Large mesh',
+                      details: { vertices: 'x'.repeat(150_000) },
+                    },
+                  ],
+                },
+              ],
+            },
+          };
+        },
+      },
+    });
+    server = startAgentServer({ launcher: stubLauncher(), token, workspaceRoot, mcp: endpoint });
+    await server.ready;
+    const capability = endpoint.mint({ runId: 'run-capture', chatId: 'chat-capture' });
+    const release = endpoint.activate({
+      token: capability.token,
+      runId: 'run-capture',
+      chatId: 'chat-capture',
+      signal: new AbortController().signal,
+    });
+    const client = await connectMcpOverFetch({
+      url: new URL('mcp', server.url()).href,
+      headers: { authorization: `Bearer ${capability.token}` },
+    });
+    try {
+      const capture = await client.callTool('screenshot', { targetFile: 'main.cs', mode: 'multi_angle' });
+      const manifest = screenshotMcpOutputSchema.parse(capture.structuredContent);
+      const { images } = manifest;
+      expect(images.map((image) => image.view)).toEqual(views);
+      expect(manifest.sourceRevision?.entry).toBe('main.cs');
+      expect(manifest.message).toBe('Section cutaways narrower than 180° are not shown in captures.');
+      expect(JSON.stringify(capture)).not.toContain('QUJD');
+      expect(Buffer.byteLength(JSON.stringify(capture), 'utf8')).toBeLessThan(128 * 1024);
+      for (const image of images) {
+        // oxlint-disable-next-line no-await-in-loop -- each named view must remain retrievable.
+        await expect(readFile(image.absolutePath)).resolves.toEqual(Buffer.from('ABC'));
+      }
+      const tests = await client.callTool('test_model', {});
+      const summary = testModelOutputSchema.parse(tests.structuredContent);
+      expect(summary).toMatchObject({ passed: 0, total: 1, omittedPasses: 0, omittedFailures: 0 });
+      expect(summary.failures[0]?.id).toBe('large-1');
+      expect(JSON.stringify(tests).length).toBeLessThan(128 * 1024);
+      expect(summary.fullResult).toBeDefined();
+      const full = JSON.parse(await readFile(summary.fullResult!.absolutePath, 'utf8')) as unknown;
+      expect(testModelOutputSchema.parse(full).failures[0]?.diagnostics?.[0]?.details).toEqual({
+        vertices: 'x'.repeat(150_000),
+      });
+    } finally {
+      await release();
+    }
+  }, 30_000);
+
+  it('codes a fault Tau hits after the tool answered, so the agent does not retry its own call', async () => {
+    endpoint = createHostMcpEndpoint({
+      secret,
+      workspaceRoot,
+      registry: {
+        list: () => [],
+        invoke: async (): ReturnType<ToolRegistry['invoke']> => ({
+          isError: false,
+          // A capture Tau cannot save: the renderer answered, the host post-processing throws.
+          content: { success: true, images: [{ view: 'isometric', dataUrl: 'data:image/gif;base64,R0lG' }] },
+        }),
+      },
+    });
+    server = startAgentServer({ launcher: stubLauncher(), token, workspaceRoot, mcp: endpoint });
+    await server.ready;
+    const capability = endpoint.mint({ runId: 'run-fault', chatId: 'chat-fault' });
+    const release = endpoint.activate({
+      token: capability.token,
+      runId: 'run-fault',
+      chatId: 'chat-fault',
+      signal: new AbortController().signal,
+    });
+    const client = await connectMcpOverFetch({
+      url: new URL('mcp', server.url()).href,
+      headers: { authorization: `Bearer ${capability.token}` },
+    });
+    try {
+      const capture = await client.callTool('screenshot', { targetFile: 'main.cs', mode: 'single' });
+      expect(capture.isError).toBe(true);
+      expect(capture.structuredContent).toMatchObject({
+        errorCode: 'MCP_HOST_FAULT',
+        message: expect.stringContaining('retrying will not help') as string,
+      });
+    } finally {
+      await release();
+    }
   }, 30_000);
 
   /* The real machine registry's definitions and handler, never a hand-written
@@ -450,6 +599,7 @@ describe('the mounted /mcp route', () => {
     });
     endpoint = createHostMcpEndpoint({
       secret,
+      workspaceRoot,
       registry: {
         list: () => machineRegistry.list(),
         invoke: async (invocation) => {
@@ -458,7 +608,7 @@ describe('the mounted /mcp route', () => {
         },
       },
     });
-    server = startAgentServer({ launcher: stubLauncher(), token, workspaceRoot: '/tmp/tau-mcp-test', mcp: endpoint });
+    server = startAgentServer({ launcher: stubLauncher(), token, workspaceRoot, mcp: endpoint });
     await server.ready;
     const capability = endpoint.mint({ runId: 'run-1', chatId: 'chat-1' });
     const release = endpoint.activate({
@@ -540,11 +690,11 @@ describe('the mounted /mcp route', () => {
   }, 30_000);
 
   it('captures the active run for each call made through one long-lived MCP session', async () => {
-    endpoint = createHostMcpEndpoint({ secret, registry });
+    endpoint = createHostMcpEndpoint({ secret, workspaceRoot, registry });
     server = startAgentServer({
       launcher: stubLauncher(),
       token,
-      workspaceRoot: '/tmp/tau-mcp-test',
+      workspaceRoot,
       mcp: endpoint,
     });
     await server.ready;
@@ -571,11 +721,11 @@ describe('the mounted /mcp route', () => {
   }, 30_000);
 
   it('refuses a capability minted for another chat on this session', async () => {
-    endpoint = createHostMcpEndpoint({ secret, registry });
+    endpoint = createHostMcpEndpoint({ secret, workspaceRoot, registry });
     server = startAgentServer({
       launcher: stubLauncher(),
       token,
-      workspaceRoot: '/tmp/tau-mcp-test',
+      workspaceRoot,
       mcp: endpoint,
     });
     await server.ready;

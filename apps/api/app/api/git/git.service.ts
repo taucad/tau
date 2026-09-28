@@ -12,6 +12,8 @@ import {
   BadRequestException,
   ForbiddenException,
   GoneException,
+  HttpException,
+  HttpStatus,
   Inject,
   Injectable,
   InternalServerErrorException,
@@ -22,18 +24,32 @@ import {
   ServiceUnavailableException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { and, eq, inArray, lt, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, lt, sql } from 'drizzle-orm';
+import { storageLimitBytesByTier } from '@taucad/billing';
 import { DatabaseService } from '#database/database.service.js';
 import { ShutdownService } from '#lifecycle/shutdown.service.js';
-import { project, projectGit, projectGitLfsObject } from '#database/schema.js';
+import { project, projectGit, projectGitLfsObject, publication } from '#database/schema.js';
 import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
 import type { ProjectRole } from '#api/collaboration/project-access.service.js';
-import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
+import { DurableEventsService } from '#api/durable-events/durable-events.service.js';
+import type {
+  CommercialEntitlements,
+  CommercialEntitlementsService,
+} from '#api/entitlements/commercial-entitlements.js';
 import { commercialEntitlementsKey } from '#api/entitlements/commercial-entitlements.js';
-import { repositoryStoreKey, storageLimitBytesByTier } from '#api/git/git.constants.js';
-import type { GitService as GitSmartService } from '#api/git/git.constants.js';
+import {
+  ceilingRefusalMarker,
+  hydratesFromOthersPerOwnerPerDay,
+  hydratesPerCallerPerDay,
+  incompleteRepositoryMarker,
+  isRemovableRef,
+  quotaRefusalSentence,
+  repositoryStoreKey,
+} from '#api/git/git.constants.js';
+import type { GitService as GitSmartService, QuotaAudience } from '#api/git/git.constants.js';
 import { commitLease } from '#api/git/store/commit.js';
 import type { MovedRef } from '#api/git/store/commit.js';
+import type { SweepOutcome } from '#api/git/store/sweep.js';
 import { RepositoryStoreError } from '#api/git/store/errors.js';
 import type { FaultInjector } from '#api/git/store/fault-points.js';
 import { resolveLfsObjectLocation } from '#api/git/lfs-keys.js';
@@ -45,6 +61,7 @@ import { repositoryLocator } from '#api/git/store/locator.js';
 import type { Manifest } from '#api/git/store/manifest.js';
 import type { RepositoryStore } from '#api/git/store/port.js';
 import { materializePublishedTags } from '#api/publications/publication-materializer.js';
+import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
 import type { MaterializerDependencies } from '#api/publications/publication-materializer.js';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
 
@@ -88,11 +105,65 @@ export type GitAccess = {
   readonly ownerId: string;
   /** What the authenticated caller may do with this project. */
   readonly role: ProjectRole;
+  /**
+   * Who is asking: the authenticated user, a cloud host (`device:<id>`, never
+   * its owner's id — RV-W10 F1), or a named system caller such as a
+   * publication viewer's repair. Keys the hydrate budgets, so an owner's own
+   * reads are never spent by anybody else (D22).
+   */
+  readonly callerId: string;
+  /**
+   * The cloud host this request came through (D21), as the git transport
+   * resolved it; absent for the account's own request. Recorded as the push's
+   * `viaDevice` (EQ11), and it holds the caller at `write` whatever the
+   * owner's own role is (I10).
+   */
+  readonly viaDevice?: string;
   /** Bytes this project may still add before the plan allowance is spent. */
   readonly remainingBytes: number;
   /** The owner's complete plan allowance, used by serialized write admission. */
   readonly storageLimitBytes: number;
+  /**
+   * Who a quota refusal speaks to (D17), resolved with the plan on a write;
+   * absent on a read, which is never refused for storage.
+   */
+  readonly quotaAudience?: QuotaAudience;
 };
+
+/**
+ * The allowance an owner's plan grants on the Hosted Remote (D16): nothing
+ * without `canSyncFiles`, otherwise the entitlement's own figure (self-host,
+ * an Enterprise override) or the tier's.
+ *
+ * @param entitlements - The owner's commercial entitlements.
+ * @returns The allowance in bytes.
+ */
+const storageLimitOf = (entitlements: CommercialEntitlements): number =>
+  entitlements.canSyncFiles
+    ? (entitlements.storageLimitBytes ??
+      (entitlements.tier === undefined ? storageLimitBytesByTier.pro : storageLimitBytesByTier[entitlements.tier]))
+    : 0;
+
+/** A publication a ref removal would leave without its named version (D24). */
+export type AffectedPublication = {
+  readonly id: string;
+  readonly title: string;
+  readonly visibility: string;
+};
+
+/**
+ * What the removal verb answered (D24): a live publication to show the owner
+ * before anything changes, or the ref it removed with the tip it held and the
+ * publication it retired.
+ */
+export type RefRemoval =
+  | { readonly outcome: 'confirm'; readonly publication: AffectedPublication }
+  | {
+      readonly outcome: 'removed';
+      readonly ref: string;
+      readonly tip: string;
+      readonly publication?: AffectedPublication;
+    };
 
 export type GitLfsObjectState = {
   readonly oid: string;
@@ -173,6 +244,16 @@ export const gitRetryAfterSeconds = 5;
  */
 const flushPacketBytes = 4;
 
+/**
+ * The most leases one owner may hold on one worker at once (D22): half the
+ * slots, and at least one. With eight slots an owner's fifth concurrent read
+ * waits, so another owner's second request and a third owner are admitted.
+ *
+ * @param slots - The leases this worker's free disk holds.
+ * @returns The owner's share.
+ */
+const ownerLeaseCap = (slots: number): number => Math.max(1, Math.floor(slots / 2));
+
 @Injectable()
 export class GitRepositoryService {
   /**
@@ -218,12 +299,23 @@ export class GitRepositoryService {
   #inFlightLeases = 0;
 
   /**
-   * Work a request started that outlives its response — today only the lease
-   * disposal that follows a fetch, whose child closes after the bytes are on
-   * the wire. Held in a set rather than fired and forgotten, so a failure has
-   * somewhere to be logged and a caller can wait for it.
+   * The same leases, per owner, so admission can be fair (D22, L6-F3): an
+   * owner who already holds a lease never takes this worker's last free slot,
+   * so one owner's concurrent reads cannot drive another owner to `503`.
+   */
+  readonly #leasesByOwner = new Map<string, number>();
+
+  /**
+   * Work a request started that outlives its response: the lease disposal
+   * that follows a fetch, whose child closes after the bytes are on the wire,
+   * the D13 announcement and a compacting commit's sweep. Held in a set
+   * rather than fired and forgotten, so a failure has somewhere to be logged
+   * and a caller can wait for it.
    */
   readonly #background = new Set<Promise<void>>();
+
+  /** The projects whose sweep is running (`sweepAfterReply`). */
+  readonly #sweeping = new Set<string>();
 
   public constructor(
     private readonly databaseService: DatabaseService,
@@ -233,6 +325,8 @@ export class GitRepositoryService {
     private readonly projectAccess: ProjectAccessService,
     @Inject(repositoryStoreKey)
     private readonly store: RepositoryStore,
+    private readonly rateLimiter: PublicationRateLimiterService,
+    private readonly durableEvents: DurableEventsService,
     @Optional() private readonly shutdown: ShutdownService = new ShutdownService(),
   ) {
     /* A crash restarts a Machine in place on the same rootfs, so boot is the
@@ -263,18 +357,28 @@ export class GitRepositoryService {
     projectId: string;
     userId: string;
     mode: 'read' | 'write' | 'finalize';
+    /** The cloud host the owner's request came through (D21), when it did. */
+    viaDevice?: string | undefined;
   }): Promise<GitAccess> {
     const access = await this.projectAccess.authorize(
       args.projectId,
       args.userId,
       args.mode === 'read' ? 'read' : 'write',
     );
+    const caller =
+      args.viaDevice === undefined
+        ? { role: access.role, callerId: args.userId }
+        : ({
+            role: 'write',
+            callerId: `device:${args.viaDevice}`,
+            viaDevice: args.viaDevice,
+          } satisfies Pick<GitAccess, 'role' | 'callerId' | 'viaDevice'>);
 
     if (args.mode === 'read') {
       return {
         projectId: args.projectId,
         ownerId: access.ownerId,
-        role: access.role,
+        ...caller,
         /* A read spends nothing and is offered nothing: every caller that reads
            these two is a write caller (`git.controller.ts`, `git-lfs.service.ts`). */
         remainingBytes: 0,
@@ -290,33 +394,65 @@ export class GitRepositoryService {
       });
     }
 
-    const limit =
-      entitlements.storageLimitBytes ??
-      (entitlements.tier === undefined ? storageLimitBytesByTier.pro : storageLimitBytesByTier[entitlements.tier]);
+    const limit = storageLimitOf(entitlements);
+    /* D17: the account's own relationship, not the request's — a cloud host
+       pushes as its owner's device, and its refusal is the owner's to act on.
+       A self-host build has no tier and nothing to sell, so it is the top. */
+    const quotaAudience: QuotaAudience =
+      access.role === 'owner'
+        ? entitlements.tier === undefined || entitlements.tier === 'enterprise'
+          ? 'ownerAtTopTier'
+          : 'owner'
+        : 'collaborator';
     const usage = await this.readOwnerUsage(access.ownerId);
     const remainingBytes = Math.max(0, limit - usage.storageBytes - usage.lfsBytes);
     if (args.mode === 'write' && remainingBytes === 0) {
       throw new PayloadTooLargeException({
         code: 'GIT_QUOTA_EXCEEDED',
-        message: `Storage quota reached: ${String(usage.storageBytes + usage.lfsBytes)} of ${String(limit)} bytes used.`,
+        message: quotaRefusalSentence(quotaAudience, limit),
       });
     }
 
     return {
       projectId: args.projectId,
       ownerId: access.ownerId,
-      role: access.role,
+      ...caller,
       remainingBytes,
       storageLimitBytes: limit,
+      quotaAudience,
     };
   }
 
-  /** Account-wide usage; one plan allowance is shared by all owned projects. */
-  public async readOwnerUsage(ownerId: string): Promise<{ storageBytes: number; lfsBytes: number }> {
+  /**
+   * What an owner's account stores against its plan (D18): the figures the Sync
+   * region renders and a later `413` quotes, from the same accounting and the
+   * same allowance `authorize` enforces.
+   *
+   * @param ownerId - The account whose allowance is asked about.
+   * @returns Live pack bytes, LFS bytes, retained bytes (never charged) and the allowance, all account-wide.
+   */
+  public async readStorageAllowance(
+    ownerId: string,
+  ): Promise<{ storageBytes: number; lfsBytes: number; retainedBytes: number; storageLimitBytes: number }> {
+    const [entitlements, usage] = await Promise.all([
+      this.entitlementsService.getEntitlements(ownerId),
+      this.readOwnerUsage(ownerId),
+    ]);
+    return { ...usage, storageLimitBytes: storageLimitOf(entitlements) };
+  }
+
+  /**
+   * Account-wide usage; one plan allowance is shared by all owned projects.
+   * `retainedBytes` is reported beside it and never charged (D18).
+   */
+  public async readOwnerUsage(
+    ownerId: string,
+  ): Promise<{ storageBytes: number; lfsBytes: number; retainedBytes: number }> {
     const rows = await this.databaseService.database
       .select({
         storageBytes: sql<number>`coalesce(sum(${projectGit.storageBytes}), 0)`,
         lfsBytes: sql<number>`coalesce(sum(${projectGit.lfsBytes}), 0)`,
+        retainedBytes: sql<number>`coalesce(sum(${projectGit.retainedBytes}), 0)`,
       })
       .from(project)
       .leftJoin(projectGit, eq(projectGit.projectId, project.id))
@@ -325,6 +461,7 @@ export class GitRepositoryService {
     return {
       storageBytes: Number(row?.storageBytes ?? 0),
       lfsBytes: Number(row?.lfsBytes ?? 0),
+      retainedBytes: Number(row?.retainedBytes ?? 0),
     };
   }
 
@@ -508,7 +645,7 @@ export class GitRepositoryService {
    * @throws ServiceUnavailableException When this worker has no disk for another lease.
    */
   public async withLease<T>(access: GitAccess, work: (lease: RepositoryLease) => Promise<T>): Promise<T> {
-    const release = await this.admitLease();
+    const release = await this.admitLease(access);
     let lease: RepositoryLease | undefined;
     try {
       lease = await hydrateLease({
@@ -563,7 +700,7 @@ export class GitRepositoryService {
     maximumInputBytes: number;
     abort?: AbortSignal;
   }): Promise<Readable> {
-    const release = await this.admitLease();
+    const release = await this.admitLease(args.access);
     let lease: RepositoryLease | undefined;
     try {
       lease = await hydrateLease({
@@ -635,6 +772,13 @@ export class GitRepositoryService {
           TAU_GIT_QUOTA_REMAINING_BYTES: String(args.access.remainingBytes),
           // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment names
           TAU_GIT_CEILING_REMAINING_BYTES: String(ceilingRemaining),
+          /* D17: the plan refusal's sentence, addressed to this caller. */
+          ...(args.access.quotaAudience === undefined
+            ? {}
+            : {
+                // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment names
+                TAU_GIT_QUOTA_SENTENCE: quotaRefusalSentence(args.access.quotaAudience, args.access.storageLimitBytes),
+              }),
         },
       });
 
@@ -653,16 +797,12 @@ export class GitRepositoryService {
          commit when the process begins to stop is refused before its first
          upload, and the client re-pushes against a Machine that is staying.
          One that has started finishes, because the drain waits for it. */
-      if (this.shutdown.signal.aborted) {
-        throw new ServiceUnavailableException({
-          code: 'GIT_SERVICE_RESTARTING',
-          message: 'This server is restarting; retry the push.',
-        });
-      }
+      this.refuseWhenStopping('This server is restarting; retry the push.');
       const result = await commitLease({
         store: this.store,
         lease,
         committedBy: args.committedBy,
+        ...(args.access.viaDevice === undefined ? {} : { viaDevice: args.access.viaDevice }),
         byteCeiling: this.repositoryByteCeiling,
         ...(this.faults === undefined ? {} : { faults: this.faults }),
       });
@@ -679,14 +819,180 @@ export class GitRepositoryService {
           );
         }
         await this.derive({ access: args.access, lease, manifest: result.manifest, moved: result.moved });
+        this.sweepAfterReply(args.access.projectId, result);
       }
       return body;
     });
   }
 
+  /**
+   * The audited ref-removal verb (D24, charter I2).
+   *
+   * The push hook refuses every deletion, so this is the only way a ref ever
+   * leaves the Hosted Remote, and it is the owner's alone. It removes a named
+   * version (`refs/tags/*`) or a conflict line (`refs/heads/conflicts/*`, D14),
+   * the latter being how an owner clears an abandoned line another device left.
+   *
+   * A named version a live publication points at is answered `confirm` with
+   * that publication until the caller names it back as `confirmPublicationId`,
+   * so the person sees what the removal affects before anything changes. A
+   * confirmed removal retires that publication in the same step: it is marked
+   * unpublished, so it stops serving and a later push that re-creates the name
+   * does not bring it back (`materializePublishedTags` skips it). Publishing it
+   * again is the owner's explicit act.
+   *
+   * The decision, the retirement and the manifest commit run inside one
+   * transaction holding the project's publication lock — the lock the publish
+   * path takes — so a publish cannot land between the check and the removal,
+   * and a failed commit rolls the retirement back. The removal is a commit
+   * like a push: the same lease, the same conditional manifest write, and the
+   * same appended attribution record (EQ11) carrying the ref without a tip;
+   * that record, plus the log line, is the audit.
+   *
+   * @param args - The access, the ref, the authenticated caller and the publication they confirmed.
+   * @returns `confirm` with the publication to show, or `removed` with the tip it held.
+   * @throws ForbiddenException When the caller is not the owner.
+   * @throws BadRequestException When the ref is not a named version or a conflict line.
+   * @throws NotFoundException When the repository holds no such ref.
+   */
+  public async removeRef(args: {
+    access: GitAccess;
+    ref: string;
+    committedBy: string;
+    confirmPublicationId?: string;
+  }): Promise<RefRemoval> {
+    const { access, ref } = args;
+    if (access.role !== 'owner') {
+      throw new ForbiddenException({
+        code: 'GIT_REF_REMOVAL_OWNER_ONLY',
+        message: 'Only the project’s owner can remove a named version or a conflict line.',
+      });
+    }
+    if (!isRemovableRef(ref)) {
+      throw new BadRequestException({
+        code: 'GIT_REF_NOT_REMOVABLE',
+        message: 'Only a named version (refs/tags/*) or a conflict line (refs/heads/conflicts/*) can be removed.',
+      });
+    }
+    const tag = ref.startsWith('refs/tags/') ? ref.slice('refs/tags/'.length) : undefined;
+
+    const removal = await this.withLease(access, async (lease): Promise<RefRemoval> => {
+      /* Before the transaction: a repair re-materializes under the same lock. */
+      await this.repairDerivedState(access, lease);
+      const held = lease.manifest?.refs[ref]?.oid;
+      if (held === undefined) {
+        throw new NotFoundException({ code: 'GIT_REF_NOT_FOUND', message: `This repository has no ${ref}.` });
+      }
+      /* The push's stop gate: a removal that has not started to commit when the
+         process begins to stop is refused before it retires a publication, and
+         the client retries against a Machine that is staying. */
+      this.refuseWhenStopping('This server is restarting; retry the removal.');
+      const decided = await this.databaseService.database.transaction(async (transaction) => {
+        await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${access.projectId}, 0))`);
+        const [affected] =
+          tag === undefined
+            ? []
+            : await transaction
+                .select({ id: publication.id, title: publication.title, visibility: publication.visibility })
+                .from(publication)
+                .where(
+                  and(
+                    eq(publication.projectId, access.projectId),
+                    eq(publication.tag, tag),
+                    isNull(publication.unpublishedAt),
+                  ),
+                );
+        if (affected !== undefined && affected.id !== args.confirmPublicationId) {
+          return { outcome: 'confirm', publication: affected } as const;
+        }
+        if (affected !== undefined) {
+          await transaction
+            .update(publication)
+            .set({ unpublishedAt: new Date() })
+            .where(eq(publication.id, affected.id));
+        }
+        await this.runGit(['update-ref', '-d', ref, held], lease.directory);
+        const result = await commitLease({
+          store: this.store,
+          lease,
+          committedBy: args.committedBy,
+          byteCeiling: this.repositoryByteCeiling,
+          ...(this.faults === undefined ? {} : { faults: this.faults }),
+        });
+        return { outcome: 'removed', result, affected } as const;
+      });
+      if (decided.outcome === 'confirm') {
+        return decided;
+      }
+      if (decided.result.committed) {
+        /* The removal is durable, so, as for a push, a failed generation write
+           is left to the next request's repair rather than answered as 500. */
+        try {
+          await this.recordGeneration(access.projectId, decided.result.manifest.generation);
+        } catch (error) {
+          this.#logger.warn(
+            { err: error, projectId: access.projectId, generation: decided.result.manifest.generation },
+            'A committed ref removal could not record its generation; the next request repairs it',
+          );
+        }
+        await this.derive({ access, lease, manifest: decided.result.manifest, moved: decided.result.moved });
+        this.sweepAfterReply(access.projectId, decided.result);
+      }
+      return {
+        outcome: 'removed',
+        ref,
+        tip: held,
+        ...(decided.affected === undefined ? {} : { publication: decided.affected }),
+      };
+    });
+    if (removal.outcome === 'removed') {
+      this.#logger.log(
+        { projectId: access.projectId, ref, tip: removal.tip, by: args.committedBy, retired: removal.publication?.id },
+        'Removed a ref through the audited verb',
+      );
+    }
+    return removal;
+  }
+
   /** Waits for the work a finished request left running. */
   public async settled(): Promise<void> {
     await Promise.all(this.#background);
+  }
+
+  /**
+   * Starts a compacting commit's sweep without the reply waiting on it (W13b):
+   * the sweep lists `packs/` and `retired/`, which grow with every push inside
+   * the retention window. Tracked, so `settled()` waits for it. At most one
+   * runs per project; a compaction that finds one running leaves its garbage
+   * to the next, which only delays a deletion, because a sweep deletes only
+   * keys the manifest it was handed does not list.
+   */
+  private sweepAfterReply(
+    projectId: string,
+    result: { compacted: boolean; sweep: () => Promise<SweepOutcome | undefined> },
+  ): void {
+    if (!result.compacted || this.#sweeping.has(projectId)) {
+      return;
+    }
+    this.#sweeping.add(projectId);
+    this.track(
+      (async (): Promise<void> => {
+        try {
+          const swept = await result.sweep();
+          /* D18: the retired bytes the store still keeps, as this listing saw
+             them. ponytail: two workers' sweeps of one project may land out of
+             order, leaving the older listing's figure until the next sweep. */
+          if (swept !== undefined) {
+            await this.databaseService.database
+              .update(projectGit)
+              .set({ retainedBytes: swept.retainedBytes })
+              .where(eq(projectGit.projectId, projectId));
+          }
+        } finally {
+          this.#sweeping.delete(projectId);
+        }
+      })(),
+    );
   }
 
   /**
@@ -769,28 +1075,111 @@ export class GitRepositoryService {
    * without changing a constant. This replaces the flat 32-child ceiling,
    * which bounded the wrong resource — a lease is disk, not CPU.
    *
+   * Two owner-keyed bounds sit beside it (D22, L6-F3). Fairness: one owner
+   * holds at most half this worker's slots ({@link ownerLeaseCap}) and never
+   * takes the last free one while it holds another, so a second request of
+   * another owner, and a third owner, still find room. And the daily hydrate
+   * budgets ({@link spendHydrate}), because every lease is a full read of the
+   * owner's repository from object storage billed to the owner.
+   *
+   * ponytail: the hydrate budget counts leases, not bytes; count manifest pack
+   * bytes instead if a small repository's hydrates ever need a different
+   * ceiling from a large one's.
+   *
+   * @param access - Whose repository the lease hydrates, and who asked.
    * @returns The release, which every path must call.
-   * @throws ServiceUnavailableException When another lease would not fit.
+   * @throws HttpException `429` when a daily hydrate budget is spent.
+   * @throws ServiceUnavailableException When another lease would not fit, or the owner already holds its share.
    */
-  private async admitLease(): Promise<() => void> {
+  private async admitLease(access: Pick<GitAccess, 'ownerId' | 'callerId' | 'viaDevice'>): Promise<() => void> {
+    const { ownerId } = access;
     await this.sweepAbandonedLeases();
     await mkdir(this.#leaseParent, { recursive: true });
     const { bavail, bsize } = await statfs(this.#leaseParent);
-    const free = bavail * bsize;
-    if ((this.#inFlightLeases + 1) * this.leaseDiskBytesPerLease > free) {
+    const slots = Math.floor((bavail * bsize) / this.leaseDiskBytesPerLease);
+    const held = this.#leasesByOwner.get(ownerId) ?? 0;
+    if (this.#inFlightLeases + 1 > slots) {
       throw new ServiceUnavailableException({
         code: 'GIT_LEASE_DISK_FULL',
         message: 'This server has no room for another repository right now; retry shortly.',
       });
     }
+    if (held >= ownerLeaseCap(slots) || (held > 0 && this.#inFlightLeases + 1 >= slots)) {
+      throw new ServiceUnavailableException({
+        code: 'GIT_LEASE_OWNER_BUSY',
+        message: 'This account already has repository work running on this server; retry shortly.',
+      });
+    }
+    /* Reserved before the budget's round trip, so the check above and this
+       increment stay one synchronous step and no concurrent admission slips
+       between them; a refused budget gives the slot straight back. */
     this.#inFlightLeases += 1;
+    this.#leasesByOwner.set(ownerId, held + 1);
     let released = false;
-    return () => {
+    const release = (): void => {
       if (!released) {
         released = true;
         this.#inFlightLeases -= 1;
+        const remaining = (this.#leasesByOwner.get(ownerId) ?? 1) - 1;
+        if (remaining === 0) {
+          this.#leasesByOwner.delete(ownerId);
+        } else {
+          this.#leasesByOwner.set(ownerId, remaining);
+        }
       }
     };
+    try {
+      await this.spendHydrate(access);
+    } catch (error) {
+      release();
+      throw error;
+    }
+    return release;
+  }
+
+  /**
+   * Spends one hydrate from the budgets that bound whose reads reach an
+   * owner's repositories (D22, coordinator ruling 2026-09-25).
+   *
+   * Every caller has its own daily bucket per owner, sized for one always-on
+   * client, so the owner's own sync never shares a bucket with anybody else's.
+   * Everybody who is not the owner — collaborators, publication viewers
+   * repairing derived state — additionally shares one aggregate per owner, so
+   * third parties together cannot turn the owner's repositories into unbounded
+   * egress, and exhausting it never touches the owner's own bucket.
+   *
+   * A cloud host is the owner's device (EQ5) but not the owner's bucket
+   * (RV-W10 F1): it has its own `caller:device:<id>` bucket and stays out of
+   * the aggregate, so a looping host can spend neither the owner's own reads
+   * nor the collaborators' allowance.
+   *
+   * @param access - Whose repository, and who is asking.
+   * @throws HttpException `429` with `retryAfterSeconds` when a bucket is spent.
+   */
+  private async spendHydrate(access: Pick<GitAccess, 'ownerId' | 'callerId' | 'viaDevice'>): Promise<void> {
+    const own = access.callerId === access.ownerId;
+    const shared = !own && access.viaDevice === undefined;
+    const buckets = [
+      {
+        key: `git:hydrate:${access.ownerId}:${own ? 'owner' : `caller:${access.callerId}`}`,
+        limit: hydratesPerCallerPerDay,
+      },
+      ...(shared ? [{ key: `git:hydrate:${access.ownerId}:others`, limit: hydratesFromOthersPerOwnerPerDay }] : []),
+    ];
+    for (const bucket of buckets) {
+      // oxlint-disable-next-line no-await-in-loop -- the aggregate is spent only once the caller's own bucket admitted the read
+      const budget = await this.rateLimiter.consumeWindowBudget({ ...bucket, windowSeconds: 86_400 });
+      if (!budget.allowed) {
+        throw new HttpException(
+          {
+            code: 'GIT_HYDRATE_BUDGET_EXHAUSTED',
+            message: 'Today’s repository reads for this project are used up; retry after midnight UTC.',
+            retryAfterSeconds: budget.retryAfterSeconds,
+          },
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      }
+    }
   }
 
   /**
@@ -836,9 +1225,11 @@ export class GitRepositoryService {
            is larger than the sum the hook measured (review F12). Nothing is
            durable either way — the assertion runs before the first upload. */
         this.#logger.log({ message: error.message }, 'The D20 ceiling was reached past the pre-receive hook');
+        /* Opens with the hook's marker so a client files it as the ceiling,
+           which no plan clears (RV-W8 F2), whichever gate refused it. */
         return new PayloadTooLargeException({
           code: 'GIT_REPOSITORY_CEILING_EXCEEDED',
-          message: error.message,
+          message: `${ceilingRefusalMarker} — ${error.message}`,
         });
       }
       case 'loose-objects':
@@ -849,9 +1240,16 @@ export class GitRepositoryService {
         });
       }
       case 'missing-pack': {
+        /* Terminal, not retryable (D22, L6-F8): the manifest names a pack the
+           store does not hold, and only an operator restore repairs that. A
+           `500` rather than a `503`, so it never widens the retryable class,
+           and a sentence opening with the marker so a leg that sees only text
+           (stock git's `text/plain` body) can classify it too. The store's own
+           sentence names internal keys, so it goes to the log instead. */
+        this.#logger.error({ message: error.message }, 'A repository manifest names a pack the store does not hold');
         return new InternalServerErrorException({
           code: 'GIT_REPOSITORY_INCOMPLETE',
-          message: error.message,
+          message: `${incompleteRepositoryMarker} — it is missing data only an operator restore brings back; retrying will not help.`,
         });
       }
     }
@@ -909,6 +1307,24 @@ export class GitRepositoryService {
     return child;
   }
 
+  /**
+   * Refuses a commit that has not started once the process begins to stop
+   * (503 `GIT_SERVICE_RESTARTING`); one already committing finishes under the drain.
+   *
+   * @param message - What the client is told to retry.
+   */
+  private refuseWhenStopping(message: string): void {
+    if (this.shutdown.signal.aborted) {
+      throw new ServiceUnavailableException({ code: 'GIT_SERVICE_RESTARTING', message });
+    }
+  }
+
+  /**
+   * Runs `work` after the reply. Every post-reply promise this service starts
+   * (announcements, sweeps, fetch disposal, the boot lease sweep) comes through
+   * here, so `settled()` and the shutdown registry, which waits for it until
+   * the stop's abandon phase, both see it.
+   */
   private track(work: Promise<void>): void {
     const settle = async (): Promise<void> => {
       try {
@@ -1060,6 +1476,17 @@ export class GitRepositoryService {
     moved: readonly MovedRef[];
   }): Promise<void> {
     const { access, manifest } = args;
+    /* D13: tell every open client of this project that the remote moved. First
+       and whatever the rebuild below does, because the manifest is already
+       durable and a reader parked on the long poll makes no git request that
+       would repair it. Fire-and-forget rather than a timeout: the append is a
+       database transaction a timeout could not cancel, so bounding the wait
+       would only stop this request knowing whether it landed while it still
+       held the lease; tracked, it holds neither the lease nor the response and
+       `settled()` still waits for it. A repair re-announces its generation
+       with its heads, which costs nothing on a device that already holds
+       them. */
+    this.track(this.announce(access, manifest.generation, args.moved));
     const storageBytes = manifest.packs.reduce((total, pack) => total + pack.bytes, 0);
     try {
       const tags = args.moved.flatMap((ref) =>
@@ -1122,6 +1549,28 @@ export class GitRepositoryService {
       this.#logger.warn(
         { err: error, projectId: access.projectId, generation: manifest.generation },
         'Derived state could not be recorded; the next request for this project repairs it',
+      );
+    }
+  }
+
+  /**
+   * One `revision` entry for a committed manifest (D13), with each moved ref's
+   * new head so a client that already holds them asks for nothing (W13e); a
+   * failure is logged, never raised.
+   */
+  private async announce(access: GitAccess, generation: number, moved: readonly MovedRef[]): Promise<void> {
+    try {
+      await this.durableEvents.appendRevision({
+        projectId: access.projectId,
+        ownerId: access.ownerId,
+        generation,
+        refs: moved.map((ref) => ref.ref),
+        heads: Object.fromEntries(moved.flatMap((ref) => (ref.after === undefined ? [] : [[ref.ref, ref.after]]))),
+      });
+    } catch (error) {
+      this.#logger.warn(
+        { err: error, projectId: access.projectId, generation },
+        'Committed manifest not announced on the revision stream; open clients learn of it on their next fetch',
       );
     }
   }

@@ -363,7 +363,7 @@ const prepareTarget = async (targetName: string): Promise<void> => {
     picoGkArchiveSha256,
     picoGkHostedPatchSha256,
     hostApiVersion: 1,
-    protocolVersion: 3,
+    protocolVersion: picogkRuntimeManifestSchema.shape.protocolVersion.value,
     sceneArtifactVersion: 3,
     topologySchemaVersion: 1,
     sourceFilesSha256: expectedSourceDigest,

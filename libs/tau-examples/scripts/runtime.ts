@@ -3,7 +3,7 @@ import { esbuild } from '@taucad/esbuild';
 import { image } from '@taucad/image';
 import { jscad } from '@taucad/jscad';
 import { manifold } from '@taucad/manifold';
-import { gltfEdgeDetection, parameterCache, parameterFileResolver, parameterUnits } from '@taucad/middleware';
+import { gltfEdgeDetection, parameterFileResolver, parameterUnits } from '@taucad/middleware';
 import { opencascade } from '@taucad/opencascade';
 import { openrscad } from '@taucad/openrscad';
 import { loadPicogkKernelOptions, picogk } from '@taucad/picogk';
@@ -41,7 +41,7 @@ export const exampleRuntime = defineRuntime({
     image(),
     ...nativePlugins,
   ],
-  middleware: [parameterFileResolver(), parameterCache(), parameterUnits(), gltfEdgeDetection()],
+  middleware: [parameterFileResolver(), parameterUnits(), gltfEdgeDetection()],
 });
 
 /** Kernel ids supported by the example-thumbnail runtime. @public */

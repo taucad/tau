@@ -8,7 +8,6 @@
     "lib": ["ES2024"],
     "target": "ESNext",
     "paths": {
-      "#*": ["./src/*"],
       "libcascade": ["./src/generated/opencascade/modules/libcascade/index.d.ts"],
       "replicad": ["./src/generated/replicad/modules/replicad/index.d.ts"],
       "replicad-opencascadejs": ["./src/generated/replicad/replicad-opencascadejs-stub.d.ts"],

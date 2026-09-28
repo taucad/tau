@@ -1,15 +1,18 @@
 /**
- * GLB mesh extraction shared by both slicing engines.
+ * GLB mesh extraction shared by every slicing engine.
  *
  * Tau kernels export glTF-space Y-up metres; printers want Z-up millimetres
  * with the part on the plate. Every triangle primitive of every node is
  * transformed by its world matrix, mapped into printer space and welded by
- * position so a per-face export becomes one closed shell.
+ * position so a per-face export becomes one closed shell. The same triangles
+ * are also welded per material colour, one part per colour, for an engine
+ * that prints each colour with its own filament.
  *
  * @module
  */
 
 import { ColorUtils, Logger, WebIO } from '@gltf-transform/core';
+import type { vec4 } from '@gltf-transform/core';
 
 /** Welded triangle soup in Z-up millimetres. @internal */
 export type TriangleMesh = Readonly<{
@@ -19,47 +22,95 @@ export type TriangleMesh = Readonly<{
   indices: Uint32Array;
   /** Axis-aligned bounds in millimetres. */
   bounds: Readonly<{ min: readonly [number, number, number]; max: readonly [number, number, number] }>;
-  /** The first triangle primitive's material colour as sRGB `#RRGGBB`; `undefined` when none has a material. */
+  /**
+   * Material colour as sRGB `#RRGGBB`: a part's own, or for a whole model the first coloured
+   * primitive's. `undefined` for the part without a material, or a model with none.
+   */
   color: string | undefined;
 }>;
+
+/** A whole model welded as one mesh, and the same triangles welded again as one part per colour. @internal */
+export type TriangleModel = TriangleMesh &
+  Readonly<{
+    /** One mesh per material colour, in first-appearance order; primitives without a material form one part. */
+    parts: readonly TriangleMesh[];
+  }>;
+
+type Welder = {
+  positions: number[];
+  indices: number[];
+  byKey: Map<string, number>;
+  min: number[];
+  max: number[];
+};
 
 const triangleMode = 4;
 const metresToMillimetres = 1000;
 const weldResolution = 1e4;
 
+const createWelder = (): Welder => ({
+  positions: [],
+  indices: [],
+  byKey: new Map(),
+  min: [Infinity, Infinity, Infinity],
+  max: [-Infinity, -Infinity, -Infinity],
+});
+
+const weld = (welder: Welder, key: string, point: readonly [number, number, number]): number => {
+  const existing = welder.byKey.get(key);
+  if (existing !== undefined) {
+    return existing;
+  }
+  const index = welder.positions.length / 3;
+  welder.positions.push(...point);
+  welder.byKey.set(key, index);
+  for (const [axis, value] of point.entries()) {
+    welder.min[axis] = Math.min(welder.min[axis]!, value);
+    welder.max[axis] = Math.max(welder.max[axis]!, value);
+  }
+  return index;
+};
+
+// The factor is linear; the hex is sRGB, as slicers and CSS read it. `ColorUtils.factorToHex` truncates
+// each channel, so an authored `#FF0000` would come back as `#FE0000`; rounding keeps it.
+const srgbHex = (factor: vec4): string => {
+  const srgb = ColorUtils.convertLinearToSRGB<vec4>(factor, [0, 0, 0, 0]);
+  const channels = [srgb[0], srgb[1], srgb[2]].map((channel) =>
+    Math.round(Math.min(Math.max(channel, 0), 1) * 255)
+      .toString(16)
+      .padStart(2, '0'),
+  );
+  return `#${channels.join('').toUpperCase()}`;
+};
+
+const meshOf = (welder: Welder, color: string | undefined): TriangleMesh => ({
+  positions: Float32Array.from(welder.positions),
+  indices: Uint32Array.from(welder.indices),
+  bounds: {
+    min: [welder.min[0]!, welder.min[1]!, welder.min[2]!],
+    max: [welder.max[0]!, welder.max[1]!, welder.max[2]!],
+  },
+  color,
+});
+
 /**
- * Read every triangle primitive of a GLB into one welded Z-up millimetre mesh.
+ * Read every triangle primitive of a GLB into one welded Z-up millimetre mesh, and into one welded
+ * part per material colour in the same space.
+ *
+ * Primitives whose sRGB base colour is equal share a part, and primitives without a material form
+ * one part. A model with one colour has one part, equal to the whole mesh.
  *
  * @internal
  * @param glb - Self-contained GLB bytes.
- * @returns The welded mesh.
+ * @returns The welded mesh and its parts.
  * @throws Error - When the GLB cannot be read or carries no triangles.
  */
-export const readTriangleMesh = async (glb: Uint8Array<ArrayBuffer>): Promise<TriangleMesh> => {
+export const readTriangleMesh = async (glb: Uint8Array<ArrayBuffer>): Promise<TriangleModel> => {
   const io = new WebIO().setLogger(new Logger(Logger.Verbosity.SILENT));
   const document = await io.readBinary(glb);
-  const positions: number[] = [];
-  const indices: number[] = [];
-  const welded = new Map<string, number>();
-  // ponytail: one colour for one filament; per-part colours when multi-material slicing lands.
+  const whole = createWelder();
+  const parts = new Map<string | undefined, Welder>();
   let color: string | undefined;
-  const min = [Infinity, Infinity, Infinity];
-  const max = [-Infinity, -Infinity, -Infinity];
-  const weld = (x: number, y: number, z: number): number => {
-    const key = `${Math.round(x * weldResolution)},${Math.round(y * weldResolution)},${Math.round(z * weldResolution)}`;
-    const existing = welded.get(key);
-    if (existing !== undefined) {
-      return existing;
-    }
-    const index = positions.length / 3;
-    positions.push(x, y, z);
-    welded.set(key, index);
-    for (const [axis, value] of [x, y, z].entries()) {
-      min[axis] = Math.min(min[axis]!, value);
-      max[axis] = Math.max(max[axis]!, value);
-    }
-    return index;
-  };
   for (const node of document.getRoot().listNodes()) {
     const mesh = node.getMesh();
     if (!mesh) {
@@ -72,13 +123,17 @@ export const readTriangleMesh = async (glb: Uint8Array<ArrayBuffer>): Promise<Tr
         continue;
       }
       const material = primitive.getMaterial();
-      if (color === undefined && material) {
-        // The factor is linear; the hex is sRGB, as slicers and CSS read it.
-        color = `#${ColorUtils.factorToHex(material.getBaseColorFactor()).toString(16).padStart(6, '0').toUpperCase()}`;
+      const partColor = material ? srgbHex(material.getBaseColorFactor()) : undefined;
+      color ??= partColor;
+      let part = parts.get(partColor);
+      if (part === undefined) {
+        part = createWelder();
+        parts.set(partColor, part);
       }
       const array = position.getArray()!;
       const count = position.getCount();
       const local = new Uint32Array(count);
+      const partLocal = new Uint32Array(count);
       for (let vertex = 0; vertex < count; vertex += 1) {
         const x = array[vertex * 3]!;
         const y = array[vertex * 3 + 1]!;
@@ -87,31 +142,68 @@ export const readTriangleMesh = async (glb: Uint8Array<ArrayBuffer>): Promise<Tr
         const worldY = matrix[1] * x + matrix[5] * y + matrix[9] * z + matrix[13];
         const worldZ = matrix[2] * x + matrix[6] * y + matrix[10] * z + matrix[14];
         // Convert glTF Y-up metres to printer Z-up millimetres.
-        local[vertex] = weld(worldX * metresToMillimetres, -worldZ * metresToMillimetres, worldY * metresToMillimetres);
+        const point = [
+          worldX * metresToMillimetres,
+          -worldZ * metresToMillimetres,
+          worldY * metresToMillimetres,
+        ] as const;
+        const key = `${Math.round(point[0] * weldResolution)},${Math.round(point[1] * weldResolution)},${Math.round(point[2] * weldResolution)}`;
+        local[vertex] = weld(whole, key, point);
+        partLocal[vertex] = weld(part, key, point);
       }
       const indexArray = primitive.getIndices()?.getArray();
       const triangleCount = indexArray ? Math.floor(indexArray.length / 3) : Math.floor(count / 3);
       for (let triangle = 0; triangle < triangleCount; triangle += 1) {
         const corner = (offset: number): number =>
-          local[indexArray ? indexArray[triangle * 3 + offset]! : triangle * 3 + offset]!;
+          indexArray ? indexArray[triangle * 3 + offset]! : triangle * 3 + offset;
         const a = corner(0);
         const b = corner(1);
         const c = corner(2);
-        if (a !== b && b !== c && a !== c) {
-          indices.push(a, b, c);
+        // Corners welded together make a degenerate triangle, in the whole mesh and in its part alike.
+        if (local[a] !== local[b] && local[b] !== local[c] && local[a] !== local[c]) {
+          whole.indices.push(local[a]!, local[b]!, local[c]!);
+          part.indices.push(partLocal[a]!, partLocal[b]!, partLocal[c]!);
         }
       }
     }
   }
-  if (indices.length === 0) {
+  if (whole.indices.length === 0) {
     throw new Error('The GLB carries no triangle primitives.');
   }
   return {
-    positions: Float32Array.from(positions),
-    indices: Uint32Array.from(indices),
-    bounds: { min: [min[0]!, min[1]!, min[2]!], max: [max[0]!, max[1]!, max[2]!] },
-    color,
+    ...meshOf(whole, color),
+    parts: [...parts].filter(([, part]) => part.indices.length > 0).map(([key, part]) => meshOf(part, key)),
   };
+};
+
+/**
+ * Whether a mesh has no open edge: every welded edge borders an even number of triangles.
+ *
+ * A colour on some faces of a solid, rather than on a whole solid, makes a part that fails this.
+ *
+ * @internal
+ * @param mesh - A welded mesh.
+ * @returns `true` when no edge lies on an open boundary.
+ */
+export const isClosedMesh = (mesh: TriangleMesh): boolean => {
+  const vertexCount = mesh.positions.length / 3;
+  const open = new Set<number>();
+  for (let offset = 0; offset < mesh.indices.length; offset += 3) {
+    for (const [from, to] of [
+      [0, 1],
+      [1, 2],
+      [2, 0],
+    ] as const) {
+      const a = mesh.indices[offset + from]!;
+      const b = mesh.indices[offset + to]!;
+      const edge = Math.min(a, b) * vertexCount + Math.max(a, b);
+      // Each use toggles the edge, so an edge used an odd number of times stays open.
+      if (!open.delete(edge)) {
+        open.add(edge);
+      }
+    }
+  }
+  return open.size === 0;
 };
 
 /**

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_P6tmxH6WDcDrhVLcxeUIm",
+  "name": "BV-125 Bench Vice",
+  "description": "A fixed-base engineer's vice with 125 mm jaws and 100 mm travel: twin guide rods in bronze bushes, a 20 × 4 trapezoidal screw and bronze nut, a pinned hub with a captive sliding handle, and replaceable grooved jaws. 21 named parts, with a SysML v2 requirements model and a GeoSpec acceptance suite.",
+  "tags": ["mechanism", "assembly", "workshop", "sysml", "replicad"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

@@ -318,6 +318,19 @@ describe('ProviderRegistry', () => {
   describe('node backend', () => {
     const nodeScope: WorkspaceScope = { backend: 'node', path: '/tmp/tau-root' };
 
+    it('retries a refused services port on the next provider resolution', async () => {
+      const { port1, port2 } = new MessageChannel();
+      const createNodeFsPort = vi
+        .fn<() => Promise<MessagePort>>()
+        .mockRejectedValueOnce(new Error('services broker is quiescing'))
+        .mockResolvedValueOnce(port1);
+      const nodeRegistry = new ProviderRegistry({ databasePrefix: 'tau-', createNodeFsPort });
+      await expect(nodeRegistry.getProvider(nodeScope)).rejects.toThrow('services broker is quiescing');
+      await expect(nodeRegistry.getProvider(nodeScope)).resolves.toBeDefined();
+      expect(createNodeFsPort).toHaveBeenCalledTimes(2);
+      port2.close();
+    });
+
     it('re-requests a port after the host dies instead of serving a dead channel', async () => {
       const ports: MessagePort[] = [];
       const createNodeFsPort = vi.fn(async () => {

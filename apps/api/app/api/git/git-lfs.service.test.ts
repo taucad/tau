@@ -13,6 +13,7 @@ const access: GitAccess = {
   projectId: 'proj_1',
   ownerId: 'user_1',
   role: 'owner',
+  callerId: 'user_1',
   remainingBytes: 1024,
   storageLimitBytes: 1024,
 };

@@ -24,7 +24,7 @@ describe('the projection comparator (P52, W18 DEF-6)', () => {
     projectId: 'proj_1',
     checkoutId: 'checkout-1',
     checkoutRoot: '/projects/proj_1',
-    branch: 'main',
+    line: { kind: 'branch', name: 'main' },
     registrySettled: true,
     projectDirty: false,
     dirty: false,
@@ -82,7 +82,9 @@ describe('the projection comparator (P52, W18 DEF-6)', () => {
     conflicts: [
       {
         revisionId: 'rev-conflict',
-        branch: 'feature',
+        branch: 'conflicts/main/device-a',
+        into: 'main',
+        foreign: false,
         labels: { ours: 'main', theirs: 'feature' },
         paths: [{ path: 'main.ts', openable: true, side: 'mine' }],
         busy: false,
@@ -95,7 +97,8 @@ describe('the projection comparator (P52, W18 DEF-6)', () => {
     ['projectId', (status) => ({ ...status, projectId: 'proj_2' })],
     ['checkoutId', (status) => ({ ...status, checkoutId: 'checkout-2' })],
     ['checkoutRoot', (status) => ({ ...status, checkoutRoot: '/checkouts/checkout-2' })],
-    ['branch', (status) => ({ ...status, branch: 'feature' })],
+    ['line.name', (status) => ({ ...status, line: { kind: 'branch', name: 'feature' } })],
+    ['line.kind', (status) => ({ ...status, line: { kind: 'unborn', name: 'main' } })],
     ['projectDirty', (status) => ({ ...status, projectDirty: true })],
     ['dirty', (status) => ({ ...status, dirty: true })],
     ['minting', (status) => ({ ...status, minting: true })],
@@ -323,6 +326,42 @@ describe('versionedChangePaths', () => {
     expect(
       versionedChangePaths(
         { type: 'fileWritten', path: '/projects/beta/main.scad', backend: 'memory' },
+        '/projects/alpha',
+        tauPathPolicy,
+      ),
+    ).toEqual([]);
+  });
+
+  it('should name the root when the scope of a change is unknown, so the next capture reads everything (E1)', () => {
+    expect(versionedChangePaths({ type: 'backendChanged', backend: 'opfs' }, '/projects/alpha', tauPathPolicy)).toEqual(
+      [''],
+    );
+    /* A tree copied over the project names no path inside it. */
+    expect(
+      versionedChangePaths(
+        { type: 'directoryCopied', sourcePath: '/archive/alpha', targetPath: '/projects/alpha', backend: 'opfs' },
+        '/projects/alpha',
+        tauPathPolicy,
+      ),
+    ).toEqual(['']);
+    expect(
+      versionedChangePaths(
+        { type: 'directoryChanged', path: '/projects', backend: 'opfs' },
+        '/projects/alpha',
+        tauPathPolicy,
+      ),
+    ).toEqual(['']);
+    /* The project removed is not a change to record, and a sibling's route is not an ancestor. */
+    expect(
+      versionedChangePaths(
+        { type: 'directoryDeleted', path: '/projects/alpha', backend: 'opfs' },
+        '/projects/alpha',
+        tauPathPolicy,
+      ),
+    ).toEqual([]);
+    expect(
+      versionedChangePaths(
+        { type: 'directoryCreated', path: '/projects/alp', backend: 'opfs' },
         '/projects/alpha',
         tauPathPolicy,
       ),

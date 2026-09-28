@@ -54,6 +54,10 @@ describe('bambuX1cManifest', () => {
     ).toEqual(['calibration.run', 'storage.format']);
   });
 
+  it('should declare still capture and no live stream', () => {
+    expect(bambuX1cManifest.camera).toEqual({ stills: true });
+  });
+
   it('offers exactly the three slicing presets and the recommended PETG profile', () => {
     expect(bambuX1cManifest.slicing.presets).toHaveLength(3);
     expect(bambuX1cManifest.slicing.presets.map(({ id, layerHeight }) => [id, layerHeight.value])).toEqual([

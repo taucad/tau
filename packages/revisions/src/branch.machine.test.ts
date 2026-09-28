@@ -245,11 +245,18 @@ describe('branchMachine', () => {
       trigger: 'switch',
       checkoutId: 'checkout-live',
       leaseIds: [],
+      requestId: 'branch-1',
     });
     expect(types(parent.events)).not.toContain('addCheckout');
     expect(actor.getSnapshot().matches({ applying: { creating: 'recording' } })).toBe(true);
 
-    actor.send({ type: 'revisionMinted', checkoutId: 'checkout-live', trigger: 'switch', revisionId: 'rev-2' });
+    actor.send({
+      type: 'revisionMinted',
+      checkoutId: 'checkout-live',
+      trigger: 'switch',
+      requestId: 'branch-1',
+      revisionId: 'rev-2',
+    });
 
     expect(parent.events).toContainEqual({ type: 'addCheckout', branch: 'isolated-run', from: 'rev-2' });
     actor.send({ type: 'branchesChanged', branches: ['main', 'isolated-run'] });
@@ -264,7 +271,7 @@ describe('branchMachine', () => {
 
     actor.send({ type: 'create', name: 'isolated-run', checkoutId: 'checkout-live', head: 'rev-1' });
     await flush();
-    actor.send({ type: 'nothingToSave', checkoutId: 'checkout-live', trigger: 'switch' });
+    actor.send({ type: 'nothingToSave', checkoutId: 'checkout-live', trigger: 'switch', requestId: 'branch-1' });
 
     expect(parent.events).toContainEqual({ type: 'addCheckout', branch: 'isolated-run', from: 'rev-1' });
     actor.stop();
@@ -277,7 +284,7 @@ describe('branchMachine', () => {
 
     actor.send({ type: 'create', name: 'isolated-run', checkoutId: 'checkout-live' });
     await flush();
-    actor.send({ type: 'nothingToSave', checkoutId: 'checkout-live', trigger: 'switch' });
+    actor.send({ type: 'nothingToSave', checkoutId: 'checkout-live', trigger: 'switch', requestId: 'branch-1' });
 
     expect(types(parent.events)).not.toContain('addCheckout');
     expect(emitted).toEqual([
@@ -334,6 +341,7 @@ describe('branchMachine', () => {
       type: 'cutFailed',
       checkoutId: 'checkout-live',
       trigger: 'switch',
+      requestId: 'branch-1',
       reason: 'This project has no files open to record.',
       code: 'CHECKOUT_CONFLICT',
     });
@@ -366,9 +374,31 @@ describe('branchMachine', () => {
     expect(actor.getSnapshot().matches({ applying: { creating: 'recording' } })).toBe(true);
     expect(types(parent.events)).not.toContain('addCheckout');
 
-    actor.send({ type: 'revisionMinted', checkoutId: 'checkout-live', trigger: 'switch', revisionId: 'rev-2' });
+    actor.send({
+      type: 'revisionMinted',
+      checkoutId: 'checkout-live',
+      trigger: 'switch',
+      requestId: 'branch-1',
+      revisionId: 'rev-2',
+    });
 
     expect(parent.events).toContainEqual({ type: 'addCheckout', branch: 'isolated-run', from: 'rev-2' });
+    actor.stop();
+    parent.stop();
+  });
+
+  /* The trigger alone cannot tell this verb's cut from an earlier one's late
+   * answer: a *New branch* that timed out leaves its `switch` cut running. */
+  it('settles only on the answer to its own cut, by the id the checkout echoes (N2)', async () => {
+    const { actor, promises, parent } = start();
+    promises.script('checkBranch', cleanCheck);
+
+    actor.send({ type: 'create', name: 'isolated-run', checkoutId: 'checkout-live' });
+    await flush();
+    actor.send({ type: 'revisionMinted', checkoutId: 'checkout-live', trigger: 'switch', revisionId: 'rev-late' });
+
+    expect(actor.getSnapshot().matches({ applying: { creating: 'recording' } })).toBe(true);
+    expect(types(parent.events)).not.toContain('addCheckout');
     actor.stop();
     parent.stop();
   });
@@ -400,7 +430,7 @@ describe('branchMachine', () => {
 
     actor.send({ type: 'create', name: 'isolated-run', checkoutId: 'checkout-live' });
     await flush();
-    actor.send({ type: 'casLost', checkoutId: 'checkout-live', trigger: 'switch' });
+    actor.send({ type: 'casLost', checkoutId: 'checkout-live', trigger: 'switch', requestId: 'branch-1' });
 
     expect(emitted).toEqual([
       {

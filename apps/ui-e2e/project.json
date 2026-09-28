@@ -8,36 +8,56 @@
   "targets": {
     "test": {
       "executor": "nx:run-commands",
-      "dependsOn": [
-        { "projects": ["ui"], "target": "build" },
-        { "projects": ["ui"], "target": "build:serve" }
-      ],
+      "dependsOn": [{ "projects": ["ui"], "target": "build:serve" }],
       "options": {
         "cwd": "{workspaceRoot}",
         "parallel": false,
         "commands": [
+          "pnpm exec nx run ui:build",
           "vitest run apps/ui-e2e/src/global-setup-preflight.spec.ts apps/ui-e2e/src/support/agent-host-gateway-script.test.ts apps/ui-e2e/src/support/chat-admission-log.test.ts apps/ui-e2e/src/support/headless-capture-performance.test.ts apps/ui-e2e/src/support/ui-build-snapshot.test.ts apps/ui-e2e/src/support/usage-receipt.test.ts apps/ui-e2e/src/support/webgpu-profile.test.ts apps/ui-e2e/src/support/serve-ui-build.test.ts --environment=node",
           "vitest run --config apps/ui-e2e/vitest.config.ts --project chromium src/project-card-preview-parity.spec.ts src/user-project-thumbnail-generation.spec.ts"
         ],
         "env": {
-          "TAU_E2E_UI_SNAPSHOT": "true"
+          "TAU_E2E_UI_SNAPSHOT": "true",
+          "TAU_CLOUD_ENABLED": "false",
+          "TAU_API_URL": "http://localhost:4000",
+          "TAU_WEBSOCKET_URL": "ws://localhost:4001",
+          "TAU_FRONTEND_URL": "http://localhost:3000"
         }
       }
     },
     "test:e2e": {
       "executor": "nx:run-commands",
-      "dependsOn": [{ "projects": ["ui"], "target": "build" }],
+      "metadata": {
+        "description": "Every ui:build consumer here builds it as its first command, under the env fixture below, instead of through dependsOn: a dependency task inherits only the caller's environment, so it could not carry the fixture. The fixture is the non-secret local URLs ci.yml sets workflow-wide plus the self-host TAU_CLOUD_ENABLED, so a clean checkout builds with no untracked apps/ui/.env; the tier's own server sets its runtime origins. ui:build declares each of these as an env input, so the self-host and the cloud (desktop-e2e, test:e2e:live) variants never share a cache entry, and building immediately before the specs means the variant in apps/ui/build is always this target's own (desktop-e2e:test:e2e, which writes the cloud variant there, runs with parallelism false)."
+      },
       "options": {
         "cwd": "{workspaceRoot}",
-        "command": "vitest run --config apps/ui-e2e/vitest.config.ts"
+        "parallel": false,
+        "commands": ["pnpm exec nx run ui:build", "vitest run --config apps/ui-e2e/vitest.config.ts"],
+        "env": {
+          "TAU_CLOUD_ENABLED": "false",
+          "TAU_API_URL": "http://localhost:4000",
+          "TAU_WEBSOCKET_URL": "ws://localhost:4001",
+          "TAU_FRONTEND_URL": "http://localhost:3000"
+        }
       }
     },
     "test:e2e:webgpu": {
       "executor": "nx:run-commands",
-      "dependsOn": [{ "projects": ["ui"], "target": "build" }],
       "options": {
         "cwd": "{workspaceRoot}",
-        "command": "vitest run --config apps/ui-e2e/vitest.config.ts --project chromium src/webgpu-qualification.spec.ts src/graphics-backend.spec.ts src/shader-fixture.spec.ts src/section-view-contour-fill.spec.ts src/section-view-control-restyle.spec.ts src/section-view-overlap-cap-shading.spec.ts src/section-view-overlap-performance-diagnostics.spec.ts src/user-project-thumbnail-generation.spec.ts src/headless-chat-image-capture.spec.ts src/headless-chat-image-capture.performance.spec.ts src/metal-morph-loader.spec.ts"
+        "parallel": false,
+        "env": {
+          "TAU_CLOUD_ENABLED": "false",
+          "TAU_API_URL": "http://localhost:4000",
+          "TAU_WEBSOCKET_URL": "ws://localhost:4001",
+          "TAU_FRONTEND_URL": "http://localhost:3000"
+        },
+        "commands": [
+          "pnpm exec nx run ui:build",
+          "vitest run --config apps/ui-e2e/vitest.config.ts --project chromium src/webgpu-qualification.spec.ts src/graphics-backend.spec.ts src/shader-fixture.spec.ts src/section-view-contour-fill.spec.ts src/section-view-control-restyle.spec.ts src/section-view-overlap-cap-shading.spec.ts src/section-view-overlap-performance-diagnostics.spec.ts src/user-project-thumbnail-generation.spec.ts src/headless-chat-image-capture.spec.ts src/headless-chat-image-capture.performance.spec.ts src/metal-morph-loader.spec.ts"
+        ]
       }
     },
     "test:e2e:development": {
@@ -73,29 +93,40 @@
     },
     "test:e2e:browser-host": {
       "executor": "nx:run-commands",
-      "dependsOn": [{ "projects": ["ui"], "target": "build" }],
       "options": {
         "cwd": "{workspaceRoot}/apps/ui-e2e",
         "commands": [
+          "pnpm --dir ../.. exec nx run ui:build",
           "../../node_modules/.bin/vitest run --config vitest.config.ts --project chromium src/browser-agent-host.spec.ts src/chat-isolated-workspace.spec.ts src/chat-todo-list.spec.ts",
           "../../node_modules/.bin/vitest run --config vitest.config.ts --project firefox src/browser-agent-host.spec.ts",
           "../../node_modules/.bin/vitest run --config vitest.config.ts --project webkit-smoke src/browser-agent-host.spec.ts"
         ],
         "parallel": false,
         "env": {
-          "TAU_E2E_UI_SNAPSHOT": "true"
+          "TAU_E2E_UI_SNAPSHOT": "true",
+          "TAU_CLOUD_ENABLED": "false",
+          "TAU_API_URL": "http://localhost:4000",
+          "TAU_WEBSOCKET_URL": "ws://localhost:4001",
+          "TAU_FRONTEND_URL": "http://localhost:3000"
         }
       }
     },
     "test:e2e:daemon-host": {
       "executor": "nx:run-commands",
-      "dependsOn": [
-        { "projects": ["ui"], "target": "build" },
-        { "projects": ["ui"], "target": "build:serve" }
-      ],
+      "dependsOn": [{ "projects": ["ui"], "target": "build:serve" }],
       "options": {
         "cwd": "{workspaceRoot}/apps/ui-e2e",
-        "command": "../../node_modules/.bin/vitest run --config vitest.config.ts --project chromium src/daemon-agent-host.spec.ts"
+        "parallel": false,
+        "commands": [
+          "pnpm --dir ../.. exec nx run ui:build",
+          "../../node_modules/.bin/vitest run --config vitest.config.ts --project chromium src/daemon-agent-host.spec.ts"
+        ],
+        "env": {
+          "TAU_CLOUD_ENABLED": "false",
+          "TAU_API_URL": "http://localhost:4000",
+          "TAU_WEBSOCKET_URL": "ws://localhost:4001",
+          "TAU_FRONTEND_URL": "http://localhost:3000"
+        }
       }
     },
     "test:e2e:live": {
@@ -108,11 +139,15 @@
         "cwd": "{workspaceRoot}/apps/ui-e2e",
         "parallel": false,
         "commands": [
-          "TAU_CLOUD_ENABLED=true pnpm --dir ../.. exec nx run ui:build",
+          "pnpm --dir ../.. exec nx run ui:build",
           "../../node_modules/.bin/vitest run --config vitest.config.ts --project chromium src/gemini-browser-agent-host.live.spec.ts src/provider-switch.live.spec.ts"
         ],
         "env": {
-          "TAU_E2E_LIVE_GEMINI": "true"
+          "TAU_E2E_LIVE_GEMINI": "true",
+          "TAU_CLOUD_ENABLED": "true",
+          "TAU_API_URL": "http://localhost:4000",
+          "TAU_WEBSOCKET_URL": "ws://localhost:4001",
+          "TAU_FRONTEND_URL": "http://localhost:3000"
         }
       }
     },

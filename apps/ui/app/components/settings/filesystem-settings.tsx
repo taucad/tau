@@ -32,6 +32,10 @@ import { toast } from '#components/ui/sonner.js';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
+import { materializeOnSignIn, useMaterializeOnSignInLocation } from '#hooks/use-cloud-projects.js';
+import { useCommercialFeatures } from '#cloud/commercial-features.js';
+import type { ProjectCreationLocation } from '#types/project-creation-location.types.js';
+import { homeProjectCreationLocation } from '#types/project-creation-location.types.js';
 
 type WorkspaceRow = {
   workspace: Workspace;
@@ -46,6 +50,9 @@ export function FileSystemSettings(): React.JSX.Element {
   const telemetry = useWorkspaceTelemetry();
   const projectManager = useProjectManager();
   const { workspaceConnection } = projectManager;
+  /* A plan without backup has no Tau Cloud projects to bring: the setting is absent,
+   * as the no-train toggle is on a plan it does not apply to. */
+  const { isResolved, canSyncFiles } = useCommercialFeatures();
   const { workspace } = useFileManager();
 
   const reloadRows = useCallback(async (): Promise<void> => {
@@ -358,6 +365,12 @@ export function FileSystemSettings(): React.JSX.Element {
         </SettingsItem>
       ) : undefined}
 
+      {isResolved && canSyncFiles ? (
+        <SettingsItem settingId='tau-cloud-projects'>
+          <TauCloudProjectsSetting workspaces={rows.map((row) => row.workspace)} />
+        </SettingsItem>
+      ) : undefined}
+
       {storageUsage ? (
         <SettingsItem settingId='browser-storage'>
           <SettingsSectionCard>
@@ -400,6 +413,62 @@ export function FileSystemSettings(): React.JSX.Element {
         </SettingsItem>
       ) : undefined}
     </div>
+  );
+}
+
+/**
+ * Materialize on sign-in (charter D20): which workspace, if any, receives this
+ * account's Tau Cloud projects when it signs in. Off by default; one workspace
+ * at most, because a project is one directory per device.
+ *
+ * @param props - This device's connected workspaces; Home is always offered.
+ * @returns The setting.
+ */
+function TauCloudProjectsSetting({ workspaces }: { readonly workspaces: readonly Workspace[] }): React.JSX.Element {
+  const selected = useMaterializeOnSignInLocation();
+  const options: ReadonlyArray<{ key: string; label: string; location: ProjectCreationLocation | undefined }> = [
+    { key: 'off', label: 'Off', location: undefined },
+    { key: 'home', label: 'Home', location: homeProjectCreationLocation },
+    ...workspaces.map((entry) => ({
+      key: entry.workspaceId,
+      label: entry.name,
+      location: { kind: 'workspace', workspaceId: entry.workspaceId } as const,
+    })),
+  ];
+  const selectedKey = selected === undefined ? 'off' : selected.kind === 'home' ? 'home' : selected.workspaceId;
+  return (
+    <SettingsSectionCard aria-labelledby='tau-cloud-projects-title'>
+      <CardHeader>
+        <CardTitle id='tau-cloud-projects-title'>Tau Cloud Projects</CardTitle>
+      </CardHeader>
+      <CardContent className='flex flex-col gap-3'>
+        <p className='text-sm text-muted-foreground'>
+          When you sign in, add every project backed up on Tau Cloud to this workspace. Each one downloads the first
+          time you open it.
+        </p>
+        <fieldset className='grid gap-2 sm:grid-cols-3'>
+          <legend className='sr-only'>Workspace for Tau Cloud projects</legend>
+          {options.map((option) => (
+            <label
+              key={option.key}
+              className='flex cursor-action items-center gap-3 rounded-md border p-3 transition-colors hover:border-primary/50 hover:bg-accent/50 has-checked:border-primary has-[input:focus-visible]:focus-outline'
+            >
+              <input
+                className='accent-primary'
+                type='radio'
+                name='tau-cloud-projects-location'
+                value={option.key}
+                checked={selectedKey === option.key}
+                onChange={() => {
+                  materializeOnSignIn.set(option.location);
+                }}
+              />
+              <span className='truncate text-sm font-medium'>{option.label}</span>
+            </label>
+          ))}
+        </fieldset>
+      </CardContent>
+    </SettingsSectionCard>
   );
 }
 

@@ -111,6 +111,8 @@ export type MaterializedRender = {
 export type CommonDependencySet = {
   readonly fileDependencies: Dependency[];
   readonly trailingDependencies: Dependency[];
+  /** Every path discovery named, resolved or not: a change to any of them can change the set. */
+  readonly paths: ReadonlySet<string>;
 };
 
 /**

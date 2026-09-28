@@ -186,7 +186,11 @@ export class WorkspaceFileService {
     this._registry = options.providerRegistry;
     this._resourceQueue = options.resourceQueue;
     this._eventBus = options.eventBus;
-    this._watchRegistry = new WatchRegistry(options.eventBus, { coalescingWindow: kernelCoalescingWindow });
+    // Kernels deduplicate by content hash, so a lone edit is delivered at once and only the burst behind it waits.
+    this._watchRegistry = new WatchRegistry(options.eventBus, {
+      coalescingWindow: kernelCoalescingWindow,
+      leadingEdge: true,
+    });
     this._crossTabCoordinator = options.crossTabCoordinator ?? new CrossTabCoordinator();
     this._filePool = options.filePool;
     this._mountTable = options.mountTable;

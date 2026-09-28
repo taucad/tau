@@ -6,7 +6,9 @@ export {
 } from '#registry/machine-tool-registry.js';
 export {
   createMachinePrintPlanner,
+  defaultFilamentSlots,
   machineSliceOptions,
+  slicedFilamentColors,
   type MachinePrintPlannerDependencies,
 } from '#registry/machine-print-planner.js';
 export type { BambuStudioEngine } from '#registry/print-profiles.js';

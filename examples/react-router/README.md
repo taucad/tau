@@ -51,7 +51,7 @@ import type { runtime } from '../../tau/runtime-definition';
 ```typescript
 import { esbuildBundler } from '@taucad/esbuild';
 import { replicadKernel } from '@taucad/replicad';
-import { geometryCache, parameterCache } from '@taucad/middleware';
+import { geometryCache } from '@taucad/middleware';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { serveWebWorkerRuntime } from '@taucad/runtime/worker/web';
 ```

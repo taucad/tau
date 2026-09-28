@@ -19,7 +19,6 @@ describe('@taucad/middleware', () => {
     expect(capabilities.kernels.map(({ id }) => id)).toEqual([]);
     expect(capabilities.middleware.map(({ id }) => id)).toEqual([
       'parameterFileResolver',
-      'parameterCache',
       'parameterUnits',
       'geometryCache',
       'gltfEdgeDetection',
@@ -32,7 +31,7 @@ describe('@taucad/middleware', () => {
     const selected = middleware({ preset: 'cache' });
 
     expect(selected.preset).toBe('cache');
-    expect(selected.capabilities.middleware.map(({ id }) => id)).toEqual(['parameterCache', 'geometryCache']);
+    expect(selected.capabilities.middleware.map(({ id }) => id)).toEqual(['geometryCache']);
   });
 
   it('offers parameter inference as an isolated opt-in preset', () => {

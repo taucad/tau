@@ -11,10 +11,21 @@ const mockSubscribeTree = vi.fn<(callback: () => void) => () => void>((callback)
   return mockUnsubscribe;
 });
 
+let treeSnapshot = new Map<string, { path: string; type: 'file'; size: number; mtimeMs: number }>();
+let treeWrites = 0;
+
 const mockTreeService = {
+  getTreeSnapshot: () => treeSnapshot,
   listDirectory: mockListDirectory,
   subscribeTree: mockSubscribeTree,
 };
+
+/** Publish a tree in which `path` was just written, as the tree service does after a file change. */
+function writeTreeFile(path: string): void {
+  treeWrites += 1;
+  treeSnapshot = new Map(treeSnapshot).set(path, { path, type: 'file', size: treeWrites, mtimeMs: treeWrites });
+  treeCallback?.();
+}
 
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({
@@ -80,6 +91,7 @@ describe('usePromptSkillsCatalog', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     treeCallback = undefined;
+    treeSnapshot = new Map();
     mockListDirectory.mockResolvedValue([]);
     mockReadFile.mockRejectedValue(new Error('not found'));
     mockSubscribeTree.mockImplementation((callback) => {
@@ -105,7 +117,7 @@ describe('usePromptSkillsCatalog', () => {
     // ...and the tree watcher fires.
     expect(treeCallback).toBeDefined();
     act(() => {
-      treeCallback?.();
+      writeTreeFile('.agents/skills/alpha/SKILL.md');
     });
 
     await waitFor(() => {
@@ -138,7 +150,9 @@ describe('usePromptSkillsCatalog', () => {
     await waitFor(() => {
       expect(mockListDirectory).toHaveBeenCalledWith('.agents/skills');
     });
-    act(() => treeCallback?.());
+    act(() => {
+      writeTreeFile('.agents/skills/beta/SKILL.md');
+    });
     await waitFor(() => {
       expect(mockListDirectory.mock.calls.filter(([path]) => path === '.agents/skills')).toHaveLength(2);
     });
@@ -178,12 +192,27 @@ describe('usePromptSkillsCatalog', () => {
     });
 
     act(() => {
-      treeCallback?.();
+      writeTreeFile('.agents/skills/alpha/SKILL.md');
     });
 
     await waitFor(() => {
       expect(result.current.some((skill) => skill.name === 'beta')).toBe(true);
     });
+  });
+
+  it('should not rescan when a write lands outside .agents', async () => {
+    serveSingleSkill('alpha', 'Alpha');
+    const { result } = renderHook(() => useSkillsCatalog());
+    await waitFor(() => {
+      expect(result.current.some((skill) => skill.name === 'alpha')).toBe(true);
+    });
+    const listings = mockListDirectory.mock.calls.length;
+
+    act(() => {
+      writeTreeFile('.tau/parameters/main.ts.json');
+    });
+
+    expect(mockListDirectory).toHaveBeenCalledTimes(listings);
   });
 
   it('should subscribe once and unsubscribe from the file tree on unmount', () => {

@@ -1,7 +1,7 @@
 /* oxlint-disable typescript/no-unsafe-assignment -- dynamic plugin test definitions erase context and handle types. */
 /* eslint-disable @typescript-eslint/naming-convention -- fixture keys are virtual file paths and OpenSCAD group names. */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { readFile } from 'node:fs/promises';
 import { JSDOM } from 'jsdom';
 import JSZip from 'jszip';
@@ -770,6 +770,37 @@ color("red") {
     expect(plainExportJson.meshes?.[0]?.primitives.map((primitive) => primitive.mode ?? 4)).toEqual([4]);
     expect(edgedExportJson.meshes?.[0]?.primitives.map((primitive) => primitive.mode ?? 4)).toEqual([4, 1]);
     expect(repeatedEdgedExport.data[0]!.bytes).toEqual(edgedExport.data[0]!.bytes);
+  });
+
+  it('renders once per request once a host keeps asking for the same edge variant', async () => {
+    const definition = await resolveRuntimePluginDefinition('kernel', openrscadKernel());
+    const runtime = createRuntime({ 'project/model.scad': 'cube(2);' });
+    const context = await definition.initialize({}, runtime);
+    const renderToGlb = vi.fn(context.backend.renderToGlb);
+    context.backend = { ...context.backend, renderToGlb };
+    const render = async (includeEdges: boolean) => {
+      renderToGlb.mockClear();
+      const { geometry } = await renderModel({
+        definition,
+        runtime,
+        context,
+        entryPath: 'project/model.scad',
+        content: { includeEdges },
+      });
+      if (geometry.format !== 'gltf') {
+        throw new Error('Expected GLB render geometry');
+      }
+      const modes = readGlbJson(geometry.content).meshes?.[0]?.primitives.map((primitive) => primitive.mode ?? 4);
+      return { calls: renderToGlb.mock.calls.length, modes };
+    };
+
+    // The first edged request learns the variant; every later one renders once.
+    expect(await render(true)).toEqual({ calls: 2, modes: [4, 1] });
+    expect(await render(true)).toEqual({ calls: 1, modes: [4, 1] });
+    expect(await render(true)).toEqual({ calls: 1, modes: [4, 1] });
+    // Switching back is symmetric, and never serves the wrong variant.
+    expect(await render(false)).toEqual({ calls: 2, modes: [4] });
+    expect(await render(false)).toEqual({ calls: 1, modes: [4] });
   });
 
   it('exports native object-aware 3MF with one object and build item per spatial solid', async () => {

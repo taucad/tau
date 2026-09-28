@@ -34,6 +34,7 @@ import { ObjectStorageService } from '#storage/object-storage.service.js';
 import { StorageModule } from '#storage/storage.module.js';
 import { assertDestructiveTestBucketAllowed } from '#storage/destructive-test-bucket-guard.js';
 import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
+import { DurableEventsService } from '#api/durable-events/durable-events.service.js';
 import type { ProjectRole } from '#api/collaboration/project-access.service.js';
 import { commercialEntitlementsKey } from '#api/entitlements/commercial-entitlements.js';
 import { repositoryStoreKey } from '#api/git/git.constants.js';
@@ -43,9 +44,11 @@ import { GitLfsService } from '#api/git/git-lfs.service.js';
 import { tenantLfsObjectKey } from '#api/git/lfs-keys.js';
 import { GitProxyController } from '#api/git/git-proxy.controller.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
+import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
 import { RepositoryStoreError } from '#api/git/store/errors.js';
 import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
-import type { RepositoryStore } from '#api/git/store/port.js';
+import { livePackBound } from '#api/git/store/limits.js';
+import type { RepositoryStore, StoredObject } from '#api/git/store/port.js';
 import { ShutdownService } from '#lifecycle/shutdown.service.js';
 
 /**
@@ -97,6 +100,12 @@ const state = {
 
 /** What one request cost the plan lookups, so the read path's cost is a fact. */
 const queries = { entitlements: 0, usage: 0 };
+/** Every committed manifest announced on the project's `revision` stream (D13), in order. */
+const announced: Array<{
+  readonly generation: number;
+  readonly refs: readonly string[];
+  readonly heads: Readonly<Record<string, string>>;
+}> = [];
 
 const runGit = async (
   args: readonly string[],
@@ -163,10 +172,15 @@ class GitTestAuthGuard implements CanActivate {
 /**
  * Delegates every port member to `inner` and lets one test replace
  * `commitManifest`, which is how a rate-limited or lost conditional write is
- * reproduced against the real adapter rather than a fake one.
+ * reproduced against the real adapter rather than a fake one, or
+ * `listObjects`, which only a compacting commit's sweep calls.
  */
-const storeControl: { commitManifest: RepositoryStore['commitManifest'] | undefined } = {
+const storeControl: {
+  commitManifest: RepositoryStore['commitManifest'] | undefined;
+  listObjects: RepositoryStore['listObjects'] | undefined;
+} = {
   commitManifest: undefined,
+  listObjects: undefined,
 };
 
 const wrapStore = (inner: RepositoryStore): RepositoryStore => ({
@@ -177,7 +191,7 @@ const wrapStore = (inner: RepositoryStore): RepositoryStore => ({
   // oxlint-disable-next-line max-params -- the port's own signature
   putObject: async (locator, key, body, options) => inner.putObject(locator, key, body, options),
   getObject: async (locator, key, range) => inner.getObject(locator, key, range),
-  listObjects: (locator, prefix) => inner.listObjects(locator, prefix),
+  listObjects: (locator, prefix) => (storeControl.listObjects ?? inner.listObjects.bind(inner))(locator, prefix),
   deleteObjects: async (locator, keys) => inner.deleteObjects(locator, keys),
 });
 
@@ -288,6 +302,7 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
       providers: [
         GitRepositoryService,
         GitLfsService,
+        PublicationRateLimiterService,
         S3RepositoryStore,
         {
           provide: repositoryStoreKey,
@@ -297,9 +312,17 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
         { provide: DatabaseService, useValue: databaseStub },
         {
           provide: RedisService,
-          useValue: { client: { get: async () => undefined, set: async () => 'OK' } },
+          useValue: { client: { get: async () => undefined, set: async () => 'OK', eval: async () => 1 } },
         },
         { provide: ProjectAccessService, useValue: projectAccessStub },
+        {
+          provide: DurableEventsService,
+          useValue: {
+            appendRevision: async (entry: (typeof announced)[number]) => {
+              announced.push({ generation: entry.generation, refs: entry.refs, heads: entry.heads });
+            },
+          },
+        },
         {
           provide: ShutdownService,
           useValue: {
@@ -352,7 +375,7 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
     repositories = app.get(GitRepositoryService);
     vi.spyOn(repositories, 'readOwnerUsage').mockImplementation(async () => {
       queries.usage += 1;
-      return { storageBytes: state.storageBytes, lfsBytes: state.lfsBytes };
+      return { storageBytes: state.storageBytes, lfsBytes: state.lfsBytes, retainedBytes: 0 };
     });
     vi.spyOn(repositories, 'readLfsObjects').mockImplementation(async (_project, oids) =>
       oids.flatMap((oid) => {
@@ -420,6 +443,12 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
     expect(state.generation).toBe(1);
     expect(state.derivedGeneration).toBe(1);
     expect(state.storageBytes).toBeGreaterThan(0);
+    /* D13: the push is announced once, by generation, ref name and the head it
+       moved to (W13e) — the head is what lets the pusher skip its own echo. */
+    const pushedHead = await gitOk(['rev-parse', 'HEAD'], clone);
+    expect(announced).toEqual([
+      { generation: 1, refs: ['refs/heads/main'], heads: { 'refs/heads/main': pushedHead.stdout.trim() } },
+    ]);
 
     const second = path.join(workspace, 'second');
     await gitOk(['clone', remoteUrl, second], workspace);
@@ -485,11 +514,12 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
     const clone = path.join(workspace, 'clone');
     await writeFile(path.join(clone, 'part.ts'), 'export const width = 13;\n', 'utf8');
     await gitOk(['commit', '-am', 'mixed push probe'], clone);
-    await gitOk(['update-ref', 'refs/heads/sync/tau/main', 'HEAD'], clone);
+    /* A branch named bare `conflicts` stays refused (D14 keeps the name for conflict lines). */
+    await gitOk(['update-ref', 'refs/heads/conflicts', 'HEAD'], clone);
 
-    const pushed = await runGit(['push', 'origin', 'HEAD:refs/heads/atomic-probe', 'refs/heads/sync/tau/main'], clone);
+    const pushed = await runGit(['push', 'origin', 'HEAD:refs/heads/atomic-probe', 'refs/heads/conflicts'], clone);
     expect(pushed.code).not.toBe(0);
-    expect(pushed.stderr).toContain('refs/heads/sync/tau/main');
+    expect(pushed.stderr).toContain('refs/heads/conflicts');
 
     expect(await advertised()).not.toContain('atomic-probe');
   }, 120_000);
@@ -828,8 +858,11 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
 
     expect(response.status).toBe(413);
     const body = (await response.json()) as { files?: Array<{ oid: string }>; message?: string };
-    expect(body.files?.map((file) => file.oid)).toEqual(objects.map((object) => object.oid));
-    expect(body.message).toContain('quota');
+    /* D17: largest first, in the sentence addressed to the owner of a Pro plan. */
+    expect(body.files?.map((file) => file.oid)).toEqual(objects.toReversed().map((object) => object.oid));
+    expect(body.message).toBe(
+      'This push needs more room than your 10 GB storage plan has left, so it was not backed up.',
+    );
   });
 
   /**
@@ -891,6 +924,7 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
     await gitOk(['update-ref', 'refs/tau/chats/chat_cas', 'HEAD'], clone);
     await gitOk(['push', 'origin', 'refs/tau/chats/chat_cas'], clone);
 
+    const announcedBeforeRefusals = announced.length;
     const deletedTag = await runGit(['push', 'origin', ':refs/tags/v-cas'], clone);
     expect(deletedTag.code, `tag deletion was accepted: ${deletedTag.stderr}`).not.toBe(0);
 
@@ -901,6 +935,8 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
     await gitOk(['reset', '--hard', 'HEAD~1'], clone);
     const rewound = await runGit(['push', '--force', 'origin', 'HEAD:refs/heads/main'], clone);
     expect(rewound.code, `a force push was accepted: ${rewound.stderr}`).not.toBe(0);
+    /* D13: a refused push commits no manifest, so nothing is announced. */
+    expect(announced).toHaveLength(announcedBeforeRefusals);
 
     const references = await advertised();
     expect(references).toContain('refs/tags/v-cas');
@@ -933,4 +969,50 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
     expect(put.status).toBe(400);
     expect(((await put.json()) as { code?: string }).code).toBe('GIT_LFS_HANDLE_REFUSED');
   });
+
+  /**
+   * W13b: a compacting push's sweep lists `packs/` and `retired/`, which grow
+   * with every push inside the retention window, so it runs after the reply.
+   * Every push here is answered while the sweep's listing is parked, and the
+   * sweep then failing costs no push anything.
+   */
+  it('answers a compacting push without waiting on its sweep, and a failed sweep fails no push', async () => {
+    const clone = path.join(workspace, 'sweep');
+    await gitOk(['clone', remoteUrl, clone], workspace);
+    const parked = Promise.withResolvers<void>();
+    let listings = 0;
+    storeControl.listObjects = () => {
+      listings += 1;
+      return {
+        [Symbol.asyncIterator]: () => ({
+          next: async (): Promise<IteratorResult<StoredObject>> => {
+            await parked.promise;
+            throw new Error('storage refused the listing');
+          },
+        }),
+      };
+    };
+    try {
+      /* One push more than the pack bound compacts at least once, whatever the earlier rows left live. */
+      for (let revision = 0; revision <= livePackBound; revision += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- pushes are sequential by definition
+        await writeFile(path.join(clone, 'part.ts'), `export const width = ${String(100 + revision)};\n`, 'utf8');
+        // oxlint-disable-next-line no-await-in-loop -- same reason
+        await gitOk(['add', '.'], clone);
+        // oxlint-disable-next-line no-await-in-loop -- same reason
+        await gitOk(['commit', '-m', `sweep revision ${String(revision)}`], clone);
+        // oxlint-disable-next-line no-await-in-loop -- same reason
+        const pushed = await runGit(['push', 'origin', 'HEAD:refs/heads/main'], clone);
+        expect(pushed.code, pushed.stderr).toBe(0);
+      }
+      expect(listings, 'no push compacted, so no sweep ran').toBeGreaterThan(0);
+    } finally {
+      parked.resolve();
+      await repositories.settled();
+      storeControl.listObjects = undefined;
+    }
+
+    const head = await gitOk(['rev-parse', 'HEAD'], clone);
+    expect(await advertised()).toContain(head.stdout.trim());
+  }, 180_000);
 });

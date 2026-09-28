@@ -104,7 +104,7 @@ describe('AcceptInvitation', () => {
     /* N2: the listing this accept just joined is the listing the project route
        reads its role from. Dropping it made the opened project's Sync region
        ask again from scratch, which is a frame with no role at all. */
-    expect(queryClient.getQueryData(['cloud-projects'])).toStrictEqual([
+    expect(queryClient.getQueryData(['cloud-projects', 'user_1'])).toStrictEqual([
       { id: 'proj_shared00000000000000', name: 'Shared Housing', role: 'write' },
     ]);
     expect(globalThis.fetch).toHaveBeenCalledWith(

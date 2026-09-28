@@ -57,7 +57,7 @@ describe('kernelEngineRecord', () => {
 });
 
 describe('the identity the record reports', () => {
-  it('enables one unit-inference middleware after the parameter cache', async () => {
+  it('enables one unit-inference middleware after the parameter file resolver', async () => {
     process.env['TAU_BUILD123D_RESOURCE_ROOT'] = resolve(import.meta.dirname, '../../resources/python');
     process.env['TAU_PICOGK_RESOURCE_ROOT'] = resolve(import.meta.dirname, '../../resources/picogk');
     const resolved = await resolveRuntimeDefinition(createDesktopRuntime(), {
@@ -66,7 +66,6 @@ describe('the identity the record reports', () => {
     });
     expect(resolved.middleware.map(({ id }) => id)).toEqual([
       'parameterFileResolver',
-      'parameterCache',
       'parameterUnits',
       'geometryCache',
       'gltfEdgeDetection',

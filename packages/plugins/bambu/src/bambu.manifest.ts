@@ -56,7 +56,7 @@ export const bambuX1cManifest: MachineManifest = parseMachineManifest({
     ],
   },
   materialSystem: { units: 1, slotsPerUnit: 4, externalSpool: true, drying: true },
-  camera: { stills: true, stream: true },
+  camera: { stills: true },
   storage: { removable: true },
   network: { lanMode: true, cloud: false },
   speedProfiles: [

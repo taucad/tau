@@ -261,10 +261,17 @@ describe('Tau Hosted Remote, real process', () => {
         headers: { authorization: `Bearer ${owner.token}` },
       });
       expect(response.status).toBe(404);
-      /* Stock git reads a refusal only as `text/plain` (N6); the browser
-         envelope is asserted on the entitlement row below. */
+      /* Stock git reads a refusal only as `text/plain` (N6). The text is
+         `ProjectAccessService`'s single answer to a caller with no relation
+         (D27), and a browser reads the same refusal's code from the envelope. */
       expect(response.headers.get('content-type')).toMatch(/text\/plain/u);
-      expect(await response.text()).toContain('Repository not found');
+      expect(await response.text()).toContain('Project not found');
+
+      const inBrowser = await fetch(`${remoteUrlFor(projectId)}/info/refs?service=git-upload-pack`, {
+        headers: { authorization: `Bearer ${owner.token}`, origin: gitE2EFrontendUrl },
+      });
+      expect(inBrowser.status).toBe(404);
+      expect(await inBrowser.json()).toEqual(expect.objectContaining({ code: 'PROJECT_NOT_FOUND' }));
     });
 
     /* W18 DEF-2 / W18-b review R8: how a second device *names* a project it has
@@ -438,21 +445,21 @@ describe('Tau Hosted Remote, real process', () => {
       expect(allowed.code).toBe(0);
     }, 300_000);
 
-    it('should keep the dumb-HTTP layout current so stock git clones it without the smart service', async () => {
+    it('should refuse an info/refs request that names no service, since the dumb-HTTP layout is retired', async () => {
       const projectId = gitE2EProjectId();
       await registerProject(owner, projectId);
       const tree = await seedWorkingTree('dumb', { 'model.scad': 'cylinder(h=4, r=2);\n' });
       const pushed = await pushMain(tree, owner, projectId);
       expect(pushed.code, pushed.stderr).toBe(0);
 
-      /* The dumb protocol reads `info/refs` off disk, which only `post-receive`
-       * keeps current — the assertion is that the hook ran on this push. */
+      /* D12 retired the dumb layout: a request naming no service is a client
+       * asking for a protocol this remote no longer speaks, even when the
+       * repository exists and has refs to serve. */
       const dumb = await fetch(`${remoteUrlFor(projectId)}/info/refs`, {
-        headers: { authorization: `Bearer ${owner.token}` },
+        headers: { authorization: `Bearer ${owner.token}`, origin: gitE2EFrontendUrl },
       });
-      expect(dumb.status).toBe(200);
-      const head = await expectGit(['rev-parse', 'HEAD'], tree);
-      expect(await dumb.text()).toContain(`${head.stdout.trim()}\trefs/heads/main`);
+      expect(dumb.status).toBe(400);
+      expect(await dumb.json()).toEqual(expect.objectContaining({ code: 'GIT_SERVICE_UNKNOWN' }));
     }, 300_000);
   });
 

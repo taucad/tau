@@ -10,12 +10,13 @@ import {
   History,
   ImageDown,
   Info,
+  RefreshCw,
   Rotate3d,
-  RotateCcw,
   Save,
   Share2,
   SlidersHorizontal,
   Terminal,
+  Undo2,
 } from 'lucide-react';
 import { useCallback } from 'react';
 import { useSelector } from '@xstate/react';
@@ -28,16 +29,15 @@ import type { CommandPaletteItem } from '#components/layout/command-palette.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useFileTreeMap } from '#hooks/use-file-tree.js';
 import { useThumbnailGenerator } from '#hooks/use-thumbnail-generator.js';
-import { useRevisions } from '#hooks/use-revisions.js';
 import { useProjectRole, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { isSyncReadOnly } from '#hooks/use-cloud-projects.js';
 import { useSaveRevisionRequest } from '#routes/w.$workspace.$project/revision-save-shortcut.js';
-import { useRestoreToPoint } from '#hooks/use-restore-to-point.js';
+import { selectStripVerbs, useRevisionFacts } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { getFileTreeDownloadErrorMessage } from '#routes/w.$workspace.$project/file-tree-download-policy.js';
 import { useFeature } from '#flags/use-feature.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
-import { captureCadImages } from '#services/headless-capture.js';
+import { captureCadImages, omittedSectionCutsNotice } from '#services/headless-capture.js';
 import { useGraphicsCameraRigQuery } from '#hooks/use-graphics.js';
 import { getGraphicsCameraState } from '#services/graphics-camera-registry.js';
 
@@ -67,10 +67,6 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
   );
   const fileCount = fileTree.size;
 
-  // Chat-restore time-travel (R13) — keyboard-first discovery of the pane + redo.
-  const { returnToLatest } = useRestoreToPoint();
-  const { canReturnToLatest } = useRevisions();
-
   /* The Sync region is the surface; the palette is the keyboard path to it
    * (DESIGN: a feature that only exists behind a pointer gesture is
    * unfinished). Where Tau Cloud is comes from `useRevisionCommands`, the one
@@ -81,9 +77,25 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
      alone left an enabled *Sync now* for a read collaborator, whose push the
      API refuses — one shared predicate rather than two conditions. */
   const syncReadOnly = isSyncReadOnly(revisionStatus?.remote, projectRole);
-  const { syncNow } = useRevisionCommands();
+  const { syncNow, undo, undoOperation } = useRevisionCommands();
+  /* D2, M1: *Undo restore* where the strip offers it and nowhere else — the restore row this
+     device's restore machine minted, still the head — in the strip's own words. Never after a
+     reload or another device's restore, which the machine would answer UNDO_UNAVAILABLE. */
+  const { where, status } = useRevisionFacts();
+  /* D15: *Undo* on the same condition as the strip, which *Undo restore* takes over when both apply. */
+  const { secondary: undoVerbs } = selectStripVerbs({
+    status,
+    where,
+    undoable: status?.restore.undoable === true,
+    canUndo: status?.restore.canUndo === true,
+    canWrite: projectRole !== 'read' && projectRole !== 'revoked',
+  });
+  const canUndoRestore = undoVerbs.includes('Undo restore');
+  const canUndo = undoVerbs.includes('Undo');
   const saveRevision = useSaveRevisionRequest();
   const isRemoteConnected = revisionStatus?.remote.kind !== undefined && revisionStatus.remote.kind !== 'none';
+  /* HQ7: backup verbs wait until the projection has located the line; before it, they could only fail. */
+  const isLineKnown = revisionStatus !== undefined && revisionStatus.line.kind !== 'unknown';
   const handleOpenSync = useCallback(() => {
     openPanel('revisions');
   }, [openPanel]);
@@ -119,13 +131,16 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
     if (!mainCadRef) {
       throw new Error('No settled CAD unit is available');
     }
-    const files = await captureCadImages({
+    const { files, omittedSectionCutIds } = await captureCadImages({
       cadRef: mainCadRef,
       graphicsRef: mainGraphicsRef,
       cameraState: getGraphicsCameraState(mainGraphicsRef),
       imageService,
       recipe: { purpose: 'utility', mode: 'current' },
     });
+    if (omittedSectionCutIds.length > 0) {
+      toast.warning(omittedSectionCutsNotice);
+    }
     const file = files[0]!;
     return new Blob([file.bytes], { type: file.mimeType });
   }, [imageService, mainCadRef, mainGraphicsRef]);
@@ -196,9 +211,10 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
             {
               id: 'change-backup',
               label: 'Change backup',
-              group: 'Sync',
+              group: 'Revisions',
               icon: <Cloud />,
               action: handleOpenSync,
+              visible: isLineKnown,
             },
             /* R29 names two verbs, not one wearing the other's id: *Change* and
                *Disconnect* are different intents and both open the pane, which
@@ -206,16 +222,17 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
             {
               id: 'disconnect-remote',
               label: 'Disconnect backup',
-              group: 'Sync',
+              group: 'Revisions',
               icon: <CloudOff />,
               action: handleOpenSync,
+              visible: isLineKnown,
             },
           ]
         : [
             {
               id: 'connect-tau-cloud',
               label: 'Connect Tau Cloud',
-              group: 'Sync',
+              group: 'Revisions',
               icon: <Cloud />,
               action: handleOpenSync,
             },
@@ -223,8 +240,8 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
       {
         id: 'sync-now',
         label: 'Sync now',
-        group: 'Sync',
-        icon: <Cloud />,
+        group: 'Revisions',
+        icon: <RefreshCw />,
         action: syncNow,
         visible: isRemoteConnected,
         disabled: revisionStatus?.remote.phase !== 'connected' || syncReadOnly,
@@ -235,6 +252,22 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
         group: 'Revisions',
         icon: <Save />,
         action: saveRevision,
+      },
+      {
+        id: 'undo-restore',
+        label: 'Undo restore',
+        group: 'Revisions',
+        icon: <Undo2 />,
+        action: undo,
+        visible: canUndoRestore,
+      },
+      {
+        id: 'undo-operation',
+        label: 'Undo',
+        group: 'Revisions',
+        icon: <Undo2 />,
+        action: undoOperation,
+        visible: canUndo,
       },
       {
         id: 'share-project',
@@ -320,14 +353,6 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
         },
       },
       {
-        id: 'restore-latest-revision',
-        label: 'Restore to latest revision',
-        group: 'Revisions',
-        icon: <RotateCcw />,
-        action: returnToLatest,
-        disabled: !canReturnToLatest,
-      },
-      {
         id: 'export',
         label: 'Export',
         group: 'Export',
@@ -381,11 +406,16 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
       handleDownloadZip,
       fileCount,
       isRemoteConnected,
+      isLineKnown,
       handleOpenSync,
       syncReadOnly,
       revisionStatus?.remote.phase,
       saveRevision,
       syncNow,
+      undo,
+      canUndoRestore,
+      undoOperation,
+      canUndo,
     ],
   );
 

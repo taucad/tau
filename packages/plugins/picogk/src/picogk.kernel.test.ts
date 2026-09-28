@@ -82,6 +82,15 @@ const context = () => ({
   },
 });
 
+/**
+ * The worker methods a session fake was asked for, in order.
+ *
+ * @param request - The session's `request` spy.
+ * @returns Each call's `method`.
+ */
+const requestedMethods = (request: ReturnType<typeof vi.fn>): string[] =>
+  request.mock.calls.map(([call]) => (call as { readonly method: string }).method);
+
 const workerError = (type: 'syntax' | 'validation' | 'runtime' | 'kernel') =>
   new PicogkWorkerError([
     {
@@ -199,6 +208,26 @@ describe('PicoGK kernel', () => {
       success: false,
       issues: [{ message: 'plain failure', type: 'runtime', location: { fileName: 'main.cs' } }],
     });
+  });
+
+  it('scopes each mirror sync to the runtime operation and asks each worker question once', async () => {
+    const value = context();
+    value.session.request.mockImplementation(async ({ method }: { method: string }) =>
+      method === 'resolve'
+        ? { sources: ['main.cs'] }
+        : method === 'analyze'
+          ? { defaultParameters: {}, jsonSchema: { type: 'object' }, timings: compilationTimings }
+          : buildResult(),
+    );
+    const render = { ...runtime, operationId: 1 };
+
+    await definition.getDependencies({ entryPath: 'main.cs' }, render, value);
+    await definition.getParameters({ entryPath: 'main.cs' }, render, value);
+    await definition.createGeometry({ entryPath: 'main.cs', parameters: {}, options: {} }, render, value);
+
+    // The mirror reuses its own walk per operation id.
+    expect(value.mirror.sync.mock.calls.map((call): unknown => call[2])).toEqual([1, 1, 1]);
+    expect(requestedMethods(value.session.request)).toEqual(['resolve', 'analyze', 'build']);
   });
 
   it('returns parameters, canonical inline geometry, immutable handles, and GLB exports', async () => {

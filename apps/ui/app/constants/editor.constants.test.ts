@@ -40,6 +40,50 @@ describe('editor constants – panel consistency', () => {
 });
 
 describe('graphics view settings parsing', () => {
+  it('preserves anchored operation evidence and does not scale angles as lengths', () => {
+    const settings = parseGraphicsViewSettings({
+      ...defaultGraphicsSettings,
+      schemaVersion: 7,
+      pinnedMeasurements: [
+        {
+          id: 'angle-1',
+          frameId: 'feature:part',
+          frameBasis: [
+            [0, 1, 0],
+            [-1, 0, 0],
+            [0, 0, 1],
+          ],
+          startPoint: [0, 0, 0],
+          endPoint: [1000, 0, 0],
+          distance: Math.PI / 2,
+          operation: 'angle',
+          quality: 'mesh',
+          geometryKey: 'g',
+          anchors: [
+            {
+              point: [1000, 0, 0],
+              localPoint: [1, 0, 0],
+              geometryKey: 'g',
+              occurrenceId: 'part',
+              label: 'Edge',
+              quality: 'mesh',
+            },
+          ],
+        },
+      ],
+    });
+    expect(settings.pinnedMeasurements?.[0]).toMatchObject({
+      distance: Math.PI / 2,
+      frameId: 'feature:part',
+      frameBasis: [
+        [0, 1, 0],
+        [-1, 0, 0],
+        [0, 0, 1],
+      ],
+      endPoint: [1, 0, 0],
+      anchors: [{ point: [1, 0, 0], localPoint: [1, 0, 0] }],
+    });
+  });
   /* Schema v11 (E1): the render timeout is owned per file, so it no longer rides in a view record. */
   it('should keep the render timeout out of the per-view record', () => {
     expect(defaultRenderTimeout).toBe(180_000);

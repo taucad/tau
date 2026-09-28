@@ -57,10 +57,35 @@ const listedValues = (): string[] =>
     .map((item) => within(item).getAllByRole('button')[0]!.getAttribute('aria-label')!.replace('Pin ', ''));
 
 describe('MeasureOptions', () => {
-  it('should read Click two points at zero, with nothing to list or clear', () => {
+  it('offers a keyboard target chooser and commits an explicitly selected candidate once', async () => {
+    const actor = startMeasuring();
+    actor.send({
+      type: 'setMeasureCandidates',
+      candidates: [
+        { id: 'edge:a', label: 'Board edge' },
+        { id: 'circle:b', label: 'Pawn base' },
+      ],
+      activeId: 'edge:a',
+    });
+    const user = userEvent.setup();
+    renderRow(actor);
+    await user.click(screen.getByRole('button', { name: /^Targets:/ }));
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Measurement mode' }), 'point');
+    expect(actor.getSnapshot().context.measureMode).toBe('point');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Measurement mode' }), 'auto');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Choose target' }), 'circle:b');
+    await user.click(screen.getByRole('button', { name: 'Lock target' }));
+    await user.click(screen.getByRole('button', { name: 'Use target' }));
+    expect(actor.getSnapshot().context).toMatchObject({
+      measureChosenCandidateId: 'circle:b',
+      measureLockedTargetId: 'circle:b',
+      measureCommitRequest: 1,
+    });
+  });
+  it('should prompt for a feature or two points at zero, with nothing to list or clear', () => {
     renderRow(startMeasuring());
 
-    expect(screen.getByRole('status')).toHaveTextContent('Click two points');
+    expect(screen.getByRole('status')).toHaveTextContent('Choose a feature or two points');
     expect(screen.queryByRole('button', { name: /measurement/ })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Clear all' })).toBeDisabled();
   });
@@ -86,7 +111,7 @@ describe('MeasureOptions', () => {
     await user.click(screen.getByRole('button', { name: 'Clear all' }));
 
     expect(actor.getSnapshot().context.measurements).toEqual([]);
-    expect(screen.getByRole('status')).toHaveTextContent('Click two points');
+    expect(screen.getByRole('status')).toHaveTextContent('Choose a feature or two points');
     expect(screen.getByRole('button', { name: 'Done' })).toHaveFocus();
   });
 

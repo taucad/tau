@@ -47,7 +47,12 @@ import {
 import { Theme, useTheme } from '#hooks/use-theme.js';
 import { darkModeIntensityScale } from '#components/geometry/graphics/three/utils/lights.utils.js';
 import { useThreeGraphicsBackend } from '#components/geometry/graphics/three/three-graphics-backend-context.js';
-import { buildGltfComponentManifest } from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
+import {
+  buildGltfComponentManifest,
+  buildGltfMeasurementFeatures,
+  gltfPrimitiveOccurrenceKey,
+} from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
+import type { GltfMeasurementFeatures } from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
 import {
   createGltfComponentOwnership,
   getComponentAncestorIds,
@@ -805,6 +810,7 @@ export function annotateSceneComponents(
   options: {
     readonly unitId: string;
     readonly associations?: ReadonlyMap<Object3D, GltfLoaderAssociation>;
+    readonly measurementFeatures?: ReadonlyMap<string, GltfMeasurementFeatures>;
   },
 ): void {
   const childComponentIds = manifest.nodesById[manifest.rootId]?.childIds ?? [];
@@ -837,6 +843,22 @@ export function annotateSceneComponents(
   let fallbackIndex = 0;
   let primitiveFallbackIndex = 0;
 
+  const setMeasurementFeatures = (
+    object: Object3D,
+    componentId: string,
+    reference: GeometryComponentPrimitiveRef | undefined,
+  ): void => {
+    if (!options.measurementFeatures) {
+      return;
+    }
+    const features = reference && options.measurementFeatures.get(gltfPrimitiveOccurrenceKey(reference));
+    if (features?.componentId === componentId) {
+      object.userData['measurementFeatures'] = features;
+    } else {
+      delete object.userData['measurementFeatures'];
+    }
+  };
+
   const annotateObject = ({
     object,
     inheritedComponentId,
@@ -848,33 +870,34 @@ export function annotateSceneComponents(
     previousSiblingRenderableComponentId: string | undefined;
     inheritedNodeIndex: number | undefined;
   }): string | undefined => {
+    const association = options.associations?.get(object);
+    const nodeIndex = association?.nodes ?? inheritedNodeIndex;
+    const primitiveReference =
+      nodeIndex !== undefined && association?.meshes !== undefined && association.primitives !== undefined
+        ? { nodeIndex, meshIndex: association.meshes, primitiveIndex: association.primitives }
+        : undefined;
     const existingComponentId = getModelComponentId(object);
     if (typeof existingComponentId === 'string') {
       setModelComponentOwner(object, {
         unitId: options.unitId,
         componentId: existingComponentId,
       });
+      const previousFeatures = object.userData['measurementFeatures'] as GltfMeasurementFeatures | undefined;
+      setMeasurementFeatures(object, existingComponentId, primitiveReference ?? previousFeatures?.primitive);
       for (const child of object.children) {
         annotateObject({
           object: child,
           inheritedComponentId: existingComponentId,
           previousSiblingRenderableComponentId: undefined,
-          inheritedNodeIndex,
+          inheritedNodeIndex: nodeIndex,
         });
       }
       return existingComponentId;
     }
 
-    const association = options.associations?.get(object);
-    const nodeIndex = association?.nodes ?? inheritedNodeIndex;
-    const primitiveComponentId =
-      nodeIndex !== undefined && association?.meshes !== undefined && association.primitives !== undefined
-        ? getGltfPrimitiveComponentId(ownership, {
-            nodeIndex,
-            meshIndex: association.meshes,
-            primitiveIndex: association.primitives,
-          })
-        : undefined;
+    const primitiveComponentId = primitiveReference
+      ? getGltfPrimitiveComponentId(ownership, primitiveReference)
+      : undefined;
     const associatedComponentId = primitiveComponentId ?? ownership.componentIdByNodeIndex.get(nodeIndex ?? -1);
     let componentId = associatedComponentId ?? inheritedComponentId;
 
@@ -898,6 +921,7 @@ export function annotateSceneComponents(
 
       if (componentId) {
         setModelComponentOwner(object, { unitId: options.unitId, componentId });
+        setMeasurementFeatures(object, componentId, primitiveReference);
       }
     }
 
@@ -1344,10 +1368,11 @@ export function GltfMesh({
 
       const manifestStartedAt = performance.now();
       const manifest = buildGltfComponentManifest(gltfFile, { sourceFile, geometryHash });
+      const measurementFeatures = buildGltfMeasurementFeatures(gltfFile, manifest);
       timings.manifest = performance.now() - manifestStartedAt;
       const annotationStartedAt = performance.now();
       // Component ids are unchanged with the topology, so this only re-keys them to the new unit.
-      annotateSceneComponents(committed.scene, manifest, { unitId: requestedUnitId });
+      annotateSceneComponents(committed.scene, manifest, { unitId: requestedUnitId, measurementFeatures });
       timings.annotation = performance.now() - annotationStartedAt;
 
       const bundle: PreparedGltfPresentation = {
@@ -1404,11 +1429,13 @@ export function GltfMesh({
 
         const manifestStartedAt = performance.now();
         const manifest = buildGltfComponentManifest(gltfFile, { sourceFile, geometryHash });
+        const measurementFeatures = buildGltfMeasurementFeatures(gltfFile, manifest);
         timings.manifest = performance.now() - manifestStartedAt;
         const annotationStartedAt = performance.now();
         annotateSceneComponents(gltf.scene, manifest, {
           unitId: requestedUnitId,
           associations: gltf.parser.associations as ReadonlyMap<Object3D, GltfLoaderAssociation>,
+          measurementFeatures,
         });
         timings.annotation = performance.now() - annotationStartedAt;
         setGltfSectionSurfaceRegistrationState(gltf.scene, 'pending');

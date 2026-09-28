@@ -4,6 +4,7 @@ import type { CameraView } from '@taucad/camera';
 import { sectionSchema } from '@taucad/workbench';
 import { sectionAxisIndices, sectionPlaneAxes } from '#components/geometry/graphics/section-cuts.js';
 import type { SectionCutValues, SectionVector } from '#components/geometry/graphics/section-cuts.js';
+import type { MeasurementRecord } from '#constants/measurement.types.js';
 
 // ============================================================================
 // Panel Constants
@@ -51,14 +52,7 @@ export const mobilePanelIds = [
 /**
  * A measurement that the user has explicitly pinned for persistence.
  */
-export type PinnedMeasurement = {
-  id: string;
-  frameId: string;
-  startPoint: [number, number, number];
-  endPoint: [number, number, number];
-  distance: number;
-  name?: string;
-};
+export type PinnedMeasurement = Omit<MeasurementRecord, 'isPinned'>;
 
 /** User preference for CAD viewer rendering API. */
 export type GraphicsBackendPreference = 'webgl' | 'webgpu';
@@ -180,10 +174,58 @@ const persistedCameraViewSchema = z.object({
 const pinnedMeasurementSchema = z.object({
   id: z.string(),
   frameId: z.string().optional(),
+  frameBasis: z.tuple([vector3Schema, vector3Schema, vector3Schema]).optional(),
   startPoint: vector3Schema,
   endPoint: vector3Schema,
   distance: z.number(),
   name: z.string().optional(),
+  operation: z
+    .enum([
+      'point-distance',
+      'minimum-distance',
+      'center-distance',
+      'plane-spacing',
+      'edge-length',
+      'radius',
+      'diameter',
+      'angle',
+      'extent-x',
+      'extent-y',
+      'extent-z',
+    ])
+    .optional(),
+  quality: z.enum(['mesh', 'fitted', 'cad', 'snapshot']).optional(),
+  geometryKey: z.string().optional(),
+  poseRevision: z.number().optional(),
+  status: z.enum(['current', 'pending', 'out-of-date', 'snapshot', 'unavailable']).optional(),
+  unavailableReason: z.string().optional(),
+  evidenceDetails: z.string().optional(),
+  anchors: z
+    .tuple([
+      z.object({
+        point: vector3Schema,
+        localPoint: vector3Schema.optional(),
+        geometryKey: z.string(),
+        occurrenceId: z.string().optional(),
+        featureId: z.string().optional(),
+        featureKind: z.enum(['point', 'edge', 'face', 'circle', 'body']).optional(),
+        label: z.string(),
+        quality: z.enum(['mesh', 'fitted', 'cad', 'snapshot']),
+      }),
+      z
+        .object({
+          point: vector3Schema,
+          localPoint: vector3Schema.optional(),
+          geometryKey: z.string(),
+          occurrenceId: z.string().optional(),
+          featureId: z.string().optional(),
+          featureKind: z.enum(['point', 'edge', 'face', 'circle', 'body']).optional(),
+          label: z.string(),
+          quality: z.enum(['mesh', 'fitted', 'cad', 'snapshot']),
+        })
+        .optional(),
+    ])
+    .optional(),
 });
 
 const componentDisplayUnitSchema = z.object({
@@ -414,7 +456,19 @@ export function parseGraphicsViewSettings(raw: unknown): GraphicsViewSettings {
     frameId: measurement.frameId ?? 'tau:root',
     startPoint: measurement.startPoint.map((coordinate) => coordinate * lengthScale) as [number, number, number],
     endPoint: measurement.endPoint.map((coordinate) => coordinate * lengthScale) as [number, number, number],
-    distance: measurement.distance * lengthScale,
+    distance: measurement.distance * (measurement.operation === 'angle' ? 1 : lengthScale),
+    ...(measurement.anchors
+      ? {
+          anchors: measurement.anchors.map((anchor) =>
+            anchor
+              ? {
+                  ...anchor,
+                  point: anchor.point.map((coordinate) => coordinate * lengthScale) as [number, number, number],
+                }
+              : undefined,
+          ) as PinnedMeasurement['anchors'],
+        }
+      : {}),
   }));
   const sectionView = parseSectionView(parsed.sectionView);
 

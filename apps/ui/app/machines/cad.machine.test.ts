@@ -341,6 +341,18 @@ describe('cadMachine', () => {
   // State: idle
   // =========================================================================
   describe('idle', () => {
+    it.each(['jscad', 'replicad'])('should leave route-specific topology defaults to %s', async (kernelId) => {
+      const { actor, mockClient } = await startAndConnect();
+      actor.send({ type: 'activeKernelChanged', kernelId });
+
+      actor.send({ type: 'setEntryPath', entryPath: stubEntryPath });
+      expect(mockClient.render).toHaveBeenCalledWith({
+        source: { path: stubEntryPath },
+        content: { includeEdges: true },
+      });
+      actor.stop();
+    });
+
     it('should forward setEntryPath to runtime client as render', async () => {
       const { actor, mockClient } = await startAndConnect();
 

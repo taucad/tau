@@ -32,6 +32,7 @@ import { recordRendererSpan } from '#lib/renderer-telemetry.js';
 import { deriveModelInteractionUnitId, modelInteractionMachine } from '#machines/model-interaction.machine.js';
 import type { ModelInteractionSource, ViewerHoverSuppressionReason } from '#machines/model-interaction.machine.js';
 import { kinematicsMachine } from '#machines/kinematics.machine.js';
+import type { MeasurementAnchor, MeasurementRecord, MeasurementOperation } from '#constants/measurement.types.js';
 
 export type ModelInteractionRef = ActorRefFrom<typeof modelInteractionMachine>;
 export type KinematicsRef = ActorRefFrom<typeof kinematicsMachine>;
@@ -189,16 +190,22 @@ export type GraphicsContext = {
 
   // Measure state
   isMeasureActive: boolean;
-  measurements: Array<{
-    id: string;
-    frameId: string;
-    startPoint: [number, number, number];
-    endPoint: [number, number, number];
-    distance: number;
-    name?: string;
-    isPinned?: boolean;
-  }>;
+  measurements: MeasurementRecord[];
   currentMeasurementStart: [number, number, number] | undefined;
+  currentMeasurementAnchor?: MeasurementAnchor;
+  measureMode: 'auto' | 'point';
+  measureFrame: 'tau:root' | 'selected-local';
+  measureSnapEnabled: boolean;
+  measureOperation: MeasurementOperation;
+  measureFilter: 'auto' | 'point' | 'edge' | 'face' | 'circle' | 'body';
+  measureLockedTargetId?: string;
+  measureCandidates: Array<{ id: string; label: string }>;
+  measureActiveCandidateId?: string;
+  measureChosenCandidateId?: string;
+  measureCommitRequest: number;
+  measureCatalogRequest: number;
+  measureMessage?: string;
+  measurePreviewDistance?: number;
   measureSnapDistance: number; // Pixels
   hoveredMeasurementId?: string;
 
@@ -261,8 +268,36 @@ export type GraphicsEvent =
     }
   // Measure events
   | { type: 'setMeasureActive'; payload: boolean }
-  | { type: 'startMeasurement'; payload: [number, number, number] }
-  | { type: 'completeMeasurement'; payload: [number, number, number] }
+  | { type: 'startMeasurement'; payload: [number, number, number]; anchor?: MeasurementAnchor }
+  | {
+      type: 'completeMeasurement';
+      payload: [number, number, number];
+      anchor?: MeasurementAnchor;
+      operation?: MeasurementOperation;
+      distance?: number;
+      quality?: MeasurementRecord['quality'];
+    }
+  | { type: 'startFeatureMeasurement'; anchor: MeasurementAnchor }
+  | { type: 'completeFeatureMeasurement'; record: Omit<MeasurementRecord, 'id' | 'isPinned'> }
+  | { type: 'setMeasureMode'; mode: 'auto' | 'point' }
+  | { type: 'setMeasureFrame'; frame: GraphicsContext['measureFrame'] }
+  | { type: 'setMeasureSnapEnabled'; enabled: boolean }
+  | { type: 'setMeasureOperation'; operation: MeasurementOperation }
+  | { type: 'setMeasureFilter'; filter: GraphicsContext['measureFilter'] }
+  | { type: 'setMeasureCandidates'; candidates: GraphicsContext['measureCandidates']; activeId?: string }
+  | { type: 'chooseMeasureCandidate'; id: string }
+  | { type: 'clearMeasureChosenCandidate' }
+  | { type: 'requestMeasureCandidateCommit' }
+  | { type: 'requestMeasureCatalog' }
+  | { type: 'setMeasureMessage'; message?: string }
+  | { type: 'setMeasurePreviewDistance'; distance?: number }
+  | { type: 'setMeasureLockedTarget'; id?: string }
+  | { type: 'measurementSourceChanged'; geometryKey: string }
+  | { type: 'measurementPoseChanged'; revision: number }
+  | { type: 'measurementCutChanged' }
+  | { type: 'addMeasurementRecord'; record: MeasurementRecord }
+  | { type: 'resolveMeasurementRecord'; id: string; patch: Partial<MeasurementRecord> }
+  | { type: 'cancelPendingMeasurements'; reason: string }
   | { type: 'cancelCurrentMeasurement' }
   | { type: 'clearMeasurement'; payload: string } // Measurement id
   | { type: 'clearAllMeasurements' }
@@ -423,7 +458,7 @@ export type GraphicsEmitted =
  * owned key reaches the actor without a second mapping.
  */
 export type GraphicsInput = Partial<GraphicsOwnedSettings> & {
-  measureSnapDistance?: number; // Default 20px
+  measureSnapDistance?: number; // Default 10px for a fine pointer
   modelInteractionRef?: ModelInteractionRef;
 };
 
@@ -743,9 +778,25 @@ export const graphicsMachine = setup({
       measurements: (input.pinnedMeasurements ?? []).map((m) => ({
         ...m,
         isPinned: true,
+        status: m.anchors?.length ? 'out-of-date' : 'snapshot',
+        quality: m.quality ?? 'snapshot',
       })),
       currentMeasurementStart: undefined,
-      measureSnapDistance: input.measureSnapDistance ?? 40,
+      currentMeasurementAnchor: undefined,
+      measureMode: 'auto',
+      measureFrame: 'tau:root',
+      measureSnapEnabled: true,
+      measureOperation: 'point-distance',
+      measureFilter: 'auto',
+      measureLockedTargetId: undefined,
+      measureCandidates: [],
+      measureActiveCandidateId: undefined,
+      measureChosenCandidateId: undefined,
+      measureCommitRequest: 0,
+      measureCatalogRequest: 0,
+      measureMessage: undefined,
+      measurePreviewDistance: undefined,
+      measureSnapDistance: input.measureSnapDistance ?? 10,
       hoveredMeasurementId: undefined,
 
       // State flags
@@ -1226,6 +1277,125 @@ export const graphicsMachine = setup({
         clearUnpinnedMeasurements: {
           context: ({ context }) => ({ measurements: context.measurements.filter((m) => m.isPinned) }),
         },
+        addMeasurementRecord: {
+          context: ({ context, event }) => ({ measurements: [...context.measurements, event.record] }),
+        },
+        resolveMeasurementRecord: {
+          context: ({ context, event }) => ({
+            measurements: context.measurements.map((measurement) =>
+              measurement.id === event.id && measurement.status === 'pending'
+                ? { ...measurement, ...event.patch }
+                : measurement,
+            ),
+          }),
+        },
+        cancelPendingMeasurements: {
+          context: ({ context, event }) => ({
+            measurements: context.measurements.map((measurement) =>
+              measurement.status === 'pending'
+                ? { ...measurement, status: 'unavailable', unavailableReason: event.reason }
+                : measurement,
+            ),
+          }),
+        },
+        setMeasureMode: {
+          context: ({ event }) => ({
+            measureMode: event.mode,
+            measureLockedTargetId: undefined,
+            measureChosenCandidateId: undefined,
+          }),
+        },
+        setMeasureFrame: { context: ({ event }) => ({ measureFrame: event.frame }) },
+        setMeasureSnapEnabled: {
+          context: ({ event }) => ({
+            measureSnapEnabled: event.enabled,
+            measureLockedTargetId: undefined,
+            measureChosenCandidateId: undefined,
+          }),
+        },
+        setMeasureOperation: { context: ({ event }) => ({ measureOperation: event.operation }) },
+        setMeasureFilter: {
+          context: ({ event }) => ({
+            measureFilter: event.filter,
+            measureLockedTargetId: undefined,
+            measureChosenCandidateId: undefined,
+          }),
+        },
+        setMeasureCandidates: {
+          context: ({ context, event }) => ({
+            measureCandidates: event.candidates,
+            measureChosenCandidateId: event.candidates.some(
+              (candidate) => candidate.id === context.measureChosenCandidateId,
+            )
+              ? context.measureChosenCandidateId
+              : undefined,
+            measureLockedTargetId: event.candidates.some((candidate) => candidate.id === context.measureLockedTargetId)
+              ? context.measureLockedTargetId
+              : undefined,
+            measureActiveCandidateId: event.candidates.some(
+              (candidate) => candidate.id === context.measureChosenCandidateId,
+            )
+              ? context.measureChosenCandidateId
+              : event.activeId,
+          }),
+        },
+        chooseMeasureCandidate: {
+          context: ({ context, event }) =>
+            context.measureCandidates.some((candidate) => candidate.id === event.id)
+              ? { measureActiveCandidateId: event.id, measureChosenCandidateId: event.id }
+              : {},
+        },
+        clearMeasureChosenCandidate: {
+          context: () => ({ measureChosenCandidateId: undefined }),
+        },
+        requestMeasureCandidateCommit: {
+          context: ({ context }) => ({ measureCommitRequest: context.measureCommitRequest + 1 }),
+        },
+        requestMeasureCatalog: {
+          context: ({ context }) => ({ measureCatalogRequest: context.measureCatalogRequest + 1 }),
+        },
+        setMeasureMessage: { context: ({ event }) => ({ measureMessage: event.message }) },
+        setMeasurePreviewDistance: { context: ({ event }) => ({ measurePreviewDistance: event.distance }) },
+        setMeasureLockedTarget: { context: ({ event }) => ({ measureLockedTargetId: event.id }) },
+        measurementSourceChanged: {
+          context: ({ context, event }) => ({
+            currentMeasurementStart:
+              context.currentMeasurementAnchor?.geometryKey === event.geometryKey
+                ? context.currentMeasurementStart
+                : undefined,
+            currentMeasurementAnchor:
+              context.currentMeasurementAnchor?.geometryKey === event.geometryKey
+                ? context.currentMeasurementAnchor
+                : undefined,
+            measurements: context.measurements.map((measurement) =>
+              measurement.geometryKey && measurement.geometryKey !== event.geometryKey
+                ? { ...measurement, status: 'out-of-date' }
+                : measurement,
+            ),
+          }),
+        },
+        measurementPoseChanged: {
+          context: ({ context, event }) => ({
+            currentMeasurementStart: undefined,
+            currentMeasurementAnchor: undefined,
+            measurements: context.measurements.map((measurement) =>
+              measurement.poseRevision !== undefined && measurement.poseRevision !== event.revision
+                ? { ...measurement, status: 'out-of-date' }
+                : measurement,
+            ),
+          }),
+        },
+        measurementCutChanged: {
+          context: ({ context }) => ({
+            currentMeasurementStart: undefined,
+            currentMeasurementAnchor: undefined,
+            measurements: context.measurements.map((measurement) =>
+              measurement.anchors?.length && measurement.status !== 'snapshot'
+                ? { ...measurement, status: 'out-of-date' }
+                : measurement,
+            ),
+          }),
+        },
       },
       states: {
         section: {
@@ -1305,32 +1475,68 @@ export const graphicsMachine = setup({
                         context: {
                           isMeasureActive: false,
                           currentMeasurementStart: undefined,
+                          currentMeasurementAnchor: undefined,
+                          measureCandidates: [],
+                          measureActiveCandidateId: undefined,
+                          measureChosenCandidateId: undefined,
+                          measureLockedTargetId: undefined,
                           ...endMeasureHoverSuppression(context),
                         },
                       },
                 clearAllMeasurements: {
                   target: '.selecting',
-                  context: { measurements: [], currentMeasurementStart: undefined },
+                  context: {
+                    measurements: [],
+                    currentMeasurementStart: undefined,
+                    currentMeasurementAnchor: undefined,
+                  },
                 },
               },
               states: {
                 selecting: {
                   on: {
+                    completeFeatureMeasurement: {
+                      context: ({ context, event }) => ({
+                        measurements: [
+                          ...context.measurements,
+                          { ...event.record, id: generatePrefixedId(idPrefix.measurement), isPinned: false },
+                        ],
+                      }),
+                    },
                     startMeasurement: {
                       target: 'selected',
-                      context: ({ event }) => ({ currentMeasurementStart: event.payload }),
+                      context: ({ event }) => ({
+                        currentMeasurementStart: event.payload,
+                        currentMeasurementAnchor: event.anchor,
+                      }),
                     },
                   },
                 },
 
                 selected: {
                   on: {
+                    completeFeatureMeasurement: {
+                      target: 'selecting',
+                      context: ({ context, event }) => ({
+                        measurements: [
+                          ...context.measurements,
+                          { ...event.record, id: generatePrefixedId(idPrefix.measurement), isPinned: false },
+                        ],
+                        currentMeasurementStart: undefined,
+                        currentMeasurementAnchor: undefined,
+                      }),
+                    },
                     completeMeasurement: ({ context, event }) => {
                       const start = context.currentMeasurementStart;
                       if (!start) {
-                        return { target: 'selecting', context: { currentMeasurementStart: undefined } };
+                        return {
+                          target: 'selecting',
+                          context: { currentMeasurementStart: undefined, currentMeasurementAnchor: undefined },
+                        };
                       }
                       const end = event.payload;
+                      const sourceGeometryKey =
+                        context.currentMeasurementAnchor?.geometryKey ?? event.anchor?.geometryKey;
                       return {
                         target: 'selecting',
                         context: {
@@ -1341,15 +1547,28 @@ export const graphicsMachine = setup({
                               frameId: 'tau:root',
                               startPoint: start,
                               endPoint: end,
-                              distance: Math.hypot(end[0] - start[0], end[1] - start[1], end[2] - start[2]),
+                              distance:
+                                event.distance ?? Math.hypot(end[0] - start[0], end[1] - start[1], end[2] - start[2]),
+                              operation: event.operation ?? 'point-distance',
+                              quality: event.quality ?? context.currentMeasurementAnchor?.quality ?? 'mesh',
+                              anchors: context.currentMeasurementAnchor
+                                ? [context.currentMeasurementAnchor, event.anchor]
+                                : undefined,
+                              geometryKey: sourceGeometryKey,
+                              poseRevision: context.kinematicsRef.getSnapshot().context.revision,
+                              status: 'current',
                               isPinned: false,
                             },
                           ],
                           currentMeasurementStart: undefined,
+                          currentMeasurementAnchor: undefined,
                         },
                       };
                     },
-                    cancelCurrentMeasurement: { target: 'selecting', context: { currentMeasurementStart: undefined } },
+                    cancelCurrentMeasurement: {
+                      target: 'selecting',
+                      context: { currentMeasurementStart: undefined, currentMeasurementAnchor: undefined },
+                    },
                   },
                 },
               },

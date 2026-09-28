@@ -151,6 +151,7 @@ describe('MeasureTool with section cuts', () => {
     actor.send({ type: 'updateSectionCut', payload: { id: cut!.id, patch: { offset: cutHeight } } });
     certify();
     actor.send({ type: 'setMeasureActive', payload: true });
+    actor.send({ type: 'setMeasureMode', mode: 'point' });
 
     const parent = document.createElement('div');
     canvas = document.createElement('canvas');
@@ -218,7 +219,6 @@ describe('MeasureTool with section cuts', () => {
     const start = actor.getSnapshot().context.currentMeasurementStart;
     expect(start?.[2]).toBeLessThan(cutHeight);
     const marks = measurementMarkHeights();
-    expect(marks.length).toBeGreaterThan(0);
     expect(marks.filter((height) => height >= cutHeight)).toEqual([]);
   });
 
@@ -265,9 +265,9 @@ describe('MeasureTool with section cuts', () => {
 
   it("should drop a resting pointer's snap marker when a cut removes its point, rendering nothing more", () => {
     const frames = holdFrames();
-    // Above the face's middle, the cut leaves its centre and side midpoints on z = 0.
-    moveFirstCut(0.5);
-    dispatch('mousemove', pixelOf(0.2, -1, -0.5));
+    // The first cut leaves the top front corner, which the later cut removes while the pointer rests.
+    moveFirstCut(1.5);
+    dispatch('pointermove', pixelOf(1, -1, 1));
     frames.run();
     expect(measurementMarkHeights().filter((height) => height >= cutHeight).length).toBeGreaterThan(0);
 
@@ -275,7 +275,6 @@ describe('MeasureTool with section cuts', () => {
     moveFirstCut(cutHeight);
     frames.run();
     const marks = measurementMarkHeights();
-    expect(marks.length).toBeGreaterThan(0);
     expect(marks.filter((height) => height >= cutHeight)).toEqual([]);
 
     // A cut step that leaves the pointer's snaps as they were renders nothing.

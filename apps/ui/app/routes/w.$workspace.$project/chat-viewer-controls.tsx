@@ -143,7 +143,11 @@ export function ChatViewerControls({ shouldEnableCapture = true }: ChatViewerCon
           <MeasureOptions />
         </ToolRow>
       ) : null}
-      <div role='group' aria-label='Viewer controls' className='flex h-7 items-center gap-1 self-center'>
+      <div
+        role='group'
+        aria-label='Viewer controls'
+        className='flex h-7 items-center gap-1 self-center text-muted-foreground [&_button]:font-normal [&_button:focus-visible]:text-foreground [&_button:hover]:text-foreground [&_button[aria-pressed=true]]:text-foreground [&_button[data-state=open]]:text-foreground'
+      >
         <GridSizeIndicator />
         <Hairline />
         {is2dGeometry ? null : (

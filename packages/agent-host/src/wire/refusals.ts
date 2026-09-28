@@ -78,6 +78,8 @@ export const refusals = {
   HOST_MODEL_UNAVAILABLE: { owner: 'host', retry: 'never' },
   /** The interrupt is not awaiting a resolution (was `INTERRUPT_NOT_FOUND` on the worker leg). */
   INTERRUPT_NOT_PENDING: { owner: 'host', retry: 'never' },
+  /** This interrupt already has a durable resolution; a second resolution cannot be appended. */
+  INTERRUPT_ALREADY_RESOLVED: { owner: 'host', retry: 'never' },
   /** The run is paused on an interrupt; resolve it first. */
   INTERRUPT_PENDING: { owner: 'host', retry: 'never' },
   /** The steer reached a run that ended before it could deliver it. */

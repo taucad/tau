@@ -519,6 +519,7 @@ Freeze(w) ==   \* hiding precedes a freeze: the tab's queued request is dropped 
     /\ UNCHANGED <<lock, lockEpoch, epochs, workerVars, fence, handle, log, lockNotFence, done, followerVars, crashes,
                    nqueues, reading, noticeDue, drives, runVars>>
 
+\* Thaw resumes a hidden tab but does not request the lock again for reconciliation alone.
 Thaw(w) ==
     /\ alive[w] /\ frozen[w]
     /\ frozen' = [frozen EXCEPT ![w] = FALSE]

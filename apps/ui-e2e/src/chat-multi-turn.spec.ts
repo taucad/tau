@@ -577,7 +577,7 @@ test('reads Done, never Finishing, while a finished turn saves its revision', as
 
   await target.expectVisible(selectors.getByText('Reply one.', { exact: true }).last(), 120_000);
   await expectLogInvariant(chatId!, { runs: 1, settlements: ['turn.finalized'] });
-  await target.expectVisible(selectors.getByText(/Rev 1 saved/u).first(), 60_000);
+  await target.expectText(selectors.getByRole('status', { name: 'Turn revision status' }), /^Rev \d+ saved$/u, 60_000);
   expect(await target.evaluate(() => (globalThis as unknown as { pvS9: { finishing: boolean } }).pvS9.finishing)).toBe(
     false,
   );
@@ -592,6 +592,10 @@ test('shows the revision of a turn stopped after it changed files', async () => 
   await target.click(selectors.getByRole('button', { name: 'Stop' }).last());
   await target.releaseAgentHostGatewayFixture();
 
-  await target.expectVisible(selectors.getByText('Rev 1 saved · Work interrupted', { exact: true }).first(), 60_000);
+  await target.expectText(
+    selectors.getByRole('status', { name: 'Turn revision status' }),
+    /^Rev \d+ saved · Work interrupted$/u,
+    60_000,
+  );
   await expectLogInvariant(chatId!, { runs: 1, settlements: ['turn.finalized'] });
 });

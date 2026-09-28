@@ -23,6 +23,41 @@ const answer = (status: 'applied' | 'replayed'): CommandAnswer => ({
 });
 
 describe('sendHostCommand', () => {
+  it('reopens after a rejected channel close and resends the identical gesture', async () => {
+    const hostCommand = vi
+      .fn()
+      .mockRejectedValueOnce(Object.assign(new Error('The channel closed.'), { code: 'PEER_UNRESPONSIVE' }))
+      .mockResolvedValueOnce(answer('replayed'));
+    const close = vi.fn(async () => undefined);
+    const connect = vi.fn(async () => ({ hostCommand, close }) as unknown as AgentHostClient);
+
+    await expect(sendHostCommand(connect, start, { retryDelay: async () => undefined })).resolves.toEqual(
+      answer('replayed'),
+    );
+    expect(hostCommand.mock.calls).toEqual([[start], [start]]);
+    expect(close).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not redial after the gesture is aborted', async () => {
+    const controller = new AbortController();
+    const hostCommand = vi.fn().mockResolvedValue({
+      commandId: start.commandId,
+      generation: 1,
+      status: 'refused',
+      effect: 'unknown',
+      code: 'PEER_UNRESPONSIVE',
+      message: 'The owner did not answer.',
+    });
+    const connect = vi.fn(async () => ({ hostCommand, close: async () => undefined }) as unknown as AgentHostClient);
+    const retryDelay = vi.fn(async () => {
+      controller.abort();
+    });
+
+    await expect(sendHostCommand(connect, start, { retryDelay, signal: controller.signal })).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+    expect(hostCommand).toHaveBeenCalledOnce();
+  });
   it('resends a start with its original command id after a coded unknown-effect close', async () => {
     const hostCommand = vi
       .fn()

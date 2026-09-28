@@ -18,7 +18,7 @@ export default defineConfig({
     fs: { allow: [fileURLToPath(new URL('../../../../..', import.meta.url))] },
   },
   // Discovered mid-run otherwise, which makes Vite reload the test.
-  optimizeDeps: { include: ['@statelyai/inspect'] },
+  optimizeDeps: { include: ['@statelyai/inspect', 'vitest-mock-extended'] },
   test: {
     include: ['app/components/printer/printer-viewer.browser.test.tsx'],
     fileParallelism: false,

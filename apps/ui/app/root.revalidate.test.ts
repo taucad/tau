@@ -2,15 +2,14 @@ import type { ShouldRevalidateFunctionArgs } from 'react-router';
 import { describe, expect, it } from 'vitest';
 import { shouldRevalidate } from '#root.js';
 
-const navigation = (from: string, to: string, formMethod?: 'POST'): ShouldRevalidateFunctionArgs =>
-  ({
-    currentUrl: new URL(from, 'https://tau.new'),
-    nextUrl: new URL(to, 'https://tau.new'),
-    currentParams: {},
-    nextParams: {},
-    formMethod,
-    defaultShouldRevalidate: true,
-  }) as ShouldRevalidateFunctionArgs;
+const navigation = (from: string, to: string, formMethod?: 'POST'): ShouldRevalidateFunctionArgs => ({
+  currentUrl: new URL(from, 'https://tau.new'),
+  nextUrl: new URL(to, 'https://tau.new'),
+  currentParams: {},
+  nextParams: {},
+  formMethod,
+  defaultShouldRevalidate: true,
+});
 
 describe('root shouldRevalidate', () => {
   it('should skip the root loader when only the query string changes', () => {

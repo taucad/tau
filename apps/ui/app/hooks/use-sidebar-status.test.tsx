@@ -428,12 +428,9 @@ const agentStateRows: ReadonlyArray<{
     sentence: undefined,
   },
   {
-    signal: 'turn.finalized, chat not focused',
+    signal: 'completed run, chat not focused',
     target: 'chat',
-    events: [
-      { type: 'runLifecycle', phase: 'completed' },
-      { type: 'turnFinalizedObserved', branch: 'main' },
-    ],
+    events: [{ type: 'runLifecycle', phase: 'completed' }],
     unread: true,
     state: 'done',
     label: 'Done',
@@ -441,12 +438,9 @@ const agentStateRows: ReadonlyArray<{
     sentence: 'Finished while you were away',
   },
   {
-    signal: 'turn.finalized, focused',
+    signal: 'completed run, focused',
     target: 'chat',
-    events: [
-      { type: 'runLifecycle', phase: 'completed' },
-      { type: 'turnFinalizedObserved', branch: 'main' },
-    ],
+    events: [{ type: 'runLifecycle', phase: 'completed' }],
     state: 'done',
     label: 'Done',
     mark: 'none',
@@ -707,10 +701,7 @@ describe('use-sidebar-status — pin (d): the project row rolls up its chats (A3
 
   it('ranks needs-you over failed over running over finished', () => {
     liveProject('bracket');
-    driveChat('bracket', 'done', [
-      { type: 'runLifecycle', phase: 'completed' },
-      { type: 'turnFinalizedObserved', branch: 'main' },
-    ]);
+    driveChat('bracket', 'done', [{ type: 'runLifecycle', phase: 'completed' }]);
     fakeRegistry.unread.add('done');
     expect(collapsed('bracket').mark).toBe('unread');
     driveChat('bracket', 'running', [{ type: 'runLifecycle', phase: 'running' }]);

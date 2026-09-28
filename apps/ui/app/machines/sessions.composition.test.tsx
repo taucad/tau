@@ -770,7 +770,7 @@ describe('sessions composition — sidebar rows across eight live projects (S48(
 });
 
 describe('sessions composition — a finished run reads Done at its terminal row (P71, PV-S9)', () => {
-  it('reads Done while the settlement is still on its way, and stays Done once it lands', async () => {
+  it('reads Done at the terminal row without a page finishing state', async () => {
     const view = await renderRoute('finishing-project');
     let chat: ReturnType<typeof openChatRoot> | undefined;
     await act(async () => {
@@ -793,20 +793,12 @@ describe('sessions composition — a finished run reads Done at its terminal row
     await act(async () => {
       chat?.send({ type: 'runLifecycle', phase: 'running', runId: 'run-finishing' });
       chat?.send({ type: 'runLifecycle', phase: 'completed', runId: 'run-finishing' });
-      /* This is the person's edit in the settlement window. */
+      /* A revision edit does not delay the run's terminal presentation. */
       chat?.send({ type: 'dirtyChanged', dirty: true });
       await Promise.resolve();
     });
 
-    /* The machine still waits on the settlement (PV-S13 deletes the wait); the row never says so (PV-A7). */
-    expect(chat?.getSnapshot().matches({ run: 'finishing' })).toBe(true);
-    expect(row.getByText('done')).toBeInTheDocument();
-
-    await act(async () => {
-      chat?.send({ type: 'turnFinalizedObserved', runId: 'run-finishing', branch: 'main' });
-      await Promise.resolve();
-    });
-
+    expect(chat?.getSnapshot().matches({ run: 'done' })).toBe(true);
     expect(row.getByText('done')).toBeInTheDocument();
     row.unmount();
     view.unmount();

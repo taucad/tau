@@ -9,13 +9,7 @@ import * as machineModule from './chat-session.machine.js';
 import { guardActors } from '@taucad/xstate-testing/inspect';
 import { unansweredEvents } from '@taucad/xstate-testing/paths';
 import { chatSessionIgnoredEvents, chatSessionMachine } from './chat-session.machine.js';
-import type {
-  ChatRequest,
-  ChatSessionMachineEvent,
-  ChatTurn,
-  ChatTurnGesture,
-  ChatTurnSettlementInput,
-} from './chat-session.machine.js';
+import type { ChatRequest, ChatSessionMachineEvent, ChatTurn, ChatTurnGesture } from './chat-session.machine.js';
 
 const isMachine = (value: unknown): boolean =>
   typeof value === 'object' && value !== null && 'getInitialSnapshot' in value && 'transition' in value;
@@ -116,35 +110,6 @@ const agentStateRows: ReadonlyArray<{
     run: 'done',
   },
   {
-    signal: 'turn.finalized after run.lifecycle: completed does not change the run row',
-    events: [
-      { type: 'runLifecycle', phase: 'completed', runId: 'run-1' },
-      { type: 'turnFinalizedObserved', runId: 'run-1', turnId: 'turn-1', branch: 'main' },
-    ],
-    run: 'done',
-  },
-  {
-    signal: 'turn.failed after run.lifecycle: completed does not change the run row',
-    events: [
-      { type: 'runLifecycle', phase: 'completed', runId: 'run-1' },
-      {
-        type: 'turnFailedObserved',
-        runId: 'run-1',
-        turnId: 'turn-1',
-        reason: 'revision cut failed',
-      },
-    ],
-    run: 'done',
-  },
-  {
-    signal: 'turn.conflicted after run.lifecycle: completed does not change the run row',
-    events: [
-      { type: 'runLifecycle', phase: 'completed', runId: 'run-1' },
-      { type: 'turnConflictedObserved', runId: 'run-1', turnId: 'turn-1' },
-    ],
-    run: 'done',
-  },
-  {
     signal: 'run.lifecycle: failed',
     events: [{ type: 'runLifecycle', phase: 'failed', reason: 'Gateway refused' }],
     run: 'failed',
@@ -209,9 +174,6 @@ describe('chatSessionMachine', () => {
         { type: 'runLifecycle', phase: 'completed', runId: 'run-1' },
         { type: 'runLifecycle', phase: 'failed' },
         { type: 'runLifecycle', phase: 'cancelled' },
-        { type: 'turnFinalizedObserved', runId: 'run-1', turnId: 'turn-1', branch: 'main' },
-        { type: 'turnFailedObserved', runId: 'run-1', turnId: 'turn-1', reason: 'revision cut failed' },
-        { type: 'turnConflictedObserved', runId: 'run-1', turnId: 'turn-1' },
         { type: 'requestLifecycle', phase: 'retrying' },
         { type: 'requestLifecycle', phase: 'stopping' },
         { type: 'toolParts', inFlight: 1, approvals: 0 },
@@ -367,15 +329,13 @@ describe('chatSessionMachine run ownership', () => {
     request: { kind: 'regenerate' },
   });
 
-  /** A scripted admission; the settlement actor remains provided by the store during cutover. */
+  /** A scripted admission; the host log, not this page, owns settlement. */
   const turnActors = (
     script: {
       readonly admit?: (input: { readonly chatId: string; readonly gesture: ChatTurnGesture }) => Promise<ChatTurn>;
-      readonly settle?: (input: ChatTurnSettlementInput) => Promise<void>;
     } = {},
   ) => {
     const admissions: Array<{ readonly chatId: string; readonly gesture: ChatTurnGesture }> = [];
-    const settlements: ChatTurnSettlementInput[] = [];
     /* No `signal.aborted` branch here: a fixture that models abandonment is a
      * fixture asserting itself (I8). The real `chatTurnAdmission` releases the
      * lease it took, and `chat-host-binding.test.ts` drives that path. */
@@ -386,11 +346,7 @@ describe('chatSessionMachine run ownership', () => {
         return { type: 'turnAdmitted', turn };
       },
     );
-    const settle = fromSafeAsync<void, ChatTurnSettlementInput>(async ({ input }) => {
-      settlements.push(input);
-      await (script.settle?.(input) ?? Promise.resolve());
-    });
-    return { admissions, settlements, actors: { admitTurn: admit, settleTurn: settle } };
+    return { admissions, actors: { admitTurn: admit } };
   };
 
   const startOwning = (actors: ReturnType<typeof turnActors>['actors']) => {
@@ -415,7 +371,6 @@ describe('chatSessionMachine run ownership', () => {
 
     expect(runState(actor)).toBe('done');
     expect(actor.getSnapshot().context.turn).toBeUndefined();
-    expect(script.settlements).toEqual([]);
     actor.stop();
   });
 
@@ -435,7 +390,6 @@ describe('chatSessionMachine run ownership', () => {
       expect(script.admissions).toHaveLength(2);
     });
     expect(script.admissions[1]?.gesture).toEqual({ kind: 'edit', messageId: 'user-1', text: 'Edited.' });
-    expect(script.settlements).toEqual([]);
 
     actor.stop();
   });
@@ -477,7 +431,6 @@ describe('chatSessionMachine run ownership', () => {
     });
     actor.send({ type: 'runLifecycle', phase: 'failed', runId: 'run-1', reason: 'Refused once.' });
 
-    expect(script.settlements).toEqual([]);
     expect(runState(actor)).toBe('failed');
     expect(actor.getSnapshot().context.failureReason).toBe('Refused once.');
 
@@ -515,7 +468,6 @@ describe('chatSessionMachine run ownership', () => {
     const actor = startOwning(script.actors);
 
     actor.send({ type: 'runLifecycle', phase: 'completed', runId: 'run-1' });
-    actor.send({ type: 'turnFinalizedObserved', runId: 'run-1', turnId: 'user-1' });
     expect(runState(actor)).toBe('done');
 
     actor.send({ type: 'adoptRun', runId: 'run-elsewhere' });
@@ -643,7 +595,6 @@ describe('chatSessionMachine run ownership', () => {
     const actor = startOwning(script.actors);
 
     actor.send({ type: 'runLifecycle', phase: 'completed', runId: 'run-1' });
-    actor.send({ type: 'turnFinalizedObserved', runId: 'run-1', turnId: 'user-1' });
     expect(runState(actor)).toBe('done');
 
     actor.send({ type: 'requestTurn', gesture: { kind: 'continue' } });
@@ -655,7 +606,6 @@ describe('chatSessionMachine run ownership', () => {
 
     actor.send({ type: 'runLifecycle', phase: 'completed', runId: 'run-1' });
     expect(runState(actor)).toBe('done');
-    expect(script.settlements).toEqual([]);
 
     actor.stop();
   });
@@ -677,7 +627,6 @@ describe('chatSessionMachine run ownership', () => {
     });
     expect(actor.getSnapshot().context.failureReason).toBe('Browser agent host is not configured for this chat.');
     expect(dispatched).toEqual([]);
-    expect(script.settlements).toEqual([]);
 
     actor.stop();
   });
@@ -716,7 +665,6 @@ describe('chatSessionMachine — the machine contract (PV-S5, MC-R17)', () => {
       turn: { runId: 'r', leaseTurnId: 't', request: { kind: 'continue' } },
     },
     { type: 'adoptRun', runId: 'r' },
-    { type: 'reconcileSettlement', runId: 'r', outcome: 'completed' },
     { type: 'interruptRecorded', state: 'requested' },
     { type: 'interruptRecorded', state: 'resolved' },
     { type: 'toolParts', inFlight: 1, approvals: 0 },
@@ -729,9 +677,6 @@ describe('chatSessionMachine — the machine contract (PV-S5, MC-R17)', () => {
     { type: 'durableRunState', state: 'active' },
     { type: 'close' },
     { type: 'turnFinalized', branch: 'main' },
-    { type: 'turnFinalizedObserved', runId: 'r' },
-    { type: 'turnFailedObserved', runId: 'r', reason: 'x' },
-    { type: 'turnConflictedObserved', runId: 'r' },
     { type: 'dirtyChanged', dirty: true },
     { type: 'syncState', state: 'pending' },
   ] satisfies ChatSessionMachineEvent[];
@@ -765,7 +710,6 @@ describe('chatSessionMachine — the machine contract (PV-S5, MC-R17)', () => {
     actor.send({ type: 'runLifecycle', phase: 'running', runId: 'run-1' });
     actor.send({ type: 'toolParts', inFlight: 1, approvals: 0 });
     actor.send({ type: 'runLifecycle', phase: 'completed', runId: 'run-1' });
-    actor.send({ type: 'turnFinalizedObserved', runId: 'run-1', turnId: 'turn-1' });
     expect(actor.getSnapshot().matches({ run: 'done' })).toBe(true);
     actor.stop();
   });

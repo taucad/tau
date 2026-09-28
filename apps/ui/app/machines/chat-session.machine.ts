@@ -31,10 +31,8 @@ import type { HostCommand } from '@taucad/agent-host/wire';
  * gesture can be admitted.
  *
  * Revision facets (`turnFinalized`, `dirtyChanged`, `syncState`) still arrive
- * through the project session, and the host-attested observations
- * (`turnFinalizedObserved`, `turnFailedObserved`, `turnConflictedObserved`)
- * remain accepted from the store during the command-lane cutover, but they do
- * not drive this page's run state.
+ * through the project session. The host log owns settlement; this machine
+ * only presents its projected run lifecycle.
  */
 
 /** How the chat's run reached the state it is in. @public */
@@ -112,9 +110,6 @@ export type ChatTurnGesture =
    */
   | Readonly<{ kind: 'continue' }>;
 
-/** How a turn ended, as the request lifecycle reported it. @public */
-export type ChatTurnOutcome = 'completed' | 'failed' | 'cancelled';
-
 /** The one turn a chat holds: its run, its lease and what it dispatches. @public */
 export type ChatTurn = Readonly<{
   /** The admission idempotency key, shared by the lease and the host request. */
@@ -123,14 +118,6 @@ export type ChatTurn = Readonly<{
   leaseTurnId: string | undefined;
   /** What the request lifecycle must dispatch for this turn. */
   request: ChatRequest;
-}>;
-
-/** Transitional input retained for the store's actor provision until its command-lane cutover. @public */
-export type ChatTurnSettlementInput = Readonly<{
-  chatId: string;
-  runId: string | undefined;
-  leaseTurnId: string | undefined;
-  outcome: ChatTurnOutcome;
 }>;
 
 /** Input accepted when creating a chatSessionMachine actor; the store creates it as a root (PV-S5, L3 D10). @public */
@@ -157,24 +144,11 @@ export type ChatSessionMachineContext = Readonly<{
   branch: string | undefined;
   /** The run whose lifecycle this actor currently presents. */
   activeRunId: string | undefined;
-  /** Transitional store debug field; settlement is not page state. */
-  pendingSettlement: ChatTurnSettlementObservation | undefined;
   /** The turn this chat holds. One slot, so a chat can only hold one (V1). */
   turn: ChatTurn | undefined;
   /** A gesture made while a turn was live; admitted when that run ends (V2). */
   pendingGesture: ChatTurnGesture | undefined;
 }>;
-
-/** One host-attested outcome, kept correlated through the UI state machine. @public */
-export type ChatTurnSettlementObservation =
-  | {
-      readonly type: 'turnFinalizedObserved';
-      readonly runId?: string;
-      readonly turnId?: string;
-      readonly branch?: string;
-    }
-  | { readonly type: 'turnFailedObserved'; readonly runId?: string; readonly turnId?: string; readonly reason: string }
-  | { readonly type: 'turnConflictedObserved'; readonly runId?: string; readonly turnId?: string };
 
 /** Events accepted by chatSessionMachine. @public */
 export type ChatSessionMachineEvent =
@@ -185,15 +159,12 @@ export type ChatSessionMachineEvent =
   | { readonly type: 'turnAdmitted'; readonly turn: ChatTurn }
   /** Reload discovery found a durable run for a chat this page never started (V5). */
   | { readonly type: 'adoptRun'; readonly runId: string }
-  /** Transitional store event; host reconciliation is not a page action. */
-  | { readonly type: 'reconcileSettlement'; readonly runId: string; readonly outcome: ChatTurnOutcome }
   | { readonly type: 'interruptRecorded'; readonly state: 'requested' | 'resolved'; readonly count?: number }
   | { readonly type: 'toolParts'; readonly inFlight: number; readonly approvals: number; readonly toolName?: string }
   | { readonly type: 'requestLifecycle'; readonly phase: ChatRequestLifecycle }
   | { readonly type: 'durableRunState'; readonly state: ChatDurableRunState }
   | { readonly type: 'close' }
   | { readonly type: 'turnFinalized'; readonly branch: string }
-  | ChatTurnSettlementObservation
   | { readonly type: 'dirtyChanged'; readonly dirty: boolean }
   | { readonly type: 'syncState'; readonly state: ChatSyncState };
 
@@ -218,9 +189,6 @@ const chatSessionActors = {
   >(async ({ input }) => {
     throw new Error(`This chat (${input.chatId}) has no turn host to admit a turn.`);
   }),
-  /* The store still provides this actor while its settlement relay is removed;
-   * no state invokes it. */
-  settleTurn: fromSafeAsync<void, ChatTurnSettlementInput>(async () => undefined),
 };
 
 type ChatSessionEnqueue = EnqueueObject<
@@ -248,7 +216,7 @@ const captureRunIdentity = (context: ChatSessionMachineContext, event: EventOf<'
   }
   return event.runId === context.activeRunId
     ? { activeRunId: event.runId }
-    : { activeRunId: event.runId, pendingSettlement: undefined, failureReason: undefined };
+    : { activeRunId: event.runId, failureReason: undefined };
 };
 
 /* V2: a gesture over a live turn never asks for a second lease. It is held
@@ -317,7 +285,6 @@ const runLifecycle = ({ context, event }: ChatSessionArgs<EventOf<'runLifecycle'
       ...identity,
       ...clearTurn,
       ...clearRunDetail,
-      pendingSettlement: undefined,
       ...(event.phase === 'failed' ? { failureReason: event.reason } : {}),
     },
   };
@@ -341,8 +308,6 @@ const pairs = (states: readonly string[], events: readonly string[]): Array<read
  *
  * - `turnAdmitted` outside `queued.admitting`: the answer of an admission a later gesture aborted.
  * - `requestLifecycle` outside `running`: the store reports every change; only a running turn reads it.
- * - Transitional host-attested outcomes and reconciliation events are ignored;
- *   the daemon owns settlement, and the run lifecycle supplies the page row.
  * - `adoptRun` in the states that hold a turn or a live run.
  *
  * @public
@@ -363,10 +328,6 @@ export const chatSessionIgnoredEvents: ReadonlyArray<readonly [state: string, ev
   ...pairs(
     [runStates.idle, runStates.queued, runStates.done, runStates.failed, runStates.stopped],
     ['requestLifecycle'],
-  ),
-  ...pairs(
-    [runStates.idle, runStates.queued, runStates.running, runStates.done, runStates.failed, runStates.stopped],
-    ['turnFinalizedObserved', 'turnFailedObserved', 'turnConflictedObserved', 'reconcileSettlement'],
   ),
   ...pairs([runStates.queued, runStates.running], ['adoptRun']),
 ];
@@ -399,7 +360,6 @@ export const chatSessionMachine = setup({
     failureReason: undefined,
     branch: undefined,
     activeRunId: undefined,
-    pendingSettlement: undefined,
     turn: undefined,
     pendingGesture: undefined,
   }),
@@ -584,10 +544,9 @@ export const chatSessionMachine = setup({
         /*
          * *Close* on a chat (A35, P63).
          *
-         * The cancel belongs to the run's owner — the store dispatches
-         * `stopRequest` to the persistence machine, whose settlement comes back
-         * here as `runLifecycle{phase:'cancelled'}`; the host settles the
-         * attempt and releases its lease. This machine only records that the person stopped, and it stays
+         * The cancel belongs to the host command lane; its durable lifecycle
+         * comes back here as `runLifecycle{phase:'cancelled'}`. This machine
+         * only records that the person stopped, and it stays
          * alive so the row reads `Stopped`: telling the project session to let
          * go would stop this actor and blank the row.
          */

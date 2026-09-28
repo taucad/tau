@@ -105,6 +105,16 @@ import type { SdkWatchInput } from '#chat-clients/_internal/sdk-watch.js';
 
 /** Run states a browser-placed run never leaves. */
 const terminalBrowserRunStates = new Set(['completed', 'failed', 'cancelled']);
+/** Framing can exist even when no assistant content reached the person. */
+const nonOutputChunkTypes: ReadonlySet<string> = new Set([
+  'start',
+  'start-step',
+  'finish-step',
+  'finish',
+  'abort',
+  'message-metadata',
+  'data-acp-session',
+]);
 
 const admissionEnvelopeSchema = z.strictObject({
   version: z.literal(1),
@@ -192,47 +202,6 @@ function editedMessage(original: MyUIMessage, request: Extract<ChatRequest, { ki
   return { ...built, id: request.messageId, metadata: { ...original.metadata, ...built.metadata } };
 }
 
-function buildDraftFromUserMessage(message: MyUIMessage): MyUIMessage {
-  return {
-    id: 'draft',
-    role: 'user',
-    parts: message.parts.filter((part) => part.type === 'text' || part.type === 'file'),
-    metadata: {
-      createdAt: Date.now(),
-      status: 'pending',
-    },
-  };
-}
-
-function buildPendingTailDraftRestore(messages: readonly MyUIMessage[]):
-  | {
-      userMessage: MyUIMessage;
-      truncatedMessages: MyUIMessage[];
-    }
-  | undefined {
-  const last = messages.at(-1);
-  if (last?.role === 'user' && last.metadata?.status === 'pending') {
-    return {
-      userMessage: last,
-      truncatedMessages: messages.slice(0, -1),
-    };
-  }
-
-  if (last?.role !== 'assistant' || last.parts.length > 0) {
-    return undefined;
-  }
-
-  const userMessage = messages.at(-2);
-  if (userMessage?.role !== 'user' || userMessage.metadata?.status !== 'pending') {
-    return undefined;
-  }
-
-  return {
-    userMessage,
-    truncatedMessages: messages.slice(0, -2),
-  };
-}
-
 // ---------------------------------------------------------------------------
 // ChatSessionStore
 // ---------------------------------------------------------------------------
@@ -269,6 +238,7 @@ type InternalSession = ChatSession & {
   materializeVersion: number;
   commandInFlight: boolean;
   stopRequested: boolean;
+  restoredStoppedRunId: string | undefined;
   status: ChatStatus;
   /** The project this chat belongs to, from its caller (PV-S4, L3 D9); never from focus. */
   readonly projectId: string;
@@ -1173,10 +1143,9 @@ export class ChatSessionStore {
   /**
    * Stop this chat's run, through the one dispatcher that owns it (P63).
    *
-   * *Stop* in the sidebar and *Stop* in the composer are the same verb, so
-   * they go to the same place: the persistence machine's `stopRequest`, which
-   * aborts the request, settles the run and releases its lease. The chat's own
-   * machine only records that the person stopped it.
+   * *Stop* in the sidebar and *Stop* in the composer use the same projected run
+   * identity and send a keyed host cancel. The host log confirms its outcome;
+   * stopping a local SDK watch alone never settles the run.
    *
    * @param chatId - The chat whose run should stop.
    * @public
@@ -1187,12 +1156,18 @@ export class ChatSessionStore {
       return;
     }
     session.stopRequested = true;
+    this.#chatTopics.get(chatId)?.emit();
     session.watch?.stop();
     session.watch = undefined;
     void session.chat.stop();
     if (!session.commandInFlight) {
       void this.#cancelSessionRun(session);
     }
+  }
+
+  /** A user Stop is awaiting its host-confirmed terminal row. @public */
+  public isStopping(chatId: string): boolean {
+    return this.#sessions.get(chatId)?.stopRequested ?? false;
   }
 
   /**
@@ -1575,8 +1550,9 @@ export class ChatSessionStore {
    *
    * @param session - The chat whose composer this is.
    * @param message - The user message coming back.
+   * @param onlyIfEmpty - Do not overwrite text the person entered while a Stop was settling.
    */
-  async #restoreDraftMessage(session: InternalSession, message: MyUIMessage): Promise<void> {
+  async #restoreDraftMessage(session: InternalSession, message: MyUIMessage, onlyIfEmpty = false): Promise<void> {
     const attachments = message.parts.flatMap((part) =>
       part.type === 'file' ? (attachmentReferenceOf(part) ?? []) : [],
     );
@@ -1597,9 +1573,33 @@ export class ChatSessionStore {
         console.warn('[ChatSessionStore] a returned message\u2019s attachments could not be re-retained', error);
       }
     }
+    if (onlyIfEmpty) {
+      const draft = session.draftActorRef.getSnapshot().context;
+      if (draft.draftText !== '' || draft.draftAttachments.length > 0) {
+        return;
+      }
+    }
     /* Wholesale: this replaces the displacing send's text and attachments
      * rather than clearing and then restoring over the top of it. */
     session.draftActorRef.send({ type: 'loadDraftFromMessageTransient', draft: message });
+    const draft = session.draftActorRef.getSnapshot().context;
+    session.composerRecordRef.send({
+      type: 'patch',
+      fields: { draft: buildDraftMessage(draft.draftText, draft.draftAttachments) },
+    });
+  }
+
+  /** Hold the composer through an asynchronously confirmed empty Stop. */
+  async #restoreStoppedDraft(session: InternalSession, message: MyUIMessage): Promise<void> {
+    const restore = this.#restoreDraftMessage(session, message, true);
+    session.composerWork.add(restore);
+    try {
+      await restore;
+    } catch (error) {
+      console.warn('[ChatSessionStore] stopped draft could not be restored', session.chatId, error);
+    } finally {
+      session.composerWork.delete(restore);
+    }
   }
 
   /**
@@ -1827,6 +1827,17 @@ export class ChatSessionStore {
     this.#syncTools(session, projection);
     const run = selectCaughtUp(projection) ? selectCurrentRun(projection) : undefined;
     const phase = selectRunPhase(projection);
+    if (run?.lifecycle === 'cancelled' && session.stopRequested && session.restoredStoppedRunId !== run.runId) {
+      session.restoredStoppedRunId = run.runId;
+      const view = projection.views[run.runId];
+      if (view?.user !== undefined && view.chunks.every((chunk) => nonOutputChunkTypes.has(chunk.type))) {
+        void this.#restoreStoppedDraft(session, view.user);
+      }
+    }
+    if (session.stopRequested && run !== undefined && !opensRun(run.lifecycle) && run.lifecycle !== 'paused') {
+      session.stopRequested = false;
+      this.#chatTopics.get(chatId)?.emit();
+    }
     if (
       run !== undefined &&
       opensRun(phase) &&
@@ -2259,28 +2270,7 @@ export class ChatSessionStore {
                 }
               }
 
-              /* Healing a pending tail into the composer is for a turn *this load*
-               * found abandoned in the row. A message the live `Chat` was already
-               * carrying belongs to a request in flight right now, and yanking it
-               * back into the draft cancels the turn the person just sent. */
-              const pendingTailRestore =
-                inFlight.length > 0 ? undefined : buildPendingTailDraftRestore(session.chat.messages);
               session.draftActorRef.send({ type: 'initializeFromChat' });
-              if (pendingTailRestore) {
-                session.chat.messages = pendingTailRestore.truncatedMessages;
-                await restoreDraft(pendingTailRestore.userMessage);
-                const restoredChat = await depsRef().commitCancelledDraftRestore(input.chatId, {
-                  messages: pendingTailRestore.truncatedMessages,
-                });
-                const healedChat = restoredChat ?? {
-                  ...loadedChat,
-                  messages: pendingTailRestore.truncatedMessages,
-                  startupRequest: undefined,
-                };
-
-                return { chat: healedChat };
-              }
-
               return { chat: loadedChat };
             },
           }),
@@ -2324,44 +2314,6 @@ export class ChatSessionStore {
       }),
       { ...this.#rootOptions, input: {} },
     );
-    /**
-     * Put a cancelled turn's message back in the composer, durably.
-     *
-     * The draft shows at once. Its attachments live in the chat's directory, so
-     * each is copied back beside the record (idempotent by hash) before the
-     * record is told to reference it; bytes that are already gone stay a
-     * placeholder (D19) rather than failing the restore.
-     */
-    const restoreDraft = async (userMessage: MyUIMessage): Promise<void> => {
-      const draft = buildDraftFromUserMessage(userMessage);
-      draftActorRef.send({ type: 'loadDraftFromMessageTransient', draft });
-      const work = persistRestoredDraft();
-      session.composerWork.add(work);
-      try {
-        await work;
-      } finally {
-        session.composerWork.delete(work);
-      }
-    };
-    const persistRestoredDraft = async (): Promise<void> => {
-      const binding = await composer;
-      const restored = draftActorRef.getSnapshot().context;
-      await Promise.all(
-        restored.draftAttachments.map(async (attachment) => {
-          try {
-            await binding.chatAttachments.copyTo(binding.record.attachments, attachment);
-          } catch (error) {
-            console.warn('[ChatSessionStore] a restored attachment is not on this device', error);
-          }
-        }),
-      );
-      const current = draftActorRef.getSnapshot().context;
-      composerRecordRef.send({
-        type: 'patch',
-        fields: { draft: buildDraftMessage(current.draftText, current.draftAttachments) },
-      });
-    };
-
     // Subscribed before the record actor starts, so its read cannot resolve unheard (D7).
     const recordLoadedSubscription = composerRecordRef.on('recordLoaded', ({ record }) => {
       draftActorRef.send({ type: 'hydrateDraft', ...draftHydrationOf(record) });
@@ -2441,6 +2393,7 @@ export class ChatSessionStore {
       materializeVersion: 0,
       commandInFlight: false,
       stopRequested: false,
+      restoredStoppedRunId: undefined,
       status: chat.status,
       placement: undefined,
       turnSubscriptions: [],

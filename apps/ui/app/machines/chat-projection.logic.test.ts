@@ -157,7 +157,8 @@ describe('chatProjectionLogic (PV-S7)', () => {
     expect(await materializeTranscript(projected)).toEqual(await deriveChatTranscript(rows));
     expect(await materializeTranscript(projected)).toEqual(await materializeTranscript(projected));
     const watched = projected.ledger.currentRunId!;
-    expect((await materializeTranscript(projected, watched)).some((message) => message.id === watched)).toBe(false);
+    const withoutWatchedRun = await materializeTranscript(projected, watched);
+    expect(withoutWatchedRun.some((message) => message.id === watched)).toBe(false);
   });
 
   it('refolds another device’s run when its segment digest changes', async () => {
@@ -184,6 +185,31 @@ describe('chatProjectionLogic (PV-S7)', () => {
     ]);
     expect(reduceChatProjection(second, { type: 'remote', segments: after }).state).toBe(second);
     expect(completed.remote).toBe(second.remote);
+  });
+
+  it('refolds same-length remote bytes when an earlier row changes but the tail key does not', async () => {
+    const remote = readLog('recorded/daemon-reattach-hexnut').slice(0, 3);
+    const segment = (rows: readonly AgentLogEvent[]) => [
+      { deviceId: 'other-device', bytes: new TextEncoder().encode(rows.map((row) => JSON.stringify(row)).join('\n')) },
+    ];
+    const before = segment(remote);
+    const after = [
+      {
+        deviceId: 'other-device',
+        bytes: new TextEncoder().encode(new TextDecoder().decode(before[0]!.bytes).replace('30mm', '40mm')),
+      },
+    ];
+    expect(after[0]?.bytes.byteLength).toBe(before[0]?.bytes.byteLength);
+    expect(new TextDecoder().decode(after[0]!.bytes).split('\n').at(-1)).toBe(
+      new TextDecoder().decode(before[0]!.bytes).split('\n').at(-1),
+    );
+    expect(digestLogSegments(after)).not.toBe(digestLogSegments(before));
+
+    const first = reduceChatProjection(initialChatProjection, { type: 'remote', segments: before }).state;
+    const second = reduceChatProjection(first, { type: 'remote', segments: after }).state;
+    expect(second.remote?.views).not.toEqual(first.remote?.views);
+    expect(await materializeTranscript(second)).not.toEqual(await materializeTranscript(first));
+    expect(JSON.stringify(await materializeTranscript(second))).toContain('40mm');
   });
 
   it('never revisits a row it already folded: O(1) work per row (L3 D19)', () => {

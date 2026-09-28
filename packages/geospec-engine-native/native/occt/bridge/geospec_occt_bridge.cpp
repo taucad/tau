@@ -6118,11 +6118,9 @@ static DE_ShapeFixParameters authored_fix_parameters() {
   return p;
 }
 
-// OCCT initializes its data-exchange globals (controllers, LibCtl libraries,
-// Interface_Static standards, XSAlgo and ShapeProcess operators) unsynchronized
-// on first use. One reader construction does it before admissions may overlap;
-// nothing writes Interface_Static afterwards, so the three statics without a
-// DESTEP_Parameters field stay process constants.
+// Initialize the data-exchange globals once while the admission lock is held.
+// OCCT also accesses mutable globals during transfer, so warm-up alone does
+// not make concurrent reads safe.
 static void step_reader_warmup() {
   static std::once_flag once;
   std::call_once(once, [] {
@@ -6172,6 +6170,10 @@ int geospec_occt_open_step(const uint8_t* bytes, size_t length,
   }
   *output = nullptr;
   return guarded(error, [&]() -> int {
+    // OCCT's STEP reader and transfer use process globals, including after
+    // first use. Keep the lock through reader destruction on every exit path.
+    static std::mutex admission_mutex;
+    const std::lock_guard<std::mutex> admission_lock(admission_mutex);
     // Validation can initialize the global pool even with parallelism off.
     // Default to one physical thread unless an explicit earlier grant won.
     int pool_width = 0;
@@ -6179,8 +6181,6 @@ int geospec_occt_open_step(const uint8_t* bytes, size_t length,
         geospec_occt_thread_pool_width(1, &pool_width, nullptr);
     if (pool_status != GEOSPEC_OCCT_OK && pool_status != GEOSPEC_OCCT_UNSUPPORTED)
       return pool_status;
-    // Each admission owns its reader, session, model and document, and reads
-    // its parameters from the model, so admissions need no process lock.
     step_reader_warmup();
     STEPCAFControl_Reader reader;
     reader.SetNameMode(true);

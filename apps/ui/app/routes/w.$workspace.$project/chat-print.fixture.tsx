@@ -13,6 +13,7 @@ import { Topic } from '@taucad/events';
 import type { JSONSchema7 } from '@taucad/json-schema';
 import type { CapabilitiesManifest, KernelIssue } from '@taucad/runtime';
 import { defineConfiguration } from '@taucad/runtime/configuration';
+import { quantity } from '@taucad/runtime/configuration/zod';
 import { parseMachineManifest } from '@taucad/runtime/machine';
 import type {
   MachineClient,
@@ -24,6 +25,7 @@ import type {
   PrintRequest,
 } from '@taucad/runtime/machine';
 import type { BambuPresetSummary, BambuStudioSelection, BambuStudioSettings } from '@taucad/slicer/bambu-studio';
+import { quantityKinds } from '@taucad/units/quantity';
 import type { Quantity } from '@taucad/units/quantity';
 import type { RJSFSchema } from '@rjsf/utils';
 import type { ParameterManifest } from '@taucad/parameters';
@@ -149,8 +151,8 @@ export const fileManagerMock = {
 };
 
 /**
- * The converter the pane reads. Bambu Studio's settings compile for real, since the shared
- * Parameters form renders them; every other schema gets an empty manifest for `ParametersFake`.
+ * The converter the pane reads. Bambu Studio and machine submission settings compile for real so the
+ * shared Parameters form exercises their schema; slicer options use `ParametersFake`.
  *
  * @param actual - The real module.
  * @returns The mocked module.
@@ -158,7 +160,7 @@ export const fileManagerMock = {
 export const converterMock = (actual: typeof ChatConverter): typeof ChatConverter => ({
   ...actual,
   async compileExportConfigurationManifest(provider, configuration, resolved) {
-    if (provider === 'bambu-studio') {
+    if (provider === 'bambu-studio' || configuration === 'print/submission') {
       return actual.compileExportConfigurationManifest(provider, configuration, resolved);
     }
     const empty: unknown = {};
@@ -364,7 +366,12 @@ const submissionConfiguration = defineConfiguration({
     flowCalibration: z.boolean().default(true),
     expectedBedType: z.string().min(1),
     expectedMaterials: z.array(z.object({ slot: z.number().int(), materialId: z.string() })).default([]),
-    expectedNozzleDiameter: z.object({ value: z.number(), unit: z.string() }).optional(),
+    expectedFilamentDiameter: quantity({
+      unit: 'mm',
+      quantityKind: quantityKinds.diameter,
+      space: 'linear',
+    }).positive(),
+    expectedNozzleDiameter: quantity({ unit: 'mm', quantityKind: quantityKinds.diameter, space: 'linear' }).positive(),
     expectedModel: z.literal('X1C'),
     timelapse: z.boolean().default(false),
   }),
@@ -493,7 +500,7 @@ export const agentRequest = (overrides: Partial<PrintRequest> = {}): PrintReques
   configuration: {
     expectedBedType: 'textured-pei',
     expectedMaterials: [{ slot: 0, materialId: 'pla-black' }],
-    expectedNozzleDiameter: { value: 0.4, unit: 'mm' },
+    expectedNozzleDiameter: 0.4,
   },
   requestedBy: { kind: 'agent', id: 'agent-1', label: 'Tau agent' },
   summary: { fileName: 'pyramid.gcode.3mf', layers: 125, estimatedDuration: 2520, filamentLength: 3200 },

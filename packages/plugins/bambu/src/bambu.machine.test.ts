@@ -16,6 +16,19 @@ vi.mock('#bambu.host.js', () => {
 const { bambuMachine } = await import('#bambu.machine.js');
 
 describe('bambuMachine', () => {
+  it('declares diameters as positive millimetre quantities rather than editable metadata objects', async () => {
+    const definition = await resolveRuntimePluginDefinition('machine', bambuMachine());
+    const { properties } = definition.submissionConfiguration.manifest.legacyProjection.inputSchema;
+    for (const key of ['expectedFilamentDiameter', 'expectedNozzleDiameter']) {
+      expect(properties?.[key]).toMatchObject({
+        type: 'number',
+        exclusiveMinimum: 0,
+        'x-tau-unit': 'mm',
+        'x-tau-quantity-kind': 'http://qudt.org/vocab/quantitykind/Diameter',
+        'x-tau-space': 'linear',
+      });
+    }
+  });
   it('should keep host dependencies lazy until an explicit operation', async () => {
     expect(loaded.count).toBe(0);
     const registration = bambuMachine();

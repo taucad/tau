@@ -336,24 +336,14 @@ const sessionWithPersistedErrors = ((): ChatSessionStore['get'] =>
     },
   })) as unknown as ChatSessionStore['get'])();
 
-let publishedConnector: Parameters<ChatSessionStore['publishProjectHostConnector']>[1] | undefined;
-let storedExecution: CadAgentExecution | undefined;
 const installSessionStore = (partial: Partial<ChatSessionStore>): void => {
   /* Merged, not replaced: the chat's turn host is mounted beside every view
    * these rows render, and it calls the store's placement and body seams. */
   vi.mocked(useChatSessionStore).mockReturnValue({
     requestTurn: vi.fn(),
     setTurnPlacement: vi.fn(),
-    publishProjectHostConnector: vi.fn(
-      (_projectId: string, connector: Parameters<ChatSessionStore['publishProjectHostConnector']>[1]) => {
-        publishedConnector = connector;
-        return () => {
-          publishedConnector = undefined;
-        };
-      },
-    ),
     reattachHostChat,
-    getChatExecution: vi.fn(async () => storedExecution),
+    respondToProjectedApproval: browserHostHarness.resolveInterrupt,
     getProjection: () => {
       const projection = {
         ledger: {
@@ -443,8 +433,6 @@ const expectRunBody = (agent: CadAgentConfigInput = buildAgent()): Record<string
 });
 
 beforeEach(() => {
-  publishedConnector = undefined;
-  storedExecution = undefined;
   placementHarness.localHostId = undefined;
   creditPreflightHarness.calls.length = 0;
   creditPreflightHarness.refuse = undefined;
@@ -480,26 +468,6 @@ beforeEach(() => {
 });
 
 describe('useCadChatClient', () => {
-  it('connects each observed chat to its own persisted host placement', async () => {
-    storedExecution = { kind: 'acp', hostId: 'origin', agentId: 'codex' };
-    const chat = mock<Chat<MyUIMessage>>();
-    Object.defineProperty(chat, 'messages', { get: () => [] });
-    useActiveChatInstanceMock.mockReturnValue(chat);
-    installActions(buildActions());
-    renderClient();
-    expect(publishedConnector).toBeDefined();
-
-    await publishedConnector!('chat_other');
-    expect(browserHostHarness.createDaemonClient).toHaveBeenCalledOnce();
-    const [transport] = browserHostHarness.createDaemonClient.mock.calls[0] as [{ dial: () => Promise<unknown> }];
-    await expect(transport.dial()).resolves.toEqual({ hostId: 'origin' });
-    expect(browserHostHarness.createClient).not.toHaveBeenCalled();
-
-    await publishedConnector!('chat_test');
-    expect(browserHostHarness.createClient).toHaveBeenCalledOnce();
-    expect(browserHostHarness.createClient.mock.calls[0]?.[0]?.systemPrompt).toBeDefined();
-  });
-
   it('should register no agent host, however many views mount it', async () => {
     /* The hook is mounted by the history, the examples, the stack trace, the
      * approval banner and once *per transcript message*. Every instance used
@@ -1017,17 +985,11 @@ describe('useCadChatClient', () => {
     const { result } = renderClient();
     await act(async () => result.current.respondToToolApproval('interrupt-1', true, { reason: 'Proceed' }));
 
-    const approval = browserHostHarness.resolveInterrupt.mock.calls[0]?.[0] as Readonly<Record<string, unknown>>;
-    expect(approval).toMatchObject({
-      chatId: 'chat_test',
-      runId: 'run-paused',
-      interruptId: 'interrupt-1',
+    expect(browserHostHarness.resolveInterrupt).toHaveBeenCalledExactlyOnceWith('chat_test', 'interrupt-1', {
       approved: true,
       reason: 'Proceed',
+      optionId: undefined,
     });
-    expect(typeof approval['commandId']).toBe('string');
-    expect(typeof approval['resumeCommandId']).toBe('string');
-    expect(approval['commandId']).not.toBe(approval['resumeCommandId']);
     expect(actions.setMessages).not.toHaveBeenCalled();
     expect(chat.addToolApprovalResponse).not.toHaveBeenCalled();
   });
@@ -1084,10 +1046,14 @@ describe('useCadChatClient', () => {
     await act(async () => result.current.respondToToolApproval('interrupt-stale', true));
 
     expect(chat.addToolApprovalResponse).not.toHaveBeenCalled();
-    expect(browserHostHarness.resolveInterrupt).not.toHaveBeenCalled();
+    expect(browserHostHarness.resolveInterrupt).toHaveBeenCalledExactlyOnceWith('chat_test', 'interrupt-stale', {
+      approved: true,
+      reason: undefined,
+      optionId: undefined,
+    });
   });
 
-  it('mints no follow-up resume id for a denied approval', async () => {
+  it('delegates a denied approval to the projection-backed command path', async () => {
     browserHostHarness.run = { runId: 'run-paused', state: 'paused', eventCount: 4 };
     const chat = mock<Chat<MyUIMessage>>();
     Object.defineProperty(chat, 'messages', { get: () => [] });
@@ -1097,12 +1063,14 @@ describe('useCadChatClient', () => {
     const { result } = renderClient();
     await act(async () => result.current.respondToToolApproval('interrupt-1', false));
 
-    const approval = browserHostHarness.resolveInterrupt.mock.calls[0]?.[0] as Readonly<Record<string, unknown>>;
-    expect(typeof approval['commandId']).toBe('string');
-    expect(approval['resumeCommandId']).toBeUndefined();
+    expect(browserHostHarness.resolveInterrupt).toHaveBeenCalledExactlyOnceWith('chat_test', 'interrupt-1', {
+      approved: false,
+      reason: undefined,
+      optionId: undefined,
+    });
   });
 
-  it('resolves an external run without minting a native Resume command', async () => {
+  it('delegates an external approval without sending an SDK request', async () => {
     browserHostHarness.run = { runId: 'run-external-paused', state: 'paused', eventCount: 4 };
     browserHostHarness.runKind = 'external';
     const chat = mock<Chat<MyUIMessage>>();
@@ -1113,12 +1081,15 @@ describe('useCadChatClient', () => {
     const { result } = renderClient();
     await act(async () => result.current.respondToToolApproval('interrupt-1', true));
 
-    const approval = browserHostHarness.resolveInterrupt.mock.calls[0]?.[0] as Readonly<Record<string, unknown>>;
-    expect(typeof approval['commandId']).toBe('string');
-    expect(approval['resumeCommandId']).toBeUndefined();
+    expect(browserHostHarness.resolveInterrupt).toHaveBeenCalledExactlyOnceWith('chat_test', 'interrupt-1', {
+      approved: true,
+      reason: undefined,
+      optionId: undefined,
+    });
+    expect(chat.resumeStream).not.toHaveBeenCalled();
   });
 
-  it("answers a daemon-placed chat's paused run that no stream follows, then follows what it continued (GM.r1 H1)", async () => {
+  it("answers a daemon-placed chat's paused run without an SDK-side resume (GM.r1 H1)", async () => {
     placementHarness.localHostId = 'desktop';
     browserHostHarness.hostRunId = 'run-daemon-paused';
     browserHostHarness.resumable = true;
@@ -1132,18 +1103,12 @@ describe('useCadChatClient', () => {
     const { result } = renderClient();
     await act(async () => result.current.respondToToolApproval('interrupt-1', true));
 
-    const approval = browserHostHarness.resolveInterrupt.mock.calls[0]?.[0] as Readonly<Record<string, unknown>>;
-    expect(approval).toMatchObject({
-      chatId: 'chat_test',
-      runId: 'run-daemon-paused',
-      interruptId: 'interrupt-1',
+    expect(browserHostHarness.resolveInterrupt).toHaveBeenCalledExactlyOnceWith('chat_test', 'interrupt-1', {
       approved: true,
       reason: undefined,
       optionId: undefined,
     });
-    expect(typeof approval['commandId']).toBe('string');
-    expect(typeof approval['resumeCommandId']).toBe('string');
-    expect(chat.resumeStream).toHaveBeenCalledOnce();
+    expect(chat.resumeStream).not.toHaveBeenCalled();
     expect(actions.setMessages).not.toHaveBeenCalled();
     expect(chat.addToolApprovalResponse).not.toHaveBeenCalled();
   });
@@ -1162,17 +1127,11 @@ describe('useCadChatClient', () => {
     const { result } = renderClient();
     await act(async () => result.current.respondToToolApproval('interrupt-1', true, { optionId: 'allow-always' }));
 
-    const approval = browserHostHarness.resolveInterrupt.mock.calls[0]?.[0] as Readonly<Record<string, unknown>>;
-    expect(approval).toMatchObject({
-      chatId: 'chat_test',
-      runId: 'run-paused',
-      interruptId: 'interrupt-1',
+    expect(browserHostHarness.resolveInterrupt).toHaveBeenCalledExactlyOnceWith('chat_test', 'interrupt-1', {
       approved: true,
       reason: undefined,
       optionId: 'allow-always',
     });
-    expect(typeof approval['commandId']).toBe('string');
-    expect(typeof approval['resumeCommandId']).toBe('string');
   });
 
   it('should call actions.sendMessage with body.agent built from useCadAgentConfig when submit fires', async () => {

@@ -2,8 +2,6 @@ import { useCallback, useEffect, useRef } from 'react';
 import type { ChatStatus } from 'ai';
 import type { CadAgentConfigInput, MyUIMessage } from '@taucad/chat';
 import { toast } from 'sonner';
-import { generatePrefixedId } from '@taucad/utils/id';
-import { idPrefix } from '@taucad/types/constants';
 import { useCadAgentConfig } from '#hooks/use-cad-agent-config.js';
 import { useActiveChatInstance } from '#chat-clients/_internal/use-active-chat-instance.js';
 import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
@@ -11,12 +9,6 @@ import { useActiveChatSession } from '#hooks/active-chat-provider.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { attachmentSendBlockReason, buildUserMessage } from '#utils/chat.utils.js';
 import type { StoredAttachmentRef } from '#utils/attachment.utils.js';
-import {
-  getBrowserAgentHostRun,
-  resolveBrowserAgentHostInterrupt,
-  resumableBrowserAgentHostRunId,
-} from '#chat-clients/_internal/browser-agent-host-transport.js';
-import { daemonPlacementOf } from '#lib/agent-host-placement.js';
 import { useModels } from '#hooks/use-models.js';
 import { useTurnAdmission } from '#chat-clients/_internal/use-turn-admission.js';
 
@@ -217,42 +209,9 @@ export const useCadChatClient = (): CadChatClient => {
       decision?: { readonly reason?: string | undefined; readonly optionId?: string | undefined },
     ): Promise<void> => {
       const { reason, optionId } = decision ?? {};
-      const browserRun = getBrowserAgentHostRun(activeChatId);
-      /* A daemon-placed chat whose paused run no stream of this page follows is answered all the same, and the page
-       * then follows what the answer continued or ended (GM.r1 H1). */
-      const detachedRunId =
-        browserRun === undefined && daemonPlacementOf(agent.execution) !== undefined
-          ? resumableBrowserAgentHostRunId(activeChatId)
-          : undefined;
-      const answeredRunId = browserRun?.runId ?? detachedRunId;
-      if (answeredRunId !== undefined) {
-        /* The log, not the current picker, owns this run's kind. A stale card
-         * without a recorded run cannot safely invent a native Resume. */
-        const recordedRun = store.getProjection(activeChatId)?.ledger.runs[answeredRunId];
-        if (recordedRun === undefined) {
-          return;
-        }
-        const commandId = generatePrefixedId(idPrefix.request);
-        const resumeCommandId =
-          approved && recordedRun.kind === 'tau' ? generatePrefixedId(idPrefix.request) : undefined;
-        await resolveBrowserAgentHostInterrupt({
-          chatId: activeChatId,
-          runId: answeredRunId,
-          interruptId: approvalId,
-          approved,
-          reason,
-          optionId,
-          commandId,
-          resumeCommandId,
-        });
-        if (detachedRunId !== undefined) {
-          void chat.resumeStream();
-        }
-      }
-      /* An approval without a current host run is stale. It cannot create a
-       * run through the SDK: only a host command may answer its interrupt. */
+      await store.respondToProjectedApproval(activeChatId, approvalId, { approved, reason, optionId });
     },
-    [activeChatId, agent.execution, chat, store],
+    [activeChatId, store],
   );
 
   return {

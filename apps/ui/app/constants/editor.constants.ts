@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { createCameraView } from '@taucad/camera';
 import type { CameraView } from '@taucad/camera';
 import { sectionSchema } from '@taucad/workbench';
-import { maxSectionCuts, sectionAxisIndices, sectionPlaneAxes } from '#components/geometry/graphics/section-cuts.js';
+import { sectionAxisIndices, sectionPlaneAxes } from '#components/geometry/graphics/section-cuts.js';
 import type { SectionCutValues, SectionVector } from '#components/geometry/graphics/section-cuts.js';
 
 // ============================================================================

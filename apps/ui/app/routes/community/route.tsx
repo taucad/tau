@@ -1,6 +1,6 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MetaFunction } from 'react-router';
-import { Link, NavLink, useNavigate } from 'react-router';
+import { Link, NavLink, useLocation, useNavigate } from 'react-router';
 import { SearchX, X } from 'lucide-react';
 import { z } from 'zod';
 import { getCoreRowModel, getPaginationRowModel, useReactTable } from '@tanstack/react-table';
@@ -113,6 +113,7 @@ export default function CadCommunity(): React.JSX.Element {
   const [query, setQuery, showQuery] = useImmediateSearchParameter(searchParameterName.query, queryParameter);
   const [kernel, setKernel, showKernel] = useImmediateSearchParameter(searchParameterName.kernel, kernelParameter);
   const navigate = useNavigate();
+  const { hash } = useLocation();
   const [pageSize, setPageSize] = useCookie<number>(cookieName.examplePageSize, defaultPageSize);
   const searchInput = useRef<HTMLInputElement>(null);
 
@@ -130,6 +131,29 @@ export default function CadCommunity(): React.JSX.Element {
   const filterKey = `${kernel}\n${term}`;
   const [page, setPage] = useState({ filterKey, pageIndex: 0 });
   const pageIndex = page.filterKey === filterKey ? page.pageIndex : 0;
+
+  /* `#<locator>` opens the page that holds that card (after filters), then brings it into
+     view and focuses its link. The example page links back here the same way. */
+  const anchor = hash.slice(1);
+  const [handledAnchor, setHandledAnchor] = useState('');
+  if (anchor !== handledAnchor) {
+    setHandledAnchor(anchor);
+    const anchorIndex = filteredProjects.findIndex(({ locator }) => locator === anchor);
+    if (anchorIndex !== -1) {
+      setPage({ filterKey, pageIndex: Math.floor(anchorIndex / pageSize) });
+    }
+  }
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      const card = anchor === '' ? null : document.querySelector(`#${CSS.escape(anchor)}`);
+      card?.scrollIntoView({ block: 'center' });
+      card?.querySelector<HTMLAnchorElement>('a[href]')?.focus({ preventScroll: true });
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+    };
+  }, [anchor]);
 
   // oxlint-disable-next-line react/incompatible-library -- This component is explicitly opted out because TanStack Table returns mutable functions that cannot be compiler-memoized safely.
   const table = useReactTable({

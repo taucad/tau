@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -177,5 +177,39 @@ describe('Community route', () => {
     await userEvent.keyboard('/');
 
     expect(screen.getByRole('searchbox', { name: 'Search examples' })).toHaveFocus();
+  });
+
+  describe('card anchors', () => {
+    beforeEach(() => {
+      Element.prototype.scrollIntoView = vi.fn();
+    });
+
+    it('should open the page holding #<locator>, scroll the card into view and focus its link', async () => {
+      renderCommunity('/community#jscad.example-22');
+
+      expect(screen.getAllByRole('listitem')).toHaveLength(5);
+      const link = screen.getByRole('link', { name: 'Open Example 22' });
+      await waitFor(() => {
+        expect(link).toHaveFocus();
+      });
+      expect(screen.getAllByRole('listitem').find((item) => item.id === 'jscad.example-22')).toContainElement(link);
+      expect(Element.prototype.scrollIntoView).toHaveBeenCalledWith({ block: 'center' });
+    });
+
+    it('should count the page after filters', async () => {
+      renderCommunity('/community?kernel=jscad#jscad.example-22');
+
+      expect(screen.getAllByRole('listitem')).toHaveLength(4);
+      await waitFor(() => {
+        expect(screen.getByRole('link', { name: 'Open Example 22' })).toHaveFocus();
+      });
+    });
+
+    it('should stay on the first page for a locator the filters exclude', () => {
+      renderCommunity('/community?kernel=jscad#replicad.example-5');
+
+      expect(screen.getAllByRole('listitem')).toHaveLength(4);
+      expect(screen.queryByRole('link', { name: 'Open Example 5' })).not.toBeInTheDocument();
+    });
   });
 });

@@ -1,8 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { z } from 'zod';
 import { renderHook, act, waitFor } from '@testing-library/react';
-import { createActor } from 'xstate';
-import type { Actor } from 'xstate';
 import { mock } from 'vitest-mock-extended';
 import type { Chat } from '@ai-sdk/react';
 import type { CadAgentConfigInput, CadAgentExecution, MyUIMessage } from '@taucad/chat';
@@ -15,24 +12,19 @@ import type { ActiveChatSessionContextValue } from '#hooks/active-chat-provider.
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
 import type { AgentHostClientOptions, AgentHostClient } from '#services/agent-host-client.js';
+import type * as AgentHostClientModule from '#services/agent-host-client.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import { ChatTurnHost } from '#chat-clients/chat-turn-host.js';
-import {
-  chatHostBinding,
-  chatHostServices,
-  chatTurnAdmit,
-  resetChatHostServices,
-  resetChatTurnServices,
-} from '#chat-clients/_internal/chat-host-binding.js';
+import { chatTurnAdmit, resetChatTurnServices } from '#chat-clients/_internal/chat-host-binding.js';
 import type { ChatTurn, ChatTurnGesture } from '#machines/chat-session.machine.js';
 import type { StoredAttachmentRef } from '#utils/attachment.utils.js';
 import { storedRef } from '#utils/attachment.test-utils.js';
 import type { ChatProjection } from '#machines/chat-projection.logic.js';
+import type { HostCommand } from '@taucad/agent-host/wire';
 
 /* Whether the project's revision root is connected yet (W8 TS-S5): the host places turns through it. */
 const revisionRoot = vi.hoisted(() => ({ connected: true }));
 const browserHostHarness = vi.hoisted(() => ({
-  registration: undefined as { createClient: () => Promise<unknown> } | undefined,
   run: undefined as { runId: string; state?: 'paused'; eventCount?: number } | undefined,
   /** Whether this chat has a browser host registered, and whether its run can be resumed. */
   placed: false,
@@ -51,8 +43,6 @@ const browserHostHarness = vi.hoisted(() => ({
   // The daemon leg: `openAgentHostChannel` → `createDaemonAgentHostTransport`
   // → `createAgentHostClient`, with no worker, bridge or workspace claim.
   openAgentHostChannel: vi.fn(async (hostId: string) => ({ hostId })),
-  /** How many times anything registered this chat's agent host. */
-  registrations: 0,
   createDaemonClient: vi.fn((transport: unknown): AgentHostClient => {
     const client = Object.create(null) as AgentHostClient & { transport?: unknown };
     client.transport = transport;
@@ -178,20 +168,14 @@ vi.mock('#hooks/use-file-manager.js', () => {
   return { useFileManager: fileManager, useOptionalFileManager: fileManager };
 });
 vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', () => ({
-  registerAgentHost: (_chatId: string, registration: typeof browserHostHarness.registration) => {
-    browserHostHarness.registrations += 1;
-    browserHostHarness.registration = registration;
-    return () => {
-      browserHostHarness.registration = undefined;
-    };
-  },
   getBrowserAgentHostRun: () => browserHostHarness.run,
   isBrowserAgentHostPlaced: () => browserHostHarness.placed,
   resumableBrowserAgentHostRunId: () =>
     browserHostHarness.resumable ? (browserHostHarness.run?.runId ?? browserHostHarness.hostRunId) : undefined,
   resolveBrowserAgentHostInterrupt: browserHostHarness.resolveInterrupt,
 }));
-vi.mock('#services/agent-host-client.js', () => ({
+vi.mock('#services/agent-host-client.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof AgentHostClientModule>()),
   createAgentHostClient: browserHostHarness.createDaemonClient,
   createBrowserAgentHostClient: browserHostHarness.createClient,
   isBrowserAgentHostProviderKind: (providerKind: string) => providerKind !== 'tau' && providerKind !== 'ollama',
@@ -287,12 +271,6 @@ const admittedRequest = async (index = 0): Promise<AdmittedRequest> => {
   return admittedTurns[index]!.request as unknown as AdmittedRequest;
 };
 
-/** The wire body the admission composed for one turn. */
-const admittedBody = async (index = 0): Promise<Record<string, unknown>> => {
-  const request = await admittedRequest(index);
-  return request.body!;
-};
-
 /** The gesture reaches the chat's admission; a refusal is the row's to assert. */
 const requestTurn = async (gesture: ChatTurnGesture): Promise<void> => {
   try {
@@ -342,25 +320,27 @@ const installSessionStore = (partial: Partial<ChatSessionStore>): void => {
   vi.mocked(useChatSessionStore).mockReturnValue({
     requestTurn: vi.fn(),
     setTurnPlacement: vi.fn(),
-    reattachHostChat,
     respondToProjectedApproval: browserHostHarness.resolveInterrupt,
     getProjection: () => {
-      const projection = {
+      const runId = browserHostHarness.run?.runId ?? browserHostHarness.hostRunId;
+      if (runId === undefined) {
+        return undefined;
+      }
+      return {
         ledger: {
-          currentRunId: browserHostHarness.run?.runId ?? browserHostHarness.hostRunId,
+          position: { cursor: 1 },
+          currentRunId: runId,
           runs: {
-            [browserHostHarness.run?.runId ?? browserHostHarness.hostRunId ?? '']: { kind: browserHostHarness.runKind },
+            [runId]: { lifecycle: browserHostHarness.run?.state ?? 'paused' },
           },
         },
-      };
-      return projection as unknown as ChatProjection;
+        endCursor: 1,
+      } as unknown as ChatProjection;
     },
     ...partial,
-  } as ChatSessionStore);
+  } as unknown as ChatSessionStore);
 };
 
-/** The store's host-log reattach, re-armed per test. */
-let reattachHostChat = vi.fn();
 /** The store's draft-attachment promotion, re-armed per test. */
 let promoteDraftAttachments = vi.fn<ChatSessionStore['promoteDraftAttachments']>();
 
@@ -386,65 +366,19 @@ const renderClient = (): ReturnType<typeof renderHook<ReturnType<typeof useCadCh
     ),
   });
 
-/** Every binding actor a row started, stopped after it. */
-const bindings: Array<Actor<typeof chatHostBinding>> = [];
-
-/**
- * Run the chat's real host binding, as its session actor does.
- *
- * The binding is invoked by `chat-session.machine`'s `host` region in the app;
- * here the row starts the same actor directly, so the registration under test
- * is the one the published services actually compose.
- */
-const bindChatHost = async (chatId = 'chat_test'): Promise<void> => {
-  await waitFor(() => {
-    expect(chatHostServices(chatId)).toBeDefined();
-  });
-  const actor = createActor(chatHostBinding, {
-    input: { chatId, placement: chatHostServices(chatId)!.placement },
-  });
-  bindings.push(actor);
-  actor.start();
-  await waitFor(() => {
-    expect(browserHostHarness.registration).toBeDefined();
-  });
-};
-
 const installActiveSession = (activeChatId: string): void => {
   vi.mocked(useActiveChatSession).mockReturnValue({
     activeChatId,
   } as unknown as ActiveChatSessionContextValue);
 };
 
-/* oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- `expect.objectContaining` is typed `any` by vitest. */
-const expectAnyHostAdmission: unknown = expect.objectContaining({ config: expect.any(Object) });
-
-const expectRunBody = (agent: CadAgentConfigInput = buildAgent()): Record<string, unknown> => ({
-  agent,
-  projectId: 'proj_test',
-  /* The page's resident host places the turn itself, so the target names only that host (W8 TS-S5). */
-  execution: { hostId: expect.stringMatching(/^host_/u) as unknown },
-  admission: {
-    version: 1,
-    idempotencyKey: expect.stringMatching(/^req_/u) as unknown,
-  },
-  // The browser host is the only Tau placement: every Tau turn admits one.
-  browserHost: expectAnyHostAdmission,
-});
-
 beforeEach(() => {
   placementHarness.localHostId = undefined;
   creditPreflightHarness.calls.length = 0;
   creditPreflightHarness.refuse = undefined;
   vi.clearAllMocks();
-  for (const binding of bindings.splice(0)) {
-    binding.stop();
-  }
-  resetChatHostServices();
   resetChatTurnServices();
   admittedTurns.length = 0;
-  browserHostHarness.registration = undefined;
-  browserHostHarness.registrations = 0;
   browserHostHarness.run = undefined;
   browserHostHarness.placed = false;
   browserHostHarness.resumable = false;
@@ -456,13 +390,9 @@ beforeEach(() => {
   useChatSelectorMock.mockReturnValue('ready');
   installActiveSession('chat_test');
   persistedErrors.length = 0;
-  reattachHostChat = vi.fn();
   promoteDraftAttachments = vi.fn(async () => undefined);
   installSessionStore({
     promoteDraftAttachments,
-    startRun: vi.fn((_chatId: string, body: Readonly<Record<string, unknown>>) => body),
-    endRun: vi.fn(),
-    reattachHostChat,
     get: sessionWithPersistedErrors,
   });
 });
@@ -486,26 +416,6 @@ describe('useCadChatClient', () => {
     });
     views.at(-1)!.unmount();
 
-    expect(browserHostHarness.registrations).toBe(0);
-  });
-
-  it('places an implicit desktop Tau turn on the services utility', async () => {
-    placementHarness.localHostId = 'desktop';
-    const chat = mock<Chat<MyUIMessage>>();
-    Object.defineProperty(chat, 'messages', { get: () => [] });
-    useActiveChatInstanceMock.mockReturnValue(chat);
-    installActions(buildActions());
-
-    renderClient();
-    await bindChatHost();
-    await browserHostHarness.registration!.createClient();
-
-    const [transport] = browserHostHarness.createDaemonClient.mock.calls.at(-1) as [{ dial: () => Promise<unknown> }];
-    await expect(transport.dial()).resolves.toEqual({ hostId: 'desktop' });
-    expect(browserHostHarness.openAgentHostChannel).toHaveBeenCalledWith('desktop', {
-      projectId: 'proj_test',
-      workspaceRoot: '/Users/test/Tau/home/proj_test',
-    });
     expect(browserHostHarness.createClient).not.toHaveBeenCalled();
   });
 
@@ -557,98 +467,6 @@ describe('useCadChatClient', () => {
     expect(actions.sendMessage).toHaveBeenCalledOnce();
   });
 
-  it('initializes browser placement with the canonical prompt, authority, and catalog provider', async () => {
-    mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-5.5' } }));
-    const chat = mock<Chat<MyUIMessage>>();
-    Object.defineProperty(chat, 'messages', { get: () => [] });
-    useActiveChatInstanceMock.mockReturnValue(chat);
-    installActions(buildActions());
-
-    renderClient();
-    await bindChatHost();
-    await browserHostHarness.registration!.createClient();
-
-    expect(browserHostHarness.syncProjectRoots).toHaveBeenCalledOnce();
-    expect(browserHostHarness.syncProjectRoots.mock.invocationCallOrder[0]).toBeLessThan(
-      browserHostHarness.openProjectRootBridge.mock.invocationCallOrder[0]!,
-    );
-    const options = browserHostHarness.createClient.mock.calls[0]?.[0];
-    expect(options).toBeDefined();
-    /* The host works on the project's live checkout; each attempt's checkout arrives with its placement (W8 TS-S5). */
-    expect(options?.authority).toEqual({ projectId: 'proj_test', workspaceId: 'live' });
-    expect(options?.openPlacementPort).toEqual(expect.any(Function));
-    expect(options?.openRevisionsPort).toEqual(expect.any(Function));
-    expect(options?.projectStorage).toMatchObject({ projectId: 'proj_test', backend: 'indexeddb' });
-    expect(options?.durability).toBe('transactional-rewrite');
-    expect(options?.openProjectRootBridge).toEqual(expect.any(Function));
-    expect(options?.model).toMatchObject({
-      id: 'openai-gpt-5.5',
-      providerKind: 'openai',
-      cost: { input: 1, output: 4, cacheRead: 0.1, cacheWrite: 1.25 },
-      reasoning: { effort: 'high', summary: 'auto' },
-    });
-    expect(options?.systemPrompt).toContain('<role>');
-    // Two blocks, not three: the workspace slot is empty on this path, and
-    // emitting it anyway spent one of Anthropic's cache breakpoints on nothing.
-    expect(options?.systemPromptBlocks).toHaveLength(2);
-    expect(options?.systemPromptBlocks[0]?.text).toContain('<role>');
-    expect(options?.systemPromptBlocks[0]?.cacheControl).toEqual({ type: 'ephemeral' });
-    expect(options?.systemPromptBlocks[1]?.text).toContain('<environment>');
-    expect(options?.systemPromptBlocks[1]?.cacheControl).toBeUndefined();
-  });
-
-  /*
-   * A bodyless Resume names no admission, so the host falls back to the model
-   * its worker was initialised with — this registration's. Composed once, at
-   * chat open, that was the model live when the chat was focused: not the one
-   * the failed attempt ran on, and not the one the INVALID_REQUEST card just
-   * told the person to change. A resume runs on the model selected *now*,
-   * exactly as a send would.
-   */
-  it('creates the client for a resume on the model selected now, not the one the registration composed on', async () => {
-    mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-5.5' } }));
-    const chat = mock<Chat<MyUIMessage>>();
-    Object.defineProperty(chat, 'messages', { get: () => [] });
-    useActiveChatInstanceMock.mockReturnValue(chat);
-    installActions(buildActions());
-
-    const view = renderClient();
-    await bindChatHost();
-    // The person changes the model on the refusal card and presses Resume. The
-    // placement does not move, so nothing re-composes the registration.
-    mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-retry' } }));
-    view.rerender({});
-    await browserHostHarness.registration!.createClient();
-
-    expect(browserHostHarness.createClient.mock.calls[0]?.[0]?.model).toMatchObject({
-      id: 'openai-gpt-retry',
-      contextWindow: 64_000,
-    });
-  });
-
-  /*
-   * Opening a chat attaches it to the host, and that client used to be composed with the full model
-   * row. Offline — or with the API down — the catalog names no provider, the composition threw, and
-   * a chat nothing ever ran in read `Failed`. Attach and replay need no model, and a bodyless resume
-   * runs on the row its log committed, so the client initialises without a default row.
-   */
-  it('creates the attach client without a model row while the catalog cannot name one', async () => {
-    mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-offline' } }));
-    const chat = mock<Chat<MyUIMessage>>();
-    Object.defineProperty(chat, 'messages', { get: () => [] });
-    useActiveChatInstanceMock.mockReturnValue(chat);
-    installActions(buildActions());
-
-    renderClient();
-    await bindChatHost();
-    await browserHostHarness.registration!.createClient();
-
-    const options = browserHostHarness.createClient.mock.calls[0]?.[0];
-    expect(options?.authority).toEqual({ projectId: 'proj_test', workspaceId: 'live' });
-    expect(options?.systemPrompt).toContain('<role>');
-    expect(options).not.toHaveProperty('model');
-  });
-
   it('does not poll the catalog before answering a send with an unresolved model', async () => {
     mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-offline' } }));
     const chat = mock<Chat<MyUIMessage>>();
@@ -657,7 +475,6 @@ describe('useCadChatClient', () => {
     installActions(buildActions());
 
     const { result } = renderClient();
-    await bindChatHost();
     act(() => {
       void result.current.submit({ text: 'Build it.' });
     });
@@ -683,46 +500,13 @@ describe('useCadChatClient', () => {
     const turn = await composeTurn({ kind: 'regenerate', requestId: 'req_startup-1' });
 
     expect(turn.runId).toBe('req_startup-1');
-    expect(turn.request.body?.['admission']).toMatchObject({ idempotencyKey: 'req_startup-1' });
-  });
-
-  it('places a Tau Host turn on the daemon channel, claiming no browser workspace', async () => {
-    mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-5.5', hostId: 'origin' } }));
-    const chat = mock<Chat<MyUIMessage>>();
-    Object.defineProperty(chat, 'messages', { get: () => [] });
-    useActiveChatInstanceMock.mockReturnValue(chat);
-    const actions = buildActions();
-    installActions(actions);
-
-    const { result } = renderClient();
-    await bindChatHost();
-    await browserHostHarness.registration!.createClient();
-
-    /* The transport is given a *dial*, not an open channel: a relayed channel
-     * dies for reasons unrelated to the run, and only a dial can heal it. */
-    expect(browserHostHarness.openAgentHostChannel).not.toHaveBeenCalled();
-    const [transport] = browserHostHarness.createDaemonClient.mock.calls.at(-1) as [{ dial: () => Promise<unknown> }];
-    await expect(transport.dial()).resolves.toEqual({ hostId: 'origin' });
-    expect(browserHostHarness.openAgentHostChannel).toHaveBeenCalledWith('origin');
-    // The daemon owns its workspace: no worker, no bridge, no project storage.
-    expect(browserHostHarness.createClient).not.toHaveBeenCalled();
-    expect(browserHostHarness.syncProjectRoots).not.toHaveBeenCalled();
-
-    act(() => {
-      void result.current.submit({ text: 'Build it.' });
+    expect(turn.request.command).toMatchObject({
+      type: 'start',
+      commandId: 'req_startup-1',
+      payload: { runId: 'req_startup-1' },
     });
-    const body = await admittedBody();
-    // The target names no browser workspace — only the daemon that writes and the mode
-    // it must record the turn in (V18).
-    expect(body['execution']).toEqual({ hostId: 'origin' });
-    expect(body['agent']).toMatchObject({ execution: { kind: 'tau', hostId: 'origin' } });
   });
 
-  /*
-   * R9. The pre-flight runs inside `admitExecution`, the one path every verb
-   * and every bodyless dispatch shares, and *before* the host is asked to
-   * place anything — a turn refused for credit must leave nothing behind.
-   */
   it('refuses a turn the balance cannot fund, on the existing credits banner', async () => {
     creditPreflightHarness.refuse = () => {
       throw new Error(
@@ -787,153 +571,6 @@ describe('useCadChatClient', () => {
     });
     await admittedRequest();
     expect(persistedErrors).toHaveLength(0);
-  });
-
-  /*
-   * "Retry with a different model" is the credits card's own way out, so the
-   * admission — and with it the pre-flight and the browser-wire check — has to
-   * see the overriding row, not the selection the composer still shows.
-   */
-
-  it('places an external-agent turn on its daemon, naming the agent and no Tau model', async () => {
-    mountAgentMock(buildAgent({ execution: { kind: 'acp', hostId: 'origin', agentId: 'codex' } }));
-    const chat = mock<Chat<MyUIMessage>>();
-    Object.defineProperty(chat, 'messages', { get: () => [] });
-    useActiveChatInstanceMock.mockReturnValue(chat);
-    const actions = buildActions();
-    installActions(actions);
-
-    const { result } = renderClient();
-    await bindChatHost();
-    await browserHostHarness.registration!.createClient();
-
-    // Dialled through the same ladder and driven over the same daemon transport
-    // as a Tau Host turn: one client, N channels.
-    const [externalTransport] = browserHostHarness.createDaemonClient.mock.calls.at(-1) as [
-      { dial: () => Promise<unknown> },
-    ];
-    await expect(externalTransport.dial()).resolves.toEqual({ hostId: 'origin' });
-    expect(browserHostHarness.openAgentHostChannel).toHaveBeenCalledWith('origin');
-    expect(browserHostHarness.createClient).not.toHaveBeenCalled();
-    expect(browserHostHarness.syncProjectRoots).not.toHaveBeenCalled();
-
-    act(() => {
-      void result.current.submit({ text: 'Build it.' });
-    });
-    const body = await admittedBody();
-    expect(body['execution']).toEqual({ hostId: 'origin' });
-    expect(body['agent']).toMatchObject({ execution: { kind: 'acp', hostId: 'origin', agentId: 'codex' } });
-    // The admission names the agent and the CAD context the client composed —
-    // and nothing a Tau turn negotiates: no model row, no prompt blocks, no
-    // tool grant, because the external agent brings its own (X6/V12).
-    expect(body['browserHost']).toMatchObject({ trigger: 'submit', agent: { kind: 'acp', id: 'codex' } });
-    const external = z.object({ context: z.record(z.string(), z.unknown()) }).safeParse(body['browserHost']);
-    const context = external.data?.context ?? {};
-    expect(Object.keys(context).toSorted()).toEqual(['systemPrompt']);
-    expect(String(context['systemPrompt'])).toContain('<workflow>');
-  });
-
-  it('carries the adapter model an external-agent execution names, and nothing else', async () => {
-    mountAgentMock(
-      buildAgent({ execution: { kind: 'acp', hostId: 'origin', agentId: 'codex', model: 'gpt-5.3-codex-spark' } }),
-    );
-    const chat = mock<Chat<MyUIMessage>>();
-    Object.defineProperty(chat, 'messages', { get: () => [] });
-    useActiveChatInstanceMock.mockReturnValue(chat);
-    const actions = buildActions();
-    installActions(actions);
-
-    const { result } = renderClient();
-    await bindChatHost();
-    await browserHostHarness.registration!.createClient();
-    act(() => {
-      void result.current.submit({ text: 'Build it.' });
-    });
-    const body = await admittedBody();
-    expect(body['browserHost']).toMatchObject({
-      trigger: 'submit',
-      agent: { kind: 'acp', id: 'codex', model: 'gpt-5.3-codex-spark' },
-    });
-  });
-
-  it('reattaches a daemon-placed chat to the daemon log no browser claim substantiates', async () => {
-    // A daemon owns its workspace, so this chat writes no claim — and reload
-    // discovery, which reads claims, never retains its run. Without a reattach
-    // driven by the registration itself, a reloaded page rebuilds the transcript
-    // from its own storage and never sees what the daemon finished unattended.
-    mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-5.5', hostId: 'origin' } }));
-    const chat = mock<Chat<MyUIMessage>>();
-    Object.defineProperty(chat, 'messages', { get: () => [] });
-    useActiveChatInstanceMock.mockReturnValue(chat);
-    installActions(buildActions());
-
-    renderClient();
-    await bindChatHost();
-
-    // Ordering, not just occurrence: the reattach rides the registration, which
-    // is the first moment the transport can answer a reconnect for this chat
-    // with the daemon rather than the API.
-    expect(reattachHostChat).toHaveBeenCalledWith({ chatId: 'chat_test', hostId: 'origin' });
-    expect(browserHostHarness.registration).toBeDefined();
-  });
-
-  /*
-   * T2-D1 / I7. Reload discovery substantiates a run from this browser's
-   * workspace claim, and the document that held the claim is the one that
-   * died — so a browser-placed run was never reattached at all: no adopt, no
-   * *Reconnecting…*, a chat that looked idle with no reply, and a durable run
-   * left `running` until the next gesture's attach dragged it back by
-   * accident. The placement is the trigger, the host's log is the authority.
-   */
-  it('reattaches a browser-placed chat to the host log its dead document left behind', async () => {
-    mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-5.5' } }));
-    const chat = mock<Chat<MyUIMessage>>();
-    Object.defineProperty(chat, 'messages', { get: () => [] });
-    useActiveChatInstanceMock.mockReturnValue(chat);
-    installActions(buildActions());
-
-    renderClient();
-
-    await bindChatHost();
-    expect(reattachHostChat).toHaveBeenCalledWith({ chatId: 'chat_test', hostId: 'tau' });
-  });
-
-  /*
-   * The file manager's worker arrives after this component's first render, so
-   * the binding's one composition was the one whose `createClient` could not
-   * prepare: `prepare` threw "This project has no revision root", the AI SDK
-   * swallowed it into `onError`, and the chat's durable log was never attached
-   * — no `RUN_ABANDONED`, no settlement, and the chat's first send wedged
-   * behind the failed resume. `reattachHostChat` latches on the hostId, so the
-   * retry has to be the composition, not the store.
-   */
-  it('waits for the revision root before reattaching, then reattaches once it connects', async () => {
-    revisionRoot.connected = false;
-    mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-5.5' } }));
-    const chat = mock<Chat<MyUIMessage>>();
-    Object.defineProperty(chat, 'messages', { get: () => [] });
-    useActiveChatInstanceMock.mockReturnValue(chat);
-    installActions(buildActions());
-
-    const view = renderClient();
-    await waitFor(() => {
-      expect(chatHostServices('chat_test')).toBeDefined();
-    });
-    const actor = createActor(chatHostBinding, {
-      input: { chatId: 'chat_test', placement: chatHostServices('chat_test')!.placement },
-    });
-    bindings.push(actor);
-    actor.start();
-    expect(browserHostHarness.registration).toBeUndefined();
-    expect(reattachHostChat).not.toHaveBeenCalled();
-
-    revisionRoot.connected = true;
-    view.rerender({});
-
-    await waitFor(() => {
-      expect(browserHostHarness.registration).toBeDefined();
-    });
-    expect(reattachHostChat).toHaveBeenCalledWith({ chatId: 'chat_test', hostId: 'tau' });
   });
 
   it('admits a turn on a host that advertises nothing about revisions', async () => {
@@ -1033,7 +670,7 @@ describe('useCadChatClient', () => {
     expect(messages.some((message) => message.id === 'resumed-reply')).toBe(true);
   });
 
-  it('does not open an SDK approval request for a run with no current host stream', async () => {
+  it('does not open an SDK approval request for a projected paused run', async () => {
     browserHostHarness.resumable = true;
     browserHostHarness.hostRunId = 'run-stale';
     const chat = mock<Chat<MyUIMessage>>();
@@ -1116,7 +753,7 @@ describe('useCadChatClient', () => {
   /* The option the human chose has to survive the whole chain, and the two
    * browser hops are the only ones with no product-path coverage: if either
    * dropped the field every other test still passes (4-review S2). */
-  it('carries the exact option a human chose down to the browser transport', async () => {
+  it('carries the exact option a human chose to the projected approval command', async () => {
     browserHostHarness.run = { runId: 'run-paused', state: 'paused', eventCount: 4 };
     const chat = mock<Chat<MyUIMessage>>();
     Object.defineProperty(chat, 'messages', { get: () => [] });
@@ -1134,7 +771,7 @@ describe('useCadChatClient', () => {
     });
   });
 
-  it('should call actions.sendMessage with body.agent built from useCadAgentConfig when submit fires', async () => {
+  it('should admit one Start command when submit hands over the user message', async () => {
     const chat = mock<Chat<MyUIMessage>>();
     useActiveChatInstanceMock.mockReturnValue(chat);
     const actions = buildActions();
@@ -1154,9 +791,15 @@ describe('useCadChatClient', () => {
       role: 'user',
       parts: [{ type: 'text', text: 'hello world' }],
     });
-    /* The verb hands over a gesture; the body is the chat admission's answer,
-     * composed once per turn by its owner rather than once per call site. */
-    expect(await admittedRequest()).toEqual({ kind: 'send', message: sentMessage, body: expectRunBody() });
+    const request = await admittedRequest();
+    expect(request).toMatchObject({ kind: 'send', message: sentMessage });
+    expect(request['command']).toMatchObject({
+      type: 'start',
+      payload: { chatId: 'chat_test', message: { id: sentMessage.id, role: 'user' }, trigger: 'submit' },
+    });
+    expect((request['command'] as HostCommand).commandId).toBe(
+      (request['command'] as HostCommand & { payload: { runId: string } }).payload.runId,
+    );
   });
 
   it('should promote draft attachments into the chat before sending a message that references them', async () => {
@@ -1275,12 +918,12 @@ describe('useCadChatClient', () => {
     expect(actions.editMessage).toHaveBeenCalledWith('msg_99', 'edited content', {
       attachments: [imageAttachment],
     });
-    expect(await admittedRequest()).toEqual({
+    expect(await admittedRequest()).toMatchObject({
       kind: 'edit',
       messageId: 'msg_99',
       content: 'edited content',
       attachments: [imageAttachment],
-      body: expectRunBody(),
+      command: { type: 'start', payload: { trigger: 'edit', message: { id: 'msg_99' } } },
     });
   });
 
@@ -1317,7 +960,7 @@ describe('useCadChatClient', () => {
     expect(result.current.error).toBe(error);
   });
 
-  it('should keep the body object reference stable across renders when the agent identity does not change', () => {
+  it('should keep the agent snapshot reference stable across renders when its identity does not change', () => {
     const chat = mock<Chat<MyUIMessage>>();
     useActiveChatInstanceMock.mockReturnValue(chat);
     const actions = buildActions();
@@ -1335,14 +978,15 @@ describe('useCadChatClient', () => {
 
   it('should publish the chat admission and leave it owned by the session on view unmount', async () => {
     const chat = mock<Chat<MyUIMessage>>();
+    chat.messages = [{ id: 'user-owned', role: 'user', parts: [{ type: 'text', text: 'Build it.' }] }];
     useActiveChatInstanceMock.mockReturnValue(chat);
     installActions(buildActions());
 
     const { unmount } = renderClient();
 
-    // The published admission composes the body when the owner invokes it.
+    // The published admission composes a host command when the owner invokes it.
     const turn = await composeTurn({ kind: 'regenerate' });
-    expect(turn.request.body).toEqual(expectRunBody());
+    expect(turn.request.command).toMatchObject({ type: 'start', payload: { trigger: 'submit' } });
 
     unmount();
 
@@ -1350,22 +994,20 @@ describe('useCadChatClient', () => {
     expect(chatTurnAdmit('chat_test')).toBeDefined();
   });
 
-  /** Mounts the client over a fixed transcript and returns the published bodyless-dispatch factory. */
-  const composeSeededBody = async (messages: MyUIMessage[]): Promise<Record<string, unknown>> => {
+  /** Mounts the client over a fixed transcript and returns its durable Start command. */
+  const composeSeededCommand = async (messages: MyUIMessage[]): Promise<HostCommand> => {
     mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-5.5' } }));
     const chat = mock<Chat<MyUIMessage>>();
     Object.defineProperty(chat, 'messages', { get: () => messages });
     useActiveChatInstanceMock.mockReturnValue(chat);
     installActions(buildActions());
     installSessionStore({
-      startRun: vi.fn((_chatId: string, body: Readonly<Record<string, unknown>>) => body),
-      endRun: vi.fn(),
       get: sessionWithPersistedErrors,
     });
 
     renderClient();
     const turn = await composeTurn({ kind: 'regenerate' });
-    return turn.request.body as Record<string, unknown>;
+    return turn.request.command!;
   };
 
   it('admits a seeded first turn as a submit, because an empty durable log has no prefix to retain', async () => {
@@ -1373,7 +1015,7 @@ describe('useCadChatClient', () => {
     // Admitted as one, `packages/agent-host` refused it with
     // HISTORY_PREFIX_INVALID against the chat's empty log and the operator's
     // primary flow never ran on the browser host.
-    const body = await composeSeededBody([
+    const command = await composeSeededCommand([
       {
         id: 'user-seeded',
         role: 'user',
@@ -1382,20 +1024,20 @@ describe('useCadChatClient', () => {
       },
     ]);
 
-    expect(body['browserHost']).toEqual({ trigger: 'submit', config: expect.anything() as unknown });
+    expect(command).toMatchObject({ type: 'start', payload: { trigger: 'submit' } });
   });
 
   it('keeps a hydration regenerate rewinding the durable history prefix it retains', async () => {
-    const body = await composeSeededBody([
+    const command = await composeSeededCommand([
       { id: 'user-1', role: 'user', parts: [{ type: 'text', text: 'Build it.' }] },
       { id: 'assistant-1', role: 'assistant', parts: [{ type: 'text', text: 'Done.' }] },
       { id: 'user-2', role: 'user', parts: [{ type: 'text', text: 'Again.' }] },
       { id: 'assistant-2', role: 'assistant', parts: [{ type: 'text', text: 'Done again.' }] },
     ]);
 
-    expect(body['browserHost']).toMatchObject({
-      trigger: 'regenerate',
-      retainedMessageIds: ['user-1', 'assistant-1'],
+    expect(command).toMatchObject({
+      type: 'start',
+      payload: { trigger: 'regenerate', retainedMessageIds: ['user-1', 'assistant-1'] },
     });
   });
 
@@ -1419,7 +1061,7 @@ describe('useCadChatClient', () => {
   });
 
   /* Resume never changes kind into a replay after its gesture was taken. */
-  it('refuses a browser resume with no resumable run, and resumes when it has one', async () => {
+  it('refuses Resume without a projected paused run and resumes that run once observed', async () => {
     const chat = mock<Chat<MyUIMessage>>();
     /* One user message, because a continuation leases it: a transcript with
      * none has no turn to continue and `turnIntentOf` refuses it (W10-B). */
@@ -1466,14 +1108,14 @@ describe('useCadChatClient', () => {
     browserHostHarness.resumable = true;
     browserHostHarness.run = { runId: 'run_live' };
 
-    await expect(composeTurn({ kind: 'continue' })).resolves.toEqual({
+    await expect(composeTurn({ kind: 'continue' })).resolves.toMatchObject({
       runId: 'run_live',
       leaseTurnId: 'user_1',
-      request: { kind: 'continue' },
+      request: { kind: 'continue', command: { type: 'resume', payload: { runId: 'run_live' } } },
     });
   });
 
-  it('names the host on the execution target and never a checkout or a mode', async () => {
+  it('sends the selected model in Start config without a page checkout or mode', async () => {
     mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-5.5' } }));
     const chat = mock<Chat<MyUIMessage>>();
     useActiveChatInstanceMock.mockReturnValue(chat);
@@ -1488,11 +1130,10 @@ describe('useCadChatClient', () => {
       expect(actions.sendMessage).toHaveBeenCalledOnce();
     });
 
-    const body = (await admittedBody()) as unknown as {
-      readonly agent: CadAgentConfigInput;
-      readonly execution: Record<string, unknown>;
-    };
-    expect(body.agent.execution).toEqual({ kind: 'tau', model: 'openai-gpt-5.5' });
-    expect(body.execution).toEqual({ hostId: expect.stringMatching(/^host_/u) as unknown });
+    const request = await admittedRequest();
+    expect(request['command']).toMatchObject({
+      type: 'start',
+      payload: { config: { model: { id: 'openai-gpt-5.5' } } },
+    });
   });
 });

@@ -18,6 +18,7 @@ const project = (view: SpecView): GatewayTraceState => {
     now: view['now'] as number,
     row: { ...row, terminalTtl, ev: [...row.ev].sort() },
     held: view['acctHeld'] as number,
+    supplier: (view['sup'] as { readonly a: GatewayTraceState['supplier'] }).a,
     voided: (view['voided'] as readonly string[]).includes('a'),
     ...(claims[0] === undefined ? {} : { claim: { gen: claims[0].gen, t: claims[0].t } }),
   };
@@ -56,6 +57,7 @@ describe('GatewayInvocation TLC to credit operation oracle (GI-A5)', () => {
       'ApiDispatch',
       'ApiObserve',
       'ApiFinish',
+      'SupplierEnd',
       'HostResume',
       'SweepClaim',
       'SweepResolve',
@@ -69,5 +71,27 @@ describe('GatewayInvocation TLC to credit operation oracle (GI-A5)', () => {
     const coversVoid = behaviours.some((behaviour) => behaviour.some((view) => project(view).voided));
     expect(coversUnresolvable).toBe(true);
     expect(coversVoid).toBe(true);
+    for (const action of ['ApiFinish', 'SweepResolve']) {
+      const settles = behaviours.some((behaviour) =>
+        behaviour.some((view, index) => {
+          const previous = behaviour[index - 1];
+          if (previous === undefined || view['act'] !== action) {
+            return false;
+          }
+          const before = project(previous);
+          const after = project(view);
+          return (
+            before.row.cust === 'pending' &&
+            after.row.cust === 'settled' &&
+            after.row.ev.includes('final') &&
+            after.row.charged === 1 &&
+            after.row.gen === (action === 'ApiFinish' ? 1 : 2) &&
+            after.row.tgen === after.row.gen &&
+            after.held === 0
+          );
+        }),
+      );
+      expect(settles, `Missing final-evidence settlement via ${action}`).toBe(true);
+    }
   });
 });

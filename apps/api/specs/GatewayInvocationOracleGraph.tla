@@ -22,6 +22,7 @@ GraphNext ==
     \/ S!ApiAdmit("a") /\ Label("ApiAdmit")
     \/ S!ApiMarkIntent("a") /\ Label("ApiMarkIntent")
     \/ S!ApiDispatch("a") /\ Label("ApiDispatch")
+    \/ S!SupplierEnd("a") /\ Label("SupplierEnd")
     \/ S!ApiObserve("a") /\ Label("ApiObserve")
     \/ S!ApiFinish("a") /\ Label("ApiFinish")
     \/ S!SweepClaim /\ Label("SweepClaim")

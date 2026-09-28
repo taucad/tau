@@ -779,13 +779,13 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     store.setFocusedProject('proj_a');
     store.acquire('chat-a', 'proj_a');
     const stopObserving = store.observe('chat-a', 'proj_a');
-    publishLogRows('chat-a', runningRows());
+    publishLogRows(store, 'chat-a', runningRows());
     expect(projectA.heard).toContainEqual({ type: 'projectedRunsChanged', runs: ['chat-a'], stoppableRuns: [] });
 
     /* The person navigates to B while A's run is still going. */
     store.setProjectSession('proj_b', projectB.ref);
     store.setFocusedProject('proj_b');
-    publishLogRows('chat-a', [lifecycleRow(2, 'completed')], 2);
+    publishLogRows(store, 'chat-a', [lifecycleRow(2, 'completed')], 2);
 
     expect(projectA.heard.at(-1)).toEqual({ type: 'projectedRunsChanged', runs: [], stoppableRuns: [] });
     expect(projectB.heard).toEqual([]);
@@ -853,7 +853,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     await vi.waitFor(() => {
       expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
     });
-    publishLogRows('chat_a', runningRows());
+    publishLogRows(store, 'chat_a', runningRows());
 
     expect(projectB.heard).toEqual([]);
     expect(projectA.heard).toContainEqual({ type: 'projectedRunsChanged', runs: ['chat_a'], stoppableRuns: [] });
@@ -1041,7 +1041,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
         expect(deps.getChat).toHaveBeenCalledWith('chat_early_settlement');
       });
       const runId = 'req_early_settlement';
-      publishLogRows('chat_early_settlement', runningRows(runId));
+      publishLogRows(store, 'chat_early_settlement', runningRows(runId));
       expect(projectA.heard).toContainEqual({
         type: 'projectedRunsChanged',
         runs: ['chat_early_settlement'],
@@ -1059,7 +1059,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
       await vi.waitFor(() => {
         expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
       });
-      publishLogRows('chat_early_settlement', [lifecycleRow(2, 'completed', runId)], 2);
+      publishLogRows(store, 'chat_early_settlement', [lifecycleRow(2, 'completed', runId)], 2);
 
       const chatA = session.stateActorRef;
       expect(chatA.getSnapshot().matches({ run: 'done' })).toBe(true);
@@ -1098,7 +1098,7 @@ describe('ChatSessionStore — run phase from the log (PV-S7, G02)', () => {
     store.setProjectSession('proj_history', project.ref);
     const actor = store.acquire('chat_history', 'proj_history').stateActorRef;
 
-    publishLogRows('chat_history', [...runningRows('run_old'), lifecycleRow(2, 'completed', 'run_old')]);
+    publishLogRows(store, 'chat_history', [...runningRows('run_old'), lifecycleRow(2, 'completed', 'run_old')]);
 
     expect(actor.getSnapshot().matches({ run: 'idle' })).toBe(true);
     expect(project.heard).toEqual([]);
@@ -1114,11 +1114,12 @@ describe('ChatSessionStore — run phase from the log (PV-S7, G02)', () => {
     const stopObserving = store.observe('chat_pages', 'proj_pages');
 
     /* The first page of a three-row log: the run it shows running may have ended in the next. */
-    publishLogPage('chat_pages', runningRows(), { cursor: 0, endCursor: 3 });
+    publishLogPage(store, 'chat_pages', runningRows(), { cursor: 0, endCursor: 3 });
     expect(actor.getSnapshot().matches({ run: 'idle' })).toBe(true);
     expect(project.heard).toEqual([]);
 
     publishLogRows(
+      store,
       'chat_pages',
       [logRow(2, { type: 'message.appended', message: { id: 'm2', role: 'assistant', content: 'Hi.' } })],
       2,
@@ -1137,7 +1138,7 @@ describe('ChatSessionStore — historical host outcomes from the projection (PV-
     const chatId = `chat_historical_${type}`;
     const runId = `run_historical_${type}`;
     const stopObserving = store.observe(chatId, 'project_history');
-    publishLogRows(chatId, [
+    publishLogRows(store, chatId, [
       ...runningRows(runId),
       lifecycleRow(2, type === 'turn.failed' ? 'failed' : 'completed', runId),
       logRow(3, {
@@ -1254,13 +1255,14 @@ describe('ChatSessionStore', () => {
     const toolRow = (sequence: number, message: Readonly<{ role: string; toolCallId: string; toolName: string }>) =>
       logRow(sequence, { type: 'message.appended', message: { id: `m${String(sequence)}`, ...message } });
 
-    publishLogRows('chat_tool_name', [
+    publishLogRows(store, 'chat_tool_name', [
       ...runningRows(),
       toolRow(2, { role: 'tool-input', toolCallId: 'tool_1', toolName: 'search' }),
     ]);
     expect(actor.getSnapshot().context).toMatchObject({ toolsInFlight: 1, toolName: 'search' });
 
     publishLogRows(
+      store,
       'chat_tool_name',
       [
         toolRow(3, { role: 'tool-output', toolCallId: 'tool_1', toolName: 'search' }),
@@ -1288,8 +1290,8 @@ describe('ChatSessionStore', () => {
       store.setDependencies(deps);
       return { store, deps };
     };
-    const ended = (chatId: string, state: string): void => {
-      publishLogRows(chatId, [...runningRows(), lifecycleRow(2, state)]);
+    const ended = (store: StoreType, chatId: string, state: string): void => {
+      publishLogRows(store, chatId, [...runningRows(), lifecycleRow(2, state)]);
     };
     const requested = logRow(2, {
       type: 'interrupt.recorded',
@@ -1304,9 +1306,9 @@ describe('ChatSessionStore', () => {
         store.acquire(chatId, projectId);
       }
 
-      ended('chat_success', 'completed');
-      ended('chat_error', 'failed');
-      ended('chat_cancelled', 'cancelled');
+      ended(store, 'chat_success', 'completed');
+      ended(store, 'chat_error', 'failed');
+      ended(store, 'chat_cancelled', 'cancelled');
 
       expect(store.isUnread('chat_success')).toBe(true);
       expect(store.isUnread('chat_error')).toBe(true);
@@ -1320,7 +1322,7 @@ describe('ChatSessionStore', () => {
       const { store } = storeInProject();
       store.acquire('chat_approval', projectId);
 
-      publishLogRows('chat_approval', [...runningRows(), requested]);
+      publishLogRows(store, 'chat_approval', [...runningRows(), requested]);
 
       expect(store.isUnread('chat_approval')).toBe(true);
     });
@@ -1331,13 +1333,13 @@ describe('ChatSessionStore', () => {
       const { store } = storeInProject();
       store.acquire('chat_opened', projectId);
       store.focusChat('chat_opened');
-      ended('chat_opened', 'completed');
+      ended(store, 'chat_opened', 'completed');
       expect(store.isUnread('chat_opened')).toBe(false);
       store.focusChat('chat_next');
       store.blurChat('chat_opened');
 
       /* The resume replays the rows the projection already holds, then the SDK walks submitted → ready. */
-      ended('chat_opened', 'completed');
+      ended(store, 'chat_opened', 'completed');
       finishRun(harness.created[0]!);
       await settle();
 
@@ -1349,8 +1351,8 @@ describe('ChatSessionStore', () => {
       store.acquire('chat_active', projectId);
       store.focusChat('chat_active');
 
-      publishLogRows('chat_active', [...runningRows(), requested]);
-      publishLogRows('chat_active', [lifecycleRow(3, 'completed')], 3);
+      publishLogRows(store, 'chat_active', [...runningRows(), requested]);
+      publishLogRows(store, 'chat_active', [lifecycleRow(3, 'completed')], 3);
 
       expect(store.isUnread('chat_active')).toBe(false);
       await vi.waitFor(() => {
@@ -1368,7 +1370,7 @@ describe('ChatSessionStore', () => {
       store.acquire('chat_focused', projectId);
       store.focusChat('chat_focused');
 
-      ended('chat_listed', 'completed');
+      ended(store, 'chat_listed', 'completed');
 
       expect(store.isUnread('chat_listed')).toBe(true);
     });
@@ -1379,7 +1381,7 @@ describe('ChatSessionStore', () => {
       store.acquire('chat_hidden', projectId);
       store.focusChat('chat_hidden');
 
-      ended('chat_hidden', 'completed');
+      ended(store, 'chat_hidden', 'completed');
       expect(store.isUnread('chat_hidden')).toBe(true);
 
       store.markViewed('chat_hidden');
@@ -1392,6 +1394,7 @@ describe('ChatSessionStore', () => {
       });
       /* A newer attention row is unread again: the receipt names the row the person saw. */
       publishLogRows(
+        store,
         'chat_hidden',
         [
           lifecycleRow(3, 'admitted', 'run_2'),
@@ -1842,7 +1845,7 @@ describe('ChatSessionStore', () => {
       const runId = 'run_projected_empty_cancel';
       const { store, deps, session, hostCommand, unpublish } = await open(chatId, projectId);
       deps.client.files.set(`${chatAttachmentsDirectory(projectId, chatId)}/${pngHash}.png`, pngBytes);
-      publishLogRows(chatId, [
+      publishLogRows(store, chatId, [
         ...runningRows(runId),
         logRow(2, {
           runId,
@@ -1866,7 +1869,7 @@ describe('ChatSessionStore', () => {
       expect(hostCommand.mock.calls[0]?.[0].type).toBe('cancel');
       expect(session.draftActorRef.getSnapshot().context.draftText).toBe('');
 
-      publishLogRows(chatId, [lifecycleRow(3, 'cancelled', runId)], 3);
+      publishLogRows(store, chatId, [lifecycleRow(3, 'cancelled', runId)], 3);
       expect(store.getProjection(chatId)?.ledger.runs[runId]?.lifecycle).toBe('cancelled');
       await vi.waitFor(() => {
         expect(session.draftActorRef.getSnapshot().context).toMatchObject({
@@ -1889,7 +1892,7 @@ describe('ChatSessionStore', () => {
       const projectId = 'project_projected_partial_cancel';
       const runId = 'run_projected_partial_cancel';
       const { store, deps, session, hostCommand, unpublish } = await open(chatId, projectId);
-      publishLogRows(chatId, [
+      publishLogRows(store, chatId, [
         ...runningRows(runId),
         logRow(2, {
           runId,
@@ -1907,7 +1910,7 @@ describe('ChatSessionStore', () => {
       await vi.waitFor(() => {
         expect(hostCommand).toHaveBeenCalledTimes(1);
       });
-      publishLogRows(chatId, [lifecycleRow(4, 'cancelled', runId)], 4);
+      publishLogRows(store, chatId, [lifecycleRow(4, 'cancelled', runId)], 4);
       await vi.waitFor(() => {
         expect(session.chat.messages.flatMap((message) => message.parts)).toEqual(
           expect.arrayContaining([expect.objectContaining({ type: 'text', text: 'Partial answer' })]),
@@ -2162,7 +2165,7 @@ describe('ChatSessionStore — composer records (W7)', () => {
     await vi.waitFor(() => {
       expect(first.store.isUnread(chatId)).toBe(true);
     });
-    publishLogRows(chatId, log);
+    publishLogRows(first.store, chatId, log);
     expect(first.store.isUnread(chatId)).toBe(true);
 
     first.store.markViewed(chatId);
@@ -2177,7 +2180,7 @@ describe('ChatSessionStore — composer records (W7)', () => {
 
     const second = openStore(client);
     second.store.acquire(chatId, projectId);
-    publishLogRows(chatId, log);
+    publishLogRows(second.store, chatId, log);
     await vi.waitFor(() => {
       expect(second.store.unreadRecordRef(projectId).getSnapshot().matches({ lifecycle: 'usable' })).toBe(true);
     });
@@ -2236,7 +2239,7 @@ describe('ChatSessionStore — composer records (W7)', () => {
     await vi.waitFor(() => {
       expect(hostCommand).toHaveBeenCalledExactlyOnceWith(command);
     });
-    publishLogRows(chatId, runningRows(runId));
+    publishLogRows(store, chatId, runningRows(runId));
     const displaced = store.requestTurn(chatId, { kind: 'send', message: second, attachments: draftAttachments });
     const third = store.requestTurn(chatId, { kind: 'send', message: buildUserMessage({ text: 'third message' }) });
     await Promise.all([displaced, third]);
@@ -2482,7 +2485,7 @@ describe('ChatSessionStore — composer records (W7)', () => {
     store.unreadRecordRef(projectId).on('writeFailed', failed);
     vi.spyOn(client, 'writeFile').mockRejectedValueOnce(Object.assign(new Error('EACCES'), { code: 'EACCES' }));
 
-    publishLogRows(chatId, [...runningRows(), lifecycleRow(2, 'completed')]);
+    publishLogRows(store, chatId, [...runningRows(), lifecycleRow(2, 'completed')]);
     store.markViewed(chatId);
 
     await vi.waitFor(() => {
@@ -2572,7 +2575,7 @@ describe('ChatSessionStore — unread restore and live-record deletion (W8)', ()
     const client = createMemoryClient();
     const first = openStore(client);
     first.store.acquire(chatId, projectId);
-    publishLogRows(chatId, [...runningRows(), lifecycleRow(2, 'completed')]);
+    publishLogRows(first.store, chatId, [...runningRows(), lifecycleRow(2, 'completed')]);
     expect(first.store.isUnread(chatId)).toBe(true);
     first.store.release(chatId);
 
@@ -2580,7 +2583,7 @@ describe('ChatSessionStore — unread restore and live-record deletion (W8)', ()
     second.store.acquire(chatId, projectId);
     const woke = vi.fn();
     second.store.subscribeUnread(woke);
-    publishLogRows(chatId, [...runningRows(), lifecycleRow(2, 'completed')]);
+    publishLogRows(second.store, chatId, [...runningRows(), lifecycleRow(2, 'completed')]);
 
     expect(second.store.isUnread(chatId)).toBe(true);
     expect(woke).toHaveBeenCalled();

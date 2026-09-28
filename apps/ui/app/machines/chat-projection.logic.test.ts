@@ -26,7 +26,6 @@ import {
   selectToolsInFlight,
   selectTurnRevision,
 } from '#machines/chat-projection.logic.js';
-import { deriveChatTranscript } from '#chat-clients/_internal/browser-agent-host-transport.js';
 import type { ChatProjection, ChatProjectionReadAnswer } from '#machines/chat-projection.logic.js';
 import { lifecycleRow, logRow } from '#machines/chat-projection.fixture.js';
 
@@ -155,7 +154,7 @@ describe('chatProjectionLogic (PV-S7)', () => {
   it('materializes the live transcript from the same terminal log', async () => {
     const rows = readLog('recorded/in-project-ping-pong-turn');
     const projected = project(rows, 7);
-    expect(await materializeTranscript(projected)).toEqual(await deriveChatTranscript(rows));
+    expect(await materializeTranscript(projected)).toEqual(await materializeTranscript(project(rows, 1)));
     expect(await materializeTranscript(projected)).toEqual(await materializeTranscript(projected));
     const watched = projected.ledger.currentRunId!;
     const withoutWatchedRun = await materializeTranscript(projected, watched);
@@ -181,8 +180,8 @@ describe('chatProjectionLogic (PV-S7)', () => {
     expect(digestLogSegments(after)).not.toBe(digestLogSegments(before));
     expect(second.remote?.digest).toBe(digestLogSegments(after));
     expect(await materializeTranscript(completed)).toEqual([
-      ...(await deriveChatTranscript(remote)),
-      ...(await deriveChatTranscript(own)),
+      ...(await materializeTranscript(project(remote, 1))),
+      ...(await materializeTranscript(project(own, 1))),
     ]);
     expect(reduceChatProjection(second, { type: 'remote', segments: after }).state).toBe(second);
     expect(completed.remote).toBe(second.remote);

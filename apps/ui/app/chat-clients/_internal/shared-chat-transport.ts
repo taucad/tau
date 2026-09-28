@@ -2,32 +2,7 @@ import { Chat } from '@ai-sdk/react';
 import type { MyUIMessage } from '@taucad/chat';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
-import { BrowserPlacementChatTransport } from '#chat-clients/_internal/browser-agent-host-transport.js';
-
-/**
- * Legacy durable-run binding bridge. Live AI SDK chats each receive their own
- * transport below, so an armed watch cannot leak into another chat. The
- * binding bridge goes with the old reattach path in PV-S11/PV-S12.
- *
- * Lives under `chat-clients/_internal/` to enforce the rule that *only* the
- * profile-scoped chat clients (and the session store that owns the live
- * `Chat` instances they consume) may touch the AI SDK transport surface.
- * Every other UI site must reach the wire through a chat-client verb so
- * `body: { agent }` composition stays centralised (blueprint R7-R10).
- *
- * @internal
- */
-// oxlint-disable-next-line tau-lint/require-public-export-jsdoc -- @internal, scoped to chat-clients & chat-session-store
-export const sharedChatTransport = new BrowserPlacementChatTransport<MyUIMessage>();
-
-/** Seeds the exact durable run selected by project-scoped reload discovery. */
-export const bindDurableChatRun = (chatId: string, runId: string): void => {
-  sharedChatTransport.bindRun(chatId, runId);
-};
-
-/** Reads the exact run captured by admission before the AI SDK finish callback. */
-export const getBoundDurableChatRunId = (chatId: string): string | undefined =>
-  sharedChatTransport.getBoundRunId(chatId);
+import type { BrowserPlacementChatTransport } from '#chat-clients/_internal/browser-agent-host-transport.js';
 
 type CreateChatInstanceOptions = {
   readonly chatId: string;

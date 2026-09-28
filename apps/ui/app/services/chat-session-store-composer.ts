@@ -11,11 +11,33 @@ import type { Actor } from 'xstate';
 import type { composerRecordMachine } from '#machines/composer-record.machine.js';
 import type { ComposerRecordStore } from '#db/composer-record-store.js';
 import type { AttachmentStore } from '#db/attachment-store.js';
-import { awaitSettlement } from '#chat-clients/_internal/browser-agent-host-transport.js';
+import { AgentHostWorkerError } from '#services/agent-host-client.js';
 import { attachmentUrl, isAttachmentUrl } from '#utils/attachment.utils.js';
 import type { AttachmentName } from '#utils/attachment.utils.js';
 
 type ComposerRecordRef = Actor<typeof composerRecordMachine>;
+
+/** Maximum wait for a chat row to name the project holding its composer. */
+const composerBindingTimeout = 30_000;
+
+const awaitComposerBinding = async (
+  bound: Promise<ComposerBinding | undefined>,
+): Promise<ComposerBinding | undefined> => {
+  const expired = Promise.withResolvers<never>();
+  const timer = globalThis.setTimeout(() => {
+    expired.reject(
+      new AgentHostWorkerError(
+        'COMPOSER_BINDING_TIMEOUT',
+        'This chat never found the project its draft is saved in. Reload the page and try again.',
+      ),
+    );
+  }, composerBindingTimeout);
+  try {
+    return await Promise.race([bound, expired.promise]);
+  } finally {
+    globalThis.clearTimeout(timer);
+  }
+};
 
 /** The parts of the draft machine's context that reference attachments. */
 type DraftReferences = {
@@ -58,7 +80,7 @@ export type UnreadRecord = {
  * draft lives in memory without a failure to report. Attachment bytes still
  * fail, because a draft cannot hold an attachment it has nowhere to store.
  *
- * Nothing this store does can outlast {@link awaitSettlement}'s bound. `bound`
+ * Nothing this store does can outlast the composer's wait bound. `bound`
  * is settled by a peer — the chat row that names the owning project, behind a
  * released predecessor's drain — and an unbounded wait on it left the record
  * machine in `loading` for the life of the page: the saved draft never came
@@ -70,12 +92,7 @@ export type UnreadRecord = {
  * @returns A store that delegates to the bound one.
  */
 export const deferredRecordStore = (bound: Promise<ComposerBinding | undefined>): ComposerRecordStore => {
-  const binding = async (): Promise<ComposerBinding | undefined> =>
-    awaitSettlement(
-      bound,
-      'This chat never found the project its draft is saved in. Reload the page and try again.',
-      'COMPOSER_BINDING_TIMEOUT',
-    );
+  const binding = async (): Promise<ComposerBinding | undefined> => awaitComposerBinding(bound);
   const record = async (): Promise<ComposerRecordStore> => {
     const owner = await binding();
     if (owner === undefined) {

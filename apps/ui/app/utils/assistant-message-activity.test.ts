@@ -4,7 +4,7 @@ import type { AgentLiveEvent } from '@taucad/agent-host';
 import { readUIMessageStream } from 'ai';
 import type { UIMessageChunk } from 'ai';
 import type { MyUIMessage } from '@taucad/chat';
-import { deriveChatTranscript } from '#chat-clients/_internal/browser-agent-host-transport.js';
+import { initialChatProjection, materializeTranscript, reduceChatProjection } from '#machines/chat-projection.logic.js';
 import { projectAgentHostEvent, projectAgentHostLiveEvent } from '#services/agent-host-event-projection.js';
 import {
   activityFamily,
@@ -189,11 +189,8 @@ describe('assistant message activity', () => {
  * The durable log of the desktop in-project run whose transcript rendered a
  * bare "File edits failed" over four `create_file`/`get_kernel_result` rounds
  * that every log row reports as `isError: false` (W11-diag, W11-fix section 7).
- * The chat is replayed the way `chat-file-storage.ts:169` loads one — through
- * `deriveChatTranscript` — and then finalized the way the store's
- * `applyFinishedRequest` finalizes a stream that ended cleanly
- * (`chat-session-store.ts:1659-1661`), which is the only site on this path that
- * can stamp `output-error` over a tool the host never failed.
+ * The chat is replayed through the same projection materializer the store
+ * reads, then its interrupted tool parts are finalized.
  */
 describe('desktop in-project turn replay', () => {
   const replayed = async (): Promise<readonly MyUIMessage[]> => {
@@ -201,7 +198,17 @@ describe('desktop in-project turn replay', () => {
       .split('\n')
       .filter((line) => line.trim() !== '')
       .map((line) => parseLogEvent(JSON.parse(line)));
-    const derived = await deriveChatTranscript(events);
+    const projected = reduceChatProjection(initialChatProjection, {
+      type: 'batch',
+      answer: {
+        status: 'batch',
+        cursor: 0,
+        nextCursor: events.length,
+        endCursor: events.length,
+        events,
+      },
+    }).state;
+    const derived = await materializeTranscript(projected);
     return finalizeInterruptedToolParts([...derived], 'chat_31RN18nUqDU3WBOn8v3Bn', 'success');
   };
 

@@ -962,29 +962,29 @@ describe('ActiveChatProvider', () => {
   });
 
   it('names the agent working from its log’s run, not the SDK request (PV-S7, D12)', () => {
-    const { result } = renderHook(() => useChatComposer(), {
+    const { result } = renderHook(() => ({ composer: useChatComposer(), store: useChatSessionStore() }), {
       wrapper: createSessionWrapper('chat_working'),
     });
 
     act(() => {
-      publishLogRows('chat_working', runningRows());
+      publishLogRows(result.current.store, 'chat_working', runningRows());
     });
-    expect(result.current.status).toBe('ready');
-    expect(result.current.agentActivity).toBe('working');
+    expect(result.current.composer.status).toBe('ready');
+    expect(result.current.composer.agentActivity).toBe('working');
 
     act(() => {
-      publishLogRows('chat_working', [lifecycleRow(2, 'completed')], 2);
+      publishLogRows(result.current.store, 'chat_working', [lifecycleRow(2, 'completed')], 2);
     });
-    expect(result.current.agentActivity).toBe('ready');
+    expect(result.current.composer.agentActivity).toBe('ready');
   });
 
   it('should surface approval and cancellation activity independently from the execution provider', () => {
-    const { result } = renderHook(() => ({ composer: useChatComposer(), session: useActiveChatSession() }), {
+    const { result } = renderHook(() => ({ composer: useChatComposer(), store: useChatSessionStore() }), {
       wrapper: createSessionWrapper('chat_activity'),
     });
 
     act(() => {
-      publishLogRows('chat_activity', [
+      publishLogRows(result.current.store, 'chat_activity', [
         ...runningRows(),
         logRow(2, { type: 'interrupt.recorded', interruptId: 'i1', phase: 'requested', reason: 'approval' }),
       ]);
@@ -993,6 +993,7 @@ describe('ActiveChatProvider', () => {
 
     act(() => {
       publishLogRows(
+        result.current.store,
         'chat_activity',
         [logRow(3, { type: 'interrupt.recorded', interruptId: 'i1', phase: 'resolved', reason: 'approval' })],
         3,
@@ -1007,7 +1008,7 @@ describe('ActiveChatProvider', () => {
       wrapper: createSessionWrapper('chat_stop'),
     });
     act(() => {
-      publishLogRows('chat_stop', runningRows());
+      publishLogRows(result.current.store, 'chat_stop', runningRows());
       result.current.composer.stop();
     });
     expect(result.current.store.isStopping('chat_stop')).toBe(true);

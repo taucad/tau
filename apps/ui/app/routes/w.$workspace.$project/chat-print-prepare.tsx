@@ -1513,14 +1513,14 @@ export function PrepareSection({
                   submissionDefaults(provider, entry, { manifest, filamentColors }),
                 )}
                 jsonSchema={advancedSubmissionSchema}
-                onParametersChange={(changed) =>
+                onParametersChange={(changed) => {
                   setSubmission({
                     ...Object.fromEntries(
                       Object.entries(submission).filter(([key]) => prepareSubmissionFields.has(key)),
                     ),
                     ...changed,
-                  })
-                }
+                  });
+                }}
                 enableSearch={false}
                 units={printUnits}
                 parameterManifest={submissionManifest}

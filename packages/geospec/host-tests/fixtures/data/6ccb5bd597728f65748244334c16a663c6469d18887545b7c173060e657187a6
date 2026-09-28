@@ -1,0 +1,1320 @@
+{
+  "schemaVersion": 1,
+  "numericProfile": "geospec-st-logical-requests-v3",
+  "authority": "execution/principal-m3-review-a1.json.continuousFixtureEntryReview + continuousContractDecision",
+  "sourceJoins": [
+    {
+      "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/continuous-fixtures/public-request-proposals.json",
+      "sha256": "b879bff021da293447ae2aa40b99a5164102e3feaf8eff723e86fb735d9e30f0"
+    },
+    {
+      "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/continuous-fixtures/public-request-proposals-v2.json",
+      "sha256": "a490f04ab5b872fd463846a5268db908ba6601e8c321b0a861c8102307e72a3f"
+    },
+    {
+      "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/continuous-fixtures/intent.json",
+      "sha256": "28ae4ce068c3166e44af16a0ebbc35b9d78added745a0465dd0e1b1dacd27d20"
+    },
+    {
+      "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/continuous-fixtures/math-proof.json",
+      "sha256": "a992a8d1016749decc598d00560bae17718af90ffbc9c008a58738a2635ffe09"
+    },
+    {
+      "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/continuous-fixtures/observed-import.json",
+      "sha256": "2940c74f6a9e4a22b90576277184db7fdac9409ea03b555ce651faa5733d2192"
+    },
+    {
+      "path": "packages/geospec/src/runner/types.ts",
+      "sha256": "25101b3d64538a4d4dc3f62eba3542a2a763fe466b21c95936b2d9b2ba418746"
+    },
+    {
+      "path": "packages/geospec/src/selector/types.ts",
+      "sha256": "1d4714efe9fda8119f962f999a86cf72b6b9f3cb8e75ea14dfcdaa9157955848"
+    }
+  ],
+  "scope": "18 independently declared ordinary public controls. Primary bytes/math fixed. Full current-profile result strings/admission raw-label metadata are not independently frozen; capture and validate source-derived exact witness semantics before empirical profile-byte freezing. This is not an approximate-volume golden campaign.",
+  "rows": [
+    {
+      "id": "insertion-depth3-band3-positive",
+      "subject": {
+        "id": "insertion-boxes",
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/continuous-fixtures/fixtures/insertion-boxes.step",
+        "byteLength": 32512,
+        "sha256": "f8d44e55f2b013d3cee7b8c47eabe2432d87140d767c7e3750f921434d1b1eee",
+        "format": "step",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "sourceUnit": "auto",
+          "outputUnit": "mm"
+        }
+      },
+      "matcher": "toHaveSpatialRelationships",
+      "polarity": "positive",
+      "options": {
+        "relationships": [
+          {
+            "kind": "insertion",
+            "subject": {
+              "kind": "occurrence",
+              "name": "insertion-subject"
+            },
+            "target": {
+              "kind": "occurrence",
+              "name": "insertion-target"
+            },
+            "axis": [
+              1,
+              0,
+              0
+            ],
+            "min": 3,
+            "max": 3,
+            "tolerance": 0
+          }
+        ]
+      },
+      "independentPositiveSatisfied": true,
+      "workUnitBudget": 8000000,
+      "subjectSlot": "part",
+      "claimId": "insertion-depth3-band3-positive",
+      "cohort": "continuous-nominal-a1",
+      "expectedStatus": "passed",
+      "ingestRequest": {
+        "protocolVersion": 3,
+        "registryVersion": 4,
+        "canonicalProfile": "geospec-jcs-v1",
+        "requestId": "continuous-ingest",
+        "method": "ingestSubject",
+        "format": "step",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "sourceUnit": "auto",
+          "outputUnit": "mm"
+        },
+        "ingestOptions": {},
+        "primaryByteLength": 32512,
+        "resources": []
+      }
+    },
+    {
+      "id": "insertion-depth3-band3-negative",
+      "subject": {
+        "id": "insertion-boxes",
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/continuous-fixtures/fixtures/insertion-boxes.step",
+        "byteLength": 32512,
+        "sha256": "f8d44e55f2b013d3cee7b8c47eabe2432d87140d767c7e3750f921434d1b1eee",
+        "format": "step",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "sourceUnit": "auto",
+          "outputUnit": "mm"
+        }
+      },
+      "matcher": "toHaveSpatialRelationships",
+      "polarity": "negative",
+      "options": {
+        "relationships": [
+          {
+            "kind": "insertion",
+            "subject": {
+              "kind": "occurrence",
+              "name": "insertion-subject"
+            },
+            "target": {
+              "kind": "occurrence",
+              "name": "insertion-target"
+            },
+            "axis": [
+              1,
+              0,
+              0
+            ],
+            "min": 3,
+            "max": 3,
+            "tolerance": 0
+          }
+        ]
+      },
+      "independentPositiveSatisfied": true,
+      "workUnitBudget": 8000000,
+      "subjectSlot": "part",
+      "claimId": "insertion-depth3-band3-negative",
+      "cohort": "continuous-nominal-a1",
+      "expectedStatus": "failed",
+      "ingestRequest": {
+        "protocolVersion": 3,
+        "registryVersion": 4,
+        "canonicalProfile": "geospec-jcs-v1",
+        "requestId": "continuous-ingest",
+        "method": "ingestSubject",
+        "format": "step",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "sourceUnit": "auto",
+          "outputUnit": "mm"
+        },
+        "ingestOptions": {},
+        "primaryByteLength": 32512,
+        "resources": []
+      }
+    },
+    {
+      "id": "insertion-depth3-band4to6-positive",
+      "subject": {
+        "id": "insertion-boxes",
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/continuous-fixtures/fixtures/insertion-boxes.step",
+        "byteLength": 32512,
+        "sha256": "f8d44e55f2b013d3cee7b8c47eabe2432d87140d767c7e3750f921434d1b1eee",
+        "format": "step",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "sourceUnit": "auto",
+          "outputUnit": "mm"
+        }
+      },
+      "matcher": "toHaveSpatialRelationships",
+      "polarity": "positive",
+      "options": {
+        "relationships": [
+          {
+            "kind": "insertion",
+            "subject": {
+              "kind": "occurrence",
+              "name": "insertion-subject"
+            },
+            "target": {
+              "kind": "occurrence",
+              "name": "insertion-target"
+            },
+            "axis": [
+              1,
+              0,
+              0
+            ],
+            "min": 4,
+            "max": 6,
+            "tolerance": 0
+          }
+        ]
+      },
+      "independentPositiveSatisfied": false,
+      "workUnitBudget": 8000000,
+      "subjectSlot": "part",
+      "claimId": "insertion-depth3-band4to6-positive",
+      "cohort": "continuous-nominal-a1",
+      "expectedStatus": "failed",
+      "ingestRequest": {
+        "protocolVersion": 3,
+        "registryVersion": 4,
+        "canonicalProfile": "geospec-jcs-v1",
+        "requestId": "continuous-ingest",
+        "method": "ingestSubject",
+        "format": "step",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "sourceUnit": "auto",
+          "outputUnit": "mm"
+        },
+        "ingestOptions": {},
+        "primaryByteLength": 32512,
+        "resources": []
+      }
+    },
+    {
+      "id": "insertion-depth3-band4to6-negative",
+      "subject": {
+        "id": "insertion-boxes",
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/continuous-fixtures/fixtures/insertion-boxes.step",
+        "byteLength": 32512,
+        "sha256": "f8d44e55f2b013d3cee7b8c47eabe2432d87140d767c7e3750f921434d1b1eee",
+        "format": "step",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "sourceUnit": "auto",
+          "outputUnit": "mm"
+        }
+      },
+      "matcher": "toHaveSpatialRelationships",
+      "polarity": "negative",
+      "options": {
+        "relationships": [
+          {
+            "kind": "insertion",
+            "subject": {
+              "kind": "occurrence",
+              "name": "insertion-subject"
+            },
+            "target": {
+              "kind": "occurrence",
+              "name": "insertion-target"
+            },
+            "axis": [
+              1,
+              0,
+              0
+            ],
+            "min": 4,
+            "max": 6,
+            "tolerance": 0
+          }
+        ]
+      },
+      "independentPositiveSatisfied": false,
+      "workUnitBudget": 8000000,
+      "subjectSlot": "part",
+      "claimId": "insertion-depth3-band4to6-negative",
+      "cohort": "continuous-nominal-a1",
+      "expectedStatus": "passed",
+      "ingestRequest": {
+        "protocolVersion": 3,
+        "registryVersion": 4,
+        "canonicalProfile": "geospec-jcs-v1",
+        "requestId": "continuous-ingest",
+        "method": "ingestSubject",
+        "format": "step",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "sourceUnit": "auto",
+          "outputUnit": "mm"
+        },
+        "ingestOptions": {},
+        "primaryByteLength": 32512,
+        "resources": []
+      }
+    },
+    {
+      "id": "wide-channel-min4-positive",
+      "subject": {
+        "id": "channel-wide",
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/continuous-fixtures/fixtures/channel-wide.step",
+        "byteLength": 64337,
+        "sha256": "9cec67720e1fcf7b730da7a6fcf064bb836489ce02b0ca631af2d6c4991f6ae8",
+        "format": "step",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "sourceUnit": "auto",
+          "outputUnit": "mm"
+        }
+      },
+      "matcher": "toHaveVoidContinuity",
+      "polarity": "positive",
+      "options": {
+        "bounds": {
+          "min": [
+            0,
+            0,
+            0
+          ],
+          "max": [
+            4,
+            4,
+            4
+          ]
+        },
+        "material": [
+          "wall-y-low",
+          "wall-y-high",
+          "wall-z-low",
+          "wall-z-high"
+        ],
+        "path": [
+          [
+            0.5,
+            2,
+            2
+          ],
+          [
+            3.5,
+            2,
+            2
+          ]
+        ],
+        "minCrossSection": 4
+      },
+      "independentPositiveSatisfied": true,
+      "workUnitBudget": 8000000,
+      "subjectSlot": "part",
+      "claimId": "wide-channel-min4-positive",
+      "cohort": "continuous-nominal-a1",
+      "expectedStatus": "passed",
+      "ingestRequest": {
+        "protocolVersion": 3,
+        "registryVersion": 4,
+        "canonicalProfile": "geospec-jcs-v1",
+        "requestId": "continuous-ingest",
+        "method": "ingestSubject",
+        "format": "step",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "sourceUnit": "auto",
+          "outputUnit": "mm"
+        },
+        "ingestOptions": {},
+        "primaryByteLength": 64337,
+        "resources": []
+      }
+    },
+    {
+      "id": "wide-channel-min4-negative",
+      "subject": {
+        "id": "channel-wide",
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/continuous-fixtures/fixtures/channel-wide.step",
+        "byteLength": 64337,
+        "sha256": "9cec67720e1fcf7b730da7a6fcf064bb836489ce02b0ca631af2d6c4991f6ae8",
+        "format": "step",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "sourceUnit": "auto",
+          "outputUnit": "mm"
+        }
+      },
+      "matcher": "toHaveVoidContinuity",
+      "polarity": "negative",
+      "options": {
+        "bounds": {
+          "min": [
+            0,
+            0,
+            0
+          ],
+          "max": [
+            4,
+            4,
+            4
+          ]
+        },
+        "material": [
+          "wall-y-low",
+          "wall-y-high",
+          "wall-z-low",
+          "wall-z-high"
+        ],
+        "path": [
+          [
+            0.5,
+            2,
+            2
+          ],
+          [
+            3.5,
+            2,
+            2
+          ]
+        ],
+        "minCrossSection": 4
+      },
+      "independentPositiveSatisfied": true,
+      "workUnitBudget": 8000000,
+      "subjectSlot": "part",
+      "claimId": "wide-channel-min4-negative",
+      "cohort": "continuous-nominal-a1",
+      "expectedStatus": "failed",
+      "ingestRequest": {
+        "protocolVersion": 3,
+        "registryVersion": 4,
+        "canonicalProfile": "geospec-jcs-v1",
+        "requestId": "continuous-ingest",
+        "method": "ingestSubject",
+        "format": "step",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "sourceUnit": "auto",
+          "outputUnit": "mm"
+        },
+        "ingestOptions": {},
+        "primaryByteLength": 64337,
+        "resources": []
+      }
+    },
+    {
+      "id": "wide-channel-min5-positive",
+      "subject": {
+        "id": "channel-wide",
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/continuous-fixtures/fixtures/channel-wide.step",
+        "byteLength": 64337,
+        "sha256": "9cec67720e1fcf7b730da7a6fcf064bb836489ce02b0ca631af2d6c4991f6ae8",
+        "format": "step",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "sourceUnit": "auto",
+          "outputUnit": "mm"
+        }
+      },
+      "matcher": "toHaveVoidContinuity",
+      "polarity": "positive",
+      "options": {
+        "bounds": {
+          "min": [
+            0,
+            0,
+            0
+          ],
+          "max": [
+            4,
+            4,
+            4
+          ]
+        },
+        "material": [
+          "wall-y-low",
+          "wall-y-high",
+          "wall-z-low",
+          "wall-z-high"
+        ],
+        "path": [
+          [
+            0.5,
+            2,
+            2
+          ],
+          [
+            3.5,
+            2,
+            2
+          ]
+        ],
+        "minCrossSection": 5
+      },
+      "independentPositiveSatisfied": false,
+      "workUnitBudget": 8000000,
+      "subjectSlot": "part",
+      "claimId": "wide-channel-min5-positive",
+      "cohort": "continuous-nominal-a1",
+      "expectedStatus": "failed",
+      "ingestRequest": {
+        "protocolVersion": 3,
+        "registryVersion": 4,
+        "canonicalProfile": "geospec-jcs-v1",
+        "requestId": "continuous-ingest",
+        "method": "ingestSubject",
+        "format": "step",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "sourceUnit": "auto",
+          "outputUnit": "mm"
+        },
+        "ingestOptions": {},
+        "primaryByteLength": 64337,
+        "resources": []
+      }
+    },
+    {
+      "id": "wide-channel-min5-negative",
+      "subject": {
+        "id": "channel-wide",
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/continuous-fixtures/fixtures/channel-wide.step",
+        "byteLength": 64337,
+        "sha256": "9cec67720e1fcf7b730da7a6fcf064bb836489ce02b0ca631af2d6c4991f6ae8",
+        "format": "step",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "sourceUnit": "auto",
+          "outputUnit": "mm"
+        }
+      },
+      "matcher": "toHaveVoidContinuity",
+      "polarity": "negative",
+      "options": {
+        "bounds": {
+          "min": [
+            0,
+            0,
+            0
+          ],
+          "max": [
+            4,
+            4,
+            4
+          ]
+        },
+        "material": [
+          "wall-y-low",
+          "wall-y-high",
+          "wall-z-low",
+          "wall-z-high"
+        ],
+        "path": [
+          [
+            0.5,
+            2,
+            2
+          ],
+          [
+            3.5,
+            2,
+            2
+          ]
+        ],
+        "minCrossSection": 5
+      },
+      "independentPositiveSatisfied": false,
+      "workUnitBudget": 8000000,
+      "subjectSlot": "part",
+      "claimId": "wide-channel-min5-negative",
+      "cohort": "continuous-nominal-a1",
+      "expectedStatus": "passed",
+      "ingestRequest": {
+        "protocolVersion": 3,
+        "registryVersion": 4,
+        "canonicalProfile": "geospec-jcs-v1",
+        "requestId": "continuous-ingest",
+        "method": "ingestSubject",
+        "format": "step",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "sourceUnit": "auto",
+          "outputUnit": "mm"
+        },
+        "ingestOptions": {},
+        "primaryByteLength": 64337,
+        "resources": []
+      }
+    },
+    {
+      "id": "narrow-channel-min1-positive",
+      "subject": {
+        "id": "channel-narrow",
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/continuous-fixtures/fixtures/channel-narrow.step",
+        "byteLength": 129684,
+        "sha256": "b61d8f199498d38d792a668747c4e9269ad36917dd47e687d532f46b6c94b65d",
+        "format": "step",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "sourceUnit": "auto",
+          "outputUnit": "mm"
+        }
+      },
+      "matcher": "toHaveVoidContinuity",
+      "polarity": "positive",
+      "options": {
+        "bounds": {
+          "min": [
+            0,
+            0,
+            0
+          ],
+          "max": [
+            4,
+            4,
+            4
+          ]
+        },
+        "material": [
+          "wall-y-low",
+          "wall-y-high",
+          "wall-z-low",
+          "wall-z-high",
+          "waist-y-low",
+          "waist-y-high",
+          "waist-z-low",
+          "waist-z-high"
+        ],
+        "path": [
+          [
+            0.5,
+            2,
+            2
+          ],
+          [
+            3.5,
+            2,
+            2
+          ]
+        ],
+        "minCrossSection": 1
+      },
+      "independentPositiveSatisfied": false,
+      "workUnitBudget": 8000000,
+      "subjectSlot": "part",
+      "claimId": "narrow-channel-min1-positive",
+      "cohort": "continuous-nominal-a1",
+      "expectedStatus": "failed",
+      "ingestRequest": {
+        "protocolVersion": 3,
+        "registryVersion": 4,
+        "canonicalProfile": "geospec-jcs-v1",
+        "requestId": "continuous-ingest",
+        "method": "ingestSubject",
+        "format": "step",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "sourceUnit": "auto",
+          "outputUnit": "mm"
+        },
+        "ingestOptions": {},
+        "primaryByteLength": 129684,
+        "resources": []
+      }
+    },
+    {
+      "id": "narrow-channel-min1-negative",
+      "subject": {
+        "id": "channel-narrow",
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/continuous-fixtures/fixtures/channel-narrow.step",
+        "byteLength": 129684,
+        "sha256": "b61d8f199498d38d792a668747c4e9269ad36917dd47e687d532f46b6c94b65d",
+        "format": "step",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "sourceUnit": "auto",
+          "outputUnit": "mm"
+        }
+      },
+      "matcher": "toHaveVoidContinuity",
+      "polarity": "negative",
+      "options": {
+        "bounds": {
+          "min": [
+            0,
+            0,
+            0
+          ],
+          "max": [
+            4,
+            4,
+            4
+          ]
+        },
+        "material": [
+          "wall-y-low",
+          "wall-y-high",
+          "wall-z-low",
+          "wall-z-high",
+          "waist-y-low",
+          "waist-y-high",
+          "waist-z-low",
+          "waist-z-high"
+        ],
+        "path": [
+          [
+            0.5,
+            2,
+            2
+          ],
+          [
+            3.5,
+            2,
+            2
+          ]
+        ],
+        "minCrossSection": 1
+      },
+      "independentPositiveSatisfied": false,
+      "workUnitBudget": 8000000,
+      "subjectSlot": "part",
+      "claimId": "narrow-channel-min1-negative",
+      "cohort": "continuous-nominal-a1",
+      "expectedStatus": "passed",
+      "ingestRequest": {
+        "protocolVersion": 3,
+        "registryVersion": 4,
+        "canonicalProfile": "geospec-jcs-v1",
+        "requestId": "continuous-ingest",
+        "method": "ingestSubject",
+        "format": "step",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "sourceUnit": "auto",
+          "outputUnit": "mm"
+        },
+        "ingestOptions": {},
+        "primaryByteLength": 129684,
+        "resources": []
+      }
+    },
+    {
+      "id": "narrow-channel-connectivity-positive",
+      "subject": {
+        "id": "channel-narrow",
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/continuous-fixtures/fixtures/channel-narrow.step",
+        "byteLength": 129684,
+        "sha256": "b61d8f199498d38d792a668747c4e9269ad36917dd47e687d532f46b6c94b65d",
+        "format": "step",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "sourceUnit": "auto",
+          "outputUnit": "mm"
+        }
+      },
+      "matcher": "toHaveVoidContinuity",
+      "polarity": "positive",
+      "options": {
+        "bounds": {
+          "min": [
+            0,
+            0,
+            0
+          ],
+          "max": [
+            4,
+            4,
+            4
+          ]
+        },
+        "material": [
+          "wall-y-low",
+          "wall-y-high",
+          "wall-z-low",
+          "wall-z-high",
+          "waist-y-low",
+          "waist-y-high",
+          "waist-z-low",
+          "waist-z-high"
+        ],
+        "path": [
+          [
+            0.5,
+            2,
+            2
+          ],
+          [
+            3.5,
+            2,
+            2
+          ]
+        ]
+      },
+      "independentPositiveSatisfied": true,
+      "workUnitBudget": 8000000,
+      "subjectSlot": "part",
+      "claimId": "narrow-channel-connectivity-positive",
+      "cohort": "continuous-nominal-a1",
+      "expectedStatus": "passed",
+      "ingestRequest": {
+        "protocolVersion": 3,
+        "registryVersion": 4,
+        "canonicalProfile": "geospec-jcs-v1",
+        "requestId": "continuous-ingest",
+        "method": "ingestSubject",
+        "format": "step",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "sourceUnit": "auto",
+          "outputUnit": "mm"
+        },
+        "ingestOptions": {},
+        "primaryByteLength": 129684,
+        "resources": []
+      }
+    },
+    {
+      "id": "narrow-channel-connectivity-negative",
+      "subject": {
+        "id": "channel-narrow",
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/continuous-fixtures/fixtures/channel-narrow.step",
+        "byteLength": 129684,
+        "sha256": "b61d8f199498d38d792a668747c4e9269ad36917dd47e687d532f46b6c94b65d",
+        "format": "step",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "sourceUnit": "auto",
+          "outputUnit": "mm"
+        }
+      },
+      "matcher": "toHaveVoidContinuity",
+      "polarity": "negative",
+      "options": {
+        "bounds": {
+          "min": [
+            0,
+            0,
+            0
+          ],
+          "max": [
+            4,
+            4,
+            4
+          ]
+        },
+        "material": [
+          "wall-y-low",
+          "wall-y-high",
+          "wall-z-low",
+          "wall-z-high",
+          "waist-y-low",
+          "waist-y-high",
+          "waist-z-low",
+          "waist-z-high"
+        ],
+        "path": [
+          [
+            0.5,
+            2,
+            2
+          ],
+          [
+            3.5,
+            2,
+            2
+          ]
+        ]
+      },
+      "independentPositiveSatisfied": true,
+      "workUnitBudget": 8000000,
+      "subjectSlot": "part",
+      "claimId": "narrow-channel-connectivity-negative",
+      "cohort": "continuous-nominal-a1",
+      "expectedStatus": "failed",
+      "ingestRequest": {
+        "protocolVersion": 3,
+        "registryVersion": 4,
+        "canonicalProfile": "geospec-jcs-v1",
+        "requestId": "continuous-ingest",
+        "method": "ingestSubject",
+        "format": "step",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "sourceUnit": "auto",
+          "outputUnit": "mm"
+        },
+        "ingestOptions": {},
+        "primaryByteLength": 129684,
+        "resources": []
+      }
+    },
+    {
+      "id": "wide-channel-waypoint-in-material",
+      "subject": {
+        "id": "channel-wide",
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/continuous-fixtures/fixtures/channel-wide.step",
+        "byteLength": 64337,
+        "sha256": "9cec67720e1fcf7b730da7a6fcf064bb836489ce02b0ca631af2d6c4991f6ae8",
+        "format": "step",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "sourceUnit": "auto",
+          "outputUnit": "mm"
+        }
+      },
+      "matcher": "toHaveVoidContinuity",
+      "polarity": "positive",
+      "options": {
+        "bounds": {
+          "min": [
+            0,
+            0,
+            0
+          ],
+          "max": [
+            4,
+            4,
+            4
+          ]
+        },
+        "material": [
+          "wall-y-low",
+          "wall-y-high",
+          "wall-z-low",
+          "wall-z-high"
+        ],
+        "path": [
+          [
+            0.5,
+            0.5,
+            2
+          ],
+          [
+            3.5,
+            2,
+            2
+          ]
+        ]
+      },
+      "independentDisposition": "geometric-false-not-refusal",
+      "workUnitBudget": 8000000,
+      "subjectSlot": "part",
+      "claimId": "wide-channel-waypoint-in-material",
+      "cohort": "continuous-nominal-a1",
+      "independentPositiveSatisfied": false,
+      "expectedStatus": "failed",
+      "ingestRequest": {
+        "protocolVersion": 3,
+        "registryVersion": 4,
+        "canonicalProfile": "geospec-jcs-v1",
+        "requestId": "continuous-ingest",
+        "method": "ingestSubject",
+        "format": "step",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "sourceUnit": "auto",
+          "outputUnit": "mm"
+        },
+        "ingestOptions": {},
+        "primaryByteLength": 64337,
+        "resources": []
+      }
+    },
+    {
+      "id": "wide-channel-waypoint-in-material-negative",
+      "subject": {
+        "id": "channel-wide",
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/continuous-fixtures/fixtures/channel-wide.step",
+        "byteLength": 64337,
+        "sha256": "9cec67720e1fcf7b730da7a6fcf064bb836489ce02b0ca631af2d6c4991f6ae8",
+        "format": "step",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "sourceUnit": "auto",
+          "outputUnit": "mm"
+        }
+      },
+      "matcher": "toHaveVoidContinuity",
+      "polarity": "negative",
+      "options": {
+        "bounds": {
+          "min": [
+            0,
+            0,
+            0
+          ],
+          "max": [
+            4,
+            4,
+            4
+          ]
+        },
+        "material": [
+          "wall-y-low",
+          "wall-y-high",
+          "wall-z-low",
+          "wall-z-high"
+        ],
+        "path": [
+          [
+            0.5,
+            0.5,
+            2
+          ],
+          [
+            3.5,
+            2,
+            2
+          ]
+        ]
+      },
+      "independentDisposition": "geometric-false-not-refusal",
+      "workUnitBudget": 8000000,
+      "subjectSlot": "part",
+      "claimId": "wide-channel-waypoint-in-material-negative",
+      "cohort": "continuous-nominal-a1",
+      "independentPositiveSatisfied": false,
+      "expectedStatus": "passed",
+      "ingestRequest": {
+        "protocolVersion": 3,
+        "registryVersion": 4,
+        "canonicalProfile": "geospec-jcs-v1",
+        "requestId": "continuous-ingest",
+        "method": "ingestSubject",
+        "format": "step",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "sourceUnit": "auto",
+          "outputUnit": "mm"
+        },
+        "ingestOptions": {},
+        "primaryByteLength": 64337,
+        "resources": []
+      }
+    },
+    {
+      "id": "wide-channel-isolation-in-material",
+      "subject": {
+        "id": "channel-wide",
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/continuous-fixtures/fixtures/channel-wide.step",
+        "byteLength": 64337,
+        "sha256": "9cec67720e1fcf7b730da7a6fcf064bb836489ce02b0ca631af2d6c4991f6ae8",
+        "format": "step",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "sourceUnit": "auto",
+          "outputUnit": "mm"
+        }
+      },
+      "matcher": "toHaveVoidContinuity",
+      "polarity": "positive",
+      "options": {
+        "bounds": {
+          "min": [
+            0,
+            0,
+            0
+          ],
+          "max": [
+            4,
+            4,
+            4
+          ]
+        },
+        "material": [
+          "wall-y-low",
+          "wall-y-high",
+          "wall-z-low",
+          "wall-z-high"
+        ],
+        "path": [
+          [
+            0.5,
+            2,
+            2
+          ],
+          [
+            3.5,
+            2,
+            2
+          ]
+        ],
+        "isolatedFrom": [
+          [
+            0.5,
+            0.5,
+            2
+          ]
+        ]
+      },
+      "independentDisposition": "unsupported-vacuous-isolation",
+      "workUnitBudget": 8000000,
+      "subjectSlot": "part",
+      "claimId": "wide-channel-isolation-in-material",
+      "cohort": "continuous-nominal-a1",
+      "expectedStatus": "refused",
+      "ingestRequest": {
+        "protocolVersion": 3,
+        "registryVersion": 4,
+        "canonicalProfile": "geospec-jcs-v1",
+        "requestId": "continuous-ingest",
+        "method": "ingestSubject",
+        "format": "step",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "sourceUnit": "auto",
+          "outputUnit": "mm"
+        },
+        "ingestOptions": {},
+        "primaryByteLength": 64337,
+        "resources": []
+      }
+    },
+    {
+      "id": "wide-channel-isolation-in-material-negative",
+      "subject": {
+        "id": "channel-wide",
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/continuous-fixtures/fixtures/channel-wide.step",
+        "byteLength": 64337,
+        "sha256": "9cec67720e1fcf7b730da7a6fcf064bb836489ce02b0ca631af2d6c4991f6ae8",
+        "format": "step",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "sourceUnit": "auto",
+          "outputUnit": "mm"
+        }
+      },
+      "matcher": "toHaveVoidContinuity",
+      "polarity": "negative",
+      "options": {
+        "bounds": {
+          "min": [
+            0,
+            0,
+            0
+          ],
+          "max": [
+            4,
+            4,
+            4
+          ]
+        },
+        "material": [
+          "wall-y-low",
+          "wall-y-high",
+          "wall-z-low",
+          "wall-z-high"
+        ],
+        "path": [
+          [
+            0.5,
+            2,
+            2
+          ],
+          [
+            3.5,
+            2,
+            2
+          ]
+        ],
+        "isolatedFrom": [
+          [
+            0.5,
+            0.5,
+            2
+          ]
+        ]
+      },
+      "independentDisposition": "unsupported-vacuous-isolation",
+      "workUnitBudget": 8000000,
+      "subjectSlot": "part",
+      "claimId": "wide-channel-isolation-in-material-negative",
+      "cohort": "continuous-nominal-a1",
+      "expectedStatus": "refused",
+      "ingestRequest": {
+        "protocolVersion": 3,
+        "registryVersion": 4,
+        "canonicalProfile": "geospec-jcs-v1",
+        "requestId": "continuous-ingest",
+        "method": "ingestSubject",
+        "format": "step",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "sourceUnit": "auto",
+          "outputUnit": "mm"
+        },
+        "ingestOptions": {},
+        "primaryByteLength": 64337,
+        "resources": []
+      }
+    },
+    {
+      "id": "wide-channel-off-center-section",
+      "subject": {
+        "id": "channel-wide",
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/continuous-fixtures/fixtures/channel-wide.step",
+        "byteLength": 64337,
+        "sha256": "9cec67720e1fcf7b730da7a6fcf064bb836489ce02b0ca631af2d6c4991f6ae8",
+        "format": "step",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "sourceUnit": "auto",
+          "outputUnit": "mm"
+        }
+      },
+      "matcher": "toHaveVoidContinuity",
+      "polarity": "positive",
+      "options": {
+        "bounds": {
+          "min": [
+            0,
+            0,
+            0
+          ],
+          "max": [
+            4,
+            4,
+            4
+          ]
+        },
+        "material": [
+          "wall-y-low",
+          "wall-y-high",
+          "wall-z-low",
+          "wall-z-high"
+        ],
+        "path": [
+          [
+            0.5,
+            1.5,
+            2
+          ],
+          [
+            3.5,
+            1.5,
+            2
+          ]
+        ],
+        "minCrossSection": 4
+      },
+      "independentDisposition": "unsupported-section-domain",
+      "workUnitBudget": 8000000,
+      "subjectSlot": "part",
+      "claimId": "wide-channel-off-center-section",
+      "cohort": "continuous-nominal-a1",
+      "expectedStatus": "refused",
+      "ingestRequest": {
+        "protocolVersion": 3,
+        "registryVersion": 4,
+        "canonicalProfile": "geospec-jcs-v1",
+        "requestId": "continuous-ingest",
+        "method": "ingestSubject",
+        "format": "step",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "sourceUnit": "auto",
+          "outputUnit": "mm"
+        },
+        "ingestOptions": {},
+        "primaryByteLength": 64337,
+        "resources": []
+      }
+    },
+    {
+      "id": "wide-channel-off-center-section-negative",
+      "subject": {
+        "id": "channel-wide",
+        "path": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/m3-geometry-a1/lanes/continuous-fixtures/fixtures/channel-wide.step",
+        "byteLength": 64337,
+        "sha256": "9cec67720e1fcf7b730da7a6fcf064bb836489ce02b0ca631af2d6c4991f6ae8",
+        "format": "step",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "sourceUnit": "auto",
+          "outputUnit": "mm"
+        }
+      },
+      "matcher": "toHaveVoidContinuity",
+      "polarity": "negative",
+      "options": {
+        "bounds": {
+          "min": [
+            0,
+            0,
+            0
+          ],
+          "max": [
+            4,
+            4,
+            4
+          ]
+        },
+        "material": [
+          "wall-y-low",
+          "wall-y-high",
+          "wall-z-low",
+          "wall-z-high"
+        ],
+        "path": [
+          [
+            0.5,
+            1.5,
+            2
+          ],
+          [
+            3.5,
+            1.5,
+            2
+          ]
+        ],
+        "minCrossSection": 4
+      },
+      "independentDisposition": "unsupported-section-domain",
+      "workUnitBudget": 8000000,
+      "subjectSlot": "part",
+      "claimId": "wide-channel-off-center-section-negative",
+      "cohort": "continuous-nominal-a1",
+      "expectedStatus": "refused",
+      "ingestRequest": {
+        "protocolVersion": 3,
+        "registryVersion": 4,
+        "canonicalProfile": "geospec-jcs-v1",
+        "requestId": "continuous-ingest",
+        "method": "ingestSubject",
+        "format": "step",
+        "frame": {
+          "coordinateSystem": "z-up",
+          "sourceUnit": "auto",
+          "outputUnit": "mm"
+        },
+        "ingestOptions": {},
+        "primaryByteLength": 64337,
+        "resources": []
+      }
+    }
+  ]
+}

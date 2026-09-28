@@ -62,7 +62,7 @@ export type ProjectHostOptions = Pick<
   'projectId' | 'checkoutsDirectory' | 'gitExecutable' | 'apiBaseUrl' | 'tauCredential'
 > &
   Pick<AgentLauncherOptions, 'systemPrompt' | 'model' | 'modelTransport' | 'credential'> &
-  Pick<HostToolRegistryOptions, 'systemSkillBundles' | 'geospecRunner' | 'machines'> &
+  Pick<HostToolRegistryOptions, 'systemSkillBundles' | 'geospecRunner' | 'geospecAuthoringMode' | 'machines'> &
   Readonly<{
     /** Absolute project root: the live checkout, and where `.tau/chats/` lives. */
     workspaceRoot: string;
@@ -345,6 +345,7 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
     parameterActor: async (root: string, entry: string) => parameters.get(parameterKey(root, entry)),
     ...(options.systemSkillBundles === undefined ? {} : { systemSkillBundles: options.systemSkillBundles }),
     ...(options.geospecRunner === undefined ? {} : { geospecRunner: options.geospecRunner }),
+    ...(options.geospecAuthoringMode === undefined ? {} : { geospecAuthoringMode: options.geospecAuthoringMode }),
     /* The machine tools, over a facet this host already serves; a print request names the project by its id. */
     ...(options.machines === undefined ? {} : { machines: options.machines }),
     ...(options.projectId === undefined ? {} : { projectId: options.projectId }),

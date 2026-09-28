@@ -1,0 +1,135 @@
+{
+  "schemaVersion": 1,
+  "taskId": "M3-EDGE-TREATMENT-FIXTURES-A1",
+  "frozenAt": "2026-09-09T12:39:02Z",
+  "frozenBeforeFirstExport": true,
+  "frame": { "sourceUnit": "mm", "upAxis": "+Z" },
+  "observationBoundary": "Independent ordinary AP242 producer/direct reader. Future edge-treatment classifier and candidate outputs are excluded.",
+  "nominalMatcherOptions": {
+    "tolerance": 0.01,
+    "chamfer": {
+      "member": { "distance": 1, "tolerance": 0.01 },
+      "mismatch": { "distance": 1.25, "tolerance": 0.01 }
+    },
+    "filletRadius1": {
+      "member": { "radius": 1, "tolerance": 0.01 },
+      "mismatch": { "radius": 1.25, "tolerance": 0.01 }
+    },
+    "filletRadius2": {
+      "member": { "radius": 2, "tolerance": 0.01 },
+      "mismatch": { "radius": 2.25, "tolerance": 0.01 }
+    },
+    "labelledPlanarChamfer": {
+      "member": { "distance": 1, "selection": "qualified transition", "tolerance": 0.01 },
+      "mismatch": { "distance": 1, "selection": "not the source label", "tolerance": 0.01 }
+    }
+  },
+  "fixtures": [
+    {
+      "order": 1,
+      "id": "planar-chamfer",
+      "file": "01-planar-chamfer.step",
+      "root": "m3-edge-planar-chamfer",
+      "occurrences": ["planar-chamfer-part"],
+      "source": "Box [0,10]x[0,12]x[0,14]; symmetric distance-1 chamfer on the vertical edge x=10,y=12.",
+      "intent": { "chamfer": "one planar equal-distance straight bevel, nominal distance 1", "fillet": "none" },
+      "sourceFaceLabel": "qualified transition"
+    },
+    {
+      "order": 2,
+      "id": "cylindrical-fillet",
+      "file": "02-cylindrical-fillet.step",
+      "root": "m3-edge-cylindrical-fillet",
+      "occurrences": ["cylindrical-fillet-part"],
+      "source": "Same box and vertical edge as case 1; constant radius-2 fillet.",
+      "intent": { "chamfer": "none", "fillet": "one cylindrical constant-radius blend, nominal radius 2" }
+    },
+    {
+      "order": 3,
+      "id": "conical-chamfer",
+      "file": "03-conical-chamfer.step",
+      "root": "m3-edge-conical-chamfer",
+      "occurrences": ["conical-chamfer-part"],
+      "source": "Solid cylinder radius 5, height 10, axis +Z; symmetric distance-1 chamfer on top circular rim z=10.",
+      "intent": { "chamfer": "one 45-degree conical band, nominal axial representative h=1", "fillet": "none" }
+    },
+    {
+      "order": 4,
+      "id": "toroidal-fillet",
+      "file": "04-toroidal-fillet.step",
+      "root": "m3-edge-toroidal-fillet",
+      "occurrences": ["toroidal-fillet-part"],
+      "source": "Same cylinder/top rim as case 3; constant radius-1 fillet.",
+      "intent": { "chamfer": "none", "fillet": "one torus quarter-band, nominal minor radius 1" }
+    },
+    {
+      "order": 5,
+      "id": "plain-box",
+      "file": "05-plain-box.step",
+      "root": "m3-edge-plain-box",
+      "occurrences": ["plain-box-part"],
+      "source": "Untouched box [0,10]x[0,12]x[0,14].",
+      "intent": { "chamfer": "none", "fillet": "none" }
+    },
+    {
+      "order": 6,
+      "id": "full-cylinder",
+      "file": "06-full-cylinder.step",
+      "root": "m3-edge-full-cylinder",
+      "occurrences": ["full-cylinder-part"],
+      "source": "Untouched solid cylinder radius 5, height 10, axis +Z.",
+      "intent": { "chamfer": "none", "fillet": "none" }
+    },
+    {
+      "order": 7,
+      "id": "rotated-planar-chamfer",
+      "file": "07-rotated-planar-chamfer.step",
+      "root": "m3-edge-rotated-planar-chamfer",
+      "occurrences": ["rotated-planar-chamfer-part"],
+      "source": "Case 1 as one unchanged definition occurrence under rational rigid transform Rz rows (3/5,-4/5,0),(4/5,3/5,0),(0,0,1), translation (20,30,40).",
+      "intent": { "chamfer": "same single planar bevel and nominal distance 1", "fillet": "none" }
+    },
+    {
+      "order": 8,
+      "id": "rotated-plain-box",
+      "file": "08-rotated-plain-box.step",
+      "root": "m3-edge-rotated-plain-box",
+      "occurrences": ["rotated-plain-box-part"],
+      "source": "Case 5 under the same rational rigid transform as case 7.",
+      "intent": { "chamfer": "none", "fillet": "none" }
+    },
+    {
+      "order": 9,
+      "id": "unrelated-planar-assembly",
+      "file": "09-unrelated-planar-assembly.step",
+      "root": "m3-edge-unrelated-planar-assembly",
+      "occurrences": ["planar-chamfer-part", "unrelated-box"],
+      "source": "Case 1 plus a separate named box [100,120]x[0,20]x[0,30].",
+      "intent": { "chamfer": "unchanged single local planar bevel and nominal distance 1", "fillet": "none" }
+    },
+    {
+      "order": 10,
+      "id": "unrelated-cylinder-assembly",
+      "file": "10-unrelated-cylinder-assembly.step",
+      "root": "m3-edge-unrelated-cylinder-assembly",
+      "occurrences": ["full-cylinder-part", "unrelated-box"],
+      "source": "Case 6 plus the same separate named box as case 9.",
+      "intent": { "chamfer": "none", "fillet": "none" }
+    },
+    {
+      "order": 11,
+      "id": "shared-fillet-instances",
+      "file": "11-shared-fillet-instances.step",
+      "root": "m3-edge-shared-fillet-instances",
+      "occurrences": ["fillet-instance-a", "fillet-instance-b"],
+      "source": "One case-2 source definition instanced at identity and translation (30,0,0).",
+      "intent": { "chamfer": "none", "fillet": "two occurrence-distinct members with the same local nominal radius 2" },
+      "sharedDefinitionRequired": true
+    }
+  ],
+  "nonGoldenObservations": [
+    "STEP numeric scalars are nominal imported observations, not exact-real/F2 authority.",
+    "No whole-reader result is frozen as a classifier golden.",
+    "No candidate implementation result may alter these fixtures, options or intents."
+  ]
+}

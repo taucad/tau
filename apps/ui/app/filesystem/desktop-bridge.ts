@@ -184,7 +184,16 @@ export const reportDesktopQuiesced = (forced: boolean): void => {
  * The desktop seam, as `apps/ui` consumes it.
  * @public
  */
+export type DesktopAgentHostConnectInput = {
+  readonly workspaceRoot: string;
+  readonly projectId: string;
+  readonly computeMode: 'off' | 'memory' | 'durable';
+  readonly geoSpecEngine?: 'legacy' | 'native' | undefined;
+};
+
 export type DesktopBridge = {
+  /** Debug-only native GeoSpec comparisons, with byte-only inputs. */
+  readonly geoSpecPerformance: { connect(): Promise<MessagePort> };
   readonly runtimeKernelIds: readonly string[];
   readonly nodeFs: {
     /**
@@ -213,7 +222,7 @@ export type DesktopBridge = {
      * Main refuses a root the user never granted, and the promise then never
      * settles rather than resolving onto a port to nowhere.
      */
-    connect(workspaceRoot: string, projectId: string, computeMode: 'off' | 'memory' | 'durable'): Promise<MessagePort>;
+    connect(input: DesktopAgentHostConnectInput): Promise<MessagePort>;
     /** Keep launcher 2 alive for one project session in this renderer. */
     retain(workspaceRoot: string, projectId: string, attachmentId: string): Promise<void>;
     /** Release that hold and await launcher shutdown when it was the last one. */
@@ -258,7 +267,12 @@ export type DesktopBridge = {
   };
   readonly openFiles: {
     /** Consume paths delivered by macOS Open With as bounded file payloads. */
-    consume(): Promise<ReadonlyArray<{ readonly bytes: Uint8Array<ArrayBuffer>; readonly name: string }>>;
+    consume(): Promise<
+      ReadonlyArray<{
+        readonly bytes: Uint8Array<ArrayBuffer>;
+        readonly name: string;
+      }>
+    >;
   };
   readonly quickLook: DesktopShell['quickLook'];
   /** Slicers that need the desktop host; absent on a shell built before them. */
@@ -332,6 +346,9 @@ export const desktopBridge = (): DesktopBridge | undefined => {
   };
 
   built ??= {
+    geoSpecPerformance: {
+      connect: async () => connectServices('geospecPerformance'),
+    },
     runtimeKernelIds: shell.runtimeKernelIds ?? [],
     /* Parsed, not trusted: the names and model ids main put here came out of a
      * vendor adapter's own config options, and this page renders them. */
@@ -345,8 +362,13 @@ export const desktopBridge = (): DesktopBridge | undefined => {
       connect: async () => connectServices('nodeFs'),
     },
     agentHost: {
-      connect: async (workspaceRoot: string, projectId: string, computeMode: 'off' | 'memory' | 'durable') =>
-        connectServices('agentHost', { workspaceRoot, projectId, computeMode }),
+      connect: async ({ workspaceRoot, projectId, computeMode, geoSpecEngine }) =>
+        connectServices('agentHost', {
+          workspaceRoot,
+          projectId,
+          computeMode,
+          ...(geoSpecEngine === undefined ? {} : { geoSpecEngine }),
+        }),
       retain: async (workspaceRoot, projectId, attachmentId) =>
         shell.agentHost.retain(workspaceRoot, projectId, attachmentId),
       release: async (workspaceRoot, projectId, attachmentId) =>

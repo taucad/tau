@@ -1654,7 +1654,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         }
         return { status: 'missing' };
       }
-      /* eslint-enable no-await-in-loop */
+      /* eslint-enable no-await-in-loop -- Subsequent callbacks use the normal rule. */
     },
     [discoverProjects, ensureDiscoveryReady, ensureProjectLibraryState, getReadiedWorker],
   );

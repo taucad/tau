@@ -1,0 +1,115 @@
+{
+  "schemaVersion": 1,
+  "taskId": "M3-HOLE-TOPOLOGY-FIXTURES-A1",
+  "authority": "independent pre-execution analytic construction intent; no STEP import or candidate result input",
+  "frame": {
+    "unit": "mm",
+    "coordinateSystem": "z-up"
+  },
+  "common": {
+    "base": {
+      "min": [0, 0, 0],
+      "max": [10, 10, 10],
+      "exactVolumeMm3": "1000"
+    },
+    "bore": {
+      "radiusMm": 1,
+      "centerXY": [5, 5],
+      "axis": [0, 0, 1]
+    }
+  },
+  "cases": [
+    {
+      "id": "through",
+      "file": "01-through.step",
+      "construction": "B minus radius-1 cylinder from z=-1 through z=11",
+      "exactRemovedVolumeMm3": "10*pi",
+      "exactMaterialVolumeMm3": "1000-10*pi",
+      "topologyIntent": "complete circular cylindrical side band over z=[0,10] with open circular mouths at z=0 and z=10"
+    },
+    {
+      "id": "blind",
+      "file": "02-blind.step",
+      "construction": "B minus radius-1 cylinder from z=2 through z=11",
+      "exactRemovedVolumeMm3": "8*pi",
+      "exactMaterialVolumeMm3": "1000-8*pi",
+      "topologyIntent": "one open circular mouth at z=10, one planar disk bottom at z=2, cylindrical band length 8"
+    },
+    {
+      "id": "sealed-cavity",
+      "file": "03-sealed-cavity.step",
+      "construction": "B minus radius-1 cylinder from z=2 through z=8",
+      "exactRemovedVolumeMm3": "6*pi",
+      "exactMaterialVolumeMm3": "1000-6*pi",
+      "topologyIntent": "closed cylindrical cavity with planar disk ends at z=2 and z=8 and no exterior mouth; not an exterior hole"
+    },
+    {
+      "id": "edge-notch",
+      "file": "04-edge-notch.step",
+      "construction": "B minus radius-1 cylinder centered at x=0,y=5 from z=-1 through z=11",
+      "exactRemovedVolumeMm3": "5*pi",
+      "exactMaterialVolumeMm3": "1000-5*pi",
+      "topologyIntent": "half cylindrical side and no full circular bore band"
+    },
+    {
+      "id": "unrelated-assembly",
+      "file": "05-unrelated-assembly.step",
+      "construction": "case through plus a separately named disjoint box [20,30]x[0,10]x[20,30]",
+      "exactComponentVolumesMm3": ["1000-10*pi", "1000"],
+      "exactDocumentZRangeMm": [0, 30],
+      "topologyIntent": "local bore geometry remains case through; document-global z extent is not a throughness witness"
+    },
+    {
+      "id": "rigid-transformed",
+      "file": "06-rigid-transformed.step",
+      "construction": "one shared local through definition under (x,y,z)->(z,y,-x)+(20,30,40)",
+      "transform3x4RowMajor": [0, 0, 1, 20, 0, 1, 0, 30, -1, 0, 0, 40],
+      "exactLocatedBoxBoundsMm": {
+        "min": [20, 30, 30],
+        "max": [30, 40, 40]
+      },
+      "exactLocatedAxis": [1, 0, 0],
+      "exactLocatedRimCentersMm": [[20, 35, 35], [30, 35, 35]],
+      "topologyIntent": "rigid placement preserves local bore topology without trigonometric authoring constants"
+    },
+    {
+      "id": "shared-instance",
+      "file": "07-shared-instance.step",
+      "construction": "one through shape definition referenced by identity and translation(20,0,0) occurrences",
+      "occurrenceTranslationsMm": [[0, 0, 0], [20, 0, 0]],
+      "topologyIntent": "distinct instance identities share one definition and identical local feature intent"
+    },
+    {
+      "id": "obstructed-through",
+      "file": "08-obstructed-through.step",
+      "construction": {
+        "base": "case through",
+        "post": {
+          "min": [4.75, 4.75, 5],
+          "max": [5.25, 5.25, 12]
+        },
+        "bridge": {
+          "min": [4.75, 4.75, 11],
+          "max": [8, 5.25, 12]
+        },
+        "anchor": {
+          "min": [7.5, 4.75, 9],
+          "max": [8, 5.25, 12]
+        }
+      },
+      "exactReasoning": {
+        "postCrossSectionAreaMm2": "1/4",
+        "postCornerSquaredRadiusMm2": "1/8",
+        "boreSquaredRadiusMm2": "1",
+        "intrudingHeightInsideBaseMm": "5",
+        "positiveIntrudingVolumeMm3": "5/4"
+      },
+      "topologyIntent": "the connected arch is anchored to material above/at the mouth while the central post obstructs z=[5,10]; side band and two rim mouths alone cannot prove a clear straight bore"
+    }
+  ],
+  "nonClaims": [
+    "No imported approximate scalar is a mathematical golden.",
+    "No raw bounds, global document extent, rim pair, side band, sampled point, or candidate classifier activates canonical hole semantics.",
+    "No expected canonical status/profile byte is authored by these fixtures."
+  ]
+}

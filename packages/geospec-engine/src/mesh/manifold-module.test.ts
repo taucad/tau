@@ -22,8 +22,9 @@ it('should locate Manifold WASM explicitly when initializing the engine module',
   await ensureManifoldModule();
 
   const locateFile = initManifold.mock.calls[0]?.[0]?.locateFile;
-  if (locateFile === undefined) {
-    throw new Error('Expected ensureManifoldModule to pass locateFile to the Manifold initializer');
+  expect(locateFile).toBeTypeOf('function');
+  if (typeof locateFile !== 'function') {
+    throw new TypeError('Manifold initializer did not receive a locateFile callback.');
   }
   const wasmUrl = locateFile();
   expect(wasmUrl).toMatch(/manifold\.wasm$/u);

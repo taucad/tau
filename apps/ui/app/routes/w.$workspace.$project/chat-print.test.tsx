@@ -45,6 +45,7 @@ import {
 import { submissionDefaults } from '#routes/w.$workspace.$project/chat-print-prepare.js';
 import {
   bambuStudioRequired,
+  describeStartConfirmations,
   developerModeRequired,
   startBlocker,
 } from '#routes/w.$workspace.$project/chat-print-send.js';
@@ -148,6 +149,12 @@ beforeEach(() => {
 });
 
 describe('Print pane orientation', () => {
+  it('confirms the numeric nozzle requested for this print', () => {
+    expect(describeStartConfirmations({ expectedNozzleDiameter: 0.6 }, entry(), manifest)).toContainEqual({
+      id: 'nozzle',
+      label: 'A 0.6 mm nozzle is installed',
+    });
+  });
   it('names the machine state and the one safe next step from the observation alone', () => {
     expect(presentMachine(entry())).toMatchObject({ label: 'Ready' });
     expect(presentMachine(printing())).toMatchObject({ label: 'Printing' });
@@ -334,6 +341,8 @@ describe('Print pane prepare and send', () => {
       expectedMaterials: [{ slot: 0, materialId: 'pla-black' }],
       amsMapping: [0],
       expectedModel: 'X1C',
+      expectedNozzleDiameter: 0.4,
+      expectedFilamentDiameter: 1.75,
     });
     // Blueprint D5: the project, the path and the digest the host re-verifies; no revision.
     expect(requestInput?.artifact).toEqual({

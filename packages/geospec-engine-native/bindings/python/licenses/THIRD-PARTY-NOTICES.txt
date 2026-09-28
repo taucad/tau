@@ -1,0 +1,560 @@
+THIRD-PARTY COMPONENT ATTRIBUTIONS
+
+This inventory reports declared licenses and the exact license/notice bytes
+collected from the selected offline dependency closure. A fallback standard
+text is identified when a published Cargo package omitted its license file.
+This inventory is technical provenance and is not legal certification.
+
+Open CASCADE Technology 3d097a0328e71b826377d4814ab05ec3c3d23871
+  declared license: LGPL-2.1-only WITH OCCT-exception-1.0
+  source: https://github.com/Open-Cascade-SAS/OCCT/archive/3d097a0328e71b826377d4814ab05ec3c3d23871.tar.gz
+  license files: OCCT-LGPL-2.1.txt, OCCT-LGPL-exception.txt
+  cohort: python
+
+V8 FastMathHypot adaptation Node-v24.10.0-9b72b88f4c4565687e3a8c4d8e1232f63a501e15
+  declared license: BSD-3-Clause
+  source: https://github.com/nodejs/node/blob/9b72b88f4c4565687e3a8c4d8e1232f63a501e15/deps/v8/src/builtins/math.tq
+  license files: NOTICE.txt
+  cohort: python
+
+allocator-api2 0.2.21
+  declared license: MIT OR Apache-2.0
+  authors: Zakarum <zaq.dev@icloud.com>
+  repository: https://github.com/zakarumych/allocator-api2
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/20fe7b00e904ed690e3b9fd6073784d3fc428141dbd10b81c01fd143d0797f58-LICENSE-APACHE, cargo/36516aefdc84c5d5a1e7485425913a22dbda69eb1930c5e84d6ae4972b5194b9-LICENSE-MIT
+  cohort: python
+
+autocfg 1.5.1
+  declared license: Apache-2.0 OR MIT
+  authors: Josh Stone <cuviper@gmail.com>
+  repository: https://github.com/cuviper/autocfg
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/27995d58ad5c1145c1a8cd86244ce844886958a35eb2b78c6b772748669999ac-LICENSE-MIT, cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE
+  cohort: python
+
+block-buffer 0.12.1
+  declared license: MIT OR Apache-2.0
+  authors: RustCrypto Developers
+  repository: https://github.com/RustCrypto/utils
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/98181e7249d0c01737645ec982499ce99a0f07eb8f7d625b8840d799d10dbc01-LICENSE-MIT, cargo/a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5-LICENSE-APACHE
+  cohort: python
+
+byteorder 1.5.0
+  declared license: Unlicense OR MIT
+  authors: Andrew Gallant <jamslam@gmail.com>
+  repository: https://github.com/BurntSushi/byteorder
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f-COPYING, cargo/0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f-LICENSE-MIT, cargo/7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c-UNLICENSE
+  cohort: python
+
+cc 1.4.4
+  declared license: MIT OR Apache-2.0
+  repository: https://github.com/rust-lang/cc-rs
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397-LICENSE-MIT, cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE
+  cohort: python
+
+cfg-if 1.0.4
+  declared license: MIT OR Apache-2.0
+  authors: Alex Crichton <alex@alexcrichton.com>
+  repository: https://github.com/rust-lang/cfg-if
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397-LICENSE-MIT, cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE
+  cohort: python
+
+clipper2-rust 1.0.3
+  declared license: BSL-1.0
+  authors: Lars Brubaker <larsbrubaker@matterhackers.com>
+  repository: https://github.com/larsbrubaker/clipper2-rust
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/beb8e42e9d6b4284e03304d05a81a0755200a965fc8d0a5e0aea1e84cf805d6e-LICENSE
+  cohort: python
+
+cmov 0.5.4
+  declared license: Apache-2.0 OR MIT
+  authors: RustCrypto Developers
+  repository: https://github.com/RustCrypto/utils
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/70c9d40f1f9545c3f133b8a67206e89da850f6468eed072281bb3701514114a9-LICENSE-MIT, cargo/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30-LICENSE-APACHE
+  cohort: python
+
+cpufeatures 0.3.0
+  declared license: MIT OR Apache-2.0
+  authors: RustCrypto Developers
+  repository: https://github.com/RustCrypto/utils
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5-LICENSE-APACHE, cargo/ae9baa7beea910273c2f384c2a6b721fb7bd02bda3436074a1072e4ee689f985-LICENSE-MIT
+  cohort: python
+
+crypto-common 0.2.2
+  declared license: MIT OR Apache-2.0
+  authors: RustCrypto Developers
+  repository: https://github.com/RustCrypto/traits
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5-LICENSE-APACHE, cargo/d2e7ec5355c96eeade56b09187ceb48a6a30299da3ce7531a66d3d11405ab963-LICENSE-MIT
+  cohort: python
+
+ctutils 0.4.2
+  declared license: Apache-2.0 OR MIT
+  authors: RustCrypto Developers
+  repository: https://github.com/RustCrypto/utils
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/91585c36e4fb9ab4ca0d3dfac5d66d3c0c62cc51f640a0e1196542daf2267eae-LICENSE-MIT, cargo/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30-LICENSE-APACHE
+  cohort: python
+
+dashu-base 0.5.1
+  declared license: MIT OR Apache-2.0
+  authors: Jacob Zhong <cmpute@gmail.com>
+  repository: https://github.com/cmpute/dashu
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4-LICENSE, fallback/MIT.txt
+  cohort: python
+  note: published Cargo package omitted a license file; fallback text is marked
+
+dashu-int 0.5.1
+  declared license: MIT OR Apache-2.0
+  authors: Jacob Zhong <cmpute@gmail.com>; Tomek Czajka <tczajka@gmail.com>
+  repository: https://github.com/cmpute/dashu
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/13ce2fb7da9c6c3a5a16e86877a604e80237f076b9258115d8f0444127f6a281-NOTICE.md, cargo/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4-LICENSE, fallback/MIT.txt
+  cohort: python
+  note: published Cargo package omitted a license file; fallback text is marked
+
+dashu-ratio 0.5.1
+  declared license: MIT OR Apache-2.0
+  authors: Jacob Zhong <cmpute@gmail.com>
+  repository: https://github.com/cmpute/dashu
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4-LICENSE, fallback/MIT.txt
+  cohort: python
+  note: published Cargo package omitted a license file; fallback text is marked
+
+digest 0.11.3
+  declared license: MIT OR Apache-2.0
+  authors: RustCrypto Developers
+  repository: https://github.com/RustCrypto/traits
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5-LICENSE-APACHE, cargo/af59cea35d7f5e2777a713b8d155d65efa2c339eb43f3c14e868c6ac8506edad-LICENSE-MIT
+  cohort: python
+
+equivalent 1.0.2
+  declared license: Apache-2.0 OR MIT
+  repository: https://github.com/indexmap-rs/equivalent
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/7365cc8878a1d7ce155a58c4ca09c3d7a6be413efa5334a80ea842912b669349-LICENSE-MIT, cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE
+  cohort: python
+
+find-msvc-tools 0.1.12
+  declared license: MIT OR Apache-2.0
+  repository: https://github.com/rust-lang/cc-rs
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397-LICENSE-MIT, cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE
+  cohort: python
+
+foldhash 0.2.0
+  declared license: Zlib
+  authors: Orson Peters <orsonpeters@gmail.com>
+  repository: https://github.com/orlp/foldhash
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/b1181a40b2a7b25cf66fd01481713bc1005df082c53ef73e851e55071b102744-LICENSE
+  cohort: python
+
+geospec-engine-native-cache-host 0.0.0
+  declared license: Apache-2.0
+  license files: cargo/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4-LICENSE
+  cohort: python
+  note: published Cargo package omitted a license file; fallback text is marked
+
+geospec-engine-native-core 0.0.0
+  declared license: Apache-2.0
+  license files: cargo/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4-LICENSE
+  cohort: python
+  note: published Cargo package omitted a license file; fallback text is marked
+
+geospec-engine-native-csg 0.0.0
+  declared license: Apache-2.0
+  license files: cargo/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4-LICENSE
+  cohort: python
+  note: published Cargo package omitted a license file; fallback text is marked
+
+geospec-engine-native-occt 0.0.0
+  declared license: Apache-2.0
+  license files: cargo/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4-LICENSE
+  cohort: python
+  note: published Cargo package omitted a license file; fallback text is marked
+
+geospec-engine-native-python 0.0.0
+  declared license: Apache-2.0
+  license files: cargo/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4-LICENSE
+  cohort: python
+  note: published Cargo package omitted a license file; fallback text is marked
+
+geospec-engine-native-runtime 0.0.0
+  declared license: Apache-2.0
+  license files: cargo/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4-LICENSE
+  cohort: python
+  note: published Cargo package omitted a license file; fallback text is marked
+
+getrandom 0.2.17
+  declared license: MIT OR Apache-2.0
+  authors: The Rand Project Developers
+  repository: https://github.com/rust-random/getrandom
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/42fa16951ce7f24b5a467a40e5b449a1d41e662f97ca779864f053f39e097737-LICENSE-MIT, cargo/aaff376532ea30a0cd5330b9502ad4a4c8bf769c539c87ffe78819d188a18ebf-LICENSE-APACHE
+  cohort: python
+
+gltf 1.4.1
+  declared license: MIT OR Apache-2.0
+  authors: David Harvey-Macaulay <alteous@outlook.com>
+  repository: https://github.com/gltf-rs/gltf
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/0e6c282dfcb08a031c37b8f851fe5813fad63612e88a29dbe5121d727d67bbf2-LICENSE-MIT, cargo/3708458dee7f359ac6c9c5558023ed481be87e5372c43ebd7f2ca7ad23c12026-LICENSE-APACHE
+  cohort: python
+
+gltf-derive 1.4.1
+  declared license: MIT OR Apache-2.0
+  authors: David Harvey-Macaulay <alteous@outlook.com>
+  repository: https://github.com/gltf-rs/gltf
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/3708458dee7f359ac6c9c5558023ed481be87e5372c43ebd7f2ca7ad23c12026-LICENSE-APACHE, cargo/f71fd5946d6674af304514dc7b3b4272aa9117052dd347fb3a9dc9679f33d95f-LICENSE-MIT
+  cohort: python
+
+gltf-json 1.4.1
+  declared license: MIT OR Apache-2.0
+  authors: David Harvey-Macaulay <alteous@outlook.com>
+  repository: https://github.com/gltf-rs/gltf
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/0e6c282dfcb08a031c37b8f851fe5813fad63612e88a29dbe5121d727d67bbf2-LICENSE-MIT, cargo/3708458dee7f359ac6c9c5558023ed481be87e5372c43ebd7f2ca7ad23c12026-LICENSE-APACHE
+  cohort: python
+
+hashbrown 0.16.1
+  declared license: MIT OR Apache-2.0
+  authors: Amanieu d'Antras <amanieu@gmail.com>
+  repository: https://github.com/rust-lang/hashbrown
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE, cargo/ff8f68cb076caf8cefe7a6430d4ac086ce6af2ca8ce2c4e5a2004d4552ef52a2-LICENSE-MIT
+  cohort: python
+
+heck 0.5.0
+  declared license: MIT OR Apache-2.0
+  repository: https://github.com/withoutboats/heck
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/7b63ecd5f1902af1b63729947373683c32745c16a10e8e6292e2e2dcd7e90ae0-LICENSE-MIT, cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE
+  cohort: python
+
+hmac 0.13.0
+  declared license: MIT OR Apache-2.0
+  authors: RustCrypto Developers
+  repository: https://github.com/RustCrypto/MACs
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/9e0dfd2dd4173a530e238cb6adb37aa78c34c6bc7444e0e10c1ab5d8881f63ba-LICENSE-MIT, cargo/a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5-LICENSE-APACHE
+  cohort: python
+
+hybrid-array 0.4.14
+  declared license: MIT OR Apache-2.0
+  authors: RustCrypto Developers
+  repository: https://github.com/RustCrypto/hybrid-array
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/70c9d40f1f9545c3f133b8a67206e89da850f6468eed072281bb3701514114a9-LICENSE-MIT, cargo/a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5-LICENSE-APACHE
+  cohort: python
+
+indoc 2.0.7
+  declared license: MIT OR Apache-2.0
+  authors: David Tolnay <dtolnay@gmail.com>
+  repository: https://github.com/dtolnay/indoc
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT, cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE
+  cohort: python
+
+inflections 1.1.1
+  declared license: MIT
+  authors: Caleb Meredith <calebmeredith8@gmail.com>
+  repository: https://docs.rs/inflections
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/fe5c9498374de7953275f83f35565b289f377ceab4a28d04c7da87723e02a372-LICENSE
+  cohort: python
+
+itoa 1.0.18
+  declared license: MIT OR Apache-2.0
+  authors: David Tolnay <dtolnay@gmail.com>
+  repository: https://github.com/dtolnay/itoa
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT, cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE
+  cohort: python
+
+lazy_static 1.5.0
+  declared license: MIT OR Apache-2.0
+  authors: Marvin Löbel <loebel.marvin@gmail.com>
+  repository: https://github.com/rust-lang-nursery/lazy-static.rs
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/0621878e61f0d0fda054bcbe02df75192c28bde1ecc8289cbd86aeba2dd72720-LICENSE-MIT, cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE
+  cohort: python
+
+libc 0.2.189
+  declared license: MIT OR Apache-2.0
+  repository: https://github.com/rust-lang/libc
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/123a331b5dbf04c30097fa43b8f858bc85df671fe776de498d01f3d6b7c1f69e-LICENSE-MIT, cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE
+  cohort: python
+
+manifold-rust 0.13.1
+  declared license: Apache-2.0
+  authors: Lars Brubaker <larsbrubaker@matterhackers.com>
+  repository: https://github.com/larsbrubaker/manifold-rust
+  license files: cargo/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4-LICENSE
+  cohort: python
+
+manifold-rust f3aab1414e5b45037b848624b143d3287d8d3842
+  declared license: Apache-2.0
+  source: https://github.com/larsbrubaker/manifold-rust
+  license files: Manifold-Rust-LICENSE.txt
+  cohort: python
+
+memchr 2.8.3
+  declared license: Unlicense OR MIT
+  authors: Andrew Gallant <jamslam@gmail.com>; bluss
+  repository: https://github.com/BurntSushi/memchr
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f-COPYING, cargo/0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f-LICENSE-MIT, cargo/7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c-UNLICENSE
+  cohort: python
+
+memoffset 0.9.1
+  declared license: MIT
+  authors: Gilad Naaman <gilad.naaman@gmail.com>
+  repository: https://github.com/Gilnaa/memoffset
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/3234ac55816264ee7b6c7ee27efd61cf0a1fe775806870e3d9b4c41ea73c5cb1-LICENSE
+  cohort: python
+
+num-bigint 0.4.6
+  declared license: MIT OR Apache-2.0
+  authors: The Rust Project Developers
+  repository: https://github.com/rust-num/num-bigint
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb-LICENSE-MIT, cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE
+  cohort: python
+
+num-integer 0.1.46
+  declared license: MIT OR Apache-2.0
+  authors: The Rust Project Developers
+  repository: https://github.com/rust-num/num-integer
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb-LICENSE-MIT, cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE
+  cohort: python
+
+num-modular 0.6.5
+  declared license: Apache-2.0
+  repository: https://github.com/cmpute/num-modular
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/98b52ccf20010b67d8fd3bdf151f50ecdfc01f25d6de190e015dd436d9f7ea0b-LICENSE
+  cohort: python
+
+num-rational 0.4.2
+  declared license: MIT OR Apache-2.0
+  authors: The Rust Project Developers
+  repository: https://github.com/rust-num/num-rational
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb-LICENSE-MIT, cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE
+  cohort: python
+
+num-traits 0.2.19
+  declared license: MIT OR Apache-2.0
+  authors: The Rust Project Developers
+  repository: https://github.com/rust-num/num-traits
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb-LICENSE-MIT, cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE
+  cohort: python
+
+once_cell 1.21.4
+  declared license: MIT OR Apache-2.0
+  authors: Aleksey Kladov <aleksey.kladov@gmail.com>
+  repository: https://github.com/matklad/once_cell
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT, cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE
+  cohort: python
+
+proc-macro2 1.0.107
+  declared license: MIT OR Apache-2.0
+  authors: David Tolnay <dtolnay@gmail.com>; Alex Crichton <alex@alexcrichton.com>
+  repository: https://github.com/dtolnay/proc-macro2
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT, cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE
+  cohort: python
+
+pyo3 0.26.0
+  declared license: MIT OR Apache-2.0
+  authors: PyO3 Project and Contributors <https://github.com/PyO3>
+  repository: https://github.com/pyo3/pyo3
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/32c76dbe0e73d79100d5ece77c158399f2e2541bc5c78548a4ba45c1cb53c5c9-LICENSE-APACHE, cargo/afcbe3b2e6b37172b5a9ca869ee4c0b8cdc09316e5d4384864154482c33e5af6-LICENSE-MIT
+  cohort: python
+
+pyo3-build-config 0.26.0
+  declared license: MIT OR Apache-2.0
+  authors: PyO3 Project and Contributors <https://github.com/PyO3>
+  repository: https://github.com/pyo3/pyo3
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/32c76dbe0e73d79100d5ece77c158399f2e2541bc5c78548a4ba45c1cb53c5c9-LICENSE-APACHE, cargo/afcbe3b2e6b37172b5a9ca869ee4c0b8cdc09316e5d4384864154482c33e5af6-LICENSE-MIT
+  cohort: python
+
+pyo3-ffi 0.26.0
+  declared license: MIT OR Apache-2.0
+  authors: PyO3 Project and Contributors <https://github.com/PyO3>
+  repository: https://github.com/pyo3/pyo3
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/32c76dbe0e73d79100d5ece77c158399f2e2541bc5c78548a4ba45c1cb53c5c9-LICENSE-APACHE, cargo/afcbe3b2e6b37172b5a9ca869ee4c0b8cdc09316e5d4384864154482c33e5af6-LICENSE-MIT
+  cohort: python
+
+pyo3-macros 0.26.0
+  declared license: MIT OR Apache-2.0
+  authors: PyO3 Project and Contributors <https://github.com/PyO3>
+  repository: https://github.com/pyo3/pyo3
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/32c76dbe0e73d79100d5ece77c158399f2e2541bc5c78548a4ba45c1cb53c5c9-LICENSE-APACHE, cargo/afcbe3b2e6b37172b5a9ca869ee4c0b8cdc09316e5d4384864154482c33e5af6-LICENSE-MIT
+  cohort: python
+
+pyo3-macros-backend 0.26.0
+  declared license: MIT OR Apache-2.0
+  authors: PyO3 Project and Contributors <https://github.com/PyO3>
+  repository: https://github.com/pyo3/pyo3
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/32c76dbe0e73d79100d5ece77c158399f2e2541bc5c78548a4ba45c1cb53c5c9-LICENSE-APACHE, cargo/afcbe3b2e6b37172b5a9ca869ee4c0b8cdc09316e5d4384864154482c33e5af6-LICENSE-MIT
+  cohort: python
+
+quote 1.0.47
+  declared license: MIT OR Apache-2.0
+  authors: David Tolnay <dtolnay@gmail.com>
+  repository: https://github.com/dtolnay/quote
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT, cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE
+  cohort: python
+
+regress 0.11.1
+  declared license: MIT OR Apache-2.0
+  authors: ridiculousfish <corydoras@ridiculousfish.com>
+  repository: https://github.com/ridiculousfish/regress
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/3f8a05fc8617c5ce569fa5a4f2301cd847fe00fa011bdaa8f353fd55a2691a54-LICENSE-MIT, cargo/e36d55837170195cdf934aa6a48c0ad6efba1bde3f5b4a1b9259c171d5aeb647-LICENSE-APACHE
+  cohort: python
+
+rustc-hash 2.1.3
+  declared license: Apache-2.0 OR MIT
+  authors: The Rust Project Developers
+  repository: https://github.com/rust-lang/rustc-hash
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/30fefc3a7d6a0041541858293bcbea2dde4caa4c0a5802f996a7f7e8c0085652-LICENSE-MIT, cargo/95bd3988beee069fa2848f648dab43cc6e0b2add2ad6bcb17360caf749802bcc-LICENSE-APACHE
+  cohort: python
+
+rustversion 1.0.23
+  declared license: MIT OR Apache-2.0
+  authors: David Tolnay <dtolnay@gmail.com>
+  repository: https://github.com/dtolnay/rustversion
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT, cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE
+  cohort: python
+
+ryu 1.0.23
+  declared license: Apache-2.0 OR BSL-1.0
+  authors: David Tolnay <dtolnay@gmail.com>
+  repository: https://github.com/dtolnay/ryu
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE, cargo/c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566-LICENSE-BOOST
+  cohort: python
+
+ryu-js 1.0.2
+  declared license: Apache-2.0 OR BSL-1.0
+  authors: David Tolnay <dtolnay@gmail.com>; boa-dev
+  repository: https://github.com/boa-dev/ryu-js
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE, cargo/c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566-LICENSE-BOOST
+  cohort: python
+
+serde 1.0.219
+  declared license: MIT OR Apache-2.0
+  authors: Erick Tryzelaar <erick.tryzelaar@gmail.com>; David Tolnay <dtolnay@gmail.com>
+  repository: https://github.com/serde-rs/serde
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT, cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE
+  cohort: python
+
+serde_derive 1.0.219
+  declared license: MIT OR Apache-2.0
+  authors: Erick Tryzelaar <erick.tryzelaar@gmail.com>; David Tolnay <dtolnay@gmail.com>
+  repository: https://github.com/serde-rs/serde
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT, cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE
+  cohort: python
+
+serde_json 1.0.143
+  declared license: MIT OR Apache-2.0
+  authors: Erick Tryzelaar <erick.tryzelaar@gmail.com>; David Tolnay <dtolnay@gmail.com>
+  repository: https://github.com/serde-rs/json
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT, cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE
+  cohort: python
+
+sha2 0.11.0
+  declared license: MIT OR Apache-2.0
+  authors: RustCrypto Developers
+  repository: https://github.com/RustCrypto/hashes
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/831e0f43ad0bf014c1c4fec5767aae470434c1d66d6e671be2d823e729063e25-LICENSE-MIT, cargo/a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5-LICENSE-APACHE
+  cohort: python
+
+shlex 2.0.1
+  declared license: MIT OR Apache-2.0
+  authors: comex <comexk@gmail.com>; Fenhl <fenhl@fenhl.net>; Adrian Taylor <adetaylor@chromium.org>; Alex Touchet <alextouchet@outlook.com>; Daniel Parks <dp+git@oxidized.org>; Garrett Berg <googberg@gmail.com>
+  repository: https://github.com/comex/rust-shlex
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/4455bf75a91154108304cb283e0fea9948c14f13e20d60887cf2552449dea3b1-LICENSE-MIT, cargo/553fffcd9b1cb158bc3e9edc35da85ca5c3b3d7d2e61c883ebcfa8a65814b583-LICENSE-APACHE
+  cohort: python
+
+static_assertions 1.1.0
+  declared license: MIT OR Apache-2.0
+  authors: Nikolai Vazquez
+  repository: https://github.com/nvzqz/static-assertions-rs
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30-LICENSE-APACHE, cargo/ea084a2373ebc1f0902c09266e7bf25a05ab3814c1805bb017ffa7308f90c061-LICENSE-MIT
+  cohort: python
+
+syn 2.0.119
+  declared license: MIT OR Apache-2.0
+  authors: David Tolnay <dtolnay@gmail.com>
+  repository: https://github.com/dtolnay/syn
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT, cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE
+  cohort: python
+
+target-lexicon 0.13.5
+  declared license: Apache-2.0 WITH LLVM-exception
+  authors: Dan Gohman <sunfish@mozilla.com>
+  repository: https://github.com/bytecodealliance/target-lexicon
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5-LICENSE
+  cohort: python
+
+typenum 1.20.1
+  declared license: MIT OR Apache-2.0
+  repository: https://github.com/paholg/typenum
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/516b24e051bf5630880ebbd55c40a25ce9552ebaf8970a53e8976eb70e522406-LICENSE-APACHE, cargo/a825bd853ab71619a4923d7b4311221427848070ff44d990da39b0b274c1683f-LICENSE-MIT, cargo/db11fec9946737df39ca3898d9cd8c10ec6f6c3a884a6802b0ad0b81b4e8f23a-LICENSE
+  cohort: python
+
+unicode-ident 1.0.24
+  declared license: (MIT OR Apache-2.0) AND Unicode-3.0
+  authors: David Tolnay <dtolnay@gmail.com>
+  repository: https://github.com/dtolnay/unicode-ident
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT, cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE, cargo/f7db81051789b729fea528a63ec4c938fdcb93d9d61d97dc8cc2e9df6d47f2a1-LICENSE-UNICODE
+  cohort: python
+
+unindent 0.2.4
+  declared license: MIT OR Apache-2.0
+  authors: David Tolnay <dtolnay@gmail.com>
+  repository: https://github.com/dtolnay/indoc
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT, cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE
+  cohort: python
+

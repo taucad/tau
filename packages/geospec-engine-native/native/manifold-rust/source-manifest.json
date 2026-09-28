@@ -1,0 +1,663 @@
+{
+  "upstream": "https://github.com/larsbrubaker/manifold-rust",
+  "commit": "f3aab1414e5b45037b848624b143d3287d8d3842",
+  "source": "git archive of exact committed tree; no dirty checkout or spike files",
+  "archiveSha256": "b64dacf987327e9132cb06509a946068934b70dbc0bf502778563f159ec6355a",
+  "license": "Apache-2.0",
+  "selectedFiles": [
+    {
+      "path": "Cargo.lock",
+      "sha256": "303c1d6e87add0e261fd11d3d6a531159f5f2401df22618c656339e5057e679f"
+    },
+    {
+      "path": "Cargo.toml",
+      "sha256": "64b87eefe87b14e58bc616047bc64a0d55dd08cd660246c25e1566d0a1d80fa5"
+    },
+    {
+      "path": "LICENSE",
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    },
+    {
+      "path": "README.md",
+      "sha256": "a48f00d697fa2ec15b39fd1447b981ec61a7d031a55220494163d365c03bde9a"
+    },
+    {
+      "path": "src/boolean3.rs",
+      "sha256": "9f31190481563017588214fa7c6b3c30c98e3b59d6e1b41dd1f9c7f525ee91cc"
+    },
+    {
+      "path": "src/boolean3_kernels.rs",
+      "sha256": "fbf33459aafc994849e7e9478acaa36d26c15d570c3448ae432906c35fafc025"
+    },
+    {
+      "path": "src/boolean3_tests.rs",
+      "sha256": "4828579461c1b59989d95141fa7ccbdc46eddf27eb57d3364cbc0d65a40d4d0b"
+    },
+    {
+      "path": "src/boolean_result.rs",
+      "sha256": "16de10e6584272ba1e303bb9949da4f7b020d66e6e9a88777f5a5f61111dc0b8"
+    },
+    {
+      "path": "src/boolean_result_assemble.rs",
+      "sha256": "52c3291b78a67aafefaeef803f9e0b5df5a859e2a67473107d7b9ae25f468353"
+    },
+    {
+      "path": "src/cancel.rs",
+      "sha256": "4d2d74cabd4e760229ee0c04d6b263b219b7dc4c9b19ea3a899d100a64dd3d47"
+    },
+    {
+      "path": "src/cancel_tests.rs",
+      "sha256": "1df6f75c35cb98c64fecf1dea3d2d5a60a1df4fd5ec25cf1ac2f2d57ea333d6a"
+    },
+    {
+      "path": "src/collider.rs",
+      "sha256": "47d8a4ff4dbd1832a216ce3fb17f03ae363ffadf8511f60d5914ed14f75d5d04"
+    },
+    {
+      "path": "src/constructors.rs",
+      "sha256": "b80cae42b05ce99bb3e8109238ead9e3b3907d4558c69106e474f0e7d505cb84"
+    },
+    {
+      "path": "src/cross_section.rs",
+      "sha256": "736aefeabeedfe99ac352f456e51f2cf1e74f037fa3d5acd908e63b530027bc7"
+    },
+    {
+      "path": "src/csg_tree.rs",
+      "sha256": "dcdcda8a234575f69d28d002560a373e0a48b1e10574f2fba13cbf3bc83c9ad7"
+    },
+    {
+      "path": "src/disjoint_sets.rs",
+      "sha256": "9b43120041c95572c557790b7123120152f3a8637fbadf58af1c4ac897ce33cf"
+    },
+    {
+      "path": "src/edge_op.rs",
+      "sha256": "5f422fc391d27fa26c54d9d34af175ef3b809fb54f5930128416762d819be199"
+    },
+    {
+      "path": "src/edge_op_tests.rs",
+      "sha256": "887508bd503f1fe552bfe4667a2ec1e8a6beaf5b2afa8918c9990cb41e12e079"
+    },
+    {
+      "path": "src/face_op.rs",
+      "sha256": "067ddb4e3d64209ddbf77143655d60a319ef85f40034b971c5af93156b46475c"
+    },
+    {
+      "path": "src/face_op_triangulate.rs",
+      "sha256": "b8326af7533c4a198ba1f513b08a15b02a31e1e3e1fa98a6775949c8ebaa4405"
+    },
+    {
+      "path": "src/impl_mesh.rs",
+      "sha256": "cc857db9d44c80f6d5eaf98d32e855e52acbf4529f0c4497f405550eba207fe7"
+    },
+    {
+      "path": "src/impl_mesh_tests.rs",
+      "sha256": "0ecec66df9dbe33b645fae595f362dd1c4dfd8aefa7f032e3310709b505fbf2b"
+    },
+    {
+      "path": "src/interp_tri.rs",
+      "sha256": "c98e21e529af787ddcabeb625884b2cfbc79fd304d9f7c122692ad537e09370c"
+    },
+    {
+      "path": "src/lib.rs",
+      "sha256": "064530f21fae7822296a216d3b8229405be800a5c06c89f2ca1d11eb04eeaa23"
+    },
+    {
+      "path": "src/linalg.rs",
+      "sha256": "b1d9e289df33c2878822271cbf71a2dd8e20a82c2d22b6b1a8a375993dbeb295"
+    },
+    {
+      "path": "src/linalg_tests.rs",
+      "sha256": "1e22616ea68d375823243bda923e768ee8db7812a550bf2bae6a3f9b2fedeb00"
+    },
+    {
+      "path": "src/manifold.rs",
+      "sha256": "a9483dcf9545221e265f330b2682c30a0e1fcd61a02af5aa994ee9c5fea8595e"
+    },
+    {
+      "path": "src/manifold_meshgl.rs",
+      "sha256": "fa74f00ebfee2704c44a3b379b30fa6a837d63e75caf14b31d340f8d2d4290e3"
+    },
+    {
+      "path": "src/manifold_shape.rs",
+      "sha256": "ea36aa758df4e5e6bb8cd10483c4406e8b6848d184413202d4ee9462c88bc4d0"
+    },
+    {
+      "path": "src/manifold_smooth.rs",
+      "sha256": "c57ee438d152e2096afb36ac65fa90c141728ff5261be010df74b98dcfd91534"
+    },
+    {
+      "path": "src/manifold_tests/advanced.rs",
+      "sha256": "59b96e1c7dfa624320bcf54057278c9b6e5e414e4541fe9aa9e84e140d2f0525"
+    },
+    {
+      "path": "src/manifold_tests/api.rs",
+      "sha256": "a39354455a4af9f635e2b963aec658aaf577a265dbdca486fcc9e2a47e43a093"
+    },
+    {
+      "path": "src/manifold_tests/basic.rs",
+      "sha256": "764218be03c2d5d1328fe6883ca482890c04056b608e923347e32cd384338523"
+    },
+    {
+      "path": "src/manifold_tests/boolean.rs",
+      "sha256": "ae06b2b366938002e0744775d36dffc667d6f3ee7cb08609f50dba7e96eddff0"
+    },
+    {
+      "path": "src/manifold_tests/complex.rs",
+      "sha256": "ae806eb446d005125ba901337cf0dfb9dcdb94086452a370ae024a6557a55f3f"
+    },
+    {
+      "path": "src/manifold_tests/cross_section2.rs",
+      "sha256": "72d4244e2456a95905c72b11ce09533beb1f63978e206dd9f75e3768acba3c6d"
+    },
+    {
+      "path": "src/manifold_tests/error_propagation.rs",
+      "sha256": "0b3728c4e518ad1c61e7c9787b208009e137985f23d54158c88a2275be96aa37"
+    },
+    {
+      "path": "src/manifold_tests/hull.rs",
+      "sha256": "bbfb21dcfb0b555ec0c5b907dc211fc0be37a8abbf201369b3d2f7f1e0671163"
+    },
+    {
+      "path": "src/manifold_tests/mesh_ops.rs",
+      "sha256": "434575289227bb904a104ef739931b466c7c01913e574034bf50f05165286df8"
+    },
+    {
+      "path": "src/manifold_tests/mod.rs",
+      "sha256": "b2a592a52c3e27cb282aca39d3672da972ab3f7430267842862c7a40163aa516"
+    },
+    {
+      "path": "src/manifold_tests/normals.rs",
+      "sha256": "40dfcc49de0ca61b7b746edd4a2406f6100cfdd7352d145e4a6269ec643e1aab"
+    },
+    {
+      "path": "src/manifold_tests/properties.rs",
+      "sha256": "e1dfbdd0021605181030ea57d3e878a82373716d5c19cd14cccc314811bc144c"
+    },
+    {
+      "path": "src/manifold_tests/raycast.rs",
+      "sha256": "1327114e7d1ac8df3db7e395eb63fb2a6c984817e7266da08e117e0abc81004d"
+    },
+    {
+      "path": "src/manifold_tests/sdf.rs",
+      "sha256": "925abdc0187487623c4c7d26e873a1aef0af4d9ef2723ab95cb7a4d116b144f8"
+    },
+    {
+      "path": "src/manifold_tests/smooth.rs",
+      "sha256": "3d9c4b2215249219f2c97fd3615c6f4236fba15eee470885463c576cb940b6c6"
+    },
+    {
+      "path": "src/manifold_tests/validation.rs",
+      "sha256": "03cc9c1371bb7a794cc42b2fdcf19dbe308241aa180249915c458c580a6aeb9d"
+    },
+    {
+      "path": "src/math.rs",
+      "sha256": "26e7136f95f35dd68572c47afbe54d802ada8664fb7327319cedb26b4a8d5296"
+    },
+    {
+      "path": "src/minkowski.rs",
+      "sha256": "89821165beaf724fe3c728e0953a951b4ed8717b91bc0173f892e8bc9f8c3046"
+    },
+    {
+      "path": "src/par.rs",
+      "sha256": "d2b624df9986c883d2daec8308b8b9ac9d89982f6fb1fb480b993036ec08e2b1"
+    },
+    {
+      "path": "src/polygon.rs",
+      "sha256": "17f25c323e7d72663b9d6e34ee29dcc21b6d8bbdf0812ac5f7e693d0a1bc03ed"
+    },
+    {
+      "path": "src/polygon_earclip.rs",
+      "sha256": "e36c7fc344da1ecdfc8488fc8798075b4b9030e8336e4572dcdd9f9221d68182"
+    },
+    {
+      "path": "src/polygon_earclip_tests.rs",
+      "sha256": "5a60e887821531dc35179609bc55f33c540a611a7655b94c5abfd4d7df39b10d"
+    },
+    {
+      "path": "src/polygon_tests.rs",
+      "sha256": "6c3207347f30960c7ddfd9e23dfc11e019f1f15e8c95866242b4fb85fd488e70"
+    },
+    {
+      "path": "src/progress.rs",
+      "sha256": "5808cf744aa61c8c330945e2435fcb521fccdcf81c4c58f5d62f7582438b2fc1"
+    },
+    {
+      "path": "src/progress_tests.rs",
+      "sha256": "1e37e7b6efef9769ef17ad0bd76347476f06243a8b3bfde9d1f7a136e4a7d3b0"
+    },
+    {
+      "path": "src/properties.rs",
+      "sha256": "fae21b56f6d74dde7d1dce59a86f0b5800f88ea694d6be74e294c367c7fc25f9"
+    },
+    {
+      "path": "src/quickhull.rs",
+      "sha256": "bf84fc9ca0e94ad927e798b883e5b8bceae9c07e04eab2374481870bb5249bad"
+    },
+    {
+      "path": "src/quickhull_algo.rs",
+      "sha256": "f4d1c6b23adad34e8101d65edb5518e4b7cfc25614cf7c3b3f911b350c455b51"
+    },
+    {
+      "path": "src/quickhull_tests.rs",
+      "sha256": "df0eb9686d194f8db8ed0df0e8533b3846daaed3bde154a27948f496bf8f6ad5"
+    },
+    {
+      "path": "src/robust/arrangement.rs",
+      "sha256": "e66b39406556ced600725b1ed9d25169d6c169d6627767ba7a1c0f96b6e67f11"
+    },
+    {
+      "path": "src/robust/arrangement_tests.rs",
+      "sha256": "ca880063cdf44881250a7e1d8ec059d146dc78dfd92eecc63860aa174dcb5d49"
+    },
+    {
+      "path": "src/robust/assemble.rs",
+      "sha256": "aa3c01d2721de797ebf90fdd5db2ea94c118818a91bfe3384c6c501d9dde041e"
+    },
+    {
+      "path": "src/robust/cdt.rs",
+      "sha256": "613a258605a13e7556144750c14a567b779f244ae4d883d50e755e53c4a08369"
+    },
+    {
+      "path": "src/robust/cdt_constraints.rs",
+      "sha256": "2a0fe38fcbd812fa826bec58af837e5a2dcbf1146e31f840e12dbab41a4d1231"
+    },
+    {
+      "path": "src/robust/cdt_tests.rs",
+      "sha256": "92fcdee2fd0c80319167d610996ce2f4d390312354656927894b8ed77389de3e"
+    },
+    {
+      "path": "src/robust/cells.rs",
+      "sha256": "abbeca9b71a92be0befabe53ac8d4f18955d6bde921648f6395b48fbe49e6f50"
+    },
+    {
+      "path": "src/robust/cells_extract.rs",
+      "sha256": "fdcf0c9c331ebf8ac6e113440b57f47313b18beed5382de145eda5f85a1ef8bf"
+    },
+    {
+      "path": "src/robust/cells_tests.rs",
+      "sha256": "bc75c8e1e6025033ffac6a697cebb381d02daf84c0f6152afac9d064962e39ee"
+    },
+    {
+      "path": "src/robust/cross_validation_tests.rs",
+      "sha256": "1a97dcca7ddfb8d83591237e3873eede0b3ac5c0b4be242aab7fae8cf8ff01a2"
+    },
+    {
+      "path": "src/robust/engine_tests.rs",
+      "sha256": "0448f530fee4e2eb2efd664bc526b54ca7d8d52b016c0c5b42ff5875ea0db968"
+    },
+    {
+      "path": "src/robust/exact/approx.rs",
+      "sha256": "3a3102c203a15232df946e1368872c6216dcee0ef02d7b58fc4838bb0ed38c28"
+    },
+    {
+      "path": "src/robust/exact/backend.rs",
+      "sha256": "1d0b89e6b2900874a82a585c4244772369db67a6abe4df52675d615f06ff2034"
+    },
+    {
+      "path": "src/robust/exact/filtered.rs",
+      "sha256": "3ef1099d05c8d2a6e7ffe3ea3e4091726b479bfd4563b48ea7c00a68465ea25c"
+    },
+    {
+      "path": "src/robust/exact/intpred.rs",
+      "sha256": "f1d36a8abf4ceecbc2f5e9c0c8df4139ca4927191a1723215f41e234c09c0b36"
+    },
+    {
+      "path": "src/robust/exact/mod.rs",
+      "sha256": "960a9200c8ed482c7a5b092edb96cb2cac1942272d1e367741052ec38373365e"
+    },
+    {
+      "path": "src/robust/exact/predicates.rs",
+      "sha256": "4c8c5d5a33392858a0a5d0fd955738e040941924a2e1d05bfccfde151e2060ef"
+    },
+    {
+      "path": "src/robust/exact/rational.rs",
+      "sha256": "79fa6d27d3ce63596b504efc0aae76ebb9a7f3b750e78a161fb3fc130f7fd2f8"
+    },
+    {
+      "path": "src/robust/exact/tests.rs",
+      "sha256": "98ba16f4f7121fb490fac99866b0dbb5397265a3c0deaf3a4d7fa1b069110ca6"
+    },
+    {
+      "path": "src/robust/graph_geom.rs",
+      "sha256": "a2ce60c0c3e70c1b690736322a4631bb038a31f58ac9a0fbcd6d0f6bb8e13ca6"
+    },
+    {
+      "path": "src/robust/graph_self_cut.rs",
+      "sha256": "0e78d8186e423a35fb796fcda789b1c13a729794161576d5754fc1624403e384"
+    },
+    {
+      "path": "src/robust/graph_types.rs",
+      "sha256": "dc527dac855f1a44616fc5d0f60e185705ad0d10148019351c00f0339d9cb82b"
+    },
+    {
+      "path": "src/robust/intersection_graph.rs",
+      "sha256": "43e8cdb577a6303c9841d47d444e5307890ff8107ab4c1dd9de14d46adcc8476"
+    },
+    {
+      "path": "src/robust/mod.rs",
+      "sha256": "745c3a574717e40cb6623ba53951936ac764fa735eaaa9a7e858fc42f895d13d"
+    },
+    {
+      "path": "src/robust/nonmanifold_tests.rs",
+      "sha256": "b1e877849e62dec00fada0b4488c24037a05859d5f97d6062e80a2b07ffa026c"
+    },
+    {
+      "path": "src/robust/pairing.rs",
+      "sha256": "07f4d9a2f2248e53f5fb8f4325208f55fa976cd0e9e15e6bc04fd82ab354ca30"
+    },
+    {
+      "path": "src/robust/pairing_tests.rs",
+      "sha256": "0f7bc61de882ff9656f559f7db2377afcbdcb05703c57c3d3a369474e34f726f"
+    },
+    {
+      "path": "src/robust/property_tests.rs",
+      "sha256": "e3b54b1cf902910f731edecedbeb018a4872419eadb32da3cc6a9b391d886a48"
+    },
+    {
+      "path": "src/robust/ray_shoot.rs",
+      "sha256": "59e2f3382369243a51d456d6673651dd904ea1fa875eb9dd46086dbccc189568"
+    },
+    {
+      "path": "src/robust/repair.rs",
+      "sha256": "6987cf71063541c82a7c835b753ebcf2fa8a7049942f98794b04b979ad6ba1d8"
+    },
+    {
+      "path": "src/robust/repair_tests.rs",
+      "sha256": "00217e104ef4bb7142a731d7545703049ddff20d3ce05e4d85abdb06d85b352d"
+    },
+    {
+      "path": "src/robust/soup.rs",
+      "sha256": "a9f4a58dca4e38546f71e3387e30a30bc486aef4577f89af0d319e58195f0d5e"
+    },
+    {
+      "path": "src/robust/soup_tests.rs",
+      "sha256": "19334e1bd47b2b13cbf2a3fa119357580b9d004700ac97f2b65b4bad62127215"
+    },
+    {
+      "path": "src/robust/stl_fixtures.rs",
+      "sha256": "99706a1e110a91653f8d960e86ba5947dd69cdaee37a365ac719878a133252f4"
+    },
+    {
+      "path": "src/robust/testdata/1075458.stl",
+      "sha256": "493669e7dcf6672ae2028bdfe1d0680127cf46e3f38fd2ff797aea37aac6d782"
+    },
+    {
+      "path": "src/robust/testdata/1147177.stl",
+      "sha256": "43f40cab420b0d72cd84385051bfdd338a1e5bdc02a558fbb9dee5ceb0dd7a84"
+    },
+    {
+      "path": "src/robust/testdata/1313535.stl",
+      "sha256": "cefde41d55a918a33854b661d57bee40c306ced0f14ce7225fa0ba1feac936b8"
+    },
+    {
+      "path": "src/robust/testdata/1663774.stl",
+      "sha256": "4e4912b538876593c9a9b2cdc16c222bbc863ce80713100779abca15c58c2ff1"
+    },
+    {
+      "path": "src/robust/testdata/301921.stl",
+      "sha256": "5d235350a67e0abbbf6aecf7932eba15e207fcb7b7d07bbd66819d860e213617"
+    },
+    {
+      "path": "src/robust/testdata/36088.stl",
+      "sha256": "58bb2430051b5892801f4ed6fc09f53104c7b64de36559bf132fd0b3859688e7"
+    },
+    {
+      "path": "src/robust/testdata/36374.stl",
+      "sha256": "45c2f473af2cd6d248d9014fc75ee12de2dff1bc2774a87f517545f2953c7155"
+    },
+    {
+      "path": "src/robust/testdata/39926.stl",
+      "sha256": "d5216eb164ac21706ae779c9c1c6b3ee635f4a9f3896cd2115619e6d2a3b875a"
+    },
+    {
+      "path": "src/robust/testdata/51334.stl",
+      "sha256": "d0c664c7bf11768753d5ab01099f783e2700f272221a8cc7792f24cddd74715a"
+    },
+    {
+      "path": "src/robust/testdata/51360.stl",
+      "sha256": "d3bdc4d699fa2075bd9a083d142bcc23983f64d21b862d7718393c91237894fd"
+    },
+    {
+      "path": "src/robust/testdata/59082.stl",
+      "sha256": "ec7f0f9505f55daaa09b37584511450741ca41fc7eb2ecbd1314d9982066d4f0"
+    },
+    {
+      "path": "src/robust/testdata/61459.stl",
+      "sha256": "a84b81e19dac78ad54c4e8a565f00691eae2c8bf642a1a6070762009907cc7b1"
+    },
+    {
+      "path": "src/robust/testdata/68730.stl",
+      "sha256": "ff14f770ba37ecedfd961f8c7da4e25df9c3a1271d9e78e6b2467a4f21b9ac07"
+    },
+    {
+      "path": "src/robust/testdata/74660.stl",
+      "sha256": "c51d62adbc2ae6c67ffd96897b69fd1a4bd882e238094098ad5244a8760083dc"
+    },
+    {
+      "path": "src/robust/testdata/90225.stl",
+      "sha256": "a473ab497ea700157270e0aee7269807e387078e256bfc1d056e038999453d2c"
+    },
+    {
+      "path": "src/robust/testdata/91115.stl",
+      "sha256": "b1d5e48165817622e4a9039d65fa9779113ce28f80bced0f55fef9f779c21947"
+    },
+    {
+      "path": "src/robust/testdata/91946.stl",
+      "sha256": "5db99c7f60c7dfd4da5f60855874e9eb240eb16f120a18b1088453c56c9494fb"
+    },
+    {
+      "path": "src/robust/testdata/92068.stl",
+      "sha256": "2a32d4dcd1c8492d26f0f97d55eb6ff90ff75ed21b8ffa3d78f774e227a738d0"
+    },
+    {
+      "path": "src/robust/testdata/93557.stl",
+      "sha256": "a7b7b0380df26d41dda4d5fb2d5e857913327c454df38e7c30e11c8aa92083b3"
+    },
+    {
+      "path": "src/robust/testdata/939888.stl",
+      "sha256": "a107f718d43790f9ac6a1acc093115e7936e1419a6be2b34213f7b44af6f0b0d"
+    },
+    {
+      "path": "src/robust/thingi_tests.rs",
+      "sha256": "3e652b69d605e7888d1934a0ce6fb7487e2aabd252a6655d04df33c1fc480674"
+    },
+    {
+      "path": "src/robust/tri_tri.rs",
+      "sha256": "009fabad6439ee161d06287fba312f4c229a354fde32f276281991919330f4f8"
+    },
+    {
+      "path": "src/robust/tri_tri_tests.rs",
+      "sha256": "410fb57214b7638778c8e70b40ac358037901191242a34fe97854eca86ad9165"
+    },
+    {
+      "path": "src/sdf.rs",
+      "sha256": "7dc87f8e358f88cf2034568a569dde4ec987b7c522fabac439e806ec1d00ad73"
+    },
+    {
+      "path": "src/smoothing.rs",
+      "sha256": "aa40ec0f3d6ac62a9cd726fa3b5d5959df003963563cf763dcc056bfdf88401d"
+    },
+    {
+      "path": "src/smoothing_tangents.rs",
+      "sha256": "5f81aa058d9b37c6af022ae6306f265b55f5a9f8f6785ac927de283e13295b3b"
+    },
+    {
+      "path": "src/smoothing_tests.rs",
+      "sha256": "2be7ff2c73fc6502964492f5d4604a178b2926fe75b5623907c08cdaee95e24f"
+    },
+    {
+      "path": "src/sort.rs",
+      "sha256": "81de355129dda307394bdb7656bd79156f7cc28f64e5004b429251e2537a43ee"
+    },
+    {
+      "path": "src/subdivision.rs",
+      "sha256": "e973b6f93c001e562744f38c799a592db09fb7323bff3e91bacfe01e47d23b7c"
+    },
+    {
+      "path": "src/subdivision_partition.rs",
+      "sha256": "32a0aa373b41555316cceae5d19fe1ecd5119f053cdf572c270e72176cc3e39d"
+    },
+    {
+      "path": "src/subdivision_tests.rs",
+      "sha256": "9c611c7e9f610df81219e956e30e2c39a35cc0344fbafe558c81d820930520bb"
+    },
+    {
+      "path": "src/svd.rs",
+      "sha256": "82632b69130cc3b31715d0760c227d4d66504c67c5c0573513db25597765c78f"
+    },
+    {
+      "path": "src/timing.rs",
+      "sha256": "3ddffc04084e76ad292c89a4ff3fb3c2ba009b888748310f5e8114b37bf2ccd3"
+    },
+    {
+      "path": "src/tree2d.rs",
+      "sha256": "21b954ac0f4caa90edd2dc05550c8be439af80c554427c40b11f01b8b937722b"
+    },
+    {
+      "path": "src/types.rs",
+      "sha256": "b3d1f57c9570136dbbc9238d15554eb6654d56ba5565b619a69f0e3d84d788e9"
+    },
+    {
+      "path": "src/types_bounds.rs",
+      "sha256": "75c1aa64de567105dea13521e4435a47764a6eefab5d15e2b32b9b13ddf20d08"
+    },
+    {
+      "path": "src/types_meshgl.rs",
+      "sha256": "4955dd7a20f2d04b2e3a210b5856e7defff5c3159ba231f837b6fb8d4732fb90"
+    },
+    {
+      "path": "src/types_tests.rs",
+      "sha256": "995721d03d2e4b9d012b13162fb8c0e300899552cb7ae7d599d8398f360b6724"
+    },
+    {
+      "path": "src/vec.rs",
+      "sha256": "5f2a23289a0a9543c285f14b3b02979a33da8b5e5968146351dca56014dd95ec"
+    }
+  ],
+  "omittedFiles": [
+    ".claude/agents/implementer.md",
+    ".claude/agents/reviewer.md",
+    ".claude/launch.json",
+    ".gitattributes",
+    ".github/FUNDING.yml",
+    ".github/workflows/deploy-demo.yml",
+    ".github/workflows/release-nuget.yml",
+    ".github/workflows/test.yml",
+    ".gitignore",
+    ".gitmodules",
+    "CLAUDE.md",
+    "PORTING_PLAN.md",
+    "README_HERO.png",
+    "benches/manifold_bench.rs",
+    "demo/build.ts",
+    "demo/bun.lock",
+    "demo/capture-thumbs.ts",
+    "demo/dev.ts",
+    "demo/index.html",
+    "demo/package.json",
+    "demo/public/favicon.svg",
+    "demo/public/thumbs/boolean-gallery.jpg",
+    "demo/public/thumbs/convex-hull.jpg",
+    "demo/public/thumbs/extrude-revolve.jpg",
+    "demo/public/thumbs/extrude-twist.jpg",
+    "demo/public/thumbs/menger-sponge.jpg",
+    "demo/public/thumbs/properties.jpg",
+    "demo/public/thumbs/revolve-partial.jpg",
+    "demo/public/thumbs/smooth-shapes.jpg",
+    "demo/public/thumbs/test-gallery.jpg",
+    "demo/server.ts",
+    "demo/src/boolean-runner.ts",
+    "demo/src/boolean-worker.ts",
+    "demo/src/busy-indicator.ts",
+    "demo/src/controls.ts",
+    "demo/src/demos/about.ts",
+    "demo/src/demos/boolean-gallery-data.ts",
+    "demo/src/demos/boolean-gallery.ts",
+    "demo/src/demos/boolean-panel.test.ts",
+    "demo/src/demos/boolean-panel.ts",
+    "demo/src/demos/boolean-readout.test.ts",
+    "demo/src/demos/boolean-readout.ts",
+    "demo/src/demos/convex-hull.ts",
+    "demo/src/demos/extrude-revolve.ts",
+    "demo/src/demos/extrude-twist.ts",
+    "demo/src/demos/gallery-widgets.ts",
+    "demo/src/demos/menger-sponge.ts",
+    "demo/src/demos/properties.ts",
+    "demo/src/demos/revolve-partial.ts",
+    "demo/src/demos/smooth-shapes.ts",
+    "demo/src/demos/test-gallery.ts",
+    "demo/src/depth-peeling.ts",
+    "demo/src/main.ts",
+    "demo/src/progress-model.test.ts",
+    "demo/src/progress-model.ts",
+    "demo/src/settings.ts",
+    "demo/src/thingi.ts",
+    "demo/src/three-viewer.ts",
+    "demo/src/wasm.ts",
+    "demo/styles/boolean-panel.css",
+    "demo/styles/main.css",
+    "demo/tsconfig.json",
+    "demo/wasm/Cargo.toml",
+    "demo/wasm/src/lib.rs",
+    "demo/wasm/src/progress.rs",
+    "demo/wasm/src/soup.rs",
+    "docs/CPP_DIVERGENCES.md",
+    "docs/Exact, robust, and efficient booleans.pdf",
+    "docs/ROBUST_ENGINE_STATUS.md",
+    "docs/booleans2009.pdf",
+    "dotnet/.gitignore",
+    "dotnet/ManifoldRust.Tests/BooleanProgressTests.cs",
+    "dotnet/ManifoldRust.Tests/CancellationTests.cs",
+    "dotnet/ManifoldRust.Tests/ManifoldRust.Tests.csproj",
+    "dotnet/ManifoldRust.Tests/ManifoldTests.cs",
+    "dotnet/ManifoldRust.Tests/Mesh64Tests.cs",
+    "dotnet/ManifoldRust.Tests/RepairTests.cs",
+    "dotnet/ManifoldRust.Tests/RobustEngineTests.cs",
+    "dotnet/ManifoldRust.Tests/TestMeshes.cs",
+    "dotnet/ManifoldRust/BooleanEngine.cs",
+    "dotnet/ManifoldRust/CancelToken.cs",
+    "dotnet/ManifoldRust/CancelTokenHandle.cs",
+    "dotnet/ManifoldRust/Manifold.cs",
+    "dotnet/ManifoldRust/ManifoldBoolean.cs",
+    "dotnet/ManifoldRust/ManifoldException.cs",
+    "dotnet/ManifoldRust/ManifoldHandle.cs",
+    "dotnet/ManifoldRust/ManifoldNative.cs",
+    "dotnet/ManifoldRust/ManifoldOpType.cs",
+    "dotnet/ManifoldRust/ManifoldRepair.cs",
+    "dotnet/ManifoldRust/ManifoldRust.csproj",
+    "dotnet/ManifoldRust/ManifoldStatus.cs",
+    "dotnet/ManifoldRust/MeshGL.cs",
+    "dotnet/ManifoldRust/MeshGL64.cs",
+    "dotnet/ManifoldRust/NativeArrays.cs",
+    "dotnet/ManifoldRust/NativeMethods.cs",
+    "dotnet/ManifoldRust/NativeVersionCheck.cs",
+    "dotnet/ManifoldRust/ProgressBridge.cs",
+    "dotnet/ManifoldRust/WindingRule.cs",
+    "dotnet/README.md",
+    "dotnet/global.json",
+    "examples/debug_301921.rs",
+    "examples/large_scene_test.rs",
+    "examples/mem_profile.rs",
+    "examples/perf_test.rs",
+    "examples/robust_perf.rs",
+    "examples/robust_repro.rs",
+    "examples/thingi_sweep.rs",
+    "examples/volume_referee.rs",
+    "ffi/Cargo.toml",
+    "ffi/README.md",
+    "ffi/build.rs",
+    "ffi/manifold_rs.h",
+    "ffi/src/cancel.rs",
+    "ffi/src/error.rs",
+    "ffi/src/lib.rs",
+    "ffi/src/meshgl64.rs",
+    "ffi/src/progress.rs",
+    "ffi/src/tests.rs",
+    "ffi/src/tests_cancel.rs",
+    "ffi/src/tests_mesh64.rs",
+    "ffi/src/tests_progress.rs",
+    "ffi/src/tests_robust.rs",
+    "validate-reference.ps1"
+  ],
+  "manifestAdaptationRequired": "Lead to remove omitted workspace/bench target declarations before build; library source remains exact at baseline."
+}

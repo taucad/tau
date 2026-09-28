@@ -1,0 +1,27 @@
+{
+  "name": "geospec-legacy-installed-baseline",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@taucad/geospec-engine": "file:../tarballs/taucad-geospec-engine.tgz",
+    "geospec": "file:../tarballs/geospec.tgz",
+    "@taucad/assimp": "file:../tarballs/taucad-assimp.tgz",
+    "@taucad/brep": "file:../tarballs/taucad-brep.tgz",
+    "@taucad/esbuild": "file:../tarballs/taucad-esbuild.tgz",
+    "@taucad/gltf": "file:../tarballs/taucad-gltf.tgz",
+    "@taucad/geometry-core": "file:../tarballs/taucad-geometry-core.tgz",
+    "@taucad/image": "file:../tarballs/taucad-image.tgz",
+    "@taucad/jscad": "file:../tarballs/taucad-jscad.tgz",
+    "@taucad/manifold": "file:../tarballs/taucad-manifold.tgz",
+    "@taucad/middleware": "file:../tarballs/taucad-middleware.tgz",
+    "@taucad/occt-core": "file:../tarballs/taucad-occt-core.tgz",
+    "@taucad/opencascade": "file:../tarballs/taucad-opencascade.tgz",
+    "@taucad/replicad": "file:../tarballs/taucad-replicad.tgz",
+    "@taucad/rhino": "file:../tarballs/taucad-rhino.tgz",
+    "@taucad/runtime": "file:../tarballs/taucad-runtime.tgz",
+    "@taucad/bundler-core": "file:../tarballs/taucad-bundler-core.tgz",
+    "@taucad/spatial": "file:../tarballs/taucad-spatial.tgz",
+    "@taucad/cache-core": "file:../tarballs/taucad-cache-core.tgz"
+  }
+}

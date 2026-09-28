@@ -40,6 +40,8 @@
     // its `#mesh/*` modules moved out in the engine extraction (117b66d66), so it no
     // longer resolves or runs. Kept as the artifact its research cites, not linted.
     "packages/geospec-engine/experiments/matcher-performance/**",
+    // Pinned external CAD model sources are fixture bytes, not GeoSpec library code.
+    "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/**",
     "**/*.jscad.js",
     // Same class: the design-story splash imports these JSCAD model sources with `?raw`
     // and checks them against a baked evidence digest, so any byte change makes the

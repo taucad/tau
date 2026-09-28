@@ -15,10 +15,13 @@ import { base64Loader } from '@taucad/vite/base64-loader';
 import { createUiReactCompilerPlugin, createUiSourceAliasPlugin, uiSsrOptions } from '../vite.config';
 // oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- config-load seam is outside the app alias root.
 import { resolveTauCloudBuildEnabled } from '../build-environment';
+// oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- Shared config-load asset gate.
+import { createGeoSpecMtAssets } from '../geospec-mt-assets.vite-plugin';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // oxlint-disable-next-line eslint/dot-notation -- ProcessEnv is index-signature-only with noPropertyAccessFromIndexSignature.
 const tauCloudEnabled = resolveTauCloudBuildEnabled(process.env['TAU_CLOUD_ENABLED']);
+const mtAssets = createGeoSpecMtAssets(process.env['GEOSPEC_MT_STAGED_PACKAGE_ROOT']);
 
 /**
  * Desktop (Electron) build of `apps/ui`.
@@ -41,11 +44,17 @@ export default defineConfig({
     tauBuildFrontendUrl: JSON.stringify(''),
     tauBuildId: JSON.stringify(Date.now()),
     tauCloudBuildEnabled: JSON.stringify(tauCloudEnabled),
+    tauGeoSpecMtReceipts: JSON.stringify(mtAssets.receipts),
     // oxlint-disable-next-line @typescript-eslint/naming-convention -- Vite define key is a member expression.
     'import.meta.env.TAU_TARGET': '"desktop"',
   },
   plugins: [
-    createUiSourceAliasPlugin({ emitModuleGraph: true, target: 'desktop', tauCloudEnabled }),
+    mtAssets.plugin,
+    createUiSourceAliasPlugin({
+      emitModuleGraph: true,
+      target: 'desktop',
+      tauCloudEnabled,
+    }),
     tauRuntime(),
     base64Loader,
     createUiReactCompilerPlugin(),

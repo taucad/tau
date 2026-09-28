@@ -919,6 +919,10 @@ const bootstrapElectronApp = async (): Promise<void> => {
       refuse('services.unknown-concern');
       return;
     }
+    if (concern === 'geospecPerformance' && !/^(1|true)$/iu.test(environment['TAU_DEBUG'] ?? '')) {
+      refuse('GeoSpec performance tools require TAU_DEBUG.');
+      return;
+    }
     try {
       const resolved = sanitizeServicesContext(context);
       /* Launcher 2 is scoped to one workspace root, and the renderer names it —
@@ -940,6 +944,16 @@ const bootstrapElectronApp = async (): Promise<void> => {
       ) {
         log.log('error', 'services.invalid-compute-mode');
         refuse('services.invalid-compute-mode');
+        return;
+      }
+      if (
+        concern === 'agentHost' &&
+        resolved['geoSpecEngine'] !== undefined &&
+        resolved['geoSpecEngine'] !== 'legacy' &&
+        resolved['geoSpecEngine'] !== 'native'
+      ) {
+        log.log('error', 'services.invalid-geospec-engine');
+        refuse('services.invalid-geospec-engine');
         return;
       }
       const port = services.connect(concern as ServicesConcern, resolved);

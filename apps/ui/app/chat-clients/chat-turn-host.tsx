@@ -51,6 +51,7 @@ import {
 } from '#chat-clients/_internal/turn-body.js';
 import { useTurnAdmission } from '#chat-clients/_internal/use-turn-admission.js';
 import { turnIntentOf, turnTriggerOf } from '#chat-clients/turn-intent.js';
+import { useFeature } from '#flags/use-feature.js';
 import { createAgentHostClient, createBrowserAgentHostClient } from '#services/agent-host-client.js';
 import { createDaemonAgentHostTransport } from '#services/daemon-agent-host-client.js';
 import { daemonPlacementOf } from '#lib/agent-host-placement.js';
@@ -88,6 +89,7 @@ export function ChatTurnHost(): ReactNode {
    * reader are served only behind it (RV9-F1). */
   const revisionsReady = useRevisionClient() !== undefined;
   const computeMode = useComputeReuseMode();
+  const nativeGeoSpec = useFeature('nativeGeoSpec');
   const { resolveModel } = useModels();
   const { admitExecution, surfaceDispatchFailure } = useTurnAdmission(agent.execution);
   const resolveModelRef = useRef(resolveModel);
@@ -262,11 +264,12 @@ export function ChatTurnHost(): ReactNode {
             gatewayBaseUrl: ENV.TAU_API_URL,
             ...config,
             runtimeConfig: createUiRuntimeConfig(ENV),
+            geoSpecEngine: nativeGeoSpec ? 'native' : 'legacy',
           });
         },
       };
     },
-    [activeChatId, computeMode, fileManagerRef, projectId, revisionsReady, store, syncProjectRoots],
+    [activeChatId, computeMode, fileManagerRef, nativeGeoSpec, projectId, revisionsReady, store, syncProjectRoots],
   );
 
   const composeRef = useRef(composeRegistration);

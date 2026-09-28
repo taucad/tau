@@ -130,11 +130,9 @@ export const describeStartConfirmations = (
   const loaded = [...slotsByMaterial].map(
     ([materialId, slots], index) => `${materialId}${index === 0 ? ' is loaded' : ''} in ${listFormat.format(slots)}`,
   );
-  const nozzleRecord = record['expectedNozzleDiameter'];
+  const nozzleValue = record['expectedNozzleDiameter'];
   const nozzle =
-    isRecord(nozzleRecord) && typeof nozzleRecord['value'] === 'number'
-      ? { value: nozzleRecord['value'], unit: typeof nozzleRecord['unit'] === 'string' ? nozzleRecord['unit'] : 'mm' }
-      : manifest?.toolhead.nozzles[0]?.diameter;
+    typeof nozzleValue === 'number' ? { value: nozzleValue, unit: 'mm' } : manifest?.toolhead.nozzles[0]?.diameter;
   return [
     {
       id: 'plate',

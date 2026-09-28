@@ -1,0 +1,37 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./out-tsc/spec",
+    "types": ["node", "vitest/importMeta", "vitest"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["DOM", "DOM.Iterable", "ES2024"],
+    "target": "ESNext",
+    "paths": {
+      "#*": ["./src/*"]
+    },
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "allowJs": true
+  },
+  "include": [
+    "vitest.config.ts",
+    "vitest.setup.ts",
+    "tsdown.config.ts",
+    "scripts/build-mixed-wasm.mts",
+    "src/**/*.test.ts",
+    "src/**/*.spec.ts",
+    "src/**/*.test-d.ts",
+    "src/**/*.d.ts",
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "src/**/*.js",
+    "src/**/*.jsx",
+    "vitest.node26.config.ts",
+    "bindings/browser-conformance/**/*.ts",
+    "bindings/*/*.mjs",
+    "host-tests/authored-corpus-b19/*.mjs",
+    "host-tests/lifecycle-m1/*.mjs",
+    "conformance/current-profile.mjs"
+  ]
+}

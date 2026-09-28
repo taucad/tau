@@ -1,0 +1,267 @@
+{
+  "revision": "f3aab1414e5b45037b848624b143d3287d8d3842",
+  "upstream": "https://github.com/larsbrubaker/manifold-rust",
+  "derivation": "git show pinned-commit:src/file; SHA-256 must match source-manifest selectedFiles; unified diff against current vendor bytes; manually reviewed changed function boundaries.",
+  "threshold": "All executable lines/functions/branches within owned function spans, including nested closures/helpers. Rest of the compiler map stays complete but is not subject to the owned 100% threshold.",
+  "files": [
+    {
+      "path": "packages/geospec-engine-native/native/manifold-rust/source/src/cross_section.rs",
+      "upstream_sha256": "736aefeabeedfe99ac352f456e51f2cf1e74f037fa3d5acd908e63b530027bc7",
+      "upstream_blob": "660b2b62279a77253ab05b6106636404a7cf24bc",
+      "current_sha256": "a28cf0a64813ec496d06110631baf2e47525572f08f9725f12fb4b250c53b30b",
+      "critical_spans": [
+        {
+          "name": "PRECISION",
+          "kind": "item",
+          "lines": [27, 27],
+          "source_sha256": "5aa466bfabca3f5071305fb8a0001b70a6b825cec96b6468f6fae2c1ef807665"
+        },
+        {
+          "name": "BooleanOperation derives",
+          "kind": "item",
+          "lines": [29, 34],
+          "source_sha256": "bac3cfd397d8a92dfe5e85dcd89f07b063b874980bfa533fd5f876ab5f1bd9b0"
+        },
+        {
+          "name": "CrossSectionError derives",
+          "kind": "item",
+          "lines": [37, 43],
+          "source_sha256": "51d41962d7ed1fe653e9d7058e479d90cac5216bd0dbc869d7ddaa170d912f6c"
+        },
+        {
+          "name": "CrossSectionError::fmt",
+          "kind": "function",
+          "lines": [46, 53],
+          "source_sha256": "76881b8a303522569853236f63844711152d75bd2eca516caacd5888059816a3"
+        },
+        {
+          "name": "CrossSectionError Error impl",
+          "kind": "item",
+          "lines": [56, 56],
+          "source_sha256": "13d048ef3940068cfee9d86a87eb50725f462b007156732d17bc9b360476c0d5"
+        },
+        {
+          "name": "validate_paths",
+          "kind": "function",
+          "lines": [77, 86],
+          "source_sha256": "eec92866b0d3f81a1f84fd2df8ea7dc45fc99cb9cf2a31b8deb6c967f6609b78"
+        },
+        {
+          "name": "boolean_paths",
+          "kind": "function",
+          "lines": [88, 115],
+          "source_sha256": "06060ed45d344e69bfcbdd0f78382324f89776305605cc19fb29932af9704a3b"
+        },
+        {
+          "name": "CrossSection::from_polygons_fill",
+          "kind": "function",
+          "lines": [134, 136],
+          "source_sha256": "246fb18f17e393db1b6582c12ad20e88b7c712f095c910ab93a97c49cc1697d8"
+        },
+        {
+          "name": "CrossSection::from_polygons_with_fill_rule",
+          "kind": "function",
+          "lines": [139, 142],
+          "source_sha256": "0fd5551110589b623db928480b9b0b44cfe7b9f4db78ae68444dffcb26014eb0"
+        },
+        {
+          "name": "CrossSection::try_from_polygons_with_fill_rule",
+          "kind": "function",
+          "lines": [145, 159],
+          "source_sha256": "78ac22a22e9815e75d14eb40346a47396a5f0c4d2c94aed54b89e8fe7f2c9380"
+        },
+        {
+          "name": "CrossSection::area",
+          "kind": "function",
+          "lines": [234, 236],
+          "source_sha256": "7e38566e1eff07e4352b71018efbb2e257559a818f88c82afb003d5c3c857818"
+        },
+        {
+          "name": "CrossSection::union",
+          "kind": "function",
+          "lines": [248, 250],
+          "source_sha256": "70cbcc3dc162c33ef45a4dc5f3bfa1122d88bab7fbd3376a6cab422ec343797a"
+        },
+        {
+          "name": "CrossSection::try_union",
+          "kind": "function",
+          "lines": [253, 261],
+          "source_sha256": "c49d6294c64b48827cebeb27986aa2c81fab2cc1b25d145b1c511bb5cae3519f"
+        },
+        {
+          "name": "CrossSection::intersection",
+          "kind": "function",
+          "lines": [263, 266],
+          "source_sha256": "b342a2b52abcff98dfd679c61eaa3286ec84a0b270c783ae36974b5c6f693fa5"
+        },
+        {
+          "name": "CrossSection::try_intersection",
+          "kind": "function",
+          "lines": [269, 277],
+          "source_sha256": "4783f6ae627f8b40b1014c7052933dee39a863785314614191e78ec3c9644999"
+        },
+        {
+          "name": "CrossSection::difference",
+          "kind": "function",
+          "lines": [279, 282],
+          "source_sha256": "c4c1bb91c291a7d4165ec6138ea961b614fcbb733ca75a46b639208c450b4c6c"
+        },
+        {
+          "name": "CrossSection::try_difference",
+          "kind": "function",
+          "lines": [285, 293],
+          "source_sha256": "a6855e33cede983b57a0ec879e83d4c0406edeccf9c9204b90c5413cd237770f"
+        },
+        {
+          "name": "CrossSection::decompose",
+          "kind": "function",
+          "lines": [366, 369],
+          "source_sha256": "8141a014469dad255914d25192618f19bfcb828f21bbd35e14aa8a1ed96efe9b"
+        },
+        {
+          "name": "CrossSection::try_decompose",
+          "kind": "function",
+          "lines": [372, 403],
+          "source_sha256": "8f2ac99912849dd9565498c4fa00e75a5bf90cca7105c9aefecb90839ca7714e"
+        }
+      ],
+      "remainder": "Unchanged upstream executable behavior remains vendor conformance scope, not owned 100%; full file map still required.",
+      "other_changes": [
+        {
+          "lines": [15, 24],
+          "disposition": "Imports/re-export only; changed callable behavior is in the selected functions."
+        },
+        {
+          "lines": [70, 75],
+          "name": "from_paths",
+          "disposition": "Formatting only."
+        },
+        {
+          "lines": [295, 306],
+          "name": "scale",
+          "disposition": "Formatting; expression closure wrapped in a block with the same expression."
+        },
+        {
+          "lines": [408, 443],
+          "name": "simplify",
+          "disposition": "Formatting only; unchanged bounds comparisons and assignments."
+        },
+        {
+          "lines": [445, 455],
+          "name": "offset",
+          "disposition": "Formatting/trailing comma only; same precision 6 and arguments."
+        },
+        {
+          "lines": [505, 520],
+          "name": "from_polygon_with_fill_rule",
+          "disposition": "Formatting/trailing comma only."
+        },
+        {
+          "lines": [523, 538],
+          "name": "warp",
+          "disposition": "Formatting only."
+        },
+        {
+          "lines": [542, 574],
+          "name": "batch_boolean",
+          "disposition": "Formatting/trailing comma only."
+        },
+        {
+          "lines": [577, 583],
+          "name": "hull_cross_sections",
+          "disposition": "Formatting only."
+        },
+        {
+          "lines": [586, 629],
+          "name": "hull_points",
+          "disposition": "Formatting; sort closure block preserves its expression; comparisons/loops unchanged."
+        },
+        {
+          "lines": [633, 642],
+          "name": "compose",
+          "disposition": "Formatting only."
+        },
+        {
+          "lines": [645, 747],
+          "disposition": "cfg(test) module: one new regression test and test formatting, not shipped executable behavior; not executed."
+        }
+      ]
+    },
+    {
+      "path": "packages/geospec-engine-native/native/manifold-rust/source/src/edge_op.rs",
+      "upstream_sha256": "5f422fc391d27fa26c54d9d34af175ef3b809fb54f5930128416762d819be199",
+      "upstream_blob": "5dc76512c948afa073d8188734e951f58d0f4e94",
+      "current_sha256": "4f9d9c13c21dfa654f2d6656e7a46dae35f968547f0023ff1782a09e0c4d1fd2",
+      "critical_spans": [
+        {
+          "name": "collapse_short_edges",
+          "kind": "function",
+          "lines": [787, 813],
+          "source_sha256": "09d7ac1985207fc2c1d6423f69277f7b70c7db2f680a61be430237a83fe358a2"
+        }
+      ],
+      "remainder": "Unchanged upstream executable behavior remains vendor conformance scope, not owned 100%; full file map still required."
+    },
+    {
+      "path": "packages/geospec-engine-native/native/manifold-rust/source/src/face_op.rs",
+      "upstream_sha256": "067ddb4e3d64209ddbf77143655d60a319ef85f40034b971c5af93156b46475c",
+      "upstream_blob": "13494109d777028ed0977d123b40e735b31e44e2",
+      "current_sha256": "6065293d56496957131cf7beea8251f8fd06b139aa9977942420b20862fce848",
+      "critical_spans": [
+        {
+          "name": "slice_triangle_order (includes insert_before/unlink)",
+          "kind": "function",
+          "lines": [577, 637],
+          "source_sha256": "54818eb6b7873901a386a1f553a72976de897c4b8e7d5ee25578b54fa6cacc0d"
+        },
+        {
+          "name": "ManifoldImpl::slice",
+          "kind": "function",
+          "lines": [642, 724],
+          "source_sha256": "7da54c54e4f87757ba33443fe2f66a866c2138f860405409333bc748cf1db732"
+        }
+      ],
+      "remainder": "Unchanged upstream executable behavior remains vendor conformance scope, not owned 100%; full file map still required."
+    },
+    {
+      "path": "packages/geospec-engine-native/native/manifold-rust/source/src/manifold.rs",
+      "upstream_sha256": "a9483dcf9545221e265f330b2682c30a0e1fcd61a02af5aa994ee9c5fea8595e",
+      "upstream_blob": "79b0f42cda8b3242c12387b217c0c661b118d0dd",
+      "current_sha256": "0c3f26575f76cc020e14de75511166ddefc8d4e83d25d8cc70a3a31f92bf23e8",
+      "critical_spans": [
+        {
+          "name": "Manifold::volume",
+          "kind": "function",
+          "lines": [68, 68],
+          "source_sha256": "990046c4cb181110b338e3803475fbfa5eb4f72e7c23aa256f6b8fa3116ed3c7"
+        },
+        {
+          "name": "Manifold::slice",
+          "kind": "function",
+          "lines": [312, 318],
+          "source_sha256": "a31cad4a0a7c78da376f57336b2ef653f6d35616dc304e996f33a812751e39b2"
+        }
+      ],
+      "remainder": "Unchanged upstream executable behavior remains vendor conformance scope, not owned 100%; full file map still required."
+    },
+    {
+      "path": "packages/geospec-engine-native/native/manifold-rust/source/src/manifold_meshgl.rs",
+      "upstream_sha256": "fa74f00ebfee2704c44a3b379b30fa6a837d63e75caf14b31d340f8d2d4290e3",
+      "upstream_blob": "9a3b6fd333ab1dab8a9a07dee7b22e371a7e155a",
+      "current_sha256": "1b2df54b6b33019df8e3f4c3d68c5cdbd65f44930f6686126049ebed0af4e39f",
+      "critical_spans": [
+        {
+          "name": "Manifold::from_mesh_impl",
+          "kind": "function",
+          "lines": [70, 341],
+          "source_sha256": "e1b4dbb94431d2802d69d4d37f985cd19937ece68ff7affe97a7b97fe3b296da"
+        }
+      ],
+      "remainder": "Unchanged upstream executable behavior remains vendor conformance scope, not owned 100%; full file map still required."
+    }
+  ],
+  "diff": {
+    "path": "packages/geospec-engine-native/quality/vendor-owned.patch",
+    "sha256": "f6dd1fefd0efa1a094b1ad73cd08d00474f8ddc4dc62f9882ca647a5398624b7"
+  }
+}

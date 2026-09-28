@@ -1,0 +1,6 @@
+{
+  "ruling": "W2.C-CONFIG-01",
+  "basisSha256": "abb29e93d82b0f7844b88fce691d7a64f0ade435be0786996daab78814acb21c",
+  "derivation": "Approved native initializer with requestId r1 and both backend-presence flags false for Engine::new, explicitly authorized portable refinement. All other approved fields unchanged. Historical mesh-entry.json is untouched.",
+  "expectedUtf8": "{\"requestId\":\"r1\",\"result\":{\"canonicalProfile\":\"geospec-jcs-v1\",\"capabilities\":[{\"name\":\"toHaveBoundingBox\",\"registryVersion\":4,\"scope\":\"mesh-buffer-whole-subject\"}],\"configuration\":{\"analysisRetentionLimits\":{\"maxMeshBytes\":268435456,\"maxMeshEntries\":256,\"maxSolidEntries\":256},\"backends\":{\"brep\":false,\"csg\":false},\"binaryAdmissionLimits\":{\"maxOccurrences\":65536,\"maxResourceBytes\":67108864,\"maxSubjectBytes\":67108864,\"maxTotalBinaryBytes\":134217728,\"maxTriangles\":4000000,\"maxVertices\":2000000,\"profileId\":\"geospec-entry-binary-v1\"},\"configurationProfile\":\"geospec-entry-config-v1\",\"defaultWorkUnitBudget\":8000000,\"maxRetainedSubjects\":32,\"productionCapacityQualified\":false},\"protocolVersion\":3,\"qualification\":\"experimental\",\"registryVersion\":4}}"
+}

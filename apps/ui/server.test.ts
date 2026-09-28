@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { existsSync, readdirSync, utimesSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, utimesSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -107,4 +107,27 @@ describeIfBuilt('apps/ui server (cross-origin isolation parity)', () => {
       expect(response.headers.get(name), `${name} on /assets/${wasmAsset}`).toBe(value);
     }
   });
+
+  it.runIf(wasmAsset !== undefined).each([
+    { accept: 'br, gzip', encoding: 'br' },
+    { accept: 'gzip', encoding: 'gzip' },
+    { accept: 'identity', encoding: null },
+  ])(
+    'should negotiate $accept for WASM with a varying, isolated, byte-identical response',
+    async ({ accept, encoding }) => {
+      const response = await fetch(`${baseUrl}/assets/${wasmAsset}`, { headers: { 'accept-encoding': accept } });
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-encoding')).toBe(encoding);
+      expect(response.headers.get('vary')).toMatch(/accept-encoding/i);
+      expect(response.headers.get('content-type')).toBe('application/wasm');
+      expect(response.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+      for (const [name, value] of Object.entries(requiredHeaders)) {
+        expect(response.headers.get(name), `${name} on ${accept}`).toBe(value);
+      }
+      // Fetch decodes the content encoding, so the body must be the file itself.
+      expect(
+        Buffer.from(await response.arrayBuffer()).equals(readFileSync(resolve(buildClientAssets, wasmAsset!))),
+      ).toBe(true);
+    },
+  );
 });

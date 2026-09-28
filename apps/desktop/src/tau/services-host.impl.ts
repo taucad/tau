@@ -62,7 +62,7 @@ import type {
   ProjectHostActor,
   ProjectHostOptions,
 } from '@taucad/host';
-import { createHostGeoSpecRunner } from '@taucad/host/agent-tools';
+import { createHostGeoSpecRunner, createHostNativeGeoSpecRunner } from '@taucad/host/agent-tools';
 import { createChannelServer, wrapMessagePortMain } from '@taucad/rpc';
 import { createHostAdmissionAuthority } from '@taucad/runtime/host';
 import type { HostAdmissionAuthority } from '@taucad/runtime/host';
@@ -77,6 +77,7 @@ import { serveElectronFileSystemBridgePort } from '@taucad/runtime/electron/util
 import { systemSkillBundles } from '@taucad/skills/resources';
 
 import { canonicalPath } from '#main/project-roots.js';
+import { serveGeoSpecPerformance } from '#tau/geospec-performance.js';
 import type { createDesktopRuntime } from '#tau/desktop-runtime.factory.js';
 
 /**
@@ -361,11 +362,13 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
   const trustedRoots = new Set<string>();
   const candidateRoots = new Map<string, number>();
   const nodeFileSystemDisposers = new Set<() => Promise<void>>();
+  const performanceDisposers = new Set<() => Promise<void>>();
   const runtimeFileSystemDisposers = new Set<RuntimeFileSystemDisposer>();
   /* One `projectHost` actor per workspace root (W6 RH-S5), outliving every
    * connection to it: a run keeps executing with zero clients attached, which is
    * the whole point of the portable host. It leaves the map when it ends. */
   const projectHosts = new Map<string, ProjectHostActor>();
+  const projectHostGeoSpecEngines = new Map<string, 'legacy' | 'native'>();
   const retiredProjectHosts = new Set<ProjectHostActor>();
   /* Renderer ports held for the actor that serves or refuses them, by connection id. */
   const connections = new Map<string, UtilityPort>();
@@ -811,10 +814,15 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
    *
    * @param workspaceRoot - The project root, canonical.
    * @param projectId - The renderer's project id.
-   * @param route - The actor's MCP route on the utility's listener.
+   * @param selection - The actor's MCP route and authoring engine.
    * @returns The options.
    */
-  const projectHostOptions = (workspaceRoot: string, projectId: string, route: string): ProjectHostOptions => {
+  const projectHostOptions = (
+    workspaceRoot: string,
+    projectId: string,
+    selection: Readonly<{ route: string; geoSpecEngine: 'legacy' | 'native' }>,
+  ): ProjectHostOptions => {
+    const { route, geoSpecEngine } = selection;
     const config = agentHostConfig;
     if (config === undefined || internalChannel === undefined || authority === undefined) {
       throw new Error('The desktop agent host has no configuration or filesystem authority.');
@@ -839,13 +847,15 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       /* Rooted per run, exactly as the daemon does it: a candidate turn's kernel
        * and GeoSpec tools read the checkout its file tools write. */
       runtimeClient: async (root) => runtimeClients.get(root),
+      geospecAuthoringMode: geoSpecEngine,
       geospecRunner: async (root) => {
         const client = await runtimeClients.get(root);
         /* GeoSpec's deliberately wide export-format carrier accepts every
          * plugin format, while this concrete desktop recipe exposes the
          * actual narrower set. Its loader requests only formats supported
          * by that recipe; bridge the generic variance at this boundary. */
-        return createHostGeoSpecRunner(root, client as unknown as HostGeoSpecRuntimeClient);
+        const createRunner = geoSpecEngine === 'native' ? createHostNativeGeoSpecRunner : createHostGeoSpecRunner;
+        return createRunner(root, client as unknown as HostGeoSpecRuntimeClient);
       },
       systemSkillBundles,
       apiBaseUrl: config.tauApiUrl,
@@ -913,9 +923,14 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
    *
    * @param workspaceRoot - The project root, canonical.
    * @param projectId - The renderer's project id.
+   * @param geoSpecEngine - The authoring engine selected for this root.
    * @returns The running actor.
    */
-  const projectHostFor = (workspaceRoot: string, projectId: string): ProjectHostActor => {
+  const projectHostFor = (
+    workspaceRoot: string,
+    projectId: string,
+    geoSpecEngine: 'legacy' | 'native',
+  ): ProjectHostActor => {
     const existing = projectHosts.get(workspaceRoot);
     if (existing !== undefined) {
       return existing;
@@ -928,7 +943,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     let servedHost: ProjectHost | undefined;
     const actor = createProjectHostActor({
       root: workspaceRoot,
-      host: () => ({ ...projectHostOptions(workspaceRoot, projectId, route), machines }),
+      host: () => ({ ...projectHostOptions(workspaceRoot, projectId, { route, geoSpecEngine }), machines }),
       serve: (connectionId, host) => {
         const port = takeConnection(connectionId);
         if (port === undefined) {
@@ -945,7 +960,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
           sessionKey: agentSessionKey,
           revisions: host.revisions.channel,
         });
-        log('agent-host-served', { workspaceRoot, reused: servedHost === host });
+        log('agent-host-served', { workspaceRoot, reused: servedHost === host, geoSpecEngine });
         servedHost = host;
       },
       refuse: (connectionId) => {
@@ -970,6 +985,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     const retire = (): void => {
       if (projectHosts.get(workspaceRoot) === actor) {
         projectHosts.delete(workspaceRoot);
+        projectHostGeoSpecEngines.delete(workspaceRoot);
       }
       retiredProjectHosts.add(actor);
       const settleRetired = async (): Promise<void> => {
@@ -989,6 +1005,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     };
     actor.subscribe({ complete: retire, error: retire });
     projectHosts.set(workspaceRoot, actor);
+    projectHostGeoSpecEngines.set(workspaceRoot, geoSpecEngine);
     actor.start();
     return actor;
   };
@@ -1193,11 +1210,29 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
      * person granted — under `$TMPDIR` those differ by `/private`, and an actor
      * filed under one of them is unreachable from the other. */
     const workspaceRoot = canonicalPath(requested);
+    const requestedEngine = context?.['geoSpecEngine'];
+    if (requestedEngine !== undefined && requestedEngine !== 'legacy' && requestedEngine !== 'native') {
+      log('agent-host.invalid-geospec-engine', { geoSpecEngine: requestedEngine });
+      port.close();
+      return;
+    }
+    const geoSpecEngine = requestedEngine ?? 'legacy';
+    const existingEngine = projectHostGeoSpecEngines.get(workspaceRoot);
+    if (existingEngine !== undefined && existingEngine !== geoSpecEngine) {
+      log('agent-host.geospec-engine-mismatch', {
+        workspaceRoot,
+        current: existingEngine,
+        requested: geoSpecEngine,
+        reason: 'Reload the project host to change the GeoSpec engine.',
+      });
+      port.close();
+      return;
+    }
     connectionCount += 1;
     const connectionId = `connection-${String(connectionCount)}`;
     connections.set(connectionId, port);
     const generation = Number(context?.['attachmentGeneration']);
-    projectHostFor(workspaceRoot, projectId).send({
+    projectHostFor(workspaceRoot, projectId, geoSpecEngine).send({
       type: 'connect',
       gen:
         context?.['attachmentGeneration'] !== undefined && Number.isSafeInteger(generation) && generation >= 0
@@ -1233,6 +1268,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     runtimeFileSystemDisposers.clear();
     await settleAll(
       [
+        ...[...performanceDisposers].map(async (close) => close()),
         ...runtimeDisposers.map(async (disposeFileSystem) => disposeFileSystem.drain()),
         ...fileSystemDisposers.map(async (disposeFileSystem) => disposeFileSystem()),
       ],
@@ -1293,7 +1329,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       const gracefulSettlement = quiescence;
       const runtimeDisposers = [...runtimeFileSystemDisposers];
       runtimeFileSystemDisposers.clear();
-      const closingFileSystems: Array<Promise<void>> = [];
+      const closingFileSystems: Array<Promise<void>> = [...performanceDisposers].map(async (close) => close());
       for (const disposeFileSystem of runtimeDisposers) {
         try {
           disposeFileSystem.force();
@@ -1365,6 +1401,34 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       }
       const context = record['context'] as Record<string, unknown> | undefined;
       switch (record['concern']) {
+        case 'geospecPerformance': {
+          if (!/^(1|true)$/iu.test(process.env['TAU_DEBUG'] ?? '')) {
+            log('geospec-performance-disabled');
+            port.close();
+            return;
+          }
+          const disposePerformance = serveGeoSpecPerformance(port);
+          const close = async (): Promise<void> => {
+            try {
+              await disposePerformance();
+            } finally {
+              performanceDisposers.delete(close);
+            }
+          };
+          performanceDisposers.add(close);
+          const disposeDisconnectedPerformance = async (): Promise<void> => {
+            try {
+              await close();
+            } catch (error) {
+              log('geospec-performance-close-failed', error instanceof Error ? error.message : String(error));
+            }
+          };
+          port.on('close', () => {
+            // async-iife: bootstrap -- the retained disposer lets quiesce await this remote-close cleanup.
+            void disposeDisconnectedPerformance();
+          });
+          return;
+        }
         case 'nodeFs': {
           const stop = serve(toNodeFsPort(port), {
             allowRoot: isTrustedRoot,

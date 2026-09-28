@@ -1,0 +1,217 @@
+{
+  "schemaVersion": 1,
+  "oracle": "actual JS RegExp.test with lastIndex reset before and after each call",
+  "node": "v24.10.0",
+  "icu": "77.1",
+  "qualification": "ordinary selector feature controls; not full ECMAScript or runtime protection qualification",
+  "rows": [
+    {
+      "id": "name-case",
+      "pattern": "^c[AB]",
+      "flags": "i",
+      "value": "Ca",
+      "expectedJs": [true, true],
+      "expectedCandidate": "same-boolean"
+    },
+    {
+      "id": "backref-yes",
+      "pattern": "^(bolt)\\1$",
+      "flags": "",
+      "value": "boltbolt",
+      "expectedJs": [true, true],
+      "expectedCandidate": "same-boolean"
+    },
+    {
+      "id": "backref-no",
+      "pattern": "^(bolt)\\1$",
+      "flags": "",
+      "value": "bolt",
+      "expectedJs": [false, false],
+      "expectedCandidate": "same-boolean"
+    },
+    {
+      "id": "lookbehind",
+      "pattern": "(?<=left\\.)bolt",
+      "flags": "",
+      "value": "left.bolt",
+      "expectedJs": [true, true],
+      "expectedCandidate": "same-boolean"
+    },
+    {
+      "id": "lookahead-no",
+      "pattern": "bolt(?!Hole)",
+      "flags": "",
+      "value": "boltHole",
+      "expectedJs": [false, false],
+      "expectedCandidate": "same-boolean"
+    },
+    {
+      "id": "lookahead-yes",
+      "pattern": "bolt(?!Hole)",
+      "flags": "",
+      "value": "boltHead",
+      "expectedJs": [true, true],
+      "expectedCandidate": "same-boolean"
+    },
+    {
+      "id": "sticky-start",
+      "pattern": "bolt",
+      "flags": "y",
+      "value": "bolt#0",
+      "expectedJs": [true, true],
+      "expectedCandidate": "same-boolean"
+    },
+    {
+      "id": "sticky-later",
+      "pattern": "bolt",
+      "flags": "y",
+      "value": "xbolt",
+      "expectedJs": [false, false],
+      "expectedCandidate": "same-boolean"
+    },
+    {
+      "id": "global-reset",
+      "pattern": "bolt",
+      "flags": "g",
+      "value": "bolt",
+      "expectedJs": [true, true],
+      "expectedCandidate": "same-boolean"
+    },
+    {
+      "id": "unicode-point",
+      "pattern": "^.$",
+      "flags": "u",
+      "value": "😀",
+      "expectedJs": [true, true],
+      "expectedCandidate": "same-boolean"
+    },
+    {
+      "id": "code-unit",
+      "pattern": "^.$",
+      "flags": "",
+      "value": "😀",
+      "expectedJs": [false, false],
+      "expectedCandidate": "same-boolean"
+    },
+    {
+      "id": "unicode-quantifier",
+      "pattern": "^😀+$",
+      "flags": "u",
+      "value": "😀😀",
+      "expectedJs": [true, true],
+      "expectedCandidate": "same-boolean"
+    },
+    {
+      "id": "code-unit-quantifier",
+      "pattern": "^😀+$",
+      "flags": "",
+      "value": "😀😀",
+      "expectedJs": [false, false],
+      "expectedCandidate": "same-boolean"
+    },
+    {
+      "id": "unicode-escape",
+      "pattern": "^\\u{1F600}$",
+      "flags": "u",
+      "value": "😀",
+      "expectedJs": [true, true],
+      "expectedCandidate": "same-boolean"
+    },
+    {
+      "id": "multiline",
+      "pattern": "^bolt$",
+      "flags": "m",
+      "value": "x\nbolt\ny",
+      "expectedJs": [true, true],
+      "expectedCandidate": "same-boolean"
+    },
+    {
+      "id": "dotall",
+      "pattern": "^a.b$",
+      "flags": "s",
+      "value": "a\nb",
+      "expectedJs": [true, true],
+      "expectedCandidate": "same-boolean"
+    },
+    {
+      "id": "dot-no-all",
+      "pattern": "^a.b$",
+      "flags": "",
+      "value": "a\nb",
+      "expectedJs": [false, false],
+      "expectedCandidate": "same-boolean"
+    },
+    {
+      "id": "indices",
+      "pattern": "bolt",
+      "flags": "d",
+      "value": "bolt",
+      "expectedJs": [true, true],
+      "expectedCandidate": "same-boolean"
+    },
+    {
+      "id": "unicode-casefold",
+      "pattern": "^k$",
+      "flags": "iu",
+      "value": "K",
+      "expectedJs": [true, true],
+      "expectedCandidate": "same-boolean"
+    },
+    {
+      "id": "legacy-casefold",
+      "pattern": "^k$",
+      "flags": "i",
+      "value": "K",
+      "expectedJs": [false, false],
+      "expectedCandidate": "same-boolean"
+    },
+    {
+      "id": "property",
+      "pattern": "^\\p{Letter}+$",
+      "flags": "u",
+      "value": "Ångström",
+      "expectedJs": [true, true],
+      "expectedCandidate": "same-boolean"
+    },
+    {
+      "id": "named-backref",
+      "pattern": "^(?<stem>bolt)\\k<stem>$",
+      "flags": "",
+      "value": "boltbolt",
+      "expectedJs": [true, true],
+      "expectedCandidate": "same-boolean"
+    },
+    {
+      "id": "invalid-parenthesis",
+      "pattern": "(",
+      "flags": "",
+      "value": "x",
+      "expectedJs": "SyntaxError",
+      "expectedCandidate": "invalid-syntax"
+    },
+    {
+      "id": "duplicate-flags",
+      "pattern": "bolt",
+      "flags": "ii",
+      "value": "bolt",
+      "expectedJs": "SyntaxError",
+      "expectedCandidate": "invalid-syntax"
+    },
+    {
+      "id": "exclusive-flags",
+      "pattern": "bolt",
+      "flags": "uv",
+      "value": "bolt",
+      "expectedJs": "SyntaxError",
+      "expectedCandidate": "invalid-syntax"
+    },
+    {
+      "id": "valid-unqualified-v",
+      "pattern": "^.$",
+      "flags": "v",
+      "value": "a",
+      "expectedJs": [true, true],
+      "expectedCandidate": "unsupported"
+    }
+  ]
+}

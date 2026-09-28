@@ -144,6 +144,7 @@
   },
   "dependencies": {
     "@taucad/filesystem": "workspace:*",
+    "@taucad/project-core": "workspace:*",
     "buffer": "catalog:",
     "isomorphic-git": "catalog:",
     "zod": "catalog:"

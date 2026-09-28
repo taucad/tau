@@ -1,0 +1,1088 @@
+THIRD-PARTY COMPONENT ATTRIBUTIONS
+
+This inventory reports declared licenses and the exact license/notice bytes
+collected from the selected offline dependency closure. A fallback standard
+text is identified when a published Cargo package omitted its license file.
+This inventory is technical provenance and is not legal certification.
+
+Emscripten mixed SDK and runtime 1db513782be24469589d7cb8a1f1834e9a33f271
+  declared license: MIT OR NCSA (Emscripten); bundled components retain their own declarations
+  source: Selected tool archives and exact input closure in source-relink receipts
+  license files: mixed-tools/sdkPrefix/emscripten/AUTHORS, mixed-tools/sdkPrefix/emscripten/LICENSE, mixed-tools/sdkPrefix/emscripten/system/include/SDL/COPYING, mixed-tools/sdkPrefix/emscripten/system/lib/compiler-rt/LICENSE.TXT, mixed-tools/sdkPrefix/emscripten/system/lib/libc/musl/COPYRIGHT, mixed-tools/sdkPrefix/emscripten/system/lib/libcxx/LICENSE.TXT, mixed-tools/sdkPrefix/emscripten/system/lib/libcxxabi/LICENSE.TXT, mixed-tools/sdkPrefix/emscripten/system/lib/libunwind/LICENSE.TXT, mixed-tools/sdkPrefix/emscripten/system/lib/llvm-libc/LICENSE.TXT, mixed-tools/sdkPrefix/emscripten/system/lib/mimalloc/LICENSE, mixed-tools/sdkPrefix/emscripten/system/lib/openmp/LICENSE.TXT, mixed-tools/sdkPrefix/emscripten/system/lib/openmp/src/thirdparty/ittnotify/LICENSE.txt
+  cohort: current-mixed
+  build-tool notices: required adjacent source kit; exact paths/hashes in components.json
+
+FreeType de8b92dd7ec634e9e2b25ef534c54a3537555c11
+  declared license: FTL
+  source: https://codeload.github.com/freetype/freetype/tar.gz/de8b92dd7ec634e9e2b25ef534c54a3537555c11
+  license files: FreeType-FTL.txt
+  cohort: current-mixed
+
+Open CASCADE Technology 3d097a0328e71b826377d4814ab05ec3c3d23871
+  declared license: LGPL-2.1-only WITH OCCT-exception-1.0
+  source: https://github.com/Open-Cascade-SAS/OCCT/archive/3d097a0328e71b826377d4814ab05ec3c3d23871.tar.gz
+  license files: OCCT-LGPL-2.1.txt, OCCT-LGPL-exception.txt
+  cohort: node, current-mixed
+
+RapidJSON 24b5e7a8b27f42fa16b96fc70aade9106cf7102f
+  declared license: MIT
+  source: https://codeload.github.com/Tencent/rapidjson/tar.gz/24b5e7a8b27f42fa16b96fc70aade9106cf7102f
+  license files: RapidJSON-LICENSE.txt
+  cohort: current-mixed
+
+Rust mixed standard library and toolchain c656540d6467dee1381f0cbd882412d6bd1cd5ae
+  declared license: MIT OR Apache-2.0; bundled dependencies retain their own declarations
+  source: Selected tool archives and exact input closure in source-relink receipts
+  license files: mixed-tools/rustPrefix/lib/rustlib/src/rust/library/backtrace/LICENSE-APACHE, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/backtrace/LICENSE-MIT, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/compiler-builtins/LICENSE.txt, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/compiler-builtins/libm/LICENSE.txt, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/portable-simd/LICENSE-APACHE, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/portable-simd/LICENSE-MIT, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/portable-simd/crates/core_simd/LICENSE-APACHE, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/portable-simd/crates/core_simd/LICENSE-MIT, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/stdarch/LICENSE-APACHE, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/stdarch/LICENSE-MIT, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/stdarch/crates/core_arch/LICENSE-APACHE, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/stdarch/crates/core_arch/LICENSE-MIT, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/stdarch/crates/intrinsic-test/LICENSE-APACHE, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/stdarch/crates/intrinsic-test/LICENSE-MIT, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/addr2line-0.27.1/LICENSE-APACHE, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/addr2line-0.27.1/LICENSE-MIT, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/adler2-2.0.1/LICENSE-0BSD, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/adler2-2.0.1/LICENSE-APACHE, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/adler2-2.0.1/LICENSE-MIT, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/cc-1.2.0/LICENSE-APACHE, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/cc-1.2.0/LICENSE-MIT, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/cfg-if-1.0.4/LICENSE-APACHE, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/cfg-if-1.0.4/LICENSE-MIT, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/dlmalloc-0.2.14/LICENSE-APACHE, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/dlmalloc-0.2.14/LICENSE-MIT, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/foldhash-0.2.0/LICENSE, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/getopts-0.2.24/LICENSE-APACHE, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/getopts-0.2.24/LICENSE-MIT, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/gimli-0.34.0/LICENSE-APACHE, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/gimli-0.34.0/LICENSE-MIT, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/hashbrown-0.17.1/LICENSE-APACHE, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/hashbrown-0.17.1/LICENSE-MIT, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/hermit-abi-0.5.2/LICENSE-APACHE, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/hermit-abi-0.5.2/LICENSE-MIT, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/libc-0.2.189/LICENSE-APACHE, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/libc-0.2.189/LICENSE-MIT, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/memchr-2.8.3/COPYING, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/memchr-2.8.3/LICENSE-MIT, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/memchr-2.8.3/UNLICENSE, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/miniz_oxide-0.9.1/LICENSE, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/miniz_oxide-0.9.1/LICENSE-APACHE.md, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/miniz_oxide-0.9.1/LICENSE-MIT.md, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/miniz_oxide-0.9.1/LICENSE-ZLIB.md, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/moto-rt-0.16.3/LICENSE-APACHE, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/moto-rt-0.16.3/LICENSE-MIT, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/object-0.39.1/LICENSE-APACHE, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/object-0.39.1/LICENSE-MIT, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/r-efi-5.3.0/AUTHORS, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/r-efi-alloc-2.1.0/AUTHORS, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/rand-0.9.5/COPYRIGHT, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/rand-0.9.5/LICENSE-APACHE, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/rand-0.9.5/LICENSE-MIT, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/rand_core-0.9.5/COPYRIGHT, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/rand_core-0.9.5/LICENSE-APACHE, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/rand_core-0.9.5/LICENSE-MIT, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/rand_xorshift-0.4.0/COPYRIGHT, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/rand_xorshift-0.4.0/LICENSE-APACHE, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/rand_xorshift-0.4.0/LICENSE-MIT, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/rustc-demangle-0.1.28/LICENSE-APACHE, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/rustc-demangle-0.1.28/LICENSE-MIT, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/rustc-literal-escaper-0.0.8/LICENSE-APACHE, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/rustc-literal-escaper-0.0.8/LICENSE-MIT, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/shlex-1.3.0/LICENSE-APACHE, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/shlex-1.3.0/LICENSE-MIT, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/unwinding-0.2.10/LICENSE-APACHE, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/unwinding-0.2.10/LICENSE-MIT, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/wasip2-1.0.4+wasi-0.2.12/LICENSE-APACHE, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/wasip2-1.0.4+wasi-0.2.12/LICENSE-Apache-2.0_WITH_LLVM-exception, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/wasip2-1.0.4+wasi-0.2.12/LICENSE-MIT, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/wasip3-0.7.1+wasi-0.3.0/LICENSE-APACHE, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/wasip3-0.7.1+wasi-0.3.0/LICENSE-Apache-2.0_WITH_LLVM-exception, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/wasip3-0.7.1+wasi-0.3.0/LICENSE-MIT, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/wit-bindgen-0.57.1/LICENSE-APACHE, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/wit-bindgen-0.57.1/LICENSE-Apache-2.0_WITH_LLVM-exception, mixed-tools/rustPrefix/lib/rustlib/src/rust/library/vendor/wit-bindgen-0.57.1/LICENSE-MIT, mixed-tools/rustPrefix/share/doc/rust/COPYRIGHT-library.html
+  cohort: current-mixed
+  build-tool notices: required adjacent source kit; exact paths/hashes in components.json
+
+V8 FastMathHypot adaptation Node-v24.10.0-9b72b88f4c4565687e3a8c4d8e1232f63a501e15
+  declared license: BSD-3-Clause
+  source: https://github.com/nodejs/node/blob/9b72b88f4c4565687e3a8c4d8e1232f63a501e15/deps/v8/src/builtins/math.tq
+  license files: NOTICE.txt
+  cohort: node, current-mixed
+
+allocator-api2 0.2.21
+  declared license: MIT OR Apache-2.0
+  authors: Zakarum <zaq.dev@icloud.com>
+  repository: https://github.com/zakarumych/allocator-api2
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/20fe7b00e904ed690e3b9fd6073784d3fc428141dbd10b81c01fd143d0797f58-LICENSE-APACHE, cargo/36516aefdc84c5d5a1e7485425913a22dbda69eb1930c5e84d6ae4972b5194b9-LICENSE-MIT
+  cohort: node
+
+allocator-api2 0.2.21
+  declared license: MIT OR Apache-2.0
+  authors: Zakarum <zaq.dev@icloud.com>
+  repository: https://github.com/zakarumych/allocator-api2
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/20fe7b00e904ed690e3b9fd6073784d3fc428141dbd10b81c01fd143d0797f58-LICENSE-APACHE, cargo/36516aefdc84c5d5a1e7485425913a22dbda69eb1930c5e84d6ae4972b5194b9-LICENSE-MIT
+  cohort: current-mixed
+
+autocfg 1.5.0
+  declared license: Apache-2.0 OR MIT
+  authors: Josh Stone <cuviper@gmail.com>
+  repository: https://github.com/cuviper/autocfg
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/27995d58ad5c1145c1a8cd86244ce844886958a35eb2b78c6b772748669999ac-LICENSE-MIT, cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE
+  cohort: current-mixed
+
+autocfg 1.5.1
+  declared license: Apache-2.0 OR MIT
+  authors: Josh Stone <cuviper@gmail.com>
+  repository: https://github.com/cuviper/autocfg
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/27995d58ad5c1145c1a8cd86244ce844886958a35eb2b78c6b772748669999ac-LICENSE-MIT, cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE
+  cohort: node
+
+bitflags 2.13.1
+  declared license: MIT OR Apache-2.0
+  authors: The Rust Project Developers
+  repository: https://github.com/bitflags/bitflags
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb-LICENSE-MIT, cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE
+  cohort: node
+
+block-buffer 0.10.4
+  declared license: MIT OR Apache-2.0
+  authors: RustCrypto Developers
+  repository: https://github.com/RustCrypto/utils
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5-LICENSE-APACHE, cargo/d5c22aa3118d240e877ad41c5d9fa232f9c77d757d4aac0c2f943afc0a95e0ef-LICENSE-MIT
+  cohort: node
+
+block-buffer 0.10.4
+  declared license: MIT OR Apache-2.0
+  authors: RustCrypto Developers
+  repository: https://github.com/RustCrypto/utils
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5-LICENSE-APACHE, cargo/d5c22aa3118d240e877ad41c5d9fa232f9c77d757d4aac0c2f943afc0a95e0ef-LICENSE-MIT
+  cohort: current-mixed
+
+byteorder 1.5.0
+  declared license: Unlicense OR MIT
+  authors: Andrew Gallant <jamslam@gmail.com>
+  repository: https://github.com/BurntSushi/byteorder
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f-COPYING, cargo/0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f-LICENSE-MIT, cargo/7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c-UNLICENSE
+  cohort: node
+
+byteorder 1.5.0
+  declared license: Unlicense OR MIT
+  authors: Andrew Gallant <jamslam@gmail.com>
+  repository: https://github.com/BurntSushi/byteorder
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f-COPYING, cargo/0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f-LICENSE-MIT, cargo/7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c-UNLICENSE
+  cohort: current-mixed
+
+cc 1.4.4
+  declared license: MIT OR Apache-2.0
+  repository: https://github.com/rust-lang/cc-rs
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397-LICENSE-MIT, cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE
+  cohort: node
+
+cc 1.4.4
+  declared license: MIT OR Apache-2.0
+  repository: https://github.com/rust-lang/cc-rs
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397-LICENSE-MIT, cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE
+  cohort: current-mixed
+
+cfg-if 1.0.4
+  declared license: MIT OR Apache-2.0
+  authors: Alex Crichton <alex@alexcrichton.com>
+  repository: https://github.com/rust-lang/cfg-if
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397-LICENSE-MIT, cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE
+  cohort: node
+
+cfg-if 1.0.4
+  declared license: MIT OR Apache-2.0
+  authors: Alex Crichton <alex@alexcrichton.com>
+  repository: https://github.com/rust-lang/cfg-if
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397-LICENSE-MIT, cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE
+  cohort: current-mixed
+
+clipper2-rust 1.0.3
+  declared license: BSL-1.0
+  authors: Lars Brubaker <larsbrubaker@matterhackers.com>
+  repository: https://github.com/larsbrubaker/clipper2-rust
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/beb8e42e9d6b4284e03304d05a81a0755200a965fc8d0a5e0aea1e84cf805d6e-LICENSE
+  cohort: node
+
+clipper2-rust 1.0.3
+  declared license: BSL-1.0
+  authors: Lars Brubaker <larsbrubaker@matterhackers.com>
+  repository: https://github.com/larsbrubaker/clipper2-rust
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/beb8e42e9d6b4284e03304d05a81a0755200a965fc8d0a5e0aea1e84cf805d6e-LICENSE
+  cohort: current-mixed
+
+convert_case 0.11.0
+  declared license: MIT
+  authors: rutrum <dave@rutrum.net>
+  repository: https://github.com/rutrum/convert-case
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/aed7b1758e35afa0cd0fde059d61950747ca11cd0e5e169cb21c11608daed772-LICENSE
+  cohort: node
+
+cpufeatures 0.2.17
+  declared license: MIT OR Apache-2.0
+  authors: RustCrypto Developers
+  repository: https://github.com/RustCrypto/utils
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5-LICENSE-APACHE, cargo/ae9baa7beea910273c2f384c2a6b721fb7bd02bda3436074a1072e4ee689f985-LICENSE-MIT
+  cohort: node
+
+crypto-common 0.1.7
+  declared license: MIT OR Apache-2.0
+  authors: RustCrypto Developers
+  repository: https://github.com/RustCrypto/traits
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/3521672491a3479422d5fe1aca6645dd2984090f85da6e5205abfb18fb7a6897-LICENSE-MIT, cargo/a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5-LICENSE-APACHE
+  cohort: node
+
+crypto-common 0.1.7
+  declared license: MIT OR Apache-2.0
+  authors: RustCrypto Developers
+  repository: https://github.com/RustCrypto/traits
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/3521672491a3479422d5fe1aca6645dd2984090f85da6e5205abfb18fb7a6897-LICENSE-MIT, cargo/a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5-LICENSE-APACHE
+  cohort: current-mixed
+
+ctor 1.0.13
+  declared license: Apache-2.0 OR MIT
+  authors: Matt Mastracci <matthew@mastracci.com>
+  repository: https://github.com/mmastrac/linktime
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/a8ad31b1c3f40dca5a84119351b8fa8ddc868edd77fad8a8ebf6d8f2d16fa4ae-LICENSE-APACHE, cargo/bccaa8b6c09f94e81f06696e179dbe058464bbdfbc823b6d49cada1d71e84ac3-LICENSE-MIT
+  cohort: node
+
+dashu-base 0.5.1
+  declared license: MIT OR Apache-2.0
+  authors: Jacob Zhong <cmpute@gmail.com>
+  repository: https://github.com/cmpute/dashu
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4-LICENSE, fallback/MIT.txt
+  cohort: node
+  note: published Cargo package omitted a license file; fallback text is marked
+
+dashu-base 0.5.1
+  declared license: MIT OR Apache-2.0
+  authors: Jacob Zhong <cmpute@gmail.com>
+  repository: https://github.com/cmpute/dashu
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4-LICENSE, fallback/MIT.txt
+  cohort: current-mixed
+  note: published Cargo package omitted a license file; fallback text is marked
+
+dashu-int 0.5.1
+  declared license: MIT OR Apache-2.0
+  authors: Jacob Zhong <cmpute@gmail.com>; Tomek Czajka <tczajka@gmail.com>
+  repository: https://github.com/cmpute/dashu
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/13ce2fb7da9c6c3a5a16e86877a604e80237f076b9258115d8f0444127f6a281-NOTICE.md, cargo/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4-LICENSE, fallback/MIT.txt
+  cohort: node
+  note: published Cargo package omitted a license file; fallback text is marked
+
+dashu-int 0.5.1
+  declared license: MIT OR Apache-2.0
+  authors: Jacob Zhong <cmpute@gmail.com>; Tomek Czajka <tczajka@gmail.com>
+  repository: https://github.com/cmpute/dashu
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/13ce2fb7da9c6c3a5a16e86877a604e80237f076b9258115d8f0444127f6a281-NOTICE.md, cargo/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4-LICENSE, fallback/MIT.txt
+  cohort: current-mixed
+  note: published Cargo package omitted a license file; fallback text is marked
+
+dashu-ratio 0.5.1
+  declared license: MIT OR Apache-2.0
+  authors: Jacob Zhong <cmpute@gmail.com>
+  repository: https://github.com/cmpute/dashu
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4-LICENSE, fallback/MIT.txt
+  cohort: node
+  note: published Cargo package omitted a license file; fallback text is marked
+
+dashu-ratio 0.5.1
+  declared license: MIT OR Apache-2.0
+  authors: Jacob Zhong <cmpute@gmail.com>
+  repository: https://github.com/cmpute/dashu
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4-LICENSE, fallback/MIT.txt
+  cohort: current-mixed
+  note: published Cargo package omitted a license file; fallback text is marked
+
+digest 0.10.7
+  declared license: MIT OR Apache-2.0
+  authors: RustCrypto Developers
+  repository: https://github.com/RustCrypto/traits
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/9e0dfd2dd4173a530e238cb6adb37aa78c34c6bc7444e0e10c1ab5d8881f63ba-LICENSE-MIT, cargo/a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5-LICENSE-APACHE
+  cohort: node
+
+digest 0.10.7
+  declared license: MIT OR Apache-2.0
+  authors: RustCrypto Developers
+  repository: https://github.com/RustCrypto/traits
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/9e0dfd2dd4173a530e238cb6adb37aa78c34c6bc7444e0e10c1ab5d8881f63ba-LICENSE-MIT, cargo/a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5-LICENSE-APACHE
+  cohort: current-mixed
+
+equivalent 1.0.2
+  declared license: Apache-2.0 OR MIT
+  repository: https://github.com/indexmap-rs/equivalent
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/7365cc8878a1d7ce155a58c4ca09c3d7a6be413efa5334a80ea842912b669349-LICENSE-MIT, cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE
+  cohort: node
+
+equivalent 1.0.2
+  declared license: Apache-2.0 OR MIT
+  repository: https://github.com/indexmap-rs/equivalent
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/7365cc8878a1d7ce155a58c4ca09c3d7a6be413efa5334a80ea842912b669349-LICENSE-MIT, cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE
+  cohort: current-mixed
+
+find-msvc-tools 0.1.12
+  declared license: MIT OR Apache-2.0
+  repository: https://github.com/rust-lang/cc-rs
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397-LICENSE-MIT, cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE
+  cohort: node
+
+find-msvc-tools 0.1.12
+  declared license: MIT OR Apache-2.0
+  repository: https://github.com/rust-lang/cc-rs
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397-LICENSE-MIT, cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE
+  cohort: current-mixed
+
+foldhash 0.2.0
+  declared license: Zlib
+  authors: Orson Peters <orsonpeters@gmail.com>
+  repository: https://github.com/orlp/foldhash
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/b1181a40b2a7b25cf66fd01481713bc1005df082c53ef73e851e55071b102744-LICENSE
+  cohort: node
+
+foldhash 0.2.0
+  declared license: Zlib
+  authors: Orson Peters <orsonpeters@gmail.com>
+  repository: https://github.com/orlp/foldhash
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/b1181a40b2a7b25cf66fd01481713bc1005df082c53ef73e851e55071b102744-LICENSE
+  cohort: current-mixed
+
+futures 0.3.34
+  declared license: MIT OR Apache-2.0
+  repository: https://github.com/rust-lang/futures-rs
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/275c491d6d1160553c32fd6127061d7f9606c3ea25abfad6ca3f6ed088785427-LICENSE-APACHE, cargo/6652c868f35dfe5e8ef636810a4e576b9d663f3a17fb0f5613ad73583e1b88fd-LICENSE-MIT
+  cohort: node
+
+futures-channel 0.3.34
+  declared license: MIT OR Apache-2.0
+  repository: https://github.com/rust-lang/futures-rs
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/275c491d6d1160553c32fd6127061d7f9606c3ea25abfad6ca3f6ed088785427-LICENSE-APACHE, cargo/6652c868f35dfe5e8ef636810a4e576b9d663f3a17fb0f5613ad73583e1b88fd-LICENSE-MIT
+  cohort: node
+
+futures-core 0.3.34
+  declared license: MIT OR Apache-2.0
+  repository: https://github.com/rust-lang/futures-rs
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/275c491d6d1160553c32fd6127061d7f9606c3ea25abfad6ca3f6ed088785427-LICENSE-APACHE, cargo/6652c868f35dfe5e8ef636810a4e576b9d663f3a17fb0f5613ad73583e1b88fd-LICENSE-MIT
+  cohort: node
+
+futures-executor 0.3.34
+  declared license: MIT OR Apache-2.0
+  repository: https://github.com/rust-lang/futures-rs
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/275c491d6d1160553c32fd6127061d7f9606c3ea25abfad6ca3f6ed088785427-LICENSE-APACHE, cargo/6652c868f35dfe5e8ef636810a4e576b9d663f3a17fb0f5613ad73583e1b88fd-LICENSE-MIT
+  cohort: node
+
+futures-io 0.3.34
+  declared license: MIT OR Apache-2.0
+  repository: https://github.com/rust-lang/futures-rs
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/275c491d6d1160553c32fd6127061d7f9606c3ea25abfad6ca3f6ed088785427-LICENSE-APACHE, cargo/6652c868f35dfe5e8ef636810a4e576b9d663f3a17fb0f5613ad73583e1b88fd-LICENSE-MIT
+  cohort: node
+
+futures-macro 0.3.34
+  declared license: MIT OR Apache-2.0
+  repository: https://github.com/rust-lang/futures-rs
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/275c491d6d1160553c32fd6127061d7f9606c3ea25abfad6ca3f6ed088785427-LICENSE-APACHE, cargo/6652c868f35dfe5e8ef636810a4e576b9d663f3a17fb0f5613ad73583e1b88fd-LICENSE-MIT
+  cohort: node
+
+futures-sink 0.3.34
+  declared license: MIT OR Apache-2.0
+  repository: https://github.com/rust-lang/futures-rs
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/275c491d6d1160553c32fd6127061d7f9606c3ea25abfad6ca3f6ed088785427-LICENSE-APACHE, cargo/6652c868f35dfe5e8ef636810a4e576b9d663f3a17fb0f5613ad73583e1b88fd-LICENSE-MIT
+  cohort: node
+
+futures-task 0.3.34
+  declared license: MIT OR Apache-2.0
+  repository: https://github.com/rust-lang/futures-rs
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/275c491d6d1160553c32fd6127061d7f9606c3ea25abfad6ca3f6ed088785427-LICENSE-APACHE, cargo/6652c868f35dfe5e8ef636810a4e576b9d663f3a17fb0f5613ad73583e1b88fd-LICENSE-MIT
+  cohort: node
+
+futures-util 0.3.34
+  declared license: MIT OR Apache-2.0
+  repository: https://github.com/rust-lang/futures-rs
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/275c491d6d1160553c32fd6127061d7f9606c3ea25abfad6ca3f6ed088785427-LICENSE-APACHE, cargo/6652c868f35dfe5e8ef636810a4e576b9d663f3a17fb0f5613ad73583e1b88fd-LICENSE-MIT
+  cohort: node
+
+generic-array 0.14.7
+  declared license: MIT
+  authors: Bartłomiej Kamiński <fizyk20@gmail.com>; Aaron Trent <novacrazy@gmail.com>
+  repository: https://github.com/fizyk20/generic-array.git
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/c09aae9d3c77b531f56351a9947bc7446511d6b025b3255312d3e3442a9a7583-LICENSE
+  cohort: node
+
+generic-array 0.14.7
+  declared license: MIT
+  authors: Bartłomiej Kamiński <fizyk20@gmail.com>; Aaron Trent <novacrazy@gmail.com>
+  repository: https://github.com/fizyk20/generic-array.git
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/c09aae9d3c77b531f56351a9947bc7446511d6b025b3255312d3e3442a9a7583-LICENSE
+  cohort: current-mixed
+
+geospec-engine-native-cache-host 0.0.0
+  declared license: Apache-2.0
+  license files: cargo/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4-LICENSE
+  cohort: node
+  note: published Cargo package omitted a license file; fallback text is marked
+
+geospec-engine-native-core 0.0.0
+  declared license: Apache-2.0
+  license files: cargo/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4-LICENSE
+  cohort: node
+  note: published Cargo package omitted a license file; fallback text is marked
+
+geospec-engine-native-core 0.0.0
+  declared license: Apache-2.0
+  license files: cargo/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4-LICENSE
+  cohort: current-mixed
+  note: published Cargo package omitted a license file; fallback text is marked
+
+geospec-engine-native-csg 0.0.0
+  declared license: Apache-2.0
+  license files: cargo/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4-LICENSE
+  cohort: node
+  note: published Cargo package omitted a license file; fallback text is marked
+
+geospec-engine-native-csg 0.0.0
+  declared license: Apache-2.0
+  license files: cargo/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4-LICENSE
+  cohort: current-mixed
+  note: published Cargo package omitted a license file; fallback text is marked
+
+geospec-engine-native-emscripten 0.0.0
+  declared license: Apache-2.0
+  license files: cargo/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4-LICENSE
+  cohort: current-mixed
+  note: published Cargo package omitted a license file; fallback text is marked
+
+geospec-engine-native-node 0.0.0
+  declared license: Apache-2.0
+  license files: cargo/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4-LICENSE
+  cohort: node
+  note: published Cargo package omitted a license file; fallback text is marked
+
+geospec-engine-native-occt 0.0.0
+  declared license: Apache-2.0
+  license files: cargo/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4-LICENSE
+  cohort: node
+  note: published Cargo package omitted a license file; fallback text is marked
+
+geospec-engine-native-occt 0.0.0
+  declared license: Apache-2.0
+  license files: cargo/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4-LICENSE
+  cohort: current-mixed
+  note: published Cargo package omitted a license file; fallback text is marked
+
+geospec-engine-native-runtime 0.0.0
+  declared license: Apache-2.0
+  license files: cargo/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4-LICENSE
+  cohort: node
+  note: published Cargo package omitted a license file; fallback text is marked
+
+geospec-engine-native-runtime 0.0.0
+  declared license: Apache-2.0
+  license files: cargo/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4-LICENSE
+  cohort: current-mixed
+  note: published Cargo package omitted a license file; fallback text is marked
+
+getrandom 0.2.17
+  declared license: MIT OR Apache-2.0
+  authors: The Rand Project Developers
+  repository: https://github.com/rust-random/getrandom
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/42fa16951ce7f24b5a467a40e5b449a1d41e662f97ca779864f053f39e097737-LICENSE-MIT, cargo/aaff376532ea30a0cd5330b9502ad4a4c8bf769c539c87ffe78819d188a18ebf-LICENSE-APACHE
+  cohort: node
+
+gltf 1.4.1
+  declared license: MIT OR Apache-2.0
+  authors: David Harvey-Macaulay <alteous@outlook.com>
+  repository: https://github.com/gltf-rs/gltf
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/0e6c282dfcb08a031c37b8f851fe5813fad63612e88a29dbe5121d727d67bbf2-LICENSE-MIT, cargo/3708458dee7f359ac6c9c5558023ed481be87e5372c43ebd7f2ca7ad23c12026-LICENSE-APACHE
+  cohort: node
+
+gltf 1.4.1
+  declared license: MIT OR Apache-2.0
+  authors: David Harvey-Macaulay <alteous@outlook.com>
+  repository: https://github.com/gltf-rs/gltf
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/0e6c282dfcb08a031c37b8f851fe5813fad63612e88a29dbe5121d727d67bbf2-LICENSE-MIT, cargo/3708458dee7f359ac6c9c5558023ed481be87e5372c43ebd7f2ca7ad23c12026-LICENSE-APACHE
+  cohort: current-mixed
+
+gltf-derive 1.4.1
+  declared license: MIT OR Apache-2.0
+  authors: David Harvey-Macaulay <alteous@outlook.com>
+  repository: https://github.com/gltf-rs/gltf
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/3708458dee7f359ac6c9c5558023ed481be87e5372c43ebd7f2ca7ad23c12026-LICENSE-APACHE, cargo/f71fd5946d6674af304514dc7b3b4272aa9117052dd347fb3a9dc9679f33d95f-LICENSE-MIT
+  cohort: node
+
+gltf-derive 1.4.1
+  declared license: MIT OR Apache-2.0
+  authors: David Harvey-Macaulay <alteous@outlook.com>
+  repository: https://github.com/gltf-rs/gltf
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/3708458dee7f359ac6c9c5558023ed481be87e5372c43ebd7f2ca7ad23c12026-LICENSE-APACHE, cargo/f71fd5946d6674af304514dc7b3b4272aa9117052dd347fb3a9dc9679f33d95f-LICENSE-MIT
+  cohort: current-mixed
+
+gltf-json 1.4.1
+  declared license: MIT OR Apache-2.0
+  authors: David Harvey-Macaulay <alteous@outlook.com>
+  repository: https://github.com/gltf-rs/gltf
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/0e6c282dfcb08a031c37b8f851fe5813fad63612e88a29dbe5121d727d67bbf2-LICENSE-MIT, cargo/3708458dee7f359ac6c9c5558023ed481be87e5372c43ebd7f2ca7ad23c12026-LICENSE-APACHE
+  cohort: node
+
+gltf-json 1.4.1
+  declared license: MIT OR Apache-2.0
+  authors: David Harvey-Macaulay <alteous@outlook.com>
+  repository: https://github.com/gltf-rs/gltf
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/0e6c282dfcb08a031c37b8f851fe5813fad63612e88a29dbe5121d727d67bbf2-LICENSE-MIT, cargo/3708458dee7f359ac6c9c5558023ed481be87e5372c43ebd7f2ca7ad23c12026-LICENSE-APACHE
+  cohort: current-mixed
+
+hashbrown 0.16.1
+  declared license: MIT OR Apache-2.0
+  authors: Amanieu d'Antras <amanieu@gmail.com>
+  repository: https://github.com/rust-lang/hashbrown
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE, cargo/ff8f68cb076caf8cefe7a6430d4ac086ce6af2ca8ce2c4e5a2004d4552ef52a2-LICENSE-MIT
+  cohort: node
+
+hashbrown 0.16.1
+  declared license: MIT OR Apache-2.0
+  authors: Amanieu d'Antras <amanieu@gmail.com>
+  repository: https://github.com/rust-lang/hashbrown
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE, cargo/ff8f68cb076caf8cefe7a6430d4ac086ce6af2ca8ce2c4e5a2004d4552ef52a2-LICENSE-MIT
+  cohort: current-mixed
+
+hmac 0.12.1
+  declared license: MIT OR Apache-2.0
+  authors: RustCrypto Developers
+  repository: https://github.com/RustCrypto/MACs
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/9e0dfd2dd4173a530e238cb6adb37aa78c34c6bc7444e0e10c1ab5d8881f63ba-LICENSE-MIT, cargo/a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5-LICENSE-APACHE
+  cohort: node
+
+inflections 1.1.1
+  declared license: MIT
+  authors: Caleb Meredith <calebmeredith8@gmail.com>
+  repository: https://docs.rs/inflections
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/fe5c9498374de7953275f83f35565b289f377ceab4a28d04c7da87723e02a372-LICENSE
+  cohort: node
+
+inflections 1.1.1
+  declared license: MIT
+  authors: Caleb Meredith <calebmeredith8@gmail.com>
+  repository: https://docs.rs/inflections
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/fe5c9498374de7953275f83f35565b289f377ceab4a28d04c7da87723e02a372-LICENSE
+  cohort: current-mixed
+
+itoa 1.0.18
+  declared license: MIT OR Apache-2.0
+  authors: David Tolnay <dtolnay@gmail.com>
+  repository: https://github.com/dtolnay/itoa
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT, cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE
+  cohort: node
+
+itoa 1.0.18
+  declared license: MIT OR Apache-2.0
+  authors: David Tolnay <dtolnay@gmail.com>
+  repository: https://github.com/dtolnay/itoa
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT, cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE
+  cohort: current-mixed
+
+lazy_static 1.5.0
+  declared license: MIT OR Apache-2.0
+  authors: Marvin Löbel <loebel.marvin@gmail.com>
+  repository: https://github.com/rust-lang-nursery/lazy-static.rs
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/0621878e61f0d0fda054bcbe02df75192c28bde1ecc8289cbd86aeba2dd72720-LICENSE-MIT, cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE
+  cohort: node
+
+lazy_static 1.5.0
+  declared license: MIT OR Apache-2.0
+  authors: Marvin Löbel <loebel.marvin@gmail.com>
+  repository: https://github.com/rust-lang-nursery/lazy-static.rs
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/0621878e61f0d0fda054bcbe02df75192c28bde1ecc8289cbd86aeba2dd72720-LICENSE-MIT, cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE
+  cohort: current-mixed
+
+libc 0.2.189
+  declared license: MIT OR Apache-2.0
+  repository: https://github.com/rust-lang/libc
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/123a331b5dbf04c30097fa43b8f858bc85df671fe776de498d01f3d6b7c1f69e-LICENSE-MIT, cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE
+  cohort: node
+
+libloading 0.9.0
+  declared license: ISC
+  authors: Simonas Kazlauskas <libloading@kazlauskas.me>
+  repository: https://github.com/nagisa/rust_libloading/
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/b29f8b01452350c20dd1af16ef83b598fea3053578ccc1c7a0ef40e57be2620f-LICENSE
+  cohort: node
+
+manifold-rust 0.13.1
+  declared license: Apache-2.0
+  authors: Lars Brubaker <larsbrubaker@matterhackers.com>
+  repository: https://github.com/larsbrubaker/manifold-rust
+  license files: cargo/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4-LICENSE
+  cohort: node
+
+manifold-rust 0.13.1
+  declared license: Apache-2.0
+  authors: Lars Brubaker <larsbrubaker@matterhackers.com>
+  repository: https://github.com/larsbrubaker/manifold-rust
+  license files: cargo/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4-LICENSE
+  cohort: current-mixed
+
+manifold-rust f3aab1414e5b45037b848624b143d3287d8d3842
+  declared license: Apache-2.0
+  source: https://github.com/larsbrubaker/manifold-rust
+  license files: Manifold-Rust-LICENSE.txt
+  cohort: node, current-mixed
+
+memchr 2.8.0
+  declared license: Unlicense OR MIT
+  authors: Andrew Gallant <jamslam@gmail.com>; bluss
+  repository: https://github.com/BurntSushi/memchr
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f-COPYING, cargo/0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f-LICENSE-MIT, cargo/7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c-UNLICENSE
+  cohort: current-mixed
+
+memchr 2.8.3
+  declared license: Unlicense OR MIT
+  authors: Andrew Gallant <jamslam@gmail.com>; bluss
+  repository: https://github.com/BurntSushi/memchr
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f-COPYING, cargo/0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f-LICENSE-MIT, cargo/7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c-UNLICENSE
+  cohort: node
+
+napi 3.12.2
+  declared license: MIT
+  authors: Nathan Sobo <nathan@github.com>; Yinan Long <lynweklm@gmail.com>
+  repository: https://github.com/napi-rs/napi-rs
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: fallback/MIT.txt
+  cohort: node
+  note: published Cargo package omitted a license file; fallback text is marked
+
+napi-build 2.4.1
+  declared license: MIT
+  authors: LongYinan <lynweklm@gmail.com>
+  repository: https://github.com/napi-rs/napi-rs
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: fallback/MIT.txt
+  cohort: node
+  note: published Cargo package omitted a license file; fallback text is marked
+
+napi-derive 3.6.3
+  declared license: MIT
+  authors: LongYinan <lynweklm@gmail.com>; Forehalo <forehalo@gmail.com>
+  repository: https://github.com/napi-rs/napi-rs
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: fallback/MIT.txt
+  cohort: node
+  note: published Cargo package omitted a license file; fallback text is marked
+
+napi-derive-backend 6.1.2
+  declared license: MIT
+  repository: https://github.com/napi-rs/napi-rs
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: fallback/MIT.txt
+  cohort: node
+  note: published Cargo package omitted a license file; fallback text is marked
+
+napi-sys 3.3.0
+  declared license: MIT
+  authors: LongYinan <lynweklm@gmail.com>
+  repository: https://github.com/napi-rs/napi-rs
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: fallback/MIT.txt
+  cohort: node
+  note: published Cargo package omitted a license file; fallback text is marked
+
+nohash-hasher 0.2.0
+  declared license: Apache-2.0 OR MIT
+  authors: Parity Technologies <admin@parity.io>
+  repository: https://github.com/paritytech/nohash-hasher
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30-LICENSE-APACHE, cargo/ec353d4fecf7963b4c054384557e5dbc3c7a717997eb4a3815b315721a6aa75a-LICENSE-MIT
+  cohort: node
+
+num-bigint 0.4.6
+  declared license: MIT OR Apache-2.0
+  authors: The Rust Project Developers
+  repository: https://github.com/rust-num/num-bigint
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb-LICENSE-MIT, cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE
+  cohort: node
+
+num-bigint 0.4.6
+  declared license: MIT OR Apache-2.0
+  authors: The Rust Project Developers
+  repository: https://github.com/rust-num/num-bigint
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb-LICENSE-MIT, cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE
+  cohort: current-mixed
+
+num-integer 0.1.46
+  declared license: MIT OR Apache-2.0
+  authors: The Rust Project Developers
+  repository: https://github.com/rust-num/num-integer
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb-LICENSE-MIT, cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE
+  cohort: node
+
+num-integer 0.1.46
+  declared license: MIT OR Apache-2.0
+  authors: The Rust Project Developers
+  repository: https://github.com/rust-num/num-integer
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb-LICENSE-MIT, cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE
+  cohort: current-mixed
+
+num-modular 0.6.5
+  declared license: Apache-2.0
+  repository: https://github.com/cmpute/num-modular
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/98b52ccf20010b67d8fd3bdf151f50ecdfc01f25d6de190e015dd436d9f7ea0b-LICENSE
+  cohort: node
+
+num-modular 0.6.5
+  declared license: Apache-2.0
+  repository: https://github.com/cmpute/num-modular
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/98b52ccf20010b67d8fd3bdf151f50ecdfc01f25d6de190e015dd436d9f7ea0b-LICENSE
+  cohort: current-mixed
+
+num-rational 0.4.2
+  declared license: MIT OR Apache-2.0
+  authors: The Rust Project Developers
+  repository: https://github.com/rust-num/num-rational
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb-LICENSE-MIT, cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE
+  cohort: node
+
+num-rational 0.4.2
+  declared license: MIT OR Apache-2.0
+  authors: The Rust Project Developers
+  repository: https://github.com/rust-num/num-rational
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb-LICENSE-MIT, cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE
+  cohort: current-mixed
+
+num-traits 0.2.19
+  declared license: MIT OR Apache-2.0
+  authors: The Rust Project Developers
+  repository: https://github.com/rust-num/num-traits
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb-LICENSE-MIT, cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE
+  cohort: node
+
+num-traits 0.2.19
+  declared license: MIT OR Apache-2.0
+  authors: The Rust Project Developers
+  repository: https://github.com/rust-num/num-traits
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb-LICENSE-MIT, cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE
+  cohort: current-mixed
+
+pin-project-lite 0.2.17
+  declared license: Apache-2.0 OR MIT
+  repository: https://github.com/taiki-e/pin-project-lite
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594-LICENSE-APACHE, cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT
+  cohort: node
+
+proc-macro2 1.0.106
+  declared license: MIT OR Apache-2.0
+  authors: David Tolnay <dtolnay@gmail.com>; Alex Crichton <alex@alexcrichton.com>
+  repository: https://github.com/dtolnay/proc-macro2
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT, cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE
+  cohort: current-mixed
+
+proc-macro2 1.0.107
+  declared license: MIT OR Apache-2.0
+  authors: David Tolnay <dtolnay@gmail.com>; Alex Crichton <alex@alexcrichton.com>
+  repository: https://github.com/dtolnay/proc-macro2
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT, cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE
+  cohort: node
+
+quote 1.0.45
+  declared license: MIT OR Apache-2.0
+  authors: David Tolnay <dtolnay@gmail.com>
+  repository: https://github.com/dtolnay/quote
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT, cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE
+  cohort: current-mixed
+
+quote 1.0.47
+  declared license: MIT OR Apache-2.0
+  authors: David Tolnay <dtolnay@gmail.com>
+  repository: https://github.com/dtolnay/quote
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT, cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE
+  cohort: node
+
+regress 0.11.1
+  declared license: MIT OR Apache-2.0
+  authors: ridiculousfish <corydoras@ridiculousfish.com>
+  repository: https://github.com/ridiculousfish/regress
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/3f8a05fc8617c5ce569fa5a4f2301cd847fe00fa011bdaa8f353fd55a2691a54-LICENSE-MIT, cargo/e36d55837170195cdf934aa6a48c0ad6efba1bde3f5b4a1b9259c171d5aeb647-LICENSE-APACHE
+  cohort: node
+
+regress 0.11.1
+  declared license: MIT OR Apache-2.0
+  authors: ridiculousfish <corydoras@ridiculousfish.com>
+  repository: https://github.com/ridiculousfish/regress
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/3f8a05fc8617c5ce569fa5a4f2301cd847fe00fa011bdaa8f353fd55a2691a54-LICENSE-MIT, cargo/e36d55837170195cdf934aa6a48c0ad6efba1bde3f5b4a1b9259c171d5aeb647-LICENSE-APACHE
+  cohort: current-mixed
+
+rustc-hash 2.1.3
+  declared license: Apache-2.0 OR MIT
+  authors: The Rust Project Developers
+  repository: https://github.com/rust-lang/rustc-hash
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/30fefc3a7d6a0041541858293bcbea2dde4caa4c0a5802f996a7f7e8c0085652-LICENSE-MIT, cargo/95bd3988beee069fa2848f648dab43cc6e0b2add2ad6bcb17360caf749802bcc-LICENSE-APACHE
+  cohort: node
+
+rustc-hash 2.1.3
+  declared license: Apache-2.0 OR MIT
+  authors: The Rust Project Developers
+  repository: https://github.com/rust-lang/rustc-hash
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/30fefc3a7d6a0041541858293bcbea2dde4caa4c0a5802f996a7f7e8c0085652-LICENSE-MIT, cargo/95bd3988beee069fa2848f648dab43cc6e0b2add2ad6bcb17360caf749802bcc-LICENSE-APACHE
+  cohort: current-mixed
+
+rustversion 1.0.22
+  declared license: MIT OR Apache-2.0
+  authors: David Tolnay <dtolnay@gmail.com>
+  repository: https://github.com/dtolnay/rustversion
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT, cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE
+  cohort: current-mixed
+
+rustversion 1.0.23
+  declared license: MIT OR Apache-2.0
+  authors: David Tolnay <dtolnay@gmail.com>
+  repository: https://github.com/dtolnay/rustversion
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT, cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE
+  cohort: node
+
+ryu 1.0.23
+  declared license: Apache-2.0 OR BSL-1.0
+  authors: David Tolnay <dtolnay@gmail.com>
+  repository: https://github.com/dtolnay/ryu
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE, cargo/c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566-LICENSE-BOOST
+  cohort: node
+
+ryu 1.0.23
+  declared license: Apache-2.0 OR BSL-1.0
+  authors: David Tolnay <dtolnay@gmail.com>
+  repository: https://github.com/dtolnay/ryu
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE, cargo/c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566-LICENSE-BOOST
+  cohort: current-mixed
+
+ryu-js 1.0.2
+  declared license: Apache-2.0 OR BSL-1.0
+  authors: David Tolnay <dtolnay@gmail.com>; boa-dev
+  repository: https://github.com/boa-dev/ryu-js
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE, cargo/c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566-LICENSE-BOOST
+  cohort: node
+
+ryu-js 1.0.2
+  declared license: Apache-2.0 OR BSL-1.0
+  authors: David Tolnay <dtolnay@gmail.com>; boa-dev
+  repository: https://github.com/boa-dev/ryu-js
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE, cargo/c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566-LICENSE-BOOST
+  cohort: current-mixed
+
+semver 1.0.28
+  declared license: MIT OR Apache-2.0
+  authors: David Tolnay <dtolnay@gmail.com>
+  repository: https://github.com/dtolnay/semver
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT, cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE
+  cohort: node
+
+serde 1.0.219
+  declared license: MIT OR Apache-2.0
+  authors: Erick Tryzelaar <erick.tryzelaar@gmail.com>; David Tolnay <dtolnay@gmail.com>
+  repository: https://github.com/serde-rs/serde
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT, cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE
+  cohort: node
+
+serde 1.0.219
+  declared license: MIT OR Apache-2.0
+  authors: Erick Tryzelaar <erick.tryzelaar@gmail.com>; David Tolnay <dtolnay@gmail.com>
+  repository: https://github.com/serde-rs/serde
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT, cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE
+  cohort: current-mixed
+
+serde_derive 1.0.219
+  declared license: MIT OR Apache-2.0
+  authors: Erick Tryzelaar <erick.tryzelaar@gmail.com>; David Tolnay <dtolnay@gmail.com>
+  repository: https://github.com/serde-rs/serde
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT, cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE
+  cohort: node
+
+serde_derive 1.0.219
+  declared license: MIT OR Apache-2.0
+  authors: Erick Tryzelaar <erick.tryzelaar@gmail.com>; David Tolnay <dtolnay@gmail.com>
+  repository: https://github.com/serde-rs/serde
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT, cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE
+  cohort: current-mixed
+
+serde_json 1.0.143
+  declared license: MIT OR Apache-2.0
+  authors: Erick Tryzelaar <erick.tryzelaar@gmail.com>; David Tolnay <dtolnay@gmail.com>
+  repository: https://github.com/serde-rs/json
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT, cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE
+  cohort: node
+
+serde_json 1.0.143
+  declared license: MIT OR Apache-2.0
+  authors: Erick Tryzelaar <erick.tryzelaar@gmail.com>; David Tolnay <dtolnay@gmail.com>
+  repository: https://github.com/serde-rs/json
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT, cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE
+  cohort: current-mixed
+
+sha2 0.10.9
+  declared license: MIT OR Apache-2.0
+  authors: RustCrypto Developers
+  repository: https://github.com/RustCrypto/hashes
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5-LICENSE-APACHE, cargo/b4eb00df6e2a4d22518fcaa6a2b4646f249b3a3c9814509b22bd2091f1392ff1-LICENSE-MIT
+  cohort: node
+
+sha2 0.10.9
+  declared license: MIT OR Apache-2.0
+  authors: RustCrypto Developers
+  repository: https://github.com/RustCrypto/hashes
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5-LICENSE-APACHE, cargo/b4eb00df6e2a4d22518fcaa6a2b4646f249b3a3c9814509b22bd2091f1392ff1-LICENSE-MIT
+  cohort: current-mixed
+
+shlex 2.0.1
+  declared license: MIT OR Apache-2.0
+  authors: comex <comexk@gmail.com>; Fenhl <fenhl@fenhl.net>; Adrian Taylor <adetaylor@chromium.org>; Alex Touchet <alextouchet@outlook.com>; Daniel Parks <dp+git@oxidized.org>; Garrett Berg <googberg@gmail.com>
+  repository: https://github.com/comex/rust-shlex
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/4455bf75a91154108304cb283e0fea9948c14f13e20d60887cf2552449dea3b1-LICENSE-MIT, cargo/553fffcd9b1cb158bc3e9edc35da85ca5c3b3d7d2e61c883ebcfa8a65814b583-LICENSE-APACHE
+  cohort: node
+
+shlex 2.0.1
+  declared license: MIT OR Apache-2.0
+  authors: comex <comexk@gmail.com>; Fenhl <fenhl@fenhl.net>; Adrian Taylor <adetaylor@chromium.org>; Alex Touchet <alextouchet@outlook.com>; Daniel Parks <dp+git@oxidized.org>; Garrett Berg <googberg@gmail.com>
+  repository: https://github.com/comex/rust-shlex
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/4455bf75a91154108304cb283e0fea9948c14f13e20d60887cf2552449dea3b1-LICENSE-MIT, cargo/553fffcd9b1cb158bc3e9edc35da85ca5c3b3d7d2e61c883ebcfa8a65814b583-LICENSE-APACHE
+  cohort: current-mixed
+
+slab 0.4.12
+  declared license: MIT
+  authors: Carl Lerche <me@carllerche.com>
+  repository: https://github.com/tokio-rs/slab
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/8ce0830173fdac609dfb4ea603fdc002c2f4af0dc9b1a005653f5da9cf534b18-LICENSE
+  cohort: node
+
+static_assertions 1.1.0
+  declared license: MIT OR Apache-2.0
+  authors: Nikolai Vazquez
+  repository: https://github.com/nvzqz/static-assertions-rs
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30-LICENSE-APACHE, cargo/ea084a2373ebc1f0902c09266e7bf25a05ab3814c1805bb017ffa7308f90c061-LICENSE-MIT
+  cohort: node
+
+static_assertions 1.1.0
+  declared license: MIT OR Apache-2.0
+  authors: Nikolai Vazquez
+  repository: https://github.com/nvzqz/static-assertions-rs
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30-LICENSE-APACHE, cargo/ea084a2373ebc1f0902c09266e7bf25a05ab3814c1805bb017ffa7308f90c061-LICENSE-MIT
+  cohort: current-mixed
+
+subtle 2.6.1
+  declared license: BSD-3-Clause
+  authors: Isis Lovecruft <isis@patternsinthevoid.net>; Henry de Valence <hdevalence@hdevalence.ca>
+  repository: https://github.com/dalek-cryptography/subtle
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/d1fc1bc0d155df60b2e7705b6b2ae02a05c96f948e1cec6e2fb86360b09f346b-LICENSE
+  cohort: node
+
+syn 2.0.117
+  declared license: MIT OR Apache-2.0
+  authors: David Tolnay <dtolnay@gmail.com>
+  repository: https://github.com/dtolnay/syn
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT, cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE
+  cohort: current-mixed
+
+syn 2.0.119
+  declared license: MIT OR Apache-2.0
+  authors: David Tolnay <dtolnay@gmail.com>
+  repository: https://github.com/dtolnay/syn
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT, cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE
+  cohort: node
+
+syn 3.0.5
+  declared license: MIT OR Apache-2.0
+  authors: David Tolnay <dtolnay@gmail.com>
+  repository: https://github.com/dtolnay/syn
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT, cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE
+  cohort: node
+
+typenum 1.20.1
+  declared license: MIT OR Apache-2.0
+  repository: https://github.com/paholg/typenum
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/516b24e051bf5630880ebbd55c40a25ce9552ebaf8970a53e8976eb70e522406-LICENSE-APACHE, cargo/a825bd853ab71619a4923d7b4311221427848070ff44d990da39b0b274c1683f-LICENSE-MIT, cargo/db11fec9946737df39ca3898d9cd8c10ec6f6c3a884a6802b0ad0b81b4e8f23a-LICENSE
+  cohort: node
+
+typenum 1.20.1
+  declared license: MIT OR Apache-2.0
+  repository: https://github.com/paholg/typenum
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/516b24e051bf5630880ebbd55c40a25ce9552ebaf8970a53e8976eb70e522406-LICENSE-APACHE, cargo/a825bd853ab71619a4923d7b4311221427848070ff44d990da39b0b274c1683f-LICENSE-MIT, cargo/db11fec9946737df39ca3898d9cd8c10ec6f6c3a884a6802b0ad0b81b4e8f23a-LICENSE
+  cohort: current-mixed
+
+unicode-ident 1.0.24
+  declared license: (MIT OR Apache-2.0) AND Unicode-3.0
+  authors: David Tolnay <dtolnay@gmail.com>
+  repository: https://github.com/dtolnay/unicode-ident
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT, cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE, cargo/f7db81051789b729fea528a63ec4c938fdcb93d9d61d97dc8cc2e9df6d47f2a1-LICENSE-UNICODE
+  cohort: node
+
+unicode-ident 1.0.24
+  declared license: (MIT OR Apache-2.0) AND Unicode-3.0
+  authors: David Tolnay <dtolnay@gmail.com>
+  repository: https://github.com/dtolnay/unicode-ident
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3-LICENSE-MIT, cargo/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a-LICENSE-APACHE, cargo/f7db81051789b729fea528a63ec4c938fdcb93d9d61d97dc8cc2e9df6d47f2a1-LICENSE-UNICODE
+  cohort: current-mixed
+
+unicode-segmentation 1.13.3
+  declared license: MIT OR Apache-2.0
+  authors: kwantam <kwantam@gmail.com>; Manish Goregaokar <manishsmail@gmail.com>
+  repository: https://github.com/unicode-rs/unicode-segmentation
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/7b63ecd5f1902af1b63729947373683c32745c16a10e8e6292e2e2dcd7e90ae0-LICENSE-MIT, cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE
+  cohort: node
+
+version_check 0.9.5
+  declared license: MIT/Apache-2.0
+  authors: Sergio Benitez <sb@sergio.bz>
+  repository: https://github.com/SergioBenitez/version_check
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE, cargo/b7e650f3fce5c53249d1cdc608b54df156a97edd636cf9d23498d0cfe7aec63e-LICENSE-MIT
+  cohort: node
+
+version_check 0.9.5
+  declared license: MIT/Apache-2.0
+  authors: Sergio Benitez <sb@sergio.bz>
+  repository: https://github.com/SergioBenitez/version_check
+  source: registry+https://github.com/rust-lang/crates.io-index
+  license files: cargo/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2-LICENSE-APACHE, cargo/b7e650f3fce5c53249d1cdc608b54df156a97edd636cf9d23498d0cfe7aec63e-LICENSE-MIT
+  cohort: current-mixed
+

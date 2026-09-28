@@ -1,0 +1,78 @@
+[workspace]
+members = ["."]
+
+[package]
+name = "manifold-rust"
+version = "0.13.1"
+edition = "2021"
+# f64::round_ties_even (used in the C++-exact sind) stabilized in 1.77.
+rust-version = "1.77"
+authors = ["Lars Brubaker <larsbrubaker@matterhackers.com>"]
+description = "Pure Rust port of the Manifold 3D geometry library"
+license = "Apache-2.0"
+repository = "https://github.com/larsbrubaker/manifold-rust"
+homepage = "https://larsbrubaker.github.io/manifold-rust/"
+documentation = "https://docs.rs/manifold-rust/"
+readme = "README.md"
+keywords = ["3d", "geometry", "mesh", "boolean", "csg"]
+categories = ["algorithms", "graphics", "mathematics", "wasm"]
+# The published crate carries the library sources only. `src/robust/testdata/`
+# is ~7 MB of Thingi10K regression meshes used exclusively by `#[cfg(test)]`
+# modules, which a consumer never compiles — shipping them would triple the
+# package for no one's benefit. Run the corpus regressions from a git checkout.
+exclude = [
+    "demo/",
+    "docs/",
+    "tests/",
+    "ffi/",
+    "dotnet/",
+    ".github/",
+    ".claude/",
+    "cpp-reference/",
+    "CLAUDE.md",
+    "src/robust/testdata/",
+]
+
+[lib]
+name = "manifold_rust"
+path = "src/lib.rs"
+
+[dependencies]
+num-traits = "0.2"
+# Exact rational arithmetic for the robust (non-manifold) boolean engine.
+# Only touched when the f64 interval filters cannot decide a predicate sign,
+# and for constructed intersection points; the exact engine never uses them.
+# dashu stores values up to two words inline, which removes the allocation
+# churn that dominated profiles of the robust engine (natively and, more
+# sharply, on wasm). Everything the engine sees goes through
+# src/robust/exact/backend.rs.
+dashu-int = { version = "0.5.1", default-features = false, features = ["std", "num-traits"] }
+dashu-ratio = { version = "0.5.1", default-features = false, features = ["std", "num-traits"] }
+clipper2-rust = "=1.0.3"
+# Fast, *deterministic* (unseeded) hasher for the robust engine's hot maps.
+# Only used at sites whose iteration order provably never reaches the output
+# (each swap documents the invariant); SipHash's per-probe cost dominated the
+# split registries, vertex interner and arrangement dedup index.
+rustc-hash = "2.1"
+rayon = { version = "1.10", optional = true }
+
+[features]
+# Parallel execution via rayon. Only determinism-preserving sites are
+# parallelized, so results stay bit-identical to the sequential build
+# (unlike upstream C++ MANIFOLD_PAR, which permits nondeterministic
+# vertex ordering in some phases).
+parallel = ["dep:rayon"]
+
+# Match the optimization latitude the C++ reference gets from MSVC /O2 with
+# unity-style TUs: fat LTO + one codegen unit lets rustc inline across the
+# module graph. Measurably faster on the boolean pipeline; slower to build.
+[profile.release]
+lto = "fat"
+codegen-units = 1
+
+[dev-dependencies]
+criterion = "0.5"
+# Thingi10K sweep harness (examples/thingi_sweep.rs) only.
+rusqlite = { version = "0.32", features = ["bundled"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+

@@ -1,5 +1,5 @@
 import { describe, expectTypeOf, it } from 'vitest';
-import type { RevisionId } from '#algorithms/revision-tree.js';
+import type { RevisionId } from '@taucad/project-core/revision-id';
 
 describe('revision substrate opaque identity', () => {
   it('does not admit plain strings where authority identities are required', () => {

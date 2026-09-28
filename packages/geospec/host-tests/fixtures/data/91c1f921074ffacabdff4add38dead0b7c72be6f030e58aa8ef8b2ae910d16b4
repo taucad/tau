@@ -1,0 +1,28 @@
+{
+  "status": "accepted six prospective nominal-domain expected rows; authorize current native cold/warm comparison",
+  "freezeSha256": "45321b29b68d111f1c0facbff56f99c6a3a022c58a9d1dec9de59be4f65bf1ff",
+  "fullwireSha256": "143fed4a40753b58735c9033de60e23e9c37cdcfef592dcc4e1fa99cebde5240",
+  "principalCommands": [
+    "57a825",
+    "current receipt creation"
+  ],
+  "verifiedArtifactHashes": 82,
+  "verifiedCompleteRows": 6,
+  "verifiedCanonicalStringHashes": 24,
+  "importedFactsReview": "execution/strict-cylinder-imported-facts-principal-readback.json",
+  "mathematics": "Conditional complete right circular cylinder: opposite caps >=10; antiparallel lateral normals give squared chord4+deltaZ^2>=4; midpoint diametric pair attains2; mixed cap/lateral normals cannot oppose. Minimum2.",
+  "semanticChecks": [
+    "full descriptor/primary binding",
+    "complete plan/request/result/submit joins",
+    "thresholds1,2,5 both polarities",
+    "budget2",
+    "full cert same as independent imported-fact-derived certificate",
+    "witness/formula/measured and diagnostics"
+  ],
+  "limits": [
+    "no native admission/comparison yet",
+    "nominal typed-support semantics, not exact-real STEP transfer proof",
+    "all broad profile/host certification remains pending"
+  ],
+  "next": "Lead current-source cold/warm all6 + unchanged6box + oldrod strict unsupported; preserve all initial errors; no unsafe producer rerun"
+}

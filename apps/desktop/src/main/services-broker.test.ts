@@ -93,7 +93,7 @@ const brokerHarness = () => {
 describe('createServicesBroker', () => {
   it('keeps the rooted runtime filesystem concern main-only', () => {
     expect(servicesConcerns).toContain('runtimeFileSystem');
-    expect(rendererServicesConcerns).toEqual(['nodeFs', 'agentHost', 'machines']);
+    expect(rendererServicesConcerns).toEqual(['nodeFs', 'agentHost', 'geospecPerformance', 'machines']);
   });
 
   it('forks nothing until the first concern is connected', () => {

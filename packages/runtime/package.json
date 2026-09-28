@@ -285,6 +285,7 @@
     "@taucad/cache-core": "workspace:*",
     "@taucad/filesystem": "workspace:*",
     "@taucad/parameters": "workspace:*",
+    "@taucad/project-core": "workspace:*",
     "@taucad/revisions": "workspace:*",
     "@taucad/rpc": "workspace:*",
     "@taucad/units": "workspace:*",

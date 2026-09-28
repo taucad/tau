@@ -1,0 +1,89 @@
+{
+  "schema": "geospec-selected-delivery-v2",
+  "host": "aarch64-apple-darwin",
+  "rust": {
+    "channel": "nightly-2026-08-22",
+    "commit": "c656540d6467dee1381f0cbd882412d6bd1cd5ae",
+    "archives": [
+      {
+        "url": "https://static.rust-lang.org/dist/2026-08-22/rustc-nightly-aarch64-apple-darwin.tar.xz",
+        "sha256": "9201e2573668f4b94ac9361e9b30463eed0247caa7ffff35609586249077f86a"
+      },
+      {
+        "url": "https://static.rust-lang.org/dist/2026-08-22/cargo-nightly-aarch64-apple-darwin.tar.xz",
+        "sha256": "e0c9dcd84b25c74079c9a7ae80dfd4164e773319498caa91c8d18d3c8d639736"
+      },
+      {
+        "url": "https://static.rust-lang.org/dist/2026-08-22/rust-std-nightly-aarch64-apple-darwin.tar.xz",
+        "sha256": "a0b7b6d0981e20d22d3eb319dc557082a4651345cb1f222116dcd7970cebd21b"
+      },
+      {
+        "url": "https://static.rust-lang.org/dist/2026-08-22/rust-std-nightly-wasm32-unknown-emscripten.tar.xz",
+        "sha256": "24fbfced0323927eea3bd5224011ccf6b9e7fb34f13745c9c35cb07bce19a2d9"
+      }
+    ],
+    "executables": {
+      "bin/rustc": "92aa4aa0ea629d071cb76c048ad709d75b483b0a37ff5e1138395232b472fdd3",
+      "bin/cargo": "6ba6d47db40f2cb8fb5ebe7e287905f3cc71bcb7b9409b3c5b7e5b803b393b54"
+    }
+  },
+  "nativeRust": "1.88.0",
+  "macosDeploymentTarget": "11.0",
+  "emscripten": {
+    "version": "6.0.5",
+    "commit": "1db513782be24469589d7cb8a1f1834e9a33f271",
+    "url": "https://storage.googleapis.com/webassembly/emscripten-releases-builds/mac/dbd755b5da399329c2576f6e3dfa7f419f5d8409/wasm-binaries-arm64.tar.xz",
+    "sha256": "82231ed58d0134a9c8796b4133207563b94704088cd5a355464a061ad0d31c15",
+    "executables": {
+      "emscripten/emcc": "498eba9b6aacffca1c358ba340fc7b37015d7867cb211c7f2d45784ee9310f03",
+      "emscripten/em++": "498eba9b6aacffca1c358ba340fc7b37015d7867cb211c7f2d45784ee9310f03",
+      "emscripten/emar": "18c8397cf60835533e0db88d1172e04fa0b753dea68e978149d923a9e6378af3",
+      "bin/clang": "b23bc0247566b4543ce6131d1cec32ea9cdeecdd7444f69de39d8debe9e4c642",
+      "bin/wasm-ld": "78d7562994e04a4fc9da1c3a65349c45a55513d79a083f00c03fa1605434edff",
+      "bin/wasm-opt": "32e91be8e904c587d0066b60f314293fc717d14a6f3fd56fbae0e1fe1e040484"
+    }
+  },
+  "occt": {
+    "url": "https://github.com/Open-Cascade-SAS/OCCT/archive/3d097a0328e71b826377d4814ab05ec3c3d23871.tar.gz",
+    "sha256": "ac47dc1cd2404ff40678d4f64910894df79b689f14e1a584a5705cfe76df2ad3",
+    "commit": "3d097a0328e71b826377d4814ab05ec3c3d23871"
+  },
+  "headers": {
+    "rapidjson": {
+      "url": "https://codeload.github.com/Tencent/rapidjson/tar.gz/24b5e7a8b27f42fa16b96fc70aade9106cf7102f",
+      "sha256": "2d2601a82d2d3b7e143a3c8d43ef616671391034bc46891a9816b79cf2d3e7a8",
+      "commit": "24b5e7a8b27f42fa16b96fc70aade9106cf7102f"
+    },
+    "freetype": {
+      "url": "https://codeload.github.com/freetype/freetype/tar.gz/de8b92dd7ec634e9e2b25ef534c54a3537555c11",
+      "sha256": "14791d34053acf30394912a8b963277bee60b35fbb3038795d86555ba0415a44",
+      "commit": "de8b92dd7ec634e9e2b25ef534c54a3537555c11"
+    }
+  },
+  "mixedOcctOptions": [
+    "-DBUILD_CPP_STANDARD=C++17",
+    "-DBUILD_USE_PCH=OFF",
+    "-DBUILD_RESOURCES=OFF",
+    "-DBUILD_RELEASE_DISABLE_EXCEPTIONS=ON",
+    "-DUSE_TBB=OFF",
+    "-DCMAKE_C_FLAGS=-msimd128 -fwasm-exceptions -sWASM_LEGACY_EXCEPTIONS=1 -sSUPPORT_LONGJMP=wasm -UOCC_CONVERT_SIGNALS",
+    "-DCMAKE_CXX_FLAGS=-msimd128 -frtti -fwasm-exceptions -sWASM_LEGACY_EXCEPTIONS=1 -sSUPPORT_LONGJMP=wasm -UOCC_CONVERT_SIGNALS"
+  ],
+  "wasmSimd": {
+    "rustFlags": ["-C", "target-feature=+simd128"],
+    "cxxFlag": "-msimd128",
+    "linkFlag": "-msimd128"
+  },
+  "wasmEh": {
+    "compileFlags": ["-fwasm-exceptions", "-sWASM_LEGACY_EXCEPTIONS=1", "-sSUPPORT_LONGJMP=wasm"],
+    "linkFlags": ["-fwasm-exceptions", "-sWASM_LEGACY_EXCEPTIONS=1", "-sSUPPORT_LONGJMP=wasm"]
+  },
+  "linkOptimization": "O3",
+  "diskGiB": {
+    "sources": 1,
+    "tools": 4,
+    "prefixes": 8,
+    "mixedBuildReserve": 6
+  },
+  "provenance": "Rust installed channel manifest 2026-08-22; qualified dbd755 SDK acquisition; S5 OCCT CMakeCache and fixed header dependency commits. Paths are materialized locally. New prefixes require independent qualification."
+}

@@ -16,36 +16,36 @@ Guide for authoring operational pages in `docs/handbooks/<handbook>/`. A handboo
 
 ## Handbook vs policy, research and incidents
 
-| Dimension | Handbook `docs/handbooks/` | Policy `docs/policy/` | Research `docs/research/` | Incidents `docs/incidents/` |
-| --- | --- | --- | --- | --- |
-| Purpose | How the running system behaves and what to do | Prescribe rules and patterns | Investigate and recommend | Record what actually happened |
-| Voice | Operational, imperative, exact | Imperative | Analytical | Chronological |
-| Lifecycle | Maintained against live state; re-verified | Ongoing | Point-in-time | Per incident |
-| Visibility | Private | Public | Optional checkout | Private |
-| Owner skill | this skill | `create-policy` | `create-research` | `create-incident` |
+| Dimension   | Handbook `docs/handbooks/`                    | Policy `docs/policy/`        | Research `docs/research/` | Incidents `docs/incidents/`   |
+| ----------- | --------------------------------------------- | ---------------------------- | ------------------------- | ----------------------------- |
+| Purpose     | How the running system behaves and what to do | Prescribe rules and patterns | Investigate and recommend | Record what actually happened |
+| Voice       | Operational, imperative, exact                | Imperative                   | Analytical                | Chronological                 |
+| Lifecycle   | Maintained against live state; re-verified    | Ongoing                      | Point-in-time             | Per incident                  |
+| Visibility  | Private                                       | Public                       | Optional checkout         | Private                       |
+| Owner skill | this skill                                    | `create-policy`              | `create-research`         | `create-incident`             |
 
 A handbook page never restates a normative contract owned by code or policy. It links the owner and states the operational consequence.
 
 ## Where pages live
 
-| | Path |
-| --- | --- |
-| Logical — what every page, link and `sources` entry uses | `docs/handbooks/<handbook>/…` |
-| Physical | `repos/tau-brain/handbooks/<handbook>/…`, reached through the tracked symlink |
-| Commit check | `git -C repos/tau-brain status --short -- handbooks/` |
+|                                                          | Path                                                                          |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| Logical — what every page, link and `sources` entry uses | `docs/handbooks/<handbook>/…`                                                 |
+| Physical                                                 | `repos/tau-brain/handbooks/<handbook>/…`, reached through the tracked symlink |
+| Commit check                                             | `git -C repos/tau-brain status --short -- handbooks/`                         |
 
 Never write an absolute path into a page. If `repos/tau-brain` is absent, `docs/handbooks` does not resolve: return the proposed page content to the parent writer and say it must be placed in Brain. Never create a real `docs/handbooks` directory: the tracked entry must stay a symlink, because a real directory publishes the handbook into the public repository.
 
 ## Modes
 
-| Mode | Trigger | What it does |
-| --- | --- | --- |
-| **create** | A new handbook or section | Scaffold the tree, `index.md`, the registers and the source map from the templates |
-| **add** | A new service, procedure or incident class | Pick the `kind`, fill the template from current source, mark every statement, add `sources`, run [generate-source-map.mjs](generate-source-map.mjs) |
-| **update** | A change touched a path in the source map | List suspect pages from the diff, re-read each page's sources, edit only what changed, bump `updated`, re-run [generate-source-map.mjs](generate-source-map.mjs). Always ends with the checklist reconciliation |
-| **verify** | Scheduled review, pre-launch, or after an incident | Re-check declared claims against source and authorized observed claims, log the result, bump `last_verified` |
-| **review** | "Are we ready to launch?", a readiness review, a scheduled pre-launch pass | Read-only digest of the go-live checklist for the operator |
-| **migrate** | Moving content out of a public document | Copy the operational passages into the right pages, leave the public stub, re-point inbound links in the same change |
+| Mode        | Trigger                                                                    | What it does                                                                                                                                                                                                    |
+| ----------- | -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **create**  | A new handbook or section                                                  | Scaffold the tree, `index.md`, the registers and the source map from the templates                                                                                                                              |
+| **add**     | A new service, procedure or incident class                                 | Pick the `kind`, fill the template from current source, mark every statement, add `sources`, run [generate-source-map.mjs](generate-source-map.mjs)                                                             |
+| **update**  | A change touched a path in the source map                                  | List suspect pages from the diff, re-read each page's sources, edit only what changed, bump `updated`, re-run [generate-source-map.mjs](generate-source-map.mjs). Always ends with the checklist reconciliation |
+| **verify**  | Scheduled review, pre-launch, or after an incident                         | Re-check declared claims against source and authorized observed claims, log the result, bump `last_verified`                                                                                                    |
+| **review**  | "Are we ready to launch?", a readiness review, a scheduled pre-launch pass | Read-only digest of the go-live checklist for the operator                                                                                                                                                      |
+| **migrate** | Moving content out of a public document                                    | Copy the operational passages into the right pages, leave the public stub, re-point inbound links in the same change                                                                                            |
 
 ### update
 
@@ -91,13 +91,13 @@ related:
 
 Required sections per `kind`, in order, are fixed. Copy the matching template from [page-templates.md](page-templates.md):
 
-| Kind | Required sections |
-| --- | --- |
-| `service` | What it is · Where it runs · What it talks to · What it depends on · How it fails and how you would tell · Commands and consoles · Secrets (names) · Declared vs observed · Open items |
-| `runbook` | When to use · Preconditions and authority needed · Steps · Verify · Roll back · If it goes wrong · Last exercised |
-| `playbook` | Symptoms · First five minutes · Decide · Remedies · Do not · Escalate · After |
-| `register` | Table only, one row per item, with an owner column |
-| `overview`, `reference` | Free structure; tables preferred |
+| Kind                    | Required sections                                                                                                                                                                      |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `service`               | What it is · Where it runs · What it talks to · What it depends on · How it fails and how you would tell · Commands and consoles · Secrets (names) · Declared vs observed · Open items |
+| `runbook`               | When to use · Preconditions and authority needed · Steps · Verify · Roll back · If it goes wrong · Last exercised                                                                      |
+| `playbook`              | Symptoms · First five minutes · Decide · Remedies · Do not · Escalate · After                                                                                                          |
+| `register`              | Table only, one row per item, with an owner column                                                                                                                                     |
+| `overview`, `reference` | Free structure; tables preferred                                                                                                                                                       |
 
 ## Frontmatter pitfalls
 
@@ -132,19 +132,19 @@ Expected: `✓ wrote <path> (<n> source paths across <n> pages)`, or `is up to d
 
 `readiness/go-live-checklist.md` is the single list reviewed before launch. Nothing else is authoritative: not a blueprint, not a closeout note, not agent memory, not a supplier's own list. Other lists are linked from a row or absorbed into rows.
 
-| Gate | Meaning |
-| --- | --- |
-| `B` | Blocks public launch |
-| `B$` | Blocks enabling live collection |
-| `A` | May launch with a recorded acceptance |
-| `P` | Dated or post-launch obligation, mirrored in the calendar |
+| Gate | Meaning                                                   |
+| ---- | --------------------------------------------------------- |
+| `B`  | Blocks public launch                                      |
+| `B$` | Blocks enabling live collection                           |
+| `A`  | May launch with a recorded acceptance                     |
+| `P`  | Dated or post-launch obligation, mirrored in the calendar |
 
-| State | Meaning |
-| --- | --- |
-| `open` | Not closed |
-| `done` | Evidence recorded |
-| `accepted` | The operator accepted the risk; the reason is copied to `known-gaps.md` |
-| `superseded` | Points to the replacing row |
+| State        | Meaning                                                                 |
+| ------------ | ----------------------------------------------------------------------- |
+| `open`       | Not closed                                                              |
+| `done`       | Evidence recorded                                                       |
+| `accepted`   | The operator accepted the risk; the reason is copied to `known-gaps.md` |
+| `superseded` | Points to the replacing row                                             |
 
 **Reconciliation — the last step of every update.** Answer all three questions against the diff, in the change summary:
 

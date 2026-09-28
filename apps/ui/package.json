@@ -35,6 +35,7 @@
     "@taucad/fs-bridge": "workspace:*",
     "@taucad/fs-client": "workspace:*",
     "@taucad/geospec-engine": "workspace:*",
+    "@taucad/geospec-engine-native": "workspace:*",
     "@taucad/gltf": "workspace:*",
     "@taucad/grammars": "workspace:*",
     "@taucad/image": "workspace:*",
@@ -95,7 +96,10 @@
     "@taucad/runtime-testing": "workspace:*",
     "@taucad/spatial": "workspace:*",
     "@taucad/vite": "workspace:*",
-    "@types/express": "^5.0.6"
+    "@types/express": "^5.0.6",
+    "@vitejs/plugin-react": "catalog:",
+    "oxc-transform-react": "catalog:",
+    "vite": "catalog:"
   },
   "files": [
     "build"

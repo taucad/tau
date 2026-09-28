@@ -145,7 +145,7 @@ const bundledTypescriptCorpus =
       throw new Error(`missing ${packageName} declaration bundle in ${relativePath}`);
     }
 
-    const directory = mkdtempSync(join(tmpdir(), `tau-${packageName}-api-`));
+    const directory = mkdtempSync(join(tmpdir(), `tau-${packageName.replaceAll(/[^\dA-Za-z-]/gu, '-')}-api-`));
     try {
       const files = { 'index.d.ts': bundled.content, ...bundled.files };
       for (const [file, content] of Object.entries(files)) {
@@ -210,6 +210,12 @@ export type BundleOwner = {
   readonly eagerGroups?: () => readonly string[];
   /** Source files beside doctrine to copy into the on-demand bundle tier. */
   readonly authoredReferences?: readonly string[];
+  /** A namespaced API index for another public authoring subpath in the same package. */
+  readonly supplementalApi?: {
+    readonly corpus: () => ApiCorpus;
+    readonly prefix: string;
+    readonly groupBy: (entry: ApiEntry) => string;
+  };
 };
 
 /**
@@ -224,11 +230,17 @@ export const bundleOwners: readonly BundleOwner[] = [
     name: 'Replicad authoring',
     title: 'Replicad authoring',
     description:
-      'Guides Replicad BRep and kinematics authoring. Use for TypeScript geometry imported from replicad, especially assemblies with moving parts.',
-    whenToUse: 'Use for Replicad models, especially assemblies with moving parts that need joints and animations.',
+      'Guides Replicad BRep, Tau physical materials, textures, named interfaces and kinematics. Use for Replicad models and appearance or moving-part requests.',
+    whenToUse:
+      'Use for Replicad models, including physical materials, textures, STEP interfaces and moving assemblies.',
     corpus: typescriptCorpus('replicad', 'dist/replicad.d.ts'),
     groupBy: byKind,
-    authoredReferences: ['kinematics-reference.md'],
+    supplementalApi: {
+      corpus: bundledTypescriptCorpus('replicad/model.bundled.json', '@taucad/replicad', 'packages/plugins/replicad'),
+      prefix: 'tau',
+      groupBy: byKind,
+    },
+    authoredReferences: ['tau-authoring-reference.md', 'kinematics-reference.md'],
   },
   {
     slug: 'cad-jscad',
@@ -398,6 +410,14 @@ export const generateBundles = async (
             groupBy: owner.groupBy,
             authoredFiles,
             ...(owner.eagerGroups === undefined ? {} : { eagerGroups: owner.eagerGroups() }),
+            ...(owner.supplementalApi === undefined
+              ? {}
+              : {
+                  supplementalApi: {
+                    ...owner.supplementalApi,
+                    corpus: owner.supplementalApi.corpus(),
+                  },
+                }),
           });
 
     const manifest: TauSkillsManifest = { bundles: [bundle.declaration] };

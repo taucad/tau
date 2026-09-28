@@ -241,8 +241,19 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     directory: false,
   },
 
-  /* Records: host-written bytes inside the project. Read-only to agents, never
-   * versioned (they ship on their own refs when sync is on). */
+  /* Records are unversioned and travel on their own refs when sync is on.
+   * Workbench records are the agent-writable exception; the remaining rows
+   * are host-written and read-only to agents. */
+  {
+    prefix: '.tau/workbench',
+    class: 'records',
+    versioned: false,
+    agentAccess: 'read-write',
+    watch: 'ui',
+    anchored: true,
+    match: 'root',
+    directory: true,
+  },
   {
     prefix: '.tau/chats',
     class: 'records',

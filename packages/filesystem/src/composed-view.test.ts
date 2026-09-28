@@ -360,6 +360,18 @@ describe('composeView agent mask', () => {
     await provider.writeFile('.tau/binding.json', '{}\n');
   });
 
+  it('writes workbench records while refusing chat-record writes', async () => {
+    const view = agentView();
+    await view.mkdir('.tau/workbench', { recursive: true });
+    await view.writeFile('.tau/workbench/layout.json', '{"version":1}\n');
+
+    expect(await view.readFile('.tau/workbench/layout.json', 'utf8')).toBe('{"version":1}\n');
+    await expect(view.writeFile('.tau/chats/chat-1/events.jsonl', 'forged\n')).rejects.toMatchObject({
+      code: 'EROFS',
+      reason: 'WORKSPACE_MASKED_PATH',
+    });
+  });
+
   /* North-star acceptance 6 (S18, A9): the control plane never reaches provider
    * I/O, so `list_directory('.tau')` shows the host's records and never the
    * revision store. */

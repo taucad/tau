@@ -41,7 +41,9 @@
 (* Abstractions: LRU order is "any idle victim"; time is three capability  *)
 (* buckets and one idle flag; a cwd change folds into the reopen branch;   *)
 (* the adapter's process group is one process; the lease ceiling, crashes  *)
-(* and vendor semantics are not modelled.                                  *)
+(* and vendor semantics are not modelled. An idle model-selection probe     *)
+(* changes vendor configuration only, so it stutters at this grain; a lend *)
+(* queued during that probe refines Acquire and starts after its answer.    *)
 (***************************************************************************)
 EXTENDS Naturals, FiniteSets
 

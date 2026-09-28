@@ -5,6 +5,7 @@ import { afterEach, expect, test } from 'vitest';
 import type { Locator, Page } from 'playwright';
 import { launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
+import { durableMessages, latestCompletedRun } from '#support/acp-evidence.js';
 import {
   gatewayFixtureFinalText,
   gatewayFixtureModelName,
@@ -14,11 +15,14 @@ import {
 import type { GatewayFixture, GatewayFixtureToolCall } from '#support/gateway-fixture.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
 import {
+  activeChatId,
+  ensureFilesPane,
   expectCount,
   expectGeometryFramed,
-  expectModelBuilt,
+  expectNativeKernelEngine,
   expectSignedIn,
   expectVisible,
+  fileTreeItemOf,
   selectChatModel,
   selectKernel,
   sendPrompt,
@@ -257,8 +261,46 @@ test('prints the chat pyramid on the simulated X1C only after Accept', async () 
       .poll(async () => Number(await progress.getAttribute('aria-valuenow')), { timeout: 60_000 })
       .toBeGreaterThan(firstProgress);
     expect(await page.getByRole('button', { name: 'Urgent stop' }).isEnabled()).toBe(true);
-    /* The seed turn closed with the same line; the continued print turn's is the second. */
-    await expectCount(page.getByText(gatewayFixtureFinalText, { exact: true }), 2, 300_000);
+    /* The older seed turn can be virtualized out of the DOM; both replies live in the host log. */
+    await expectVisible(page.getByText(gatewayFixtureFinalText, { exact: true }).last(), 300_000);
+    const eventsPath = join(root, '.tau/chats', activeChatId(page), 'events.jsonl');
+    await expect
+      .poll(
+        async () =>
+          durableMessages(await readFile(eventsPath, 'utf8')).filter(
+            (message) =>
+              message.role === 'assistant' && JSON.stringify(message.content).includes(gatewayFixtureFinalText),
+          ).length,
+      )
+      .toBe(2);
+    await expect
+      .poll(
+        async () => {
+          try {
+            return latestCompletedRun(await readFile(eventsPath, 'utf8'));
+          } catch {
+            return undefined;
+          }
+        },
+        { timeout: 120_000 },
+      )
+      .toBeDefined();
+    const events = await readFile(eventsPath, 'utf8');
+    const printRunId = latestCompletedRun(events);
+    const closingReplies = durableMessages(events).filter(
+      (message) => message.role === 'assistant' && JSON.stringify(message.content).includes(gatewayFixtureFinalText),
+    );
+    expect(new Set(closingReplies.map((message) => message.runId)).size).toBe(2);
+    expect(closingReplies.at(-1)?.runId).toBe(printRunId);
+    expect(
+      events.split('\n').some((line) => {
+        if (line.trim() === '') {
+          return false;
+        }
+        const event = JSON.parse(line) as { type?: string; runId?: string; revisionId?: string };
+        return event.type === 'turn.finalized' && event.runId === printRunId && Boolean(event.revisionId);
+      }),
+    ).toBe(true);
     await expectCount(chatApprovalOf(page), 0);
     /* The host handed the chat's answer to the ledger, in the chat's words. */
     const [accepted, ...others] = await ledgerRequests(session!);
@@ -270,12 +312,15 @@ test('prints the chat pyramid on the simulated X1C only after Accept', async () 
       expect.stringContaining("The run paused for the person's approval, and they answered:"),
     );
     expect(continued).toContainEqual(expect.stringContaining(`- approved: "Print ${fileName} on ${machineName}?`));
-    await expectModelBuilt({
-      finalText: gatewayFixtureFinalText,
-      logPath: session!.logPath,
-      page,
-      sourcePath: join(root, 'main.scad'),
-    });
+    /* Revision cards can be unmounted; verify the live geometry and native file instead. */
+    await expectCount(page.getByText(/ROOT_UNAVAILABLE/u), 0);
+    await expectCount(page.getByText('File not found', { exact: true }), 0);
+    await expectCount(page.getByRole('status', { name: 'Waiting for geometry' }), 0, 120_000);
+    await expectVisible(page.getByTestId('cad-viewer-canvas-region').locator('canvas'), 60_000);
+    await expectNativeKernelEngine(session!.logPath);
+    await expectGeometryFramed(page);
+    await ensureFilesPane(page);
+    await expectVisible(fileTreeItemOf(page, 'main.scad'), 60_000);
   } catch (error) {
     await session!.capture('print-dry-run-accept');
     throw error;
@@ -304,7 +349,12 @@ test.each([
     /* A denial ends the run cancelled: the model is not asked again, and no closing line follows the seed turn's. */
     await waitForRunToSettle(page, 120_000);
     expect(fixture!.gatewayRequests.length).toBe(paused);
-    await expectCount(page.getByText(gatewayFixtureFinalText, { exact: true }), 1);
+    const events = await readFile(join(root, '.tau/chats', activeChatId(page), 'events.jsonl'), 'utf8');
+    expect(
+      durableMessages(events).filter(
+        (message) => message.role === 'assistant' && JSON.stringify(message.content).includes(gatewayFixtureFinalText),
+      ),
+    ).toHaveLength(1);
     const [request, ...others] = await ledgerRequests(session!);
     expect(others).toEqual([]);
     expect(request).toMatchObject({

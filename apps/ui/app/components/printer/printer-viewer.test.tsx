@@ -50,9 +50,9 @@ const renderPane = ({ actions, body }: FileViewerPaneContent): React.ReactNode =
 );
 const readAll = async (): Promise<Uint8Array<ArrayBuffer>> => container;
 
-const viewer = (): React.JSX.Element => (
+const viewer = (revision = 1, load: () => Promise<Uint8Array<ArrayBuffer>> = readAll): React.JSX.Element => (
   <TooltipProvider>
-    <PrinterViewer name={name} kind='container' revision={1} readAll={readAll} renderPane={renderPane} />
+    <PrinterViewer name={name} kind='container' revision={revision} readAll={load} renderPane={renderPane} />
   </TooltipProvider>
 );
 
@@ -144,6 +144,29 @@ describe('PrinterViewer', () => {
     expect(props.chamberLight).toBe('unknown');
     expect(props.filamentColors).toEqual([printerAccent]);
     expect(props.geometry.buildVolume).toEqual([256, 256, 256]);
+  });
+
+  it('should retain playback, filters and scene across unrelated pane renders', async () => {
+    const user = userEvent.setup();
+    const load = vi.fn().mockResolvedValue(container);
+    const view = render(viewer(1, load));
+    const region = await screen.findByRole('region', { name: `Printer simulation: ${name}` });
+    const controls = within(region).getByRole('group', { name: 'Playback controls' });
+    const filter = within(region).getByRole('region', { name: 'G-code filter' });
+    const scene = latestSceneProps();
+    fireEvent.change(within(controls).getByRole('slider', { name: 'Layer' }), { target: { value: '2' } });
+    await user.click(within(controls).getByRole('radio', { name: '10×' }));
+    await user.click(within(filter).getByRole('checkbox', { name: 'Preparation' }));
+    const time = scene.store.getTime();
+
+    view.rerender(viewer(1, load));
+
+    expect(screen.getByRole('region', { name: `Printer simulation: ${name}` })).toBe(region);
+    expect(latestSceneProps().store).toBe(scene.store);
+    expect(scene.store.getTime()).toBe(time);
+    expect(scene.store.getSnapshot().speed).toBe(10);
+    expect(latestSceneProps().hiddenGroups).toContain('preparation');
+    expect(load).toHaveBeenCalledOnce();
   });
 
   it('should open paused under reduced motion while scrubbing still works', async () => {

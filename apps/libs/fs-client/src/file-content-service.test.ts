@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mock } from 'vitest-mock-extended';
+import * as hash from '@taucad/utils/hash';
 import { EditorSaveConflictError, FileContentService } from '#file-content-service.js';
 import type { ContentChangeEvent, FileContentResult, OutcomeChangeEvent } from '#file-content-service.js';
 import { BinaryFileError, FileNotFoundError, FileTooLargeError } from '#file-content-errors.js';
@@ -1013,13 +1014,69 @@ describe('FileContentService', () => {
       expect(handler).not.toHaveBeenCalled();
     });
 
-    it('should publish a new revision for separately allocated equal binary heads', async () => {
-      vi.mocked(proxy.readFile).mockResolvedValueOnce(new Uint8Array([0, 1, 2]));
+    it('should retain the binary outcome for separately allocated equal bytes', async () => {
+      vi.mocked(proxy.readFile).mockImplementation(async () => new Uint8Array([0, 1, 2]));
       await service.resolve('asset.bin');
       const first = service.peekOutcome('asset.bin');
       const handler = vi.fn<(event: OutcomeChangeEvent) => void>();
       service.onDidChangeOutcome(handler);
-      vi.mocked(proxy.readFile).mockResolvedValueOnce(new Uint8Array([0, 1, 2]));
+      const digest = vi.spyOn(hash, 'sha256Bytes');
+      try {
+        emitFileChanged(fileWritten('asset.bin'));
+        await vi.waitFor(() => {
+          expect(digest).toHaveBeenCalledOnce();
+        });
+        await digest.mock.results[0]!.value;
+        await Promise.resolve();
+
+        const second = service.peekOutcome('asset.bin');
+        expect(second).toBe(first);
+        expect(handler).not.toHaveBeenCalled();
+        expect(await service.resolve('asset.bin')).toBe(first);
+      } finally {
+        digest.mockRestore();
+      }
+    });
+
+    it('should retain an unchanged binary outcome across broad refreshes', async () => {
+      const bytes = new Uint8Array([0, 1, 2]);
+      vi.mocked(proxy.readFile).mockImplementation(async () => new Uint8Array(bytes));
+      const first = await service.resolve('asset.bin');
+      const handler = vi.fn<(event: OutcomeChangeEvent) => void>();
+      service.onDidChangeOutcome(handler);
+      const digest = vi.spyOn(hash, 'sha256Bytes');
+      try {
+        emitFileChanged({ type: 'directoryChanged', path: '', backend: 'indexeddb' });
+        await vi.waitFor(() => {
+          expect(digest).toHaveBeenCalledOnce();
+        });
+        await digest.mock.results[0]!.value;
+        await Promise.resolve();
+        expect(service.peekOutcome('asset.bin')).toBe(first);
+        expect(handler).not.toHaveBeenCalled();
+
+        emitFileChanged({ type: 'backendChanged', backend: 'opfs' });
+        await vi.waitFor(() => {
+          expect(digest).toHaveBeenCalledTimes(2);
+        });
+        await digest.mock.results[1]!.value;
+        await Promise.resolve();
+
+        expect(service.peekOutcome('asset.bin')).toBe(first);
+        expect(handler).not.toHaveBeenCalled();
+      } finally {
+        digest.mockRestore();
+      }
+    });
+
+    it('should publish a changed binary tail after the same 512-byte head and size', async () => {
+      const firstBytes = new Uint8Array(1024);
+      const changedBytes = new Uint8Array(firstBytes);
+      changedBytes[900] = 1;
+      vi.mocked(proxy.readFile).mockResolvedValueOnce(firstBytes).mockResolvedValueOnce(changedBytes);
+      const first = await service.resolve('asset.bin');
+      const handler = vi.fn<(event: OutcomeChangeEvent) => void>();
+      service.onDidChangeOutcome(handler);
 
       emitFileChanged(fileWritten('asset.bin'));
       await vi.waitFor(() => {
@@ -1030,8 +1087,160 @@ describe('FileContentService', () => {
       expect(first.kind).toBe('binary');
       expect(second.kind).toBe('binary');
       if (first.kind === 'binary' && second.kind === 'binary') {
+        expect(second.head).toEqual(first.head);
+        expect(second.size).toBe(first.size);
         expect(second.revision).toBeGreaterThan(first.revision);
       }
+    });
+
+    it('should discard an older binary refresh after its delayed digest completes', async () => {
+      vi.mocked(proxy.readFile).mockResolvedValueOnce(new Uint8Array([0, 1, 0]));
+      await service.resolve('asset.bin');
+      const older = new Uint8Array([0, 1, 1]);
+      const newer = new Uint8Array([0, 1, 2]);
+      vi.mocked(proxy.readFile).mockResolvedValueOnce(older).mockResolvedValueOnce(newer);
+      const olderDigest = Promise.withResolvers<string>();
+      const actualHash = hash.sha256Bytes;
+      const digest = vi
+        .spyOn(hash, 'sha256Bytes')
+        .mockImplementationOnce(async () => olderDigest.promise)
+        .mockImplementation(actualHash);
+      const handler = vi.fn<(event: OutcomeChangeEvent) => void>();
+      service.onDidChangeOutcome(handler);
+      try {
+        emitFileChanged(fileWritten('asset.bin'));
+        await vi.waitFor(() => {
+          expect(digest).toHaveBeenCalledOnce();
+        });
+        emitFileChanged(fileWritten('asset.bin'));
+        await vi.waitFor(() => {
+          const result = service.peekOutcome('asset.bin');
+          expect(result.kind).toBe('binary');
+          if (result.kind === 'binary') {
+            expect(result.head[2]).toBe(2);
+          }
+        });
+        const latest = service.peekOutcome('asset.bin');
+
+        olderDigest.resolve(await actualHash(older));
+        await digest.mock.results[0]!.value;
+        await Promise.resolve();
+
+        expect(service.peekOutcome('asset.bin')).toBe(latest);
+        expect(handler).toHaveBeenCalledOnce();
+      } finally {
+        digest.mockRestore();
+      }
+    });
+
+    it('should publish orphan and recreated binary outcomes even when the bytes match', async () => {
+      const bytes = new Uint8Array([0, 1, 2]);
+      vi.mocked(proxy.readFile).mockResolvedValue(bytes);
+      const first = await service.resolve('asset.bin');
+      const handler = vi.fn<(event: OutcomeChangeEvent) => void>();
+      service.onDidChangeOutcome(handler);
+
+      emitFileChanged({ type: 'fileDeleted', path: 'asset.bin', backend: 'indexeddb' });
+      expect(service.peekOutcome('asset.bin').kind).toBe('orphaned');
+      emitFileChanged(fileWritten('asset.bin'));
+      await vi.waitFor(() => {
+        expect(handler).toHaveBeenCalledTimes(2);
+      });
+      expect(service.peekOutcome('asset.bin').kind).toBe('binary');
+      expect(service.peekOutcome('asset.bin')).not.toBe(first);
+    });
+
+    it('should keep the binary outcome on equal local single and batch writes', async () => {
+      const bytes = new Uint8Array([0, 1, 2]);
+      vi.mocked(proxy.readFile).mockResolvedValue(bytes);
+      const first = await service.resolve('asset.bin');
+      const handler = vi.fn<(event: OutcomeChangeEvent) => void>();
+      service.onDidChangeOutcome(handler);
+
+      await service.write('asset.bin', new Uint8Array(bytes), 'machine');
+      await service.writeFiles({ 'asset.bin': { content: new Uint8Array(bytes) } }, 'machine');
+
+      expect(service.peekOutcome('asset.bin')).toBe(first);
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it('should classify a changed local binary write and preserve editor text intent', async () => {
+      const bytes = new Uint8Array([0, 1, 2]);
+      await service.write('asset.bin', bytes, 'machine');
+      const first = service.peekOutcome('asset.bin');
+      expect(first.kind).toBe('binary');
+
+      const changed = new Uint8Array([0, 1, 3]);
+      await service.writeFiles({ 'asset.bin': { content: changed } }, 'machine');
+      const afterBatch = service.peekOutcome('asset.bin');
+      expect(afterBatch.kind).toBe('binary');
+      if (first.kind === 'binary' && afterBatch.kind === 'binary') {
+        expect(afterBatch.revision).toBeGreaterThan(first.revision);
+      }
+
+      await service.saveEditor('main.ts', new Uint8Array([0, 65]));
+      expect(service.peekOutcome('main.ts').kind).toBe('text');
+    });
+
+    it('should apply the open size limit to local binary writes', async () => {
+      const { service: tinyService } = createHarness({ openSizeBytes: 2 });
+      await tinyService.write('asset.bin', new Uint8Array([0, 1, 2]), 'machine');
+      expect(tinyService.peekOutcome('asset.bin')).toEqual({ kind: 'too-large', size: 3, limit: 2 });
+    });
+
+    it('should publish binary outcomes before write facts in commit order when an earlier digest is slow', async () => {
+      const firstBytes = new Uint8Array([0, 1, 2]);
+      const secondBytes = new Uint8Array([0, 1, 3]);
+      const firstDigest = Promise.withResolvers<string>();
+      const actualHash = hash.sha256Bytes;
+      const digest = vi
+        .spyOn(hash, 'sha256Bytes')
+        .mockImplementationOnce(async () => firstDigest.promise)
+        .mockImplementation(actualHash);
+      const written: number[] = [];
+      const visible: FileContentResult[] = [];
+      service.onDidContentChange((event) => {
+        if (event.type === 'written') {
+          written.push(event.data[2]!);
+          visible.push(service.peekOutcome(event.path));
+        }
+      });
+      try {
+        const first = service.write('asset.bin', firstBytes, 'machine');
+        await vi.waitFor(() => {
+          expect(digest).toHaveBeenCalledOnce();
+        });
+        const second = service.write('asset.bin', secondBytes, 'machine');
+        await second;
+
+        expect(written).toEqual([3]);
+        expect(visible[0]?.kind).toBe('binary');
+        const secondOutcome = service.peekOutcome('asset.bin');
+
+        firstDigest.resolve(await actualHash(firstBytes));
+        await first;
+        expect(written).toEqual([3, 2]);
+        expect(visible[1]?.kind).toBe('binary');
+        expect(visible[0]).toBe(secondOutcome);
+        expect(visible[1]).toBe(service.peekOutcome('asset.bin'));
+      } finally {
+        digest.mockRestore();
+      }
+    });
+
+    it('should expose the classified binary outcome to a synchronous batch subscriber', async () => {
+      const snapshots: FileContentResult[] = [];
+      service.onDidContentChange((event) => {
+        if (event.type === 'batchWritten') {
+          snapshots.push(service.peekOutcome('asset.bin'));
+        }
+      });
+
+      await service.writeFiles({ 'asset.bin': { content: new Uint8Array([0, 1, 2]) } }, 'machine');
+
+      expect(snapshots).toHaveLength(1);
+      expect(snapshots[0]?.kind).toBe('binary');
+      expect(service.peek('asset.bin')).toBeUndefined();
     });
 
     it('should stop firing onDidChangeOutcome after unsubscribe', async () => {

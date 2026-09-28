@@ -1,5 +1,6 @@
 import { BoundedFileCache, WorkspaceMutationError } from '@taucad/filesystem';
 import type { ContentExportFilter } from '@taucad/filesystem/content-ops';
+import { sha256Bytes } from '@taucad/utils/hash';
 import { Topic } from '@taucad/events';
 import { PathSubscriberRegistry } from '#path-subscriber-registry.js';
 import type { RefreshGenerationGuard } from '#refresh-generation-guard.js';
@@ -160,6 +161,8 @@ type EditorSaveState = {
   completion: Promise<void>;
 };
 
+type PreparedWrittenOutcome = { kind: 'text' | 'too-large' } | { kind: 'binary'; digest: string };
+
 type EditorMutationBarrier = {
   readonly source: string;
   readonly target: string | undefined;
@@ -212,6 +215,7 @@ export class FileContentService {
   private readonly refreshGuard: RefreshGenerationGuard;
   private readonly pendingResolves = new Map<string, Promise<FileContentResult>>();
   private readonly outcomes = new Map<string, FileContentResult>();
+  private readonly binaryDigests = new WeakMap<FileContentResult, string>();
   private readonly pathNotifyRegistry = new PathSubscriberRegistry();
   private readonly contentChangeRegistry = new PathSubscriberRegistry<ContentChangeEvent>();
   private readonly orphanedPaths = new Set<string>();
@@ -444,8 +448,10 @@ export class FileContentService {
     const localCopy = new Uint8Array(data);
     const wireCopy = new Uint8Array(data);
     const absolutePath = this.paths.toAbsolutePath(key);
+    const prepared: PreparedWrittenOutcome =
+      source === 'editor' ? { kind: 'text' } : await this.prepareWrittenOutcome(localCopy, source);
     await this.proxy.writeFile(absolutePath, wireCopy);
-    this.recordWrite(key, localCopy, source);
+    this.recordWrite(key, localCopy, { source, prepared });
   }
 
   /**
@@ -522,14 +528,14 @@ export class FileContentService {
       paths.push(key);
     }
 
+    const prepared = await Promise.all(
+      [...clones].map(async ([key, data]) => [key, data, await this.prepareWrittenOutcome(data, source)] as const),
+    );
     await this.proxy.writeFiles(absoluteFiles);
 
-    for (const [key, localCopy] of clones) {
-      this.refreshGuard.begin(key);
-      this.cache.set(key, localCopy);
-      this.publishOutcome(key, { kind: 'text', content: localCopy });
+    for (const [key, data, outcome] of prepared) {
+      this.publishWrittenOutcome(key, data, outcome);
     }
-
     this.notifyGlobalSubscribers({ type: 'batchWritten', paths, source });
   }
 
@@ -1096,7 +1102,7 @@ export class FileContentService {
         result.conflicts.find((conflict) => conflict.path === absolutePath)?.actual ?? null,
       );
     }
-    this.recordWrite(key, new Uint8Array(data), 'editor');
+    this.recordWrite(key, new Uint8Array(data), { source: 'editor', prepared: { kind: 'text' } });
   }
 
   /**
@@ -1138,12 +1144,43 @@ export class FileContentService {
   }
 
   /** The bookkeeping every landed write shares: cache, outcome and the `written` fact. */
-  private recordWrite(key: string, localCopy: Uint8Array<ArrayBuffer>, source: FileWriteSource): void {
-    this.refreshGuard.begin(key);
-    this.cache.set(key, localCopy);
+  private recordWrite(
+    key: string,
+    localCopy: Uint8Array<ArrayBuffer>,
+    write: { source: FileWriteSource; prepared: PreparedWrittenOutcome },
+  ): void {
+    this.publishWrittenOutcome(key, localCopy, write.prepared);
+    this.notifyGlobalSubscribers({ type: 'written', path: key, data: localCopy, source: write.source });
+  }
+
+  private async prepareWrittenOutcome(
+    data: Uint8Array<ArrayBuffer>,
+    source: FileWriteSource,
+  ): Promise<PreparedWrittenOutcome> {
+    if (source === 'editor') {
+      return { kind: 'text' };
+    }
+    if (data.byteLength > this.openSizeBytes) {
+      return { kind: 'too-large' };
+    }
+    return seemsBinary(data) ? { kind: 'binary', digest: await sha256Bytes(data) } : { kind: 'text' };
+  }
+
+  private publishWrittenOutcome(key: string, data: Uint8Array<ArrayBuffer>, prepared: PreparedWrittenOutcome): void {
+    const generation = this.refreshGuard.begin(key);
+    const outcome: FileContentResult =
+      prepared.kind === 'too-large'
+        ? { kind: 'too-large', size: data.byteLength, limit: this.openSizeBytes }
+        : prepared.kind === 'binary'
+          ? this.createBinaryOutcome(data, generation, prepared.digest)
+          : { kind: 'text', content: data };
+    if (outcome.kind === 'text') {
+      this.cache.set(key, data);
+    } else {
+      this.cache.delete(key);
+    }
     this.setOrphaned(key, false);
-    this.publishOutcome(key, { kind: 'text', content: localCopy });
-    this.notifyGlobalSubscribers({ type: 'written', path: key, data: localCopy, source });
+    this.publishOutcome(key, outcome);
   }
 
   private _beginEditorMutation(source: string, target?: string): EditorMutationBarrier {
@@ -1458,8 +1495,7 @@ export class FileContentService {
     }
 
     if (seemsBinary(data)) {
-      const head = data.slice(0, headSniffByteLength);
-      const outcome: FileContentResult = { kind: 'binary', size: data.byteLength, head, revision: generation };
+      const outcome = await this.binaryOutcome(data, generation);
       if (!this.refreshGuard.isCurrent(path, generation)) {
         return;
       }
@@ -1495,10 +1531,9 @@ export class FileContentService {
     }
 
     if (!forceText && seemsBinary(data)) {
-      const head = data.slice(0, headSniffByteLength);
-      const outcome: FileContentResult = { kind: 'binary', size: data.byteLength, head, revision: generation };
+      const outcome = await this.binaryOutcome(data, generation);
       if (this.refreshGuard.isCurrent(path, generation)) {
-        this.publishOutcome(path, outcome);
+        return this.publishOutcome(path, outcome);
       }
       return outcome;
     }
@@ -1510,6 +1545,21 @@ export class FileContentService {
     const outcome: FileContentResult = { kind: 'text', content: data };
     this.publishOutcome(path, outcome);
     this.notifyGlobalSubscribers({ type: 'read', path, data });
+    return outcome;
+  }
+
+  private async binaryOutcome(data: Uint8Array<ArrayBuffer>, generation: number): Promise<FileContentResult> {
+    return this.createBinaryOutcome(data, generation, await sha256Bytes(data));
+  }
+
+  private createBinaryOutcome(data: Uint8Array<ArrayBuffer>, generation: number, digest: string): FileContentResult {
+    const outcome: FileContentResult = {
+      kind: 'binary',
+      size: data.byteLength,
+      head: data.slice(0, headSniffByteLength),
+      revision: generation,
+    };
+    this.binaryDigests.set(outcome, digest);
     return outcome;
   }
 
@@ -1550,14 +1600,15 @@ export class FileContentService {
     }
   }
 
-  private publishOutcome(path: string, result: FileContentResult): void {
+  private publishOutcome(path: string, result: FileContentResult): FileContentResult {
     const previous = this.outcomes.get(path);
-    if (previous && outcomesEqual(previous, result)) {
-      return;
+    if (previous && outcomesEqual(previous, result, this.binaryDigests)) {
+      return previous;
     }
     this.outcomes.set(path, result);
     this.#outcomeTopic.emit({ path, result });
     this.notifyPathSubscribers(path);
+    return result;
   }
 
   private setOrphaned(path: string, orphaned: boolean): void {
@@ -1582,7 +1633,11 @@ export class FileContentService {
   }
 }
 
-function outcomesEqual(a: FileContentResult, b: FileContentResult): boolean {
+function outcomesEqual(
+  a: FileContentResult,
+  b: FileContentResult,
+  binaryDigests: WeakMap<FileContentResult, string>,
+): boolean {
   if (a.kind !== b.kind) {
     return false;
   }
@@ -1597,7 +1652,8 @@ function outcomesEqual(a: FileContentResult, b: FileContentResult): boolean {
     }
     case 'binary': {
       const other = b as Extract<FileContentResult, { kind: 'binary' }>;
-      return a.revision === other.revision;
+      const digest = binaryDigests.get(a);
+      return digest !== undefined && digest === binaryDigests.get(other);
     }
     case 'too-large': {
       const other = b as Extract<FileContentResult, { kind: 'too-large' }>;

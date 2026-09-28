@@ -132,6 +132,26 @@ test('sends a new message after stopping a gated turn', async () => {
   await expectLogInvariant(chatId!, { runs: 2, settlements: ['turn.failed', 'turn.finalized'] });
 });
 
+test('shows the revision of a turn stopped after it changed files', async () => {
+  const [chatId] = await openChat([
+    reply('The proof file is written.', {
+      toolCalls: [
+        { name: 'create_file', args: { targetFile: 'interrupted-proof.txt', content: 'saved before stop\n' } },
+      ],
+    }),
+    reply('Checking the saved file.', { gated: true }),
+  ]);
+  await sendDraft('First plain message.');
+  await target.waitForAgentHostGatewayGate({ kind: 'stream', turn: 'First plain message.' }, 120_000);
+  await expect.poll(gatewayRequestCount, { timeout: 60_000 }).toBe(2);
+
+  await target.click(selectors.getByCss('button:has(svg.lucide-square)').last());
+  await target.expectVisible(selectors.getByText(/Rev \d+ saved · Work interrupted/u).first(), 120_000);
+  await expectLogInvariant(chatId!, { runs: 1, settlements: ['turn.finalized'] });
+  await target.releaseAgentHostGatewayFixture('First plain message.');
+  await expectAsksByTurn([['First plain message.', 1]]);
+});
+
 test('sends a second message after reloading a completed chat', async () => {
   const [chatId] = await openChat(twoTurnScript);
   await completeFirstTurn();
@@ -469,7 +489,7 @@ test('resumes a refused turn under its own run, rewinding nothing', async () => 
   await expectNoAdmissionRefusal();
 });
 
-test('sends again after reloading while a turn is queued', async () => {
+test('keeps a queued turn live across reload and sends again after it settles', async () => {
   const [chatId] = await openChat(twoTurnScript);
   /* The turn is parked at the request's *entry* — dispatched, not one byte
    * answered — which is the only way to reload a turn that is still in
@@ -485,10 +505,8 @@ test('sends again after reloading while a turn is queued', async () => {
   await target.expectVisible(selectors.getByCss(composerSelector).first(), 60_000);
   await target.releaseAgentHostGatewayRequest('First plain message.');
 
-  /* I4: the document that placed the run is gone, so the new document's attach
-   * *records* it — one `turn.failed` carrying `RUN_ABANDONED` — and never
-   * drives it. The turn keeps its single ask; the reload spends nothing. */
-  await expectLogInvariant(chatId!, { runs: 1, settlements: ['turn.failed'], timeoutMilliseconds: 120_000 });
+  await target.expectVisible(selectors.getByText('Reply one.', { exact: true }).last(), 120_000);
+  await expectLogInvariant(chatId!, { runs: 1, settlements: ['turn.finalized'], timeoutMilliseconds: 120_000 });
   await expectAsksByTurn([['First plain message.', 1]]);
 
   await selectModel(pdfModelName);
@@ -499,13 +517,11 @@ test('sends again after reloading while a turn is queued', async () => {
     ['First plain message.', 1],
     ['Second plain message.', 1],
   ]);
-  await expectLogInvariant(chatId!, { runs: 2, settlements: ['turn.failed', 'turn.finalized'] });
-  /* `RUN_ABANDONED` is the record the takeover just wrote, so the page reports
-   * it; every other refusal in the union is still a failure here. */
-  await expectNoAdmissionRefusal(['RUN_ABANDONED']);
+  await expectLogInvariant(chatId!, { runs: 2, settlements: ['turn.finalized', 'turn.finalized'] });
+  await expectNoAdmissionRefusal();
 });
 
-test('resumes the turn a navigation abandoned, then sends another', async () => {
+test('keeps a live turn after navigation, then sends another', async () => {
   const [chatId] = await openChat([reply('Reply one.', { gated: true }), reply('Reply two.')]);
   await sendDraft('First plain message.');
   await target.expectVisible(selectors.getByText('Reply one.', { exact: true }).last(), 120_000);
@@ -515,38 +531,24 @@ test('resumes the turn a navigation abandoned, then sends another', async () => 
   await target.expectUrl(/\/$|\/\?/u, 60_000);
   await target.navigate(`${projectUrl.pathname}${projectUrl.search}`);
   await target.expectVisible(selectors.getByCss(composerSelector).first(), 60_000);
-  await target.releaseAgentHostGatewayFixture();
-
-  /* Ruling E1: the run the departed document left behind is recorded, not
-   * resumed. The takeover used to resume it on the next gesture's attach — a
-   * full-price re-ask of a turn the person had already paid for, with the reply
-   * they watched erased and no settlement written at all (Finding 1). */
-  await expectLogInvariant(chatId!, { runs: 1, settlements: ['turn.failed'], timeoutMilliseconds: 120_000 });
-  await expectAsksByTurn([['First plain message.', 1]]);
-
-  /* The person's own gesture is what spends: the saved turn's card continues
-   * the same run rather than rewinding it. A partial stream is never durable,
-   * so the continuation asks for that turn a second time and the script replays
-   * its own entry. */
-  await target.expectVisible(continueAction, 60_000);
-  await target.click(continueAction);
-  await target.waitForAgentHostGatewayGate({ kind: 'stream', turn: 'First plain message.' });
-  await target.releaseAgentHostGatewayFixture('First plain message.');
   await target.expectVisible(selectors.getByText('Reply one.', { exact: true }).last(), 120_000);
+  await expectAsksByTurn([['First plain message.', 1]]);
+  await target.releaseAgentHostGatewayFixture('First plain message.');
   await target.expectVisible(selectors.getByText(/Rev 1 saved/u).first(), 60_000);
+  await expectLogInvariant(chatId!, { runs: 1, settlements: ['turn.finalized'], timeoutMilliseconds: 120_000 });
 
   await selectModel(pdfModelName);
   await sendDraft('Second plain message.');
 
   await target.expectVisible(selectors.getByText('Reply two.', { exact: true }).last(), 120_000);
   await expectAsksByTurn([
-    ['First plain message.', 2],
+    ['First plain message.', 1],
     ['Second plain message.', 1],
   ]);
   await expectLogInvariant(chatId!, {
     runs: 2,
-    attempts: [2, 1],
-    settlements: ['turn.failed', 'turn.finalized', 'turn.finalized'],
+    attempts: [1, 1],
+    settlements: ['turn.finalized', 'turn.finalized'],
   });
-  await expectNoAdmissionRefusal(['RUN_ABANDONED']);
+  await expectNoAdmissionRefusal();
 });

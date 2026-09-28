@@ -826,7 +826,7 @@ describe('createBrowserAgentHostClient', () => {
               { once: true },
             );
           }),
-        liveEvents: async function* () {
+        async *liveEvents() {
           yield* [];
         },
         close: () => undefined,

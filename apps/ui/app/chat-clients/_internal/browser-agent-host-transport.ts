@@ -33,6 +33,8 @@ export class BrowserPlacementChatTransport<Message extends UIMessage> implements
   public async reconnectToStream(
     _options: Parameters<ChatTransport<Message>['reconnectToStream']>[0],
   ): ReturnType<ChatTransport<Message>['reconnectToStream']> {
-    return null;
+    const stream = this.#armed;
+    this.#armed = undefined;
+    return stream ?? null;
   }
 }

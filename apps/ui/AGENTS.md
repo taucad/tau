@@ -9,7 +9,7 @@ This app owns the browser shell, editor, file manager, chat presentation, and br
 - Treat the portable host event log as authoritative when attaching or reattaching. Rebuild the UI transcript from the whole log; do not append a second competing history.
 - Close project-scoped workers, services, and subscriptions when project identity changes. Route editor, file, and revision transitions through their owning XState machines and filesystem authorities.
 - Finalize only interrupted tail tool parts: consult the RPC ledger for live tails and the host log for rebuilt tails. Follow [Interrupted Tool-Call Contract Policy](../../docs/policy/interrupted-tool-call-contract.md).
-- Keep the streaming activity skeleton inside the single `TurnGroup` that owns the run. Use `Chat.startupRequest` for startup messages and `commitCancelledDraftRestore` for durable cancelled-draft restoration.
+- Keep the streaming skeleton in the run's single `TurnGroup`. Use `Chat.startupRequest` for durable first turns; `ChatSessionStore` restores refused or stopped sends with attachments.
 - Per-device composer records: `#db/composer-record-store`, `#machines/composer-record.machine`, bound by `#hooks/composer-record`. Attachments: `#db/attachment-store`, `#utils/attachment.utils`, `#hooks/use-attachment-source`. Build user messages only with `buildUserMessage` (`#utils/chat.utils`).
 - Activate Monaco/Shiki language features on demand. Follow [Language Contribution Policy](../../docs/policy/language-contribution-policy.md) and [Filesystem Policy](../../docs/policy/filesystem-policy.md).
 - Follow [Chat Request Config Policy](../../docs/policy/chat-request-config-policy.md) and [SSR Bundle Policy](../../docs/policy/ssr-bundle-policy.md).

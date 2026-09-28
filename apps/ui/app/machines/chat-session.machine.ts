@@ -21,10 +21,8 @@ import type { StoredAttachmentRef } from '#utils/attachment.utils.js';
  *
  * The `run` region owns the chat's turn, as policy §16 requires: `queued`
  * invokes `admitTurn` — which derives the rewind point, waits out host
- * availability, resolves the model and pre-flights credits — and `finishing`
- * invokes `settleTurn`, which only lets the run's record go: the agent host
- * takes the checkout's lease, settles the turn through its placement port and
- * appends its settlement row itself (W8 TS-S5, TS-S6); the page writes none. The verbs send
+ * availability, resolves the model and pre-flights credits. The agent host
+ * owns the checkout's lease and settlement row (W8 TS-S5, TS-S6). The verbs send
  * `requestTurn` and nothing else; what to dispatch is the admission's answer,
  * emitted as `startTurnRequest` for the request lifecycle to carry out.
  *
@@ -34,14 +32,14 @@ import type { StoredAttachmentRef } from '#utils/attachment.utils.js';
  * guard, and two machines plus that hook each held an admission policy. One
  * owner refuses what the others could only race over: `requestTurn` while a
  * turn is live queues the gesture instead of leasing a second checkout, and
- * every turn that took a lease passes through `finishing` before this chat can
- * take another.
+ * a terminal run releases this page's record of its turn before another
+ * gesture can be admitted.
  *
  * Revision facets (`turnFinalized`, `dirtyChanged`, `syncState`) still arrive
  * through the project session, and the host-attested observations
  * (`turnFinalizedObserved`, `turnFailedObserved`, `turnConflictedObserved`)
- * still settle a run this page did not admit — a reload adopts one rather
- * than re-running it.
+ * remain accepted from the store during the command-lane cutover, but they do
+ * not drive this page's run state.
  */
 
 /** How the chat's run reached the state it is in. @public */
@@ -130,7 +128,7 @@ export type ChatTurn = Readonly<{
   request: ChatRequest;
 }>;
 
-/** What `settleTurn` is given — the context's own turn, never an event's. @public */
+/** Transitional input retained for the store's actor provision until its command-lane cutover. @public */
 export type ChatTurnSettlementInput = Readonly<{
   chatId: string;
   runId: string | undefined;
@@ -164,18 +162,14 @@ export type ChatSessionMachineContext = Readonly<{
   branch: string | undefined;
   /** The run whose lifecycle this actor currently presents. */
   activeRunId: string | undefined;
-  /** A matching host outcome that arrived before `run.lifecycle: completed`. */
+  /** Transitional store debug field; settlement is not page state. */
   pendingSettlement: ChatTurnSettlementObservation | undefined;
   /** Where this chat's next turn runs; the `host` region re-binds when it moves. */
   placement: string;
   /** The turn this chat holds. One slot, so a chat can only hold one (V1). */
   turn: ChatTurn | undefined;
-  /** A gesture made while a turn was live; admitted when that turn settles (V2). */
+  /** A gesture made while a turn was live; admitted when that run ends (V2). */
   pendingGesture: ChatTurnGesture | undefined;
-  /** How the live turn ended, read by `settleTurn` and by the state it lands in. */
-  outcome: ChatTurnOutcome | undefined;
-  /** Whether this turn's settlement has already been retried once (T3-D6). */
-  settlementRetried: boolean;
 }>;
 
 /** One host-attested outcome, kept correlated through the UI state machine. @public */
@@ -198,13 +192,7 @@ export type ChatSessionMachineEvent =
   | { readonly type: 'turnAdmitted'; readonly turn: ChatTurn }
   /** Reload discovery found a durable run for a chat this page never started (V5). */
   | { readonly type: 'adoptRun'; readonly runId: string }
-  /**
-   * A terminal run of this chat that the host's log holds no settlement for.
-   *
-   * The tab that ran it died before the host appended its settlement row, so
-   * `finishing.observing` would wait forever. The page that adopted the run
-   * follows the host until its reconcile appends that row (W8 TS-S7, V10).
-   */
+  /** Transitional store event; host reconciliation is not a page action. */
   | { readonly type: 'reconcileSettlement'; readonly runId: string; readonly outcome: ChatTurnOutcome }
   /** The route's live agent selection for this chat; only its placement is state. */
   | { readonly type: 'agentConfigChanged'; readonly placement: string }
@@ -245,6 +233,8 @@ const chatSessionActors = {
   >(async ({ input }) => {
     throw new Error(`This chat (${input.chatId}) has no turn host to admit a turn.`);
   }),
+  /* The store still provides this actor while its settlement relay is removed;
+   * no state invokes it. */
   settleTurn: fromSafeAsync<void, ChatTurnSettlementInput>(async () => undefined),
 };
 
@@ -265,7 +255,7 @@ const announce = (context: ChatSessionMachineContext, enq: ChatSessionEnqueue): 
 /* The run is over: whatever the transport last said about tools and
  * approvals is no longer true of this chat. */
 const clearRunDetail = { pendingApprovalCount: 0, toolsInFlight: 0, toolName: undefined } as const;
-const clearTurn = { turn: undefined, outcome: undefined, settlementRetried: false } as const;
+const clearTurn = { turn: undefined } as const;
 
 const captureRunIdentity = (context: ChatSessionMachineContext, event: EventOf<'runLifecycle'>): ChatSessionPatch => {
   if (event.runId === undefined) {
@@ -285,65 +275,8 @@ const holdGesture = ({ context, event }: ChatSessionArgs<EventOf<'requestTurn'>>
   return { context: { pendingGesture: event.gesture } };
 };
 
-/* Buffered until `run.lifecycle: completed` for the run this chat presents. */
-/* Another run's outcome is stale here: answered with `{}` (MC-R18). */
-const bufferSettlement = ({ context, event }: ChatSessionArgs<ChatTurnSettlementObservation>) =>
-  event.runId === context.activeRunId ? { context: { pendingSettlement: event } } : {};
-
 const failureMessage = (error: unknown, fallback: string): string =>
   error instanceof Error ? error.message : fallback;
-
-/* Not the actor-failure record: the lease was never released — that is what
- * failed — so the turn is what the retry and any later reconciliation name,
- * and the queued gesture is the person's next message (T3-D6). */
-const recordSettlementFailure = (context: ChatSessionMachineContext, error: unknown): ChatSessionPatch => ({
-  failureReason: failureMessage(error, context.failureReason ?? 'the turn could not be settled'),
-});
-
-/**
- * An adopted run's attestation ends it — and admits a gesture held over it
- * (V2), or the turn the person asked for while the page was catching up stays
- * queued behind a run that has already finished.
- */
-const observedSettlement =
-  (target: 'done' | 'failed', failureReason?: (event: ChatTurnSettlementObservation) => string) =>
-  ({ context, event }: ChatSessionArgs<ChatTurnSettlementObservation>, enq: ChatSessionEnqueue) => {
-    /* An owned turn settles through `settleTurn`; another run's outcome is stale (MC-R18). */
-    if (context.turn !== undefined || event.runId !== context.activeRunId) {
-      return {};
-    }
-    announce(context, enq);
-    const patch = failureReason === undefined ? {} : { failureReason: failureReason(event) };
-    return {
-      target: context.pendingGesture === undefined ? target : '#chat-session.run.queued.admitting',
-      context: patch,
-    };
-  };
-
-/**
- * Leave a terminal run of this chat that the host's log holds no settlement
- * for yet (C6, V10).
- *
- * Accepted only where the chat is not mid-turn: a turn this page admitted is
- * already on its way through `finishing.settling`. The page writes no
- * settlement (W8 TS-S6): `finishing` only releases this page's record of the
- * run, and the host's M1 appends the row at its next reconciliation (TS-S7).
- * W9 reduces this transition.
- */
-const reconcileSettlementTransition = (
-  { context, event }: ChatSessionArgs<EventOf<'reconcileSettlement'>>,
-  enq: ChatSessionEnqueue,
-) => {
-  /* The turn this page admitted is already settling itself. */
-  if (context.turn !== undefined) {
-    return {};
-  }
-  announce(context, enq);
-  return {
-    target: '#chat-session.run.finishing.settling',
-    context: { activeRunId: event.runId, outcome: event.outcome },
-  };
-};
 
 /**
  * Take on a run of this chat that is live somewhere else (V5).
@@ -353,11 +286,7 @@ const reconcileSettlementTransition = (
  * runs is still in flight elsewhere — navigate away and back mid-run (T3-D10).
  * Not from the states in between. `turn === undefined` alone does not say that:
  * it is true for the whole admission window, because the lease is taken before
- * `turn` exists, and true again in the `finishing.settling` a *reconciled*
- * settlement runs in. Handled at the root it was honoured in both, and
- * discovery then stopped the actor that owned the work — the admission of a
- * gesture `#bindSessionOwner` had flushed one statement earlier, or the only
- * settlement an adopted run will ever get.
+ * `turn` exists. Handled at the root it would stop that admission.
  */
 const adoptRunTransition = ({ context, event }: ChatSessionArgs<EventOf<'adoptRun'>>, enq: ChatSessionEnqueue) => {
   /* This chat owns a turn; the discovered run is that turn's or stale. */
@@ -367,15 +296,6 @@ const adoptRunTransition = ({ context, event }: ChatSessionArgs<EventOf<'adoptRu
   announce(context, enq);
   return { target: '#chat-session.run.running.reconnecting', context: { activeRunId: event.runId } };
 };
-
-/* The completed run's settlement arrived first: land where it said. */
-const pendingSettlementFor = (
-  context: ChatSessionMachineContext,
-  event: EventOf<'runLifecycle'>,
-): ChatTurnSettlementObservation | undefined =>
-  event.phase === 'completed' && context.pendingSettlement?.runId === (event.runId ?? context.activeRunId)
-    ? context.pendingSettlement
-    : undefined;
 
 /* A tool part in flight is what "running a tool" means; deltas never get here,
  * so `running` with nothing in flight is generating (the table). */
@@ -405,62 +325,17 @@ const runLifecycle = ({ context, event }: ChatSessionArgs<EventOf<'runLifecycle'
       context: identity,
     };
   }
-  /* V4: every turn that took a lease passes through `finishing`. A failed or
-   * cancelled run used to reach its terminal state directly, which is why a
-   * refused turn's settlement record was a matter of whether the stream
-   * outlived the revision root (F6). */
-  if (context.turn !== undefined) {
-    return {
-      target: '.finishing',
-      context: {
-        /* After `identity`: a new run id has already cleared the old reason. */
-        ...identity,
-        ...(event.phase === 'failed' ? { failureReason: event.reason } : {}),
-        outcome: event.phase,
-        ...clearRunDetail,
-      },
-    };
-  }
-  const settled = pendingSettlementFor(context, event);
-  if (settled !== undefined) {
-    return settled.type === 'turnFinalizedObserved'
-      ? { target: '.done', context: { ...identity, ...clearRunDetail, pendingSettlement: undefined } }
-      : {
-          target: '.failed',
-          context: {
-            ...identity,
-            failureReason: settled.type === 'turnFailedObserved' ? settled.reason : 'revision conflict',
-            ...clearRunDetail,
-            pendingSettlement: undefined,
-          },
-        };
-  }
-  if (event.phase === 'completed') {
-    return { target: '.finishing', context: { ...identity, ...clearRunDetail } };
-  }
-  if (event.phase === 'failed') {
-    return {
-      target: '.failed',
-      context: { ...identity, failureReason: event.reason, ...clearRunDetail, pendingSettlement: undefined },
-    };
-  }
-  return { target: '.stopped', context: { ...identity, ...clearRunDetail, pendingSettlement: undefined } };
-};
-
-/* Where the settled turn lands: a held gesture first, then its outcome. */
-const settledTarget = (context: ChatSessionMachineContext): string => {
-  if (context.pendingGesture !== undefined) {
-    return '#chat-session.run.queued.admitting';
-  }
-  if (context.outcome === 'cancelled') {
-    return '#chat-session.run.stopped';
-  }
-  return context.outcome === 'failed' ? '#chat-session.run.failed' : '#chat-session.run.done';
-};
-
-const settleOnDone = ({ context }: ChatSessionArgs<unknown>, enq: ChatSessionEnqueue) => {
-  announce(context, enq);
-  return { target: settledTarget(context), context: { ...clearTurn, pendingSettlement: undefined } };
+  const terminal = event.phase === 'completed' ? '.done' : event.phase === 'failed' ? '.failed' : '.stopped';
+  return {
+    target: context.pendingGesture === undefined ? terminal : '.queued.admitting',
+    context: {
+      ...identity,
+      ...clearTurn,
+      ...clearRunDetail,
+      pendingSettlement: undefined,
+      ...(event.phase === 'failed' ? { failureReason: event.reason } : {}),
+    },
+  };
 };
 
 const runStates = {
@@ -469,7 +344,6 @@ const runStates = {
   dispatched: 'run.queued.dispatched',
   queued: 'run.queued',
   running: 'run.running',
-  finishing: 'run.finishing',
   done: 'run.done',
   failed: 'run.failed',
   stopped: 'run.stopped',
@@ -482,8 +356,9 @@ const pairs = (states: readonly string[], events: readonly string[]): Array<read
  *
  * - `turnAdmitted` outside `queued.admitting`: the answer of an admission a later gesture aborted.
  * - `requestLifecycle` outside `running`: the store reports every change; only a running turn reads it.
- * - A host-attested outcome where no run is presented: the store replays an idle chat's settlement as its lifecycle.
- * - `adoptRun` and `reconcileSettlement` in the states that hold a turn or a live run (see their transitions).
+ * - Transitional host-attested outcomes and reconciliation events are ignored;
+ *   the daemon owns settlement, and the run lifecycle supplies the page row.
+ * - `adoptRun` in the states that hold a turn or a live run.
  *
  * @public
  */
@@ -494,7 +369,6 @@ export const chatSessionIgnoredEvents: ReadonlyArray<readonly [state: string, ev
       runStates.observing,
       runStates.dispatched,
       runStates.running,
-      runStates.finishing,
       runStates.done,
       runStates.failed,
       runStates.stopped,
@@ -502,15 +376,14 @@ export const chatSessionIgnoredEvents: ReadonlyArray<readonly [state: string, ev
     ['turnAdmitted'],
   ),
   ...pairs(
-    [runStates.idle, runStates.queued, runStates.finishing, runStates.done, runStates.failed, runStates.stopped],
+    [runStates.idle, runStates.queued, runStates.done, runStates.failed, runStates.stopped],
     ['requestLifecycle'],
   ),
   ...pairs(
-    [runStates.idle, runStates.done, runStates.failed, runStates.stopped],
-    ['turnFinalizedObserved', 'turnFailedObserved', 'turnConflictedObserved'],
+    [runStates.idle, runStates.queued, runStates.running, runStates.done, runStates.failed, runStates.stopped],
+    ['turnFinalizedObserved', 'turnFailedObserved', 'turnConflictedObserved', 'reconcileSettlement'],
   ),
-  ...pairs([runStates.queued, runStates.running, runStates.finishing], ['adoptRun']),
-  ...pairs([runStates.queued, runStates.running, runStates.done], ['reconcileSettlement']),
+  ...pairs([runStates.queued, runStates.running], ['adoptRun']),
 ];
 
 /**
@@ -546,8 +419,6 @@ export const chatSessionMachine = setup({
     placement: '',
     turn: undefined,
     pendingGesture: undefined,
-    outcome: undefined,
-    settlementRetried: false,
   }),
   type: 'parallel',
   on: {
@@ -580,7 +451,6 @@ export const chatSessionMachine = setup({
         /* No session, no run. */
         idle: {
           on: {
-            reconcileSettlement: reconcileSettlementTransition,
             adoptRun: adoptRunTransition,
           },
         },
@@ -606,7 +476,6 @@ export const chatSessionMachine = setup({
                       failureReason: failureMessage(event.error, context.failureReason ?? 'the turn could not start'),
                       turn: undefined,
                       pendingGesture: undefined,
-                      outcome: undefined,
                       ...clearRunDetail,
                     },
                   };
@@ -622,12 +491,8 @@ export const chatSessionMachine = setup({
                       turn: event.turn,
                       pendingGesture: undefined,
                       failureReason: undefined,
-                      settlementRetried: false,
                       /* A `continue` resumes the run the host already has and
-                       * mints none, so its turn carries no run id. Adopting that
-                       * `undefined` as the chat's run identity dropped every
-                       * host-attested observation and left `settleTurn` with
-                       * nothing to name (T3-D7). */
+                       * mints none, so preserve the run's identity (T3-D7). */
                       activeRunId: event.turn.runId ?? context.activeRunId,
                     },
                   };
@@ -641,11 +506,6 @@ export const chatSessionMachine = setup({
             dispatched: {
               on: { requestTurn: holdGesture },
             },
-          },
-          on: {
-            turnFinalizedObserved: bufferSettlement,
-            turnFailedObserved: bufferSettlement,
-            turnConflictedObserved: bufferSettlement,
           },
         },
         running: {
@@ -687,9 +547,6 @@ export const chatSessionMachine = setup({
             reconnecting: {},
           },
           on: {
-            turnFinalizedObserved: bufferSettlement,
-            turnFailedObserved: bufferSettlement,
-            turnConflictedObserved: bufferSettlement,
             requestLifecycle: ({ context, event }, enq) => {
               if (event.phase === 'retrying') {
                 return { target: '.reconnecting' };
@@ -717,67 +574,9 @@ export const chatSessionMachine = setup({
             },
           },
         },
-        finishing: {
-          initial: 'deciding',
-          states: {
-            deciding: {
-              always: ({ context }) => ({ target: context.turn === undefined ? 'observing' : 'settling' }),
-            },
-            /* The turn's end, handed to its owner. Never interrupted: a gesture
-             * made while this runs is held in `pendingGesture` and admitted
-             * from `onDone`, so exactly one settlement is attempted per turn
-             * that took a lease (V4, V10). */
-            settling: {
-              invoke: {
-                id: 'settleTurn',
-                src: 'settleTurn',
-                input: ({ context }) => ({
-                  chatId: context.chatId,
-                  /* A reconciled run took no lease here, so it has no turn —
-                   * the run it settles is the one this chat is holding. */
-                  runId: context.turn?.runId ?? context.activeRunId,
-                  leaseTurnId: context.turn?.leaseTurnId,
-                  outcome: context.outcome ?? 'completed',
-                }),
-                onDone: settleOnDone,
-                onError: ({ context, event }, enq) => {
-                  announce(context, enq);
-                  /* One retry, in place: a settlement that rejected left the
-                   * lease held and — when the failure cleared the turn — left
-                   * nothing that could ever name the run holding it. */
-                  return context.settlementRetried
-                    ? { target: '#chat-session.run.failed', context: recordSettlementFailure(context, event.error) }
-                    : {
-                        target: 'settling',
-                        reenter: true,
-                        context: { settlementRetried: true, ...recordSettlementFailure(context, event.error) },
-                      };
-                },
-              },
-            },
-            /* A run this page did not admit: its outcome is the host's to
-             * attest, and it arrives on the settlement observations below. */
-            observing: {},
-          },
-          on: {
-            /* Only for a run this page did not admit. `settleTurn` awaits the
-             * same attestation itself, and its `onDone` is the one transition
-             * that ends an owned turn. */
-            turnFinalizedObserved: observedSettlement('done'),
-            turnFailedObserved: observedSettlement('failed', (event) =>
-              event.type === 'turnFailedObserved' ? event.reason : 'failed',
-            ),
-            turnConflictedObserved: observedSettlement('failed', () => 'revision conflict'),
-            requestTurn: ({ context, event }, enq) => {
-              announce(context, enq);
-              return { context: { pendingGesture: event.gesture } };
-            },
-            reconcileSettlement: reconcileSettlementTransition,
-          },
-        },
         done: { on: { adoptRun: adoptRunTransition } },
-        failed: { on: { reconcileSettlement: reconcileSettlementTransition, adoptRun: adoptRunTransition } },
-        stopped: { on: { reconcileSettlement: reconcileSettlementTransition, adoptRun: adoptRunTransition } },
+        failed: { on: { adoptRun: adoptRunTransition } },
+        stopped: { on: { adoptRun: adoptRunTransition } },
       },
       on: {
         /* The one way a turn starts. Every verb sends this and nothing else;

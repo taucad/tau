@@ -108,7 +108,7 @@ export function ProjectActionDropdown({ project, actions }: ProjectActionDropdow
                   if (row.runs > 0) {
                     setIsConfirmingClose(true);
                   } else {
-                    actions.handleDelete(project);
+                    void actions.handleDelete(project);
                   }
                 }}
               >
@@ -148,7 +148,7 @@ export function ProjectActionDropdown({ project, actions }: ProjectActionDropdow
           isOpen
           onOpenChange={setIsConfirmingClose}
           onConfirm={() => {
-            actions.handleDelete(project);
+            void actions.handleDelete(project);
           }}
         />
       ) : null}

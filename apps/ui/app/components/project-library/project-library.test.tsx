@@ -76,17 +76,18 @@ vi.mock('#hooks/use-project-manager.js', () => ({
   }),
 }));
 
-const { mockCloseProject, mockToastSuccess, mockToastError } = vi.hoisted(() => ({
+const { mockCloseProject, mockToastSuccess, mockToastError, mockToastWarning } = vi.hoisted(() => ({
   mockCloseProject: vi.fn(),
   mockToastSuccess: vi.fn(),
   mockToastError: vi.fn(),
+  mockToastWarning: vi.fn(),
 }));
 
 vi.mock('#hooks/use-sidebar-status.js', () => ({
   useSidebarCommands: () => ({ closeProject: mockCloseProject }),
 }));
 vi.mock('#components/ui/sonner.js', () => ({
-  toast: { success: mockToastSuccess, error: mockToastError },
+  toast: { success: mockToastSuccess, error: mockToastError, warning: mockToastWarning },
 }));
 
 vi.mock('#hooks/use-kernel.js', () => ({
@@ -322,8 +323,28 @@ describe('ProjectLibrary', () => {
 
       fireEvent.click(screen.getByRole('checkbox', { name: 'Select all' }));
 
-      expect(screen.getByRole('button', { name: 'Delete 2' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Move to Trash 2' })).toBeInTheDocument();
       expect(within(screen.getByRole('row', { name: /Hinge Delta/u })).queryByRole('checkbox')).toBeNull();
+    });
+
+    it('counts completed bulk trash results before reporting partial success', async () => {
+      mockCookieValues = { [cookieName.projectViewMode]: 'table' };
+      const deleteProject = vi
+        .fn(async () => true)
+        .mockResolvedValueOnce(true)
+        .mockResolvedValueOnce(false);
+      mockUseProjectsResult = { ...createUseProjectsResult(), deleteProject };
+      renderLibrary();
+
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select all' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Move to Trash 2' }));
+      fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Move to Trash' }));
+
+      await waitFor(() => {
+        expect(deleteProject).toHaveBeenCalledTimes(2);
+        expect(mockToastWarning).toHaveBeenCalledWith('Moved 1 project to Trash; 1 failed');
+      });
+      expect(mockToastSuccess).not.toHaveBeenCalled();
     });
   });
 

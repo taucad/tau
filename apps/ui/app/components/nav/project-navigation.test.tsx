@@ -114,7 +114,7 @@ vi.mock('#components/inline-text-editor.js', () => ({
     </div>
   ),
 }));
-vi.mock('#components/ui/sonner.js', () => ({ toast: { success: vi.fn() } }));
+vi.mock('#components/ui/sonner.js', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 vi.mock('@taucad/ui/components/alert-dialog', () => ({
   AlertDialog: ({ children, ...properties }: { readonly children: ReactNode } & Record<string, unknown>) =>
     properties['open'] === false ? null : <div role='dialog'>{children}</div>,
@@ -184,7 +184,7 @@ const projectsResult = {
   projects: [firstProject, secondProject],
   isLoading: false,
   error: undefined,
-  deleteProject: vi.fn(),
+  deleteProject: vi.fn(async () => true),
   duplicateProject: vi.fn(),
   updateName: vi.fn(),
 };
@@ -471,7 +471,7 @@ describe('ProjectNavigation', () => {
     }));
     render(<ProjectNavigation />);
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[0]!);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Move to Trash' })[0]!);
 
     expect(projectsResult.deleteProject).not.toHaveBeenCalled();
     expect(screen.getByRole('heading', { name: 'Stop 2 agents and close Two?' })).toBeInTheDocument();

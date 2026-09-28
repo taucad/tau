@@ -650,6 +650,19 @@ describe('chat file store', () => {
       const result = await store.softDeleteChat('chat_missing');
       expect(result).toBeUndefined();
     });
+
+    it('restores a tombstoned chat to the active list', async () => {
+      const store = createStore();
+      const chat = await freshChat(store);
+
+      await store.deleteChat(chat.id);
+      expect(await store.getChatsForResource(chat.resourceId)).toEqual([]);
+
+      const restored = await store.patchChat(chat.id, 'deletedAt', undefined);
+      expect(restored?.deletedAt).toBeUndefined();
+      const activeChats = await store.getChatsForResource(chat.resourceId);
+      expect(activeChats.map((entry) => entry.id)).toEqual([chat.id]);
+    });
   });
 });
 

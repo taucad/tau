@@ -15,7 +15,7 @@ import { useFileManager } from '#hooks/use-file-manager.js';
 import { joinPath } from '@taucad/utils/path';
 import { defaultGraphicsSettings } from '#constants/editor.constants.js';
 import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
-import { ephemeralKernelOptions } from '#constants/ephemeral-kernel-options.js';
+import { ephemeralKernelOptions, ephemeralPreviewStage } from '#constants/ephemeral-kernel-options.js';
 import { useProjectKernelOptions } from '#hooks/use-project-kernel-options.js';
 import { nativeKernelRequirementForEntryPath } from '#constants/available-kernel-configurations.js';
 import type { fileManagerMachine } from '#machines/file-manager.machine.js';
@@ -264,6 +264,7 @@ function CadPreviewPipeline({
         projectId,
         mainFile,
         files,
+        stage: files === undefined ? undefined : ephemeralPreviewStage(files),
         parameters,
       },
     },

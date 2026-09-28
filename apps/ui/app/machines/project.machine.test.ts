@@ -47,6 +47,7 @@ function createTestActor(options?: {
   shouldAutoLoad?: boolean;
   shouldLoadModelOnStart?: boolean;
   projectId?: string;
+  stage?: Record<string, Uint8Array<ArrayBuffer>>;
 }) {
   const loadResult = options?.loadResult ?? stubProject;
   const loadFunction = typeof loadResult === 'function' ? loadResult : async () => loadResult;
@@ -90,6 +91,7 @@ function createTestActor(options?: {
       fileManagerRef,
       fileSystemRoot: '/previews/test-project',
       kernelOptionsFactory,
+      ...(options?.stage ? { stage: options.stage } : {}),
     },
   });
 }
@@ -503,6 +505,17 @@ describe('projectMachine', () => {
       expect(actor.getSnapshot().context.geometryUnits.get('main.ts')?.getSnapshot().context.fileSystemRoot).toBe(
         '/previews/test-project',
       );
+      actor.stop();
+    });
+
+    it('should carry the input stage onto a spawned unit', async () => {
+      const stage = { 'main.ts': new Uint8Array([1]) };
+      const actor = await startAndLoad({ stage });
+      actor.send({ type: 'createGeometryUnit', entryPath: 'main.ts' });
+      expect(actor.getSnapshot().context.geometryUnits.get('main.ts')?.getSnapshot().context.parameterRender).toEqual({
+        kind: 'initial',
+        stage,
+      });
       actor.stop();
     });
 

@@ -90,7 +90,7 @@ describe('ModelViewer', () => {
       render(<ModelViewer geometry={undefined} error={error} />);
 
       const alert = screen.getByRole('alert', { name: 'CAD runtime error' });
-      expect(alert).toHaveTextContent('Preview could not load. Open the example to see it.');
+      expect(alert).toHaveTextContent('Preview could not load. Open the project to see the error.');
       // The runtime's own text is one disclosure away, not the headline.
       expect(within(alert).getByText('Something went wrong').closest('details')).not.toHaveAttribute('open');
       expect(within(alert).getByText('Details')).toBeInTheDocument();

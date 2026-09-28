@@ -120,6 +120,7 @@ const provider = {
     slicing: {
       recommended: { nozzleTemperature: { value: 250, unit: 'Cel' }, bedTemperature: { value: 70, unit: 'Cel' } },
     },
+    materialSystem: { units: 1, slotsPerUnit: 4, externalSpool: true, externalSpoolSlot: 254, drying: true },
   },
 } as unknown as MachineProvider;
 
@@ -525,6 +526,8 @@ describe('machine print planner', () => {
         bedType: 'textured-pei',
         materials: [
           tray(0, 'PLA', '#0000FFFF'),
+          /* Listed before the AMS tray, the external spool holds red PLA too, but cannot change filament mid-print. */
+          tray(254, 'PLA', '#FF0000FF'),
           { ...tray(1, 'PLA', '#FF0000FF'), profileId: 'GFA01' },
           tray(3, 'PETG', '#FF0000FF'),
         ],

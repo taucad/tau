@@ -332,7 +332,8 @@ const terminalRunState = (state: HostRunSnapshot['state']): boolean =>
  * wire field is optional so a headless daemon can run on its own default, but a
  * page that has picked a model expects that model.
  */
-const wireAdmissionConfig = (config: AgentHostAdmissionConfig): AgentChannelAdmissionConfig => ({
+/** Project the page's explicit Tau admission onto the host command wire. @public */
+export const wireAdmissionConfig = (config: AgentHostAdmissionConfig): AgentChannelAdmissionConfig => ({
   systemPrompt: config.systemPrompt,
   // Copied out of their readonly tuples; the wire shape is mutable by construction.
   systemPromptBlocks: [...config.systemPromptBlocks] as AgentChannelAdmissionConfig['systemPromptBlocks'],
@@ -357,7 +358,8 @@ const wireAdmissionConfig = (config: AgentHostAdmissionConfig): AgentChannelAdmi
  * the skill index and the editor snapshot. Nothing a Tau turn negotiates
  * travels; `toolChoice` is required by the wire and inert here.
  */
-const externalAdmissionConfig = (
+/** Project an external agent's explicit selector and context onto the host command wire. @public */
+export const externalAdmissionConfig = (
   agent: AgentHostExternalAgent,
   context: AgentHostExternalContext | undefined,
 ): AgentChannelAdmissionConfig => ({

@@ -12,7 +12,9 @@ import type { AgentLogEvent } from '@taucad/agent-host';
 import { projectAgentHostEvent, runFailureText } from '#services/agent-host-event-projection.js';
 import {
   chatProjectionLogic,
+  digestLogSegments,
   initialChatProjection,
+  materializeTranscript,
   reduceChatProjection,
   selectAttentionRow,
   selectCaughtUp,
@@ -20,9 +22,11 @@ import {
   selectRunFailure,
   selectPosition,
   selectRunPhase,
+  selectTranscriptSource,
   selectToolsInFlight,
   selectTurnRevision,
 } from '#machines/chat-projection.logic.js';
+import { deriveChatTranscript } from '#chat-clients/_internal/browser-agent-host-transport.js';
 import type { ChatProjection, ChatProjectionReadAnswer } from '#machines/chat-projection.logic.js';
 import { lifecycleRow, logRow } from '#machines/chat-projection.fixture.js';
 
@@ -146,6 +150,81 @@ describe('chatProjectionLogic (PV-S7)', () => {
     expect(chunks.some((chunk) => chunk.type === 'text-delta')).toBe(true);
     // oxlint-disable-next-line unicorn/prefer-structured-clone -- the JSON round trip proves watch state is serializable.
     expect(JSON.parse(JSON.stringify(state.views))).toEqual(state.views);
+  });
+
+  it('materializes the live transcript from the same terminal log', async () => {
+    const rows = readLog('recorded/in-project-ping-pong-turn');
+    const projected = project(rows, 7);
+    expect(await materializeTranscript(projected)).toEqual(await deriveChatTranscript(rows));
+    expect(await materializeTranscript(projected)).toEqual(await materializeTranscript(projected));
+    const watched = projected.ledger.currentRunId!;
+    const withoutWatchedRun = await materializeTranscript(projected, watched);
+    expect(withoutWatchedRun.some((message) => message.id === watched)).toBe(false);
+  });
+
+  it('refolds another device’s run when its segment digest changes', async () => {
+    const own = readLog('recorded/in-project-ping-pong-turn');
+    const remote = readLog('recorded/daemon-reattach-hexnut');
+    const segment = (rows: readonly AgentLogEvent[]) => [
+      {
+        deviceId: 'other-device',
+        bytes: new TextEncoder().encode(rows.map((row) => JSON.stringify(row)).join('\n') + '\n'),
+      },
+    ];
+    const before = segment(remote.slice(0, 3));
+    const after = segment(remote);
+    const ownProjection = project(own.slice(0, 10), 7);
+    const first = reduceChatProjection(ownProjection, { type: 'remote', segments: before }).state;
+    const second = reduceChatProjection(first, { type: 'remote', segments: after }).state;
+    const completed = project(own, 7, second);
+
+    expect(digestLogSegments(after)).not.toBe(digestLogSegments(before));
+    expect(second.remote?.digest).toBe(digestLogSegments(after));
+    expect(await materializeTranscript(completed)).toEqual([
+      ...(await deriveChatTranscript(remote)),
+      ...(await deriveChatTranscript(own)),
+    ]);
+    expect(reduceChatProjection(second, { type: 'remote', segments: after }).state).toBe(second);
+    expect(completed.remote).toBe(second.remote);
+  });
+
+  it('keeps a device’s run order when its clock moves backwards', () => {
+    const rows = [
+      { ...lifecycleRow(0, 'admitted', 'run_z'), leaderEpoch: 'earlier', recordedAt: '2026-09-28T00:00:02.000Z' },
+      { ...lifecycleRow(0, 'admitted', 'run_a'), leaderEpoch: 'later', recordedAt: '2026-09-28T00:00:01.000Z' },
+    ];
+    const segment = {
+      deviceId: 'other-device',
+      bytes: new TextEncoder().encode(rows.map((row) => JSON.stringify(row)).join('\n')),
+    };
+    const remote = reduceChatProjection(initialChatProjection, { type: 'remote', segments: [segment] }).state;
+
+    expect(selectTranscriptSource(remote).map((view) => view.runId)).toEqual(['run_z', 'run_a']);
+  });
+
+  it('refolds same-length remote bytes when an earlier row changes but the tail key does not', async () => {
+    const remote = readLog('recorded/daemon-reattach-hexnut').slice(0, 3);
+    const segment = (rows: readonly AgentLogEvent[]) => [
+      { deviceId: 'other-device', bytes: new TextEncoder().encode(rows.map((row) => JSON.stringify(row)).join('\n')) },
+    ];
+    const before = segment(remote);
+    const after = [
+      {
+        deviceId: 'other-device',
+        bytes: new TextEncoder().encode(new TextDecoder().decode(before[0]!.bytes).replace('30mm', '40mm')),
+      },
+    ];
+    expect(after[0]?.bytes.byteLength).toBe(before[0]?.bytes.byteLength);
+    expect(new TextDecoder().decode(after[0]!.bytes).split('\n').at(-1)).toBe(
+      new TextDecoder().decode(before[0]!.bytes).split('\n').at(-1),
+    );
+    expect(digestLogSegments(after)).not.toBe(digestLogSegments(before));
+
+    const first = reduceChatProjection(initialChatProjection, { type: 'remote', segments: before }).state;
+    const second = reduceChatProjection(first, { type: 'remote', segments: after }).state;
+    expect(second.remote?.views).not.toEqual(first.remote?.views);
+    expect(await materializeTranscript(second)).not.toEqual(await materializeTranscript(first));
+    expect(JSON.stringify(await materializeTranscript(second))).toContain('40mm');
   });
 
   it('never revisits a row it already folded: O(1) work per row (L3 D19)', () => {

@@ -3,6 +3,7 @@ import type { ActorRefFrom, EnqueueObject, EventObject, SystemRegistry } from 'x
 import type { CadAgentExecution, MyUIMessage } from '@taucad/chat';
 import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
 import type { StoredAttachmentRef } from '#utils/attachment.utils.js';
+import type { HostCommand } from '@taucad/agent-host/wire';
 
 /**
  * One chat's live state (D32, S45).
@@ -69,31 +70,33 @@ export type ChatSyncState = 'synced' | 'pending' | 'conflicted';
  */
 export type ChatRequestBody = Readonly<Record<string, unknown>>;
 
-export type ChatRequest =
-  | { kind: 'send'; message: MyUIMessage; body?: ChatRequestBody }
-  | {
-      kind: 'regenerate';
-      body?: ChatRequestBody;
-      /**
-       * Execution the body must be composed from, when the dispatcher knows it
-       * and the React tree does not yet. The seeded first turn is dispatched
-       * from inside `loadChatActor`, one statement before the load's answer
-       * that assigns {@link ChatPersistenceMachineContext.activeExecution};
-       * without this the bodyless dispatch composes from the un-hydrated
-       * cookie fallback and runs the chat's `acp` (or host-pinned Tau) turn as
-       * a plain browser Tau turn.
-       */
-      execution?: CadAgentExecution;
-    }
-  | {
-      kind: 'edit';
-      messageId: string;
-      content: string;
-      /** The edit's attachments, already promoted into the chat's directory. */
-      attachments?: readonly StoredAttachmentRef[];
-      body?: ChatRequestBody;
-    }
-  | { kind: 'continue'; body?: ChatRequestBody };
+export type ChatRequest = Readonly<{ command?: HostCommand }> &
+  (
+    | { kind: 'send'; message: MyUIMessage; body?: ChatRequestBody }
+    | {
+        kind: 'regenerate';
+        body?: ChatRequestBody;
+        /**
+         * Execution the body must be composed from, when the dispatcher knows it
+         * and the React tree does not yet. The seeded first turn is dispatched
+         * from inside `loadChatActor`, one statement before the load's answer
+         * that assigns {@link ChatPersistenceMachineContext.activeExecution};
+         * without this the bodyless dispatch composes from the un-hydrated
+         * cookie fallback and runs the chat's `acp` (or host-pinned Tau) turn as
+         * a plain browser Tau turn.
+         */
+        execution?: CadAgentExecution;
+      }
+    | {
+        kind: 'edit';
+        messageId: string;
+        content: string;
+        /** The edit's attachments, already promoted into the chat's directory. */
+        attachments?: readonly StoredAttachmentRef[];
+        body?: ChatRequestBody;
+      }
+    | { kind: 'continue'; body?: ChatRequestBody }
+  );
 
 /**
  * What the person did, as the chat's turn owner receives it.

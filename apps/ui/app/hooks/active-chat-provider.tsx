@@ -17,8 +17,8 @@
  *
  * - **`<ActiveChatProvider chatId>`** — session-backed (project route).
  *   Chat-row-preferred model/kernel with cookie fallback and dual-write on
- *   set; live `status` from the AI SDK `Chat`; `stop` dispatches
- *   `stopRequest`; `contextUsage` is the most-recent `data-context-usage`
+ *   set; live `status` from the AI SDK `Chat`; `stop` sends a keyed host cancel;
+ *   `contextUsage` is the most-recent `data-context-usage`
  *   part on any message; `session` carries the live triple.
  *
  * `useActiveChatSession()` remains the strict entry point for genuine
@@ -31,7 +31,16 @@
  */
 
 import { useActorRef, useSelector } from '@xstate/react';
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import type { Chat } from '@ai-sdk/react';
 import { createAsyncLogic } from 'xstate';
 import { waitUnlessGone } from '#lib/xstate.lib.js';
@@ -45,6 +54,7 @@ import { resizeImageActor } from '#hooks/resize-image.actor.js';
 import { useDraftImageErrorToast } from '#hooks/use-draft-image-error-toast.js';
 import { inspect } from '#machines/inspector.js';
 import { useChatSession, useChatSessionSnapshot } from '#hooks/use-chat-session.js';
+import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ChatSession } from '#services/chat-session-store.js';
 import type { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
 import { useModels } from '#hooks/use-models.js';
@@ -164,8 +174,7 @@ export type ChatComposerContextValue = {
   agentActivity: ChatAgentActivity;
   /**
    * Cancel-in-flight callback. No-op under the composer provider;
-   * dispatches `stopRequest` to the persistence machine under the session
-   * provider.
+   * sends one keyed host cancel through the session store under the session provider.
    */
   stop: () => void;
   /**
@@ -695,9 +704,13 @@ function useSessionAgentActivity(session: ChatSession): ChatAgentActivity {
       snapshot.matches({ run: 'queued' }) ||
       (snapshot.matches({ run: 'running' }) && !snapshot.matches({ run: { running: 'waiting' } })),
   );
-  const stopping = useSelector(session.persistenceActorRef, (snapshot) =>
-    snapshot.matches({ requestLifecycle: 'stopping' }),
+  const store = useChatSessionStore();
+  const subscribeStop = useCallback(
+    (listener: () => void) => store.subscribeChat(session.chatId, listener),
+    [session.chatId, store],
   );
+  const readStop = useCallback(() => store.isStopping(session.chatId), [session.chatId, store]);
+  const stopping = useSyncExternalStore(subscribeStop, readStop, readStop);
   if (approvalRequired) {
     return 'approval-required';
   }
@@ -708,13 +721,13 @@ function useSessionAgentActivity(session: ChatSession): ChatAgentActivity {
 }
 
 /**
- * Stable `stop()` callback that dispatches `stopRequest` to the
- * persistence machine for the active session.
+ * Stable `stop()` callback for the active session's projected host run.
  */
 function useSessionStop(session: ChatSession): () => void {
+  const store = useChatSessionStore();
   return useCallback(() => {
-    session.persistenceActorRef.send({ type: 'stopRequest' });
-  }, [session.persistenceActorRef]);
+    store.stopRun(session.chatId);
+  }, [session.chatId, store]);
 }
 
 /**

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Chat } from '#types/chat.types.js';
+import type { MyUIMessage } from '#types/message.types.js';
 import { chatRecordSchema, parseChatRecord, serializeChatRecord } from '#schemas/chat-record.schema.js';
 
 const chat: Chat = {
@@ -30,6 +31,53 @@ describe('chat record', () => {
    * claim, where the loser's copy overwrites the winner's. */
   it('never writes the derived transcript', () => {
     expect(serializeChatRecord(chat)).not.toContain('messages');
+  });
+
+  it('keeps a pending startup command message while omitting the transcript', () => {
+    const message: MyUIMessage = {
+      id: 'msg_pending',
+      role: 'user',
+      parts: [
+        { type: 'file', url: 'attachments/image.png', mediaType: 'image/png' },
+        { type: 'text', text: 'Build this' },
+      ],
+    };
+    const seeded: Chat = {
+      ...chat,
+      messages: [message, { id: 'msg_other', role: 'assistant', parts: [{ type: 'text', text: 'not durable' }] }],
+      startupRequest: {
+        id: 'req_pending',
+        kind: 'regenerate-tail',
+        messageId: message.id,
+        message,
+        source: 'homepage-initial-message',
+        createdAt: 3,
+      },
+    };
+
+    const bytes = serializeChatRecord(seeded);
+    expect(bytes).not.toContain('msg_other');
+    expect(parseChatRecord(bytes)).toEqual({
+      ...chat,
+      messages: undefined,
+      startupRequest: seeded.startupRequest,
+    });
+  });
+
+  it('accepts an older startup request without a message', () => {
+    const parsed = parseChatRecord(
+      serializeChatRecord({
+        ...chat,
+        startupRequest: {
+          id: 'req_old',
+          kind: 'regenerate-tail',
+          messageId: 'msg_old',
+          source: 'homepage-initial-message',
+          createdAt: 3,
+        },
+      }),
+    );
+    expect(parsed?.startupRequest?.message).toBeUndefined();
   });
 
   it('drops keys whose value is undefined rather than writing them', () => {

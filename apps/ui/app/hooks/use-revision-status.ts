@@ -311,11 +311,6 @@ export const createHostRevisionClient = (input: {
     return response.result;
   };
   const send = (request: WorkerRevisionCommand): void => {
-    // Only a browser-owned replica adopts host settlements. This client already
-    // reads that host's authoritative revision stream; never echo its heads back.
-    if (request.command === 'adoptHostFinalized') {
-      return;
-    }
     // async-iife: bootstrap -- a machine verb reports its settled state on the revision stream.
     void (async (): Promise<void> => {
       try {

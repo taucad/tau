@@ -114,10 +114,10 @@ const agentStateRows: ReadonlyArray<{
   {
     signal: 'run.lifecycle: completed',
     events: [{ type: 'runLifecycle', phase: 'completed' }],
-    run: 'finishing.observing',
+    run: 'done',
   },
   {
-    signal: 'turn.finalized after run.lifecycle: completed',
+    signal: 'turn.finalized after run.lifecycle: completed does not change the run row',
     events: [
       { type: 'runLifecycle', phase: 'completed', runId: 'run-1' },
       { type: 'turnFinalizedObserved', runId: 'run-1', turnId: 'turn-1', branch: 'main' },
@@ -125,7 +125,7 @@ const agentStateRows: ReadonlyArray<{
     run: 'done',
   },
   {
-    signal: 'turn.failed after run.lifecycle: completed',
+    signal: 'turn.failed after run.lifecycle: completed does not change the run row',
     events: [
       { type: 'runLifecycle', phase: 'completed', runId: 'run-1' },
       {
@@ -135,15 +135,15 @@ const agentStateRows: ReadonlyArray<{
         reason: 'revision cut failed',
       },
     ],
-    run: 'failed',
+    run: 'done',
   },
   {
-    signal: 'turn.conflicted after run.lifecycle: completed',
+    signal: 'turn.conflicted after run.lifecycle: completed does not change the run row',
     events: [
       { type: 'runLifecycle', phase: 'completed', runId: 'run-1' },
       { type: 'turnConflictedObserved', runId: 'run-1', turnId: 'turn-1' },
     ],
-    run: 'failed',
+    run: 'done',
   },
   {
     signal: 'run.lifecycle: failed',
@@ -232,7 +232,6 @@ describe('chatSessionMachine', () => {
       [
         'done',
         'failed',
-        'finishing.observing',
         'idle',
         'queued.observing',
         'running.generating',
@@ -459,8 +458,8 @@ describe('chatSessionMachine host region', () => {
 /*
  * The chat's turn, owned here (C3, policy §16).
  *
- * `queued` admits and `finishing` settles; every row drives the two invoked
- * actors through `machine.provide` so the machine stays headless.
+ * `queued` admits; the daemon owns settlement and a terminal lifecycle ends
+ * this page's record of the run.
  */
 describe('chatSessionMachine run ownership', () => {
   const turnOf = (runId: string, leaseTurnId: string): ChatTurn => ({
@@ -469,7 +468,7 @@ describe('chatSessionMachine run ownership', () => {
     request: { kind: 'regenerate' },
   });
 
-  /** A scripted admission and settlement, with the inputs each was given. */
+  /** A scripted admission; the settlement actor remains provided by the store during cutover. */
   const turnActors = (
     script: {
       readonly admit?: (input: { readonly chatId: string; readonly gesture: ChatTurnGesture }) => Promise<ChatTurn>;
@@ -505,9 +504,8 @@ describe('chatSessionMachine run ownership', () => {
 
   const sendGesture: ChatTurnGesture = { kind: 'regenerate' };
 
-  it('should queue a turn requested while finishing and admit it once the settlement resolves', async () => {
-    const released = Promise.withResolvers<void>();
-    const script = turnActors({ settle: async () => released.promise });
+  it('ends an admitted turn at the terminal run row without invoking page settlement', async () => {
+    const script = turnActors();
     const actor = startOwning(script.actors);
 
     actor.send({ type: 'requestTurn', gesture: sendGesture });
@@ -515,17 +513,30 @@ describe('chatSessionMachine run ownership', () => {
       expect(runState(actor)).toBe('queued.dispatched');
     });
     actor.send({ type: 'runLifecycle', phase: 'completed', runId: 'run-1' });
-    expect(runState(actor)).toBe('finishing.settling');
 
+    expect(runState(actor)).toBe('done');
+    expect(actor.getSnapshot().context.turn).toBeUndefined();
+    expect(script.settlements).toEqual([]);
+    actor.stop();
+  });
+
+  it('admits a held gesture when the preceding run ends', async () => {
+    const script = turnActors();
+    const actor = startOwning(script.actors);
+
+    actor.send({ type: 'requestTurn', gesture: sendGesture });
+    await vi.waitFor(() => {
+      expect(runState(actor)).toBe('queued.dispatched');
+    });
     actor.send({ type: 'requestTurn', gesture: { kind: 'edit', messageId: 'user-1', text: 'Edited.' } });
-    expect(runState(actor)).toBe('finishing.settling');
+    expect(runState(actor)).toBe('queued.dispatched');
     expect(script.admissions).toHaveLength(1);
-
-    released.resolve();
+    actor.send({ type: 'runLifecycle', phase: 'completed', runId: 'run-1' });
     await vi.waitFor(() => {
       expect(script.admissions).toHaveLength(2);
     });
     expect(script.admissions[1]?.gesture).toEqual({ kind: 'edit', messageId: 'user-1', text: 'Edited.' });
+    expect(script.settlements).toEqual([]);
 
     actor.stop();
   });
@@ -557,7 +568,7 @@ describe('chatSessionMachine run ownership', () => {
     actor.stop();
   });
 
-  it('should settle a turn whose run failed before the host admitted it', async () => {
+  it('records a failed run without invoking page settlement', async () => {
     const script = turnActors();
     const actor = startOwning(script.actors);
 
@@ -567,13 +578,8 @@ describe('chatSessionMachine run ownership', () => {
     });
     actor.send({ type: 'runLifecycle', phase: 'failed', runId: 'run-1', reason: 'Refused once.' });
 
-    await vi.waitFor(() => {
-      expect(script.settlements).toHaveLength(1);
-    });
-    expect(script.settlements[0]).toMatchObject({ chatId: 'chat-1', runId: 'run-1', outcome: 'failed' });
-    await vi.waitFor(() => {
-      expect(runState(actor)).toBe('failed');
-    });
+    expect(script.settlements).toEqual([]);
+    expect(runState(actor)).toBe('failed');
     expect(actor.getSnapshot().context.failureReason).toBe('Refused once.');
 
     actor.stop();
@@ -646,137 +652,13 @@ describe('chatSessionMachine run ownership', () => {
     actor.stop();
   });
 
-  /* The same guard from the other end. A reconciled settlement runs in
-   * `finishing.settling` holding no turn of its own, so `hasNoOwnTurn` is true
-   * there too — and adopting over it abandons the `settleTurn` that is the
-   * adopted run's only settlement. */
-  it('should ignore adoptRun while a reconciled run is settling', async () => {
-    const released = Promise.withResolvers<void>();
-    const script = turnActors({ settle: async () => released.promise });
-    const actor = startOwning(script.actors);
-
-    actor.send({ type: 'runLifecycle', phase: 'completed', runId: 'run-reloaded' });
-    actor.send({ type: 'reconcileSettlement', runId: 'run-reloaded', outcome: 'completed' });
-    expect(runState(actor)).toBe('finishing.settling');
-
-    actor.send({ type: 'adoptRun', runId: 'run-elsewhere' });
-
-    expect(runState(actor)).toBe('finishing.settling');
-    released.resolve();
-    await vi.waitFor(() => {
-      expect(runState(actor)).toBe('done');
-    });
-    expect(script.settlements).toHaveLength(1);
-
-    actor.stop();
-  });
-
-  /* T3-D6. A rejected settlement shared `recordActorFailure` with a rejected
-   * admission, which clears `turn`, `pendingGesture` and `outcome`. There the
-   * clearing is right — the cleared gesture *is* the one that failed and
-   * nothing was leased. Here it was not: the lease was never released (that is
-   * what failed), and the actor no longer knew which run held it, so nothing
-   * could retry and the person's queued message went with it. */
-  it('should keep the turn when every settlement of it is rejected', async () => {
-    const script = turnActors({
-      settle: async () => {
-        throw new Error('The revision root never answered.');
-      },
-    });
-    const actor = startOwning(script.actors);
-
-    actor.send({ type: 'requestTurn', gesture: sendGesture });
-    await vi.waitFor(() => {
-      expect(runState(actor)).toBe('queued.dispatched');
-    });
-    actor.send({ type: 'runLifecycle', phase: 'completed', runId: 'run-1' });
-
-    await vi.waitFor(() => {
-      expect(runState(actor)).toBe('failed');
-    });
-    expect(actor.getSnapshot().context.failureReason).toBe('The revision root never answered.');
-    /* Retried once, then surfaced — with the turn retained, so a later
-     * `reconcileSettlement` can still name the run that holds the lease. */
-    expect(script.settlements).toHaveLength(2);
-    expect(actor.getSnapshot().context.turn).toEqual(turnOf('run-1', 'user-1'));
-
-    actor.stop();
-  });
-
-  it('should settle a turn whose first settlement was rejected, and admit the gesture queued behind it', async () => {
-    let attempts = 0;
-    const script = turnActors({
-      settle: async () => {
-        attempts += 1;
-        if (attempts === 1) {
-          throw new Error('The revision root never answered.');
-        }
-      },
-    });
-    const actor = startOwning(script.actors);
-
-    actor.send({ type: 'requestTurn', gesture: sendGesture });
-    await vi.waitFor(() => {
-      expect(runState(actor)).toBe('queued.dispatched');
-    });
-    actor.send({ type: 'requestTurn', gesture: { kind: 'edit', messageId: 'user-1', text: 'Edited.' } });
-    actor.send({ type: 'runLifecycle', phase: 'completed', runId: 'run-1' });
-
-    await vi.waitFor(() => {
-      expect(script.admissions).toHaveLength(2);
-    });
-    expect(script.settlements.map((settlement) => settlement.runId)).toEqual(['run-1', 'run-1']);
-    expect(script.admissions[1]?.gesture).toEqual({ kind: 'edit', messageId: 'user-1', text: 'Edited.' });
-
-    actor.stop();
-  });
-
-  /**
-   * C6/V10: a reload finds a run the host carried to a terminal state with no
-   * settlement in its log — the tab that ran it died before the revision root
-   * answered. Nobody is coming to attest it, so the page that adopted it
-   * settles it, once, and the chat leaves `finishing` instead of sitting in it.
-   */
-  it('should settle a terminal run the log holds no settlement for, once', async () => {
-    const script = turnActors();
-    const actor = startOwning(script.actors);
-
-    actor.send({ type: 'runLifecycle', phase: 'completed', runId: 'run-reloaded' });
-    expect(runState(actor)).toBe('finishing.observing');
-
-    actor.send({ type: 'reconcileSettlement', runId: 'run-reloaded', outcome: 'completed' });
-    await vi.waitFor(() => {
-      expect(script.settlements).toHaveLength(1);
-    });
-    expect(script.settlements[0]).toMatchObject({
-      chatId: 'chat-1',
-      runId: 'run-reloaded',
-      leaseTurnId: undefined,
-      outcome: 'completed',
-    });
-    await vi.waitFor(() => {
-      expect(runState(actor)).toBe('done');
-    });
-
-    /* A second reconciliation of the same run — a later reattach, another
-     * `onFinish` — settles nothing: the run it named is over. */
-    actor.send({ type: 'reconcileSettlement', runId: 'run-reloaded', outcome: 'completed' });
-    await vi.waitFor(() => {
-      expect(runState(actor)).toBe('done');
-    });
-    expect(script.settlements).toHaveLength(1);
-
-    actor.stop();
-  });
-
   /**
    * V2 on a run this page adopted: the gesture made over it is held, and the
-   * thing that releases it is the run ending. An adopted run ends on the
-   * host's own attestation, and the held gesture has to be admitted there too
+   * thing that releases it is the run ending. The held gesture has to be admitted there too
    * — navigating away mid-turn and back left the second message queued behind
    * a run that had already finished.
    */
-  it('should admit a gesture held over an adopted run once the host attests it', async () => {
+  it('should admit a gesture held over an adopted run when its lifecycle ends', async () => {
     const script = turnActors();
     const actor = startOwning(script.actors);
 
@@ -787,8 +669,6 @@ describe('chatSessionMachine run ownership', () => {
     expect(script.admissions).toEqual([]);
 
     actor.send({ type: 'runLifecycle', phase: 'completed', runId: 'run-adopted' });
-    expect(runState(actor)).toBe('finishing.observing');
-    actor.send({ type: 'turnFinalizedObserved', runId: 'run-adopted', turnId: 'user-adopted' });
 
     await vi.waitFor(() => {
       expect(script.admissions).toHaveLength(1);
@@ -853,38 +733,9 @@ describe('chatSessionMachine run ownership', () => {
   });
 
   /*
-   * V3's page half: a settlement names the run it settles. `settleTurn` reads
-   * `context.turn?.runId ?? context.activeRunId`, and the two differ whenever
-   * the transport reports a run this chat is not holding — `captureRunIdentity`
-   * moves `activeRunId`, the turn's lease does not move with it.
-   */
-  it('should settle the run its own turn leased, not the last run the transport named', async () => {
-    const script = turnActors();
-    const actor = startOwning(script.actors);
-
-    actor.send({ type: 'requestTurn', gesture: sendGesture });
-    await vi.waitFor(() => {
-      expect(runState(actor)).toBe('queued.dispatched');
-    });
-    actor.send({ type: 'runLifecycle', phase: 'running', runId: 'run-other' });
-    expect(actor.getSnapshot().context.activeRunId).toBe('run-other');
-
-    actor.send({ type: 'runLifecycle', phase: 'completed', runId: 'run-other' });
-
-    await vi.waitFor(() => {
-      expect(script.settlements).toHaveLength(1);
-    });
-    expect(script.settlements[0]).toMatchObject({ runId: 'run-1', leaseTurnId: 'user-1' });
-
-    actor.stop();
-  });
-
-  /*
    * T3-D7. `ChatTurn.runId` is `string | undefined` precisely so a `continue`
    * can carry "no new run" — it resumes the run the host already has. Adopting
-   * that `undefined` as the chat's run identity dropped every host-attested
-   * observation (`matchesActiveRun`), so no settlement could be buffered and
-   * `settleTurn` was handed `undefined`, which the settlement returns on.
+   * that `undefined` as the chat's run identity would lose the resumed run.
    */
   it('should keep the active run id when a turn mints none', async () => {
     const script = turnActors({
@@ -904,10 +755,8 @@ describe('chatSessionMachine run ownership', () => {
     expect(actor.getSnapshot().context.activeRunId).toBe('run-1');
 
     actor.send({ type: 'runLifecycle', phase: 'completed', runId: 'run-1' });
-    await vi.waitFor(() => {
-      expect(script.settlements).toHaveLength(1);
-    });
-    expect(script.settlements[0]).toMatchObject({ runId: 'run-1' });
+    expect(runState(actor)).toBe('done');
+    expect(script.settlements).toEqual([]);
 
     actor.stop();
   });
@@ -1008,7 +857,7 @@ describe('chatSessionMachine — the machine contract (PV-S5, MC-R17)', () => {
     ).toEqual([]);
   });
 
-  it('leaves no dead letter, unanswered delivery or fault over a turn and its settlement', () => {
+  it('leaves no dead letter, unanswered delivery or fault over a turn lifecycle', () => {
     const guard = guardActors({ ignore: { 'chat-session': chatSessionIgnoredEvents } });
     const actor = createActor(chatSessionMachine, {
       input: { chatId: 'chat-1', projectId: 'proj_1' },

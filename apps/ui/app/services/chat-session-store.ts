@@ -80,14 +80,11 @@ import {
   BrowserPlacementChatTransport,
   cancelBrowserAgentHostRun,
   getBrowserAgentHostRun,
-  getHostTurnSettlement,
   isBrowserAgentHostPlaced,
   registerAgentHostRunReset,
   requestBrowserAgentHostResume,
   subscribeChatLogAnswers,
-  subscribeHostTurnSettlements,
 } from '#chat-clients/_internal/browser-agent-host-transport.js';
-import type { HostTurnSettlement } from '#chat-clients/_internal/browser-agent-host-transport.js';
 import { hostAttachment } from '#chat-clients/_internal/host-attachment.js';
 import type { AgentHostClient } from '#services/agent-host-client.js';
 import {
@@ -435,7 +432,6 @@ export class ChatSessionStore {
    * overwritten.
    */
   readonly #composerDrains = new Map<string, Promise<void>>();
-  #settlementUnsubscribe: (() => void) | undefined;
   /**
    * Each chat's projection of its log (PV-S7), fed from every stream that reads it. Kept for the store's life, not a
    * view's: a run outlives the view that started it (V5), and its rows keep arriving.
@@ -1073,15 +1069,8 @@ export class ChatSessionStore {
       this.#projectSessions.delete(projectId);
     } else {
       this.#projectSessions.set(projectId, ref);
-      this.#settlementUnsubscribe ??= subscribeHostTurnSettlements((event) => {
-        this.#observeHostTurnSettlement(event);
-      });
       this.#projectRunKeys.delete(projectId);
       this.#refreshProjectRuns(projectId);
-    }
-    if (this.#projectSessions.size === 0) {
-      this.#settlementUnsubscribe?.();
-      this.#settlementUnsubscribe = undefined;
     }
   }
 
@@ -1620,8 +1609,6 @@ export class ChatSessionStore {
     if (live !== undefined && !terminalBrowserRunStates.has(live.state)) {
       session.stateActorRef.send({ type: 'adoptRun', runId: live.runId });
     }
-    /* A chat whose log this page already read shows how its last turn ended from the start. */
-    this.#replayPersistedSettlement(session);
     this.#syncProjection(session.chatId, 'open');
   }
 
@@ -1722,6 +1709,16 @@ export class ChatSessionStore {
       return;
     }
     this.#projectRunKeys.set(projectId, key);
+    const liveChatIds = this.observedChatIdsOf(projectId).filter((chatId) => {
+      const projection = this.#projectionContext(chatId);
+      return projection !== undefined && selectCaughtUp(projection) && opensRun(selectRunPhase(projection));
+    });
+    this.#publishProjectRunPlan(projectId, {
+      liveChatIds,
+      stoppableChatIds: [],
+      stoppableRunCount: 0,
+      continuingRuns: [],
+    });
     void this.getProjectClosePlan(projectId).catch((error: unknown) => {
       console.warn('[ChatSessionStore] project run classification failed', projectId, error);
     });
@@ -2089,7 +2086,6 @@ export class ChatSessionStore {
                 return { chat: healedChat };
               }
 
-              this.#replayPersistedSettlement(session);
               // Reattach to any admitted queued/running/waiting run after a
               // reload. The host transport replays the whole durable log from
               // cursor 0 — nothing persists a cursor — and drops this
@@ -2197,18 +2193,10 @@ export class ChatSessionStore {
       chatId,
       transport,
       onFinish: ({ messages, isAbort, isError, isDisconnect }) => {
-        /* The host's run first, this page's memory second. The stream that just
-         * ended resolved the run from the chat's durable log, and after a
-         * reload that is the *only* source — `durableRunId` is whatever reload
-         * discovery retained from a workspace claim, which on a reattached chat
-         * names a different run or none at all, so a settlement keyed on it
-         * reconciled the wrong run or no run (T2-D4). `#syncRunPhase` already
-         * reads the two in this order. */
         const durableRunId = getBoundDurableChatRunId(chatId) ?? session.durableRunId;
         if (durableRunId && !isDisconnect) {
           session.durableRunId = durableRunId;
           session.durableRunState = 'terminal';
-          this.#reconcileUnsettledRun(session, { runId: durableRunId, isAbort, isError });
         }
         persistenceActorRef.send({ type: 'requestFinished', messages, isAbort, isError, isDisconnect });
         this.#scheduleRunReleaseIfTerminal(session);
@@ -2612,126 +2600,11 @@ export class ChatSessionStore {
   }
 
   /**
-   * Tell the chat's session actor about a terminal run its log never settled
-   * (C6, V10).
+   * Preserve a refused command's persisted error when it has no durable log row.
    *
-   * The reload case: the tab that ran the turn closed before its host appended
-   * the settlement row, so the log holds the run's terminal lifecycle and no
-   * settlement. The host's M1 appends it at its next reconciliation (W8 TS-S7);
-   * the page writes none, and `finishing` only lets the run's record go. The
-   * actor refuses this for a turn it admitted itself, so this only ever reaches
-   * an adopted run.
-   *
-   * @param session - The chat whose run just reached a terminal state.
-   * @param outcome - The run the log named and how this page saw it end.
-   */
-  #reconcileUnsettledRun(
-    session: InternalSession,
-    outcome: Readonly<{ runId: string; isAbort: boolean; isError: boolean }>,
-  ): void {
-    if (getHostTurnSettlement(session.chatId)?.runId === outcome.runId) {
-      return;
-    }
-    /* How the *run* ended, not how this document's stream ended. A reattach
-     * over an abandoned or already-terminal run closes cleanly — nothing
-     * aborted and nothing errored — so reading the SDK's flags settled a run
-     * the host had recorded `failed` as though it had completed, and the page
-     * would have asked the root to record the dead turn's writes as a
-     * revision. The stream's flags still decide for a run this document drove,
-     * where the host record is this same stream's. */
-    const host = getBrowserAgentHostRun(session.chatId);
-    const hostOutcome =
-      host?.runId === outcome.runId && (host.state === 'failed' || host.state === 'cancelled') ? host.state : undefined;
-    session.stateActorRef.send({
-      type: 'reconcileSettlement',
-      runId: outcome.runId,
-      outcome: hostOutcome ?? (outcome.isAbort ? 'cancelled' : outcome.isError ? 'failed' : 'completed'),
-    });
-  }
-
-  /** Route one host-attested outcome to the chat that owns it. */
-  #observeHostTurnSettlement(event: HostTurnSettlement): void {
-    const session = this.#sessions.get(event.chatId);
-    if (session === undefined) {
-      return;
-    }
-    const { stateActorRef } = session;
-    if (stateActorRef.getSnapshot().matches({ run: 'idle' })) {
-      this.#replayPersistedSettlement(session);
-      return;
-    }
-    switch (event.type) {
-      case 'turn.finalized': {
-        stateActorRef.send({
-          type: 'turnFinalizedObserved',
-          runId: event.runId,
-          turnId: event.turnId,
-          ...(event.branch === undefined ? {} : { branch: event.branch }),
-        });
-        break;
-      }
-      case 'turn.failed': {
-        stateActorRef.send({
-          type: 'turnFailedObserved',
-          runId: event.runId,
-          turnId: event.turnId,
-          reason: event.reason,
-        });
-        break;
-      }
-      case 'turn.conflicted': {
-        stateActorRef.send({ type: 'turnConflictedObserved', runId: event.runId, turnId: event.turnId });
-        break;
-      }
-    }
-  }
-
-  /** Restore a terminal machine state from the chat log that supplied its transcript. */
-  #replayPersistedSettlement(session: InternalSession): void {
-    const event = getHostTurnSettlement(session.chatId);
-    const { stateActorRef } = session;
-    if (event === undefined || !stateActorRef.getSnapshot().matches({ run: 'idle' })) {
-      return;
-    }
-    stateActorRef.send({ type: 'runLifecycle', phase: 'admitted', runId: event.runId });
-    switch (event.type) {
-      case 'turn.finalized': {
-        stateActorRef.send({
-          type: 'turnFinalizedObserved',
-          runId: event.runId,
-          turnId: event.turnId,
-          ...(event.branch === undefined ? {} : { branch: event.branch }),
-        });
-        if (event.branch !== undefined) {
-          stateActorRef.send({ type: 'turnFinalized', branch: event.branch });
-        }
-        break;
-      }
-      case 'turn.failed': {
-        stateActorRef.send({
-          type: 'turnFailedObserved',
-          runId: event.runId,
-          turnId: event.turnId,
-          reason: event.reason,
-        });
-        break;
-      }
-      case 'turn.conflicted': {
-        stateActorRef.send({ type: 'turnConflictedObserved', runId: event.runId, turnId: event.turnId });
-        break;
-      }
-    }
-    stateActorRef.send({ type: 'runLifecycle', phase: 'completed', runId: event.runId });
-  }
-
-  /**
-   * Replay a failure this chat carries from an earlier session (P59, D32).
-   *
-   * The SDK status of a rehydrated chat is `ready`, so `#syncRunPhase` never
-   * reports the failure the record still holds and the chat's machine — the one
-   * status source — would say `idle` about a run that failed. This says it once,
-   * when the chat's load lands, and never over a live run. No `runSettled` goes with it: a
-   * historical failure is not a run this session admitted.
+   * Host-logged failures come from the projection. A command refused before it
+   * reaches that log still leaves a chat-record error; loading the chat shows
+   * that error without inventing a settled run.
    *
    * @param session - The chat that just got its machine.
    */

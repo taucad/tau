@@ -30,7 +30,7 @@ vi.mock('react-router', () => ({
     </a>
   ),
   Outlet: () => <div>Page content</div>,
-  useLocation: () => ({ key: state.locationKey, pathname: state.pathname }),
+  useLocation: () => ({ key: state.locationKey, pathname: state.pathname, hash: '' }),
   NavigationType: { Pop: 'POP', Push: 'PUSH', Replace: 'REPLACE' },
   useNavigationType: () => state.navigationType,
 }));
@@ -417,6 +417,54 @@ describe('Page scroll restoration', () => {
     state.navigationType = 'POP';
     rerender(<Page />);
     expect(scroller().scrollTop).toBe(1400);
+  });
+
+  it('should hold the restored offset while the returning page settles, until the person scrolls', () => {
+    const resizeCallbacks: Array<() => void> = [];
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        public constructor(callback: () => void) {
+          resizeCallbacks.push(callback);
+        }
+        public observe(): void {
+          // Resizes are driven by the test.
+        }
+        public disconnect(): void {
+          resizeCallbacks.length = 0;
+        }
+      },
+    );
+    try {
+      state.enableOverflowY = true;
+      state.locationKey = 'community';
+      state.pathname = '/community';
+      const { rerender } = render(<Page />);
+      scrollTo(900);
+      state.locationKey = 'example';
+      state.pathname = '/s/builtin~replicad.spur-gearbox';
+      state.navigationType = 'PUSH';
+      rerender(<Page />);
+
+      state.locationKey = 'community';
+      state.pathname = '/community';
+      state.navigationType = 'POP';
+      rerender(<Page />);
+      // The shell's panes settle and scroll anchoring moves the offset.
+      scrollTo(816);
+      for (const callback of resizeCallbacks) {
+        callback();
+      }
+      expect(scroller().scrollTop).toBe(900);
+      expect(sessionStorage.getItem('tau.page-scroll.community')).toBe('900');
+
+      fireEvent.wheel(scroller());
+      scrollTo(1200);
+      expect(resizeCallbacks).toHaveLength(0);
+      expect(sessionStorage.getItem('tau.page-scroll.community')).toBe('1200');
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('should keep the offset when a filter or dialog replaces the entry on the same page', () => {

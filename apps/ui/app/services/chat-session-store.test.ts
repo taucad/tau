@@ -361,24 +361,6 @@ function publishAdmission(
   }));
 }
 
-const testRunBody = Object.freeze({
-  agent: Object.freeze({
-    profile: 'cad',
-    execution: Object.freeze({ kind: 'tau', model: 'openai-gpt-5.5' }),
-    kernel: 'replicad',
-    mode: 'agent',
-    toolChoice: 'auto',
-    testingEnabled: true,
-  }),
-  projectId: 'project_test',
-  execution: Object.freeze({
-    hostId: 'host_test',
-    workspaceId: 'workspace_test',
-    baseRevisionId: 'revision_test',
-  }),
-  admission: Object.freeze({ version: 1, idempotencyKey: 'req_test_chat_session_store' }),
-});
-
 describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
   it('materializes a reopened completed chat from a foreign segment and refreshes changed bytes', async () => {
     const projectId = 'project_remote_transcript';
@@ -1012,11 +994,6 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
         expect(deps.getChat).toHaveBeenCalledWith('chat_early_settlement');
       });
       const runId = 'req_early_settlement';
-      store.startRun('chat_early_settlement', {
-        ...testRunBody,
-        projectId: 'proj_a',
-        admission: { version: 1, idempotencyKey: runId },
-      });
       publishLogRows('chat_early_settlement', runningRows(runId));
       expect(projectA.heard).toContainEqual({
         type: 'projectedRunsChanged',
@@ -1043,7 +1020,6 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
       expect(projectB.heard).toEqual([]);
     } finally {
       stopObserving();
-      store.endRun('chat_early_settlement');
       store.release('chat_early_settlement');
       store.setProjectSession('proj_a', undefined);
       store.setProjectSession('proj_b', undefined);

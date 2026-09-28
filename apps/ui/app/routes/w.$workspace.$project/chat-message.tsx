@@ -882,7 +882,7 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
             />
           </When>
           <When shouldRender={!isEditing}>
-            {/* Matches focused-edit ChatTextarea natural max (max-h-48 editor + mb-10 toolbar room + 2px border = 14.625rem). Keep in sync so click-to-edit does not jump. */}
+            {/* Matches focused-edit ChatTextarea natural max (max-h-48 editor + in-flow toolbar + border = 14.625rem). Keep in sync so click-to-edit does not jump. */}
             <div
               className={cn(
                 'flex flex-col gap-0 min-w-0',

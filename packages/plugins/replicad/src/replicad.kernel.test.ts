@@ -2,6 +2,7 @@
 /* oxlint-disable max-lines -- comprehensive kernel test suite */
 /* oxlint-disable @typescript-eslint/no-unsafe-assignment -- vitest asymmetric matchers return any */
 /* eslint-disable @typescript-eslint/naming-convention -- File names use extensions like 'box.ts' */
+import { readFile } from 'node:fs/promises';
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { NodeIO } from '@gltf-transform/core';
@@ -21,7 +22,7 @@ import { registerTauGltfExtensions } from '@taucad/geometry-core';
 import type { TauCadTopologyPayload, TauCadTopologyRoot } from '@taucad/geometry-core';
 import { tauCadTopologyExtension } from '@taucad/runtime/types';
 import { decode as msgpackDecode, encode as msgpackEncode } from '@msgpack/msgpack';
-import { resolveMechanismComponents } from '@taucad/kinematics';
+import { evaluatePose, resolveMechanismComponents, sampleAnimation } from '@taucad/kinematics';
 import { readMechanismExport, replicadKernel } from '#replicad.kernel.js';
 import { normalizeRenderShapes } from '#utils/render-output.js';
 import type { NativeHandleEntry } from '#interface-resolution.js';
@@ -4283,6 +4284,37 @@ const formatUnreachable = (): never => {
 };
 
 describe('mechanism export', () => {
+  it('should render and pose the hinged model documented in the Replicad skill', async () => {
+    const reference = await readFile(new URL('../agent/kinematics-reference.md', import.meta.url), 'utf8');
+    const source = /## Complete hinged model\n\n```typescript\n([\s\S]*?)\n```/u.exec(reference)?.[1];
+    expect(source).toBeDefined();
+    if (source === undefined) {
+      return;
+    }
+
+    const result = await createGeometry({ files: { 'hinge.ts': source }, mainFile: 'hinge.ts' });
+    assertSuccess(result);
+    expect(result.issues).toEqual([]);
+    const payload = await readTopologyPayload(extractGltfFromResult(result));
+    const { mechanism } = payload;
+    expect(mechanism?.links).toEqual({
+      base: { components: ['component:base'] },
+      lid: { components: ['component:lid'] },
+    });
+    const animation = mechanism?.animations?.[0];
+    expect(animation).toBeDefined();
+    if (mechanism === undefined || animation === undefined) {
+      return;
+    }
+    const coordinates = sampleAnimation({ animation, time: 1 });
+    expect(coordinates).toEqual({ hinge: 55 });
+    const pose = evaluatePose({ mechanism, coordinates });
+    expect(pose.status).toBe('posed');
+    if (pose.status === 'posed') {
+      expect(pose.pose.linkTransforms['lid']).not.toEqual(pose.pose.linkTransforms['base']);
+    }
+  });
+
   it('should carry a mechanism in GLB space with resolved component ids', async () => {
     const result = await createGeometry({
       files: { 'gears.ts': mechanismModule('Drive Gear') },

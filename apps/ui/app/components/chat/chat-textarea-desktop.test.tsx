@@ -288,6 +288,18 @@ describe('ChatTextareaDesktop draft rehydration', () => {
     };
   };
 
+  it('keeps one editor scroll region above controls that take layout space', () => {
+    const view = renderComposer('', codexSession);
+    const editorContent = view.container.querySelector('.tiptap')?.parentElement;
+    const editorScroller = editorContent?.parentElement;
+    const bar = view.container.querySelector('[data-slot=composer-bar]');
+
+    expect(editorScroller).toHaveClass('overflow-y-auto', 'max-h-48');
+    expect(editorContent).not.toHaveClass('overflow-y-auto');
+    expect(bar?.parentElement).toBe(editorScroller?.parentElement);
+    expect(bar).not.toHaveClass('absolute');
+  });
+
   it('chips a restored $skill once the agent advertises it, without changing the draft text', async () => {
     execution.current = { kind: 'acp', hostId: 'desktop', agentId: 'codex' };
     const view = renderComposer('Make a render of this using $imagegen', codexSession);

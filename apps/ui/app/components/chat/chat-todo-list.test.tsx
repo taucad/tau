@@ -7,6 +7,7 @@ import type { FileContentResult } from '@taucad/fs-client/file-content-service';
 let activeChatId = 'chat_alpha';
 let fileContent: FileContentResult = { kind: 'loading' };
 const requestedPaths: string[] = [];
+const savedFolds = new Map<string, string>();
 
 vi.mock('#hooks/use-chat.js', () => ({
   useChatContext: () => ({ activeChatId }),
@@ -44,9 +45,16 @@ beforeEach(() => {
   activeChatId = 'chat_alpha';
   fileContent = { kind: 'loading' };
   requestedPaths.length = 0;
-  globalThis.localStorage.clear();
+  savedFolds.clear();
+  vi.stubGlobal('localStorage', {
+    getItem: (key: string) => savedFolds.get(key) ?? null,
+    setItem: (key: string, value: string) => savedFolds.set(key, value),
+  });
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe('ChatTodoList', () => {
   it('should read the active chat list path and render the summary with the in-progress task', () => {
@@ -55,7 +63,15 @@ describe('ChatTodoList', () => {
 
     expect(requestedPaths[0]).toBe('.tau/chats/chat_alpha/todo.yaml');
     const trigger = screen.getByRole('button', { name: 'Tasks: 1 of 3 done · Slice the pyramid' });
-    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('list', { name: 'Tasks' })).not.toBeInTheDocument();
+  });
+
+  it('reveals every task and its note on request', async () => {
+    const user = userEvent.setup();
+    fileContent = pyramid;
+    render(<ChatTodoList />);
+    await user.click(screen.getByRole('button', { name: /1 of 3 done/u }));
     const list = screen.getByRole('list', { name: 'Tasks' });
     const rows = within(list).getAllByRole('listitem');
     expect(rows.map((row) => row.textContent)).toEqual([
@@ -73,26 +89,26 @@ describe('ChatTodoList', () => {
 
     trigger.focus();
     await user.keyboard('{Enter}');
-    expect(trigger).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.queryByRole('list', { name: 'Tasks' })).not.toBeInTheDocument();
-    expect(globalThis.localStorage.getItem('tau:chat-todo-collapsed:chat_alpha')).toBe('true');
-
-    await user.keyboard(' ');
     expect(trigger).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByRole('list', { name: 'Tasks' })).toBeVisible();
     expect(globalThis.localStorage.getItem('tau:chat-todo-collapsed:chat_alpha')).toBe('false');
+
+    await user.keyboard(' ');
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('list', { name: 'Tasks' })).not.toBeInTheDocument();
+    expect(globalThis.localStorage.getItem('tau:chat-todo-collapsed:chat_alpha')).toBe('true');
   });
 
-  it('should start collapsed when this chat was folded before, and open for another chat', () => {
-    globalThis.localStorage.setItem('tau:chat-todo-collapsed:chat_alpha', 'true');
+  it('should remember an open chat without opening another chat by default', () => {
+    globalThis.localStorage.setItem('tau:chat-todo-collapsed:chat_alpha', 'false');
     fileContent = pyramid;
     const { unmount } = render(<ChatTodoList />);
-    expect(screen.getByRole('button', { name: /1 of 3 done/u })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByRole('button', { name: /1 of 3 done/u })).toHaveAttribute('aria-expanded', 'true');
     unmount();
 
     activeChatId = 'chat_beta';
     render(<ChatTodoList />);
-    expect(screen.getByRole('button', { name: /1 of 3 done/u })).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('button', { name: /1 of 3 done/u })).toHaveAttribute('aria-expanded', 'false');
   });
 
   it('should update the summary and rows when the file content changes', () => {
@@ -116,7 +132,7 @@ describe('ChatTodoList', () => {
     rerender(<ChatTodoList />);
 
     expect(screen.getByRole('button', { name: 'Tasks: 2 of 3 done · Request the print' })).toBeVisible();
-    expect(within(screen.getByRole('list', { name: 'Tasks' })).getAllByRole('listitem')).toHaveLength(3);
+    expect(screen.queryByRole('list', { name: 'Tasks' })).not.toBeInTheDocument();
   });
 
   it('should render a summary without a current task when nothing is in progress', () => {

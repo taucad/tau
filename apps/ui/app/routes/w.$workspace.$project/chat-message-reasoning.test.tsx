@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import type { ReasoningUIPart } from 'ai';
@@ -65,35 +65,6 @@ const renderReasoning = (
     />,
   );
 
-class TestResizeObserver implements ResizeObserver {
-  public static callback: ResizeObserverCallback | undefined;
-
-  public constructor(callback: ResizeObserverCallback) {
-    TestResizeObserver.callback = callback;
-  }
-
-  public observe(): void {
-    // The disclosure test only needs construction to succeed.
-  }
-  public unobserve(): void {
-    // The disclosure test only needs construction to succeed.
-  }
-  public disconnect(): void {
-    // The disclosure test only needs construction to succeed.
-  }
-}
-
-const originalResizeObserver = globalThis.ResizeObserver;
-
-beforeEach(() => {
-  globalThis.ResizeObserver = TestResizeObserver;
-});
-
-afterEach(() => {
-  globalThis.ResizeObserver = originalResizeObserver;
-  vi.restoreAllMocks();
-});
-
 describe('reasoningDurationMs', () => {
   it('unions overlapping intervals and sums separated intervals', () => {
     expect(
@@ -130,6 +101,7 @@ describe('ChatMessageReasoning', () => {
 
     const body = screen.getByRole('region', { name: 'Thought briefly details' });
     expect(body).toHaveClass('reasoning-body', 'font-normal', 'italic');
+    expect(body).not.toHaveClass('overflow-y-auto');
     expect(body.className).toContain('[&_*]:font-normal');
     expect(body.querySelector('.lucide-thought-bubble')).toBeNull();
     expect(screen.getAllByTestId('reasoning-markdown')).toHaveLength(2);

@@ -493,6 +493,112 @@ test.skipIf(!codexAvailable || turbojetSourcePath === undefined)(
   900_000,
 );
 
+test.skipIf(!codexAvailable || !packaged || process.env['TAU_E2E_ACP_KINEMATICS'] !== 'true')(
+  'animates a Codex GPT-5.6-Sol hinged model in the packaged Kinematics pane',
+  async () => {
+    const account = tauTestAccount('acp-kinematics');
+    seededEmail = account.email;
+    const token = await seedTauTestUser(account);
+    session = await launchDesktopApp({ token, packaged: true });
+    await authenticatePackagedDesktop(session, token);
+    const { page } = session;
+
+    try {
+      await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
+      await expectSignedIn(page);
+      await page.evaluate(() => {
+        localStorage.setItem('tau:flags', JSON.stringify({ tauDebug: true }));
+      });
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
+      await connectPickedFolder(session);
+      expect(await selectAgent(page, 'Codex', 'GPT-5.6-Sol')).toMatch(/Runs with your local Codex login/u);
+      await selectKernel(page, 'Replicad');
+      expect(await page.evaluate(() => localStorage.getItem('tau-cad-kernel'))).toBe('"replicad"');
+
+      const slug = await submitPrompt(
+        page,
+        'Create a simple hinged storage box with exactly two named parts, Base and Lid. The Lid should open around a back hinge; keep both as separate solids. Verify the model.',
+      );
+      await waitForProjectOnDisk(session.pickedDirectory, slug, { extension: '.ts', page });
+      const sourcePath = join(session.pickedDirectory, slug, 'main.ts');
+      await expect.poll(() => new URL(page.url()).searchParams.get('chat'), { timeout: 120_000 }).toBeTruthy();
+      const eventsPath = join(session.pickedDirectory, slug, '.tau/chats', activeChatId(page), 'events.jsonl');
+      const chat = readFileSync(join(dirname(eventsPath), 'chat.json'), 'utf8');
+      expect(chat).toMatch(/"activeKernel":\s*"replicad"/u);
+      expect(chat).toMatch(/"model":\s*"gpt-5\.6-sol"/u);
+      await expect.poll(() => readLog(eventsPath), { timeout: 600_000 }).toMatch(/"state":"completed"/u);
+      const events = readLog(eventsPath);
+      expect(events).toMatch(/cad-replicad\/SKILL\.md/u);
+      expect(events).toContain('kinematics-reference.md');
+      expect(readFileSync(sourcePath, 'utf8')).toMatch(/export\s+(?:async\s+)?(?:function|const)\s+mechanism\b/u);
+
+      await page.keyboard.press('Control+m');
+      await expectVisible(page.getByTestId('kinematics-pane'), 60_000);
+      await expect
+        .poll(async () => page.locator('[data-testid^="kinematics-dof-"]').count(), { timeout: 60_000 })
+        .toBe(1);
+      const state = async () =>
+        page.evaluate(() =>
+          (
+            globalThis as typeof globalThis & {
+              __TAU_KINEMATICS_TEST__?: {
+                getState(unitId: string): { revision: number; coordinates: Record<string, number> } | undefined;
+              };
+            }
+          ).__TAU_KINEMATICS_TEST__?.getState('file:main.ts'),
+        );
+      const lidMatrix = async () =>
+        page.evaluate(() =>
+          (
+            globalThis as typeof globalThis & {
+              __TAU_KINEMATICS_TEST__?: {
+                getComponentWorldMatrix(unitId: string, componentId: string): number[] | undefined;
+              };
+            }
+          ).__TAU_KINEMATICS_TEST__?.getComponentWorldMatrix('file:main.ts', 'component:lid'),
+        );
+      await expect.poll(state, { timeout: 60_000 }).toBeDefined();
+      const before = await state();
+      const baseMatrix = await lidMatrix();
+      expect(baseMatrix).toBeDefined();
+
+      await page.getByRole('button', { name: /^Animation:/u }).click();
+      const clips = page.getByRole('option');
+      await expect.poll(async () => clips.count()).toBeGreaterThan(1);
+      await clips.first().click();
+      if ((await page.getByTestId('kinematics-play').count()) > 0) {
+        await page.getByTestId('kinematics-play').click();
+      }
+      await expect
+        .poll(
+          async () => {
+            const current = await state();
+            return current?.revision ?? 0;
+          },
+          { timeout: 30_000 },
+        )
+        .toBeGreaterThan(before?.revision ?? 0);
+      await expect
+        .poll(
+          async () => {
+            const posed = await lidMatrix();
+            return posed && baseMatrix
+              ? Math.max(...posed.map((value, index) => Math.abs(value - baseMatrix[index]!)))
+              : 0;
+          },
+          { timeout: 30_000 },
+        )
+        .toBeGreaterThan(1e-5);
+      await session.capture('acp-kinematics-sol-playback');
+    } catch (error) {
+      await session.capture('acp-kinematics-sol-failure');
+      throw error;
+    }
+  },
+  900_000,
+);
+
 /**
  * The operator's actual flow, and the one turn the spec above cannot reach:
  * Codex is picked on the **home hero**, and the very first turn of the new

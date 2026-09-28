@@ -19,6 +19,12 @@ afterEach(() => {
 
 const session = (facts: readonly TurnPlacementFact[] = []): TurnPlacementSession & { toolPort: MessagePort } => {
   const tools = new MessageChannel();
+  const connection = {
+    port: tools.port1,
+    dispose: () => {
+      tools.port1.close();
+    },
+  };
   closers.push(() => {
     tools.port2.close();
   });
@@ -30,7 +36,7 @@ const session = (facts: readonly TurnPlacementFact[] = []): TurnPlacementSession
         : {
             requestId,
             status: 'applied',
-            placement: { checkoutId: 'live', mode: 'direct', root: '/project', tools: { port: tools.port1 } },
+            placement: { checkoutId: 'live', mode: 'direct', root: '/project', tools: connection },
           },
     ),
     complete: vi.fn<TurnPlacementSession['complete']>(async ({ requestId }) => ({ requestId, status: 'applied' })),
@@ -64,7 +70,7 @@ const connect = (served: TurnPlacementSession) => {
 };
 
 describe('the placement session channel', () => {
-  it('should hand an admitted attempt its tools through toolsFor and pass a refusal through as data', async () => {
+  it('should transfer only the tool port from a disposable connection and pass a refusal through as data', async () => {
     const served = session();
     const { client, toolsFor } = connect(served);
 

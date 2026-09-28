@@ -1260,6 +1260,13 @@ export class ChatSessionStore {
           }
           if (event.type === 'attachment.attached') {
             observed.attempts = 0;
+          } else if (event.type === 'attachment.refused') {
+            queueMicrotask(() => {
+              if (observed.attachment === attachment) {
+                attachment.stop();
+                observed.attachment = undefined;
+              }
+            });
           } else if (event.type === 'attachment.lost') {
             const retryDelayMilliseconds = Math.min(250 * 2 ** observed.attempts, 30_000);
             observed.attempts += 1;

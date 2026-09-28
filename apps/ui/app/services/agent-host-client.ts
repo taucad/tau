@@ -290,9 +290,11 @@ export type AgentHostClient = {
    * `position` is the row's cursor in the log; it restarts at 0 when the follow starts over (SC-R12).
    */
   subscribe(
-    input: { readonly chatId: string; readonly cursor: number },
+    input: AgentHostReadInput,
     listener: (chatId: string, event: AgentLogEvent, position?: number) => void,
     onEnded?: () => void,
+    /** The exact read batch or refusal, for a projection that owns the cursor. */
+    onAnswer?: (answer: ReadAnswer) => ReadRequest['last'] | void,
   ): () => void;
   /** One chat's live deltas. */
   subscribeLive?(chatId: string, listener: (chatId: string, event: AgentLiveEvent) => void): () => void;
@@ -510,19 +512,23 @@ export const createAgentHostClient = (
     };
   };
 
-  const follow: AgentHostClient['subscribe'] = ({ chatId, cursor: from }, listener, onEnded) =>
-    consume(async (signal) => {
+  const follow: AgentHostClient['subscribe'] = (...parameters) => {
+    const [{ chatId, cursor: from, last: initialLast }, listener, onEnded, onAnswer] = parameters;
+    return consume(async (signal) => {
       let cursor = from;
+      let last = initialLast;
       while (!signal.aborted) {
         // oxlint-disable-next-line no-await-in-loop -- one outstanding long-poll read per chat (SC-R14).
-        const answer = await read({ chatId, cursor }, signal);
+        const answer = await read({ chatId, cursor, last }, signal);
         if (isAborted(signal)) {
           return;
         }
+        const projectedLast = onAnswer?.(answer);
         if (answer.status === 'refused') {
           if (answer.reason === 'cursor-ahead' || answer.reason === 'identity-mismatch') {
             // SC-R12: never a clamp; the reader starts over, and the projection drops rows it already holds.
             cursor = 0;
+            last = undefined;
             continue;
           }
           throw new AgentHostWorkerError(
@@ -539,8 +545,10 @@ export const createAgentHostClient = (
           listener(chatId, event as AgentLogEvent, cursor + index);
         }
         cursor = answer.nextCursor;
+        last = projectedLast ?? last;
       }
     }, onEnded);
+  };
 
   const subscribeLive = (chatId: string, listener: (chatId: string, event: AgentLiveEvent) => void): (() => void) =>
     consume(async (signal) => {

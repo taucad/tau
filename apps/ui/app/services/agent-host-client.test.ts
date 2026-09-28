@@ -568,11 +568,19 @@ describe('createBrowserAgentHostClient', () => {
     const client = createTestClient(workerOf(worker), { computeMode: 'off', openComputeStorePort });
     const events: unknown[] = [];
     const positions: Array<number | undefined> = [];
+    const answers: ReadAnswer[] = [];
     const liveEvents: unknown[] = [];
-    const unsubscribe = client.subscribe({ chatId: 'chat-1', cursor: 0 }, (_chatId, event, position) => {
-      events.push(event);
-      positions.push(position);
-    });
+    const unsubscribe = client.subscribe(
+      { chatId: 'chat-1', cursor: 0 },
+      (_chatId, event, position) => {
+        events.push(event);
+        positions.push(position);
+      },
+      undefined,
+      (answer) => {
+        answers.push(answer);
+      },
+    );
     const unsubscribeLive = client.subscribeLive?.('chat-1', (_chatId, event) => {
       liveEvents.push(event);
     });
@@ -618,6 +626,7 @@ describe('createBrowserAgentHostClient', () => {
     await expect.poll(() => events).toHaveLength(4);
     /* Each row carries its position in the log, which the page's projection folds at (PV-S7). */
     expect(positions).toEqual([0, 1, 2, 3]);
+    expect(answers.filter((answer) => answer.status === 'batch' && answer.events.length > 0)).toHaveLength(4);
     expect(liveEvents).toEqual([liveDelta('chat-1', 'run-1', 'live')]);
 
     unsubscribe();
@@ -655,6 +664,29 @@ describe('createBrowserAgentHostClient', () => {
     });
     const reads = worker.requests.filter((request) => request.name === 'read').map((request) => request.args);
     expect(reads.at(-1)).toEqual({ chatId: 'chat-bounds', cursor: 0, limit: 16, maxBytes: 1_048_576 });
+    await client.close();
+  });
+
+  it('carries the folded row identity into the next long-poll read', async () => {
+    const worker = new FakeResidentWorker();
+    const client = createTestClient(workerOf(worker));
+    const last = { leaderEpoch: 'epoch-1', sequence: 0 };
+    const unsubscribe = client.subscribe(
+      { chatId: 'chat-identity', cursor: 0 },
+      () => undefined,
+      undefined,
+      (answer) => (answer.status === 'batch' && answer.events.length > 0 ? last : undefined),
+    );
+    await client.start({ chatId: 'chat-identity', runId: 'run-identity', trigger: 'submit', message: 'Build.' });
+
+    await vi.waitFor(() => {
+      expect(requestsNamed(worker, 'read').at(-1)?.args).toMatchObject({
+        chatId: 'chat-identity',
+        cursor: 1,
+        last,
+      });
+    });
+    unsubscribe();
     await client.close();
   });
 

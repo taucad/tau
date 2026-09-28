@@ -40,7 +40,7 @@ export function CommunityProjectGrid({
       {displayedProjects.map((project) => {
         const isFeatured = project.locator === featuredLocator;
         return (
-          <li key={project.id} className={cn(isFeatured && 'col-span-2 lg:row-span-2')}>
+          <li key={project.id} id={project.locator} className={cn(isFeatured && 'col-span-2 lg:row-span-2')}>
             <CommunityProjectCard
               project={project}
               isFeatured={isFeatured}

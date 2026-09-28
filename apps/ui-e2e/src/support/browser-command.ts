@@ -982,6 +982,10 @@ export const uiReleaseTauServeGateway: BrowserCommand = (commandContext) => {
   tauServeFor(commandContext).release();
 };
 
+/** Whether the daemon's second provider request is parked before its final answer. */
+export const uiIsTauServeGatewayHeld: BrowserCommand<[], boolean> = (commandContext) =>
+  tauServeFor(commandContext).secondRequestHeld();
+
 export const uiReadTauServeFile: BrowserCommand<[relativePath: string], string | undefined> = async (
   commandContext,
   relativePath,
@@ -1837,6 +1841,7 @@ export const uiBrowserCommands = {
   uiTargetWorkers,
   uiStopTauServeFixture,
   uiReleaseTauServeGateway,
+  uiIsTauServeGatewayHeld,
   uiReadTauServeFile,
   uiListTauServeChats,
   uiTypeTarget,

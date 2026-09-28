@@ -56,7 +56,7 @@ const publishProjectHostConnector = vi.fn(
 );
 const browserClientOptions: unknown[] = [];
 const daemonClientTransports: unknown[] = [];
-const cancelProjectedRun = vi.fn(async () => undefined);
+const cancelProjectedRun = vi.fn(async (): Promise<'stopped' | 'continuing'> => 'stopped');
 const storedHostSettings = new Map<
   string,
   { activeExecution?: { kind: 'tau'; model: string; hostId?: string }; activeKernel?: 'openscad' }
@@ -473,6 +473,22 @@ describe('project route session identity', () => {
       expect(cancelProjectedRun).toHaveBeenCalledWith('chat-unseen');
     });
     expect(cancelProjectedRun).not.toHaveBeenCalledWith('chat-other-build');
+  });
+  it('keeps the project open when a preflight-stoppable run refuses cancellation', async () => {
+    cancelProjectedRun.mockResolvedValueOnce('continuing');
+    getProjectRouteAccess.mockImplementation(async (id) => ready(id));
+    renderRouteProvider();
+    await screen.findAllByTestId('project-session');
+    const session = sessionsActor.getSnapshot().context.refs[projectA];
+    expect(session).toBeDefined();
+    session?.send({ type: 'projectedRunsChanged', runs: ['chat-unseen'], stoppableRuns: ['chat-unseen'] });
+    session?.send({ type: 'close', reason: 'user' });
+    session?.send({ type: 'confirmClose' });
+    await waitFor(() => {
+      expect(cancelProjectedRun).toHaveBeenCalledWith('chat-unseen');
+      expect(session?.getSnapshot().matches('failed')).toBe(true);
+    });
+    expect(sessionsActor.getSnapshot().context.refs[projectA]).toBe(session);
   });
   it('retains one project connector when focus moves to another live project', async () => {
     fileManagerReady = true;

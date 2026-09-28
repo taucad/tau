@@ -2,7 +2,7 @@ import { useSyncExternalStore } from 'react';
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const { projectManager, query, registry, useQuery, worker } = vi.hoisted(() => {
+const { projectManager, query, registry, useQuery, worker, chats } = vi.hoisted(() => {
   const listeners = new Set<
     (snapshot: { context: { refs: Readonly<Record<string, Record<string, unknown>>> } }) => void
   >();
@@ -30,6 +30,7 @@ const { projectManager, query, registry, useQuery, worker } = vi.hoisted(() => {
   };
   return {
     projectManager: {
+      getChatsForResource: vi.fn(async (): Promise<Array<{ id: string }>> => []),
       deleteProject: vi.fn(async (projectId: string) => {
         operations.push(`trash:${projectId}`);
         return true;
@@ -60,6 +61,11 @@ const { projectManager, query, registry, useQuery, worker } = vi.hoisted(() => {
       refetch: vi.fn(),
     })),
     worker: { isLoading: false },
+    chats: {
+      observed: [] as string[],
+      projection: undefined as { ledger: { position: { cursor: number } }; endCursor: number } | undefined,
+      plan: { liveChatIds: [] as string[] },
+    },
   };
 });
 
@@ -71,6 +77,7 @@ vi.mock('@tanstack/react-query', () => ({
 vi.mock('#hooks/use-project-manager.js', () => ({
   useProjectManager: () => ({
     getProjectListing: vi.fn(),
+    getChatsForResource: projectManager.getChatsForResource,
     updateProject: vi.fn(),
     getProject: vi.fn(),
     deleteProject: projectManager.deleteProject,
@@ -84,6 +91,9 @@ vi.mock('#hooks/use-project-manager.js', () => ({
 vi.mock('#hooks/use-sessions.js', () => ({ useSessions: () => registry.actor }));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({
   useChatSessionStore: () => ({
+    observedChatIdsOf: () => chats.observed,
+    getProjection: () => chats.projection,
+    getProjectClosePlan: async () => chats.plan,
     removeProject: async (projectId: string) => {
       registry.operations.push(`remove-composers:${projectId}`);
     },
@@ -141,7 +151,30 @@ describe('useProjects readiness', () => {
 describe('useProjects deletion', () => {
   afterEach(() => {
     registry.reset();
+    chats.observed = [];
+    chats.projection = undefined;
+    chats.plan = { liveChatIds: [] };
+    projectManager.getChatsForResource.mockResolvedValue([]);
     vi.clearAllMocks();
+  });
+
+  it('refuses permanent deletion without a caught-up projection for every stored chat', async () => {
+    projectManager.getChatsForResource.mockResolvedValue([{ id: 'unseen-chat' }]);
+    const { result } = renderHook(() => useProjects());
+    await expect(result.current.permanentlyDeleteProject('proj_closed')).rejects.toThrow(/Restore.*open/u);
+    expect(projectManager.permanentlyDeleteProject).not.toHaveBeenCalled();
+  });
+
+  it('refuses Trash while an observed run is continuing, before closing the session', async () => {
+    registry.live('proj_live');
+    projectManager.getChatsForResource.mockResolvedValue([{ id: 'unseen-chat' }]);
+    chats.observed = ['unseen-chat'];
+    chats.projection = { ledger: { position: { cursor: 1 } }, endCursor: 1 };
+    chats.plan = { liveChatIds: ['unseen-chat'] };
+    const { result } = renderHook(() => useProjects());
+    await expect(result.current.deleteProject('proj_live')).rejects.toThrow(/running/u);
+    expect(registry.operations).toEqual([]);
+    expect(projectManager.deleteProject).not.toHaveBeenCalled();
   });
 
   it('closes a live project before trashing it so the live header drops with the row', async () => {

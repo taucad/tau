@@ -69,7 +69,6 @@ export function ProjectNavigation(): React.JSX.Element {
   const [editingProjectId, setEditingProjectId] = useState<string | undefined>();
   const [visibleCount, setVisibleCount] = useState(projectsPerPage);
   const liveProjectIds = useLiveProjectIds();
-  const { closeProject } = useSidebarCommands();
   /* A29's temporal hiding: what is live now sits above what is not, and the
    * rest keeps its recency order. */
   const sortedProjects = useMemo(() => {
@@ -186,7 +185,6 @@ export function ProjectNavigation(): React.JSX.Element {
                     void navigate(`${projectUrl(project.slugs)}?${parameters.toString()}`);
                   }}
                   onDelete={async () => {
-                    closeProject(project.id);
                     await deleteProject(project.id);
                     toast.success(`Deleted ${project.name}`);
                   }}
@@ -266,6 +264,14 @@ function ProjectNavigationItem({
       const plan = await chatSessions.getProjectClosePlan(project.id);
       setClosePlan(plan);
       if (deleting) {
+        if (plan.continuingRuns.length > 0) {
+          toast.error(`Can’t delete ${project.name} while work continues in another window or build.`);
+          return;
+        }
+        if (plan.liveChatIds.length === 0) {
+          await onDelete();
+          return;
+        }
         setAskingToDelete(true);
       } else {
         setAskingToClose(true);
@@ -321,11 +327,7 @@ function ProjectNavigationItem({
       <Item
         variant='destructive'
         onSelect={() => {
-          if (row.runs > 0) {
-            void askToClose(true);
-          } else {
-            void onDelete();
-          }
+          void askToClose(true);
         }}
       >
         <Trash2 aria-hidden />
@@ -439,10 +441,11 @@ function ProjectNavigationItem({
         row={row}
         name={project.name}
         closePlan={closePlan}
+        beforeDelete
         isOpen={askingToDelete}
         onOpenChange={setAskingToDelete}
         onConfirm={() => {
-          void onDelete();
+          closeProject(project.id);
         }}
       />
       <ProjectChatList project={project} isProjectActive={isActive} isExpanded={isExpanded} />

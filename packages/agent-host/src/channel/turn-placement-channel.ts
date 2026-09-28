@@ -179,7 +179,14 @@ export const serveTurnPlacementChannel = (options: ServeTurnPlacementChannelOpti
       switch (name) {
         case 'admit': {
           const answer = await session.admit(parse('admit', args));
-          return answer.status === 'refused' ? answer : { value: answer, transferables: [answer.placement.tools.port] };
+          if (answer.status === 'refused') {
+            return answer;
+          }
+          const { port } = answer.placement.tools;
+          return {
+            value: { ...answer, placement: { ...answer.placement, tools: { port } } },
+            transferables: [port],
+          };
         }
         case 'complete': {
           return session.complete(parse('complete', args));

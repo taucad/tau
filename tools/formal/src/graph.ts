@@ -98,15 +98,68 @@ export const buildSpecGraph = (pairs: ReadonlyArray<readonly [SpecView, SpecView
  *
  * @public
  */
-export const readSpecGraph = (file: string): SpecGraph => JSON.parse(readFileSync(file, 'utf8')) as SpecGraph;
+export const readSpecGraph = (file: string): SpecGraph => {
+  const stored = JSON.parse(readFileSync(file, 'utf8')) as SpecGraph | CompactSpecGraph;
+  if (!('fields' in stored)) {
+    return stored;
+  }
+  const { initial, fields, values, views, actions, edges } = stored;
+  return {
+    initial,
+    views: views.map((row) =>
+      Object.fromEntries(
+        fields.flatMap((field, column) => (row[column] === -1 ? [] : [[field, values[column]?.[row[column] ?? -1]]])),
+      ),
+    ),
+    edges: edges.map((packed) => {
+      const action = packed % actions.length;
+      const target = Math.floor(packed / actions.length) % views.length;
+      return [Math.floor(packed / actions.length / views.length), target, actions[action] ?? ''] as const;
+    }),
+  };
+};
+
+type CompactSpecGraph = {
+  readonly initial: readonly number[];
+  readonly fields: readonly string[];
+  readonly values: ReadonlyArray<readonly unknown[]>;
+  readonly views: ReadonlyArray<readonly number[]>;
+  readonly actions: readonly string[];
+  /** Each edge packs `(from * stateCount + to) * actionCount + actionIndex`. */
+  readonly edges: readonly number[];
+};
 
 /**
  * The committed text of a spec graph: canonical JSON, one trailing newline.
  *
  * @public
  */
-export const serializeGraph = (graph: SpecGraph): string =>
-  `{"initial":${JSON.stringify(graph.initial)},\n"views":[\n${graph.views.map((view) => canonicalJson(view)).join(',\n')}\n],\n"edges":[\n${graph.edges.map((edge) => JSON.stringify(edge)).join(',\n')}\n]}\n`;
+export const serializeGraph = (graph: SpecGraph): string => {
+  const plain = `{"initial":${JSON.stringify(graph.initial)},\n"views":[\n${graph.views.map((view) => canonicalJson(view)).join(',\n')}\n],\n"edges":[\n${graph.edges.map((edge) => JSON.stringify(edge)).join(',\n')}\n]}\n`;
+  // Plain JSON grows under the repository formatter; compact large graphs before that step.
+  if (Buffer.byteLength(plain) <= 600_000) {
+    return plain;
+  }
+
+  const fields = [...new Set(graph.views.flatMap((view) => Object.keys(view)))].sort();
+  const values = fields.map((field) =>
+    [...new Set(graph.views.flatMap((view) => (Object.hasOwn(view, field) ? [canonicalJson(view[field])] : [])))]
+      .sort()
+      .map((text) => JSON.parse(text) as unknown),
+  );
+  const indices = values.map((column) => new Map(column.map((value, index) => [canonicalJson(value), index])));
+  const views = graph.views.map((view) =>
+    fields.map((field, column) =>
+      Object.hasOwn(view, field) ? (indices[column]?.get(canonicalJson(view[field])) ?? -1) : -1,
+    ),
+  );
+  const actions = [...new Set(graph.edges.map((edge) => edge[2]))].sort();
+  const actionIndices = new Map(actions.map((action, index) => [action, index]));
+  const edges = graph.edges.map(
+    ([from, to, action]) => (from * views.length + to) * actions.length + (actionIndices.get(action) ?? -1),
+  );
+  return `${JSON.stringify({ initial: graph.initial, fields, values, views, actions, edges })}\n`;
+};
 
 /**
  * The committed text of a covering suite: canonical JSON, one trailing newline.

@@ -54,7 +54,7 @@ export function RootCommandPaletteItems({ match }: { readonly match: UIMatch }):
         group: 'Developer',
         icon: <Code2 />,
         link: '/debug/geospec',
-        visible: ENV.TAU_DEBUG,
+        visible: ENV.TAU_DEBUG && !(import.meta.env.TAU_TARGET === 'desktop' && import.meta.env.PROD),
       },
       {
         id: 'sign-in',

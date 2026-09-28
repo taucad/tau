@@ -26,6 +26,8 @@ const routes: RouteConfigEntry[] = await flatRoutes({
     // `+types/*.test.ts` modules vitest then fails to collect).
     '../../app/routes/**/*.test.{ts,tsx}',
     '../../app/routes/**/*.spec.{ts,tsx}',
+    // The performance lab needs locally generated GeoSpec WASM; keep it in dev builds only.
+    ...(process.env['NODE_ENV'] === 'production' ? ['../../app/routes/debug.geospec/**'] : []),
     // oxlint-disable-next-line eslint/dot-notation -- ProcessEnv is index-signature-only with noPropertyAccessFromIndexSignature.
     ...(resolveTauCloudBuildEnabled(process.env['TAU_CLOUD_ENABLED']) ? [] : ['../../app/routes/usage/**']),
 

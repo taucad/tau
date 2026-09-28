@@ -126,7 +126,7 @@
         "{projectRoot}/src/model/**/*.ts",
         "{projectRoot}/src/render/**/*.ts",
         "{projectRoot}/src/generated/**/*",
-        "{workspaceRoot}/packages/plugins/*/agent/doctrine.md",
+        "{workspaceRoot}/packages/plugins/*/agent/*.md",
         "{workspaceRoot}/packages/geospec/agent/doctrine.md",
         "{workspaceRoot}/pnpm-lock.yaml",
         "sharedGlobals"

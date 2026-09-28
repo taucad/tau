@@ -324,9 +324,8 @@ function startTurnOwner(store: StoreType, projectId: string): void {
 /**
  * Publish what one chat's admission composes, as its route would.
  *
- * Deliberately separable from {@link startTurnOwner}: the seeded first turn is
- * requested before the route has mounted, and the admission actor waits for
- * this rather than timing out on it.
+ * Deliberately separable from {@link startTurnOwner}: a loaded seed remains
+ * durable and pending until the focused admission and connector both publish.
  *
  * @param chatId - The chat this admission belongs to.
  * @param request - What the admission composes, or a throw to refuse the turn.
@@ -440,6 +439,61 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
       expect(reloaded.get('chat_seed_waiting_ack')?.chat.messages).toContainEqual(seed);
     });
     expect(deps.consumeChatStartupRequest).not.toHaveBeenCalled();
+    expect(
+      reloaded
+        .get('chat_seed_waiting_ack')
+        ?.stateActorRef.getSnapshot()
+        .matches({ run: { queued: 'admitting' } }),
+    ).toBe(false);
+
+    const hostCommand = vi.fn(
+      async (command: HostCommand): Promise<CommandAnswer> => ({
+        commandId: command.commandId,
+        generation: 0,
+        status: 'applied',
+        effect: 'durable',
+        cursor: 1,
+      }),
+    );
+    const unpublishConnector = reloaded.publishProjectHostConnector(
+      'project_seed_waiting_ack',
+      async () => ({ hostCommand, close: vi.fn() }) as unknown as AgentHostClient,
+    );
+    expect(hostCommand).not.toHaveBeenCalled();
+    const unpublishAdmission = publishChatTurnAdmission('chat_seed_waiting_ack', async (gesture) => {
+      if (gesture.kind !== 'regenerate' || gesture.requestId === undefined) {
+        throw new Error('Expected the durable seeded regenerate gesture.');
+      }
+      const runId = gesture.requestId;
+      return {
+        runId,
+        leaseTurnId: undefined,
+        request: {
+          kind: 'regenerate',
+          command: {
+            type: 'start',
+            commandId: runId,
+            payload: {
+              chatId: 'chat_seed_waiting_ack',
+              runId,
+              message: { id: seed.id, role: 'user', content: 'Make a cube' },
+              trigger: 'submit',
+            },
+          },
+        },
+      };
+    });
+    reloaded.startPendingSeed('chat_seed_waiting_ack');
+    await vi.waitFor(() => {
+      expect(hostCommand).toHaveBeenCalledOnce();
+      expect(deps.consumeChatStartupRequest).toHaveBeenCalledWith('chat_seed_waiting_ack', 'req_seed_waiting_ack');
+    });
+    reloaded.startPendingSeed('chat_seed_waiting_ack');
+    expect(hostCommand).toHaveBeenCalledOnce();
+    unpublishAdmission();
+    unpublishConnector();
+    first.release('chat_seed_waiting_ack');
+    reloaded.release('chat_seed_waiting_ack');
   });
 
   it('dispatches one admitted Start before the SDK watches its projected run', async () => {
@@ -1447,10 +1501,7 @@ describe('ChatSessionStore', () => {
       owner.stop();
       expect(root.getSnapshot().status).toBe('active');
 
-      admission.resolve({
-        kind: 'regenerate',
-        body: { agent: { profile: 'cad', execution: { kind: 'tau', model: 'cad-default' }, kernel: 'replicad' } },
-      });
+      admission.resolve({ kind: 'regenerate' });
       await expect(requested).resolves.toBeUndefined();
       expect(root.getSnapshot().matches({ run: { queued: 'admitting' } })).toBe(false);
       store.release('chat_stopped_admitting');

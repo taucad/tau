@@ -37,8 +37,8 @@ export type GetRetryDelayOptions = {
  *
  * Curve:
  * - Attempt `n` ≥ 1: `min(baseDelay × 2^(n - 1), maxDelay)` plus 0–25 % uniform jitter.
- * - Attempts `< 1` are clamped to 1 (defensive — callers should always pass
- *   the 1-based attempt counter from `requestLifecycle.retrying`).
+ * - Attempts `< 1` are clamped to 1 (defensive — callers pass a 1-based
+ *   attempt counter).
  *
  * The returned delay is **always** at least the un-jittered base for that
  * attempt, and at most `1.25 × min(baseDelay × 2^(n - 1), maxDelay)`.

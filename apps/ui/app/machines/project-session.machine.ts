@@ -175,9 +175,6 @@ const flushSync = createAsyncLogic<void, { projectId: string; boundMilliseconds:
   run: unprovided('flushSync'),
 });
 
-/** Retire the leases this session's turns took on the project's checkouts. */
-const releaseLeases = createAsyncLogic<void, { projectId: string }>({ run: unprovided('releaseLeases') });
-
 /** Release the project-scoped agent-host registration after its work drains. */
 const releaseAgentHost = createAsyncLogic<void, { projectId: string }>({ run: unprovided('releaseAgentHost') });
 
@@ -204,7 +201,6 @@ const projectSessionActors = {
   cancelRuns,
   flushProducers,
   flushSync,
-  releaseLeases,
   releaseAgentHost,
   fileManager,
   project,
@@ -515,7 +511,7 @@ export const projectSessionMachine = setup({
       initial: 'idle',
       on: {
         projectedRunsChanged: ({ context, event }, enq) => {
-          const runs = event.runs;
+          const { runs } = event;
           reportFacts({ ...context, runs }, enq);
           /* R3: a run needs the kernel back whether or not anyone is looking. */
           if (runs.length > 0) {
@@ -640,14 +636,6 @@ export const projectSessionMachine = setup({
               projectId: context.projectId,
               boundMilliseconds: context.closeFlushMilliseconds,
             }),
-            onDone: { target: 'releasing' },
-            onError: closeFailed,
-          },
-        },
-        releasing: {
-          invoke: {
-            src: 'releaseLeases',
-            input: ({ context }) => ({ projectId: context.projectId }),
             onDone: { target: 'releasingAgentHost' },
             onError: closeFailed,
           },

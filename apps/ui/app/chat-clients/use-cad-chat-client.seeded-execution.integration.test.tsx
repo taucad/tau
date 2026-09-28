@@ -2,24 +2,16 @@
 /**
  * Seeded first turn — execution provenance (integration)
  *
- * The one dispatch in the app that carries no body of its own is the seeded
- * first turn: `loadChatActor` consumes `Chat.startupRequest` and sends
- * `startRequest` *before* the `chatRetrieved` event that hydrates the chat
- * row's `activeExecution` into the persistence machine. Every other scope
- * hands the execution in already-resolved, so nothing crossed
- * `useSessionExecution` in its **un-hydrated** state — where it fabricates
- * `{ kind: 'tau', model: <cookie> }` and the published body factory closes
- * over it. The operator's Codex chat therefore ran its first turn as a Tau
- * turn at the last-used Tau model.
+ * A seeded first turn starts before the focused view necessarily knows its
+ * model. Its durable startup intent and persisted execution must be the
+ * command source; the cookie fallback must not turn an ACP seed into Tau.
  *
  * So this scope deliberately mounts the **real** `<ActiveChatProvider>` (no
  * `vi.mock` of the provider), the real `useCadChatClient` and the real
  * `ChatSessionStore` over a chat row that carries both an `activeExecution`
- * and a pending startup request, and asserts on the body the store hands
- * `Chat.regenerate` — the wire body of the turn that actually runs.
+ * and a pending startup request, and asserts on the one durable host command.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { z } from 'zod';
 import { render, waitFor } from '@testing-library/react';
 import type { CadAgentExecution, Chat as ChatEntity, MyUIMessage } from '@taucad/chat';
 import type * as CadAgentConfigModuleShape from '#hooks/use-cad-agent-config.js';
@@ -30,6 +22,8 @@ import { ChatTurnHost } from '#chat-clients/chat-turn-host.js';
 import { createActor } from 'xstate';
 import { projectSessionMachine } from '#machines/project-session.machine.js';
 import { resetChatTurnServices } from '#chat-clients/_internal/chat-host-binding.js';
+import type { AgentHostClient } from '#services/agent-host-client.js';
+import type { HostCommand } from '@taucad/agent-host/wire';
 
 /** The Tau model the cookie holds — what the un-hydrated fallback rebuilds from. */
 const cookieModelId = 'openai-gpt-5.6-luna';
@@ -62,6 +56,7 @@ const harness = vi.hoisted(() => {
   });
   return {
     chats: new Map<string, FakeChat>(),
+    commands: [] as HostCommand[],
     store: undefined as unknown as ChatSessionStore,
     projectSession: undefined as { stop: () => void } | undefined,
     models: {
@@ -94,7 +89,7 @@ const harness = vi.hoisted(() => {
 });
 
 // The store's own `Chat` instance, minus the AI SDK and its transport: this
-// scope asserts on the body handed to `regenerate`, never on a stream.
+// scope asserts on the host command, never on a stream.
 vi.mock('#chat-clients/_internal/shared-chat-transport.js', () => ({
   createChatInstance: ({ chatId }: { chatId: string }) => {
     const chat = {
@@ -115,15 +110,6 @@ vi.mock('#chat-clients/_internal/shared-chat-transport.js', () => ({
     return chat;
   },
 }));
-vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', () => ({
-  registerAgentHost: () => () => undefined,
-  registerAgentHostRunReset: () => () => undefined,
-  getBrowserAgentHostRun: () => undefined,
-  resolveBrowserAgentHostInterrupt: async () => undefined,
-  // Read when the loaded row rebinds the chat to its project; no settlement was recorded.
-  getHostTurnSettlement: () => undefined,
-  subscribeHostTurnSettlements: () => () => undefined,
-}));
 vi.mock('#machines/inspector.js', () => ({ inspect: undefined }));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({ useChatSessionStore: () => harness.store }));
 vi.mock('#hooks/use-chat.js', () => ({
@@ -140,8 +126,7 @@ vi.mock('#hooks/use-context-payload.js', () => ({ useContextPayload: () => undef
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ projectId: 'proj_seeded', mainEntryPath: 'main.ts' }),
 }));
-// Absent file manager: the browser-host registration effect returns early, so
-// this scope never builds a worker-backed host client.
+// Absent file manager: this scope publishes an explicit host-command stub.
 vi.mock('#hooks/use-file-manager.js', () => ({
   useOptionalFileManager: () => undefined,
   useFileManager: () => ({ client: harness.client }),
@@ -154,8 +139,6 @@ vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
   readRootedBridgeCapabilities: async () => ({ writable: true, durability: 'exclusive-append' }),
   waitForRootedBridgeOpener: async () => undefined,
 }));
-/* ChatTurnHost composes a registration only once the project's revision root is connected (W8 TS-S5). */
-vi.mock('#hooks/use-revision-status.js', () => ({ useRevisionClient: () => ({}) }));
 // A browser build: no implicit local daemon, and no host directory to probe.
 vi.mock('#lib/agent-host-placement.js', () => ({
   localAgentHostId: () => undefined,
@@ -193,13 +176,14 @@ const buildSeededRow = (activeExecution: CadAgentExecution): ChatEntity => ({
     messageId: pendingUserMessage.id,
     source: 'homepage-initial-message',
     createdAt: 1_700_000_000_000,
+    message: pendingUserMessage,
   },
   createdAt: 1_700_000_000_000,
   updatedAt: 1_700_000_000_000,
 });
 
 /** Mount the real provider + client over a row seeded with `activeExecution`. */
-const dispatchSeededTurn = async (activeExecution: CadAgentExecution): Promise<Record<string, unknown>> => {
+const dispatchSeededTurn = async (activeExecution: CadAgentExecution): Promise<HostCommand> => {
   const row = buildSeededRow(activeExecution);
   const store = new ChatSessionStore();
   harness.store = store;
@@ -211,6 +195,17 @@ const dispatchSeededTurn = async (activeExecution: CadAgentExecution): Promise<R
     commitCancelledDraftRestore: async () => undefined,
     client: harness.client,
   });
+  store.publishProjectHostConnector(
+    row.resourceId,
+    async () =>
+      ({
+        hostCommand: async (command: HostCommand) => {
+          harness.commands.push(command);
+          return { commandId: command.commandId, generation: 1, status: 'applied', effect: 'durable', cursor: 1 };
+        },
+        close: async () => undefined,
+      }) as unknown as AgentHostClient,
+  );
   /* The seeded turn is a turn like any other: its owner is the chat's session
    * actor under its project's, and the admission it invokes is the one
    * `ChatTurnHost` publishes below (C3). */
@@ -227,70 +222,55 @@ const dispatchSeededTurn = async (activeExecution: CadAgentExecution): Promise<R
 
   render(
     <ActiveChatProvider chatId={chatId} projectId={row.resourceId}>
-      {/* The chat's one turn host publishes the bodyless body factory the
-          seeded dispatch composes through; the view beside it only reads. */}
+      {/* The chat's one turn host composes the durable command; the view beside it only reads. */}
       <ChatTurnHost />
       <Client />
     </ActiveChatProvider>,
   );
 
   await waitFor(() => {
-    expect(harness.chats.get(chatId)?.regenerate).toHaveBeenCalledTimes(1);
+    expect(harness.commands).toHaveLength(1);
   });
-  const [options] = harness.chats.get(chatId)!.regenerate.mock.calls[0]! as [
-    { body?: Record<string, unknown> } | undefined,
-  ];
-  return options?.body ?? {};
+  return harness.commands[0]!;
 };
 
 beforeEach(() => {
   harness.chats.clear();
+  harness.commands.length = 0;
   harness.projectSession?.stop();
   harness.projectSession = undefined;
   resetChatTurnServices();
   vi.clearAllMocks();
 });
 
-/**
- * The CAD context an external admission carried.
- *
- * @param body - The turn body the client sent.
- * @returns Its `browserHost.context` object.
- */
-const externalContext = (body: Record<string, unknown>): Record<string, unknown> => {
-  const parsed = z.object({ browserHost: z.object({ context: z.record(z.string(), z.unknown()) }) }).safeParse(body);
-  return parsed.data?.browserHost.context ?? {};
-};
-
 describe('seeded first turn execution', () => {
   it('runs the external agent the consumed row selected, not the cookie Tau fallback', async () => {
-    const body = await dispatchSeededTurn({ kind: 'acp', hostId: 'desktop', agentId: 'codex' });
+    const command = await dispatchSeededTurn({ kind: 'acp', hostId: 'desktop', agentId: 'codex' });
 
-    expect(body['agent']).toMatchObject({
-      profile: 'cad',
-      execution: { kind: 'acp', hostId: 'desktop', agentId: 'codex' },
+    expect(command).toMatchObject({
+      type: 'start',
+      commandId: 'req_seeded',
+      payload: { runId: 'req_seeded', trigger: 'submit', config: { agent: { kind: 'acp', id: 'codex' } } },
     });
     /* V12: the agent selection *and* the CAD context the client composed —
      * without it the daemon prompts an agent that knows no kernel at all. No
      * Tau model row, prompt blocks or tool grant travel with it (X6). */
-    expect(body['browserHost']).toMatchObject({ trigger: 'submit', agent: { kind: 'acp', id: 'codex' } });
-    const context = externalContext(body);
-    expect(String(context['systemPrompt'])).toContain('<workflow>');
-    expect(Object.keys(context)).not.toContain('model');
-    // An external agent is daemon-placed: the daemon owns the files, so no
-    // browser workspace claim is prepared or fenced for this turn — but the
-    // target still names the host and the mode it must record in (V18).
-    expect(body['execution']).toEqual({ hostId: 'desktop' });
+    if (command.type !== 'start') {
+      throw new Error('Expected seeded Start');
+    }
+    expect(command.payload.config?.systemPrompt).toContain('<workflow>');
+    expect(command.payload.config).not.toHaveProperty('model');
   });
 
   it('keeps the consumed row’s Tau host and model instead of rebuilding them from the cookie', async () => {
-    const body = await dispatchSeededTurn({ kind: 'tau', hostId: 'origin', model: 'openai-gpt-5.5' });
+    const command = await dispatchSeededTurn({ kind: 'tau', hostId: 'origin', model: 'openai-gpt-5.5' });
 
-    expect(body['agent']).toMatchObject({ execution: { kind: 'tau', hostId: 'origin', model: 'openai-gpt-5.5' } });
-    const browserHost = body['browserHost'] as { trigger: string; config: { model: { id: string } } };
-    expect(browserHost.trigger).toBe('submit');
-    expect(browserHost.config.model.id).toBe('openai-gpt-5.5');
-    expect(JSON.stringify(body)).not.toContain(cookieModelId);
+    expect(command).toMatchObject({
+      type: 'start',
+      commandId: 'req_seeded',
+      payload: { runId: 'req_seeded', trigger: 'submit', config: { model: { id: 'openai-gpt-5.5' } } },
+    });
+    expect(JSON.stringify(command)).not.toContain(cookieModelId);
   });
 
   /**

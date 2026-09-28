@@ -60,7 +60,6 @@ const harness = (options?: {
           });
         }
       }),
-      releaseLeases: fromSafeAsync<void, { projectId: string }>(async () => undefined),
       releaseAgentHost: fromSafeAsync<void, { projectId: string }>(async () => undefined),
       fileManager: readyChild('views'),
       project: readyChild('runtime'),

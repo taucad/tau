@@ -15,9 +15,8 @@ import { useTurnAdmission } from '#chat-clients/_internal/use-turn-admission.js'
 /**
  * Input payload for {@link CadChatClient.submit}. Mirrors the surface the
  * `ChatTextarea`'s `onSubmit` hands the client — a string `text` plus the
- * draft's stored attachments. All other request configuration
- * (model, kernel, mode, toolChoice, testingEnabled, snapshot, contextPayload)
- * is composed *inside* the client from `useCadAgentConfig`.
+ * draft's stored attachments. `ChatTurnHost` composes the durable host command
+ * from the selected agent and its current project context.
  *
  * @public
  */
@@ -28,27 +27,18 @@ export type CadChatSubmitInput = {
 };
 
 /**
- * Public surface of the CAD chat client. Every UI assembly site reaches the
- * `/v1/chat` wire through one of these verbs — never through the raw
- * `Chat.sendMessage` / `Chat.regenerate` API or a hand-built `body: { ... }`
- * literal. This is the indirection that stops the previously-broken
- * kernel / testingEnabled / model fields from sprawling across N call sites
- * (the original symptom behind the chat-metadata-first-class-architecture
- * refactor).
+ * Public surface of the CAD chat client. UI assembly sites express gestures
+ * through these verbs, never a raw SDK request or hand-built host command.
  *
- * The verbs route their requests through the **persistence machine** (via
- * `useChatActions().sendMessage`) so the entire request lifecycle —
- * milestone persists, tool-state cleanup on abort / disconnect, auto-retry
- * on transport disconnects, status emit on `streaming` — remains owned by
- * the existing `chatPersistenceMachine`. The chat client's only addition
- * is the per-request `body: { agent }` payload it threads onto each
- * dispatch (see `dispatchRequest` in `chat-session-store.ts`).
+ * `ChatSessionStore` turns each gesture into one command id and a projection
+ * watch. The persistence machine retains only chat record/error/composer state;
+ * the host log owns run lifecycle, transcript and settlement.
  *
  * @public
  */
 export type CadChatClient = {
   /**
-   * Send a fresh user message. Builds `{ body: { agent } }` from the live agent config.
+   * Send a fresh user message through the chat's admission and command path.
    *
    * Settles once the message is handed to the chat or the dispatch failed, so
    * the composer can stay busy through attachment copy and workspace admission
@@ -58,9 +48,8 @@ export type CadChatClient = {
   submit: (input: CadChatSubmitInput) => Promise<void>;
   /**
    * Replace the targeted user message's text/image parts and regenerate the
-   * assistant turn from there. The wire body's `agent` block is composed
-   * from the live `useCadAgentConfig` snapshot — never from the historical
-   * user-message metadata (which is preserved verbatim for display badges).
+   * assistant turn from there. Admission uses the live agent config, never
+   * historical user-message metadata (which is retained for display).
    */
   edit: (messageId: string, input: CadChatSubmitInput) => void;
   /** Abort the in-flight request, if any. */
@@ -84,9 +73,7 @@ export type CadChatClient = {
   /** Live error from the bound `Chat` instance. */
   error: Error | undefined;
   /**
-   * Snapshot of the agent config the client will send on its next call.
-   * Exposed for test/regression scope and the chat-session-store dispatch
-   * adapter (R10/t17) — production UI sites should not read this directly.
+   * Snapshot of the agent config the next turn's admission will use.
    */
   agent: CadAgentConfigInput;
 };
@@ -103,11 +90,9 @@ const promotionToastId = 'chat-attachment-promotion';
  * - {@link useActiveChatInstance} — the module-private accessor for the live
  *   AI SDK `Chat` instance owned by the chat-session store. Exposed via the
  *   client's `messages`/`status`/`error` reads.
- * - {@link useChatActions} — the persistence-machine entry point. Verbs go
- *   through here so the machine still owns lifecycle / cleanup / retry.
+ * - {@link useChatActions} — the gesture entry point into the session store.
  *
- * Exposes profile-aware verbs (`submit`, `edit`, `stop`) that thread
- * `body: { agent }` onto every wire call. Verb identities are
+ * Exposes profile-aware verbs (`submit`, `edit`, `stop`). Verb identities are
  * stable across renders as long as the underlying actions and agent identity
  * don't change.
  *

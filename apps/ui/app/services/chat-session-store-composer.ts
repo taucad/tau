@@ -1,7 +1,7 @@
 /**
  * The composer-record plumbing `ChatSessionStore` binds each chat to
- * (blueprint W7, D7, D9): a record store that waits for the chat's project,
- * the drain that lets a closing chat keep its last keystroke, and the
+ * (blueprint W7, D7, D9): a record store that waits for its predecessor's
+ * write drain so a closing chat keeps its last keystroke, and the
  * attachment references a draft still holds.
  */
 
@@ -17,7 +17,7 @@ import type { AttachmentName } from '#utils/attachment.utils.js';
 
 type ComposerRecordRef = Actor<typeof composerRecordMachine>;
 
-/** Maximum wait for a chat row to name the project holding its composer. */
+/** External-I/O liveness bound for the previous record actor's write drain. */
 const composerBindingTimeout = 30_000;
 
 const awaitComposerBinding = async (
@@ -28,7 +28,7 @@ const awaitComposerBinding = async (
     expired.reject(
       new AgentHostWorkerError(
         'COMPOSER_BINDING_TIMEOUT',
-        'This chat never found the project its draft is saved in. Reload the page and try again.',
+        'The previous draft save for this chat did not finish. Reload the page and try again.',
       ),
     );
   }, composerBindingTimeout);
@@ -67,26 +67,20 @@ export type UnreadRecord = {
 };
 
 /**
- * A record store whose I/O waits for the chat's project to be known.
+ * A record store whose I/O waits for a released predecessor's writes.
  *
- * The record actor and the draft actor exist before the chat row has said which
- * project it belongs to, and the acquire-time project can be a stale focus. So
- * the machine starts at once and its read and writes resolve against the real
- * path once `bound` does; a patch made before that is held by the record
- * machine, not lost.
+ * `ChatSessionStore` receives the project id at acquire and constructs the
+ * binding immediately. It waits only for the previous actor of this chat to
+ * drain its final writes, preserving their order across reacquisition.
  *
  * A chat with no project (`undefined`) has nowhere to keep a composer: its
  * record reads as absent and its record writes are dropped, so an ownerless
  * draft lives in memory without a failure to report. Attachment bytes still
  * fail, because a draft cannot hold an attachment it has nowhere to store.
  *
- * Nothing this store does can outlast the composer's wait bound. `bound`
- * is settled by a peer — the chat row that names the owning project, behind a
- * released predecessor's drain — and an unbounded wait on it left the record
- * machine in `loading` for the life of the page: the saved draft never came
- * back, every keystroke queued behind a write that never started, and not one
- * of them was ever reported. Past the bound the read fails like any other
- * unreadable record, so the composer turns usable and says so (D7).
+ * The previous actor's filesystem write can fail to return. Past this bound
+ * the read fails like any other unreadable record, so the composer becomes
+ * usable and reports the failure instead of waiting forever (D7).
  *
  * @param bound - Settles with the chat's binding, or `undefined` for none.
  * @returns A store that delegates to the bound one.

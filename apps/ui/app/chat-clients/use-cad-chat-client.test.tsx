@@ -319,6 +319,7 @@ const installSessionStore = (partial: Partial<ChatSessionStore>): void => {
    * these rows render, and it calls the store's placement and body seams. */
   vi.mocked(useChatSessionStore).mockReturnValue({
     requestTurn: vi.fn(),
+    startPendingSeed: vi.fn(),
     setTurnPlacement: vi.fn(),
     respondToProjectedApproval: browserHostHarness.resolveInterrupt,
     getProjection: () => {
@@ -976,7 +977,7 @@ describe('useCadChatClient', () => {
     expect(secondAgent).toBe(firstAgent);
   });
 
-  it('should publish the chat admission and leave it owned by the session on view unmount', async () => {
+  it('should unpublish the focused admission on view unmount without interrupting its composed command', async () => {
     const chat = mock<Chat<MyUIMessage>>();
     chat.messages = [{ id: 'user-owned', role: 'user', parts: [{ type: 'text', text: 'Build it.' }] }];
     useActiveChatInstanceMock.mockReturnValue(chat);
@@ -990,8 +991,8 @@ describe('useCadChatClient', () => {
 
     unmount();
 
-    // The registry keeps the admission after the view goes: a run may outlive it.
-    expect(chatTurnAdmit('chat_test')).toBeDefined();
+    // An admitted command is already composed; a later seed must not call stale route hooks.
+    expect(chatTurnAdmit('chat_test')).toBeUndefined();
   });
 
   /** Mounts the client over a fixed transcript and returns its durable Start command. */
@@ -1058,6 +1059,7 @@ describe('useCadChatClient', () => {
     await waitFor(() => {
       expect(chatTurnAdmit('chat_second')).toBeDefined();
     });
+    expect(chatTurnAdmit('chat_test')).toBeUndefined();
   });
 
   /* Resume never changes kind into a replay after its gesture was taken. */

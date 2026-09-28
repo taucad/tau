@@ -99,36 +99,36 @@ describe('createDaemonAgentHostTransport', () => {
     const client = createAgentHostClient(createDaemonAgentHostTransport(channel));
 
     await expect(
-      client.start({
-        chatId: 'chat-1',
-        runId: 'run-1',
-        trigger: 'submit',
-        message: 'Build it.',
-        config: {
-          systemPrompt: 'admission prompt',
-          systemPromptBlocks: [
-            { type: 'text', text: 'static' },
-            { type: 'text', text: 'dynamic' },
-          ],
-          model: { id: 'fixture-model', providerKind: 'anthropic', contextWindow: 200_000 },
-          toolChoice: 'auto',
-          allowedTools: ['create_file'],
-          // The daemon assembles its own tool registry; this must not travel.
-          testingEnabled: true,
+      client.hostCommand({
+        type: 'start',
+        commandId: 'gesture-start-1',
+        payload: {
+          chatId: 'chat-1',
+          runId: 'run-1',
+          trigger: 'submit',
+          message: { id: 'user-1', role: 'user', content: 'Build it.' },
+          config: {
+            systemPrompt: 'admission prompt',
+            systemPromptBlocks: [
+              { type: 'text', text: 'static' },
+              { type: 'text', text: 'dynamic' },
+            ],
+            model: { id: 'fixture-model', providerKind: 'anthropic', contextWindow: 200_000 },
+            toolChoice: 'auto',
+            allowedTools: ['create_file'],
+          },
         },
       }),
-    ).resolves.toMatchObject({ runId: 'run-1', state: 'completed' });
+    ).resolves.toMatchObject({ commandId: 'gesture-start-1', status: 'applied' });
 
     expect(channel.commands.at(0)).toEqual({
       type: 'start',
-      /* oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- `expect.stringMatching` is typed `any` by vitest. */
-      commandId: expect.stringMatching(/^req_/u),
+      commandId: 'gesture-start-1',
       payload: {
         trigger: 'submit',
         chatId: 'chat-1',
         runId: 'run-1',
-        /* oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- `expect.any` is typed `any` by vitest. */
-        message: { id: expect.any(String), role: 'user', content: 'Build it.' },
+        message: { id: 'user-1', role: 'user', content: 'Build it.' },
         config: {
           systemPrompt: 'admission prompt',
           systemPromptBlocks: [
@@ -141,8 +141,7 @@ describe('createDaemonAgentHostTransport', () => {
         },
       },
     });
-    // The answer is by key; the snapshot comes from one attach after it.
-    expect(channel.commands.map((command) => command.type)).toEqual(['start', 'attach']);
+    expect(channel.commands.map((command) => command.type)).toEqual(['start']);
     await client.close();
   });
 
@@ -150,13 +149,16 @@ describe('createDaemonAgentHostTransport', () => {
     const channel = fakeChannel();
     const client = createAgentHostClient(createDaemonAgentHostTransport(channel));
 
-    await client.start({
-      chatId: 'chat-1',
-      runId: 'run-1',
-      trigger: 'submit',
-      message: 'Build it.',
-      agent: { kind: 'acp', id: 'claude-code' },
-      context: { systemPrompt: 'CAD prompt' },
+    await client.hostCommand({
+      type: 'start',
+      commandId: 'gesture-agent-1',
+      payload: {
+        chatId: 'chat-1',
+        runId: 'run-1',
+        trigger: 'submit',
+        message: { id: 'user-1', role: 'user', content: 'Build it.' },
+        config: { agent: { kind: 'acp', id: 'claude-code' }, systemPrompt: 'CAD prompt', toolChoice: 'auto' },
+      },
     });
 
     expect(channel.commands.at(0)?.payload).toMatchObject({
@@ -173,13 +175,22 @@ describe('createDaemonAgentHostTransport', () => {
     const channel = fakeChannel();
     const client = createAgentHostClient(createDaemonAgentHostTransport(channel));
 
-    await client.attach({ chatId: 'chat-attached', cursor: 0 });
-    await expect(client.cancel('run-1')).resolves.toMatchObject({ runId: 'run-1' });
+    await client.hostCommand({
+      type: 'attach',
+      commandId: 'attach-1',
+      payload: { chatId: 'chat-attached' },
+    });
+    await expect(
+      client.hostCommand({
+        type: 'cancel',
+        commandId: 'stop-1',
+        payload: { chatId: 'chat-attached', runId: 'run-1' },
+      }),
+    ).resolves.toMatchObject({ status: 'applied' });
 
     expect(channel.commands.find((command) => command.type === 'cancel')).toEqual({
       type: 'cancel',
-      /* oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- `expect.stringMatching` is typed `any` by vitest. */
-      commandId: expect.stringMatching(/^req_/u),
+      commandId: 'stop-1',
       payload: { chatId: 'chat-attached', runId: 'run-1' },
     });
     await client.close();
@@ -189,8 +200,26 @@ describe('createDaemonAgentHostTransport', () => {
     const channel = fakeChannel();
     const client = createAgentHostClient(createDaemonAgentHostTransport(channel));
 
-    await client.resolveInterrupt('chat-1', 'run-1', { interruptId: 'approval-1', outcome: 'approved' });
-    await client.resolveInterrupt('chat-1', 'run-1', { interruptId: 'approval-2', outcome: 'denied' });
+    await client.hostCommand({
+      type: 'resolve-interrupt',
+      commandId: 'approval-click-1',
+      payload: {
+        chatId: 'chat-1',
+        runId: 'run-1',
+        interruptId: 'approval-1',
+        outcome: 'approved',
+      },
+    });
+    await client.hostCommand({
+      type: 'resolve-interrupt',
+      commandId: 'approval-click-2',
+      payload: {
+        chatId: 'chat-1',
+        runId: 'run-1',
+        interruptId: 'approval-2',
+        outcome: 'denied',
+      },
+    });
 
     const resolutions = channel.commands.filter((command) => command.type === 'resolve-interrupt');
     expect(resolutions.map((command) => command.payload)).toEqual([
@@ -246,8 +275,14 @@ describe('createDaemonAgentHostTransport', () => {
     );
     const client = createAgentHostClient(createDaemonAgentHostTransport(channel));
 
-    await expect(client.resume('chat-1', 'run-9')).rejects.toMatchObject({
-      name: 'AgentHostWorkerError',
+    await expect(
+      client.hostCommand({
+        type: 'resume',
+        commandId: 'resume-9',
+        payload: { chatId: 'chat-1', runId: 'run-9' },
+      }),
+    ).resolves.toMatchObject({
+      status: 'refused',
       code: 'RESUME_UNAVAILABLE',
       details: { currentRunId: 'run-1' },
     });
@@ -264,8 +299,13 @@ describe('createDaemonAgentHostTransport', () => {
       }),
     );
 
-    await expect(client.cancel('run-1')).rejects.toMatchObject({ code: 'RUN_NOT_FOUND' });
-    await expect(client.attach({ chatId: 'chat-1', cursor: 0 })).rejects.toMatchObject({
+    await expect(
+      client.hostCommand({
+        type: 'attach',
+        commandId: 'attach-rejected',
+        payload: { chatId: 'chat-1' },
+      }),
+    ).rejects.toMatchObject({
       code: 'HOST_NOT_PAIRED',
       message: 'This computer is no longer paired with your account.',
     });

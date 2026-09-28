@@ -1927,13 +1927,13 @@ describe('ChatSessionStore', () => {
         send: (event: { type: string }) => {
           heard.push(event.type);
         },
-        getSnapshot: () => ({ context: { chatRefs: { [chatId]: actor } } }),
+        getSnapshot: () => ({ context: { chatRefs: { [chatId]: actor }, runs: [] } }),
       } as unknown as ProjectSessionActorRef;
 
       try {
         store.setFocusedProject('project_reattach');
         store.setProjectSession('project_reattach', projectRef);
-        const session = store.acquire(chatId);
+        const session = store.acquire(chatId, 'project_reattach');
         await vi.waitFor(() => {
           expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
         });

@@ -475,6 +475,20 @@ describe('cadMachine', () => {
       actor.stop();
     });
 
+    it('should stage the initial files on the first render only', async () => {
+      const { actor, mockClient } = await startAndConnect();
+      vi.mocked(mockClient.render).mockClear();
+      const stage = { 'main.ts': new Uint8Array([1]) };
+      const sidecar = { '.tau/parameters/main.ts.json': new Uint8Array([2]) };
+
+      actor.send({ type: 'initializeModel', entryPath: stubEntryPath, stage });
+      actor.send({ type: 'commitParameters', stage: sidecar });
+
+      // A kernel that cannot see the preview mount receives its bytes once; the commit carries only its own.
+      expect(vi.mocked(mockClient.render).mock.calls.map(([request]) => request.stage)).toEqual([stage, sidecar]);
+      actor.stop();
+    });
+
     it('should preserve a nested entry path across concurrent CAD actors', async () => {
       const [main, nested] = await Promise.all([startAndConnect(), startAndConnect()]);
 

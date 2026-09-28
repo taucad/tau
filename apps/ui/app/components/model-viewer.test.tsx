@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { Geometry } from '@taucad/types';
 import { ModelViewer, RuntimeStatusOverlay } from '#components/model-viewer.js';
@@ -89,8 +89,11 @@ describe('ModelViewer', () => {
 
       render(<ModelViewer geometry={undefined} error={error} />);
 
-      expect(screen.getByRole('alert')).toBeInTheDocument();
-      expect(screen.getByText('Something went wrong')).toBeInTheDocument();
+      const alert = screen.getByRole('alert', { name: 'CAD runtime error' });
+      expect(alert).toHaveTextContent('Preview could not load. Open the project to see the error.');
+      // The runtime's own text is one disclosure away, not the headline.
+      expect(within(alert).getByText('Something went wrong').closest('details')).not.toHaveAttribute('open');
+      expect(within(alert).getByText('Details')).toBeInTheDocument();
       expect(screen.queryByTestId('cad-viewer')).not.toBeInTheDocument();
     });
 

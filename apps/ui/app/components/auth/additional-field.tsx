@@ -457,6 +457,7 @@ function DateInput({ name, field, isPending }: AdditionalFieldProps) {
               variant='outline'
               id={`${name}-date`}
               data-empty={!date}
+              // oxlint-disable-next-line jsx-a11y/role-supports-aria-props -- drives the Button's invalid border; the field's error text is the announcement
               aria-invalid={Boolean(error)}
               disabled={isPending ?? field.readOnly}
               className={cn('flex-1 justify-between font-normal', 'data-[empty=true]:text-muted-foreground')}

@@ -340,6 +340,18 @@
   }
 }
 
+/* UI Policy §6: reduced motion collapses every animation and transition for every Tau surface.
+   `0.01ms`, not `0s`, so `transitionend` and `animationend` still fire. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 @layer base {
   /* Lucide and lucide-style icons ship stroke-width 2; 1.5 reads lighter at our icon sizes.
      Icons that set any other weight keep it, since this only matches the default. */
@@ -447,8 +459,11 @@
   outline-offset: var(--focus-outline-offset-outside);
 }
 
-/* Shared by primary actions and selected button-like controls in every theme. */
+/* Shared by primary actions and selected button-like controls in every theme. The inset focus
+   outline paints on this fill, where `--ring` falls to 2:1, so the fill recolours it with its own
+   foreground; `focus-outline` still owns the geometry. */
 @utility primary-action {
+  --focus-outline-color: var(--primary-action-foreground);
   color: var(--primary-action-foreground);
   background-color: var(--primary-action);
   background-image: var(--primary-action-sheen);

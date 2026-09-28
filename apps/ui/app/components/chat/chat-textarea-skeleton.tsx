@@ -11,6 +11,6 @@ type ChatTextareaSkeletonProps = {
  */
 export function ChatTextareaSkeleton({ className }: ChatTextareaSkeletonProps): React.JSX.Element {
   return (
-    <div className={cn('flex min-h-[82px] w-full flex-col rounded-2xl border bg-background shadow-md', className)} />
+    <div className={cn('flex min-h-20.5 w-full flex-col rounded-2xl border bg-background shadow-md', className)} />
   );
 }

@@ -6,12 +6,13 @@ import { measureProjectCardForeground } from '#support/project-card-framing.js';
 test('project card thumbnail and preview parity', async () => {
   await target.setViewport({ width: 1440, height: 1000 });
   await target.navigate('/community');
-  const search = selectors.getByPlaceholder('Search projects...');
+  const search = selectors.getByRole('searchbox', { name: 'Search examples' });
   await target.expectVisible(search, 60_000);
   await target.fill(search, 'Cycloidal Gear');
 
-  const card = '[data-slot="card"]:has(img[alt="Cycloidal Gear"])';
-  const thumbnail = selectors.getByCss(`${card} img[alt="Cycloidal Gear"]`);
+  /* The card is named by its link ("Open <name>"); the thumbnail beside the heading is decorative. */
+  const card = '[data-slot="card"]:has(a:has-text("Open Cycloidal Gear"))';
+  const thumbnail = selectors.getByCss(`${card} img`);
   await target.expectVisible(thumbnail);
   await expect
     .poll(async () =>

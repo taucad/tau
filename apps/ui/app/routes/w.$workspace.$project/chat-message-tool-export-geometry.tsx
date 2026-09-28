@@ -184,7 +184,7 @@ function ExportGeometryDownloadSplitButton({
       <div aria-hidden className='w-px self-stretch bg-border' />
       <Tooltip>
         <ComboBoxResponsive
-          className="data-[slot='popover-content']:w-[220px]"
+          className="data-[slot='popover-content']:w-55"
           description='Choose an export format or open the full exporter.'
           emptyListMessage='No export formats available.'
           footer={
@@ -212,7 +212,7 @@ function ExportGeometryDownloadSplitButton({
           onSelect={handleFormatSelect}
           popoverProperties={{ align: 'end' }}
           renderLabel={(item, selectedItem) => <ExportFormatComboboxLabel item={item} selectedItem={selectedItem} />}
-          searchPlaceHolder='Filter formats...'
+          searchPlaceHolder='Filter formats…'
           title='Export formats'
           value={selectedFormatEntry}
         >

@@ -83,7 +83,13 @@ type FileSystemBindingChangedEvent = {
 };
 
 type CadEvent =
-  | { type: 'initializeModel'; entryPath: string; parameters?: Record<string, unknown> }
+  | {
+      type: 'initializeModel';
+      entryPath: string;
+      parameters?: Record<string, unknown>;
+      /** Bytes the first render stages for a kernel that cannot see the files (a desktop ephemeral utility). */
+      stage?: Record<string, Uint8Array<ArrayBuffer>>;
+    }
   | { type: 'setEntryPath'; entryPath: string }
   | { type: 'commitParameters'; stage: Record<string, Uint8Array<ArrayBuffer>> }
   | { type: 'scrubParameters'; parameters: Record<string, unknown> }
@@ -158,11 +164,18 @@ type RenderModelInput = {
   isLatestRequest: () => boolean;
 };
 
-/** What one render carries for parameters: initial preview values, committed sidecar bytes, or a drag sample. */
+/**
+ * What one render carries beyond the entry: initial preview values and staged files, committed
+ * sidecar bytes, or a drag sample.
+ */
 type ParameterRender =
   | Readonly<{ kind: 'commit'; stage: Record<string, Uint8Array<ArrayBuffer>> }>
   | Readonly<{ kind: 'scrub'; parameters: Record<string, unknown> }>
-  | Readonly<{ kind: 'initial'; parameters: Record<string, unknown> }>;
+  | Readonly<{
+      kind: 'initial';
+      parameters?: Record<string, unknown>;
+      stage?: Record<string, Uint8Array<ArrayBuffer>>;
+    }>;
 
 const fallbackCadFailureIssues: readonly KernelIssue[] = Object.freeze([
   Object.freeze({
@@ -363,7 +376,12 @@ const renderModelActor = fromSafeAsync<void, RenderModelInput>(async ({ input })
   const request = {
     ...entry,
     ...(input.parameterRender?.kind === 'commit' ? { stage: input.parameterRender.stage } : {}),
-    ...(input.parameterRender?.kind === 'initial' ? { parameters: input.parameterRender.parameters } : {}),
+    ...(input.parameterRender?.kind === 'initial'
+      ? {
+          ...(input.parameterRender.parameters ? { parameters: input.parameterRender.parameters } : {}),
+          ...(input.parameterRender.stage ? { stage: input.parameterRender.stage } : {}),
+        }
+      : {}),
     ...(input.parameterRender?.kind === 'scrub'
       ? { parameters: input.parameterRender.parameters, transient: true }
       : {}),
@@ -464,7 +482,15 @@ const renderRequestPatch = (context: CadContext, event: RenderTrigger): CadPatch
         codeIssues: [],
         latestGeometryOutcome: undefined,
         parameterManifest: undefined,
-        parameterRender: event.parameters === undefined ? undefined : { kind: 'initial', parameters: event.parameters },
+        /* The initial stage rides only this render; a later commit or scrub replaces it. */
+        parameterRender:
+          event.parameters === undefined && event.stage === undefined
+            ? undefined
+            : {
+                kind: 'initial',
+                ...(event.parameters ? { parameters: event.parameters } : {}),
+                ...(event.stage ? { stage: event.stage } : {}),
+              },
       };
     }
     case 'setEntryPath': {

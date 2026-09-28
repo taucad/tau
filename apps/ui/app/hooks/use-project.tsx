@@ -314,9 +314,9 @@ export function ProjectProvider({
   readonly kernelOptionsFactory?: LazyKernelOptionsFactory;
   readonly profile?: 'editor' | 'shared';
 }): React.JSX.Element {
-  // The shared-project workbench passes no factory, so this default is a real
-  // product path: it reads the same preference the focused workbench does
-  // instead of silently opting into durable reuse (charter D3).
+  // A caller without a factory (the converter route) gets the local kernel, which
+  // reads the same preference the focused workbench does instead of silently
+  // opting into durable reuse (charter D3).
   const computeMode = useComputeReuseMode();
   const resolvedKernelOptionsFactory = kernelOptionsFactory ?? localKernelOptions(projectId, undefined, computeMode);
   const queryClient = useQueryClient();

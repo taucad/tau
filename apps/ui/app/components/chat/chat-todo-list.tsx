@@ -139,6 +139,7 @@ export function ChatTodoList(): React.JSX.Element | undefined {
       <CollapsibleContent>
         <ul
           aria-label='Tasks'
+          // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a scrollable list must be keyboard reachable (WCAG 2.1.1)
           tabIndex={0}
           className='flex max-h-[min(12rem,25cqh)] scroll-shadows-y flex-col gap-1 overflow-y-auto overscroll-contain border-t px-2 pt-2 pb-3 focus-visible:focus-outline'
         >

@@ -119,7 +119,7 @@ export function GeneralSettings(): React.JSX.Element {
                 )}
                 onSelect={handleThemeChange}
               >
-                <Button variant='outline' className='w-[160px] justify-between'>
+                <Button variant='outline' className='w-40 justify-between'>
                   <span className='flex items-center gap-2'>
                     {getThemeIcon(themeWithSystem)}
                     <span className='truncate'>{currentOption.name}</span>
@@ -176,7 +176,7 @@ export function GeneralSettings(): React.JSX.Element {
                   setHue(value.h);
                 }}
               >
-                <Button variant='outline' className='w-[160px] justify-between'>
+                <Button variant='outline' className='w-40 justify-between'>
                   <span className='flex items-center gap-2'>
                     <span className='size-4 shrink-0 rounded-full bg-primary' />
                     <span className='truncate'>Hue: {hue}°</span>
@@ -286,7 +286,7 @@ export function GeneralSettings(): React.JSX.Element {
                   )}
                   onSelect={handlePrivacyModeChange}
                 >
-                  <Button variant='outline' disabled={isUpdating} className='w-[160px] justify-between'>
+                  <Button variant='outline' disabled={isUpdating} className='w-40 justify-between'>
                     <span className='truncate'>{currentMode.name}</span>
                     <ChevronDown className='size-4 shrink-0 opacity-50' />
                   </Button>

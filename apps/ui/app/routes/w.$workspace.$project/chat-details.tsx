@@ -107,7 +107,7 @@ export function DetailsPanelBody({
                   id='project-name'
                   value={projectName}
                   disabled={readOnly}
-                  placeholder='Enter your project name...'
+                  placeholder='Enter your project name…'
                   onChange={(event) => {
                     updateName(event.target.value);
                   }}
@@ -122,7 +122,7 @@ export function DetailsPanelBody({
                   id='project-description'
                   value={projectDescription}
                   disabled={readOnly}
-                  placeholder="Describe what you're building..."
+                  placeholder="Describe what you're building…"
                   className='min-h-20'
                   onChange={(event) => {
                     updateDescription(event.target.value);
@@ -136,7 +136,7 @@ export function DetailsPanelBody({
                   <p className='text-sm text-muted-foreground'>{projectTags.join(', ') || 'No tags'}</p>
                 ) : (
                   <Tags tags={projectTags} onTagsChange={handleTagsChange}>
-                    <TagsTrigger placeholder='Add tags...' />
+                    <TagsTrigger placeholder='Add tags…' />
                   </Tags>
                 )}
               </div>
@@ -145,7 +145,7 @@ export function DetailsPanelBody({
                 <label className='text-sm font-medium text-foreground'>Main file</label>
                 <FileSelector
                   selectedFile={mainFile}
-                  placeholder='Select main file...'
+                  placeholder='Select main file…'
                   title='Select Main File'
                   description='Choose the main file for your project'
                   emptyMessage='No files available'

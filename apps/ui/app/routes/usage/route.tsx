@@ -143,7 +143,7 @@ function FilterMenu<Value extends string>({
           ) : undefined}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align='start' className='max-h-[300px] w-56 overflow-y-auto'>
+      <DropdownMenuContent align='start' className='max-h-75 w-56 overflow-y-auto'>
         <DropdownMenuLabel>Filter by {label.toLowerCase()}</DropdownMenuLabel>
         <DropdownMenuSeparator />
         {options.map((option) => (
@@ -157,7 +157,7 @@ function FilterMenu<Value extends string>({
               onToggle(option.id);
             }}
           >
-            <span className='max-w-[180px] truncate'>{option.label}</span>
+            <span className='max-w-45 truncate'>{option.label}</span>
           </DropdownMenuCheckboxItem>
         ))}
       </DropdownMenuContent>

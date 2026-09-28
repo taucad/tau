@@ -8,7 +8,7 @@ const seedProjectName = 'sgenoud/models file-tree e2e';
 
 const openCommand = async (name: string): Promise<void> => {
   await target.click(selectors.getByRole('button', { name: 'Search', exact: true }));
-  const commandSearch = selectors.getByPlaceholder('Search projects, chats, and actions...');
+  const commandSearch = selectors.getByPlaceholder('Search projects, chats, and actions…');
   await target.fill(commandSearch, name);
   await target.click(selectors.getByRole('option', { name: new RegExp(`^${name}(?:\\s|$)`, 'u') }));
 };

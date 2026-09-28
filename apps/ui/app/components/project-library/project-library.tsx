@@ -79,6 +79,7 @@ import { useSidebarCommands } from '#hooks/use-sidebar-status.js';
 import { Skeleton } from '@taucad/ui/components/skeleton';
 import type { ProjectDiscoveryConflict, WorkspaceBindingRepairGroup } from '#hooks/use-project-manager.js';
 import { ProjectCard, ProjectCardCadPreview, ProjectCardMedia } from '#components/project-card.js';
+import { PageHeader } from '#components/layout/page-header.js';
 import { projectSlugOf, projectUrlOr } from '#utils/project-url.utils.js';
 import { projectLocationDescriptor, projectLocationFullLabel } from '#utils/project-creation-location.utils.js';
 import { useCloudProjects } from '#hooks/use-cloud-projects.js';
@@ -419,12 +420,22 @@ export function ProjectLibrary(): React.JSX.Element {
 
   return (
     <div className='container mx-auto px-4 py-8'>
-      <div className='mb-6 flex items-center justify-between'>
-        <h1 className='text-3xl font-bold'>Projects</h1>
-        <Button asChild>
-          <NavLink to='/'>{({ isPending }) => (isPending ? <Loader /> : 'New Project')}</NavLink>
-        </Button>
-      </div>
+      <PageHeader
+        title='Projects'
+        className='mb-6'
+        action={
+          <Button asChild>
+            <NavLink to='/'>
+              {({ isPending }) => (
+                <>
+                  New project
+                  {isPending ? <Loader /> : null}
+                </>
+              )}
+            </NavLink>
+          </Button>
+        }
+      />
 
       {workspaceBindingRepairs.length > 0 && (
         <div className='mb-6 space-y-2' aria-label='Workspace link repair'>
@@ -759,7 +770,7 @@ function UnifiedProjectList({ rows, viewMode, actions, onOpenCloudProject }: Uni
       <CollectionEmptyState className='min-h-[60vh]'>
         {/* Empty-library CTA — composer-only, no chat session to attach to. */}
         <ChatComposerProvider surface='library'>
-          <div className='mx-auto max-w-2xl space-y-6'>
+          <div className='mx-auto w-full max-w-2xl space-y-6'>
             <div className='flex flex-col items-center space-y-4 text-center'>
               <PackageX className='size-16 text-muted-foreground' strokeWidth={1} />
               <div className='space-y-2'>
@@ -792,7 +803,7 @@ function UnifiedProjectList({ rows, viewMode, actions, onOpenCloudProject }: Uni
   return (
     <div className='space-y-4'>
       <div className='flex items-center justify-between gap-2'>
-        <DataTableSearch table={table} placeholder='Search projects...' containerClassName='grow' />
+        <DataTableSearch table={table} placeholder='Search projects…' containerClassName='grow' />
         <div className='flex items-center gap-2'>
           {/* Add bulk actions when rows are selected */}
           {table.getFilteredSelectedRowModel().rows.length > 0 && (
@@ -876,7 +887,6 @@ export function ProjectLibraryCard({
         />
       </div>
       <ProjectCardMedia
-        name={project.name}
         thumbnailSource={thumbnailSource}
         isPreviewVisible={showPreview}
         onPreviewVisibilityChange={setShowPreview}

@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router';
+import { MemoryRouter, Route, Routes } from 'react-router';
 import { describe, it, expect, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { PublicationTopbar } from '#components/share/publication-topbar.js';
@@ -119,5 +119,44 @@ describe('PublicationTopbar', () => {
     );
     expect(screen.queryByRole('button', { name: /share/i })).not.toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: /^remix$/iu })).toHaveLength(2);
+  });
+
+  describe('exits and title', () => {
+    const renderAt = (path: string): ReturnType<typeof render> =>
+      render(
+        <TooltipProvider>
+          <MemoryRouter initialEntries={[path]}>
+            <Routes>
+              <Route
+                path='/s/:slug'
+                element={<PublicationTopbar publication={publication} files={new Map()} parameters={{}} />}
+              />
+            </Routes>
+          </MemoryRouter>
+        </TooltipProvider>,
+      );
+
+    it('should lead a builtin example back to its card in the gallery', () => {
+      renderAt('/s/builtin~replicad.birdhouse');
+
+      expect(screen.getByRole('link', { name: 'Examples' })).toHaveAttribute('href', '/community#replicad.birdhouse');
+    });
+
+    it('should offer no gallery exit for a share that is not an example', () => {
+      renderAt('/s/github-gist~0123456789abcdef');
+
+      expect(screen.queryByRole('link', { name: 'Examples' })).not.toBeInTheDocument();
+      expect(screen.getByRole('link', { name: /go home/iu })).toHaveAttribute('href', '/');
+    });
+
+    // Below sm the title takes its own row instead of disappearing; only the source line hides.
+    it('should keep the title on a phone and hide only the source line', () => {
+      renderAt('/s/builtin~replicad.birdhouse');
+
+      const title = screen.getByText('Topbar fixture');
+      expect(title.parentElement).not.toHaveClass('hidden');
+      expect(title.parentElement).toHaveClass('order-last', 'w-full', 'sm:order-none');
+      expect(screen.getByText('Public Tau share')).toHaveClass('hidden', 'sm:block');
+    });
   });
 });

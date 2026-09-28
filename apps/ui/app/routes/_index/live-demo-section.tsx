@@ -48,7 +48,7 @@ export function LiveDemoSection(): React.JSX.Element {
           {tab === 'qr' ? (
             <Suspense
               fallback={
-                <div className='flex h-[560px] items-center justify-center rounded-xl border bg-sidebar'>
+                <div className='flex h-140 items-center justify-center rounded-xl border bg-sidebar'>
                   <Loader />
                 </div>
               }

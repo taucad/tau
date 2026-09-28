@@ -315,6 +315,8 @@ Verify both desktop and browser behavior, not a screenshot from a stale build.
 
 Dense, dark-first, keyboard-first. Panels and floating surfaces come from the shared primitives; pane headers retain visible contextual actions or a named overflow trigger, with optional hover shortcuts under the affordance rules above. The sidebar, command palette, and keyboard service are the three navigation spines; a feature that only exists behind a pointer gesture is unfinished (2.5.7).
 
+Route-level pages compose from one recipe per part — frame, title row, view controls, collection grid and pagination, cards and their states, busy and collection states, view URL state and the first-viewport budget — owned with its gates by `docs/policy/page-composition-policy.md`.
+
 Workbench empty states use the shared clean panel presentation, not decorative
 dashed boxes; intentional dropzones retain their functional boundaries. Settings
 reuse app sidebar/group/search primitives, shadowless section cards with headings

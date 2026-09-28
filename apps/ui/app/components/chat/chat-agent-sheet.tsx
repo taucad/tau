@@ -765,7 +765,7 @@ function ModelList({
     <Command className='min-h-0 flex-1 bg-transparent' onKeyDown={backOnEmpty(query, onBack)}>
       <CommandInput
         autoFocus
-        placeholder={agent.kind === 'tau' ? 'Search models...' : `Search ${agent.displayName} models...`}
+        placeholder={agent.kind === 'tau' ? 'Search models…' : `Search ${agent.displayName} models…`}
         value={query}
         onValueChange={setQuery}
       />
@@ -925,7 +925,7 @@ function AgentList({
       defaultValue={current.key}
       onKeyDown={backOnEmpty(query, onBack)}
     >
-      <CommandInput autoFocus placeholder='Search agents...' value={query} onValueChange={setQuery} />
+      <CommandInput autoFocus placeholder='Search agents…' value={query} onValueChange={setQuery} />
       <CommandList className='max-h-none min-h-0 flex-1'>
         <CommandEmpty className='mx-2'>No agents match “{query}”.</CommandEmpty>
         <CommandGroup>{agents.filter((agent) => agent.kind === 'tau').map((agent) => row(agent))}</CommandGroup>

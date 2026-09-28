@@ -320,6 +320,9 @@ export function useChatEditor({
     editorProps: {
       attributes: {
         class: 'outline-none',
+        // An editable div only takes a name through a role; Shift+Enter adds lines.
+        role: 'textbox',
+        'aria-multiline': 'true',
         'aria-label': placeholder,
       },
       handlePaste: (_view: EditorView, event: ClipboardEvent) => {

@@ -307,7 +307,7 @@ describe('ChatExplorerTree', () => {
 
     renderExplorerTree();
 
-    expect(screen.getByRole('searchbox', { name: 'Filter parts' })).toHaveAttribute('placeholder', 'Filter parts...');
+    expect(screen.getByRole('searchbox', { name: 'Filter parts' })).toHaveAttribute('placeholder', 'Filter parts…');
     expect(screen.getByText('No model components available').closest('[data-slot="panel-empty-state"]')).toBeTruthy();
   });
 

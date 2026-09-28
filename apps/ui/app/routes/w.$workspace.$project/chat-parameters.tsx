@@ -485,14 +485,14 @@ function ParameterGroupSelector({
         getValue={getItemValue}
         value={selectedItem}
         placeholder='Select a parameter group'
-        searchPlaceHolder='Search groups...'
+        searchPlaceHolder='Search groups…'
         title='Parameter Groups'
         description='Select a parameter group to apply.'
         isSearchEnabled={groupItems.length > 5}
         shouldCloseOnSelect={shouldCloseOnSelect}
         popoverProperties={{
           align: 'end',
-          className: 'w-[260px]',
+          className: 'w-65',
         }}
         onSelect={handleSelect}
       >
@@ -1084,7 +1084,7 @@ export function ParametersPanelBody(): React.JSX.Element {
       <div data-slot='parameters-filter' className='shrink-0 bg-sidebar px-2 pt-2'>
         <SearchInput
           aria-label='Filter parameters'
-          placeholder='Filter parameters...'
+          placeholder='Filter parameters…'
           value={filterTerm}
           className='h-7 min-w-0 bg-background'
           onChange={(event) => {

@@ -109,7 +109,7 @@ export function DockviewTabOverflowPicker(
         renderLabel={(panel, selectedPanel) => renderPanelLabel(panel, selectedPanel, { getIcon, leadingIcon })}
         className='w-72'
         popoverProperties={{ align: 'end' }}
-        searchPlaceHolder='Search open tabs...'
+        searchPlaceHolder='Search open tabs…'
         emptyListMessage='No open tabs found.'
         title='Open tabs'
         description='Search and activate an open tab in this pane.'

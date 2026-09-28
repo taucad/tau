@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Link } from 'react-router';
+import type { MetaFunction } from 'react-router';
 import {
   CheckCircle2,
   AlertCircle,
@@ -38,6 +39,8 @@ import { getFileTreeDownloadErrorMessage } from '#routes/w.$workspace.$project/f
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import type { FileTreeNode, WorkspaceScope } from '@taucad/filesystem';
 import type { WorkspaceConnectionState } from '#hooks/workspace-connection.machine.js';
+
+export const meta: MetaFunction = () => [{ title: 'Files · Tau' }];
 
 export const handle: Handle = {
   breadcrumb() {
@@ -125,9 +128,11 @@ function downloadBlob(blob: Blob, filename: string): void {
 
 function FileActions({
   path,
+  name,
   onDownload,
 }: {
   readonly path: string;
+  readonly name: string;
   readonly onDownload: (path: string) => Promise<void>;
 }): React.JSX.Element {
   const handleAction = useCallback(
@@ -140,39 +145,47 @@ function FileActions({
   );
 
   return (
-    <ComboBoxResponsive
-      groupedItems={[{ name: 'Actions', items: fileActions }]}
-      getValue={(item) => item.value}
-      renderLabel={(item) => (
-        <div className='flex items-center gap-2'>
-          <item.icon className='size-4' />
-          <span>{item.label}</span>
-        </div>
-      )}
-      title='File Actions'
-      description='Choose an action for this file'
-      isSearchEnabled={false}
-      onSelect={handleAction}
-    >
-      <Button
-        variant='ghost'
-        size='icon'
-        className='size-6 shrink-0'
-        onClick={(event) => {
-          event.stopPropagation();
-        }}
+    <Tooltip>
+      <ComboBoxResponsive
+        groupedItems={[{ name: 'Actions', items: fileActions }]}
+        getValue={(item) => item.value}
+        renderLabel={(item) => (
+          <div className='flex items-center gap-2'>
+            <item.icon className='size-4' />
+            <span>{item.label}</span>
+          </div>
+        )}
+        title='File Actions'
+        description='Choose an action for this file'
+        isSearchEnabled={false}
+        onSelect={handleAction}
       >
-        <EllipsisVertical className='size-4' />
-      </Button>
-    </ComboBoxResponsive>
+        <TooltipTrigger asChild>
+          <Button
+            variant='ghost'
+            size='icon'
+            className='size-6 shrink-0'
+            aria-label={`Actions for ${name}`}
+            onClick={(event) => {
+              event.stopPropagation();
+            }}
+          >
+            <EllipsisVertical className='size-4' />
+          </Button>
+        </TooltipTrigger>
+      </ComboBoxResponsive>
+      <TooltipContent>Actions for {name}</TooltipContent>
+    </Tooltip>
   );
 }
 
 function FolderActions({
   path,
+  name,
   onDownloadZip,
 }: {
   readonly path: string;
+  readonly name: string;
   readonly onDownloadZip: (path: string) => Promise<void>;
 }): React.JSX.Element {
   const handleAction = useCallback(
@@ -185,31 +198,37 @@ function FolderActions({
   );
 
   return (
-    <ComboBoxResponsive
-      groupedItems={[{ name: 'Actions', items: folderActions }]}
-      getValue={(item) => item.value}
-      renderLabel={(item) => (
-        <div className='flex items-center gap-2'>
-          <item.icon className='size-4' />
-          <span>{item.label}</span>
-        </div>
-      )}
-      title='Folder Actions'
-      description='Choose an action for this folder'
-      isSearchEnabled={false}
-      onSelect={handleAction}
-    >
-      <Button
-        variant='ghost'
-        size='icon'
-        className='size-6 shrink-0'
-        onClick={(event) => {
-          event.stopPropagation();
-        }}
+    <Tooltip>
+      <ComboBoxResponsive
+        groupedItems={[{ name: 'Actions', items: folderActions }]}
+        getValue={(item) => item.value}
+        renderLabel={(item) => (
+          <div className='flex items-center gap-2'>
+            <item.icon className='size-4' />
+            <span>{item.label}</span>
+          </div>
+        )}
+        title='Folder Actions'
+        description='Choose an action for this folder'
+        isSearchEnabled={false}
+        onSelect={handleAction}
       >
-        <EllipsisVertical className='size-4' />
-      </Button>
-    </ComboBoxResponsive>
+        <TooltipTrigger asChild>
+          <Button
+            variant='ghost'
+            size='icon'
+            className='size-6 shrink-0'
+            aria-label={`Actions for ${name}`}
+            onClick={(event) => {
+              event.stopPropagation();
+            }}
+          >
+            <EllipsisVertical className='size-4' />
+          </Button>
+        </TooltipTrigger>
+      </ComboBoxResponsive>
+      <TooltipContent>Actions for {name}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -244,7 +263,7 @@ function renderTree(elements: TreeViewElement[], handlers: TreeActionHandlers): 
           key={element.id}
           element={<FolderLabel name={element.name} project={project} />}
           value={element.id}
-          actions={<FolderActions path={element.id} onDownloadZip={handlers.onDownloadFolderZip} />}
+          actions={<FolderActions path={element.id} name={element.name} onDownloadZip={handlers.onDownloadFolderZip} />}
         >
           {renderTree(element.children, handlers)}
         </Folder>
@@ -255,7 +274,7 @@ function renderTree(elements: TreeViewElement[], handlers: TreeActionHandlers): 
       <File
         key={element.id}
         value={element.id}
-        actions={<FileActions path={element.id} onDownload={handlers.onDownloadFile} />}
+        actions={<FileActions path={element.id} name={element.name} onDownload={handlers.onDownloadFile} />}
       >
         {element.name}
       </File>
@@ -346,6 +365,7 @@ function ColumnShell({
                   variant='ghost'
                   size='icon'
                   className='size-7'
+                  aria-label='Refresh'
                   disabled={isLoading || isDisabled}
                   onClick={onRefresh}
                 >

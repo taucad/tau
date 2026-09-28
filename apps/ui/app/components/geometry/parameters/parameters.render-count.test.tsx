@@ -87,7 +87,7 @@ describe('Parameters render counts', () => {
   it('re-renders no number row that stays visible while the filter is typed', async () => {
     const user = userEvent.setup();
     render(form({}));
-    const filter = screen.getByPlaceholderText('Filter parameters...');
+    const filter = screen.getByPlaceholderText('Filter parameters…');
     renders.numberRow = 0;
 
     await user.type(filter, 'wid');

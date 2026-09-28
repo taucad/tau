@@ -15,7 +15,7 @@ const disclosure = (path: string): Locator => selectors.getByRole('button', { na
 
 const openCommand = async (name: string, surface?: target.TargetSurface): Promise<void> => {
   await target.click(selectors.getByRole('button', { name: 'Search', exact: true }), undefined, surface);
-  const commandSearch = selectors.getByPlaceholder('Search projects, chats, and actions...');
+  const commandSearch = selectors.getByPlaceholder('Search projects, chats, and actions…');
   await target.fill(commandSearch, name, surface);
   await target.click(selectors.getByText(name, { exact: true }), undefined, surface);
 };

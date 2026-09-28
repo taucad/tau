@@ -146,7 +146,7 @@ function ConditionRow({
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button type='button' variant='outline' size='xs' className='h-7 min-w-20 gap-1 px-2 font-normal'>
-              <span className='flex-1 text-left'>{condition.value || 'Select...'}</span>
+              <span className='flex-1 text-left'>{condition.value || 'Select…'}</span>
               <ChevronDown className='size-3 text-muted-foreground' />
             </Button>
           </DropdownMenuTrigger>

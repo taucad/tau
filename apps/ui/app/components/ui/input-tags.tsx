@@ -72,7 +72,7 @@ export type TagsTriggerProps = {
 export function TagsTrigger({
   id,
   className,
-  placeholder = 'Type to add tags...',
+  placeholder = 'Type to add tags…',
   inputAriaLabel,
   disabled,
 }: TagsTriggerProps): React.JSX.Element {
@@ -162,7 +162,7 @@ export function TagsTrigger({
           value={value}
           disabled={disabled}
           placeholder={tags.length === 0 ? placeholder : ''}
-          className='w-0 flex-1 bg-transparent px-0.5 py-px text-base outline-none group-focus-within/tags-trigger:w-[120px] placeholder:text-muted-foreground md:text-sm'
+          className='w-0 flex-1 bg-transparent px-0.5 py-px text-base outline-none group-focus-within/tags-trigger:w-30 placeholder:text-muted-foreground md:text-sm'
           onChange={(event) => {
             setValue(event.target.value);
           }}
@@ -221,7 +221,7 @@ export type TagsContentProps = ComponentProps<typeof PopoverContent>;
 export function TagsContent({ className, children, ...props }: TagsContentProps): React.JSX.Element {
   const { value, setValue } = useTagsContext();
   return (
-    <PopoverContent className={cn('w-[300px] p-0', className)} align='start' {...props}>
+    <PopoverContent className={cn('w-75 p-0', className)} align='start' {...props}>
       <Command value={value} onValueChange={setValue}>
         {children}
       </Command>
@@ -231,7 +231,7 @@ export function TagsContent({ className, children, ...props }: TagsContentProps)
 
 export type TagsListProps = ComponentProps<typeof CommandList>;
 export function TagsList({ className, ...props }: TagsListProps): React.JSX.Element {
-  return <CommandList className={cn('max-h-[200px]', className)} {...props} />;
+  return <CommandList className={cn('max-h-50', className)} {...props} />;
 }
 
 export type TagsEmptyProps = ComponentProps<typeof CommandEmpty>;

@@ -91,7 +91,7 @@ function UsagePieChartComponent({
           <CardTitle>{title}</CardTitle>
           {description ? <CardDescription>{description}</CardDescription> : undefined}
         </CardHeader>
-        <CardContent className='flex h-[300px] items-center justify-center'>
+        <CardContent className='flex h-75 items-center justify-center'>
           <p className='text-sm text-muted-foreground'>No usage in this range</p>
         </CardContent>
       </Card>
@@ -105,7 +105,7 @@ function UsagePieChartComponent({
         {description ? <CardDescription>{description}</CardDescription> : undefined}
       </CardHeader>
       <CardContent className='min-w-0'>
-        <ChartContainer config={chartConfig} className='h-[300px] w-full min-w-0'>
+        <ChartContainer config={chartConfig} className='h-75 w-full min-w-0'>
           <PieChart>
             {/* @ts-expect-error - ChartTooltipContent types don't match Recharts exactly */}
             <ChartTooltip cursor={false} content={ChartTooltipContent} />

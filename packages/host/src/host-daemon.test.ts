@@ -1691,10 +1691,20 @@ describe('startHostDaemon', () => {
       sessionId: 'session-2',
     });
 
+    const secondRuntimeRoute = '/v1/agents/sessions/session-2/host/runtime';
+    await vi.waitFor(() => {
+      expect(routes.has(secondRuntimeRoute)).toBe(true);
+    });
+
     firstControl.close(1012, 'relay restarting');
     const secondControl = await reconnectedControl.promise;
     const [secondReadyFrame] = (await once(secondControl, 'message')) as [Uint8Array<ArrayBuffer>];
     expect(JSON.parse(Buffer.from(secondReadyFrame).toString())).toMatchObject({ type: 'ready', deviceId: 'device-1' });
+    // Its relay lives on its own socket, so losing control to a restart does not end the session.
+    expect(events).not.toContainEqual(
+      expect.objectContaining({ type: 'session', sessionId: 'session-2', state: 'disconnected' }),
+    );
+    expect(routes.get(secondRuntimeRoute)?.readyState).toBe(WebSocket.OPEN);
 
     const daemonClosing = daemon.close();
     await drainStarted.promise;

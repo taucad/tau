@@ -396,7 +396,7 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
               issue.details.type === 'render' &&
               'code' in issue.details &&
               issue.details.code === 'parse' &&
-              /accessor \d+ count \d+ exceeds \d+/u.test(issue.message),
+              /accessor \d+ count \d+ exceeds \d+|declared accessor values exceed \d+/u.test(issue.message),
           );
           throw Object.assign(new Error(message), overLimit ? { code: 'RESULT_TOO_LARGE' } : {});
         }

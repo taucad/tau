@@ -16,6 +16,9 @@ import type { BridgeCallOptions, BridgeWatchEvent, BridgeWatchRequest } from '#b
 import { createBridgeChannelSchemas } from '#bridge/bridge-schemas.js';
 import type { BridgeRpcProtocol } from '#bridge/bridge-schemas.js';
 
+/** A disposed proxy's closure carries the channel's own `CHANNEL_CLOSED` code. */
+const bridgeClosedError = (): Error => Object.assign(new Error('Bridge proxy closed'), { code: 'CHANNEL_CLOSED' });
+
 /**
  * Create a low-level RPC call/listen/dispose triple backed by a MessagePort.
  *
@@ -106,7 +109,7 @@ export function createBridgeCall<
     eventTopics.clear();
     for (const entry of pendingCalls) {
       entry.ac.abort();
-      entry.reject(new Error('Bridge proxy closed'));
+      entry.reject(bridgeClosedError());
     }
     pendingCalls.clear();
     safeDispose(() => {
@@ -116,7 +119,7 @@ export function createBridgeCall<
 
   const callMethod = async (method: string, args: unknown[]): Promise<unknown> => {
     if (disposed) {
-      throw new Error('Bridge proxy closed');
+      throw bridgeClosedError();
     }
 
     const preparedArgs = options?.prepareCallArgs ? options.prepareCallArgs(method, args) : args;
@@ -139,7 +142,11 @@ export function createBridgeCall<
           timer = setTimeout(() => {
             if (pendingCalls.delete(entry!)) {
               ac.abort();
-              reject(new Error(`Bridge call '${method}' timed out`));
+              reject(
+                Object.assign(new Error(`Bridge call '${method}' timed out after ${String(callTimeout)}ms`), {
+                  code: 'BRIDGE_CALL_TIMEOUT',
+                }),
+              );
             }
           }, callTimeout);
         }

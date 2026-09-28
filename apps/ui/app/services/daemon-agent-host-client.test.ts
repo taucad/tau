@@ -376,13 +376,20 @@ describe('createDaemonAgentHostTransport re-dial', () => {
       await vi.advanceTimersByTimeAsync(1);
       expect(dials).toBe(3);
 
-      // ...and the third waits double it.
+      // ...and each one after it waits double the last.
       await vi.advanceTimersByTimeAsync(499);
       expect(dials).toBe(3);
       await vi.advanceTimersByTimeAsync(1);
       expect(dials).toBe(4);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(dials).toBe(5);
+      // The last lands 3.75 s after the death: past a daemon's 1 to 1.25 s reconnect to another API Machine.
+      await vi.advanceTimersByTimeAsync(1999);
+      expect(dials).toBe(5);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(dials).toBe(6);
 
-      // Three re-dials, then the same typed death — the bound did not change.
+      // Five re-dials, then the same typed death.
       await failed;
       transport.close();
     } finally {

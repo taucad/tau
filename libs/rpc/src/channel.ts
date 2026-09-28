@@ -393,6 +393,19 @@ const resolveListenIterable = async (result: unknown): Promise<AsyncIterable<unk
   return result as Promise<AsyncIterable<unknown>>;
 };
 
+/** `code` of every error a closed channel rejects a call, listen or `ready` with. */
+const channelClosedCode = 'CHANNEL_CLOSED';
+
+/**
+ * Typed closure: names which side closed and why (`port-closed`,
+ * `hello-timeout`, a peer's bye reason), so a stranded caller's error says
+ * what ended the wire rather than only that it ended.
+ */
+const channelClosedError = (message: string, origin: CloseOrigin, reason?: string): Error =>
+  Object.assign(new Error(`${message} (${origin}${reason === undefined ? '' : `: ${reason}`})`), {
+    code: channelClosedCode,
+  });
+
 const defaultCloseTimeout = 5000;
 /**
  * A client whose server never sends its hello has no wire, and every caller
@@ -550,7 +563,7 @@ type CloseController = {
 
 const createCloseController = (options: {
   postClose: (reason?: string) => void;
-  onTeardown: (origin: CloseOrigin) => void;
+  onTeardown: (origin: CloseOrigin, reason?: string) => void;
   onFinalize: (origin: CloseOrigin) => void;
   closeHandshakeTimeout: number;
 }): CloseController => {
@@ -572,7 +585,7 @@ const createCloseController = (options: {
       return;
     }
     teardownDone = true;
-    onTeardown(origin);
+    onTeardown(origin, storedReason);
   };
 
   const finalize = (origin: CloseOrigin): void => {
@@ -841,18 +854,51 @@ export const createChannelClient = <P extends RpcProtocol = EmptyRpcProtocol>(
     },
   };
 
+  /**
+   * Post one frame. A frame the port refuses — an uncloneable or detached
+   * payload throws `DataCloneError` — fails its own call or listen instead of
+   * stranding it; any other refused frame throws to the sender.
+   */
+  const send = (frame: WireMessage, transfer?: readonly Transferable[]): void => {
+    try {
+      port.postMessage(frame, transfer);
+    } catch (error) {
+      const failure = error instanceof Error ? error : new Error(String(error));
+      const pending = frame.k === 'rq' ? callPending.get(frame.i) : undefined;
+      if (frame.k === 'rq' && pending) {
+        callPending.delete(frame.i);
+        callPendingNames.delete(frame.i);
+        pending.reject(failure);
+        return;
+      }
+      const sink = frame.k === 'ss' ? listenSinks.get(frame.i) : undefined;
+      if (frame.k === 'ss' && sink) {
+        listenSinks.delete(frame.i);
+        sink.fail(failure);
+        return;
+      }
+      throw failure;
+    }
+  };
+
   const post = (frame: WireMessage, transfer?: readonly Transferable[]): void => {
     if (!isReady) {
       sendQueue.push({ frame, transfer });
       return;
     }
-    port.postMessage(frame, transfer);
+    send(frame, transfer);
   };
 
+  /* Runs inside the port's message listener: one refused frame must neither
+   * throw out of it nor strand the frames queued behind it. */
   const flushSendQueue = (): void => {
     while (sendQueue.length > 0) {
       const item = sendQueue.shift()!;
-      port.postMessage(item.frame, item.transfer);
+      try {
+        send(item.frame, item.transfer);
+      } catch {
+        // A queued notify has no caller left to tell; its frame is dropped.
+      }
     }
   };
 
@@ -1014,9 +1060,10 @@ export const createChannelClient = <P extends RpcProtocol = EmptyRpcProtocol>(
   /** Set when the port reported its own death, which is never a graceful bye. */
   let portDied = false;
 
-  const cleanupPendingState = (origin: CloseOrigin): void => {
+  const cleanupPendingState = (origin: CloseOrigin, reason?: string): void => {
+    const closedError = (): Error => channelClosedError('Channel closed', origin, reason);
     for (const [, p] of callPending) {
-      p.reject(new Error('Channel closed'));
+      p.reject(closedError());
     }
     callPending.clear();
     callPendingNames.clear();
@@ -1027,7 +1074,7 @@ export const createChannelClient = <P extends RpcProtocol = EmptyRpcProtocol>(
      * completed empty instead of rejecting). */
     for (const [sid, s] of listenSinks) {
       if (origin === 'local' || portDied) {
-        s.fail(new Error('Channel closed'));
+        s.fail(closedError());
       } else {
         s.accept(listenEnd, 0);
       }
@@ -1035,7 +1082,7 @@ export const createChannelClient = <P extends RpcProtocol = EmptyRpcProtocol>(
     }
     sendQueue.length = 0;
     if (!isReady) {
-      rejectReady(new Error('Channel closed before ready'));
+      rejectReady(channelClosedError('Channel closed before ready', origin, reason));
     }
   };
 
@@ -1044,8 +1091,8 @@ export const createChannelClient = <P extends RpcProtocol = EmptyRpcProtocol>(
       const frame: WireBye = reason === undefined ? { v: 1, k: 'lb' } : { v: 1, k: 'lb', r: reason };
       port.postMessage(frame);
     },
-    onTeardown: (origin) => {
-      cleanupPendingState(origin);
+    onTeardown: (origin, reason) => {
+      cleanupPendingState(origin, reason);
     },
     onFinalize: () => {
       off();
@@ -1072,7 +1119,7 @@ export const createChannelClient = <P extends RpcProtocol = EmptyRpcProtocol>(
 
   const ensureOpen = (): void => {
     if (closeController.isClosed()) {
-      throw new Error('Channel is closed');
+      throw Object.assign(new Error('Channel is closed'), { code: channelClosedCode });
     }
   };
 
@@ -1092,7 +1139,12 @@ export const createChannelClient = <P extends RpcProtocol = EmptyRpcProtocol>(
       const id = createId();
       return new Promise<unknown>((resolve, reject) => {
         const onAbort = (): void => {
-          if (callPending.has(id)) {
+          /* A request still queued behind the hello never reached the server:
+           * drop it rather than let the server run it after the caller left. */
+          const queued = sendQueue.findIndex((item) => item.frame.k === 'rq' && item.frame.i === id);
+          if (queued !== -1) {
+            sendQueue.splice(queued, 1);
+          } else if (callPending.has(id)) {
             const cancelFrame: WireRequestCancel = { v: 1, k: 'rc', i: id, e: { m: 'aborted' } };
             try {
               port.postMessage(cancelFrame);

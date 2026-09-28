@@ -13,13 +13,16 @@ export type ShutdownPhases = {
 };
 
 /**
- * Fly allows 30 s (`kill_timeout` in `fly.*.toml`) from SIGTERM to SIGKILL.
- * Requests get until 20 s; work they leave behind (and whatever the cut itself
- * starts, such as a cancelled model step's settlement) until 23 s; module
- * teardown, with its OTEL flush of at most 5 s, fits in what remains with 2 s
- * to spare. Every phase ends as soon as its work is done.
+ * Fly allows 120 s (`kill_timeout` in `fly.*.toml`) from SIGTERM to SIGKILL,
+ * sized so a model step still streaming at a deploy usually finishes rather
+ * than being cut. Requests get until 105 s; work they leave behind (and
+ * whatever the cut itself starts, such as a cut model step's settlement) until
+ * 112 s; module teardown, with its OTEL flush of at most 5 s, fits in what
+ * remains with 3 s to spare. Every phase ends as soon as its work is done, so
+ * the window costs a deploy time only while a request is still running.
+ * `kill_timeout` and these phases change together.
  */
-export const shutdownPhases: ShutdownPhases = { cut: 20_000, abandon: 23_000 };
+export const shutdownPhases: ShutdownPhases = { cut: 105_000, abandon: 112_000 };
 
 /**
  * Fastify options the drain depends on. A request that reaches a closing

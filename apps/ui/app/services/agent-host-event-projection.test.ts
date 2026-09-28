@@ -661,6 +661,25 @@ describe('projectAgentHostEvent', () => {
     ]);
   });
 
+  it('preserves a durable interruption code for the tool error card', () => {
+    const [chunk] = projectAgentHostEvent({
+      ...base,
+      type: 'message.appended',
+      message: {
+        id: 'stopped-output',
+        role: 'tool-output',
+        toolCallId: 'stopped-call',
+        toolName: 'screenshot',
+        content: { errorCode: 'USER_INTERRUPTED', message: 'Interrupted by user.' },
+        isError: true,
+      },
+    });
+    expect(chunk).toMatchObject({
+      type: 'tool-output-error',
+      errorText: '{"errorCode":"USER_INTERRUPTED","message":"Interrupted by user."}',
+    });
+  });
+
   it.each([
     [
       'a shell call',

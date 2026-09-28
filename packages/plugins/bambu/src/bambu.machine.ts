@@ -1,6 +1,8 @@
 import { defineConfiguration } from '@taucad/runtime/configuration';
+import { quantity } from '@taucad/runtime/configuration/zod';
 import { defineMachine } from '@taucad/runtime/machine';
 import type { MachineAcceptedContainer } from '@taucad/runtime/machine';
+import { quantityKinds } from '@taucad/units/quantity';
 import { z } from 'zod';
 
 import { bambuX1cManifest } from '#bambu.manifest.js';
@@ -19,28 +21,22 @@ const bindingConfiguration = defineConfiguration({
 /** Submission schema shared by the LAN provider and the simulator. @internal */
 export const bambuSubmissionConfiguration = defineConfiguration({
   id: 'bambu.machine.submission',
-  version: '1.0.0',
+  version: '1.1.0',
   schema: z.object({
     amsMapping: z.array(z.number().int().min(-1).max(15)).max(16).default([]),
     bedLeveling: z.boolean().default(true),
     expectedBedType: z.string().min(1).max(64),
-    expectedFilamentDiameter: z.strictObject({
-      value: z.number().positive(),
-      unit: z.string().min(1).max(64),
-      kind: z.string().min(1).max(256),
-      space: z.literal('linear'),
-    }),
+    expectedFilamentDiameter: quantity({
+      unit: 'mm',
+      quantityKind: quantityKinds.diameter,
+      space: 'linear',
+    }).positive(),
     expectedMaterials: z
       .array(z.strictObject({ slot: z.number().int().min(0).max(15), materialId: z.string().min(1).max(128) }))
       .min(1)
       .max(16),
     expectedModel: z.literal('X1C'),
-    expectedNozzleDiameter: z.strictObject({
-      value: z.number().positive(),
-      unit: z.string().min(1).max(64),
-      kind: z.string().min(1).max(256),
-      space: z.literal('linear'),
-    }),
+    expectedNozzleDiameter: quantity({ unit: 'mm', quantityKind: quantityKinds.diameter, space: 'linear' }).positive(),
     operatorConfirmedBedType: z.string().min(1).max(64).optional(),
     flowCalibration: z.boolean().default(true),
     timelapse: z.boolean().default(false),

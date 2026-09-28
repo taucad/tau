@@ -625,6 +625,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
   /** Settle attempts per pending operation this session (DF11 retry cap). */
   const recoveryAttemptsRef = useRef(new Map<string, number>());
   const discoveryPassRef = useRef<Promise<ProjectDiscoveryResult> | undefined>(undefined);
+  const discoveryPassEpochRef = useRef<number | undefined>(undefined);
   const connectionTraceRef = useRef<WorkspaceConnectionTrace | undefined>(undefined);
   const connectionPromiseRef = useRef<Promise<ConnectedWorkspace | undefined> | undefined>(undefined);
   /**
@@ -633,6 +634,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
    * current holds a stale snapshot and must not garbage-collect configs.
    */
   const discoveryEpochRef = useRef(0);
+  const discoverySnapshotRef = useRef<{ epoch: number; result: ProjectDiscoveryResult } | undefined>(undefined);
   /*
    * What the provider publishes about pending recoveries. `recoveriesRef` stays
    * the live map — settling is asynchronous, and one loop iteration must see
@@ -647,6 +649,8 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
   const [recoveries, setRecoveries] = useState<readonly PendingProjectRecovery[]>([]);
 
   const invalidateProjectsList = useCallback(() => {
+    discoveryEpochRef.current++;
+    discoverySnapshotRef.current = undefined;
     void queryClient.invalidateQueries({ queryKey: ['projects'] });
   }, [queryClient]);
 
@@ -671,6 +675,8 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
 
   const invalidationTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const scheduleProjectsListInvalidation = useCallback(() => {
+    discoveryEpochRef.current++;
+    discoverySnapshotRef.current = undefined;
     clearTimeout(invalidationTimerRef.current);
     invalidationTimerRef.current = setTimeout(invalidateProjectsList, discoveryInvalidationDebounce);
   }, [invalidateProjectsList]);
@@ -1139,6 +1145,8 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       if (previous) {
         await previous.catch(() => undefined);
       }
+      discoveryEpochRef.current++;
+      discoverySnapshotRef.current = undefined;
       await queryClient.invalidateQueries({ queryKey: ['projects'] });
       try {
         await setProjectCreationLocation(location);
@@ -1302,6 +1310,9 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         await applyProjectFileSystemConfigChanges({ upserts: configUpserts, deletes: configDeletes });
         await fileManager.workspace.syncProjectRoots();
       }
+      if (epoch === discoveryEpochRef.current) {
+        discoverySnapshotRef.current = { epoch, result };
+      }
       return result;
     },
     [fileManager, getReadiedWorker],
@@ -1320,9 +1331,11 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
           return await runDiscoveryPass(options);
         } finally {
           discoveryPassRef.current = undefined;
+          discoveryPassEpochRef.current = undefined;
         }
       })();
       discoveryPassRef.current = pass;
+      discoveryPassEpochRef.current = discoveryEpochRef.current;
       return pass;
     },
     [runDiscoveryPass],
@@ -1384,6 +1397,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
   useEffect(() => {
     return subscribeProjectRootConfigurationChanges(async () => {
       discoveryEpochRef.current++;
+      discoverySnapshotRef.current = undefined;
       // The channel invokes this listener with nowhere to put a rejection, so
       // the body owns its own failures (DF10).
       try {
@@ -1581,42 +1595,66 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     async (projectId: string): Promise<ProjectRouteAccess> => {
       await ensureDiscoveryReady();
       const worker = await getReadiedWorker();
-      const recovery = [...recoveriesRef.current.values()].find((entry) => entry.projectId === projectId);
-      if (recovery?.status === 'recovering') {
-        return { status: 'recovering', recovery };
+      // A manifest/root event can supersede a shared pass while it is in flight.
+      /* eslint-disable no-await-in-loop -- A route must retry sequentially until its discovery epoch is current. */
+      for (;;) {
+        const recovery = [...recoveriesRef.current.values()].find((entry) => entry.projectId === projectId);
+        if (recovery?.status === 'recovering') {
+          return { status: 'recovering', recovery };
+        }
+        if (recovery?.status === 'failed') {
+          return { status: 'recovery-failed', recovery };
+        }
+        const snapshot = discoverySnapshotRef.current;
+        let epoch = discoveryEpochRef.current;
+        let discovery: ProjectDiscoveryResult;
+        if (snapshot?.epoch === epoch) {
+          discovery = snapshot.result;
+        } else {
+          const pending = discoverProjects();
+          epoch = discoveryPassEpochRef.current ?? epoch;
+          discovery = await pending;
+          if (epoch !== discoveryEpochRef.current) {
+            continue;
+          }
+        }
+        const valid = discovery.entries.find(
+          (entry): entry is Extract<ProjectDiscoveryEntry, { status: 'valid' }> =>
+            entry.status === 'valid' && entry.manifest.id === projectId,
+        );
+        if (valid) {
+          const library = await ensureProjectLibraryState(worker, projectId);
+          if (epoch !== discoveryEpochRef.current) {
+            continue;
+          }
+          return library.deletedAt === undefined
+            ? { status: 'ready', project: valid.manifest }
+            : { status: 'trashed', project: valid.manifest };
+        }
+        if (discovery.entries.some((entry) => entry.status === 'route-blocked' && entry.manifest.id === projectId)) {
+          return { status: 'unavailable' };
+        }
+        if (discovery.entries.some((entry) => entry.status === 'duplicate-id' && entry.manifest.id === projectId)) {
+          return { status: 'conflict' };
+        }
+        const config = await getProjectFileSystemConfig(projectId);
+        if (epoch !== discoveryEpochRef.current) {
+          continue;
+        }
+        if (
+          config &&
+          config.backend !== 'memory' &&
+          discovery.roots.some(
+            (root) =>
+              root.status === 'inaccessible' &&
+              persistentStorageRootKey(root.root) === persistentStorageRootKey(config),
+          )
+        ) {
+          return { status: 'unavailable' };
+        }
+        return { status: 'missing' };
       }
-      if (recovery?.status === 'failed') {
-        return { status: 'recovery-failed', recovery };
-      }
-      const discovery = await discoverProjects();
-      const valid = discovery.entries.find(
-        (entry): entry is Extract<ProjectDiscoveryEntry, { status: 'valid' }> =>
-          entry.status === 'valid' && entry.manifest.id === projectId,
-      );
-      if (valid) {
-        const library = await ensureProjectLibraryState(worker, projectId);
-        return library.deletedAt === undefined
-          ? { status: 'ready', project: valid.manifest }
-          : { status: 'trashed', project: valid.manifest };
-      }
-      if (discovery.entries.some((entry) => entry.status === 'route-blocked' && entry.manifest.id === projectId)) {
-        return { status: 'unavailable' };
-      }
-      if (discovery.entries.some((entry) => entry.status === 'duplicate-id' && entry.manifest.id === projectId)) {
-        return { status: 'conflict' };
-      }
-      const config = await getProjectFileSystemConfig(projectId);
-      if (
-        config &&
-        config.backend !== 'memory' &&
-        discovery.roots.some(
-          (root) =>
-            root.status === 'inaccessible' && persistentStorageRootKey(root.root) === persistentStorageRootKey(config),
-        )
-      ) {
-        return { status: 'unavailable' };
-      }
-      return { status: 'missing' };
+      /* eslint-enable no-await-in-loop */
     },
     [discoverProjects, ensureDiscoveryReady, ensureProjectLibraryState, getReadiedWorker],
   );

@@ -885,6 +885,8 @@ export type AcpSession = {
   readonly title: string | undefined;
   /** Resolves when the connection is gone, however it went. */
   readonly closed: Promise<void>;
+  /** Select a model on an idle discovery session to read its configuration options. */
+  probeModel(model: string): Promise<readonly SessionConfigOption[] | undefined>;
   /**
    * Run one turn against this session.
    *

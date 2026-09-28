@@ -7,7 +7,7 @@ export type AgentConfigOption = AcpSessionData['configOptions'][number];
 
 /** The agent's own options, and how to read and change them. */
 export type AgentConfig = {
-  /** Every non-model option the session reported, in its order. Empty on Tau or before the first turn. */
+  /** Every non-model session option, or discovered reasoning before the first turn. Empty on Tau. */
   readonly options: readonly AgentConfigOption[];
   /** The value in force: a pending choice first, else what the session confirmed. */
   readonly valueOf: (option: AgentConfigOption) => string | boolean;
@@ -41,9 +41,14 @@ export const configValues = (
  *
  * @param sessionData - The latest session presentation for the chat.
  * @param status - The chat's status; a settled turn confirms what it carried.
+ * @param discoveredThoughtLevel - The agent's own reasoning option from discovery, before a session exists.
  * @returns The options, their values and the setter.
  */
-export const useAgentConfig = (sessionData: AcpSessionData | undefined, status: string): AgentConfig => {
+export const useAgentConfig = (
+  sessionData: AcpSessionData | undefined,
+  status: string,
+  discoveredThoughtLevel?: AgentConfigOption,
+): AgentConfig => {
   const {
     execution: { execution, setActiveExecution },
   } = useChatComposer();
@@ -93,13 +98,18 @@ export const useAgentConfig = (sessionData: AcpSessionData | undefined, status: 
   }, [confirmed, execution, pending, sessionData, setActiveExecution, status]);
   const pendingValues = pending.confirmed === confirmed ? pending.values : {};
   /* A session of another agent (the chat just switched) offers nothing for this one. */
-  const options =
-    execution.kind === 'acp' && sessionData?.agentId === execution.agentId
-      ? sessionData.configOptions.filter((option) => option.category !== 'model')
+  const liveSession = execution.kind === 'acp' && sessionData?.agentId === execution.agentId;
+  const options = liveSession
+    ? sessionData.configOptions.filter((option) => option.category !== 'model')
+    : execution.kind === 'acp' && discoveredThoughtLevel
+      ? [discoveredThoughtLevel]
       : [];
   return {
     options,
-    valueOf: (option) => pendingValues[option.id] ?? option.currentValue,
+    valueOf: (option) =>
+      liveSession
+        ? (pendingValues[option.id] ?? option.currentValue)
+        : ((execution.kind === 'acp' ? execution.config?.[option.id] : undefined) ?? option.currentValue),
     select: (id, value) => {
       if (execution.kind !== 'acp') {
         return;

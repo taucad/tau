@@ -14,12 +14,14 @@ import { agentWireVersion } from '@taucad/agent-host/wire';
 import type { CommandAnswer, HostCommand, ReadAnswer, ReadInput } from '@taucad/agent-host/wire';
 import {
   AgentHostWorkerError,
+  createAgentHostClient,
   createBrowserAgentHostClient,
   getBrowserAgentHostCapability,
   probeBrowserAgentHostCapability,
   resendWhileSettling,
   residentAgentWorker,
 } from '#services/agent-host-client.js';
+import type { AgentHostTransport } from '#services/agent-host-transport.js';
 import type { AgentHostWorkerProtocol } from '#workers/agent-host.contract.js';
 import { agentHostWorkerProtocolSchemas, parseAgentHostWorkerConnect } from '#workers/agent-host.contract.js';
 
@@ -783,6 +785,71 @@ describe('createBrowserAgentHostClient', () => {
     await expect(completion).resolves.toMatchObject({ runId: 'run-lost-terminal', state: 'completed' });
     expect(worker.requests.filter((request) => request.name === 'attach').length).toBeGreaterThan(1);
     await client.close();
+  });
+
+  it('retries one timed-out liveness attachment but fails after three', async () => {
+    const check = async (timeouts: number): Promise<void> => {
+      let attaches = 0;
+      const execute = vi.fn(async (command: HostCommand): Promise<CommandAnswer> => {
+        if (command.type !== 'attach') {
+          return { commandId: command.commandId, generation: 1, status: 'applied', effect: 'durable', cursor: 0 };
+        }
+        attaches += 1;
+        if (attaches > 1 && attaches <= timeouts + 1) {
+          throw new AgentHostWorkerError('COMMAND_TIMEOUT', 'The attachment did not answer.');
+        }
+        const snapshot: HostRunSnapshot = {
+          chatId: 'chat-probe',
+          runId: 'run-probe',
+          turnId: 'turn-probe',
+          state: attaches === 1 ? 'running' : 'completed',
+          messages: [],
+        };
+        return {
+          commandId: command.commandId,
+          generation: 1,
+          status: 'applied',
+          effect: 'not-applied',
+          details: { snapshot, endCursor: 0 },
+        };
+      });
+      const transport: AgentHostTransport = {
+        ready: Promise.resolve(),
+        execute,
+        read: async ({ signal }) =>
+          new Promise<ReadAnswer>((_resolve, reject) => {
+            signal?.addEventListener(
+              'abort',
+              () => {
+                reject(new Error('Read stopped.'));
+              },
+              { once: true },
+            );
+          }),
+        liveEvents: async function* () {
+          yield* [];
+        },
+        close: () => undefined,
+      };
+      const client = createAgentHostClient(transport, { runIdleTimeout: 1 });
+      try {
+        const completion = client.start({
+          chatId: 'chat-probe',
+          runId: 'run-probe',
+          trigger: 'submit',
+          message: 'Build slowly.',
+        });
+        await (timeouts === 1
+          ? expect(completion).resolves.toMatchObject({ state: 'completed' })
+          : expect(completion).rejects.toMatchObject({ code: 'RUN_IDLE_TIMEOUT' }));
+        expect(attaches).toBe(timeouts === 1 ? 3 : 4);
+        expect(execute.mock.calls.filter(([command]) => command.type === 'start')).toHaveLength(1);
+      } finally {
+        await client.close();
+      }
+    };
+    await check(1);
+    await check(3);
   });
 });
 

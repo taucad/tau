@@ -401,6 +401,34 @@ function renderMarkdown(nodes: readonly MarkdownNode[], inline: boolean): React.
           </blockquote>
         );
       }
+      case 'table': {
+        // A GFM table: the first row is the header; cells hold inline Markdown.
+        const [head, ...body] = node.children;
+        return (
+          <Table key={key} className='min-w-[960px]'>
+            <TableHeader>
+              <TableRow>
+                {head?.children.map((cell) => (
+                  <TableHead key={cell.position?.start.offset} className='align-top whitespace-normal'>
+                    {renderMarkdown(cell.children, true)}
+                  </TableHead>
+                ))}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {body.map((row) => (
+                <TableRow key={row.position?.start.offset}>
+                  {row.children.map((cell) => (
+                    <TableCell key={cell.position?.start.offset} className='align-top whitespace-normal'>
+                      {renderMarkdown(cell.children, true)}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        );
+      }
       default: {
         const Wrapper = wrappers.get(node.type);
         if (Wrapper) {
@@ -529,7 +557,7 @@ function ChapterView({ chapter, evidence }: { chapter: Chapter; evidence: Eviden
             {chapter.horizon}
           </span>
         </CardTitle>
-        <CardDescription className='space-y-2'>
+        <CardDescription className='min-w-0 space-y-2'>
           <Markdown text={chapter.summary} />
         </CardDescription>
       </CardHeader>
@@ -1491,7 +1519,10 @@ function Guide({ guide }: { guide: ApiGuide }): React.JSX.Element {
             <div className='flex flex-wrap items-center gap-2'>
               <Badge>{guide.status}</Badge>
               <Badge variant='outline'>revision {guide.revision}</Badge>
-              <Badge variant='outline' className={failing === 0 ? 'text-success' : 'text-destructive'}>
+              <Badge
+                variant='outline'
+                className={failing === 0 ? 'max-w-full whitespace-normal text-success' : 'text-destructive'}
+              >
                 {failing === 0 ? `sketches check · ${toolchains.join(' · ')}` : `${failing} sketch errors`}
               </Badge>
             </div>

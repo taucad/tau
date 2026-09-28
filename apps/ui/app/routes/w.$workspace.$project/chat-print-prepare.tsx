@@ -16,7 +16,6 @@ import type {
 import { printIntentPath, printIntentSchema } from '@taucad/slicer/print-intent';
 import type { PrintIntent } from '@taucad/slicer/print-intent';
 import type { FileExtension } from '@taucad/types';
-import { quantityKinds } from '@taucad/units/quantity';
 import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
 import { sha256Bytes } from '@taucad/utils/hash';
@@ -138,6 +137,18 @@ const schemaConstant = (schema: JSONSchema7 | boolean | undefined): unknown => {
 };
 
 const noColors: readonly string[] = [];
+/** Values owned by the machine or the visible Prepare controls, not separate Advanced choices. */
+const prepareSubmissionFields = new Set([
+  'amsMapping',
+  'expectedMaterials',
+  'expectedBedType',
+  'expectedModel',
+  'operatorConfirmedBedType',
+]);
+const observedDiameterFields = new Set(['expectedFilamentDiameter', 'expectedNozzleDiameter']);
+
+const advancedSubmissionValues = (values: Record<string, unknown>): Record<string, unknown> =>
+  Object.fromEntries(Object.entries(values).filter(([key]) => !prepareSubmissionFields.has(key)));
 
 /**
  * Each mapped filament's slot with the material the machine reports there, in filament order; a filament
@@ -231,20 +242,10 @@ export const submissionDefaults = (
     observed['amsMapping'] = mapping;
   }
   if ('expectedNozzleDiameter' in properties && nozzle) {
-    observed['expectedNozzleDiameter'] = {
-      value: nozzle.diameter.value,
-      unit: nozzle.diameter.unit,
-      kind: quantityKinds.diameter,
-      space: 'linear',
-    };
+    observed['expectedNozzleDiameter'] = nozzle.diameter.value;
   }
   if ('expectedFilamentDiameter' in properties && manifest) {
-    observed['expectedFilamentDiameter'] = {
-      value: manifest.toolhead.filamentDiameter.value,
-      unit: manifest.toolhead.filamentDiameter.unit,
-      kind: quantityKinds.diameter,
-      space: 'linear',
-    };
+    observed['expectedFilamentDiameter'] = manifest.toolhead.filamentDiameter.value;
   }
   if ('expectedModel' in properties) {
     observed['expectedModel'] = schemaConstant(properties['expectedModel']) ?? entry.descriptor.model;
@@ -1379,6 +1380,24 @@ export function PrepareSection({
     : undefined;
   const optionsManifest = useCompiledConfigurationManifest(providerKey, 'print/options', optionsSchema);
   const submissionManifest = useCompiledConfigurationManifest(provider?.id, 'print/submission', submissionSchema);
+  const advancedSubmissionSchema = useMemo<RJSFSchema | undefined>(() => {
+    if (!submissionSchema) {
+      return undefined;
+    }
+    const schema = submissionSchema.schema as RJSFSchema;
+    return {
+      ...schema,
+      properties: Object.fromEntries(
+        Object.entries(schema.properties ?? {})
+          .filter(([key]) => !prepareSubmissionFields.has(key))
+          .map(([key, field]) => [
+            key,
+            observedDiameterFields.has(key) && typeof field === 'object' ? { ...field, readOnly: true } : field,
+          ]),
+      ),
+      required: schema.required?.filter((key) => !prepareSubmissionFields.has(key)),
+    };
+  }, [submissionSchema]);
   const { choosePreset } = studio;
   const selectPreset = useCallback(
     (preset: MachineManifest['slicing']['presets'][number]) => {
@@ -1489,10 +1508,19 @@ export function PrepareSection({
           <div className='overflow-hidden rounded-lg border border-border/70 bg-card' aria-label='Machine mapping'>
             {submissionManifest ? (
               <Parameters
-                parameters={submission}
-                defaultParameters={submissionDefaults(provider, entry, { manifest, filamentColors })}
-                jsonSchema={submissionSchema.schema as RJSFSchema}
-                onParametersChange={setSubmission}
+                parameters={advancedSubmissionValues(submission)}
+                defaultParameters={advancedSubmissionValues(
+                  submissionDefaults(provider, entry, { manifest, filamentColors }),
+                )}
+                jsonSchema={advancedSubmissionSchema}
+                onParametersChange={(changed) =>
+                  setSubmission({
+                    ...Object.fromEntries(
+                      Object.entries(submission).filter(([key]) => prepareSubmissionFields.has(key)),
+                    ),
+                    ...changed,
+                  })
+                }
                 enableSearch={false}
                 units={printUnits}
                 parameterManifest={submissionManifest}

@@ -7,8 +7,8 @@
  * text checkpoint is E23) lives inside the `lentTurn` actor for exactly one lend.
  */
 
-import { createActor, createAsyncLogic, createCallbackLogic } from 'xstate';
-import type { ContentBlock } from '@agentclientprotocol/sdk';
+import { createActor, createAsyncLogic, createCallbackLogic, waitFor } from 'xstate';
+import type { ContentBlock, SessionConfigOption } from '@agentclientprotocol/sdk';
 
 import type { ExternalAgentLogEvent, ProviderMessage } from '@taucad/agent-host';
 import type { ExternalAgentTurn } from '@taucad/agent-host/launcher';
@@ -514,6 +514,32 @@ export const openAcpSession = async (options: OpenAcpSessionOptions): Promise<Ac
     agent: context().facts,
     get configOptions() {
       return context().configOptions;
+    },
+    probeModel: async (model: string): Promise<readonly SessionConfigOption[] | undefined> => {
+      await waitFor(actor, (snapshot) => snapshot.matches({ idle: 'resting' }));
+      const requestId = `probe-${String(sequence++)}`;
+      const result = Promise.withResolvers<readonly SessionConfigOption[] | undefined>();
+      const subscription = actor.on('modelProbed', (event) => {
+        if (event.requestId !== requestId) {
+          return;
+        }
+        if (event.failure === undefined) {
+          result.resolve(event.configOptions);
+        } else {
+          result.reject(failureError(event.failure));
+        }
+      });
+      try {
+        actor.send({ type: 'probeModel', requestId, model });
+        return await Promise.race([
+          result.promise,
+          closed.promise.then((failure) => {
+            throw failureError(failure ?? sessionClosed);
+          }),
+        ]);
+      } finally {
+        subscription.unsubscribe();
+      }
     },
     get modeId() {
       return context().presentation.modeId;

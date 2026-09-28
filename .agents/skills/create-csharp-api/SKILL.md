@@ -17,3 +17,12 @@ Follow [create-api](../create-api/SKILL.md) and its [authoring contract](../crea
   `// expect-error CSxxxx` immediately before an invalid line. Run the common checker with
   `--dotnet` and repeatable `--reference` paths. Check successful calls and misuse against the
   real C# compiler, and record the .NET version.
+- For C# CAD mechanisms, show a complete named-part and joint call site inside the normal model
+  lifecycle. Distinguish the author's shape names from canonical component IDs; review absent or
+  duplicate names against the final displayed scene, and keep groups separate from link ownership.
+  Compare a typed DTO with a JSON-equivalent source object only when schema duplication is a real
+  trade-off. Never imply a compiled stand-in implements the viewer method.
+- Check the resulting GLB contract, not just C# syntax: `TAU_cad_topology.mechanism` must use the
+  existing `@taucad/kinematics` schema, resolved component IDs, and the same coordinate frame and
+  length unit as the vertices. Include invalid-reference and invalid-unit recovery without dropping
+  valid geometry.

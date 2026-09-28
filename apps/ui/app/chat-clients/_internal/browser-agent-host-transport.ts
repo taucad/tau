@@ -1,5 +1,5 @@
-import { readUIMessageStream } from 'ai';
-import type { ChatTransport, UIMessage, UIMessageChunk } from 'ai';
+import { consumeStream, createUIMessageStream, readUIMessageStream } from 'ai';
+import type { ChatTransport, InferUIMessageChunk, UIMessage, UIMessageChunk } from 'ai';
 import { z } from 'zod';
 import { isRecord } from '@taucad/utils/schema';
 import { isAttachmentUrl } from '#utils/attachment.utils.js';
@@ -464,21 +464,57 @@ export const registerAgentHostRunReset = (
 /** Replay one run's durable events into the message the live path built. */
 const readRunMessage = async (events: readonly AgentLogEvent[]): Promise<MyUIMessage | undefined> => {
   const streamedBlocks = new Map();
-  const chunks = events.flatMap((event) => [...projectAgentHostEvent(event, streamedBlocks)]);
+  // The projection emits MyUIMessage chunks, but its shared return type is the broader UIMessageChunk.
+  const chunks = events.flatMap((event) => [
+    ...projectAgentHostEvent(event, streamedBlocks),
+  ]) as InferUIMessageChunk<MyUIMessage>[];
   if (chunks.length === 0) {
     return undefined;
   }
-  const stream = new ReadableStream<UIMessageChunk>({
-    start: (controller) => {
-      for (const chunk of chunks) {
-        controller.enqueue(chunk);
-      }
-      controller.close();
+  // The reader snapshots only on writes. Step boundaries can change reducer
+  // state without a write, so a partial run must keep its last visible state.
+  const lastWrite = chunks.findLastIndex(
+    (chunk) =>
+      chunk.type !== 'start-step' &&
+      chunk.type !== 'finish-step' &&
+      chunk.type !== 'error' &&
+      chunk.type !== 'abort' &&
+      !(chunk.type === 'finish' && chunk.messageMetadata == null) &&
+      !(chunk.type === 'start' && chunk.messageId == null && chunk.messageMetadata == null) &&
+      !(chunk.type === 'message-metadata' && chunk.messageMetadata == null) &&
+      !('transient' in chunk && chunk.transient === true),
+  );
+  if (lastWrite < 0) return undefined;
+  const trailingSteps = chunks.slice(lastWrite + 1).filter((chunk) => chunk.type === 'start-step').length;
+  const stream = (): ReadableStream<InferUIMessageChunk<MyUIMessage>> =>
+    new ReadableStream<InferUIMessageChunk<MyUIMessage>>({
+      start: (controller) => {
+        for (const chunk of chunks) {
+          controller.enqueue(chunk);
+        }
+        controller.close();
+      },
+    });
+  let message: MyUIMessage | undefined;
+  let failed = false;
+  await consumeStream({
+    stream: createUIMessageStream<MyUIMessage>({
+      execute: ({ writer }) => writer.merge(stream()),
+      generateId: () => '',
+      onError: () => 'An error occurred.',
+      onFinish: ({ responseMessage }) => {
+        message = responseMessage;
+      },
+    }),
+    onError: () => {
+      failed = true;
     },
   });
-  let message: MyUIMessage | undefined;
-  for await (const next of readUIMessageStream<MyUIMessage>({ stream })) {
-    message = next;
+  if (failed) {
+    message = undefined;
+    for await (const next of readUIMessageStream<MyUIMessage>({ stream: stream() })) message = next;
+  } else if (message && trailingSteps > 0) {
+    message = { ...message, parts: message.parts.slice(0, -trailingSteps) };
   }
   return message;
 };

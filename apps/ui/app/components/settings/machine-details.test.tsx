@@ -214,6 +214,13 @@ describe('MachineDetails', () => {
     expect(within(options).getByRole('switch', { name: 'Toggle for Flow Calibration' })).toBeChecked();
     expect(within(options).getByRole('switch', { name: 'Toggle for Timelapse' })).not.toBeChecked();
     expect(within(options).getByRole('switch', { name: 'Toggle for Timelapse' })).toBeDisabled();
+    for (const label of ['Expected Filament Diameter', 'Expected Nozzle Diameter']) {
+      const diameter = within(options).getByRole('spinbutton', { name: `Input for ${label}` });
+      expect(diameter).toHaveAttribute('readonly');
+      expect(within(options).getByLabelText(`Parameter: ${label}`)).toHaveTextContent(label);
+    }
+    expect(options).not.toHaveTextContent('Kind');
+    expect(options).not.toHaveTextContent('Space');
     expect(within(options).queryByRole('button', { name: /^Add/u })).not.toBeInTheDocument();
     expect(within(options).queryByRole('button', { name: /^Reset/u })).not.toBeInTheDocument();
     fireEvent.click(within(options).getByRole('switch', { name: 'Toggle for Timelapse' }));

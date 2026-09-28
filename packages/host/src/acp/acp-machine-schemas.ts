@@ -31,6 +31,7 @@ const lendSchema = json<AcpLend>();
 export const childEventSchemas = {
   /* From the parent (or `openAcpSession`). */
   lend: z.object({ lend: lendSchema }),
+  probeModel: z.object({ requestId: z.string(), model: z.string() }),
   cancel: z.object({}),
   close: z.object({}),
   /* From `adapterConnection`. */
@@ -90,6 +91,7 @@ export const childContextSchema = z.object({
   /* The next call id, and the one this state waits on. */
   calls: z.number().int().nonnegative(),
   pending: z.string().optional(),
+  probeRequestId: z.string().optional(),
   exited: z.boolean(),
   stderr: z.string(),
   /* Why the child closed without ever opening; `closed` reports it. */
@@ -131,6 +133,11 @@ export const closingContextSchema = childContextSchema.extend({ deferred: json<A
 /** What `acpSession` reports to its parent, or emits with none. */
 export const reportSchemas = {
   opened: z.object({ key: z.string() }),
+  modelProbed: z.object({
+    requestId: z.string(),
+    configOptions: json<readonly SessionConfigOption[] | undefined>(),
+    failure: json<AcpFailure | undefined>(),
+  }),
   turnEnded: z.object({
     key: z.string(),
     requestId: z.string(),

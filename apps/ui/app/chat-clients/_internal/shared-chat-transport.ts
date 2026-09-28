@@ -1,5 +1,4 @@
 import { Chat } from '@ai-sdk/react';
-import { lastAssistantMessageIsCompleteWithApprovalResponses } from 'ai';
 import type { MyUIMessage } from '@taucad/chat';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
@@ -53,5 +52,4 @@ export const createChatInstance = ({ chatId, onFinish, onError }: CreateChatInst
     generateId: () => generatePrefixedId(idPrefix.message),
     onFinish,
     onError,
-    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
   });

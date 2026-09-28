@@ -320,6 +320,37 @@ describe('chat file store', () => {
       expect(loaded?.error?.code).toBe('HISTORY_INVALID');
     });
 
+    it.each([
+      ['unknown kind', { kind: 'future-kind' }],
+      ['unknown source', { source: 'future-source' }],
+      ['invalid command id', { id: 'not-a-request-id' }],
+      ['invalid timestamp', { createdAt: -1 }],
+      [
+        'non-pending message',
+        { message: { ...draftMessage('initial'), metadata: { createdAt: 1, status: 'success' } } },
+      ],
+    ])('does not dispatch a persisted startup intent with %s', async (_, override) => {
+      const files = createStoreWithFiles();
+      const path = '/projects/resource_test/.tau/chats/chat_bad_envelope/chat.json';
+      const message = draftMessage('initial');
+      await files.write(
+        path,
+        JSON.stringify({
+          id: 'chat_bad_envelope',
+          resourceId: 'resource_test',
+          name: 'Bad envelope',
+          createdAt: 1,
+          updatedAt: 1,
+          startupRequest: { ...startupRequest(message), ...override },
+        }),
+      );
+
+      const loaded = await files.store.getChat('chat_bad_envelope');
+      expect(loaded?.messages).toEqual([]);
+      expect(loaded?.error?.code).toBe('HISTORY_INVALID');
+      expect(JSON.parse(await files.read(path))).not.toHaveProperty('error');
+    });
+
     it('does not persist a synthetic history error during an unrelated metadata patch', async () => {
       const files = createStoreWithFiles();
       const path = '/projects/resource_test/.tau/chats/chat_malformed/chat.json';

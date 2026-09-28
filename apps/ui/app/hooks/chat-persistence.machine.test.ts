@@ -132,6 +132,35 @@ describe('chatPersistenceMachine', () => {
     actor.stop();
   });
 
+  it('clears a stored refusal when a new turn is requested, including after reload', async () => {
+    let storedError: ChatError | undefined = refusal;
+    const machine = chatPersistenceMachine.provide({
+      actors: {
+        loadChatActor: createAsyncLogic<ChatLoadOutput, { chatId: string }>({
+          run: async () => ({ chat: { ...chat('chat_a'), error: storedError } }),
+        }),
+        clearErrorActor: createAsyncLogic<void, { chatId: string }>({
+          run: async () => {
+            storedError = undefined;
+          },
+        }),
+      },
+    });
+    const actor = createActor(machine, { input: {} }).start();
+    actor.send({ type: 'setActiveChatId', chatId: 'chat_a' });
+    await waitFor(actor, (snapshot) => snapshot.context.persistedError === refusal);
+
+    actor.send({ type: 'turnRequested' });
+    await waitFor(actor, () => storedError === undefined, { timeout: 1000 });
+    actor.stop();
+
+    const reloaded = createActor(machine, { input: {} }).start();
+    reloaded.send({ type: 'setActiveChatId', chatId: 'chat_a' });
+    await waitFor(reloaded, (snapshot) => !snapshot.context.isLoadingChat);
+    expect(reloaded.getSnapshot().context.persistedError).toBeUndefined();
+    reloaded.stop();
+  });
+
   it('answers its current events or declares them ignored', () => {
     const events = [
       { type: 'setActiveChatId', chatId: 'chat_a' },

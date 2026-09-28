@@ -209,6 +209,7 @@ const foldRunViews = (
   previousBlocks: ChatProjection['blocks'],
 ): Readonly<{ views: ChatProjection['views']; blocks: ChatProjection['blocks'] }> => {
   let views = previousViews;
+  let lastAdmittedAt = Object.values(previousViews).at(-1)?.admittedAt;
   const blocks: AgentHostLiveBlocks = new Map(
     Object.entries(previousBlocks).map(([key, block]) => [key, { ...block }]),
   );
@@ -231,10 +232,17 @@ const foldRunViews = (
     if (chunks.length === 0 && user === undefined && terminal === undefined && row.type !== 'run.lifecycle') {
       continue;
     }
+    // The merged rows already preserve each device's term order; clamp a backwards clock before sorting runs.
+    const admittedAt =
+      previous?.admittedAt ??
+      (lastAdmittedAt !== undefined && row.recordedAt < lastAdmittedAt ? lastAdmittedAt : row.recordedAt);
+    if (previous === undefined) {
+      lastAdmittedAt = admittedAt;
+    }
     views = {
       ...views,
       [row.runId]: {
-        admittedAt: previous?.admittedAt ?? row.recordedAt,
+        admittedAt,
         chunks: chunks.length === 0 ? (previous?.chunks ?? []) : [...(previous?.chunks ?? []), ...chunks],
         ...(previous?.user === undefined && user === undefined ? {} : { user: user ?? previous?.user }),
         ...(row.type === 'run.lifecycle'
@@ -374,11 +382,7 @@ export const selectTranscriptSource = (
 ): ReadonlyArray<RunView & { readonly runId: string }> =>
   Object.entries({ ...projection.remote?.views, ...projection.views })
     .map(([runId, view]) => ({ runId, ...view }))
-    .toSorted((left, right) =>
-      left.admittedAt === right.admittedAt
-        ? left.runId.localeCompare(right.runId)
-        : left.admittedAt.localeCompare(right.admittedAt),
-    );
+    .toSorted((left, right) => left.admittedAt.localeCompare(right.admittedAt));
 
 const messagesByChunks = new WeakMap<RunView['chunks'], Promise<MyUIMessage | undefined>>();
 

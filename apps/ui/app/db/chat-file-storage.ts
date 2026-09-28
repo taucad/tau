@@ -7,6 +7,7 @@ import { parseChatRecord, serializeChatRecord } from '@taucad/chat/schemas';
 import { chatLogFileName, chatRecordFileName, chatRecordsPath } from '@taucad/revisions';
 import { errorCategory, idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
+import { isRecord } from '@taucad/utils/schema';
 import { composerRecordPaths, createComposerRecordStore } from '#db/composer-record-store.js';
 import { KeyedMutex } from '#db/keyed-mutex.js';
 import type { ChatStorage, CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
@@ -134,13 +135,28 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
   };
 
   const hydrate = async (record: ChatRecord): Promise<Chat> => {
-    const request = record.startupRequest;
-    if (!request) {
+    const request: unknown = record.startupRequest;
+    if (request === undefined) {
       return { ...record, messages: [] };
     }
-    const result = await safeValidateUiMessages([request.message]);
-    const message = result.success ? result.data[0] : undefined;
-    if (message?.role === 'user' && message.id === request.messageId) {
+    const envelope = isRecord(request) ? request : undefined;
+    const validEnvelope =
+      envelope !== undefined &&
+      typeof envelope['id'] === 'string' &&
+      envelope['id'].startsWith(`${idPrefix.request}_`) &&
+      envelope['id'].length > idPrefix.request.length + 1 &&
+      envelope['kind'] === 'regenerate-tail' &&
+      typeof envelope['messageId'] === 'string' &&
+      envelope['messageId'].length > 0 &&
+      (envelope['source'] === 'homepage-initial-message' ||
+        envelope['source'] === 'fix-with-ai-new-chat' ||
+        envelope['source'] === 'resolve-conflict-new-chat') &&
+      Number.isSafeInteger(envelope['createdAt']) &&
+      typeof envelope['createdAt'] === 'number' &&
+      envelope['createdAt'] >= 0;
+    const result = validEnvelope ? await safeValidateUiMessages([envelope['message']]) : undefined;
+    const message = result?.success ? result.data[0] : undefined;
+    if (message?.role === 'user' && message.id === envelope?.['messageId'] && message.metadata?.status === 'pending') {
       return { ...record, messages: [message] };
     }
     return {

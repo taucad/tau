@@ -253,7 +253,10 @@ export const chatPersistenceMachine = setup({
     },
   },
   on: {
-    turnRequested: { context: { persistedError: undefined } },
+    turnRequested: (_args, enq) => {
+      enq.raise({ type: 'clearPersistedError' });
+      return {};
+    },
     handleError: ({ event }, enq) => {
       enq(logPersistenceError, event.error);
       return {};

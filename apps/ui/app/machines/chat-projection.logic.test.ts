@@ -22,6 +22,7 @@ import {
   selectRunFailure,
   selectPosition,
   selectRunPhase,
+  selectTranscriptSource,
   selectToolsInFlight,
   selectTurnRevision,
 } from '#machines/chat-projection.logic.js';
@@ -185,6 +186,20 @@ describe('chatProjectionLogic (PV-S7)', () => {
     ]);
     expect(reduceChatProjection(second, { type: 'remote', segments: after }).state).toBe(second);
     expect(completed.remote).toBe(second.remote);
+  });
+
+  it('keeps a device’s run order when its clock moves backwards', () => {
+    const rows = [
+      { ...lifecycleRow(0, 'admitted', 'run_z'), leaderEpoch: 'earlier', recordedAt: '2026-09-28T00:00:02.000Z' },
+      { ...lifecycleRow(0, 'admitted', 'run_a'), leaderEpoch: 'later', recordedAt: '2026-09-28T00:00:01.000Z' },
+    ];
+    const segment = {
+      deviceId: 'other-device',
+      bytes: new TextEncoder().encode(rows.map((row) => JSON.stringify(row)).join('\n')),
+    };
+    const remote = reduceChatProjection(initialChatProjection, { type: 'remote', segments: [segment] }).state;
+
+    expect(selectTranscriptSource(remote).map((view) => view.runId)).toEqual(['run_z', 'run_a']);
   });
 
   it('refolds same-length remote bytes when an earlier row changes but the tail key does not', async () => {

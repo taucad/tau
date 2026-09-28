@@ -6,10 +6,28 @@ import type { BuiltinProjectCardModel } from '#constants/project-examples.js';
 import { CommunityProjectGrid } from '#components/project-grid.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
-const { createProjectMock, presentLocationErrorMock } = vi.hoisted(() => ({
+const { createProjectMock, presentLocationErrorMock, toastMock } = vi.hoisted(() => ({
   createProjectMock: vi.fn(),
   presentLocationErrorMock: vi.fn(() => false),
+  toastMock: { success: vi.fn(), error: vi.fn() },
 }));
+
+vi.mock('#hooks/use-project-creation-location.js', () => ({
+  useProjectCreationLocation: () => ({
+    phase: 'ready',
+    value: { kind: 'home' },
+    canCreate: true,
+    shouldShowPicker: false,
+    hasWebAccessCapability: false,
+    refresh: vi.fn(),
+  }),
+}));
+
+vi.mock('#components/filesystem/workspace-selector.js', () => ({
+  WorkspaceSelector: () => <p>Home in this browser</p>,
+}));
+
+vi.mock('#components/ui/sonner.js', () => ({ toast: toastMock }));
 
 vi.mock('#hooks/use-project-manager.js', () => ({
   useProjectManager: () => ({ createProject: createProjectMock }),
@@ -190,36 +208,57 @@ describe('CommunityProjectGrid', () => {
     expect(secondToggle).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('should Remix with the portable project payload without opening the preview route', async () => {
+  it('should Remix through the example page flow: location dialog, fork suffix and toast', async () => {
     renderGrid();
 
     await userEvent.click(screen.getByRole('button', { name: 'Remix Community Demo' }));
+    expect(createProjectMock).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog', { name: 'Remix Community Demo' })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Create remix' }));
 
     expect(createProjectMock).toHaveBeenCalledWith({
       project: {
-        name: 'Community Demo (Remixed)',
+        name: 'Community Demo (fork)',
         description: 'Description retained for Remix payload only',
         tags: ['community'],
         assets: project.assets,
       },
       files,
+      location: { kind: 'home' },
     });
     await waitFor(() => {
       expect(screen.getByTestId('location')).toHaveTextContent('/w/tau-workspace/remixed-project');
     });
+    expect(toastMock.success).toHaveBeenCalledWith('Remixed to your projects', { description: 'Community Demo' });
   });
 
-  it('retains the card and resets Remix after a creation-location failure', async () => {
+  it('should keep the dialog and re-enable Remix after a creation-location failure', async () => {
     const error = new Error('disconnected');
     createProjectMock.mockRejectedValue(error);
     presentLocationErrorMock.mockReturnValue(true);
     renderGrid();
 
     await userEvent.click(screen.getByRole('button', { name: 'Remix Community Demo' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Create remix' }));
 
-    expect(presentLocationErrorMock).toHaveBeenCalledWith(error);
-    expect(screen.getByRole('button', { name: 'Remix Community Demo' })).toBeEnabled();
-    expect(screen.getByRole('heading', { level: 2, name: 'Community Demo' })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(presentLocationErrorMock).toHaveBeenCalledWith(error);
+    });
+    expect(screen.getByRole('button', { name: 'Create remix' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Remix Community Demo', hidden: true })).toBeEnabled();
     expect(screen.getByTestId('location')).toHaveTextContent('/community');
+  });
+
+  it('should name the example when a remix fails for another reason', async () => {
+    createProjectMock.mockRejectedValue(new Error('quota exceeded'));
+    renderGrid();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Remix Community Demo' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Create remix' }));
+
+    await waitFor(() => {
+      expect(toastMock.error).toHaveBeenCalledWith('Could not remix Community Demo', { description: 'quota exceeded' });
+    });
   });
 });

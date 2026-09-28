@@ -1,6 +1,5 @@
 import { ArrowRight } from 'lucide-react';
-import { useState, useCallback, useRef } from 'react';
-import { useNavigate } from 'react-router';
+import { useState, useCallback, useMemo, useRef } from 'react';
 import { resolveKernel } from '@taucad/types/constants';
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
@@ -8,13 +7,12 @@ import { cn } from '@taucad/ui/utils/cn';
 import { formatSharePath } from '@taucad/share/locator';
 import { Loader } from '#components/ui/loader.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
-import { useProjectManager } from '#hooks/use-project-manager.js';
-import { useProjectCreationLocationError } from '#hooks/use-project-creation-location-error.js';
 import { CadPreviewProvider } from '#hooks/use-cad-preview.js';
 import type { BuiltinProjectCardModel, ProjectFiles } from '#constants/project-examples.js';
 import { loadBuiltinProjectFiles } from '#constants/project-examples.js';
 import { ProjectCard, ProjectCardCadPreview, ProjectCardMedia } from '#components/project-card.js';
-import { projectUrl } from '#utils/project-url.utils.js';
+import { RemixDialog } from '#components/share/fork-action.js';
+import type { RemixSource } from '#components/share/fork-action.js';
 
 /** The project card grid, shared by the Community, the landing strip and their skeletons. */
 export const projectGridClassName = 'grid grid-cols-2 gap-3 sm:gap-6 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5';
@@ -68,12 +66,8 @@ function CommunityProjectCard({
   onPreviewLocatorChange,
 }: CommunityProjectCardProperties): React.JSX.Element {
   const { id, name, description, thumbnail, kernel, tags, assets, locator } = project;
-  const [isForking, setIsForking] = useState(false);
   const [files, setFiles] = useState<ProjectFiles>();
   const filesPromise = useRef<Promise<ProjectFiles> | undefined>(undefined);
-  const projectManager = useProjectManager();
-  const presentLocationError = useProjectCreationLocationError();
-  const navigate = useNavigate();
 
   const mainFile = assets.main.entryPath;
 
@@ -84,30 +78,10 @@ function CommunityProjectCard({
     return loaded;
   }, [project]);
 
-  const handleFork = useCallback(async () => {
-    if (isForking) {
-      return;
-    }
-
-    setIsForking(true);
-
-    try {
-      const projectFiles = await ensureFiles();
-      const createProject = await projectManager.createProject({
-        project: {
-          name: `${name} (Remixed)`,
-          description,
-          tags: [...tags],
-          assets,
-        },
-        files: projectFiles,
-      });
-      await navigate(projectUrl(createProject.slugs));
-    } catch (error) {
-      presentLocationError(error);
-      setIsForking(false);
-    }
-  }, [isForking, name, description, tags, assets, projectManager, ensureFiles, navigate, presentLocationError]);
+  const remixSource = useMemo<RemixSource>(
+    () => ({ project: { name, description, tags: [...tags], assets }, loadFiles: ensureFiles }),
+    [assets, description, ensureFiles, name, tags],
+  );
 
   const handlePreviewVisibilityChange = useCallback(
     (isVisible: boolean) => {
@@ -169,18 +143,15 @@ function CommunityProjectCard({
           </p>
         </div>
         <div className='relative z-20 sm:shrink-0'>
-          <Button
-            variant='outline'
-            size='sm'
-            className='max-sm:w-full'
-            aria-busy={isForking}
-            disabled={isForking}
-            onClick={handleFork}
-          >
-            Remix
-            {isForking ? <Loader /> : <ArrowRight aria-hidden />}
-            <span className='sr-only'> {name}</span>
-          </Button>
+          <RemixDialog source={remixSource}>
+            {(isBusy) => (
+              <Button variant='outline' size='sm' className='max-sm:w-full' aria-busy={isBusy} disabled={isBusy}>
+                Remix
+                {isBusy ? <Loader /> : <ArrowRight aria-hidden />}
+                <span className='sr-only'> {name}</span>
+              </Button>
+            )}
+          </RemixDialog>
         </div>
       </div>
     </ProjectCard>

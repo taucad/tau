@@ -32,7 +32,6 @@
 import type { Chat } from '@ai-sdk/react';
 import type { ChatStatus } from 'ai';
 import { Topic } from '@taucad/events';
-import { z } from 'zod';
 import { createActor, createAsyncLogic } from 'xstate';
 import type { Actor, ActorOptions, AnyActorLogic } from 'xstate';
 import type { CadAgentExecution, Chat as ChatEntity, MyUIMessage } from '@taucad/chat';
@@ -72,20 +71,14 @@ import { resizeImageActor } from '#hooks/resize-image.actor.js';
 import { clearLedger } from '#services/rpc-ledger.js';
 import { parseErrorForPersistence } from '#utils/error.utils.js';
 import { buildUserMessage } from '#utils/chat.utils.js';
-import { bindDurableChatRun, createChatInstance } from '#chat-clients/_internal/shared-chat-transport.js';
+import { createChatInstance } from '#chat-clients/_internal/shared-chat-transport.js';
 import {
   BrowserPlacementChatTransport,
-  getBrowserAgentHostRun,
   subscribeChatLogAnswers,
 } from '#chat-clients/_internal/browser-agent-host-transport.js';
 import { hostAttachment } from '#chat-clients/_internal/host-attachment.js';
 import type { AgentHostClient } from '#services/agent-host-client.js';
-import {
-  chatHostBinding,
-  chatTurnAdmission,
-  chatTurnSettlement,
-  clearChatTurnServices,
-} from '#chat-clients/_internal/chat-host-binding.js';
+import { chatTurnAdmission, clearChatTurnServices } from '#chat-clients/_internal/chat-host-binding.js';
 import type { CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
 import { ENV } from '#environment.config.js';
 import {
@@ -105,8 +98,6 @@ import type { HostCommand } from '@taucad/agent-host/wire';
 import { sdkWatch } from '#chat-clients/_internal/sdk-watch.js';
 import type { SdkWatchInput } from '#chat-clients/_internal/sdk-watch.js';
 
-/** Run states a browser-placed run never leaves. */
-const terminalBrowserRunStates = new Set(['completed', 'failed', 'cancelled']);
 /** Framing can exist even when no assistant content reached the person. */
 const nonOutputChunkTypes: ReadonlySet<string> = new Set([
   'start',
@@ -117,11 +108,6 @@ const nonOutputChunkTypes: ReadonlySet<string> = new Set([
   'message-metadata',
   'data-acp-session',
 ]);
-
-const admissionEnvelopeSchema = z.strictObject({
-  version: z.literal(1),
-  idempotencyKey: z.string().min(1),
-});
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -217,21 +203,8 @@ type InternalSession = ChatSession & {
   viewRefcount: number;
   /** Non-view ownership held while one logical run is active. */
   runHeld: boolean;
-  /** Exact server-authoritative run selected by project reload discovery. */
-  durableRunId: string | undefined;
-  durableRunState: 'reattaching' | 'active' | 'terminal' | undefined;
-  /** Host this session has already reattached to; see `reattachHostChat`. */
-  reattachedHostId: string | undefined;
-  /** Host a reattach named while the chat was still loading; see `reattachHostChat`. */
-  pendingReattachHostId: string | undefined;
-  /**
-   * This load dispatched the chat's seeded first turn, so the host stream is
-   * this page's own and there is nothing to reattach to; see
-   * {@link ChatSessionStore.reattachHostChat}.
-   */
+  /** This load dispatched the chat's seeded first turn; clear only after durable Start. */
   seededDispatch: boolean;
-  /** Immutable wire body for the active logical run, including admission. */
-  activeRunBody: Readonly<Record<string, unknown>> | undefined;
   /** The one command being dispatched, and the SDK watch following its projected run. */
   activeCommand: HostCommand | undefined;
   commandAbort: AbortController | undefined;
@@ -244,15 +217,8 @@ type InternalSession = ChatSession & {
   status: ChatStatus;
   /** The project this chat belongs to, from its caller (PV-S4, L3 D9); never from focus. */
   readonly projectId: string;
-  /** Where this chat's next turn runs, as its turn host last said. */
-  placement: string | undefined;
   /** The chat machine's turn emits, subscribed once when its root is created. */
   turnSubscriptions: Array<{ unsubscribe: () => void }>;
-  /** The request facts last handed to `stateActorRef`, so nothing is sent twice; PV-S10 and PV-S12 retire them. */
-  lastState: {
-    durable?: string;
-    lifecycle?: string;
-  };
   /**
    * The chat's record store and project. Known at acquire (PV-S4); a reacquired chat's I/O waits only for its released
    * predecessor's drain (D7).
@@ -443,20 +409,16 @@ export class ChatSessionStore {
 
   public constructor(options: ChatSessionStoreOptions = {}) {
     const { chatSession, ...rootOptions } = options;
-    /* The chat session's three owned resources, bound to the route's published services: one host registration,
-     * one admission and one settlement per chat (policy §16). */
+    /* One admission per chat; the project-scoped connector owns log attachment. */
     this.#chatSessionLogic =
       chatSession ??
       chatSessionMachine.provide({
-        actors: { hostBinding: chatHostBinding, admitTurn: chatTurnAdmission, settleTurn: chatTurnSettlement },
+        actors: { admitTurn: chatTurnAdmission },
       });
     this.#rootOptions = rootOptions;
-    // ponytail: the store lives as long as the document, so this subscription does too.
+    /* Temporary test fixture bridge; production host attachment alone publishes batches. */
     subscribeChatLogAnswers(({ chatId, answer }) => {
-      const observed = this.#observed.get(chatId);
-      /* An attached chat has exactly one log reader. The old SDK transport's
-       * replay tap must not race the projection's owned cursor. */
-      if (observed !== undefined && this.#projectHostConnectors.has(observed.projectId)) {
+      if (this.#observed.has(chatId) && this.#projectHostConnectors.has(this.#observed.get(chatId)!.projectId)) {
         return;
       }
       this.#projectionOf(chatId).send({ type: 'batch', answer });
@@ -807,117 +769,6 @@ export class ChatSessionStore {
     return session;
   }
 
-  /**
-   * Rehydrate an API-discovered durable run without acquiring a React view.
-   * Its non-view hold keeps the session alive while the exact run resumes.
-   */
-  public retainDurableRun(input: {
-    readonly chatId: string;
-    readonly projectId: string;
-    readonly runId: string;
-    readonly state?: 'active' | 'terminal';
-  }): ChatSession {
-    bindDurableChatRun(input.chatId, input.runId);
-    const existing = this.#sessions.get(input.chatId);
-    if (existing) {
-      const runChanged = existing.durableRunId !== input.runId;
-      const priorState = existing.durableRunState;
-      const nextState = !runChanged && priorState === 'terminal' ? 'terminal' : (input.state ?? 'reattaching');
-      const shouldResume =
-        nextState !== 'terminal' &&
-        existing.status === 'ready' &&
-        !existing.persistenceActorRef.getSnapshot().context.isLoadingChat &&
-        (runChanged || priorState === undefined);
-      existing.runHeld = true;
-      existing.durableRunId = input.runId;
-      existing.durableRunState = nextState;
-      if (shouldResume) {
-        queueMicrotask(() => {
-          if (
-            this.#sessions.get(input.chatId) === existing &&
-            existing.durableRunId === input.runId &&
-            existing.durableRunState !== 'terminal'
-          ) {
-            void existing.chat.resumeStream();
-          }
-        });
-      }
-      return existing;
-    }
-    const session = this.#createSession(input.chatId, input.projectId);
-    session.viewRefcount = 0;
-    session.runHeld = true;
-    session.durableRunId = input.runId;
-    session.durableRunState = input.state ?? 'reattaching';
-    this.#sessions.set(input.chatId, session);
-    this.#refreshSnapshot();
-    this.#notifyMembership();
-    return session;
-  }
-
-  /**
-   * Reattach one host-placed chat to its host's durable log.
-   *
-   * Reload discovery substantiates a run from this browser's *workspace claim*
-   * (`ProjectChatRpcBindings` → {@link ChatSessionStore.retainDurableRun}). A
-   * chat placed on a daemon writes no claim — the daemon owns its workspace,
-   * its files and its tools — so nothing ever retained its run, the load-time
-   * resume gate never opened, and a reloaded page rebuilt its transcript from
-   * local storage while the daemon finished the turn unattended.
-   *
-   * The host's log is the authority (PH19) and the transport resolves the run
-   * from it, so the trigger here is the *placement*, not a run id. Idempotent
-   * per host, and there is no second pass: the caller is the host binding,
-   * which composes once per placement. A request that lands while the chat's
-   * row is still being read is therefore held rather than dropped — the chat's
-   * view mounts as soon as it is focused, long before its load settles, and a
-   * dropped one left the durable log unattached for the life of the page (I7).
-   *
-   * A chat whose seeded first turn *this load* dispatched is excluded: that
-   * dispatch is already the host stream, and reattaching over it opened a
-   * second one — on rung 2, a second relay session, refused by a capacity-1
-   * daemon with 409 BUSY before the seeded turn had run at all. `status` alone
-   * does not cover it: the registration effect can observe `ready` in the same
-   * tick the dispatch is queued.
-   *
-   * @param input - The chat and the host it is placed on.
-   */
-  public reattachHostChat(input: { readonly chatId: string; readonly hostId: string }): void {
-    const session = this.#sessions.get(input.chatId);
-    if (!session || session.reattachedHostId === input.hostId || session.seededDispatch) {
-      return;
-    }
-    if (session.persistenceActorRef.getSnapshot().context.isLoadingChat) {
-      /* Held, not dropped. @see flushPendingReattach */
-      session.pendingReattachHostId = input.hostId;
-      return;
-    }
-    session.pendingReattachHostId = undefined;
-    if (session.status !== 'ready') {
-      // A chat already running a turn is already attached to its host; this one
-      // is genuinely nothing to do, and resuming over it opens a second stream.
-      return;
-    }
-    // Marked only when it actually reattaches.
-    session.reattachedHostId = input.hostId;
-    queueMicrotask(() => {
-      if (this.#sessions.get(input.chatId) === session) {
-        void session.chat.resumeStream();
-      }
-    });
-  }
-
-  /** Release reload-discovery ownership after project-wide settlement. */
-  public releaseDurableRun(input: { readonly chatId: string; readonly runId: string }): void {
-    const session = this.#sessions.get(input.chatId);
-    if (!session || session.durableRunId !== input.runId) {
-      return;
-    }
-    session.durableRunId = undefined;
-    session.durableRunState = undefined;
-    this.#disposeIfUnreferenced(session);
-  }
-
   public release(chatId: string): void {
     const session = this.#sessions.get(chatId);
     if (!session) {
@@ -971,36 +822,6 @@ export class ChatSessionStore {
     return this.#addPerChatListener({ bucket: this.#projectionTopics, namePrefix: 'projection', chatId, listener });
   }
 
-  public getDurableRunState(chatId: string): InternalSession['durableRunState'] {
-    return this.#sessions.get(chatId)?.durableRunState;
-  }
-
-  public getDurableRunId(chatId: string): string | undefined {
-    return this.#sessions.get(chatId)?.durableRunId;
-  }
-
-  /**
-   * Say where this chat's next turn runs.
-   *
-   * The chat's session actor owns its agent-host binding and re-invokes it on
-   * this and on nothing else; a model or prompt change is read when the client
-   * is created, so it must not churn the registration. Published by the chat's
-   * one `ChatTurnHost`, and replayed to the machine when a project session
-   * spawns it.
-   *
-   * @param chatId - The chat whose placement moved.
-   * @param placement - The daemon host id, or the execution kind for a local one.
-   * @public
-   */
-  public setTurnPlacement(chatId: string, placement: string): void {
-    const session = this.#sessions.get(chatId);
-    if (!session || session.placement === placement) {
-      return;
-    }
-    session.placement = placement;
-    session.stateActorRef.send({ type: 'agentConfigChanged', placement });
-  }
-
   /**
    * Ask this chat's session actor for a turn.
    *
@@ -1040,35 +861,6 @@ export class ChatSessionStore {
       snapshot !== undefined &&
       (snapshot.context.turn !== undefined || snapshot.matches({ run: { queued: 'admitting' } }))
     );
-  }
-
-  /**
-   * Begin non-view ownership for one logical run and return its immutable,
-   * versioned wire body. Repeated calls while the persistence machine
-   * preempts or retries a run keep one hold but may replace the active body
-   * when a newly admitted user operation supplies its own idempotency key.
-   */
-  public startRun(chatId: string, body: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
-    const session = this.#sessions.get(chatId);
-    if (!session) {
-      throw new Error(`ChatSessionStore: cannot start a run for inactive chat ${chatId}`);
-    }
-
-    const admittedBody = this.#withAdmission(body);
-    session.runHeld = true;
-    session.activeRunBody = admittedBody;
-    return admittedBody;
-  }
-
-  /** Release a direct run that failed before AI SDK could emit `onFinish`. */
-  public endRun(chatId: string): void {
-    const session = this.#sessions.get(chatId);
-    if (!session || !session.runHeld) {
-      return;
-    }
-    session.runHeld = false;
-    session.activeRunBody = undefined;
-    this.#disposeIfUnreferenced(session);
   }
 
   // -------------------------------------------------------------------------
@@ -1779,12 +1571,12 @@ export class ChatSessionStore {
         runId: command.payload.runId,
         reason: error instanceof Error ? error.message : String(error),
       });
-      this.endRun(session.chatId);
     } finally {
       session.commandInFlight = false;
       if (session.commandAbort === abort) {
         session.commandAbort = undefined;
       }
+      this.#scheduleRunReleaseIfTerminal(session);
     }
   }
 
@@ -1800,14 +1592,6 @@ export class ChatSessionStore {
     const facts = this.#revisionFacts.get(session.projectId);
     if (facts !== undefined) {
       sendRevisionFacts(session.stateActorRef, facts);
-    }
-    /* A run outlives the view that started it (V5). Navigating away and back
-     * gives this chat a new actor while its run is still in flight, and an
-     * actor that starts `idle` admits a second turn over the live one — which
-     * the host refuses, ending the turn on a banner the page caused itself. */
-    const live = getBrowserAgentHostRun(session.chatId);
-    if (live !== undefined && !terminalBrowserRunStates.has(live.state)) {
-      session.stateActorRef.send({ type: 'adoptRun', runId: live.runId });
     }
     this.#syncProjection(session.chatId, 'open');
   }
@@ -2377,7 +2161,6 @@ export class ChatSessionStore {
     // the AI SDK's "internal-but-intended-for-subscribers" marker — see
     // node_modules/@ai-sdk/react/dist/index.d.ts).
     const unregisterMessages = chat['~registerMessagesCallback'](() => {
-      this.#syncChatState(session);
       this.#chatTopics.get(chatId)?.emit();
     });
     const unregisterStatus = chat['~registerStatusCallback'](() => {
@@ -2391,11 +2174,9 @@ export class ChatSessionStore {
           }
         }
       }
-      this.#syncChatState(session);
       this.#chatTopics.get(chatId)?.emit();
     });
     const unregisterError = chat['~registerErrorCallback'](() => {
-      this.#syncChatState(session);
       this.#chatTopics.get(chatId)?.emit();
     });
 
@@ -2414,7 +2195,6 @@ export class ChatSessionStore {
       projectId,
       chatRoot,
       stateActorRef: chatRoot,
-      lastState: {},
       persistenceActorRef,
       draftActorRef,
       composerRecordRef,
@@ -2422,12 +2202,7 @@ export class ChatSessionStore {
       composerWork: new Set(),
       viewRefcount: 1,
       runHeld: false,
-      durableRunId: undefined,
-      durableRunState: undefined,
-      reattachedHostId: undefined,
-      pendingReattachHostId: undefined,
       seededDispatch: false,
-      activeRunBody: undefined,
       activeCommand: undefined,
       commandAbort: undefined,
       watch: undefined,
@@ -2437,7 +2212,6 @@ export class ChatSessionStore {
       stopRequested: false,
       restoredStoppedRunId: undefined,
       status: chat.status,
-      placement: undefined,
       turnSubscriptions: [],
       dispose: () => {
         for (const subscription of session.turnSubscriptions) {
@@ -2463,8 +2237,6 @@ export class ChatSessionStore {
         this.#replayPersistedFailure(session);
         this.#syncProjection(session.chatId, 'open');
       }
-      this.#syncChatState(session);
-      this.#flushPendingReattach(session);
     });
 
     /* The chat's machine is a root this store owns (PV-S5, L3 D10): a chat's fault never reaches its project, and
@@ -2477,51 +2249,6 @@ export class ChatSessionStore {
     persistenceActorRef.send({ type: 'setActiveChatId', chatId });
 
     return session;
-  }
-
-  /**
-   * Hand the chat's machine what changed, and only what changed.
-   *
-   * One place reads the store's facts; the machine owns what they mean. Token
-   * deltas never get here — the message callback fires per part, and what it
-   * sends is a batched count (F8, A38).
-   *
-   * @param session - The chat whose facts moved.
-   */
-  /**
-   * Apply a reattach the chat was still loading for.
-   *
-   * Driven from the persistence actor's own snapshots, which is where the
-   * condition that held the request clears. `reattachHostChat` decides again
-   * from scratch: a chat that is still loading simply holds it once more.
-   *
-   * @param session - The session whose load may have settled.
-   */
-  #flushPendingReattach(session: InternalSession): void {
-    const hostId = session.pendingReattachHostId;
-    if (hostId !== undefined) {
-      this.reattachHostChat({ chatId: session.chatId, hostId });
-    }
-  }
-
-  #syncChatState(session: InternalSession): void {
-    const { lastState, stateActorRef } = session;
-    if (session.durableRunState !== lastState.durable) {
-      lastState.durable = session.durableRunState;
-      if (session.durableRunState !== undefined) {
-        stateActorRef.send({ type: 'durableRunState', state: session.durableRunState });
-      }
-    }
-    const snapshot = session.persistenceActorRef.getSnapshot();
-    const lifecycle = (['invoking', 'retrying', 'stopping'] as const).find((phaseName) =>
-      snapshot.matches({ requestLifecycle: phaseName }),
-    );
-    if (lifecycle !== lastState.lifecycle) {
-      lastState.lifecycle = lifecycle;
-      if (lifecycle !== undefined) {
-        stateActorRef.send({ type: 'requestLifecycle', phase: lifecycle });
-      }
-    }
   }
 
   /**
@@ -2544,20 +2271,6 @@ export class ChatSessionStore {
     session.stateActorRef.send({ type: 'runLifecycle', phase: 'failed', reason: failure.message });
   }
 
-  #withAdmission(body: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
-    if (admissionEnvelopeSchema.safeParse(body['admission']).success) {
-      return body;
-    }
-
-    return Object.freeze({
-      ...body,
-      admission: Object.freeze({
-        version: 1,
-        idempotencyKey: generatePrefixedId(idPrefix.request),
-      }),
-    });
-  }
-
   #scheduleRunReleaseIfTerminal(session: InternalSession): void {
     queueMicrotask(() => {
       if (!session.runHeld || session.watchedRunId !== undefined || session.commandInFlight) {
@@ -2565,7 +2278,6 @@ export class ChatSessionStore {
       }
       session.runHeld = false;
       session.activeCommand = undefined;
-      session.activeRunBody = undefined;
       this.#disposeIfUnreferenced(session);
     });
   }
@@ -2593,7 +2305,6 @@ export class ChatSessionStore {
     if (
       session.viewRefcount > 0 ||
       session.runHeld ||
-      session.durableRunId !== undefined ||
       this.#isAdmittingTurn(session) ||
       this.#sessions.get(session.chatId) !== session
     ) {

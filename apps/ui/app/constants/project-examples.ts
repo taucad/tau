@@ -1,19 +1,19 @@
 import { builtinExamples } from '@taucad/tau-examples/builtin';
 import type { BuiltinExample } from '@taucad/tau-examples/builtin';
 import type { ProjectManifest } from '@taucad/types';
+import { isKernelId } from '@taucad/types/constants';
+import type { KernelId } from '@taucad/types/constants';
 
 export type ProjectFiles = Record<string, { readonly content: Uint8Array<ArrayBuffer> }>;
 
 /** Gallery-facing metadata for a manifest-backed builtin project. */
 export type BuiltinProjectCardModel = {
   readonly locator: string;
-  readonly kernel: string;
+  readonly kernel: KernelId;
   readonly id: string;
   readonly name: string;
   readonly description: string;
-  readonly author: { readonly name: string; readonly avatar: string };
   readonly tags: readonly string[];
-  readonly createdAt: number;
   readonly assets: ProjectManifest['assets'];
   readonly thumbnail: string;
   readonly fileAssets: BuiltinExample['assets'];
@@ -41,18 +41,16 @@ export const loadBuiltinProjectFiles = async ({
 const builtinCatalog: readonly BuiltinExample[] = builtinExamples;
 
 export const sampleProjects: readonly BuiltinProjectCardModel[] = builtinCatalog.flatMap((example) => {
-  const { thumbnailUrl } = example;
-  return thumbnailUrl
+  const { thumbnailUrl, kernel } = example;
+  return thumbnailUrl && isKernelId(kernel)
     ? [
         {
           locator: example.locator,
-          kernel: example.kernel,
+          kernel,
           id: example.manifest.id,
           name: example.manifest.name,
           description: example.manifest.description,
-          author: { name: 'Tau Team', avatar: '/avatar-sample.png' },
           tags: example.manifest.tags,
-          createdAt: 1_740_702_000_000,
           assets: example.manifest.assets,
           thumbnail: thumbnailUrl,
           fileAssets: example.assets,
@@ -87,6 +85,9 @@ export const communityLocators = [
   'replicad.cycloidal-gear',
   'replicad.wavy-vase',
 ] as const;
+
+/** The Community example that leads the unfiltered first page, spanning two columns and rows. */
+export const featuredCommunityLocator: (typeof communityLocators)[number] = 'replicad.kestrel-240-quadcopter';
 
 const sampleProjectsByLocator = new Map(sampleProjects.map((project) => [project.locator, project]));
 

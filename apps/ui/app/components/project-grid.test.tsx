@@ -62,10 +62,8 @@ const project: BuiltinProjectCardModel = {
   id: 'community-project',
   name: 'Community Demo',
   description: 'Description retained for Remix payload only',
-  author: { name: 'Tau Team', avatar: '/avatar.png' },
   tags: ['community'],
   thumbnail: '/thumbnail.png',
-  createdAt: 1,
   assets: { main: { entryPath: mainFile } },
   fileAssets: [
     { path: mainFile, load: async () => files[mainFile].content },
@@ -78,11 +76,19 @@ function LocationProbe(): React.JSX.Element {
   return <output data-testid='location'>{location.pathname}</output>;
 }
 
-function renderGrid(): void {
+const secondProject: BuiltinProjectCardModel = {
+  ...project,
+  locator: 'openscad.second-demo',
+  kernel: 'openscad',
+  id: 'second-project',
+  name: 'Second Demo',
+};
+
+function renderGrid(properties: Partial<React.ComponentProps<typeof CommunityProjectGrid>> = {}): void {
   render(
     <MemoryRouter initialEntries={['/community']}>
       <TooltipProvider>
-        <CommunityProjectGrid projects={[project]} />
+        <CommunityProjectGrid projects={[project]} {...properties} />
       </TooltipProvider>
       <LocationProbe />
     </MemoryRouter>,
@@ -107,17 +113,39 @@ describe('CommunityProjectGrid', () => {
     });
   });
 
-  it('should compose a single whole-card link without rendering the description', () => {
+  it('should render a list of cards named by an Open link, an h2 title and the kernel only', () => {
     renderGrid();
 
+    expect(screen.getByRole('list')).toHaveClass('grid', 'grid-flow-dense');
+    expect(screen.getAllByRole('listitem')).toHaveLength(1);
     expect(screen.getAllByRole('link')).toHaveLength(1);
-    const cardLink = screen.getByRole('link', { name: 'Preview Community Demo' });
+    const cardLink = screen.getByRole('link', { name: 'Open Community Demo' });
     expect(cardLink).toHaveAttribute('href', '/s/builtin~replicad.community-demo');
     expect(cardLink.parentElement).toHaveClass('hover:border-foreground/30');
-    expect(screen.getByText('Community Demo')).toBeInTheDocument();
-    expect(screen.getByText('Tau Team')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Remix' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: 'Community Demo' })).toBeInTheDocument();
+    expect(screen.getByText('Replicad')).toBeInTheDocument();
+    expect(screen.queryByText('Tau Team')).not.toBeInTheDocument();
+    expect(screen.queryByText('Featured')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Remix Community Demo' })).toBeInTheDocument();
     expect(screen.queryByText('Description retained for Remix payload only')).not.toBeInTheDocument();
+  });
+
+  it('should span the featured card over two columns with a badge and its description', () => {
+    renderGrid({ projects: [project, secondProject], featuredLocator: project.locator });
+
+    const [featured, plain] = screen.getAllByRole('listitem');
+    expect(featured).toHaveClass('col-span-2', 'lg:row-span-2');
+    expect(plain).not.toHaveClass('col-span-2');
+    expect(screen.getByText('Featured')).toBeInTheDocument();
+    expect(screen.getByText('Description retained for Remix payload only')).toBeInTheDocument();
+    expect(screen.getByText('OpenSCAD')).toBeInTheDocument();
+  });
+
+  it('should cap the landing strip at its limit', () => {
+    renderGrid({ projects: [project, secondProject], limit: 1 });
+
+    expect(screen.getAllByRole('listitem')).toHaveLength(1);
+    expect(screen.queryByRole('link', { name: 'Open Second Demo' })).not.toBeInTheDocument();
   });
 
   it('should mount the preview once and preserve it while hidden', async () => {
@@ -143,7 +171,7 @@ describe('CommunityProjectGrid', () => {
   it('should Remix with the portable project payload without opening the preview route', async () => {
     renderGrid();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Remix' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Remix Community Demo' }));
 
     expect(createProjectMock).toHaveBeenCalledWith({
       project: {
@@ -165,11 +193,11 @@ describe('CommunityProjectGrid', () => {
     presentLocationErrorMock.mockReturnValue(true);
     renderGrid();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Remix' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Remix Community Demo' }));
 
     expect(presentLocationErrorMock).toHaveBeenCalledWith(error);
-    expect(screen.getByRole('button', { name: 'Remix' })).toBeEnabled();
-    expect(screen.getByText('Community Demo')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Remix Community Demo' })).toBeEnabled();
+    expect(screen.getByRole('heading', { level: 2, name: 'Community Demo' })).toBeInTheDocument();
     expect(screen.getByTestId('location')).toHaveTextContent('/community');
   });
 });

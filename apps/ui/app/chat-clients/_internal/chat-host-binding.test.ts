@@ -4,23 +4,15 @@ import { createActor } from 'xstate';
 import {
   armChatTurnHold,
   chatTurnAdmission,
-  chatTurnSettlement,
   publishChatTurnAdmission,
   releaseChatTurnHold,
   resetChatTurnServices,
 } from '#chat-clients/_internal/chat-host-binding.js';
-import { retireBrowserAgentHostRun } from '#chat-clients/_internal/browser-agent-host-transport.js';
-import type * as BrowserAgentHostTransport from '#chat-clients/_internal/browser-agent-host-transport.js';
-import type { ChatTurn, ChatTurnSettlementInput } from '#machines/chat-session.machine.js';
-
-vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', async (importOriginal) => ({
-  ...(await importOriginal<typeof BrowserAgentHostTransport>()),
-  retireBrowserAgentHostRun: vi.fn(),
-}));
+import type { ChatTurn } from '#machines/chat-session.machine.js';
 
 /**
- * The chat session's two turn services, driven as the real actors through the real registries (I8). The host places
- * and settles every attempt (W8 TS-S5, TS-S6): the admission takes no lease, and the settlement writes nothing.
+ * The chat session's admission service, driven as a real actor through its registry (I8). The host places and
+ * settles every attempt (W8 TS-S5, TS-S6); admission takes no lease.
  */
 describe('chatTurnAdmission', () => {
   afterEach(() => {
@@ -55,11 +47,8 @@ describe('chatTurnAdmission', () => {
   });
 
   /*
-   * F3/F4. The two states a browser row most needs to observe are the two it
-   * cannot hold open from outside: `run.queued.admitting` lasts microseconds,
-   * and `run.finishing.*` starts after the stream the row is watching has
-   * already closed. These holds are what let a row park a page in each, make
-   * its gesture or its reload land there, and then let it carry on.
+   * F3/F4. `run.queued.admitting` lasts microseconds; the debug hold lets a
+   * browser row park a page there, then release the admission.
    */
   it('should park an admission until its debug hold is released', async () => {
     const admitted: string[] = [];
@@ -85,45 +74,5 @@ describe('chatTurnAdmission', () => {
       expect(admitted).toEqual(['admitted']);
     });
     actor.stop();
-  });
-
-  it('should park a settlement until its debug hold is released', async () => {
-    armChatTurnHold('settlement');
-    const input: ChatTurnSettlementInput = {
-      chatId: 'chat-held-settlement',
-      runId: 'run-held-settlement',
-      leaseTurnId: 'user-1',
-      outcome: 'completed',
-    };
-    const done = vi.fn();
-    const actor = createActor(chatTurnSettlement, { input });
-    actor.subscribe({ complete: done });
-    actor.start();
-    await new Promise<void>((resolve) => {
-      setTimeout(resolve, 0);
-    });
-
-    expect(done).not.toHaveBeenCalled();
-
-    releaseChatTurnHold('settlement');
-
-    await vi.waitFor(() => {
-      expect(done).toHaveBeenCalledOnce();
-    });
-  });
-
-  /* W8 TS-S6: the host appends the run's row itself; the page only lets the run's record go (D6, D7 deleted). */
-  it("should settle a turn without waiting for the host's row, letting its run record go", async () => {
-    const done = vi.fn();
-    const actor = createActor(chatTurnSettlement, {
-      input: { chatId: 'chat-settled-by-host', runId: 'run-settled-by-host', leaseTurnId: 'user-1', outcome: 'failed' },
-    });
-    actor.subscribe({ complete: done });
-    actor.start();
-
-    await vi.waitFor(() => {
-      expect(done).toHaveBeenCalledOnce();
-    });
-    expect(retireBrowserAgentHostRun).toHaveBeenCalledWith('chat-settled-by-host', 'run-settled-by-host');
   });
 });

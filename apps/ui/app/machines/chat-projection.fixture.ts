@@ -3,7 +3,9 @@
  * where the chat store's projection hears them.
  */
 
-import { publishChatLogAnswer } from '#chat-clients/_internal/browser-agent-host-transport.js';
+import type { ChatSessionStore } from '#services/chat-session-store.js';
+
+type ProjectionReader = Pick<ChatSessionStore, 'receiveHostReadAnswer'>;
 
 /**
  * One durable row of a test chat's log.
@@ -41,25 +43,36 @@ export const runningRows = (runId = 'run_1'): Array<Record<string, unknown>> => 
 /**
  * Publish rows as one read answer from `cursor`, as a stream's replay would.
  *
+ * @param store - The store reading the answer.
  * @param chatId - The chat.
  * @param rows - The rows, in log order.
  * @param cursor - The first row's position.
  */
-export const publishLogRows = (chatId: string, rows: readonly unknown[], cursor = 0): void => {
-  publishLogPage(chatId, rows, { cursor, endCursor: cursor + rows.length });
+// oxlint-disable-next-line eslint/max-params -- The read fixture names its reader, chat, rows and optional cursor.
+export const publishLogRows = (store: ProjectionReader, chatId: string, rows: readonly unknown[], cursor = 0): void => {
+  publishLogPage(store, chatId, rows, { cursor, endCursor: cursor + rows.length });
 };
 
 /**
  * Publish one page of a longer replay: its answer says the log ends at `endCursor`, past these rows.
  *
+ * @param store - The store reading the answer.
  * @param chatId - The chat.
  * @param rows - The page's rows, in log order.
  * @param page - The first row's position and where the log ends.
  */
+// oxlint-disable-next-line eslint/max-params -- A page needs its reader, chat, rows and cursor/end boundary.
 export const publishLogPage = (
+  store: ProjectionReader,
   chatId: string,
   rows: readonly unknown[],
   { cursor, endCursor }: Readonly<{ cursor: number; endCursor: number }>,
 ): void => {
-  publishChatLogAnswer(chatId, { status: 'batch', cursor, nextCursor: cursor + rows.length, endCursor, events: rows });
+  store.receiveHostReadAnswer(chatId, {
+    status: 'batch',
+    cursor,
+    nextCursor: cursor + rows.length,
+    endCursor,
+    events: rows,
+  });
 };

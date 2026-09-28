@@ -5,7 +5,6 @@ import type { ChatSessionDeps } from '#services/chat-session-store.js';
 import { lifecycleRow } from '#machines/chat-projection.fixture.js';
 import type { AgentHostClient } from '#services/agent-host-client.js';
 import type { ProjectSessionActorRef } from '#machines/project-session.machine.js';
-import { publishChatLogAnswer } from '#chat-clients/_internal/browser-agent-host-transport.js';
 
 const unusedHostCommand = async (): Promise<never> => {
   throw new Error('Unexpected host command.');
@@ -248,14 +247,6 @@ describe('ChatSessionStore.observe', () => {
     });
     expect(store.getProjection('chat_a')?.ledger.position.cursor).toBe(1);
     expect(store.getProjection('chat_b')?.ledger.position.cursor).toBe(1);
-    publishChatLogAnswer('chat_a', {
-      status: 'batch',
-      cursor: 1,
-      nextCursor: 2,
-      endCursor: 2,
-      events: [lifecycleRow(1, 'completed')],
-    });
-    expect(store.getProjection('chat_a')?.ledger.position.cursor).toBe(1);
     unpublish();
     expect(close).toHaveBeenCalledTimes(2);
     const unpublishAgain = store.publishProjectHostConnector('project_1', connect);

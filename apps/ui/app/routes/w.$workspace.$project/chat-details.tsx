@@ -60,7 +60,8 @@ function FileSystemInfo({
 
 export function DetailsPanelBody({
   readOnly: sharedReadOnly = false,
-}: { readonly readOnly?: boolean } = {}): React.JSX.Element {
+  enableHistory = true,
+}: { readonly readOnly?: boolean; readonly enableHistory?: boolean } = {}): React.JSX.Element {
   const { projectRef, updateName, updateDescription, updateTags } = useProject();
   // A degraded tau.json is shown through a lossy view, so it is not edited here until it is repaired (R4).
   const needsRepair = useSelector(projectRef, (state) => state.context.manifestIssue !== undefined);
@@ -157,7 +158,7 @@ export function DetailsPanelBody({
           </section>
 
           <FileSystemInfo backendType={backendType} activeWorkspaceName={activeWorkspaceName} />
-          {sharedReadOnly ? null : <ChatDetailsUsage />}
+          {sharedReadOnly ? null : <ChatDetailsUsage enabled={enableHistory} />}
         </div>
       </div>
     </div>

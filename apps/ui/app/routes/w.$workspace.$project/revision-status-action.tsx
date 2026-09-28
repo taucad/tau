@@ -7,7 +7,7 @@ import { useProject } from '#hooks/use-project.js';
 import { useRevisions, useWithRestoreTargets } from '#hooks/use-revisions.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
 import { useRevisionCommands } from '#hooks/use-revision-status.js';
-import { useChats } from '#hooks/use-chats.js';
+import { useChatRecords } from '#hooks/use-chat-records.js';
 import { formatRelativeTime } from '#utils/date.utils.js';
 import { backupByDefaultNotice, useTauCloudEligibility, useTauCloudIntent } from '#hooks/use-cloud-projects.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
@@ -110,7 +110,7 @@ export function RevisionStatusAction(): React.JSX.Element | undefined {
   const { branch } = where;
   const commands = useRevisionCommands();
   const { editorRef, projectId } = useProject();
-  const { chats } = useChats(projectId);
+  const { chats } = useChatRecords(projectId);
   const { openPanel } = useProjectWorkspace();
   const focusedChatId = useSelector(editorRef, (state) => state.context.focusedChatId);
   /* Before the first save of a project backed up by default, the pane's own line (D19). */

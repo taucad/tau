@@ -15,7 +15,7 @@ type PageHeaderProps = Omit<React.ComponentProps<'div'>, 'title'> & {
  */
 export function PageHeader({ title, count, action, className, ...properties }: PageHeaderProps): React.JSX.Element {
   return (
-    <div className={cn('flex flex-wrap items-center justify-between gap-4', className)} {...properties}>
+    <div className={cn('flex shrink-0 flex-wrap items-center justify-between gap-4', className)} {...properties}>
       <div className='flex items-baseline gap-3'>
         <h1 className='text-4xl leading-[1.1] font-medium tracking-tight'>{title}</h1>
         {count === undefined ? null : <span className='text-muted-foreground tabular-nums'>{count}</span>}

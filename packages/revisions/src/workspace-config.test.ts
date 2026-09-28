@@ -49,6 +49,7 @@ describe('generated ignore file', () => {
   /* The ignore file is derived from the path registry, so the records rows
    * appear and the deleted Jujutsu configuration does not (W1 pin b). */
   it('lists the records rows and no engine configuration', () => {
+    expect(generatedIgnoreEntries(tauRevisionPolicy)).toContain('/.tau/workbench/');
     expect(generatedIgnoreEntries(tauRevisionPolicy)).toContain('/.tau/runs/');
     expect(generatedIgnoreEntries(tauRevisionPolicy)).toContain('/exports/');
     expect(generatedIgnoreEntries(tauRevisionPolicy)).not.toContain('/.tau/jj-config.toml');
@@ -135,6 +136,7 @@ describe('generated ignore file', () => {
 /.tau/types/
 /.tau/tsconfig.generated.json
 /.tau/lockfile.json
+/.tau/workbench/
 /.tau/chats/
 /.tau/runs/
 /.tau/export/

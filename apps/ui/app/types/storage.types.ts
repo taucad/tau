@@ -1,4 +1,5 @@
 import type { Chat } from '@taucad/chat';
+import type { ChatRecord } from '@taucad/chat/schemas';
 import type { PartialDeep } from 'type-fest';
 import type { EditorState, EditorStateInput } from '#types/editor.types.js';
 import type { ProjectLibraryState } from '#types/project-library.types.js';
@@ -109,6 +110,9 @@ export type ChatStorage = {
    */
   softDeleteChat(chatId: string): Promise<Chat | undefined>;
   getChat(chatId: string): Promise<Chat | undefined>;
+  /** Navigation metadata without deriving a transcript for every chat. */
+  getAllChatRecords(options?: { includeDeleted?: boolean }): Promise<ChatRecord[]>;
+  getChatRecordsForResource(resourceId: string, options?: { includeDeleted?: boolean }): Promise<ChatRecord[]>;
   getAllChats(options?: { includeDeleted?: boolean }): Promise<Chat[]>;
   getChatsForResource(resourceId: string, options?: { includeDeleted?: boolean }): Promise<Chat[]>;
   deleteChat(chatId: string): Promise<void>;

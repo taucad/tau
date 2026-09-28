@@ -17,7 +17,7 @@ export function useOpenNewChat(): {
   readonly isReady: boolean;
 } {
   const { projectId } = useProject();
-  const { createChat } = useChats(projectId);
+  const { createChat } = useChats(projectId, { enabled: false });
   const navigate = useNavigate();
   const slugs = useProjectSlugs(projectId);
 

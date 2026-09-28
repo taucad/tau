@@ -12,6 +12,7 @@ import type { ChatStoreClient } from '#db/chat-file-storage.js';
 import { IndexedDbStorageProvider } from '#db/indexeddb-storage.js';
 import type { ChatStorage } from '#types/storage.types.js';
 import type { ProjectLibraryState } from '#types/project-library.types.js';
+import { getChatRecencyAt } from '#utils/chat-recency.utils.js';
 
 /**
  * The chat store's behaviour, re-pointed from `indexeddb-storage.test.ts`.
@@ -39,6 +40,7 @@ const createStoreWithFiles = (): {
   read: (path: string) => Promise<string>;
   write: (path: string, content: string) => Promise<void>;
   exists: (path: string) => Promise<boolean>;
+  directoriesRead: string[];
 } => {
   let filesystem: FileSystemProvider | undefined;
   const provider = async (): Promise<FileSystemProvider> => {
@@ -48,6 +50,7 @@ const createStoreWithFiles = (): {
   const rooted = (path: string): string => path.replace(/^\/+/u, '');
   const seen = new Set<string>();
   const reads: string[] = [];
+  const directoriesRead: string[] = [];
   /* Only a project path names a project; a composer record lives in the Home
    * workspace and must never be mistaken for one. */
   const noteProject = (path: string): void => {
@@ -86,6 +89,7 @@ const createStoreWithFiles = (): {
       await filesystem.writeFile(rooted(path), data);
     },
     readdir: async (path) => {
+      directoriesRead.push(path);
       const filesystem = await provider();
       return filesystem.readdir(rooted(path));
     },
@@ -109,6 +113,7 @@ const createStoreWithFiles = (): {
     store,
     reopen,
     reads,
+    directoriesRead,
     read: async (path) => {
       const provided = await provider();
       return decoder.decode(await provided.readFile(rooted(path)));
@@ -188,6 +193,12 @@ describe('chat file store', () => {
 
     await expect(store.getAllChats()).resolves.toMatchObject([{ id: first.id }]);
     await expect(store.getAllChats({ includeDeleted: true })).resolves.toHaveLength(2);
+    await expect(store.getAllChatRecords()).resolves.toMatchObject([{ id: first.id }]);
+    await expect(store.getAllChatRecords({ includeDeleted: true })).resolves.toHaveLength(2);
+    await expect(store.getChatRecordsForResource('proj_two')).resolves.toEqual([]);
+    await expect(store.getChatRecordsForResource('proj_two', { includeDeleted: true })).resolves.toMatchObject([
+      { id: second.id },
+    ]);
   });
 
   describe('disjoint metadata writes', () => {
@@ -850,11 +861,78 @@ describe('chat file store — log ownership boundary', () => {
   });
 
   it('does not cache or derive a remote segment as record messages', async () => {
-    const { store, write } = createStoreWithFiles();
+    const { store, write, reads } = createStoreWithFiles();
     await write(`/projects/${projectId}/.tau/chats/${chatId}/chat.json`, record);
     await write(`/projects/${projectId}/.tau/chats/${chatId}/events/device-b.jsonl`, 'remote host events');
     const chat = await store.getChat(chatId);
     expect(chat?.messages).toEqual([]);
+    expect(reads).not.toContain(`/projects/${projectId}/.tau/chats/${chatId}/events/device-b.jsonl`);
+  });
+
+  it('lists modern metadata without reading either local or foreign log segments', async () => {
+    const { store, write, reads, directoriesRead } = createStoreWithFiles();
+    const modernRecord = JSON.stringify({
+      id: chatId,
+      resourceId: projectId,
+      name: 'Modern chat',
+      createdAt: 1,
+      updatedAt: 2,
+      recencyAt: 3,
+    });
+    await write(`/projects/${projectId}/.tau/chats/${chatId}/chat.json`, modernRecord);
+    await write(`/projects/${projectId}/.tau/chats/${chatId}/events.jsonl`, 'local host events');
+    await write(`/projects/${projectId}/.tau/chats/${chatId}/events/device-b.jsonl`, 'remote host events');
+
+    expect(await store.getChatRecordsForResource(projectId)).toEqual([
+      expect.objectContaining({ id: chatId, name: 'Modern chat', recencyAt: 3 }),
+    ]);
+    expect(reads).toEqual([`/projects/${projectId}/.tau/chats/${chatId}/chat.json`]);
+    expect(directoriesRead).toEqual([`/projects/${projectId}/.tau/chats`]);
+
+    const fullChats = await store.getChatsForResource(projectId);
+    expect(fullChats[0]?.messages).toEqual([]);
+    expect(reads).not.toContain(`/projects/${projectId}/.tau/chats/${chatId}/events.jsonl`);
+    expect(reads).not.toContain(`/projects/${projectId}/.tau/chats/${chatId}/events/device-b.jsonl`);
+  });
+
+  it('keeps log-only chats visible and falls back to creation time for legacy metadata', async () => {
+    const { store, write } = createStoreWithFiles();
+    const logOnlyId = 'chat_log_only';
+    await write(`/projects/${projectId}/.tau/chats/${chatId}/chat.json`, record);
+    await write(`/projects/${projectId}/.tau/chats/${chatId}/events.jsonl`, 'local host events');
+    await write(`/projects/${projectId}/.tau/chats/${logOnlyId}/events.jsonl`, 'remote host events');
+
+    const full = await store.getChatsForResource(projectId);
+    const metadata = await store.getChatRecordsForResource(projectId);
+    expect(metadata.map((chat) => chat.id).sort((left, right) => left.localeCompare(right))).toEqual(
+      full.map((chat) => chat.id).sort((left, right) => left.localeCompare(right)),
+    );
+    expect(metadata.map((chat) => chat.recencyAt).sort((left, right) => (left ?? 0) - (right ?? 0))).toEqual(
+      full.map((chat) => getChatRecencyAt(chat)).sort((left, right) => left - right),
+    );
+    expect(metadata.find((chat) => chat.id === chatId)?.recencyAt).toBe(1);
+    expect(metadata.find((chat) => chat.id === logOnlyId)?.recencyAt).toBe(0);
+    expect(metadata.find((chat) => chat.id === logOnlyId)?.name).toBe('New chat');
+  });
+
+  it('reads changed projected metadata on the next listing', async () => {
+    const { store, write } = createStoreWithFiles();
+    await write(`/projects/${projectId}/.tau/chats/${chatId}/chat.json`, record);
+    expect(await store.getChatRecordsForResource(projectId)).toMatchObject([{ name: 'From the log', recencyAt: 1 }]);
+
+    await write(
+      `/projects/${projectId}/.tau/chats/${chatId}/chat.json`,
+      JSON.stringify({
+        id: chatId,
+        resourceId: projectId,
+        name: 'After sync',
+        createdAt: 1,
+        updatedAt: 3,
+        recencyAt: 3,
+      }),
+    );
+
+    expect(await store.getChatRecordsForResource(projectId)).toMatchObject([{ name: 'After sync', recencyAt: 3 }]);
   });
 
   /* A record that has not landed yet is a real runtime state, not a migration

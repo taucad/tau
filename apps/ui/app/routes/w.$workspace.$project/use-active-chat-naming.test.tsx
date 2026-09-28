@@ -41,6 +41,7 @@ describe('useActiveChatNaming', () => {
       ({ activeChat }) =>
         useActiveChatNaming({
           activeChat,
+          firstMessage: activeChat.messages[0],
           isProjectLoading: false,
           isChatsLoading: false,
           applyGeneratedChatName,
@@ -62,6 +63,7 @@ describe('useActiveChatNaming', () => {
       ({ activeChat }) =>
         useActiveChatNaming({
           activeChat,
+          firstMessage: activeChat.messages[0],
           isProjectLoading: false,
           isChatsLoading: false,
           applyGeneratedChatName,
@@ -81,6 +83,7 @@ describe('useActiveChatNaming', () => {
     renderHook(() =>
       useActiveChatNaming({
         activeChat: makeChat(),
+        firstMessage: makeChat().messages[0],
         isProjectLoading: false,
         isChatsLoading: false,
         applyGeneratedChatName: vi.fn(),

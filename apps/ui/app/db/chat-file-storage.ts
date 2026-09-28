@@ -101,7 +101,7 @@ export type ChatFileStoreOptions = {
   readonly projectIds: () => Promise<readonly string[]>;
 };
 
-const isDeleted = (chat: Chat): boolean => chat.deletedAt !== undefined;
+const isDeleted = (chat: Chat | ChatRecord): boolean => chat.deletedAt !== undefined;
 
 const valuesEqual = (left: unknown, right: unknown): boolean => {
   if (left === right) {
@@ -211,6 +211,20 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
     return placeholderRecord(projectId, chatId);
   };
 
+  /** Read navigation metadata without deriving a host-log transcript. */
+  const readChatRecord = async (projectId: string, chatId: string): Promise<ChatRecord | undefined> => {
+    const record = await readRecord(projectId, chatId);
+    if (record !== undefined) {
+      return record.recencyAt === undefined ? { ...record, recencyAt: getChatRecencyAt(record) } : record;
+    }
+    const chat = await readChatDirectory(projectId, chatId);
+    if (chat === undefined) {
+      return undefined;
+    }
+    const { messages: _messages, ...metadata } = chat;
+    return { ...metadata, recencyAt: getChatRecencyAt(chat) };
+  };
+
   const listProjectChats = async (projectId: string): Promise<Chat[]> => {
     let ids: string[];
     try {
@@ -220,6 +234,17 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
     }
     const chats = await Promise.all(ids.map(async (chatId) => readChatDirectory(projectId, chatId)));
     return chats.filter((chat) => chat !== undefined);
+  };
+
+  const listProjectChatRecords = async (projectId: string): Promise<ChatRecord[]> => {
+    let ids: string[];
+    try {
+      ids = await options.client.readdir(chatsDirectory(projectId));
+    } catch {
+      return [];
+    }
+    const records = await Promise.all(ids.map(async (chatId) => readChatRecord(projectId, chatId)));
+    return records.filter((record) => record !== undefined);
   };
 
   /**
@@ -430,6 +455,18 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
       const perProject = await Promise.all(projects.map(async (projectId) => listProjectChats(projectId)));
       const chats = perProject.flat();
       return listOptions?.includeDeleted === true ? chats : chats.filter((chat) => !isDeleted(chat));
+    },
+
+    getChatRecordsForResource: async (resourceId, listOptions) => {
+      const records = await listProjectChatRecords(resourceId);
+      return listOptions?.includeDeleted === true ? records : records.filter((record) => !isDeleted(record));
+    },
+
+    getAllChatRecords: async (listOptions) => {
+      const projects = await options.projectIds();
+      const perProject = await Promise.all(projects.map(async (projectId) => listProjectChatRecords(projectId)));
+      const records = perProject.flat();
+      return listOptions?.includeDeleted === true ? records : records.filter((record) => !isDeleted(record));
     },
 
     putChatRecord: async (chat) => {

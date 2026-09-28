@@ -47,7 +47,8 @@ class DeploymentTargetTest(unittest.TestCase):
             'occtPrefix': '/recorded/prep/occt-mixed/install',
             'rustPrefix': '/recorded/rust', 'sdkPrefix': '/recorded/sdk',
             'sourceRoot': str(materials.ROOT), 'preparationCache': '/recorded/prep',
-            'environment': {'HOME': '/recorded/home', 'EM_CONFIG': '/recorded/config'},
+            'environment': {'HOME': '/recorded/home', 'EM_CONFIG': '/recorded/config',
+                            'CARGO_HOME': '/recorded/cargo'},
             'wasmEh': prepare.RECIPE['wasmEh'],
             'tools': tools,
             **{name: f'/recorded/tools/{name}' for name in ['rustc', 'cargo', 'emcc', 'emxx', 'emar']},
@@ -63,7 +64,12 @@ class DeploymentTargetTest(unittest.TestCase):
         with patch.object(Path, 'read_text', return_value='# mocked Emscripten config\n'):
             simd_recipe = materials.mixed_producer_recipe(mixed)
         self.assertEqual(simd_recipe['recordedEnvironment']['CARGO_ENCODED_RUSTFLAGS'],
-                         '-C\x1ftarget-feature=+simd128')
+                         '\x1f'.join([
+                             '-C', 'target-feature=+simd128',
+                             f'--remap-path-prefix={materials.ROOT}=tau',
+                             '--remap-path-prefix=/recorded/cargo=cargo',
+                             '--remap-path-prefix=/recorded/rust/lib/rustlib/src/rust=rust-src',
+                         ]))
         self.assertTrue(simd_recipe['recordedEnvironment']['CXXFLAGS_wasm32_unknown_emscripten']
                         .startswith('-msimd128 '))
         self.assertIn('occt-mixed-simd128', simd_recipe['rebuildMixedPrefix'])
@@ -97,13 +103,41 @@ class DeploymentTargetTest(unittest.TestCase):
         with patch.object(prepare, 'digest', return_value='mock-source-pin'):
             return prepare.prefix_contract(kind, paths, {}, context)
 
-    def recipe(self):
+    def recipe(self, cohort='node', executable_identity=None):
         workspace = (materials.ROOT / 'pnpm-workspace.yaml').read_text()
         version = re.search(r"^\s*'@napi-rs/cli':\s*([^\s#]+)", workspace, re.MULTILINE)[1]
         with patch.object(materials, 'selected_executable', side_effect=lambda name: Path('/tools') / name), \
                 patch.object(materials, 'run', return_value='/tools/selected\n'), \
-                patch.object(materials, 'executable_identity', return_value={'mock': True}):
-            return materials.native_producer_recipe({'selectedVersion': version})
+                patch.object(materials, 'executable_identity',
+                             side_effect=executable_identity or (lambda *_: {'mock': True})):
+            return materials.native_producer_recipe({'selectedVersion': version}, cohort)
+
+    def test_should_not_observe_unselected_python_tools_for_node_material(self):
+        python_project = materials.tomllib.loads(
+            (materials.PACKAGE / 'bindings/python/pyproject.toml').read_text()
+        )
+        maturin_version = python_project['build-system']['requires'][0].split('==', 1)[1]
+
+        def reject_python(path, *_):
+            if 'python-venv' in str(path) or 'python314-venv' in str(path):
+                raise ValueError(f'Missing selected executable: {path}')
+            return {'mock': True}
+
+        node = self.recipe('node', reject_python)
+        observations = node['reconstructionSelectionAtMaterialGeneration']
+        self.assertNotIn('python313', observations)
+        self.assertNotIn('python314', observations)
+        self.assertEqual(node['pythonReconstructionRequirements'], {
+            'python313': {'requiredPythonSeries': '3.13', 'maturinVersion': maturin_version},
+            'python314': {'requiredPythonSeries': '3.14', 'maturinVersion': maturin_version},
+        })
+        self.assertEqual(set(node['standaloneRoutes']), {'node', 'python313', 'python314'})
+        self.assertEqual(set(node['sourceSelectedRoutes']), {'node', 'python313', 'python314'})
+        with self.assertRaisesRegex(ValueError, 'Missing selected executable: .*python-venv'):
+            self.recipe('python', reject_python)
+        python = self.recipe('python')
+        self.assertIn('python313', python['reconstructionSelectionAtMaterialGeneration'])
+        self.assertIn('python314', python['reconstructionSelectionAtMaterialGeneration'])
 
     def test_should_select_the_ruled_floor(self):
         self.assertEqual(prepare.RECIPE['macosDeploymentTarget'], '11.0')
@@ -239,6 +273,34 @@ class PreparationContractTest(unittest.TestCase):
 
     def verify(self):
         return prepare.verify_prefix(self.prefix, self.contract())
+
+    def test_should_freeze_owned_sdk_without_changing_bytes_or_external_tools(self):
+        sdk = self.cache / 'sdk/install'
+        tool = sdk / 'emscripten/tool.py'
+        tool.parent.mkdir(parents=True)
+        tool.write_text('print("inert SDK tool")\n')
+        tool.chmod(0o755)
+        outside = self.root / 'external-tool'
+        outside.write_text('outside the owned SDK')
+        outside_mode = outside.stat().st_mode
+        (sdk / 'external-link').symlink_to(outside)
+        prepare.RUST.mkdir()
+        before = prepare.support_payload({'sdk': sdk})
+        with patch.object(prepare, 'SDK', sdk), \
+                patch.object(prepare, 'room'), \
+                patch.object(prepare, 'tool_paths', return_value=self.paths), \
+                patch.object(prepare, 'validate_tools', return_value='inert rust'):
+            with patch.dict(os.environ, GEOSPEC_DELIVERY_EMSDK_PREFIX=str(sdk)):
+                prepare.prepare_tools()
+                self.assertEqual(tool.stat().st_mode & 0o777, 0o755)
+                self.assertNotEqual(tool.parent.stat().st_mode & 0o222, 0)
+            prepare.prepare_tools()
+            prepare.prepare_tools()
+        self.assertEqual(prepare.support_payload({'sdk': sdk}), before)
+        for path in [sdk, tool.parent, tool]:
+            self.assertEqual(path.stat().st_mode & 0o222, 0)
+        self.assertEqual(tool.stat().st_mode & 0o111, 0o111)
+        self.assertEqual(outside.stat().st_mode, outside_mode)
 
     def test_should_prepare_only_selected_prefix_after_common_gates(self):
         for selection, expected in [(None, ['native', 'mixed']), ('mixed', ['mixed']), ('native', ['native'])]:

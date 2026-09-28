@@ -1,5 +1,5 @@
 import type { FileEntry } from '@taucad/types';
-import type { Chat } from '@taucad/chat';
+import type { ChatRecord } from '@taucad/chat/schemas';
 import type { ChipType } from '#components/chat/context-chip.js';
 
 /**
@@ -79,7 +79,7 @@ export type ResolvedAtReference =
 export function resolveAtReference(
   path: string,
   fileTree: Map<string, FileEntry>,
-  chatsById: Map<string, Chat>,
+  chatsById: Map<string, ChatRecord>,
 ): ResolvedAtReference | undefined {
   if (isChatLogPath(path)) {
     const chatId = extractChatIdFromChatLogPath(path);
@@ -197,7 +197,7 @@ export type PastedContentSegment =
 
 export type BuildPastedContentOptions = {
   fileTree: Map<string, FileEntry>;
-  chats: Chat[];
+  chats: ChatRecord[];
   /** Full invocation tokens the active agent offers (`/brep-design`, `$imagegen`). */
   knownTokens?: ReadonlySet<string>;
 };

@@ -112,6 +112,17 @@ platform dependency; it does not publish. Wheels include the Python assertions
 and pytest entry point. A build receipt alone does not establish installed-package
 correctness, supported-platform certification or performance promotion.
 
+All macOS desktop package modes automatically prepare the complete current-source
+delivery when missing or stale, and reuse it when its input and output hashes
+still verify. The first build includes the pinned native and mixed-WASM producers;
+the root package ships both entry points. The default assembly is
+`out/artifacts/geospec-native-engine/ci/assembly`. An explicit
+`TAU_GEOSPEC_NATIVE_ASSEMBLY_ROOT` can select another qualified assembly without
+running the default producer; its package layout and license closure are still
+validated. A loose workspace addon is not an assembly.
+The owned SDK installation is read-only so compiler bytecode cannot change its
+recorded inputs; Emscripten's selected build cache remains outside that SDK.
+
 Relevant Nx checks include `typecheck`, `lint`, `clippy-rust`, `format-rust`,
 `check-wasm` and the explicit conformance/benchmark targets in `project.json`.
 Strict Clippy is a static correctness check, not a coverage measurement.

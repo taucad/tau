@@ -78,6 +78,7 @@ import { useProjectManager } from '#hooks/use-project-manager.js';
 import { Skeleton } from '@taucad/ui/components/skeleton';
 import type { ProjectDiscoveryConflict, WorkspaceBindingRepairGroup } from '#hooks/use-project-manager.js';
 import { ProjectCard, ProjectCardCadPreview, ProjectCardMedia } from '#components/project-card.js';
+import { PageContent } from '#components/layout/page-content.js';
 import { PageHeader } from '#components/layout/page-header.js';
 import { projectSlugOf, projectUrlOr } from '#utils/project-url.utils.js';
 import { projectLocationDescriptor, projectLocationFullLabel } from '#utils/project-creation-location.utils.js';
@@ -429,7 +430,7 @@ export function ProjectLibrary(): React.JSX.Element {
   };
 
   return (
-    <div className='container mx-auto px-4 py-8'>
+    <PageContent>
       <PageHeader
         title='Projects'
         className='mb-6'
@@ -719,7 +720,7 @@ export function ProjectLibrary(): React.JSX.Element {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </PageContent>
   );
 }
 

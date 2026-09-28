@@ -32,6 +32,7 @@ import {
 
 type AgentsPanelBodyProps = {
   readonly metadataByChatId?: Readonly<Record<string, AgentProjectionMetadata>>;
+  readonly enableHistory?: boolean;
 };
 
 type AgentListProps = {
@@ -105,7 +106,10 @@ export const ChatAgents = ({
 );
 
 /** Durable + live project-wide projection. It never acquires or owns a chat run. */
-export const AgentsPanelBody = ({ metadataByChatId }: AgentsPanelBodyProps): React.JSX.Element => {
+export const AgentsPanelBody = ({
+  metadataByChatId,
+  enableHistory = true,
+}: AgentsPanelBodyProps): React.JSX.Element => {
   useAgentsClock();
   const { projectId } = useProject();
   const projectSlugsResolution = useProjectSlugs(projectId);
@@ -113,6 +117,7 @@ export const AgentsPanelBody = ({ metadataByChatId }: AgentsPanelBodyProps): Rea
   const { agents, isLoading, error, retry } = useAgentProjections({
     workspaceLabel: projectSlugs?.workspaceSlug,
     metadataByChatId,
+    enabled: enableHistory,
   });
 
   return (

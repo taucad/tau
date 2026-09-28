@@ -9,6 +9,8 @@
  */
 
 import { execFile, execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { createReadStream } from 'node:fs';
 import { cp, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -106,6 +108,59 @@ export const copyGeoSpecNativeAssembly = async (
   return { [name]: manifest.version, [platformName]: platformManifest.version };
 };
 
+/**
+ * Co-deliver the source/relink archive described by the staged native root's receipt.
+ * The receipt is captured before Electron Packager removes the staging directory.
+ * @param assemblyRoot - The selected native assembly.
+ * @param stagedReceipt - `licenses/SOURCE-RELINK.json` text from its staged root package.
+ * @param resourcesRoot - Packaged app's `Contents/Resources` directory.
+ */
+export const copyGeoSpecSourceRelink = async (
+  assemblyRoot: string,
+  stagedReceipt: string,
+  resourcesRoot: string,
+): Promise<void> => {
+  const name = 'geospec-engine-native-source-relink.tar.gz';
+  const receipt = JSON.parse(stagedReceipt) as {
+    readonly schema?: string;
+    readonly artifact?: { readonly fileName?: string; readonly bytes?: number; readonly sha256?: string };
+  };
+  if (
+    receipt.schema !== 'geospec-native-source-relink-asset-v2' ||
+    receipt.artifact?.fileName !== name ||
+    typeof receipt.artifact.bytes !== 'number' ||
+    !Number.isSafeInteger(receipt.artifact.bytes) ||
+    receipt.artifact.bytes <= 0 ||
+    !/^[0-9a-f]{64}$/u.test(receipt.artifact.sha256 ?? '')
+  ) {
+    throw new Error('GeoSpec SOURCE-RELINK receipt has no valid source archive identity.');
+  }
+  const expected = receipt.artifact;
+  const digest = async (path: string): Promise<string> => {
+    const hash = createHash('sha256');
+    for await (const chunk of createReadStream(path) as AsyncIterable<Uint8Array<ArrayBuffer>>) {
+      hash.update(chunk);
+    }
+    return hash.digest('hex');
+  };
+  const source = resolve(assemblyRoot, 'tarballs', name);
+  const sourceInfo = await stat(source);
+  if (!sourceInfo.isFile() || sourceInfo.size !== expected.bytes || (await digest(source)) !== expected.sha256) {
+    throw new Error('GeoSpec source/relink archive differs from the staged native receipt.');
+  }
+  const destination = resolve(resourcesRoot, 'SOURCES', name);
+  await mkdir(dirname(destination), { recursive: true });
+  await cp(source, destination, { dereference: true });
+  const destinationInfo = await stat(destination);
+  if (
+    !destinationInfo.isFile() ||
+    destinationInfo.size !== expected.bytes ||
+    (await digest(destination)) !== expected.sha256
+  ) {
+    throw new Error('Copied GeoSpec source/relink archive differs from the staged native receipt.');
+  }
+};
+
 /** Remove each path under `target` whose counterpart under `source` fails `keep`. */
 const prune = async (target: string, source: string, keep: (path: string) => boolean): Promise<void> => {
   const entries = await readdir(target, { withFileTypes: true });
@@ -199,8 +254,12 @@ const runtimeDependencies = async (directory: string): Promise<readonly string[]
  */
 const resolveFromTree = async (from: string, name: string, stopAt: string): Promise<string | undefined> => {
   for (let directory = from; directory.startsWith(stopAt); directory = dirname(directory)) {
+    const candidate =
+      basename(directory) === 'node_modules'
+        ? resolve(directory, name, 'package.json')
+        : resolve(directory, 'node_modules', name, 'package.json');
     // oxlint-disable-next-line no-await-in-loop -- Node's own resolution is a serial walk up the tree.
-    const found = await realpath(resolve(directory, 'node_modules', name, 'package.json')).catch(() => undefined);
+    const found = await realpath(candidate).catch(() => undefined);
     if (found) {
       return dirname(found);
     }

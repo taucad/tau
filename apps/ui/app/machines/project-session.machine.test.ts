@@ -40,7 +40,7 @@ const recordingParent = (): { ref: AnyActorRef; received: Array<EventObject & Re
 const harness = (options?: {
   readonly readyRegions?: readonly ProjectSessionRegion[];
   readonly parentRef?: AnyActorRef;
-  readonly failCloseStep?: 'cancelRuns' | 'flushProducers' | 'flushSync' | 'releaseLeases' | 'releaseAgentHost';
+  readonly failCloseStep?: 'cancelRuns' | 'flushProducers' | 'flushSync' | 'releaseAgentHost';
   readonly inspect?: ReturnType<typeof guardActors>['inspect'];
 }) => {
   const order: string[] = [];
@@ -77,12 +77,6 @@ const harness = (options?: {
           order.push('flushSync');
           if (options?.failCloseStep === 'flushSync') {
             throw new Error('flushSync failed');
-          }
-        }),
-        releaseLeases: fromSafeAsync<void, { projectId: string }>(async () => {
-          order.push('releaseLeases');
-          if (options?.failCloseStep === 'releaseLeases') {
-            throw new Error('releaseLeases failed');
           }
         }),
         releaseAgentHost: fromSafeAsync<void, { projectId: string }>(async () => {
@@ -414,7 +408,7 @@ describe('projectSessionMachine', () => {
     actor.stop();
   });
 
-  it('cancels, flushes, releases and stops every child in that order (pin d)', async () => {
+  it('cancels, flushes and stops every child without a second lease relay (pin d)', async () => {
     const parent = recordingParent();
     const { actor, order, live } = harness({ parentRef: parent.ref });
     await settle();
@@ -432,7 +426,6 @@ describe('projectSessionMachine', () => {
       'cancelRuns:chat-1',
       'flushProducers',
       'flushSync',
-      'releaseLeases',
       'releaseAgentHost',
       'stop:fileManager',
       'stop:project',
@@ -522,7 +515,7 @@ describe('projectSessionMachine', () => {
     actor.stop();
   });
 
-  it.each(['cancelRuns', 'flushSync', 'releaseLeases', 'releaseAgentHost'] as const)(
+  it.each(['cancelRuns', 'flushSync', 'releaseAgentHost'] as const)(
     'keeps resources live and reports failure when %s fails',
     async (failCloseStep) => {
       const parent = recordingParent();

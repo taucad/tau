@@ -45,7 +45,8 @@ const only = new Set(
     .split(',')
     .filter(Boolean) ?? [],
 );
-const thumbnailOptions = { width: 768, height: 576 } as const;
+// Twice the largest card slot (a featured card is ~750 CSS px wide) so 2× displays and share previews stay sharp.
+const thumbnailOptions = { width: 1536, height: 1152 } as const;
 const thumbnailMargin = 0.1;
 
 const supportedKernels: ReadonlySet<string> = exampleKernelIds;
@@ -232,7 +233,7 @@ for (const entry of isolated ? renderable : []) {
       exportOptions: {
         mode: 'single',
         ...thumbnailOptions,
-        lineWidth: 3,
+        lineWidth: 6,
         camera: {
           framing: 'bounds',
           direction: [0.6123724357, -0.6123724357, 0.5],

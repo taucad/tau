@@ -28,6 +28,9 @@ type SearchParameterSetter<T> = (next: T | ((previous: T) => T)) => void;
  * - Writing the codec's fallback deletes the parameter, so a default view has a
  *   clean URL.
  * - Invalid input degrades to the codec's fallback and never throws.
+ * - One write per parameter per navigation: React Router's functional updater
+ *   reads the committed URL, not a queued one, so two setters called in the same
+ *   tick overwrite each other. Reset several parameters with one `setSearchParams`.
  *
  * SSR needs no special handling: React Router supplies the URL on the server
  * and the client alike, so there is no server snapshot to get right. The one

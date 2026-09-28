@@ -20,7 +20,7 @@
  *   provider — marketing-route composers consume these for clearDraft /
  *   draft-image dispatch without pulling the rest of the contract.
  * - **Session-required** ({@link useChatContext} / {@link useChatSelector} /
- *   {@link useChatActions} / {@link useChatById} / {@link useChatRetrySnapshot}):
+ *   {@link useChatActions} / {@link useChatById}):
  *   work under `<ActiveChatProvider>` only. The session's existence is a
  *   compile-time guarantee through {@link useActiveChatSession}.
  *
@@ -318,37 +318,6 @@ export function useChatSelector<T>(selector: (state: CombinedChatState) => T, ch
  */
 export function useChatById<T>(chatId: string, selector: (state: CombinedChatState) => T): T {
   return useChatSelector(selector, chatId);
-}
-
-/**
- * Snapshot of the chatPersistenceMachine's transparent auto-retry counters
- * for the resolved chat. Returns `{ retryAttempt: 0 }` when no session is
- * mounted so consumers can render unconditionally.
- *
- * Components use this (instead of reaching into `persistenceActorRef`
- * directly) to render a "Reconnecting... N/M" indicator while the
- * `requestLifecycle.retrying` substate is active between attempts.
- */
-export type ChatRetrySnapshot = {
-  retryAttempt: number;
-  retryMaxAttempts: number;
-};
-
-const emptyRetrySnapshot: ChatRetrySnapshot = { retryAttempt: 0, retryMaxAttempts: 0 };
-
-export function useChatRetrySnapshot(chatId?: string): ChatRetrySnapshot {
-  const { persistenceActorRef } = useChatContext(chatId);
-  return useSelector(
-    persistenceActorRef,
-    (state) => {
-      if (!state) {
-        return emptyRetrySnapshot;
-      }
-      const { retryAttempt, retryMaxAttempts } = state.context;
-      return { retryAttempt, retryMaxAttempts };
-    },
-    (a, b) => a.retryAttempt === b.retryAttempt && a.retryMaxAttempts === b.retryMaxAttempts,
-  );
 }
 
 // ---------------------------------------------------------------------------

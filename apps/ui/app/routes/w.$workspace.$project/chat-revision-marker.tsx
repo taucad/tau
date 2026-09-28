@@ -17,7 +17,7 @@ import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-works
 import { useRevisionCards, useRevisionChanges, useRevisions, useTurnRevision } from '#hooks/use-revisions.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
 import { useRevisionStatus } from '#hooks/use-revision-status.js';
-import { useChatActions, useChatContext, useChatRetrySnapshot, useChatSelector } from '#hooks/use-chat.js';
+import { useChatActions, useChatContext, useChatSelector } from '#hooks/use-chat.js';
 import { useChatSidebarStatus } from '#hooks/use-sidebar-status.js';
 import { useProject } from '#hooks/use-project.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
@@ -98,7 +98,6 @@ function useTurnRevisionState(userMessageId: string, isLatestTurn: boolean): Tur
   const baseCard = useRevisionCard(isLatestTurn && log?.settlement === undefined ? baseRevisionId : undefined);
   const recorded = turnSave(useTurnRevision(userMessageId), baseRevisionId);
   const run = useChatSidebarStatus(projectId, activeChatId);
-  const { retryAttempt } = useChatRetrySnapshot();
   const hasError = useChatSelector((state) => state.error !== undefined || state.persistedError !== undefined);
   /* The last visible state, so a reconnect holds what the summary said. */
   const [held, setHeld] = useState<TurnRevisionState>();
@@ -116,7 +115,7 @@ function useTurnRevisionState(userMessageId: string, isLatestTurn: boolean): Tur
     recorded,
     base,
     isUnreachable: isLatestTurn && hasError,
-    isReconnecting: isLatestTurn && (retryAttempt > 0 || run?.state === 'reconnecting'),
+    isReconnecting: isLatestTurn && run?.state === 'reconnecting',
     previous: held,
   });
   if (stateKey(state) !== stateKey(held)) {

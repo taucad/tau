@@ -19,8 +19,6 @@ export type ChatActivityFacts = Readonly<{
   runState: ChatSidebarState | undefined;
   /** The AI SDK chat status. */
   chatStatus: 'submitted' | 'streaming' | 'ready' | 'error';
-  /** The transport's automatic retry attempt; `0` when none is under way. */
-  retryAttempt: number;
 }>;
 
 /**
@@ -37,7 +35,7 @@ export type ChatActivityFacts = Readonly<{
  */
 export const selectChatActivityCue = (facts: ChatActivityFacts): ChatActivityCue | undefined => {
   /* A finished run says nothing here: the revision card alone says "Saving revision" (§5.10, V5 B1). */
-  if (facts.retryAttempt > 0 || facts.runState === 'reconnecting') {
+  if (facts.runState === 'reconnecting') {
     return { kind: 'reconnecting', sentence: 'Reconnecting…' };
   }
   switch (facts.runState) {

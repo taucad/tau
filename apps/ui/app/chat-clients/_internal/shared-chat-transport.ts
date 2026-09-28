@@ -5,8 +5,9 @@ import { idPrefix } from '@taucad/types/constants';
 import { BrowserPlacementChatTransport } from '#chat-clients/_internal/browser-agent-host-transport.js';
 
 /**
- * Single shared transport. Constructed once at module load so N concurrent
- * sessions share one fetch factory.
+ * Legacy durable-run binding bridge. Live AI SDK chats each receive their own
+ * transport below, so an armed watch cannot leak into another chat. The
+ * binding bridge goes with the old reattach path in PV-S11/PV-S12.
  *
  * Lives under `chat-clients/_internal/` to enforce the rule that *only* the
  * profile-scoped chat clients (and the session store that owns the live
@@ -30,6 +31,7 @@ export const getBoundDurableChatRunId = (chatId: string): string | undefined =>
 
 type CreateChatInstanceOptions = {
   readonly chatId: string;
+  readonly transport: BrowserPlacementChatTransport<MyUIMessage>;
   readonly onFinish: NonNullable<ConstructorParameters<typeof Chat<MyUIMessage>>[0]['onFinish']>;
   readonly onError: NonNullable<ConstructorParameters<typeof Chat<MyUIMessage>>[0]['onError']>;
 };
@@ -45,10 +47,15 @@ type CreateChatInstanceOptions = {
  *
  * @internal
  */
-export const createChatInstance = ({ chatId, onFinish, onError }: CreateChatInstanceOptions): Chat<MyUIMessage> =>
+export const createChatInstance = ({
+  chatId,
+  transport,
+  onFinish,
+  onError,
+}: CreateChatInstanceOptions): Chat<MyUIMessage> =>
   new Chat<MyUIMessage>({
     id: chatId,
-    transport: sharedChatTransport,
+    transport,
     generateId: () => generatePrefixedId(idPrefix.message),
     onFinish,
     onError,

@@ -76,6 +76,7 @@ import {
   getBoundDurableChatRunId,
 } from '#chat-clients/_internal/shared-chat-transport.js';
 import {
+  BrowserPlacementChatTransport,
   cancelBrowserAgentHostRun,
   getBrowserAgentHostRun,
   getHostTurnSettlement,
@@ -263,6 +264,8 @@ function countPersistMilestones(message: MyUIMessage): number {
 // ---------------------------------------------------------------------------
 
 type InternalSession = ChatSession & {
+  /** One SDK stream slot per chat; an armed watch cannot belong to a different chat. */
+  readonly transport: BrowserPlacementChatTransport<MyUIMessage>;
   /** The chat's machine as the root this store started; `stateActorRef` is the same actor. */
   readonly chatRoot: Actor<typeof chatSessionMachine>;
   /** React/view consumers currently observing this session. */
@@ -1909,8 +1912,10 @@ export class ChatSessionStore {
       draftActorRef.send({ type: 'hydrateDraft', ...draftHydrationOf(record) });
     });
 
+    const transport = new BrowserPlacementChatTransport<MyUIMessage>();
     const chat = createChatInstance({
       chatId,
+      transport,
       onFinish: ({ messages, isAbort, isError, isDisconnect }) => {
         /* The host's run first, this page's memory second. The stream that just
          * ended resolved the run from the chat's durable log, and after a
@@ -2206,6 +2211,7 @@ export class ChatSessionStore {
     session = {
       chatId,
       chat,
+      transport,
       projectId,
       chatRoot,
       stateActorRef: chatRoot,

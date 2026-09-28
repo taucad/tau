@@ -2,7 +2,6 @@ import { readUIMessageStream } from 'ai';
 import type { ChatTransport, UIMessage, UIMessageChunk } from 'ai';
 import { z } from 'zod';
 import { isRecord } from '@taucad/utils/schema';
-import { isAttachmentUrl } from '#utils/attachment.utils.js';
 import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import { AgentHostWorkerError, resendWhileSettling } from '#services/agent-host-client.js';
 import type { AgentHostClient } from '#services/agent-host-client.js';
@@ -24,6 +23,7 @@ import { emptyChatLedger, foldReadAnswer, isResumableRunFailure } from '@taucad/
 import type { AgentLiveEvent, AgentLogEvent } from '@taucad/agent-host';
 import type { RefusalCode } from '@taucad/agent-host/wire';
 import type { MyUIMessage } from '@taucad/chat';
+import { userProviderMessageOf } from '#chat-clients/turn-intent.js';
 
 type HostRunSnapshot = Awaited<ReturnType<AgentHostClient['start']>>;
 type HostEventBatch = Awaited<ReturnType<AgentHostClient['attach']>>;
@@ -32,7 +32,6 @@ type ReadAnswer = Awaited<ReturnType<AgentHostClient['read']>>;
 /** ponytail: a bound on refolds and stale pages per replay; a log that keeps moving under a read is reported. */
 const maxReadPages = 10_000;
 type UserProviderMessage = Exclude<Parameters<AgentHostClient['start']>[0]['message'], string>;
-type JsonValue = Extract<AgentLogEvent, { readonly type: 'message.appended' }>['message']['content'];
 type BrowserRunState = HostRunSnapshot['state'];
 type HostStartInput = Parameters<AgentHostClient['start']>[0];
 
@@ -687,54 +686,6 @@ const hostAdmission = (
   return value;
 };
 
-const userMessage = <Message extends UIMessage>(messages: readonly Message[]): UserProviderMessage => {
-  const message = messages.findLast((candidate) => candidate.role === 'user');
-  if (!message) {
-    throw new TypeError('Browser agent host admission requires a user message.');
-  }
-  const content: JsonValue[] = [];
-  for (const part of message.parts) {
-    if (part.type === 'text') {
-      content.push({ type: 'text', text: part.text });
-      continue;
-    }
-    if (part.type === 'file') {
-      /* A content-addressed attachment: the bytes are already durable beside
-       * the log, so the row references them rather than re-inlining base64 on
-       * every retry, edit and reattach. A `FileUIPart` has no size field, so a
-       * composer that knows it rides it on `providerMetadata.common`. */
-      if (isAttachmentUrl(part.url)) {
-        const byteLength = part.providerMetadata?.['common']?.['byteLength'];
-        content.push({
-          type: 'file-ref',
-          path: part.url,
-          mimeType: part.mediaType,
-          /* Optional (P29): a freshly composed draft has the `Attachment` and
-           * its size, a draft hydrated from a record has only the file part.
-           * Omitted beats fabricated — nothing reads it, and a row must never
-           * lie about its size. */
-          ...(typeof byteLength === 'number' && Number.isInteger(byteLength) && byteLength >= 0 ? { byteLength } : {}),
-          ...(part.filename === undefined ? {} : { filename: part.filename }),
-        });
-        continue;
-      }
-      // The legacy arm (D14): a caller that still hands over inline base64. Only an image is an image block (G8).
-      const match = /^data:(image\/[^;,]+);base64,(.*)$/u.exec(part.url);
-      if (!match) {
-        throw new TypeError(`Browser agent host cannot record file part URL "${part.url}".`);
-      }
-      content.push({ type: 'image', mimeType: match[1]!, data: match[2]! });
-    }
-  }
-  const first = content[0];
-  const textOnly = content.length === 1 && isRecord(first) && first['type'] === 'text';
-  return {
-    id: message.id,
-    role: 'user',
-    content: textOnly && typeof first['text'] === 'string' ? first['text'] : content,
-  };
-};
-
 const lifecycleState = (event: AgentLogEvent): BrowserRunState | undefined =>
   event.type === 'run.lifecycle' ? event.state : undefined;
 
@@ -1272,7 +1223,7 @@ const createHostStream = <Message extends UIMessage>(input: {
         return;
       }
       if (input.admission) {
-        const admittedMessage = userMessage(input.messages ?? []);
+        const admittedMessage = userProviderMessageOf(input.messages ?? []);
         turnId = admittedMessage.id;
         durableUserMessage = projectAgentHostUserMessage(admittedMessage);
         publishRun();

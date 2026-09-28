@@ -178,14 +178,14 @@ const SharedProjectLayout = ({
                 </div>
               </DrawerContent>
             </Drawer>
-            <div className='relative min-h-0 flex-1 bg-background'>
+            <main className='relative min-h-0 flex-1 bg-background'>
               <ViewerDockview profile='shared' />
-            </div>
+            </main>
           </>
         ) : (
           <>
             {topbar}
-            <div className='min-h-0 flex-1 p-2'>
+            <main className='min-h-0 flex-1 p-2'>
               <Allotment
                 separator={false}
                 proportionalLayout={false}
@@ -200,7 +200,7 @@ const SharedProjectLayout = ({
                   </div>
                 </Allotment.Pane>
               </Allotment>
-            </div>
+            </main>
           </>
         )}
       </ChatContextInsertionProvider>

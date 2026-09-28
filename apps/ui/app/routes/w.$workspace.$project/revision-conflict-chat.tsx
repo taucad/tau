@@ -45,7 +45,7 @@ const resolutionPrompt = (paths: readonly string[]): string =>
 export function RevisionConflictChat(): undefined {
   const client = useRevisionClient();
   const { projectId, setFocusedChatId } = useProject();
-  const { createChat } = useChats(projectId);
+  const { createChat } = useChats(projectId, { enabled: false });
   const { bindConflict } = useChatWorkspaceAuthority();
 
   /* The seeding is tracked rather than fired and forgotten: two facts arriving

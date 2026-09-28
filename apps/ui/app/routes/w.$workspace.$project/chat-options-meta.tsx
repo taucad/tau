@@ -7,7 +7,7 @@ import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { useModels } from '#hooks/use-models.js';
 import { useProject } from '#hooks/use-project.js';
-import { useChats } from '#hooks/use-chats.js';
+import { useChatRecords } from '#hooks/use-chat-records.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { getChatRecencyAt } from '#utils/chat-recency.utils.js';
 import {
@@ -29,7 +29,7 @@ export function ChatOptionsMeta(): React.JSX.Element {
   const { resolveModel } = useModels();
   const { editorRef, projectId } = useProject();
   const activeChatId = useSelector(editorRef, (state) => state.context.focusedChatId);
-  const { chats } = useChats(projectId);
+  const { chats } = useChatRecords(projectId);
   const activeChat = useMemo(() => chats.find((chat) => chat.id === activeChatId), [chats, activeChatId]);
   const recencyAt = activeChat ? getChatRecencyAt(activeChat) : undefined;
 

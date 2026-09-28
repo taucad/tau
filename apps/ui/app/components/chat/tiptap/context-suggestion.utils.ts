@@ -1,6 +1,6 @@
 import { classify, pathRegistry } from '@taucad/filesystem/path-registry';
 import type { FileEntry, FileProvenance, FileStatEntry } from '@taucad/types';
-import type { Chat } from '@taucad/chat';
+import type { ChatRecord } from '@taucad/chat/schemas';
 import type { ContextSuggestionItem } from '#components/chat/tiptap/suggestion-types.js';
 import { fuzzyMatch } from '#components/chat/tiptap/fuzzy-match.js';
 import { getChatRecencyAt } from '#utils/chat-recency.utils.js';
@@ -49,13 +49,13 @@ const isReservedPath = (path: string): boolean =>
 
 export type BuildContextItemsOptions = {
   fileTree: Map<string, FileEntry>;
-  chats: Chat[];
+  chats: ChatRecord[];
   actionItems?: ContextSuggestionItem[];
 };
 
 export type BuildContextItemsFromSearchOptions = {
   fileEntries: FileStatEntry[];
-  chats: Chat[];
+  chats: ChatRecord[];
   actionItems?: ContextSuggestionItem[];
 };
 

@@ -15,6 +15,7 @@ import { menuGroupHeadingClass, menuItemLayoutClass } from '@taucad/ui/component
 import { cn } from '@taucad/ui/utils/cn';
 import { useTypedMatches } from '#hooks/use-typed-matches.js';
 import { SidebarMenuButton } from '#components/ui/sidebar.js';
+import { ProjectNavigationCommandItems } from '#components/nav/project-navigation-command-items.js';
 
 /**
  * Context for command palette item registration
@@ -259,6 +260,7 @@ function CommandPaletteTrigger({ items }: CommandPaletteTriggerProperties): Reac
 
   return (
     <>
+      {open ? <ProjectNavigationCommandItems /> : null}
       <SidebarMenuButton
         variant='outline'
         aria-label='Search'
@@ -282,6 +284,7 @@ type CommandPaletteMobileProperties = {
 
 function CommandPaletteMobile({ items }: CommandPaletteMobileProperties): React.JSX.Element {
   const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
 
   const groupedItems = useMemo(() => {
     const groupsMap: Record<string, { name: string; items: CommandPaletteItem[] }> = {};
@@ -315,7 +318,10 @@ function CommandPaletteMobile({ items }: CommandPaletteMobileProperties): React.
 
   return (
     <Tooltip>
+      {open ? <ProjectNavigationCommandItems /> : null}
       <ComboBoxResponsive<CommandPaletteItem>
+        isOpen={open}
+        onOpenChange={setOpen}
         groupedItems={groupedItems}
         renderLabel={renderItemLabel}
         getValue={getItemValue}
@@ -422,13 +428,13 @@ export function RouteCommandPaletteItems(): React.JSX.Element {
  * Sidebar search entry point: the palette trigger over every registered item.
  * @returns The palette trigger and its mobile equivalent.
  */
-export function Commands(): React.JSX.Element | undefined {
+export function Commands(): React.JSX.Element {
   const allItems = useContext(CommandPaletteItemsContext);
 
-  return allItems.length > 0 ? (
+  return (
     <div className='flex items-center gap-2'>
       <CommandPaletteTrigger items={allItems} />
       <CommandPaletteMobile items={allItems} />
     </div>
-  ) : undefined;
+  );
 }

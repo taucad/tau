@@ -9,7 +9,7 @@ import { Placeholder } from '@tiptap/extension-placeholder';
 import type { Editor, JSONContent } from '@tiptap/core';
 import { Slice } from '@tiptap/pm/model';
 import type { EditorView } from '@tiptap/pm/view';
-import type { Chat } from '@taucad/chat';
+import type { ChatRecord } from '@taucad/chat/schemas';
 import type { FileEntry } from '@taucad/types';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import type { ChipType } from '#components/chat/context-chip.js';
@@ -158,7 +158,7 @@ export type UseChatEditorOptions = {
   onUpdate?: (content: ChatInputContent) => void;
   handleImagePaste?: (event: ClipboardPasteEvent) => boolean;
   treeService: FileTreeService | undefined;
-  chats: Chat[];
+  chats: ChatRecord[];
   actionItems?: ContextSuggestionItem[];
   slashCommandItems?: SlashCommandItem[];
   onSlashCommand?: (item: SlashCommandItem) => void;

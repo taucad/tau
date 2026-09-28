@@ -441,7 +441,7 @@ export function ChatStackTrace({ entryPath, className, side, ...props }: ChatSta
   const { getMainFilename, projectId, setFocusedChatId } = useProject();
   const { setChatOpen } = useProjectWorkspace();
   const fileManager = useFileManager();
-  const { createChat } = useChats(projectId);
+  const { createChat } = useChats(projectId, { enabled: false });
   const [isOpen, setIsOpen] = useState(true);
 
   // Guard against stale cadActor during project transitions.

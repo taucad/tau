@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import type { Chat } from '@taucad/chat';
 import { projectToManifest } from '@taucad/types';
 import type { useChats } from '#hooks/use-chats.js';
+import type { useChatRecords } from '#hooks/use-chat-records.js';
 import type { ProjectListItem } from '#types/project-library.types.js';
 import type * as SidebarStatusModule from '#hooks/use-sidebar-status.js';
 
@@ -17,6 +18,9 @@ let search = '?chat=chat_12';
 let pendingLocation: { readonly pathname: string; readonly search: string } | undefined;
 
 vi.mock('#hooks/use-chats.js', () => ({ useChats: () => mockUseChats() as ReturnType<typeof useChats> }));
+vi.mock('#hooks/use-chat-records.js', () => ({
+  useChatRecords: () => mockUseChats() as ReturnType<typeof useChatRecords>,
+}));
 vi.mock('#hooks/use-chat-session.js', () => ({ useChatSession: mockUseChatSession }));
 vi.mock('react-router', () => ({
   Link: ({

@@ -41,47 +41,18 @@ export type ChatRunPhase = 'admitted' | 'running' | 'paused' | 'completed' | 'fa
 /** The sync facet of the project's revision status, as this chat sees it. @public */
 export type ChatSyncState = 'synced' | 'pending' | 'conflicted';
 
-/**
- * Per-request body the chat-client composes from `useCadAgentConfig` and
- * forwards through the persistence machine to the chat-session-store
- * `dispatchRequest` listener. The listener merges this object into the
- * `chat.sendMessage` / `chat.regenerate` call so the wire body always carries
- * an `agent` block — never the cookie-bleed-prone per-message metadata path.
- *
- * Optional because startup-request hydration can still run before the
- * chat-client mounts; `ChatSessionStore` falls back to the latest published
- * agent body when no explicit body is attached.
- *
- * @public
- */
-export type ChatRequestBody = Readonly<Record<string, unknown>>;
-
 export type ChatRequest = Readonly<{ command?: HostCommand }> &
   (
-    | { kind: 'send'; message: MyUIMessage; body?: ChatRequestBody }
-    | {
-        kind: 'regenerate';
-        body?: ChatRequestBody;
-        /**
-         * Execution the body must be composed from, when the dispatcher knows it
-         * and the React tree does not yet. The seeded first turn is dispatched
-         * from inside `loadChatActor`, one statement before the load's answer
-         * that assigns {@link ChatPersistenceMachineContext.activeExecution};
-         * without this the bodyless dispatch composes from the un-hydrated
-         * cookie fallback and runs the chat's `acp` (or host-pinned Tau) turn as
-         * a plain browser Tau turn.
-         */
-        execution?: CadAgentExecution;
-      }
+    | { kind: 'send'; message: MyUIMessage }
+    | { kind: 'regenerate' }
     | {
         kind: 'edit';
         messageId: string;
         content: string;
         /** The edit's attachments, already promoted into the chat's directory. */
         attachments?: readonly StoredAttachmentRef[];
-        body?: ChatRequestBody;
       }
-    | { kind: 'continue'; body?: ChatRequestBody }
+    | { kind: 'continue' }
   );
 
 /**

@@ -12,8 +12,8 @@
  * Lifetime ownership:
  * - `acquire(chatId, projectId)` / `release(chatId)` track React views only; the
  *   caller names the chat's project (PV-S4).
- * - `startRun(chatId)` owns the session independently while a request is
- *   active, so navigation cannot stop its transport or persistence actor.
+ * - An active projection watch retains the session independently of a view,
+ *   so navigation cannot stop its SDK transcript consumer.
  * - A session is disposed only when its final view and active run are both
  *   released.
  *

@@ -1,5 +1,5 @@
 import { consumeStream, createUIMessageStream, readUIMessageStream } from 'ai';
-import type { ChatTransport, InferUIMessageChunk, UIMessage } from 'ai';
+import type { ChatTransport, InferUIMessageChunk, UIMessage, UIMessageChunk } from 'ai';
 import { z } from 'zod';
 import { isRecord } from '@taucad/utils/schema';
 import { isAttachmentUrl } from '#utils/attachment.utils.js';
@@ -532,6 +532,19 @@ const readRunMessage = async (events: readonly AgentLogEvent[]): Promise<MyUIMes
   if (chunks.length === 0) {
     return undefined;
   }
+  // The SDK reader only yields after a write; a partial log with step/error
+  // control chunks alone has no message even though the finish callback has state.
+  if (
+    chunks.every(
+      (chunk) =>
+        chunk.type === 'start-step' ||
+        chunk.type === 'finish-step' ||
+        chunk.type === 'error' ||
+        chunk.type === 'abort' ||
+        (chunk.type === 'finish' && chunk.messageMetadata == null),
+    )
+  )
+    return undefined;
   const stream = (): ReadableStream<InferUIMessageChunk<MyUIMessage>> =>
     new ReadableStream<InferUIMessageChunk<MyUIMessage>>({
       start: (controller) => {
@@ -547,10 +560,7 @@ const readRunMessage = async (events: readonly AgentLogEvent[]): Promise<MyUIMes
     stream: createUIMessageStream<MyUIMessage>({
       execute: ({ writer }) => writer.merge(stream()),
       generateId: () => '',
-      onError: () => {
-        failed = true;
-        return 'An error occurred.';
-      },
+      onError: () => 'An error occurred.',
       onFinish: ({ responseMessage }) => {
         message = responseMessage;
       },
@@ -563,7 +573,6 @@ const readRunMessage = async (events: readonly AgentLogEvent[]): Promise<MyUIMes
     message = undefined;
     for await (const next of readUIMessageStream<MyUIMessage>({ stream: stream() })) message = next;
   }
-  if (message?.id === '' && message.parts.length === 0 && message.metadata === undefined) return undefined;
   return message;
 };
 

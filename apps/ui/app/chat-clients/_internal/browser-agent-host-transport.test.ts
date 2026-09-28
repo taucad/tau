@@ -264,6 +264,17 @@ describe('BrowserPlacementChatTransport', () => {
       const actual = await deriveChatTranscript(events);
       expect(actual).toEqual([expected]);
       expect(clone.mock.calls.length).toBeLessThan(5);
+
+      const failedEvents: AgentLogEvent[] = [
+        ...events.slice(0, -1),
+        { ...base, sequence: 66, type: 'run.lifecycle', state: 'failed', detail: { message: 'Refused' } },
+      ];
+      clone.mockClear();
+      const expectedFailed = await readWithSdkSnapshots(failedEvents);
+      expect(clone.mock.calls.length).toBeGreaterThan(64);
+      clone.mockClear();
+      expect(await deriveChatTranscript(failedEvents)).toEqual([expectedFailed]);
+      expect(clone.mock.calls.length).toBeLessThan(5);
     } finally {
       clone.mockRestore();
     }
@@ -289,7 +300,20 @@ describe('BrowserPlacementChatTransport', () => {
       state: 'failed',
       detail: { message: 'Refused' },
     } as const;
-    for (const events of [[], [running], [failed], [admitted], [admitted, running, failed]]) {
+    const orphanTool = {
+      ...base,
+      sequence: 2,
+      type: 'message.appended',
+      message: {
+        id: 'orphan-output',
+        role: 'tool-output',
+        toolCallId: 'missing',
+        toolName: 'shell',
+        content: 'ok',
+        isError: false,
+      },
+    } as const;
+    for (const events of [[], [running], [failed], [admitted], [admitted, running, failed], [admitted, orphanTool]]) {
       const expected = await readWithSdkSnapshots(events);
       const actual = await deriveChatTranscript(events);
       expect(actual).toEqual(expected === undefined ? [] : [expected]);

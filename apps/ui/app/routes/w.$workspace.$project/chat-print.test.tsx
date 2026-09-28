@@ -512,6 +512,21 @@ describe('Print pane prepare and send', () => {
     expect(await within(mapping).findByRole('switch', { name: 'Toggle for Bed Leveling' })).toBeChecked();
     expect(within(mapping).getByRole('switch', { name: 'Toggle for Flow Calibration' })).toBeChecked();
     expect(within(mapping).getByRole('switch', { name: 'Toggle for Timelapse' })).not.toBeChecked();
+    expect(within(mapping).getByRole('spinbutton', { name: 'Input for Expected Filament Diameter' })).toHaveValue(
+      '1.75',
+    );
+    expect(within(mapping).getByRole('spinbutton', { name: 'Input for Expected Nozzle Diameter' })).toHaveValue('0.4');
+    for (const label of [
+      'Kind',
+      'Space',
+      'Unit',
+      'Ams Mapping',
+      'Expected Materials',
+      'Expected Bed Type',
+      'Expected Model',
+    ]) {
+      expect(within(mapping).queryByLabelText(`Parameter: ${label}`)).not.toBeInTheDocument();
+    }
   });
 
   it('disables sending, not slicing, when the chosen material is no longer the loaded one', async () => {

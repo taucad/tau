@@ -11,7 +11,6 @@ import type {
   MachineDiscoveryEvent,
   MachineDiscoveryRuntime,
   MachineNetworkStream,
-  MachineQuantityDeclaration,
   MachineSession,
   MachineSnapshot,
   MachineSubmissionReceipt,
@@ -47,10 +46,10 @@ type Submission = Readonly<{
   amsMapping: readonly number[];
   bedLeveling: boolean;
   expectedBedType: string;
-  expectedFilamentDiameter: MachineQuantityDeclaration;
+  expectedFilamentDiameter: number;
   expectedMaterials: ReadonlyArray<Readonly<{ slot: number; materialId: string }>>;
   expectedModel: 'X1C';
-  expectedNozzleDiameter: MachineQuantityDeclaration;
+  expectedNozzleDiameter: number;
   operatorConfirmedBedType?: string;
   flowCalibration: boolean;
   timelapse: boolean;
@@ -78,12 +77,15 @@ if (filamentDiameter.status !== 'success') {
   throw new Error('BAMBU_PROVIDER_UNITS_INVALID');
 }
 
-const sameQuantity = (observed: Quantity | undefined, declared: MachineQuantityDeclaration): boolean => {
+const sameQuantity = (observed: Quantity | undefined, declared: number): boolean => {
   if (!observed) {
     return false;
   }
   const expected = createQuantity({
-    ...declared,
+    value: declared,
+    unit: 'mm',
+    kind: quantityKinds.diameter,
+    space: 'linear',
     semanticMode: 'declared-only',
   });
   if (expected.status !== 'success') {

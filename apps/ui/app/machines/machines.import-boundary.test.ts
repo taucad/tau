@@ -20,6 +20,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const sourceDirectory = fileURLToPath(new URL('.', import.meta.url));
+const appDirectory = join(sourceDirectory, '..');
 
 const sessionMachines = (): readonly string[] =>
   readdirSync(sourceDirectory).filter((entry) => entry.endsWith('.machine.ts') && entry.includes('session'));
@@ -71,5 +72,16 @@ describe('session machine import boundary', () => {
     const store = readFileSync(join(sourceDirectory, '../hooks/use-sessions.tsx'), 'utf8');
 
     expect(store).toMatch(/from\s+'react'/u);
+  });
+
+  it('keeps settlement writers out of React page components (PV-S13)', () => {
+    const pages = readdirSync(appDirectory, { recursive: true }).filter(
+      (entry): entry is string => typeof entry === 'string' && entry.endsWith('.tsx') && !entry.includes('.test.'),
+    );
+    const writerImport =
+      /import\s*\{[^}]*\b(?:appendChatRows|chatTurnSettlement|recordHostTurnSettlement)\b[^}]*\}\s*from\s*['"][^'"]+['"]/su;
+    const offenders = pages.filter((page) => writerImport.test(readFileSync(join(appDirectory, page), 'utf8')));
+
+    expect(offenders).toEqual([]);
   });
 });

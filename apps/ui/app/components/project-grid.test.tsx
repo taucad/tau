@@ -159,6 +159,21 @@ describe('CommunityProjectGrid', () => {
     expect(screen.getByText('OpenSCAD')).toBeInTheDocument();
   });
 
+  it('should draw only the featured card with its thinner-edged featured thumbnail', () => {
+    const withFeaturedThumbnail = { featuredThumbnail: '/thumbnail-featured.png' };
+    renderGrid({
+      projects: [
+        { ...project, ...withFeaturedThumbnail },
+        { ...secondProject, ...withFeaturedThumbnail },
+      ],
+      featuredLocator: project.locator,
+    });
+
+    const [featured, plain] = screen.getAllByRole('listitem');
+    expect(featured?.querySelector('img')).toHaveAttribute('src', '/thumbnail-featured.png');
+    expect(plain?.querySelector('img')).toHaveAttribute('src', '/thumbnail.png');
+  });
+
   it('should cap the landing strip at its limit', () => {
     renderGrid({ projects: [project, secondProject], limit: 1 });
 

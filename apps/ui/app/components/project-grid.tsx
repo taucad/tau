@@ -65,7 +65,7 @@ function CommunityProjectCard({
   isPreviewVisible,
   onPreviewLocatorChange,
 }: CommunityProjectCardProperties): React.JSX.Element {
-  const { id, name, description, thumbnail, kernel, tags, assets, locator } = project;
+  const { id, name, description, thumbnail, featuredThumbnail, kernel, tags, assets, locator } = project;
   const [files, setFiles] = useState<ProjectFiles>();
   const filesPromise = useRef<Promise<ProjectFiles> | undefined>(undefined);
 
@@ -109,7 +109,7 @@ function CommunityProjectCard({
       >
         <ProjectCardMedia
           shouldFill
-          thumbnailSource={thumbnail}
+          thumbnailSource={isFeatured ? (featuredThumbnail ?? thumbnail) : thumbnail}
           isPreviewVisible={isPreviewVisible}
           onPreviewVisibilityChange={handlePreviewVisibilityChange}
         >

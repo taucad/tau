@@ -1,11 +1,13 @@
 import { ArrowRight } from 'lucide-react';
 import { useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
+import { resolveKernel } from '@taucad/types/constants';
+import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
-import { Avatar, AvatarFallback, AvatarImage } from '@taucad/ui/components/avatar';
-import { CardHeader, CardTitle, CardFooter } from '@taucad/ui/components/card';
+import { cn } from '@taucad/ui/utils/cn';
+import { formatSharePath } from '@taucad/share/locator';
 import { Loader } from '#components/ui/loader.js';
+import { SvgIcon } from '#components/icons/svg-icon.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useProjectCreationLocationError } from '#hooks/use-project-creation-location-error.js';
 import { CadPreviewProvider } from '#hooks/use-cad-preview.js';
@@ -13,46 +15,45 @@ import type { BuiltinProjectCardModel, ProjectFiles } from '#constants/project-e
 import { loadBuiltinProjectFiles } from '#constants/project-examples.js';
 import { ProjectCard, ProjectCardCadPreview, ProjectCardMedia } from '#components/project-card.js';
 import { projectUrl } from '#utils/project-url.utils.js';
-import { formatSharePath } from '@taucad/share/locator';
 
-export const communityGridClassName = 'grid grid-cols-2 gap-3 sm:gap-6 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5';
+/** The project card grid, shared by the Community, the landing strip and their skeletons. */
+export const projectGridClassName = 'grid grid-cols-2 gap-3 sm:gap-6 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5';
 
 export type CommunityProjectGridProperties = {
   readonly projects: readonly BuiltinProjectCardModel[];
-  readonly hasMore?: boolean;
-  readonly onLoadMore?: () => void;
   readonly limit?: number;
+  /** The example that spans two columns and rows, when it is in `projects`. */
+  readonly featuredLocator?: string;
 };
 
 export function CommunityProjectGrid({
   projects,
-  hasMore,
-  onLoadMore,
   limit,
+  featuredLocator,
 }: CommunityProjectGridProperties): React.JSX.Element {
   const displayedProjects = limit ? projects.slice(0, limit) : projects;
 
   return (
-    <>
-      <div className={communityGridClassName}>
-        {displayedProjects.map((project) => (
-          <CommunityProjectCard key={project.id} {...project} />
-        ))}
-      </div>
-
-      {hasMore ? (
-        <div className='mt-8 text-center'>
-          <Button variant='outline' onClick={onLoadMore}>
-            Load More Projects
-          </Button>
-        </div>
-      ) : null}
-    </>
+    <ul role='list' className={cn(projectGridClassName, 'grid-flow-dense')}>
+      {displayedProjects.map((project) => {
+        const isFeatured = project.locator === featuredLocator;
+        return (
+          <li key={project.id} className={cn(isFeatured && 'col-span-2 lg:row-span-2')}>
+            <CommunityProjectCard project={project} isFeatured={isFeatured} />
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
-function CommunityProjectCard(project: BuiltinProjectCardModel): React.JSX.Element {
-  const { id, name, description, thumbnail, author, tags, assets, locator } = project;
+type CommunityProjectCardProperties = {
+  readonly project: BuiltinProjectCardModel;
+  readonly isFeatured: boolean;
+};
+
+function CommunityProjectCard({ project, isFeatured }: CommunityProjectCardProperties): React.JSX.Element {
+  const { id, name, description, thumbnail, kernel, tags, assets, locator } = project;
   const [activated, setActivated] = useState(false);
   const [visible, setVisible] = useState(false);
   const [isForking, setIsForking] = useState(false);
@@ -62,7 +63,6 @@ function CommunityProjectCard(project: BuiltinProjectCardModel): React.JSX.Eleme
   const presentLocationError = useProjectCreationLocationError();
   const navigate = useNavigate();
 
-  const thumbnailSource = thumbnail;
   const mainFile = assets.main.entryPath;
 
   const ensureFiles = useCallback(async (): Promise<ProjectFiles> => {
@@ -111,54 +111,66 @@ function CommunityProjectCard(project: BuiltinProjectCardModel): React.JSX.Eleme
   return (
     <ProjectCard
       to={formatSharePath({ providerId: 'builtin', reference: locator })}
-      linkLabel={`Preview ${name}`}
-      className='flex flex-col pb-0'
+      linkLabel={`Open ${name}`}
+      className='flex h-full flex-col gap-0 pb-0'
     >
-      <ProjectCardMedia
-        thumbnailSource={thumbnailSource}
-        isPreviewVisible={visible}
-        onPreviewVisibilityChange={handlePreviewVisibilityChange}
+      {/* The wrapper owns the media geometry and the media fills it, so the spanning
+          featured card takes its height from the grid rows (size containment). */}
+      <div
+        className={cn(
+          'relative w-full',
+          isFeatured ? 'aspect-4/3 lg:aspect-auto lg:flex-1 lg:[contain:size]' : 'aspect-4/3',
+        )}
       >
-        {activated && files ? (
-          <CadPreviewProvider projectId={id} mainFile={mainFile} files={files}>
-            <ProjectCardCadPreview />
-          </CadPreviewProvider>
-        ) : null}
-      </ProjectCardMedia>
-      <div className='flex flex-1 flex-col'>
-        <CardHeader className='max-md:p-2'>
-          <CardTitle className='line-clamp-1 text-sm sm:text-base'>{name}</CardTitle>
-        </CardHeader>
-        <CardFooter className='mt-auto flex items-center justify-between gap-1.5 p-2 pt-1 sm:gap-2 sm:p-4 sm:pt-2'>
-          <div className='hidden items-center gap-2 sm:flex'>
-            <Avatar className='size-6'>
-              <AvatarImage src={author.avatar} alt={author.name} />
-              <AvatarFallback className='text-xs'>{author.name.charAt(0)}</AvatarFallback>
-            </Avatar>
-            <span className='line-clamp-1 text-sm text-muted-foreground'>{author.name}</span>
+        <ProjectCardMedia
+          shouldFill
+          thumbnailSource={thumbnail}
+          isPreviewVisible={visible}
+          onPreviewVisibilityChange={handlePreviewVisibilityChange}
+        >
+          {activated && files ? (
+            <CadPreviewProvider projectId={id} mainFile={mainFile} files={files}>
+              <ProjectCardCadPreview />
+            </CadPreviewProvider>
+          ) : null}
+        </ProjectCardMedia>
+      </div>
+      {/* Below sm the action takes its own full-width row so the title keeps its width. */}
+      <div
+        className={cn(
+          'flex flex-col gap-2 p-3 sm:flex-row sm:items-end sm:justify-between sm:gap-3',
+          isFeatured && 'lg:p-4',
+        )}
+      >
+        <div className='min-w-0'>
+          <div className='flex items-center gap-2'>
+            <h2 className={cn('line-clamp-1 font-semibold', isFeatured ? 'text-xl leading-7' : 'text-base leading-6')}>
+              {name}
+            </h2>
+            {isFeatured ? <Badge variant='secondary'>Featured</Badge> : null}
           </div>
-          <div className='relative z-20 flex w-full items-center justify-between gap-1.5 sm:w-auto sm:justify-end sm:gap-2'>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant='outline'
-                  size='sm'
-                  className='flex h-7 items-center gap-1 px-2 text-xs text-muted-foreground hover:text-primary sm:h-8 sm:px-3 sm:text-sm'
-                  disabled={isForking}
-                  onClick={handleFork}
-                >
-                  <span className='text-xs sm:text-sm'>Remix</span>
-                  {isForking ? (
-                    <Loader className='size-3.5 sm:size-4' />
-                  ) : (
-                    <ArrowRight className='size-3.5 sm:size-4' />
-                  )}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{isForking ? 'Remixing project...' : 'Remix this project'}</TooltipContent>
-            </Tooltip>
-          </div>
-        </CardFooter>
+          {isFeatured ? (
+            <p className='mt-1 line-clamp-2 max-w-prose text-sm text-muted-foreground'>{description}</p>
+          ) : null}
+          <p className='mt-1 flex items-center gap-1.5 text-xs leading-4 text-muted-foreground'>
+            <SvgIcon id={kernel} className='size-3.5 shrink-0' aria-hidden />
+            {resolveKernel(kernel).name}
+          </p>
+        </div>
+        <div className='relative z-20 sm:shrink-0'>
+          <Button
+            variant='outline'
+            size='sm'
+            className='max-sm:w-full'
+            aria-busy={isForking}
+            disabled={isForking}
+            onClick={handleFork}
+          >
+            Remix
+            {isForking ? <Loader /> : <ArrowRight aria-hidden />}
+            <span className='sr-only'> {name}</span>
+          </Button>
+        </div>
       </div>
     </ProjectCard>
   );

@@ -17,6 +17,11 @@ type ProjectCardMediaProps = {
   readonly thumbnailSource?: string;
   readonly isPreviewVisible: boolean;
   readonly onPreviewVisibilityChange: (isVisible: boolean) => void;
+  /**
+   * Fill a positioned parent that owns the media geometry instead of sizing itself
+   * at 4:3, so a card spanning grid rows takes its height from the rows.
+   */
+  readonly shouldFill?: boolean;
   readonly children: React.ReactNode;
 };
 
@@ -52,10 +57,13 @@ export function ProjectCardMedia({
   thumbnailSource,
   isPreviewVisible,
   onPreviewVisibilityChange,
+  shouldFill = false,
   children,
 }: ProjectCardMediaProps): React.JSX.Element {
   return (
-    <div className='relative aspect-4/3 h-fit w-full overflow-hidden bg-muted'>
+    <div
+      className={cn('overflow-hidden bg-muted', shouldFill ? 'absolute inset-0' : 'relative aspect-4/3 h-fit w-full')}
+    >
       {/* The card link names the card, so the thumbnail is decorative. */}
       {isPreviewVisible ? null : (
         <img src={thumbnailSource ?? '/placeholder.svg'} alt='' className='size-full object-cover' loading='lazy' />

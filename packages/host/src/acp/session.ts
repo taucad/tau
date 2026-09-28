@@ -860,6 +860,8 @@ export type AcpSession = {
   readonly agent: AcpAgentFacts;
   /** Config options as the session last reported them, `config_option_update` included. */
   readonly configOptions: readonly SessionConfigOption[] | undefined;
+  /** Select a model on a throwaway discovery session to read that model's own configuration options. */
+  probeModel(model: string): Promise<readonly SessionConfigOption[] | undefined>;
   /** The mode the agent last reported, when it pushed one. */
   readonly modeId: string | undefined;
   /** `true` when a requested session could be neither resumed nor loaded. */
@@ -2275,6 +2277,21 @@ export const openAcpSession = async (options: OpenAcpSessionOptions): Promise<Ac
       contextLost,
       agent: facts,
       get configOptions(): readonly SessionConfigOption[] | undefined {
+        return configOptions;
+      },
+      probeModel: async (model) => {
+        const choice = modelChoice(configOptions);
+        if (!choice?.values.includes(model)) {
+          return undefined;
+        }
+        if (choice.currentValue !== model) {
+          const set = await connection.agent.request('session/set_config_option', {
+            sessionId: acpSessionId,
+            configId: choice.configId,
+            value: model,
+          });
+          configOptions = set.configOptions;
+        }
         return configOptions;
       },
       get modeId(): string | undefined {

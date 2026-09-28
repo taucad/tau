@@ -1347,6 +1347,17 @@ describe('hostControlMessageSchema', () => {
           { id: 'gpt-5.3-codex-spark', name: 'GPT-5.3-Codex-Spark' },
         ],
         defaultModel: 'gpt-5.6-sol',
+        thoughtLevel: {
+          type: 'select',
+          id: 'thought_level',
+          name: 'Thinking',
+          category: 'thought_level',
+          currentValue: 'medium',
+          options: [
+            { value: 'medium', name: 'Medium' },
+            { value: 'high', name: 'High' },
+          ],
+        },
       },
       { id: 'claude', displayName: 'Claude Code', models: [], refusal: 'CLI_TOO_OLD' },
     ];

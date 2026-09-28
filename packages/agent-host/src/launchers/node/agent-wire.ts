@@ -68,6 +68,34 @@ export const externalAgentRefusalCodes = [
   'ADAPTER_NO_BIN',
 ] as const;
 
+/** The agent's own pre-session reasoning choice, read from its discovery session. */
+const externalAgentThoughtValueSchema = z.object({
+  value: z.string().max(128),
+  name: z.string().max(128),
+  description: z.string().max(512).nullish(),
+});
+
+const externalAgentThoughtLevelSchema = z.object({
+  type: z.literal('select'),
+  id: z.string().min(1).max(128),
+  name: z.string().min(1).max(128),
+  category: z.literal('thought_level'),
+  description: z.string().max(512).nullish(),
+  currentValue: z.string().max(128),
+  options: z.union([
+    z.array(externalAgentThoughtValueSchema).max(16),
+    z
+      .array(
+        z.object({
+          group: z.string().max(128),
+          name: z.string().max(128),
+          options: z.array(externalAgentThoughtValueSchema).max(16),
+        }),
+      )
+      .max(16),
+  ]),
+});
+
 /** One {@link externalAgentRefusalCodes} value. @public */
 export type ExternalAgentRefusalCode = (typeof externalAgentRefusalCodes)[number];
 
@@ -106,12 +134,16 @@ export const externalAgentDescriptorSchema = z.strictObject({
       z.strictObject({
         id: z.string().min(1).max(128),
         name: z.string().min(1).max(128),
+        /** This model's ACP reasoning choices, if its probe offered them. */
+        thoughtLevel: externalAgentThoughtLevelSchema.optional(),
       }),
     )
     .max(64)
     .default([]),
   /** The select's `currentValue`: what a turn naming no model actually runs. */
   defaultModel: z.string().min(1).max(128).optional(),
+  /** The probe's own reasoning choices, available before the first chat session. */
+  thoughtLevel: externalAgentThoughtLevelSchema.optional(),
   /** Present exactly when this agent cannot be started; `models` is then empty. */
   refusal: z.enum(externalAgentRefusalCodes).optional(),
 });

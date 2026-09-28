@@ -6,12 +6,14 @@ import type { AcpSessionData } from '@taucad/chat';
 import { kernelConfigurations } from '@taucad/types/constants';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { ChatComposerContextValue } from '#hooks/active-chat-provider.js';
+import type { AgentHostPlacementTarget } from '#lib/agent-host-placement.js';
 
 const manifoldKernel = kernelConfigurations.find((k) => k.id === 'manifold')!;
 const execution: { current: ChatComposerContextValue['execution']['execution'] } = {
   current: { kind: 'tau', model: 'm' },
 };
 const setActiveExecution = vi.fn();
+const placements: { current: readonly AgentHostPlacementTarget[] } = { current: [] };
 
 vi.mock('#hooks/active-chat-provider.js', () => ({
   useChatComposer: () => ({
@@ -40,8 +42,16 @@ vi.mock('#hooks/use-keyboard.js', () => ({
 /* The sheet has its own suite; here it only has to sit beside Send. */
 vi.mock('#components/chat/chat-agent-sheet.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  ChatAgentSheet: () => (
-    <button type='button' data-slot='agent-trigger'>
+  ChatAgentSheet: ({
+    agentConfig,
+  }: {
+    readonly agentConfig: import('#components/chat/use-agent-config.js').AgentConfig;
+  }) => (
+    <button
+      type='button'
+      data-slot='agent-trigger'
+      data-reasoning={agentConfig.options.find((option) => option.category === 'thought_level')?.currentValue}
+    >
       Agent and model
     </button>
   ),
@@ -62,6 +72,10 @@ vi.mock('#components/icons/svg-icon.js', () => ({
 vi.mock('#hooks/use-skills-catalog.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useSkillsCatalog: () => [],
+}));
+
+vi.mock('#hooks/use-cad-agent-config.js', () => ({
+  useAgentHostPlacements: () => ({ targets: placements.current, loading: false }),
 }));
 
 const { ChatTextareaBar, ChatTextareaDesktop, acpCommandToSlashCommand } =
@@ -131,6 +145,7 @@ describe('ChatTextareaBar', () => {
     vi.clearAllMocks();
     keybindings.clear();
     execution.current = { kind: 'tau', model: 'm' };
+    placements.current = [];
   });
 
   it('lays out +, the kernel, the agent trigger and Send — no branch, balance or Tau mode (D6, Q11, Q16)', () => {
@@ -189,7 +204,7 @@ describe('ChatTextareaBar', () => {
   });
 
   it('shows an external agent’s permission mode, named, and steps it with ⌘. (C5)', () => {
-    execution.current = { kind: 'acp', hostId: 'desktop', agentId: 'codex' };
+    execution.current = { kind: 'acp', hostId: 'desktop', agentId: 'codex', model: 'gpt-6-astra' };
     renderBar({ acpSessionData: codexSession });
 
     expect(screen.getByRole('button', { name: 'Mode: Ask for approval' })).toBeInTheDocument();
@@ -205,6 +220,46 @@ describe('ChatTextareaBar', () => {
       agentId: 'codex',
       config: { mode: 'agent' },
     });
+  });
+
+  it('passes the host-discovered reasoning option to the pre-project agent control', () => {
+    execution.current = { kind: 'acp', hostId: 'desktop', agentId: 'codex' };
+    placements.current = [
+      {
+        hostId: 'desktop',
+        rung: 'in-process',
+        label: 'This Mac',
+        workspaceRoot: '',
+        online: true,
+        externalAgents: [
+          {
+            id: 'codex',
+            displayName: 'Codex',
+            defaultModel: 'gpt-6-sol',
+            models: [
+              { id: 'gpt-6-sol', name: 'Sol' },
+              {
+                id: 'gpt-6-astra',
+                name: 'Astra',
+                thoughtLevel: {
+                  type: 'select',
+                  id: 'reasoning_effort',
+                  name: 'Reasoning effort',
+                  category: 'thought_level',
+                  currentValue: 'medium',
+                  options: [
+                    { value: 'medium', name: 'Medium' },
+                    { value: 'high', name: 'High' },
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+      },
+    ];
+    renderBar();
+    expect(screen.getByRole('button', { name: 'Agent and model' })).toHaveAttribute('data-reasoning', 'medium');
   });
 
   it('leaves ⌘. and ⌘/ to an edit box that has focus (F6)', () => {

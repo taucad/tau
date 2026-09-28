@@ -25,8 +25,6 @@ const handleMessage = async (event: MessageEvent<SectionCapWorkerRequest>): Prom
       type: 'error',
       sequence: request.sequence,
       requestKey: request.requestKey,
-      planeKey: request.planeKey,
-      sourceSetKey: request.sourceSetKey,
       message: error instanceof Error ? error.message : 'Unknown section cap overlap worker failure.',
     };
     context.postMessage(response);

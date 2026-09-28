@@ -87,7 +87,7 @@ Resources allocated with `useMemo` require matching effect cleanup. Dispose only
 
 Route pointer-rate model picking through `raycastFirstVisibleMeshHit` in `graphics/three/utils/bvh-raycast.ts`. Pass the active clipping state so a clipped first triangle cannot hide a farther visible hit.
 
-Do not patch `Mesh.prototype.raycast`. Transform-control picking may use the stock raycaster only on its own gizmo subtree.
+Do not patch `Mesh.prototype.raycast`. Section handles and the plane picker may use the stock raycaster only on their own subtrees.
 
 Coalesce high-frequency pointer work through `createRafCoalescer`, with the latest event winning once per animation frame.
 

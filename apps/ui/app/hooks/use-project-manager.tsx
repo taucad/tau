@@ -76,7 +76,7 @@ import type {
   PendingProjectRecoveryReason,
   PendingProjectStorage,
 } from '#types/pending-project-operation.types.js';
-import type { ProjectLibraryEntry, ProjectLibraryState } from '#types/project.types.js';
+import type { ProjectLibraryEntry, ProjectLibraryState } from '#types/project-library.types.js';
 import { allocateProjectDirectorySlug } from '#utils/project-directory.utils.js';
 import { directorySlug, homeWorkspaceSlug, projectSlugsOf } from '#utils/project-url.utils.js';
 import type { ProjectSlugs } from '#utils/project-url.utils.js';
@@ -936,16 +936,14 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         /* The bytes are handed over: this attempt owns them, and a retry reads
          * the durable pending operation again (`getPendingProjectOperations`),
          * so the bridge transfers them instead of copying the whole import. */
+        const input = {
+          providerBasePath: operation.providerBasePath,
+          scope,
+          files: Object.fromEntries(Object.entries(operation.files).filter(([path]) => path !== 'tau.json')),
+          manifest: serializeProjectManifest(operation.manifest),
+        };
         result = await fileManager.client.commitPendingProjectDirectory(
-          Object.assign(
-            {
-              providerBasePath: operation.providerBasePath,
-              scope,
-              files: Object.fromEntries(Object.entries(operation.files).filter(([path]) => path !== 'tau.json')),
-              manifest: serializeProjectManifest(operation.manifest),
-            },
-            { [consumableBytes]: true },
-          ),
+          Object.assign(input, { [consumableBytes]: true }),
         );
       } catch (error) {
         throw new PendingProjectRecoveryError(

@@ -10,10 +10,15 @@ const directory = '/projects/p1/.tau/chats/c1/attachments';
 const pngHash = 'a'.repeat(64);
 const pngUrl = `attachments/${pngHash}.png`;
 const pngBytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+const jsonHash = 'b'.repeat(64);
+const jsonBytes = new TextEncoder().encode('{"passed":1}');
 
 const readFile = vi.fn(async (path: string) => {
   if (path === `${directory}/${pngHash}.png`) {
     return pngBytes;
+  }
+  if (path === `${directory}/${jsonHash}.json`) {
+    return jsonBytes;
   }
   throw Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
 });
@@ -105,6 +110,18 @@ describe('ChatMessageMedia', () => {
     );
 
     expect(screen.getByRole('link', { name: 'spec.pdf' })).toHaveAttribute('download', 'spec.pdf');
+  });
+
+  it('reads a saved GeoSpec JSON report as a downloadable chat attachment', async () => {
+    renderInChat(
+      <ChatMessageMedia
+        media={{ url: `attachments/${jsonHash}.json`, mediaType: 'application/json', filename: 'geospec-report.json' }}
+      />,
+    );
+    expect(await screen.findByRole('link', { name: 'geospec-report.json' })).toHaveAttribute(
+      'href',
+      'blob:agent-image',
+    );
   });
 });
 

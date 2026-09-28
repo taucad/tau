@@ -447,7 +447,7 @@ export type RevisionActorsOptions = Readonly<{
    * value, so a project opened under another layout cannot have Tau's rows
    * quietly applied to its files.
    *
-   * A non-default policy must also hand its rows to
+   * A non-default policy must also hand its layout to
    * `generatedIgnoreContent`, or the generated ignore block and the capture
    * disagree (PP5); `tauRevisionPolicy` keeps the pair together.
    */

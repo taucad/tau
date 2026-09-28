@@ -178,6 +178,8 @@ export type WatchRegistryOptions = {
   maxQueueDepth?: number;
   /** Coalescing window. Default: 50. Milliseconds. */
   coalescingWindow?: number;
+  /** Deliver the first events of a quiet subscription on the next tick; see `CoalescerOptions.leadingEdge`. */
+  leadingEdge?: boolean;
 };
 
 /** Internal authority selector used by captured rooted filesystems. */
@@ -196,6 +198,7 @@ export class WatchRegistry {
   private readonly _maxQueueDepth?: number;
   /** Milliseconds. */
   private readonly _coalescingWindow?: number;
+  private readonly _leadingEdge?: boolean;
 
   /**
    * Create a WatchRegistry.
@@ -207,6 +210,7 @@ export class WatchRegistry {
     this._eventBus = eventBus;
     this._maxQueueDepth = options?.maxQueueDepth;
     this._coalescingWindow = options?.coalescingWindow;
+    this._leadingEdge = options?.leadingEdge;
   }
 
   /**
@@ -237,6 +241,7 @@ export class WatchRegistry {
         },
         {
           coalescingWindow: this._coalescingWindow,
+          leadingEdge: this._leadingEdge,
           maxQueueDepth: this._maxQueueDepth,
           onOverflow: () => {
             this._dispatchReset(subscription!);

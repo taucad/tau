@@ -663,6 +663,27 @@ describe('projectAgentHostEvent', () => {
     ]);
   });
 
+  it.each([
+    [
+      'a shell call',
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Codex's own `rawOutput` field names.
+      { formatted_output: 'zsh: command not found: dotnet\n', exit_code: 1 },
+      'zsh: command not found: dotnet\n\n\nExit code 1',
+    ],
+    [
+      'an MCP call',
+      { result: { content: [{ type: 'text', text: 'Computer Use permissions are not granted' }] } },
+      'Computer Use permissions are not granted',
+    ],
+  ])("renders a failed %s's output as text, never as JSON", (_name, content, expected) => {
+    const [chunk] = projectAgentHostEvent({
+      ...base,
+      type: 'message.appended',
+      message: { id: 'output-3', role: 'tool-output', toolCallId: 'call-3', toolName: 'shell', content, isError: true },
+    });
+    expect(chunk).toMatchObject({ type: 'tool-output-error', errorText: expected });
+  });
+
   it('opens a self-contained approval part carrying the options the host recorded', () => {
     expect(
       projectAgentHostEvent({

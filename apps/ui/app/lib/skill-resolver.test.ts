@@ -107,7 +107,10 @@ describe('createSkillResolver', () => {
         skillPath: '.agents/skills/create-skill/SKILL.md',
       }),
     );
-    expect(createSkill).not.toHaveProperty('shadowedSources');
+    // The replaced bundle is recorded as shadowed; none of its content or metadata leaks through.
+    expect(createSkill?.shadowedSources).toEqual([
+      expect.objectContaining({ source: 'system', resourceUri: 'system:skills/create-skill/SKILL.md' }),
+    ]);
     expect(createSkill).toHaveProperty('version', undefined);
     expect(createSkill).toHaveProperty('whenToUse', undefined);
 
@@ -123,7 +126,7 @@ describe('createSkillResolver', () => {
     if (resolved.success) {
       expect(resolved.content).toContain('# Workspace replacement');
     }
-    expect(resolved).not.toHaveProperty('shadowedSources');
+    expect(resolved).toHaveProperty('shadowedSources', createSkill?.shadowedSources);
     expect(resolved).not.toHaveProperty('version');
     expect(resolved).not.toHaveProperty('whenToUse');
   });

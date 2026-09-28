@@ -82,6 +82,8 @@ export function PublicationTopbar({
           {sourceLabel ?? (publication.visibility === 'private' ? 'Private Tau share' : 'Public Tau share')}
         </p>
       </div>
+      {/* Every action here (Remix and Manage too) shows its label from md: below it the shared page's phone layout
+          adds its Workbench trigger, and with every action present the labelled bar overflowed at 640-667 px. */}
       <div className='flex items-center gap-1 sm:gap-2'>
         {shareUrl ? (
           <Button
@@ -89,13 +91,13 @@ export function PublicationTopbar({
             size='sm'
             variant='ghost'
             aria-label='Copy link'
-            className='max-sm:size-8 max-sm:px-0'
+            className='max-md:size-8 max-md:px-0'
             onClick={() => {
               void copyShareUrl();
             }}
           >
-            <Link2 className='size-3.5 sm:mr-1.5' aria-hidden />
-            <span className='hidden sm:inline'>Copy link</span>
+            <Link2 className='size-3.5 md:mr-1.5' aria-hidden />
+            <span className='hidden md:inline'>Copy link</span>
           </Button>
         ) : null}
         {managementActions}
@@ -105,16 +107,16 @@ export function PublicationTopbar({
             size='sm'
             variant='ghost'
             aria-label='Download source'
-            className='max-sm:size-8 max-sm:px-0'
+            className='max-md:size-8 max-md:px-0'
             onClick={downloadArchive}
           >
-            <Download className='size-3.5 sm:mr-1.5' aria-hidden />
-            <span className='hidden sm:inline'>Download source</span>
+            <Download className='size-3.5 md:mr-1.5' aria-hidden />
+            <span className='hidden md:inline'>Download source</span>
           </Button>
         ) : null}
         <ProjectExportAction
-          className='h-8 px-2.5 text-xs max-sm:size-8 max-sm:px-0'
-          labelClassName='hidden sm:inline'
+          className='h-8 px-2.5 text-xs max-md:size-8 max-md:px-0'
+          labelClassName='hidden md:inline'
         />
         <ForkAction publication={publication} files={files} parameters={parameters} />
       </div>

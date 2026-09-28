@@ -218,11 +218,11 @@ export function ProjectRouteGate({
       controller.abort();
     };
     /*
-     * `libraryRevision` (W2): trashing or restoring the project on screen must
-     * re-resolve access. Without it the route kept a one-shot answer and showed
-     * the closed notice for a project that is in the Trash (Finding 2).
+     * Trashing or restoring the project on screen must re-resolve access (W2,
+     * Finding 2). The manager's value carries `libraryRevision`, so it moves
+     * with the library and `projectManager` alone re-runs this effect (P66).
      */
-  }, [requestedProjectId, projectManager, loadAttempt, projectManager.libraryRevision]);
+  }, [requestedProjectId, projectManager, loadAttempt]);
 
   /*
    * Liveness is orthogonal to navigation (A35, I22).

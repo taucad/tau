@@ -31,7 +31,7 @@ import { useProjectManager } from '#hooks/use-project-manager.js';
 import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import { cloudProjectStub } from '#hooks/use-open-cloud-project.js';
 import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
-import type { ProjectListItem } from '#types/project.types.js';
+import type { ProjectListItem } from '#types/project-library.types.js';
 
 /** A project only Tau Cloud holds, as a library row (D20). @public */
 export type CloudOnlyRow = CloudProject & {

@@ -38,7 +38,8 @@ import { CodeBlockContent, Pre } from '#components/code/code-block.js';
 import { FileLink } from '#components/files/file-link.js';
 import { ChatMessageMedia } from '#routes/w.$workspace.$project/chat-message-media.js';
 import type { ChatMedia } from '#routes/w.$workspace.$project/chat-message-media.js';
-import { externalCommandOf, summarizeExternalCall } from '#utils/shell-command-summary.js';
+import { summarizeExternalCall, summaryNoun } from '#utils/external-call-summary.js';
+import { externalCommandOf } from '#utils/shell-command-summary.js';
 
 /** ACP's whole `ToolKind` taxonomy, in the order the protocol declares it. @see https://agentclientprotocol.com */
 export const externalToolKinds = [
@@ -281,6 +282,12 @@ type ExternalHeading = {
   readonly isCommand: boolean;
   /** What leads the body: the command, once the header no longer shows it. */
   readonly bodyPrefix: string;
+  /** Files the call read, linked in its body. */
+  readonly locations: readonly string[];
+  /** What a failed call attempted, for the error card whose code owns the verb. */
+  readonly noun: string;
+  /** Alternative text for media the call produced: the agent's own name for the action. */
+  readonly mediaAlt: string;
 };
 
 /**
@@ -306,6 +313,8 @@ const headingOf = (part: DynamicToolUIPart, facts: AcpFacts, label: string): Ext
       icon: externalToolPresentation(summary.kind).icon,
       isCommand: false,
       bodyPrefix: command === undefined ? '' : `$ ${command}\n`,
+      noun: summaryNoun(summary),
+      mediaAlt: label,
     };
   }
   const { icon, verb, activeVerb, body } = presentation;
@@ -316,7 +325,18 @@ const headingOf = (part: DynamicToolUIPart, facts: AcpFacts, label: string): Ext
     return lowerLabel === lowerCandidate || lowerLabel.startsWith(`${lowerCandidate} `);
   });
   const detail = repeatedVerb === undefined ? label : label.slice(repeatedVerb.length).trimStart();
-  return { icon, verb, activeVerb, detail, activeDetail: detail, isCommand: body === 'command', bodyPrefix: '' };
+  return {
+    icon,
+    verb,
+    activeVerb,
+    detail,
+    activeDetail: detail,
+    isCommand: body === 'command',
+    bodyPrefix: '',
+    locations: facts.locations,
+    noun: label,
+    mediaAlt: detail === '' ? label : detail,
+  };
 };
 
 /**
@@ -337,7 +357,13 @@ export function ChatMessageToolExternal({ part }: { readonly part: DynamicToolUI
   const { icon } = heading;
 
   if (part.state === 'output-error') {
-    return <ChatToolError errorText={sanitizeAgentText(part.errorText, 400)} icon={icon} noun={label} />;
+    return (
+      <ChatToolError
+        errorText={sanitizeAgentText(part.errorText, 400)}
+        icon={icon}
+        noun={sanitizeAgentText(heading.noun)}
+      />
+    );
   }
 
   const displayVerb = isLoading ? heading.activeVerb : heading.verb;
@@ -365,14 +391,21 @@ export function ChatMessageToolExternal({ part }: { readonly part: DynamicToolUI
 
   const text = `${heading.bodyPrefix}${bodyText(facts, output)}`;
   const exitCode = exitCodeOf(output);
-  const hasBody = text !== '' || facts.locations.length > 0;
+  const hasBody = text !== '' || heading.locations.length > 0;
+  /* A parsed read links its files just as an adapter-labelled read does. */
+  const locationItems = heading.locations.map((path) => (
+    <ChatToolCardListItem key={path} icon={FileText}>
+      {/* The child is what is read; the prop is what is opened. */}
+      <FileLink path={path}>{sanitizeAgentPath(path)}</FileLink>
+    </ChatToolCardListItem>
+  ));
   /* The call's product, not its log: shown open under the card, as Codex shows a render. */
   const media = externalToolMedia(facts, output);
   const mediaList =
     media.length === 0 ? null : (
       <div className='mt-1 flex flex-col gap-2'>
         {media.map((item) => (
-          <ChatMessageMedia key={item.url} media={item} alt={detail === '' ? label : detail} />
+          <ChatMessageMedia key={item.url} media={item} alt={heading.mediaAlt} />
         ))}
       </div>
     );
@@ -405,17 +438,15 @@ export function ChatMessageToolExternal({ part }: { readonly part: DynamicToolUI
         {header}
         <ChatToolCardContent>
           {body === 'command' || body === 'text' ? (
-            <CodeBlockContent>
-              <Pre language={body === 'command' ? 'bash' : 'plaintext'}>{sanitizeAgentText(text, 4000)}</Pre>
-            </CodeBlockContent>
+            <>
+              {locationItems.length === 0 ? null : <ChatToolCardList>{locationItems}</ChatToolCardList>}
+              <CodeBlockContent>
+                <Pre language={body === 'command' ? 'bash' : 'plaintext'}>{sanitizeAgentText(text, 4000)}</Pre>
+              </CodeBlockContent>
+            </>
           ) : (
             <ChatToolCardList>
-              {facts.locations.map((path) => (
-                <ChatToolCardListItem key={path} icon={FileText}>
-                  {/* The child is what is read; the prop is what is opened. */}
-                  <FileLink path={path}>{sanitizeAgentPath(path)}</FileLink>
-                </ChatToolCardListItem>
-              ))}
+              {locationItems}
               {text
                 .split('\n')
                 .filter((line) => line.trim() !== '')

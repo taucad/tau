@@ -370,7 +370,7 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
   const mcp =
     externalAgents === undefined
       ? undefined
-      : createHostMcpEndpoint({ secret: randomBytes(32).toString('base64url'), registry: toolRegistry });
+      : createHostMcpEndpoint({ secret: randomBytes(32).toString('base64url'), registry: toolRegistry, workspaceRoot });
 
   const launcher = createAgentLauncher({
     chats: createNodeChatStore({ workspaceRoot }),

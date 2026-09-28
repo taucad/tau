@@ -61,4 +61,37 @@ export const sampleProjects: readonly BuiltinProjectCardModel[] = builtinCatalog
     : [];
 });
 
-export const galleryProjects = sampleProjects;
+/**
+ * The Community showcase, in display order: the strongest builtins only. Starter and
+ * toy models stay in `@taucad/tau-examples` and remain reachable by their `/s/builtin~` link.
+ */
+export const communityLocators = [
+  'replicad.kestrel-240-quadcopter',
+  'replicad.v8-engine',
+  'replicad.bench-vise',
+  'replicad.turbofan',
+  'openscad.arq5-racing-quadcopter',
+  'replicad.six-axis-arm',
+  'replicad.heat-exchanger',
+  'replicad.worm-gear-system',
+  'replicad.standing-fan',
+  'replicad.spur-gearbox',
+  'replicad.planetary-gear-system',
+  'replicad.wheelbarrow',
+  'replicad.copper-lampshade',
+  'openscad.cyber-chess-set',
+  'jscad.planetary-gear-system',
+  'openscad.dollhouse',
+  'replicad.gridfinity-box',
+  'openscad.fluted-vase',
+  'replicad.cycloidal-gear',
+  'replicad.wavy-vase',
+] as const;
+
+const sampleProjectsByLocator = new Map(sampleProjects.map((project) => [project.locator, project]));
+
+// ponytail: a locator without a builtin is dropped here; project-examples.test.ts fails on it.
+export const galleryProjects: readonly BuiltinProjectCardModel[] = communityLocators.flatMap((locator) => {
+  const project = sampleProjectsByLocator.get(locator);
+  return project ? [project] : [];
+});

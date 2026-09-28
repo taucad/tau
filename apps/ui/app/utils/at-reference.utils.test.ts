@@ -7,9 +7,9 @@ import {
   extractChatIdFromChatLogPath,
   resolveAtReference,
   buildPastedContent,
-  parseSlashCommands,
+  commandInvocation,
+  escapeDollarInvocations,
   parseInlineReferences,
-  resolveSlashCommand,
 } from '#utils/at-reference.utils.js';
 
 describe('parseAtReferences', () => {
@@ -311,135 +311,141 @@ describe('buildPastedContent', () => {
     ]);
   });
 
-  it('should resolve /command as skill chip when knownSkills is provided', () => {
-    const knownSkills = new Set(['create-policy']);
-    const result = buildPastedContent('/create-policy', { fileTree: new Map(), chats: [], knownSkills });
+  it('should resolve /command as skill chip when knownTokens is provided', () => {
+    const knownTokens = new Set(['/create-policy']);
+    const result = buildPastedContent('/create-policy', { fileTree: new Map(), chats: [], knownTokens });
 
-    expect(result).toEqual([{ type: 'chip', id: 'create-policy', label: '/create-policy', chipType: 'skill' }]);
+    expect(result).toEqual([{ type: 'chip', id: '/create-policy', label: '/create-policy', chipType: 'skill' }]);
+  });
+
+  it('should resolve a Codex $skill and a namespaced $skill as chips', () => {
+    const knownTokens = new Set(['$imagegen', '$openai-templates:simple-dark']);
+    const result = buildPastedContent('Render with $imagegen then $openai-templates:simple-dark.', {
+      fileTree: new Map(),
+      chats: [],
+      knownTokens,
+    });
+
+    expect(result).toEqual([
+      { type: 'text', value: 'Render with ' },
+      { type: 'chip', id: '$imagegen', label: '$imagegen', chipType: 'skill' },
+      { type: 'text', value: ' then ' },
+      { type: 'chip', id: '$openai-templates:simple-dark', label: '$openai-templates:simple-dark', chipType: 'skill' },
+      { type: 'text', value: '.' },
+    ]);
+  });
+
+  it('should not chip a token under the other prefix', () => {
+    const knownTokens = new Set(['$imagegen']);
+    const result = buildPastedContent('/imagegen', { fileTree: new Map(), chats: [], knownTokens });
+
+    expect(result).toEqual([{ type: 'text', value: '/imagegen' }]);
   });
 
   it('should keep unknown /command as plain text', () => {
-    const knownSkills = new Set(['create-policy']);
-    const result = buildPastedContent('/unknown-skill', { fileTree: new Map(), chats: [], knownSkills });
+    const knownTokens = new Set(['/create-policy']);
+    const result = buildPastedContent('/unknown-skill', { fileTree: new Map(), chats: [], knownTokens });
 
     expect(result).toEqual([{ type: 'text', value: '/unknown-skill' }]);
   });
 
   it('should handle mixed @path and /command references', () => {
     const fileTree = createFileTree([['src/app.ts', { name: 'app.ts' }]]);
-    const knownSkills = new Set(['repos']);
-    const result = buildPastedContent('/repos check @src/app.ts', { fileTree, chats: [], knownSkills });
+    const knownTokens = new Set(['/repos']);
+    const result = buildPastedContent('/repos check @src/app.ts', { fileTree, chats: [], knownTokens });
 
     expect(result).toEqual([
-      { type: 'chip', id: 'repos', label: '/repos', chipType: 'skill' },
+      { type: 'chip', id: '/repos', label: '/repos', chipType: 'skill' },
       { type: 'text', value: ' check ' },
       { type: 'chip', id: 'src/app.ts', label: 'app.ts', chipType: 'file', path: 'src/app.ts' },
     ]);
   });
 
-  it('should treat /command as plain text when knownSkills is not provided', () => {
+  it('should treat /command as plain text when knownTokens is not provided', () => {
     const result = buildPastedContent('/create-policy', { fileTree: new Map(), chats: [] });
 
     expect(result).toEqual([{ type: 'text', value: '/create-policy' }]);
   });
 });
 
-describe('parseSlashCommands', () => {
-  it('should return single text segment when no commands', () => {
-    expect(parseSlashCommands('hello world')).toEqual([{ type: 'text', value: 'hello world' }]);
-  });
-
-  it('should parse /command at start of text', () => {
-    expect(parseSlashCommands('/create-policy some text')).toEqual([
-      { type: 'slashCommand', commandId: 'create-policy' },
-      { type: 'text', value: ' some text' },
-    ]);
-  });
-
-  it('should parse /command after whitespace', () => {
-    expect(parseSlashCommands('run /repos now')).toEqual([
-      { type: 'text', value: 'run ' },
-      { type: 'slashCommand', commandId: 'repos' },
-      { type: 'text', value: ' now' },
-    ]);
-  });
-
-  it('should not match slash mid-word', () => {
-    expect(parseSlashCommands('path/to/file')).toEqual([{ type: 'text', value: 'path/to/file' }]);
-  });
-
-  it('should parse multiple commands', () => {
-    expect(parseSlashCommands('/repos /create-policy')).toEqual([
-      { type: 'slashCommand', commandId: 'repos' },
-      { type: 'text', value: ' ' },
-      { type: 'slashCommand', commandId: 'create-policy' },
-    ]);
-  });
-
-  it('should return empty array for empty text', () => {
-    expect(parseSlashCommands('')).toEqual([]);
-  });
-});
-
 describe('parseInlineReferences', () => {
   it('should handle text with both @ and / references', () => {
-    const result = parseInlineReferences('/repos check @src/app.ts');
-
-    expect(result).toEqual([
-      { type: 'slashCommand', commandId: 'repos' },
+    expect(parseInlineReferences('/repos check @src/app.ts')).toEqual([
+      { type: 'invocation', token: '/repos' },
       { type: 'text', value: ' check ' },
       { type: 'atReference', path: 'src/app.ts' },
     ]);
   });
 
   it('should handle @-only text', () => {
-    const result = parseInlineReferences('check @src/app.ts');
-
-    expect(result).toEqual([
+    expect(parseInlineReferences('check @src/app.ts')).toEqual([
       { type: 'text', value: 'check ' },
       { type: 'atReference', path: 'src/app.ts' },
     ]);
   });
 
-  it('should handle /-only text', () => {
-    const result = parseInlineReferences('/create-policy');
+  it('should parse $ and namespaced tokens and stop before trailing punctuation', () => {
+    expect(parseInlineReferences('use $imagegen: or $template-creator:template-creator, /compact!')).toEqual([
+      { type: 'text', value: 'use ' },
+      { type: 'invocation', token: '$imagegen' },
+      { type: 'text', value: ': or ' },
+      { type: 'invocation', token: '$template-creator:template-creator' },
+      { type: 'text', value: ', ' },
+      { type: 'invocation', token: '/compact' },
+      { type: 'text', value: '!' },
+    ]);
+  });
 
-    expect(result).toEqual([{ type: 'slashCommand', commandId: 'create-policy' }]);
+  it('should leave paths and mid-word slashes as text', () => {
+    expect(parseInlineReferences('see /usr/bin and path/to/file')).toEqual([
+      { type: 'text', value: 'see /usr/bin and path/to/file' },
+    ]);
+  });
+
+  it('should require whitespace or start before a token', () => {
+    expect(parseInlineReferences('a$imagegen (/repos)')).toEqual([{ type: 'text', value: 'a$imagegen (/repos)' }]);
   });
 
   it('should handle plain text with no references', () => {
     expect(parseInlineReferences('hello world')).toEqual([{ type: 'text', value: 'hello world' }]);
   });
 
-  it('should preserve order of mixed references', () => {
-    const result = parseInlineReferences('@src/a.ts /repos @src/b.ts');
+  it('should return no segments for empty text', () => {
+    expect(parseInlineReferences('')).toEqual([]);
+  });
 
-    expect(result).toEqual([
+  it('should preserve order of mixed references', () => {
+    expect(parseInlineReferences('@src/a.ts /repos @src/b.ts')).toEqual([
       { type: 'atReference', path: 'src/a.ts' },
       { type: 'text', value: ' ' },
-      { type: 'slashCommand', commandId: 'repos' },
+      { type: 'invocation', token: '/repos' },
       { type: 'text', value: ' ' },
       { type: 'atReference', path: 'src/b.ts' },
     ]);
   });
 });
 
-describe('resolveSlashCommand', () => {
-  const knownSkills = new Set(['create-policy', 'repos', 'create-kernel']);
+describe('commandInvocation', () => {
+  it('keeps advertised prefixes and adds / to bare names', () => {
+    expect(commandInvocation('$imagegen')).toBe('$imagegen');
+    expect(commandInvocation('/review')).toBe('/review');
+    expect(commandInvocation('compact')).toBe('/compact');
+  });
+});
 
-  it('should resolve known skill', () => {
-    expect(resolveSlashCommand('create-policy', knownSkills)).toEqual({
-      type: 'skill',
-      commandId: 'create-policy',
-      label: '/create-policy',
-    });
+describe('escapeDollarInvocations', () => {
+  const knownTokens = new Set(['$imagegen', '$brep-design']);
+
+  it('escapes known $ tokens so single-dollar math cannot pair them', () => {
+    expect(escapeDollarInvocations('use $imagegen and $brep-design', knownTokens)).toBe(
+      String.raw`use \$imagegen and \$brep-design`,
+    );
   });
 
-  it('should return undefined for unknown command', () => {
-    expect(resolveSlashCommand('nonexistent', knownSkills)).toBeUndefined();
-  });
-
-  it('should return undefined for empty set', () => {
-    expect(resolveSlashCommand('repos', new Set())).toBeUndefined();
+  it('leaves unknown dollars, slash tokens and code verbatim', () => {
+    const markdown = 'costs $5, /review, `$imagegen` and\n```\n$brep-design\n```\nthen $imagegen';
+    expect(escapeDollarInvocations(markdown, knownTokens)).toBe(
+      'costs $5, /review, `$imagegen` and\n```\n$brep-design\n```\nthen \\$imagegen',
+    );
   });
 });

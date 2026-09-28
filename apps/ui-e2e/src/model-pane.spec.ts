@@ -54,7 +54,7 @@ const openSecondGeometryUnit = async (): Promise<void> => {
   }
 
   await target.hover(treeItem(secondaryPath));
-  await target.click(selectors.getByRole('button', { name: 'Actions for box-corner.js' }));
+  await target.click(selectors.getByRole('button', { name: 'More actions for box-corner.js', exact: true }));
   await target.click(selectors.getByRole('menuitem', { name: 'Open in Viewer' }));
   await target.expectVisible(selectors.getByCss(`.dv-tab[aria-label="${secondaryPath}"]`), 60_000);
 };
@@ -135,10 +135,10 @@ test('keeps the Model hierarchy filterable, accessible, and reorderable through 
   await target.expectAttribute(main, 'aria-expanded', 'true');
   await target.expectAttribute(secondary, 'aria-expanded', 'true');
 
-  const filter = selectors.getByRole('textbox', { name: 'Filter parts' });
+  const filter = selectors.getByRole('searchbox', { name: 'Filter parts' });
   await target.expectVisible(filter);
   await target.expectAttribute(filter, 'placeholder', 'Filter parts...');
-  await target.expectCount(selectors.getByRole('textbox', { name: 'Filter parts' }), 1);
+  await target.expectCount(selectors.getByRole('searchbox', { name: 'Filter parts' }), 1);
   await target.expectCount(selectors.getByRole('button', { name: /show search|hide search/iu }), 0);
 
   const mainList = selectors.getByRole('list', { name: `Model components for ${mainPath}` });

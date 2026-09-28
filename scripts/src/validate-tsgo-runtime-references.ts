@@ -15,18 +15,32 @@ const ignoredDirectories = new Set([
   'coverage',
   'dist',
   'node_modules',
+  'out',
   'out-tsc',
   'repos',
   'tmp',
 ]);
 const researchDocumentPath = 'docs/research/tsgo-nx-project-reference-guardrails.md';
+const hashAliasResearchPath = 'docs/research/scoped-hash-import-resolution.md';
+
+/**
+ * Configs allowed a `#` path alias, with why. `paths` applies to every file in the
+ * program and beats `package.json#imports`, so an alias rewrites the `#` imports of
+ * each workspace package compiled from source there. These projects have no
+ * package.json to hold an imports map, and compile no colliding `#` sources.
+ */
+export const hashPathAliasExceptions: Readonly<Record<string, string>> = {
+  'apps/api-e2e/tsconfig.spec.json': 'no package.json for an imports map',
+  'apps/desktop-e2e/tsconfig.json': 'no package.json for an imports map',
+  'apps/ui-e2e/tsconfig.spec.json': 'no package.json for an imports map',
+};
 
 type ReferenceEntry = {
   path?: unknown;
 };
 
 export type TsgoRuntimeReferenceDiagnostic = {
-  kind: 'forbidden-reference' | 'parse-error';
+  kind: 'forbidden-reference' | 'hash-path-alias' | 'parse-error';
   configPath: string;
   projectRoot: string;
   referencePath?: string;
@@ -98,33 +112,52 @@ const validateRuntimeConfig = (options: {
     ];
   }
 
-  const references = (parsed.config as { references?: ReferenceEntry[] } | undefined)?.references;
+  const config = parsed.config as
+    | { references?: ReferenceEntry[]; compilerOptions?: { paths?: Record<string, unknown> } }
+    | undefined;
+  const hashAliases =
+    configRelativePath in hashPathAliasExceptions
+      ? []
+      : Object.keys(config?.compilerOptions?.paths ?? {}).filter((key) => key.startsWith('#'));
+  const aliasDiagnostics = hashAliases.map(
+    (alias): TsgoRuntimeReferenceDiagnostic => ({
+      kind: 'hash-path-alias',
+      configPath: configRelativePath,
+      projectRoot: projectRelativePath,
+      message: `${configRelativePath}: \`#\` path alias "${alias}" applies to every file in the program, so it rewrites the \`#\` imports of workspace packages compiled from source. Declare it in package.json#imports instead. See ${hashAliasResearchPath}.`,
+    }),
+  );
+
+  const references = config?.references;
   if (!Array.isArray(references)) {
-    return [];
+    return aliasDiagnostics;
   }
 
-  return references.flatMap((reference): TsgoRuntimeReferenceDiagnostic[] => {
-    if (typeof reference.path !== 'string') {
-      return [];
-    }
+  return [
+    ...aliasDiagnostics,
+    ...references.flatMap((reference): TsgoRuntimeReferenceDiagnostic[] => {
+      if (typeof reference.path !== 'string') {
+        return [];
+      }
 
-    const resolvedReferencePath = resolve(dirname(configPath), reference.path);
-    if (isInsideDirectory({ parent: projectRoot, child: resolvedReferencePath })) {
-      return [];
-    }
+      const resolvedReferencePath = resolve(dirname(configPath), reference.path);
+      if (isInsideDirectory({ parent: projectRoot, child: resolvedReferencePath })) {
+        return [];
+      }
 
-    const resolvedRelativePath = toWorkspacePath({ workspaceRoot, path: resolvedReferencePath });
-    return [
-      {
-        kind: 'forbidden-reference',
-        configPath: configRelativePath,
-        projectRoot: projectRelativePath,
-        referencePath: reference.path,
-        resolvedPath: resolvedRelativePath,
-        message: `${configRelativePath}: forbidden cross-project reference "${reference.path}" resolves to "${resolvedRelativePath}". Tau runtime configs checked by tsgo must resolve workspace package types through source exports, not referenced out-tsc declarations. Remove the cross-project reference or move declaration generation to a build/publish config. See ${researchDocumentPath}.`,
-      },
-    ];
-  });
+      const resolvedRelativePath = toWorkspacePath({ workspaceRoot, path: resolvedReferencePath });
+      return [
+        {
+          kind: 'forbidden-reference',
+          configPath: configRelativePath,
+          projectRoot: projectRelativePath,
+          referencePath: reference.path,
+          resolvedPath: resolvedRelativePath,
+          message: `${configRelativePath}: forbidden cross-project reference "${reference.path}" resolves to "${resolvedRelativePath}". Tau runtime configs checked by tsgo must resolve workspace package types through source exports, not referenced out-tsc declarations. Remove the cross-project reference or move declaration generation to a build/publish config. See ${researchDocumentPath}.`,
+        },
+      ];
+    }),
+  ];
 };
 
 export const validateTsgoRuntimeReferences = (
@@ -155,17 +188,15 @@ export const runTsgoRuntimeReferenceValidation = (workspaceRoot = process.cwd())
   const diagnostics = validateTsgoRuntimeReferences({ workspaceRoot });
 
   if (diagnostics.length > 0) {
-    console.log('\nForbidden tsgo runtime project references found:\n');
+    console.log('\nForbidden tsgo runtime config entries found:\n');
     console.log(formatTsgoRuntimeReferenceDiagnostics(diagnostics));
     console.log(
-      `\nSummary: ${diagnostics.length} forbidden cross-project runtime reference${
-        diagnostics.length === 1 ? '' : 's'
-      } found`,
+      `\nSummary: ${diagnostics.length} forbidden runtime config entr${diagnostics.length === 1 ? 'y' : 'ies'} found`,
     );
     return 1;
   }
 
-  console.log('Summary: 0 forbidden cross-project runtime references found');
+  console.log('Summary: 0 forbidden runtime config entries found');
   return 0;
 };
 

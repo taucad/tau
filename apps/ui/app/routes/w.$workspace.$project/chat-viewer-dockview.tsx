@@ -396,7 +396,7 @@ export const createInheritedGraphicsSettings = (
   }
   return {
     ...parseGraphicsViewSettings(activeSettings),
-    // A cut belongs to the geometry it was made through; how any cut is shown is a pane preference.
+    // Cuts belong to the geometry they were made through, so a new pane starts without them.
     cameraView: undefined,
     sectionView: undefined,
     pinnedMeasurements: undefined,

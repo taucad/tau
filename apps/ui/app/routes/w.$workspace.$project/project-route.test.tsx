@@ -19,10 +19,11 @@ const projectC = 'proj_ccccccccccccccccccccc';
 let currentProjectId = projectA;
 const getProjectRouteAccess = vi.fn<(projectId: string) => Promise<ProjectRouteAccess>>();
 const restoreProject = vi.fn<(projectId: string) => Promise<void>>();
-const projectManager = {
+/* W2: a trash or restore publishes a new manager value carrying the next
+ * `libraryRevision`, and that value is how it reaches an already-resolved route. */
+let projectManager = {
   getProjectRouteAccess,
   restoreProject,
-  /* W2: bumping this is how a trash or restore reaches an already-resolved route. */
   libraryRevision: 0,
 };
 const mounts: string[] = [];
@@ -800,7 +801,7 @@ describe('project route session identity', () => {
      * Finding 2: deleting the open project closes its session and writes
      * `deletedAt`. The close was live; the trash was not, so the route kept
      * showing "Closed" — and its Reopen would have re-mounted a trashed
-     * project. The revision counter is what makes the second fact arrive.
+     * project. The manager's next value is what makes the second fact arrive.
      */
     getProjectRouteAccess.mockResolvedValue(ready(projectA));
     const { Provider, view } = renderRouteProvider();
@@ -808,7 +809,7 @@ describe('project route session identity', () => {
 
     getProjectRouteAccess.mockResolvedValue(trashed(projectA));
     await act(async () => {
-      projectManager.libraryRevision += 1;
+      projectManager = { ...projectManager, libraryRevision: projectManager.libraryRevision + 1 };
       view.rerender(<Provider>content</Provider>);
       await new Promise<void>((resolve) => {
         globalThis.setTimeout(resolve, 0);
@@ -825,7 +826,7 @@ describe('project route session identity', () => {
 
     getProjectRouteAccess.mockResolvedValue(ready(projectA));
     await act(async () => {
-      projectManager.libraryRevision += 1;
+      projectManager = { ...projectManager, libraryRevision: projectManager.libraryRevision + 1 };
       view.rerender(<Provider>content</Provider>);
       await new Promise<void>((resolve) => {
         globalThis.setTimeout(resolve, 0);

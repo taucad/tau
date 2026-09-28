@@ -42,7 +42,7 @@ const client = createRuntimeClient({
 The default preset installs four middleware, in order:
 
 - **`parameterFileResolver()`** — merges persisted parameter-group values from `.tau/parameters/<entry>.json` over the request parameters.
-- **`parameterCache()`** — caches `getParameters` results under `.tau/cache/parameters/`, keyed by the dependency hash.
+- **`parameterUnits()`** — infers units for parameters whose schema does not declare one.
 - **`geometryCache()`** — caches `createGeometry` results as MessagePack binaries under `.tau/cache/geometry/`, skipping kernel computation when code and parameters are unchanged.
 - **`gltfEdgeDetection()`** — adds edge primitives to glTF meshes for sharp-edge rendering.
 
@@ -69,7 +69,7 @@ const client = createRuntimeClient({
 });
 ```
 
-The `'cache'` preset shown here installs only `parameterCache` and `geometryCache` — pick it when your viewer needs no edge rendering or parameter files.
+The `'cache'` preset shown here installs only `geometryCache` — pick it when your viewer needs no edge rendering or parameter files.
 
 ### 4. Render as usual
 

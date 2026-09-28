@@ -120,6 +120,11 @@ export type KinematicsUnitState = Readonly<{
    * `loadMechanism` and `clearMechanism` keep it.
    */
   dragEnabled: boolean;
+  /**
+   * Components the Kinematics pane points at: a hovered or focused row's parts. The viewer highlights them
+   * as it does a hovered part. Changing them never changes `revision`.
+   */
+  hoveredComponentIds: readonly string[];
   /** Increments on every pose change; the viewer re-applies link transforms when it changes. */
   revision: number;
 }>;
@@ -152,9 +157,13 @@ export type KinematicsMachineEvent =
   | { type: 'dragEnd'; unitId: string }
   | { type: 'dragCancel'; unitId: string }
   /** Arms or disarms viewer drags for the unit; disarming during a drag cancels it like `dragCancel`. */
-  | { type: 'setDragEnabled'; unitId: string; enabled: boolean };
+  | { type: 'setDragEnabled'; unitId: string; enabled: boolean }
+  /** The components a pane row points at; an empty list clears the highlight. */
+  | { type: 'setHoveredComponents'; unitId: string; componentIds: readonly string[] };
 
 const stoppedPlayback: KinematicsPlayback = { status: 'stopped', animationId: undefined, time: 0, speed: 1 };
+
+const noComponents: readonly string[] = Object.freeze([]);
 
 // Frozen singleton for absent units: `useSelector`'s `Object.is` short-circuits re-renders.
 const emptyUnitState: KinematicsUnitState = Object.freeze({
@@ -167,6 +176,7 @@ const emptyUnitState: KinematicsUnitState = Object.freeze({
   playback: Object.freeze(stoppedPlayback),
   drag: undefined,
   dragEnabled: false,
+  hoveredComponentIds: noComponents,
   revision: 0,
 });
 
@@ -236,6 +246,35 @@ const resolveAnimation = (
   animationId === undefined
     ? createDriverSweep(mechanism, degreesOfFreedom)
     : mechanism.animations?.find((animation) => animation.id === animationId);
+
+/** The clip `play` runs: the authored animation `animationId` names, or the driver sweep when it is `undefined`. */
+export const getKinematicsAnimation = ({
+  mechanism,
+  degreesOfFreedom,
+  animationId,
+}: Readonly<{
+  mechanism: Mechanism | undefined;
+  degreesOfFreedom: readonly DegreeOfFreedom[];
+  animationId: string | undefined;
+}>): Animation | undefined =>
+  mechanism === undefined ? undefined : resolveAnimation(mechanism, degreesOfFreedom, animationId);
+
+/**
+ * Where in one play of the clip `time` falls. Playback time grows without bound; a repeating clip wraps it and a
+ * back-and-forth clip reflects it, as `sampleAnimation` does. Seconds.
+ */
+// ponytail: mirrors the private `loopTime` in packages/kinematics/src/pose.ts; export it from the package (with an
+// API design guide) if a second consumer needs it.
+export const getKinematicsClipTime = ({ duration, loop }: Animation, time: number): number => {
+  if (loop === 'repeat') {
+    return ((time % duration) + duration) % duration;
+  }
+  if (loop === 'pingPong') {
+    const phase = ((time % (2 * duration)) + 2 * duration) % (2 * duration);
+    return phase > duration ? 2 * duration - phase : phase;
+  }
+  return Math.min(time, duration);
+};
 
 /** The `playback.animationId` a picker id selects: the driver sweep is `undefined`. */
 const toPlaybackAnimationId = (animationId: string): string | undefined =>
@@ -503,6 +542,17 @@ export const kinematicsMachine = setup({
       }
       const restored = withPose({ ...unit, drag: undefined }, unit.drag.startCoordinates);
       return { context: assignUnit(context, event.unitId, restored) };
+    },
+    setHoveredComponents: ({ context, event }) => {
+      const unit = getKinematicsUnitState(context, event.unitId);
+      const isSame =
+        unit.hoveredComponentIds.length === event.componentIds.length &&
+        unit.hoveredComponentIds.every((id, index) => id === event.componentIds[index]);
+      if (isSame || (unit.mechanism === undefined && event.componentIds.length > 0)) {
+        return {};
+      }
+      const hoveredComponentIds = event.componentIds.length === 0 ? noComponents : event.componentIds;
+      return { context: assignUnit(context, event.unitId, { ...unit, hoveredComponentIds }) };
     },
     setDragEnabled: ({ context, event }) => {
       const unit = getKinematicsUnitState(context, event.unitId);

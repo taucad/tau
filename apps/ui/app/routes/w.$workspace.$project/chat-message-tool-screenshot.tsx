@@ -57,7 +57,9 @@ export function ChatMessageToolScreenshot({
     case 'output-available': {
       const { output } = part;
       const allImages = output.images;
-      const renderableImages = allImages.filter((img) => img.dataUrl.startsWith('data:'));
+      const renderableImages = allImages.filter((image) =>
+        'dataUrl' in image ? image.dataUrl.startsWith('data:') : image.path.startsWith('attachments/'),
+      );
       const count = allImages.length;
       const noun = count === 1 ? 'screenshot' : 'screenshots';
 
@@ -93,7 +95,11 @@ export function ChatMessageToolScreenshot({
                 {renderableImages.map((image) => (
                   <div key={image.view} className='flex flex-col items-center gap-1'>
                     <ChatMessageMedia
-                      media={{ url: image.dataUrl, mediaType: image.dataUrl.slice(5, image.dataUrl.indexOf(';')) }}
+                      media={
+                        'dataUrl' in image
+                          ? { url: image.dataUrl, mediaType: image.dataUrl.slice(5, image.dataUrl.indexOf(';')) }
+                          : { url: image.path, mediaType: image.mimeType }
+                      }
                       alt={`${image.view} view`}
                     />
                     <span className='text-xs text-muted-foreground'>{image.view}</span>

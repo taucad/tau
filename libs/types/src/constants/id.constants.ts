@@ -149,6 +149,10 @@ export const idPrefix = {
    */
   measurement: 'meas',
   /**
+   * A section view cut ID. Cuts get new IDs on every load, so it never persists.
+   */
+  sectionCut: 'cut',
+  /**
    * An observation ID.
    */
   observation: 'obs',

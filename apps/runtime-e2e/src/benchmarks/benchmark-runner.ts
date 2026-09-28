@@ -18,6 +18,9 @@ import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { replicadKernel } from '@taucad/replicad';
 import { openrscadKernel } from '@taucad/openrscad';
 import { esbuild } from '@taucad/esbuild';
+import { parameterFileResolver } from '@taucad/middleware';
+import { serializeParameterRecord } from '@taucad/parameters';
+import { fileParameterEntrySchema, parametersDirectory } from '@taucad/types';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { getGeometryStatsFromInspect, getInspectReport } from '@taucad/runtime-testing';
 import type { BenchmarkCase, BenchmarkKernel } from '#benchmarks/benchmark-suite.js';
@@ -358,9 +361,13 @@ export async function runBenchmarks(
     const caseOperation = benchCase.operation ?? operation;
 
     const fileSystem = fromMemoryFs(benchCase.files);
+    const isParameterCase = benchCase.parameterSequence !== undefined || benchCase.stageSequence !== undefined;
+    const sidecarPath = `${parametersDirectory}/${benchCase.mainFile}.json`;
     const runtime = defineRuntime({
       plugins: [esbuild()],
       kernels: [kernelForCase(benchCase.kernel, kernelOptions)],
+      /* Parameter cases resolve values the way the UI does: from the committed record, with overrides on top. */
+      middleware: isParameterCase ? [parameterFileResolver()] : [],
     });
     const transport = inProcessTransport({ runtime, fileSystem });
     const client = createRuntimeClient({
@@ -409,6 +416,7 @@ export async function runBenchmarks(
 
       const start = performance.now();
       const parameters = benchCase.parameterSequence?.[iter % benchCase.parameterSequence.length] ?? {};
+      const committed = benchCase.stageSequence?.[iter % benchCase.stageSequence.length];
       let failureMessage: string | undefined;
       if (caseOperation === 'render') {
         const renderResult = await client.render({
@@ -416,6 +424,18 @@ export async function runBenchmarks(
           parameters,
           content: { includeEdges },
           renderOptions,
+          ...(committed === undefined
+            ? {}
+            : {
+                stage: {
+                  [sidecarPath]: serializeParameterRecord(
+                    fileParameterEntrySchema.parse({
+                      activeGroup: 'default',
+                      groups: { default: { values: committed } },
+                    }),
+                  ),
+                },
+              }),
         });
         if (renderResult.superseded) {
           failureMessage = 'render was unexpectedly superseded';
@@ -500,6 +520,7 @@ export async function runBenchmarks(
         mode,
         operation: caseOperation,
         parameterSequence: benchCase.parameterSequence,
+        stageSequence: benchCase.stageSequence,
         renderOptions,
         tessellationInstancing,
         wasm: typeof wasm === 'string' ? wasm : wasm.wasmUrl,

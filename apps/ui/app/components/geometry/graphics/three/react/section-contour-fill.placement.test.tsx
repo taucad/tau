@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 import * as THREE from 'three';
 import { MeshBVH } from 'three-mesh-bvh';
 import type { GeometryComponentManifest } from '@taucad/types';
+import { resolveSectionFaces, resolveSectionPieces } from '#components/geometry/graphics/section-cuts.js';
+import type { SectionFace } from '#components/geometry/graphics/section-cuts.js';
 import {
   buildSectionCapStyleKey,
   buildSectionCapTopologySourceSetKey,
@@ -36,9 +38,13 @@ import type { CapMultiPolygon } from '#components/geometry/graphics/three/utils/
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url));
 const stageSource = readFileSync(join(currentDirectory, '..', 'stage.tsx'), 'utf8');
-const sectionViewControlsSource = readFileSync(join(currentDirectory, 'section-view-controls.tsx'), 'utf8');
+const sectionHandlesSource = readFileSync(join(currentDirectory, 'section-handles.tsx'), 'utf8');
 const sectionContourFillSource = readFileSync(join(currentDirectory, 'section-contour-fill.tsx'), 'utf8');
 const gltfMeshSource = readFileSync(join(currentDirectory, 'gltf-mesh.tsx'), 'utf8');
+
+/** The face of a cut removing z < `offset`, whose kept side is the plane `(0, 0, 1)·p − offset ≥ 0`. */
+const xyFace = (offset: number): SectionFace =>
+  resolveSectionFaces(resolveSectionPieces([{ id: 'cut-a', kind: 'plane', plane: 'xy', offset, isFlipped: true }]))[0]!;
 
 function createModelInteractionContext({
   unitId,
@@ -112,10 +118,10 @@ describe('SectionContourFills placement (Architecture C)', () => {
     expect(stageSource.includes(legacyCapPlane)).toBe(false);
   });
 
-  it('keeps clipped-cap contour extraction out of section-view controls', () => {
-    expect(sectionViewControlsSource.includes('SectionContourFills')).toBe(false);
-    expect(sectionViewControlsSource.includes('extractSectionContours')).toBe(false);
-    expect(sectionViewControlsSource.includes('buildSectionCapBoundaryPositions')).toBe(false);
+  it('keeps clipped-cap contour extraction out of the section handles', () => {
+    expect(sectionHandlesSource.includes('SectionContourFills')).toBe(false);
+    expect(sectionHandlesSource.includes('extractSectionContours')).toBe(false);
+    expect(sectionHandlesSource.includes('buildSectionCapBoundaryPositions')).toBe(false);
   });
 
   it('uses explicit render tiers and contour-specific materials for cap fills and outlines', () => {
@@ -135,7 +141,7 @@ describe('SectionContourFills placement (Architecture C)', () => {
   it('builds current base caps and sanitized cap-boundary outlines without stale exact-response gating', () => {
     expect(sectionContourFillSource.includes('buildCurrentSectionBaseCapGeometry')).toBe(true);
     expect(sectionContourFillSource.includes('buildSectionCapBoundaryPositions')).toBe(true);
-    expect(sectionContourFillSource.includes('const baseBuffers = exactBuffers')).toBe(true);
+    expect(sectionContourFillSource.includes('const baseBuffers = buildCurrentSectionBaseCapGeometry({')).toBe(true);
     expect(sectionContourFillSource.includes('if (!exactResponse) {')).toBe(false);
     expect(sectionContourFillSource.includes('helper.fillMesh.visible)')).toBe(false);
   });
@@ -241,24 +247,22 @@ describe('SectionContourFills source records', () => {
     expect(collectSectionSourceRecords(root)).toEqual([]);
   });
 
-  it('keeps cache keys stable for camera-only frames and invalidates on plane or source transform changes', () => {
+  it('should keep cache keys stable for camera-only frames and invalidate them on cut face or source transform changes', () => {
     const root = new THREE.Group();
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial({ color: 0xff_00_00 }));
     root.add(mesh);
     root.updateMatrixWorld(true);
 
     const record = collectSectionSourceRecords(root)[0]!;
-    const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
-    const sameFrameKey = buildSectionFillGeometryKey(record, plane);
+    const face = xyFace(0);
+    const sameFrameKey = buildSectionFillGeometryKey(record, face);
 
-    expect(buildSectionFillGeometryKey(record, plane)).toBe(sameFrameKey);
-
-    const movedPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -1);
-    expect(buildSectionFillGeometryKey(record, movedPlane)).not.toBe(sameFrameKey);
+    expect(buildSectionFillGeometryKey(record, xyFace(0))).toBe(sameFrameKey);
+    expect(buildSectionFillGeometryKey(record, xyFace(1))).not.toBe(sameFrameKey);
 
     mesh.position.set(1, 0, 0);
     mesh.updateMatrixWorld(true);
-    expect(buildSectionFillGeometryKey(record, plane)).not.toBe(sameFrameKey);
+    expect(buildSectionFillGeometryKey(record, face)).not.toBe(sameFrameKey);
   });
 
   it('invalidates the geometry key when a kinematic pose moves a registered part away from its scene root', async () => {
@@ -288,15 +292,15 @@ describe('SectionContourFills source records', () => {
       parser: { json: {}, associations: new Map(), getDependency: async () => undefined },
     });
     const record = collectSectionSourceRecords(root)[0]!;
-    const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
-    const asBuiltKey = buildSectionFillGeometryKey(record, plane);
+    const face = xyFace(0);
+    const asBuiltKey = buildSectionFillGeometryKey(record, face);
 
     // The pose composer moves the part's node; the glTF scene root the source registered under stays put.
     node.matrixAutoUpdate = false;
     node.matrix.makeRotationZ(Math.PI / 2);
     node.updateMatrixWorld(true);
 
-    expect(buildSectionFillGeometryKey(record, plane)).not.toBe(asBuiltKey);
+    expect(buildSectionFillGeometryKey(record, face)).not.toBe(asBuiltKey);
   });
 
   it('keeps geometry keys independent from source tint changes', () => {
@@ -306,15 +310,15 @@ describe('SectionContourFills source records', () => {
     root.add(mesh);
     root.updateMatrixWorld(true);
 
-    const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+    const face = xyFace(0);
     const firstRecord = collectSectionSourceRecords(root)[0]!;
-    const firstKey = buildSectionFillGeometryKey(firstRecord, plane);
+    const firstKey = buildSectionFillGeometryKey(firstRecord, face);
 
     material.color.setHex(0x00_00_ff);
     const secondRecord = collectSectionSourceRecords(root)[0]!;
 
     expect(secondRecord.baseTintHex).toBe(0x00_00_ff);
-    expect(buildSectionFillGeometryKey(secondRecord, plane)).toBe(firstKey);
+    expect(buildSectionFillGeometryKey(secondRecord, face)).toBe(firstKey);
   });
 
   it('uses captured base material tint instead of the live mutated material color when available', () => {
@@ -343,8 +347,8 @@ describe('SectionContourFills source records', () => {
     root.updateMatrixWorld(true);
 
     const record = collectSectionSourceRecords(root)[0]!;
-    const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
-    const geometryKey = buildSectionFillGeometryKey(record, plane);
+    const face = xyFace(0);
+    const geometryKey = buildSectionFillGeometryKey(record, face);
     const idleContext = createModelInteractionContext({ unitId });
     const hoveredContext = createModelInteractionContext({ unitId, hoveredComponentId: componentId });
     const selectedContext = createModelInteractionContext({
@@ -360,7 +364,7 @@ describe('SectionContourFills source records', () => {
     expect(resolveSectionSourceTint(record, selectedContext)).not.toBe(
       resolveSectionSourceTint(record, hoveredContext),
     );
-    expect(buildSectionFillGeometryKey(record, plane)).toBe(geometryKey);
+    expect(buildSectionFillGeometryKey(record, face)).toBe(geometryKey);
   });
 
   it('keeps section cap topology keys stable while style keys change for hover tint', () => {

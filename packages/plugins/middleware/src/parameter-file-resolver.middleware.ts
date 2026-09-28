@@ -1,6 +1,7 @@
 import deepmerge from 'deepmerge';
 import { z } from 'zod';
 import { parameterEntryPath } from '@taucad/types';
+import type { JSONValue } from '@taucad/types';
 import type { KernelIssue } from '@taucad/runtime/types';
 import { isNotFoundError } from '@taucad/runtime/kernel';
 import { defineMiddleware } from '@taucad/runtime/middleware';
@@ -25,6 +26,25 @@ const recordFrom = (content: string): ReturnType<typeof requireParameterRecord> 
   } catch (error) {
     throw Object.assign(new Error(errorMessage(error)), { issues: [recordIssue(error)] });
   }
+};
+
+/**
+ * The last record's input values, keyed on its exact text. A render usually rereads unchanged
+ * bytes, and comparing the text is cheaper than hashing it. One entry is enough for the common
+ * single-entry project; switching entry files only costs a decode.
+ */
+let lastRecord: Readonly<{ content: string; values: Readonly<Record<string, JSONValue>> }> | undefined;
+
+/**
+ * Decode the record's input values, reusing the last decode when the text is unchanged.
+ * @param content - The record's text as read.
+ * @returns The active group's input values; never mutate them.
+ */
+const inputValuesFrom = (content: string): Readonly<Record<string, JSONValue>> => {
+  if (lastRecord?.content !== content) {
+    lastRecord = { content, values: parameterRecordInputValues(recordFrom(content)) };
+  }
+  return lastRecord.values;
 };
 
 /**
@@ -71,11 +91,10 @@ export const parameterFileResolver = defineMiddleware({
       throw error;
     }
 
-    const entry = recordFrom(content);
-
+    // `deepmerge` clones its inputs, so the memoised values are never handed out or mutated.
     return handler({
       ...input,
-      parameters: deepmerge(parameterRecordInputValues(entry), input.parameters, {
+      parameters: deepmerge(inputValuesFrom(content), input.parameters, {
         arrayMerge: (_target: unknown[], source: unknown[]) => source,
       }),
     });

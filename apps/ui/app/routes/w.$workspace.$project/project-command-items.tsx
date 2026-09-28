@@ -37,7 +37,7 @@ import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-works
 import { getFileTreeDownloadErrorMessage } from '#routes/w.$workspace.$project/file-tree-download-policy.js';
 import { useFeature } from '#flags/use-feature.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
-import { captureCadImages } from '#services/headless-capture.js';
+import { captureCadImages, omittedSectionCutsNotice } from '#services/headless-capture.js';
 import { useGraphicsCameraRigQuery } from '#hooks/use-graphics.js';
 import { getGraphicsCameraState } from '#services/graphics-camera-registry.js';
 
@@ -131,13 +131,16 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
     if (!mainCadRef) {
       throw new Error('No settled CAD unit is available');
     }
-    const files = await captureCadImages({
+    const { files, omittedSectionCutIds } = await captureCadImages({
       cadRef: mainCadRef,
       graphicsRef: mainGraphicsRef,
       cameraState: getGraphicsCameraState(mainGraphicsRef),
       imageService,
       recipe: { purpose: 'utility', mode: 'current' },
     });
+    if (omittedSectionCutIds.length > 0) {
+      toast.warning(omittedSectionCutsNotice);
+    }
     const file = files[0]!;
     return new Blob([file.bytes], { type: file.mimeType });
   }, [imageService, mainCadRef, mainGraphicsRef]);

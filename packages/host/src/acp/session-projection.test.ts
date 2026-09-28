@@ -404,7 +404,18 @@ describe('the ACP turn projection', () => {
     [
       'screenshot',
       { targetFile: 'main.ts', mode: 'single' },
-      { images: [{ view: 'isometric', dataUrl: 'data:image/webp;base64,AQ==' }] },
+      {
+        images: [
+          {
+            view: 'isometric',
+            path: `attachments/${'0'.repeat(64)}.webp`,
+            absolutePath: '/tmp/capture.webp',
+            mimeType: 'image/webp',
+            byteLength: 1,
+            sha256: '0'.repeat(64),
+          },
+        ],
+      },
     ],
     [
       'export_geometry',
@@ -505,6 +516,94 @@ describe('the ACP turn projection', () => {
       isError: true,
       content: { errorCode: 'MCP_TOOL_ERROR', message: 'RENDER_TIMEOUT: Renderer did not settle.' },
     });
+  });
+
+  it('projects a persisted screenshot and names clipped MCP output precisely', async () => {
+    const sha256 = 'a'.repeat(64);
+    const image = {
+      view: 'isometric',
+      path: `attachments/${sha256}.webp`,
+      absolutePath: `/tmp/tau-capture/${sha256}.webp`,
+      mimeType: 'image/webp',
+      byteLength: 3,
+      sha256,
+    };
+    const input = {
+      sessionUpdate: 'tool_call',
+      toolCallId: 'capture',
+      title: 'mcp.tau.screenshot',
+      kind: 'execute',
+      status: 'pending',
+      rawInput: { server: 'tau', tool: 'screenshot', arguments: { targetFile: 'main.ts', mode: 'single' } },
+      _meta: { is_mcp_tool_call: true },
+    } as const;
+    const valid = await project(
+      [
+        input,
+        {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'capture',
+          status: 'completed',
+          rawOutput: {
+            result: {
+              content: [{ type: 'resource_link', uri: `file://${image.absolutePath}`, name: 'isometric screenshot' }],
+              structuredContent: { images: [image] },
+            },
+          },
+        },
+      ] as SessionUpdate[],
+      'codex',
+      undefined,
+      'tau',
+    );
+    expect(valid[1]).toMatchObject({ role: 'tool-output', isError: false, content: { images: [image] } });
+
+    const clipped = await project(
+      [
+        input,
+        {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'capture',
+          status: 'completed',
+          rawOutput: {
+            result: { content: [{ type: 'text', text: `{"images":"${'a'.repeat(128)}…4146 chars truncated…"}` }] },
+          },
+        },
+      ] as SessionUpdate[],
+      'codex',
+      undefined,
+      'tau',
+    );
+    expect(clipped[1]).toMatchObject({
+      role: 'tool-output',
+      isError: true,
+      content: { errorCode: 'MCP_RESULT_TRUNCATED' },
+    });
+
+    await Promise.all(
+      (
+        [
+          [undefined, 'MCP_RESULT_MISSING'],
+          [{ images: [{ view: 'isometric', path: 'missing.webp' }] }, 'MCP_RESULT_INVALID'],
+        ] as const
+      ).map(async ([structuredContent, errorCode]) => {
+        const messages = await project(
+          [
+            input,
+            {
+              sessionUpdate: 'tool_call_update',
+              toolCallId: 'capture',
+              status: 'completed',
+              rawOutput: { result: { content: [], structuredContent } },
+            },
+          ] as SessionUpdate[],
+          'codex',
+          undefined,
+          'tau',
+        );
+        expect(messages[1]).toMatchObject({ role: 'tool-output', isError: true, content: { errorCode } });
+      }),
+    );
   });
 
   it('trusts the terminal ACP status when an adapter omits MCP isError', async () => {

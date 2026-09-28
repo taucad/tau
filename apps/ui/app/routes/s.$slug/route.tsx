@@ -345,7 +345,11 @@ export const PortableShareSurface = (): React.JSX.Element => {
   }
   if (!artifact || !resolved) {
     return (
-      <main className='flex min-h-dvh flex-col items-center justify-center gap-3 bg-background text-muted-foreground'>
+      <main
+        role='status'
+        aria-busy='true'
+        className='flex min-h-dvh flex-col items-center justify-center gap-3 bg-background text-muted-foreground'
+      >
         <Loader className='size-8' />
         <p className='text-sm'>Opening shared project…</p>
       </main>
@@ -413,21 +417,22 @@ export const PortableShareSurface = (): React.JSX.Element => {
  *
  * Never a gate: the shared workbench is what this link is for, and the app is
  * the second way to it. The workbench is full-bleed, so there is no column to
- * put the card in and it sits in the bottom corner instead.
+ * put the card in and it floats instead.
  *
  * `OpenInDesktop` renders nothing on the desktop build and nothing for a slug
  * the shell's parser would refuse, so in both of those cases this is an empty
  * box that takes no pointer events and paints nothing.
  *
- * Shown from `md`, where the workbench pane takes the right of the window and
- * the card sits over it, clear of the viewer. Below `md` the viewer fills the
- * width and its centred controls own the bottom edge (the card covered them at
- * 640-767 px), and phones and tablets have no desktop app to open.
+ * It sits over the viewer's bottom-left corner, lifted clear of the viewer's
+ * centred control bar: the workbench's bottom-right corner, where it used to
+ * sit, holds the end of the parameter list (lane C Finding 10). Shown from
+ * `lg`, where the viewer is wide enough to keep the card off both the bar and
+ * the workbench; phones and tablets have no desktop app to open.
  *
  * @returns The offer's corner.
  */
 const ShareDesktopOffer = (): React.JSX.Element => (
-  <div className='pointer-events-none fixed inset-x-0 bottom-0 z-50 hidden justify-end p-4 md:flex'>
+  <div className='pointer-events-none fixed inset-x-0 bottom-16 z-50 hidden justify-start p-4 lg:flex'>
     <div className='pointer-events-auto'>
       <OpenInDesktop continueLabel='View in the browser' />
     </div>

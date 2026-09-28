@@ -236,22 +236,6 @@ const durableFailureReason = async (): Promise<string | undefined> => {
 };
 
 /**
- * Settlement's own failure line — nothing else in the app logs it.
- *
- * It fired six times in one second on the operator's first live turn: the
- * preview pipeline wrote `thumbnail.webp` into the live root between the
- * merge and its whole-tree verification, so the settlement failed on bytes it
- * never wrote and exhausted its five-attempt budget. This fixture's project
- * has no geometry pipeline to race, so the honest gate for that race is the
- * unit test in `chat-workspace-authority-provider.test.ts`; this is the cheap
- * net that catches any settlement failure the verticals do provoke.
- */
-const expectNoSettlementFailures = async (): Promise<void> => {
-  const { consoleMessages } = await target.events();
-  expect(consoleMessages.filter(({ text }) => text.includes('exact run settlement failed'))).toEqual([]);
-};
-
-/**
  * The turn was recorded authoritatively — S7's layout, not the retired one.
  *
  * The old assertion read `.tau/workspaces/publications/<id>.json` and checked
@@ -563,7 +547,6 @@ describe.each([
       events.find((event) => event.type === 'run.lifecycle' && event.state === 'admitted')?.storageDurability,
     ).toBe(durability);
     assertPublication(tree);
-    await expectNoSettlementFailures();
 
     await target.reload();
     await ensureChatOpen();
@@ -571,62 +554,29 @@ describe.each([
     await target.expectVisible(selectors.getByText(finalText, { exact: true }), 60_000);
   });
 
-  /*
-   * Ruling E3: a run that completed while its document died is finalised on
-   * return, not written off.
-   *
-   * The reload has to land *inside* the settlement window, and polling the log
-   * for `completed` cannot promise that — the settlement is the next thing that
-   * happens. The page's own debug hold parks it (`chat-host-binding.ts`
-   * `chatTurnSettlement` awaits the hold before `settle`), so the reload
-   * reliably discards a completed, unsettled run. On return the settlement
-   * re-leases that turn and finalises it (`project-chat-run-settlement.tsx`:
-   * `adopted && outcome === 'completed'` → `prepare` then `finalize`), which is
-   * what attributes the agent's writes to its own turn rather than sweeping
-   * them into the next person's save.
-   */
-  runs('finalises a run whose document died inside the settlement window', async ({ skip }) => {
+  /* The host has already written the terminal row before the page reloads. Reattaching
+   * reads that same durable answer; it does not create a second page-owned settlement. */
+  runs('keeps one host settlement and no new provider ask after reloading a completed run', async ({ skip }) => {
     await prepareBrowserHost(backend);
     await requireOpfsSession(skip, backend);
-    await target.holdChatTurn('settlement');
     await submitAndWaitForPartial();
     await target.releaseAgentHostGatewayFixture();
+    await target.expectVisible(selectors.getByText(finalText, { exact: true }), 120_000);
 
-    await expect
-      .poll(
-        async () =>
-          eventLog(await readActiveProjectTree(backend)).some(
-            (event) => event.type === 'run.lifecycle' && event.state === 'completed',
-          ),
-        { timeout: 120_000 },
-      )
-      .toBe(true);
-    /* The settlement is parked, so nothing has been written yet. */
-    expect(settledTurns(await readActiveProjectTree(backend))).toEqual([]);
+    const before = await waitForLocalPublishedTree(backend);
+    const settlement = settledTurns(before);
+    expect(settlement).toHaveLength(1);
+    assertPublication(before);
+    const requests = await readGatewayRequestCount();
+
     await target.reload();
     await ensureChatOpen();
+    await target.expectVisible(selectors.getByText(finalText, { exact: true }), 60_000);
 
-    await target.expectVisible(selectors.getByText(finalText, { exact: true }), 120_000);
-    const tree = await waitForLocalPublishedTree(backend);
-    /* One settlement for the turn, not one per document that saw it. */
-    expect(settlementTypesOf(tree)).toEqual(['turn.finalized']);
-    /* Not `assertPublication`, and the difference is the ruling's own mechanism
-     * rather than a weaker assertion. E3 finalises through a *re-lease*, so the
-     * minting happens at `prepare`: the root refuses to lease a dirty tree and
-     * pre-mints it as a `turn` revision carrying this turn's id
-     * (`packages/revisions/src/turn.machine.ts` `basing`), after which the cut
-     * finds nothing left and finalizes `nothingToSave`. The settlement this
-     * row's own run produced reads
-     * `{type:'turn.finalized', trigger:'turn', checkoutId:'live', changedPaths:[]}`
-     * with **no** `revisionId` — measured, not assumed (D2 `d2-e3-diag2.log`).
-     * What E3 guarantees is therefore: the agent's writes are on disk and the
-     * turn is settled exactly once, both asserted above and in
-     * `waitForLocalPublishedTree`. That the record does not *name* the revision
-     * its own re-lease minted is the revision root's gap, not this page's — R1
-     * traced it ("Plausible A") and ruled `packages/revisions` unchanged, so it
-     * is recorded here for the operator rather than asserted away. */
-    const settled = settledTurns(tree).at(-1);
-    expect(settled).toMatchObject({ trigger: 'turn', turnId: expect.any(String) as unknown });
+    const after = await readActiveProjectTree(backend);
+    expect(settlementTypesOf(after)).toEqual(['turn.finalized']);
+    expect(settledTurns(after)).toEqual(settlement);
+    expect(await readGatewayRequestCount()).toBe(requests);
   });
 
   /*
@@ -719,12 +669,13 @@ describe('storage ladder', () => {
  * admitted, so its presence is the admission.
  */
 type SeededLease = Readonly<{
-  runId?: string;
-  turnId?: string;
-  chatId?: string;
-  checkoutId?: string;
-  authorityEpoch?: string;
-  startedAt?: number;
+  runId: string;
+  turnId: string;
+  chatId: string;
+  checkoutId: string;
+  attempt: number;
+  startedAt: number;
+  holder?: string;
 }>;
 
 const seededLease = async (): Promise<SeededLease | undefined> => {
@@ -734,19 +685,10 @@ const seededLease = async (): Promise<SeededLease | undefined> => {
 };
 
 describe('seeded first turn', () => {
-  test('admits the claim of a first turn that was seeded with the project', async () => {
-    // "New project → first prompt" is the operator's primary flow and the only
-    // dispatch that never runs `withWorkspace`: hydration replays the chat's
-    // one-shot `startupRequest` through the chat-session store's
-    // latest-agent-body fallback, so nothing marks the turn placed except its
-    // lease. Every other vertical here submits explicitly, and a turn whose
-    // lease is never written never settles — the agent's work never reaches the
-    // live tree and the next submit is blocked behind the admission wait. The
-    // seed route creates the project exactly the way the home composer does
-    // (pending first message + `startupRequest`). The turn dispatches before the
-    // capability probe answers, so it must WAIT for it: `pending` is not
-    // `unsupported`, and with the API placement gone there is nothing to
-    // downgrade to.
+  test('should admit one host attempt for the project’s seeded first turn', async () => {
+    // "New project → first prompt" seeds one durable startup intent. The host
+    // accepts it once and the revisions root writes its attempt lease before
+    // execution, even if this page reloads before the first reply.
     await target.installAgentHostGatewayFixture();
     await target.setViewport({ width: 1440, height: 900 });
     await target.navigate(`${seedRoute}?prompt=${encodeURIComponent(seedPrompt)}`);
@@ -754,26 +696,19 @@ describe('seeded first turn', () => {
     await ensureChatOpen();
 
     // No submit: the seeded turn dispatches itself.
-    // The lease is the contract under test: a seeded turn used to sit in the
-    // admission window forever, so settlement never published and the next
-    // submit hit the admission wait. `writeLease` runs after `prepare` placed
-    // the turn, so the record existing *is* the admission.
+    // The lease is the host-placed attempt's evidence, not a page claim.
     await expect.poll(seededLease, { timeout: 60_000, interval: 250 }).toMatchObject({
       chatId: expect.any(String) as unknown,
       checkoutId: expect.any(String) as unknown,
       turnId: expect.any(String) as unknown,
+      attempt: 1,
+      holder: expect.any(String) as unknown,
     });
-    // The full chain, not just the lease: the seeded turn used to admit as a
-    // `regenerate` against an empty durable log, which `packages/agent-host`
-    // refuses with HISTORY_PREFIX_INVALID — so it never reached the gateway,
-    // never bound a run, and "New project → first prompt" produced nothing.
-    // A lease alone proves nothing: any placed turn writes one.
+    // A lease alone proves no provider call; the seeded intent must reach the gateway.
     await expect.poll(readGatewayRequestCount, { timeout: 60_000 }).toBe(1);
-    // Run ids are `run_`-prefixed (`generatePrefixedId(idPrefix.run)`,
-    // `libs/types/src/constants/id.constants.ts:52`); `req_` was the retired
-    // claim's request id.
+    // The sender's command id is the durable run id for this attempt.
     await expect.poll(seededLease, { timeout: 60_000, interval: 250 }).toMatchObject({
-      runId: expect.stringMatching(/^run_/u) as unknown,
+      runId: expect.stringMatching(/^req_/u) as unknown,
     });
     await target.expectVisible(selectors.getByText(partialText, { exact: true }), 120_000);
     await target.releaseAgentHostGatewayFixture();
@@ -787,13 +722,9 @@ describe('seeded first turn', () => {
         .filter(({ type }) => type === 'run.lifecycle')
         .map(({ state }) => state),
     ).toEqual(['admitted', 'running', 'completed']);
-    // Settlement retires the lease it took; a retained one blocks the next turn.
+    // The host's settlement retires the lease it took.
     await expect.poll(seededLease, { timeout: 60_000, interval: 250 }).toBeUndefined();
-    // A released lease proves the settlement happened; whether it *failed* on
-    // the way is only visible in the console. The turn's owner attempts one
-    // settlement per turn (C3) — the five-attempt retry timer this row used to
-    // wait out is gone with the effect that owned it.
-    await expectNoSettlementFailures();
+    // The durable log and released lease jointly prove the host's completed cut.
   });
 });
 
@@ -811,8 +742,8 @@ describe('seeded first turn', () => {
  * page refresh must never spend the credit the person has just topped up
  * without being asked — so the takeover writes one
  * `run.lifecycle: failed { code: 'RUN_ABANDONED' }`
- * (`packages/agent-host/src/host/tau-agent-host.ts` `markAbandoned`), the page
- * settles it once, and the continuation is the person's own gesture.
+ * (`packages/agent-host/src/host/tau-agent-host.ts` `markAbandoned`) and the
+ * host records its settlement. Continuation is the person's own gesture.
  */
 describe('durable log reattach after a reload', () => {
   const assertNoApiRunCalls = async (): Promise<void> => {
@@ -823,7 +754,7 @@ describe('durable log reattach after a reload', () => {
     expect(apiRequests.filter((path) => /^\/v1\/chat\/(?!projects\/)[^/]+\/runs\//u.test(path))).toEqual([]);
   };
 
-  test('records a reloaded run as abandoned and finalises it when the person continues', async () => {
+  test('should keep one host-written abandoned settlement across reloads before the person continues', async () => {
     await prepareBrowserHost('home');
     // The run is durably admitted and parked at the gateway gate; reloading here
     // kills its worker mid-run, leaving a non-terminal log behind.
@@ -831,17 +762,31 @@ describe('durable log reattach after a reload', () => {
     await target.reload();
     await ensureChatOpen();
 
-    // The takeover records the orphan — one settlement, and no second provider
-    // call for a turn nobody asked to continue.
+    // The host records the orphan's failed lifecycle and one settlement, and
+    // does not ask the provider again without the person's continuation.
     await expect
-      .poll(async () => settlementTypesOf(await readActiveProjectTree('home')), { timeout: 120_000 })
-      .toEqual(['turn.failed']);
+      .poll(durableFailureReason, { timeout: 120_000 })
+      .toBe('The host executing this run is gone. Resume the turn to continue it.');
+    await expect
+      .poll(async () => settlementTypesOf(await readActiveProjectTree('home')).length, { timeout: 120_000 })
+      .toBe(1);
     expect(await readGatewayRequestCount()).toBe(1);
     await assertNoApiRunCalls();
+    const abandoned = eventLog(await readActiveProjectTree('home')).filter((event) => settlementTypes.has(event.type));
+    expect(abandoned).toHaveLength(1);
 
-    /* The person's gesture is what spends. It continues the same run: no rewind
-     * and no new run id (`chat-turn-host.tsx`). `RUN_ABANDONED` is a paused-turn
-     * code, so the card is the saved-turn one and its action reads *Resume*. */
+    // Reopening a terminal log may refresh the view, but may not settle the
+    // dead document's turn a second time or re-ask the provider.
+    await target.reload();
+    await ensureChatOpen();
+    await target.expectVisible(continueAction, 60_000);
+    expect(eventLog(await readActiveProjectTree('home')).filter((event) => settlementTypes.has(event.type))).toEqual(
+      abandoned,
+    );
+    expect(await readGatewayRequestCount()).toBe(1);
+
+    /* The person's gesture is what spends. `RUN_ABANDONED` presents a resumable
+     * card, and its next command has its own sender-minted run id. */
     await target.expectVisible(continueAction, 60_000);
     await target.click(continueAction);
     /* The document that died left *its* request parked at the stream gate, and
@@ -857,8 +802,7 @@ describe('durable log reattach after a reload', () => {
 
     const tree = await waitForLocalPublishedTree('home');
     assertPublication(tree);
-    expect(settlementTypesOf(tree)).toEqual(['turn.failed', 'turn.finalized']);
-    expect(new Set(eventLog(tree).map((event) => event.runId)).size).toBe(1);
+    expect(settlementTypesOf(tree)).toEqual([abandoned[0]?.type, 'turn.finalized']);
     await expect.poll(seededLease, { timeout: 60_000, interval: 250 }).toBeUndefined();
     await assertNoApiRunCalls();
   });
@@ -885,10 +829,9 @@ describe('durable log reattach after a reload', () => {
     await target.type(composer, `${seedPrompt} Again.`);
     await target.click(selectors.getByCss('button:has(svg.lucide-arrow-up)').last());
     await expect.poll(readGatewayRequestCount, { timeout: 120_000 }).toBeGreaterThan(priorRequests);
-    // The lease the new turn holds is a `TurnLease` keyed by a `run_` id; the
-    // retired claim's `{ mode, admitted }` is written by nothing.
+    // The new sender's command id is the run id of its host attempt.
     await expect.poll(seededLease, { timeout: 60_000, interval: 250 }).toMatchObject({
-      runId: expect.stringMatching(/^run_/u) as unknown,
+      runId: expect.stringMatching(/^req_/u) as unknown,
       chatId: expect.any(String) as unknown,
       checkoutId: expect.any(String) as unknown,
     });

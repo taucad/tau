@@ -15,13 +15,7 @@
 import { createLogic } from 'xstate';
 import { readUIMessageStream } from 'ai';
 import type { UIMessageChunk } from 'ai';
-import {
-  agentLogEventSchema,
-  emptyChatLedger,
-  foldReadAnswer,
-  mergeLogSegments,
-  parseEventLog,
-} from '@taucad/agent-host';
+import { agentLogEventSchema, emptyChatLedger, foldReadAnswer, mergeLogSegments } from '@taucad/agent-host';
 import type { AgentLogEvent, ChatLedger, ChatLogSegment, RowKey, TurnPlacement } from '@taucad/agent-host';
 import type { MyUIMessage } from '@taucad/chat';
 import {
@@ -190,14 +184,22 @@ const fromCursor = (answer: ChatProjectionReadAnswer, cursor: number): ChatProje
   return { ...answer, cursor, events: answer.events.slice(cursor - answer.cursor) };
 };
 
-/** One cheap digest of the segment facts that can change the merged transcript. @public */
+/** FNV-1a over every byte; equal sizes and tail keys can still hide a corrected earlier row. */
+const hashSegment = (bytes: Uint8Array<ArrayBuffer>): number => {
+  let hash = 2_166_136_261;
+  for (const byte of bytes) {
+    // oxlint-disable-next-line eslint/no-bitwise -- FNV-1a requires XORing each byte into the hash.
+    hash = Math.imul(hash ^ byte, 16_777_619);
+  }
+  // oxlint-disable-next-line eslint/no-bitwise -- Keep the bounded unsigned 32-bit digest.
+  return hash >>> 0;
+};
+
+/** One bounded digest of the segment bytes that can change the merged transcript. @public */
 export const digestLogSegments = (segments: readonly ChatLogSegment[]): string =>
   JSON.stringify(
     segments
-      .map(({ deviceId, bytes }) => {
-        const last = parseEventLog(new TextDecoder().decode(bytes)).at(-1);
-        return { deviceId, byteLength: bytes.byteLength, last: [last?.leaderEpoch, last?.sequence] };
-      })
+      .map(({ deviceId, bytes }) => ({ deviceId, byteLength: bytes.byteLength, hash: hashSegment(bytes) }))
       .toSorted((left, right) => (left.deviceId < right.deviceId ? -1 : left.deviceId > right.deviceId ? 1 : 0)),
   );
 

@@ -7,6 +7,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { RevisionDiffEntry } from '@taucad/revisions';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
@@ -142,6 +143,51 @@ describe('RevisionRow', () => {
     await user.click(screen.getByRole('button', { name: 'Compare bracket.scad' }));
     expect(await screen.findByTestId('diff')).toHaveAttribute('data-language', 'openscad');
     expect(screen.getByTestId('diff')).toHaveTextContent('cube(1);|cube(2);');
+  });
+
+  it('should show three files first and toggle the complete file list', async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.diff = Array.from(
+      { length: 5 },
+      (_, index): RevisionDiffEntry => ({
+        path: `part-${String(index + 1)}.ts`,
+        kind: 'added',
+      }),
+    );
+    renderRow();
+    await openRow(user);
+
+    const files = screen.getByRole('list', { name: 'Changed files' });
+    expect(within(files).getAllByRole('button', { name: /^Compare /u })).toHaveLength(3);
+    expect(within(files).queryByText('part-4.ts')).not.toBeInTheDocument();
+
+    await user.click(within(files).getByRole('button', { name: 'Show all 5 files' }));
+    expect(within(files).getAllByRole('button', { name: /^Compare /u })).toHaveLength(5);
+    expect(within(files).getByRole('button', { name: 'Collapse files' })).toBeInTheDocument();
+
+    await user.click(within(files).getByRole('button', { name: 'Collapse files' }));
+    expect(within(files).getAllByRole('button', { name: /^Compare /u })).toHaveLength(3);
+    expect(within(files).getByRole('button', { name: 'Show all 5 files' })).toBeInTheDocument();
+  });
+
+  it('should use the same three-file preview when comparing with current', async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-5' };
+    revisionStatusHarness.diff = Array.from(
+      { length: 4 },
+      (_, index): RevisionDiffEntry => ({
+        path: `part-${String(index + 1)}.ts`,
+        kind: 'modified',
+      }),
+    );
+    renderRow();
+    await openRow(user);
+    await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Compare with current' }));
+
+    const files = await screen.findByRole('list', { name: 'Changed since Rev 2' });
+    expect(within(files).getAllByRole('button', { name: /^Compare /u })).toHaveLength(3);
+    expect(within(files).getByRole('button', { name: 'Show all 4 files' })).toBeInTheDocument();
   });
 
   it('tells a failed comparison from an empty file, and retries it', async () => {

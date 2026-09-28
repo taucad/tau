@@ -40,10 +40,8 @@ vi.mock('#hooks/use-revision-status.js', async () => {
   return harness.revisionStatusMock();
 });
 
-const settlements: readonly never[] = [];
-vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', () => ({
-  getHostFinalizedTurns: () => settlements,
-  subscribeHostFinalizedTurns: () => () => undefined,
+vi.mock('#hooks/chat-session-store-provider.js', () => ({
+  useChatSessionStore: () => ({ observedChatIdsOf: () => [], subscribeMembership: () => () => undefined }),
 }));
 let chats = [{ id: 'chat-1', name: 'Initial design', checkoutId: 'live' }];
 vi.mock('#hooks/use-chats.js', () => ({ useChats: () => ({ chats }) }));

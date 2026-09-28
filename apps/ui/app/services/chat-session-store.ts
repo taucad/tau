@@ -602,6 +602,14 @@ export class ChatSessionStore {
     return chat?.activeExecution;
   }
 
+  /** Read a listed chat's host bootstrap choices without acquiring an SDK session. @public */
+  public async getChatHostSettings(
+    chatId: string,
+  ): Promise<Pick<ChatEntity, 'activeExecution' | 'activeKernel'> | undefined> {
+    const chat = await this.#deps.getChat(chatId);
+    return chat === undefined ? undefined : { activeExecution: chat.activeExecution, activeKernel: chat.activeKernel };
+  }
+
   /** Replace an idle live transcript with the chat log just projected from Git. */
   public async refreshFromStorage(chatId: string): Promise<void> {
     const session = this.#sessions.get(chatId);
@@ -1260,30 +1268,32 @@ export class ChatSessionStore {
           }
           if (event.type === 'attachment.attached') {
             observed.attempts = 0;
-          } else if (event.type === 'attachment.refused') {
+            return;
+          }
+          if (event.type === 'attachment.refused') {
             queueMicrotask(() => {
               if (observed.attachment === attachment) {
                 attachment.stop();
                 observed.attachment = undefined;
               }
             });
-          } else if (event.type === 'attachment.lost') {
-            const retryDelayMilliseconds = Math.min(250 * 2 ** observed.attempts, 30_000);
-            observed.attempts += 1;
-            queueMicrotask(() => {
-              if (observed.attachment !== attachment) {
-                return;
-              }
-              attachment.stop();
-              observed.attachment = undefined;
-              observed.retry = setTimeout(() => {
-                observed.retry = undefined;
-                if (this.#observed.get(chatId) === observed) {
-                  this.#startObservedAttachment(chatId, observed);
-                }
-              }, retryDelayMilliseconds);
-            });
+            return;
           }
+          const retryDelayMilliseconds = Math.min(250 * 2 ** observed.attempts, 30_000);
+          observed.attempts += 1;
+          queueMicrotask(() => {
+            if (observed.attachment !== attachment) {
+              return;
+            }
+            attachment.stop();
+            observed.attachment = undefined;
+            observed.retry = setTimeout(() => {
+              observed.retry = undefined;
+              if (this.#observed.get(chatId) === observed) {
+                this.#startObservedAttachment(chatId, observed);
+              }
+            }, retryDelayMilliseconds);
+          });
         },
       },
       ...this.#rootOptions,

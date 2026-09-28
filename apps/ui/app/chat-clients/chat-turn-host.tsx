@@ -88,7 +88,7 @@ export function ChatTurnHost(): ReactNode {
    * reader are served only behind it (RV9-F1). */
   const revisionsReady = useRevisionClient() !== undefined;
   const computeMode = useComputeReuseMode();
-  const { defaultExecution, resolveModel } = useModels();
+  const { resolveModel } = useModels();
   const { admitExecution, surfaceDispatchFailure } = useTurnAdmission(agent.execution);
   const resolveModelRef = useRef(resolveModel);
   useEffect(() => {
@@ -299,22 +299,6 @@ export function ChatTurnHost(): ReactNode {
       }),
     [activeChatId, composable, placement],
   );
-  useEffect(() => {
-    if (!composable) {
-      return;
-    }
-    return store.publishProjectHostConnector(projectId, async (chatId) => {
-      const execution =
-        chatId === activeChatId
-          ? boundExecutionRef.current
-          : ((await store.getChatExecution(chatId)) ?? defaultExecution);
-      const registration = composeRef.current(execution, chatId, false);
-      if (registration === undefined) {
-        throw new Error(`The host for chat ${chatId} is unavailable.`);
-      }
-      return registration.createClient();
-    });
-  }, [activeChatId, composable, defaultExecution, placement, projectId, store]);
   /* The chat session actor holds the binding; it re-invokes it when — and only
    * when — the placement it was given moves. */
   useEffect(() => {

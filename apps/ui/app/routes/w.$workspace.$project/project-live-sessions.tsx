@@ -6,7 +6,7 @@
  * the chunk a page that only lists projects evaluates. `project-route.tsx` loads it lazily the moment
  * a project is live, and the project route imports its own entry point from here directly.
  */
-import { useCallback, useEffect, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
 import { useSelector } from '@xstate/react';
 import { waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
@@ -16,12 +16,29 @@ import { ProjectWorkspaceProvider } from '#routes/w.$workspace.$project/project-
 import { ProjectShareRouteIntent } from '#routes/w.$workspace.$project/project-share-action.js';
 import { ViewSettingsSyncHost } from '#routes/w.$workspace.$project/view-settings-sync-host.js';
 import { HomeFileManagerProvider, useFileManager } from '#hooks/use-file-manager.js';
+import { useModels } from '#hooks/use-models.js';
+import { useKernel } from '#hooks/use-kernel.js';
+import { useCookie } from '#hooks/use-cookie.js';
+import { cookieName } from '#constants/cookie.constants.js';
+import { isKernelAvailable } from '#constants/available-kernel-configurations.js';
+import { isKernelId } from '@taucad/types/constants';
 import { MonacoModelServiceProvider } from '#hooks/use-monaco-model-service.js';
 import { RevisionConflictChat } from '#routes/w.$workspace.$project/revision-conflict-chat.js';
 import { RevisionRestore } from '#routes/w.$workspace.$project/revision-restore.js';
 import { WorkbenchCheckoutRoot } from '#routes/w.$workspace.$project/workbench-checkout-root.js';
 import { RevisionOutcomes } from '#routes/w.$workspace.$project/revision-outcomes.js';
-import { ChatWorkspaceAuthorityProvider } from '#providers/chat-workspace-authority-provider.js';
+import {
+  ChatWorkspaceAuthorityProvider,
+  readRootedBridgeCapabilities,
+} from '#providers/chat-workspace-authority-provider.js';
+import { createBrowserAgentHostClient, createAgentHostClient } from '#services/agent-host-client.js';
+import { createDaemonAgentHostTransport } from '#services/daemon-agent-host-client.js';
+import { daemonPlacementOf } from '#lib/agent-host-placement.js';
+import { dialAgentHost, agentHostClientConfig } from '#chat-clients/_internal/turn-body.js';
+import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
+import { useComputeReuseMode } from '#lib/compute-reuse-preference.js';
+import { ENV } from '#environment.config.js';
+import { createUiRuntimeConfig } from '#runtime/ui-runtime.config.js';
 import { useFlushOnClose } from '#hooks/use-flush-on-close.js';
 import { RevisionSaveShortcut } from '#routes/w.$workspace.$project/revision-save-shortcut.js';
 // Chat persistence + draft flush is handled centrally by `<GlobalChatFlushGuard>`
@@ -134,7 +151,15 @@ function ProjectSessionBinding({
   readonly isFocused: boolean;
   readonly shouldOpenFromTauCloud?: boolean;
 }): React.JSX.Element {
-  const { fileManagerRef } = useFileManager();
+  const { fileManagerRef, workspace } = useFileManager();
+  const { defaultExecution, resolveModel } = useModels();
+  const { kernel: defaultKernel } = useKernel();
+  const [testingEnabled] = useCookie(cookieName.chatTestingEnabled, true);
+  const computeMode = useComputeReuseMode();
+  const choices = useRef({ defaultExecution, defaultKernel, testingEnabled, computeMode, resolveModel });
+  useEffect(() => {
+    choices.current = { defaultExecution, defaultKernel, testingEnabled, computeMode, resolveModel };
+  }, [defaultExecution, defaultKernel, testingEnabled, computeMode, resolveModel]);
   const { parameterService, projectRef, editorRef } = useProject();
   const client = useRevisionClientLifecycle();
   const revisionCommands = useRevisionCommands();
@@ -147,6 +172,95 @@ function ProjectSessionBinding({
   /* R4: why this project has no kernel, from the machine that owns its units. */
   const kernelRefusal = useSelector(projectRef, selectProjectKernelRefusal);
   const status = useRevisionClientStatus(client);
+  /* Every live project publishes one read connector, even without a focused chat. Each chat's persisted placement
+   * decides which owner log to read; opening an observer never issues Start or acquires an SDK session. */
+  useEffect(() => {
+    if (client === undefined || !viewsReady) {
+      return;
+    }
+    return chatSessions.publishProjectHostConnector(projectId, async (chatId) => {
+      const stored = await chatSessions.getChatHostSettings(chatId);
+      const {
+        defaultExecution: fallback,
+        defaultKernel: kernelFallback,
+        testingEnabled: tests,
+        computeMode: reuse,
+        resolveModel: resolve,
+      } = choices.current;
+      const execution = stored?.activeExecution ?? fallback;
+      const daemonHostId = daemonPlacementOf(execution);
+      if (daemonHostId !== undefined) {
+        return createAgentHostClient(
+          createDaemonAgentHostTransport(async () => dialAgentHost(daemonHostId, projectId)),
+        );
+      }
+      if (execution.kind !== 'tau') {
+        throw new Error(`Chat ${chatId} has no readable host placement.`);
+      }
+      const kernel =
+        stored?.activeKernel !== undefined && isKernelId(stored.activeKernel) && isKernelAvailable(stored.activeKernel)
+          ? stored.activeKernel
+          : kernelFallback;
+      const config = await getProjectFileSystemConfig(projectId);
+      if (config === undefined) {
+        throw new Error(`Project ${projectId} has no filesystem configuration.`);
+      }
+      const projectStorage =
+        config.backend === 'memory'
+          ? {
+              projectId: config.projectId,
+              backend: config.backend,
+              storageRootKey: config.storageRootKey,
+              providerBasePath: config.providerBasePath,
+            }
+          : config.backend === 'webaccess'
+            ? {
+                projectId: config.projectId,
+                backend: config.backend,
+                workspaceId: config.workspaceId,
+                providerBasePath: config.providerBasePath,
+              }
+            : { projectId: config.projectId, backend: config.backend, providerBasePath: config.providerBasePath };
+      await workspace.syncProjectRoots();
+      const openProjectRootBridge = () => {
+        const { openFileSystemBridge, rootDirectory } = fileManagerRef.getSnapshot().context;
+        if (openFileSystemBridge === undefined) {
+          throw new Error('The project filesystem bridge is unavailable.');
+        }
+        return openFileSystemBridge(rootDirectory, 'working-copy');
+      };
+      const capabilities = await readRootedBridgeCapabilities(openProjectRootBridge);
+      if (!capabilities.writable || !capabilities.durability) {
+        throw new Error('The project filesystem cannot hold a readable host log.');
+      }
+      const openRevisionSession = (kind: 'placement' | 'reader') => () =>
+        fileManagerRef.getSnapshot().context.openRevisionSessionPort?.(kind, projectId);
+      return createBrowserAgentHostClient({
+        openFileSystemBridge: openProjectRootBridge,
+        openProjectRootBridge,
+        openRevisionsPort: openRevisionSession('reader'),
+        openPlacementPort: openRevisionSession('placement'),
+        computeMode: reuse,
+        openComputeStorePort: () => {
+          const opener = fileManagerRef.getSnapshot().context.openComputeStorePort;
+          if (opener === undefined) {
+            throw new Error('The project compute authority is unavailable.');
+          }
+          return opener(projectId);
+        },
+        projectStorage,
+        durability: capabilities.durability,
+        authority: { projectId, workspaceId: 'live' },
+        gatewayBaseUrl: ENV.TAU_API_URL,
+        ...agentHostClientConfig({
+          agent: { profile: 'cad', execution, kernel, mode: 'agent', toolChoice: 'auto', testingEnabled: tests },
+          chatId,
+          resolvedModel: resolve(execution.model),
+        }),
+        runtimeConfig: createUiRuntimeConfig(ENV),
+      });
+    });
+  }, [chatSessions, client, fileManagerRef, projectId, viewsReady, workspace]);
   /* RV-W5b2 R2-1: an editor's conflict still being recorded keeps the project open, like a dirty tree. */
   const recording = useSyncExternalStore(
     subscribeEditorConflictRecords,

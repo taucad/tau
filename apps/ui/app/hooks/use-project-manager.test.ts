@@ -2031,6 +2031,9 @@ describe('useProjectManager.createProject', () => {
       );
 
       const startup = mockPrepareProjectCreation.mock.calls.at(-1)?.[0].chat.messages[0];
+      const startupRequest = mockPrepareProjectCreation.mock.calls.at(-1)?.[0].chat.startupRequest;
+      expect(startupRequest?.message).toEqual(startup);
+      expect(startupRequest?.messageId).toBe(startup?.id);
       expect(startup?.parts).toEqual([
         { type: 'file', url: `attachments/${image.hash}.png`, mediaType: 'image/png' },
         { type: 'file', url: `attachments/${pdf.hash}.pdf`, mediaType: 'application/pdf', filename: 'spec.pdf' },

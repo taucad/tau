@@ -662,11 +662,10 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
   const invalidateProjectedChats = useCallback(
     (resourceId: string, chatIds: readonly string[]) => {
       for (const chatId of chatIds) {
-        chatStore.invalidateLog(chatId);
         invalidateChatQueries(resourceId, chatId);
       }
     },
-    [chatStore, invalidateChatQueries],
+    [invalidateChatQueries],
   );
 
   const invalidationTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -722,7 +721,6 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
           return;
         }
         const [resourceId, chatId] = projected;
-        chatStore.invalidateLog(chatId);
         invalidateChatQueries(resourceId, chatId);
       },
     };
@@ -1090,6 +1088,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
             id: generatePrefixedId(idPrefix.request),
             kind: 'regenerate-tail',
             messageId: initialUserMessage.id,
+            message: initialUserMessage,
             source: 'homepage-initial-message',
             createdAt: Date.now(),
           }

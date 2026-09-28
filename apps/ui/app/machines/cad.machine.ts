@@ -372,6 +372,7 @@ const renderModelActor = fromSafeAsync<void, RenderModelInput>(async ({ input })
   /* Stored values are never a second copy in this machine: a committed edit carries the sidecar
    * bytes the authority just wrote (D1) and the runtime resolves the values from them, and a drag
    * sample carries values that are on no disk at all and are never persisted (D2). */
+  // The runtime projects its topology default only onto render routes that support it.
   const entry = { source: { path: input.entryPath }, content: { includeEdges: true } } as const;
   const request = {
     ...entry,

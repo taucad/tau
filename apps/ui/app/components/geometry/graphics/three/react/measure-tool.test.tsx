@@ -6,12 +6,19 @@ import * as THREE from 'three';
 import { createActor } from 'xstate';
 import type { Actor } from 'xstate';
 import type { Mechanism } from '@taucad/kinematics';
-import { MeasureTool } from '#components/geometry/graphics/three/react/measure-tool.js';
-import { detectSnapPoints } from '#components/geometry/graphics/three/utils/snap-detection.utils.js';
+import { MeasureTool, describeMeasurementTarget } from '#components/geometry/graphics/three/react/measure-tool.js';
+import { getMeshMeasurementFeatures } from '#components/geometry/graphics/three/utils/measurement-features.js';
+import type { EdgeFeature, MeasurementTarget } from '#components/geometry/graphics/three/utils/measurement-features.js';
 import { kinematicsMachine } from '#machines/kinematics.machine.js';
 
 const mocks = vi.hoisted(() => ({
+  send: vi.fn(),
   kinematics: undefined as Actor<typeof kinematicsMachine> | undefined,
+  renderFrame: {
+    anchorFrameId: 'tau:root',
+    originMeters: [0, 0, 0] as [number, number, number],
+    metersPerRenderUnit: 1,
+  },
   graphicsSnapshot: {
     context: {
       gltfPresentation: { presentedKey: 'geometry' },
@@ -20,6 +27,18 @@ const mocks = vi.hoisted(() => ({
       measurements: [],
       currentMeasurementStart: undefined,
       measureSnapDistance: 12,
+      measureMode: 'auto',
+      measureFilter: 'auto',
+      measureOperation: 'point-distance',
+      measureFrame: 'tau:root',
+      measureSnapEnabled: true,
+      measureCandidates: [],
+      measureActiveCandidateId: undefined,
+      measureChosenCandidateId: undefined,
+      measureLockedTargetId: undefined,
+      measureCommitRequest: 0,
+      measureCatalogRequest: 0,
+      committedSectionCuts: [],
       displayUnits: { length: { metersPerUnit: 1, symbol: 'm' } },
       hoveredMeasurementId: undefined,
       isMeasureActive: true,
@@ -28,27 +47,24 @@ const mocks = vi.hoisted(() => ({
   },
 }));
 
+const graphicsActorMock = {
+  send: mocks.send,
+  getSnapshot: () => mocks.graphicsSnapshot,
+  subscribe: () => ({ unsubscribe: vi.fn() }),
+};
+
 vi.mock('#hooks/use-graphics.js', () => ({
-  useGraphics: () => ({
-    send: vi.fn(),
-    getSnapshot: () => mocks.graphicsSnapshot,
-    subscribe: () => ({ unsubscribe: vi.fn() }),
-  }),
+  useGraphics: () => graphicsActorMock,
   useGraphicsSelector: <T,>(selector: (snapshot: typeof mocks.graphicsSnapshot) => T): T =>
     selector(mocks.graphicsSnapshot),
   useModelInteractionSelector: <T,>(selector: (snapshot: { context: { displayRevision: number } }) => T): T =>
     selector({ context: { displayRevision: 0 } }),
-  useRenderFrame: () => ({ anchorFrameId: 'tau:root', originMeters: [0, 0, 0], metersPerRenderUnit: 1 }),
+  useRenderFrame: () => mocks.renderFrame,
   useKinematicsRef: () => mocks.kinematics,
 }));
 
 vi.mock('#components/geometry/graphics/three/use-section-view.js', () => ({
   resolveSectionViewRaycastClip: () => undefined,
-}));
-
-vi.mock('#components/geometry/graphics/three/utils/snap-detection.utils.js', () => ({
-  detectSnapPoints: vi.fn(() => []),
-  findClosestSnapPoint: vi.fn(() => undefined),
 }));
 
 const mechanism: Mechanism = {
@@ -86,12 +102,12 @@ describe('MeasureTool', () => {
   };
 
   beforeAll(() => {
-    extend({ Group: THREE.Group });
+    extend(THREE as unknown as Parameters<typeof extend>[0]);
   });
 
   beforeEach(async () => {
     mocks.kinematics = createActor(kinematicsMachine, { input: {} }).start();
-    vi.mocked(detectSnapPoints).mockClear();
+    mocks.send.mockClear();
     canvas = document.createElement('canvas');
     canvas.getBoundingClientRect = () => DOMRect.fromRect({ x: 0, y: 0, width: 800, height: 600 });
     document.body.append(canvas);
@@ -125,17 +141,42 @@ describe('MeasureTool', () => {
     canvas.remove();
   });
 
-  it('should reuse snap points for the same face until a kinematic pose moves the model', () => {
+  it('cancels a pending selection when the model pose changes', () => {
     pressCentre();
-    pressCentre();
-    expect(detectSnapPoints).toHaveBeenCalledTimes(1);
-
-    // A pose moves meshes without a new geometry key; snap points cached in world space are stale.
     act(() => {
       mocks.kinematics!.send({ type: 'loadMechanism', unitId: 'file:main.ts', mechanism });
     });
-    pressCentre();
+    expect(mocks.send).toHaveBeenCalledWith(expect.objectContaining({ type: 'measurementPoseChanged' }));
+    expect(mocks.send).toHaveBeenCalledWith({ type: 'cancelCurrentMeasurement' });
+  });
 
-    expect(detectSnapPoints).toHaveBeenCalledTimes(2);
+  it('names same-edge endpoints and distinct edges without exposing feature IDs', () => {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2));
+    mesh.name = 'Frame';
+    const graph = getMeshMeasurementFeatures(mesh);
+    const edges = graph.features.filter(
+      (feature): feature is EdgeFeature => feature.kind === 'edge' && !feature.closed,
+    );
+    expect(edges.length).toBeGreaterThan(1);
+    const target = (feature: (typeof edges)[number], suffix: 'start' | 'end'): MeasurementTarget => ({
+      id: `${mesh.uuid}:${graph.revision}:${feature.id}:endpoint:${suffix}`,
+      featureId: feature.id,
+      kind: 'endpoint',
+      position: feature.points[0]!.clone(),
+      localPosition: feature.points[0]!.clone(),
+      evidence: feature.evidence,
+      distancePx: 0,
+      label: 'Edge endpoint',
+      feature,
+      sourceMesh: mesh,
+      revision: graph.revision,
+    });
+    const start = describeMeasurementTarget(target(edges[0]!, 'start'), mesh);
+    const end = describeMeasurementTarget(target(edges[0]!, 'end'), mesh);
+    const nextEdge = describeMeasurementTarget(target(edges[1]!, 'start'), mesh);
+    expect(start).toMatch(/^Frame: Edge endpoint \d+ · start$/);
+    expect(end).toMatch(/^Frame: Edge endpoint \d+ · end$/);
+    expect(new Set([start, end, nextEdge]).size).toBe(3);
+    expect(start).not.toContain('edge:');
   });
 });

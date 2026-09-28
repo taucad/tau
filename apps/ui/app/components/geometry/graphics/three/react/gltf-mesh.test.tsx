@@ -50,6 +50,7 @@ import {
 } from '#components/geometry/graphics/three/overlay-colors.constants.js';
 import type { GeometryComponentManifest } from '@taucad/types';
 import * as componentVisibility from '#components/geometry/graphics/metadata/gltf-component-visibility.js';
+import type { GltfMeasurementFeatures } from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
 
 const firstComponentId = 'component:first';
 const secondComponentId = 'component:second';
@@ -327,6 +328,10 @@ describe('annotateSceneComponents', () => {
     const parentSurface = buildMeshWithPositions([0, 0, 0, 1, 0, 0, 0, 1, 0]);
     const parentEdges = buildLineSegmentsWithPositions([0, 0, 0, 1, 0, 0]);
     const childSurface = buildMeshWithPositions([2, 0, 0, 3, 0, 0, 2, 1, 0]);
+    // GLTFLoader copies authored node extras onto renderables before annotation.
+    parentNode.userData['tauComponentId'] = parentId;
+    parentSurface.userData['tauComponentId'] = parentId;
+    parentEdges.userData['tauComponentId'] = parentId;
     parentNode.add(parentSurface, parentEdges, childSurface);
     scene.add(parentNode);
     const associations = new Map<Object3D, { meshes?: number; nodes?: number; primitives?: number }>([
@@ -336,11 +341,47 @@ describe('annotateSceneComponents', () => {
       [childSurface, { nodes: 1, meshes: 1, primitives: 0 }],
     ]);
 
-    annotateSceneComponents(scene, manifest, { unitId, associations });
+    const measurementFeatures = new Map<string, GltfMeasurementFeatures>([
+      [
+        '0/0/0',
+        {
+          occurrenceId: parentId,
+          componentId: parentId,
+          kind: 'surface',
+          primitive: { nodeIndex: 0, meshIndex: 0, primitiveIndex: 0 },
+          faces: [{ id: 'face:7', start: 0, count: 3 }],
+        },
+      ],
+      [
+        '0/0/1',
+        {
+          occurrenceId: parentId,
+          componentId: parentId,
+          kind: 'line',
+          primitive: { nodeIndex: 0, meshIndex: 0, primitiveIndex: 1 },
+          edges: [{ id: 'edge:9', start: 0, count: 2 }],
+        },
+      ],
+    ]);
+    annotateSceneComponents(scene, manifest, { unitId, associations, measurementFeatures });
 
     expect(getModelComponentOwner(parentSurface)).toEqual({ unitId, componentId: parentId });
     expect(getModelComponentOwner(parentEdges)).toEqual({ unitId, componentId: parentId });
     expect(getModelComponentOwner(childSurface)).toEqual({ unitId, componentId: childId });
+    expect(parentSurface.userData['measurementFeatures']).toMatchObject({
+      occurrenceId: parentId,
+      faces: [{ id: 'face:7' }],
+    });
+    expect(parentEdges.userData['measurementFeatures']).toMatchObject({
+      occurrenceId: parentId,
+      edges: [{ id: 'edge:9' }],
+    });
+
+    annotateSceneComponents(scene, manifest, { unitId: 'next-unit', measurementFeatures });
+    expect(parentSurface.userData['measurementFeatures']).toMatchObject({
+      occurrenceId: parentId,
+      faces: [{ id: 'face:7' }],
+    });
   });
 
   it('should assign sibling edge lines to the owning surface fallback component', () => {

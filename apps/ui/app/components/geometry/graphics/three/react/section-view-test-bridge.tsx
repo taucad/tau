@@ -171,6 +171,12 @@ export type SectionViewTestMeasureState = Readonly<{
   cameraInteracting: boolean;
   /** Meshes the measure tool has drawn into the scene: snap indicators, lines and labels. */
   measurementUiMeshCount: number;
+  rendererGeometryCount: number;
+  snapDistancePx: number;
+  candidates: GraphicsContext['measureCandidates'];
+  activeCandidateId: string | undefined;
+  lockedTargetId: string | undefined;
+  mode: GraphicsContext['measureMode'];
   currentStart: readonly [number, number, number] | undefined;
   measurements: ReadonlyArray<
     Readonly<{
@@ -178,6 +184,10 @@ export type SectionViewTestMeasureState = Readonly<{
       distance: number;
       startPoint: readonly [number, number, number];
       endPoint: readonly [number, number, number];
+      operation?: string;
+      quality?: string;
+      status?: string;
+      unavailableReason?: string;
     }>
   >;
 }>;
@@ -814,13 +824,25 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
           isMeasureActive: context.isMeasureActive,
           cameraInteracting: context.cameraInteracting,
           measurementUiMeshCount: getSectionViewTestMeasurementUiMeshCount(scene),
+          rendererGeometryCount: get().gl.info.memory.geometries,
+          snapDistancePx: context.measureSnapDistance,
+          candidates: context.measureCandidates,
+          activeCandidateId: context.measureActiveCandidateId,
+          lockedTargetId: context.measureLockedTargetId,
+          mode: context.measureMode,
           currentStart: context.currentMeasurementStart,
-          measurements: context.measurements.map(({ id, distance, startPoint, endPoint }) => ({
-            id,
-            distance,
-            startPoint,
-            endPoint,
-          })),
+          measurements: context.measurements.map(
+            ({ id, distance, startPoint, endPoint, operation, quality, status, unavailableReason }) => ({
+              id,
+              distance,
+              startPoint,
+              endPoint,
+              operation,
+              quality,
+              status,
+              unavailableReason,
+            }),
+          ),
         };
       },
       getSectionHelperSummary() {

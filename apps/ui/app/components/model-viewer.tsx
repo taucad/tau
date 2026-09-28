@@ -178,7 +178,6 @@ const ModelViewerWithOwnGraphics = memo(function ModelViewerWithOwnGraphics(
 ): React.JSX.Element {
   const graphicsRef = useActorRef(graphicsMachine, {
     input: {
-      measureSnapDistance: 40,
       enableSurfaces: defaultGraphicsSettings.enableSurfaces,
       enableLines: defaultGraphicsSettings.enableLines,
       enableGizmo: defaultGraphicsSettings.enableGizmo,

@@ -592,7 +592,6 @@ export function RenderingProfile(): React.JSX.Element {
   const graphicsRef = useActorRef(graphicsMachine, {
     input: {
       ...defaultGraphicsSettings,
-      measureSnapDistance: 40,
       enablePostProcessing: true,
       enableMatcap: false,
       upDirection: 'z',

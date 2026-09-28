@@ -18,7 +18,7 @@
  */
 
 import path from 'node:path';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
 
 import { describe, expect, it } from 'vitest';
@@ -184,7 +184,7 @@ describe('chatRun conforms to ChatRunSlot.tla', () => {
     expect(await replay({ inspect: guard.inspect })).toEqual([]);
   });
 
-  it.runIf(simulated !== undefined)(
+  it.runIf(simulated !== undefined && existsSync(path.join(simulated, 'ChatRunSlotGraph.ndjson')))(
     'should replay the simulated behaviours without divergence',
     async () => {
       const traces = readFileSync(path.join(simulated ?? '', 'ChatRunSlotGraph.ndjson'), 'utf8')

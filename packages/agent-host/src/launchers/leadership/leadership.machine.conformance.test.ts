@@ -6,7 +6,7 @@
  */
 
 import path from 'node:path';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 
@@ -100,7 +100,7 @@ describe('leadershipMachine conforms to LogLeadership.tla', () => {
     expect(await replaySuite(behaviours, logLeadershipAdapter, (state) => [state['act'], state])).toEqual([]);
   });
 
-  it.runIf(simulated !== undefined)(
+  it.runIf(simulated !== undefined && existsSync(path.join(simulated, 'LogLeadershipGraph.ndjson')))(
     'should replay the simulated behaviours without divergence',
     async () => {
       const traces = readFileSync(path.join(simulated ?? '', 'LogLeadershipGraph.ndjson'), 'utf8')

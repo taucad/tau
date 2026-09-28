@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import type { Expectation, ExpectedLocation, Outcome, Tier } from '#expected.js';
 import { compareOutcome, describeOutcome, findExpectedFiles, lintExpectedFile } from '#expected.js';
@@ -415,6 +415,15 @@ const simulateProject = async (
   if (graphs.length === 0) {
     return { status: 0 };
   }
+  const output = path.join(
+    context.root,
+    'out/test-results/formal',
+    path.relative(context.root, projectRoot),
+    'simulated',
+  );
+  for (const { module } of graphs) {
+    rmSync(path.join(output, `${module}.ndjson`), { force: true });
+  }
   const tools = locateTools(context);
   if (!tools.java || !tools.tlc) {
     return {
@@ -427,12 +436,6 @@ const simulateProject = async (
     };
   }
   const seed = Number(context.env['FORMAL_SEED'] ?? Math.floor(Math.random() * 2_147_483_647));
-  const output = path.join(
-    context.root,
-    'out/test-results/formal',
-    path.relative(context.root, projectRoot),
-    'simulated',
-  );
   mkdirSync(output, { recursive: true });
   let status = 0;
   for (const { directory, module, graph } of graphs) {

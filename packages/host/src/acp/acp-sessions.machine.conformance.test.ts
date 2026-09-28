@@ -5,7 +5,7 @@
  */
 
 import path from 'node:path';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 import {
@@ -102,7 +102,7 @@ describe('acpSessionsMachine conforms to AcpSessions.tla', () => {
     replayTimeout,
   );
 
-  it.runIf(simulated !== undefined)(
+  it.runIf(simulated !== undefined && existsSync(path.join(simulated, 'AcpSessions.ndjson')))(
     'replays the simulated behaviours through the adapter',
     async () => {
       const replayed = readFileSync(path.join(simulated ?? '', 'AcpSessions.ndjson'), 'utf8')

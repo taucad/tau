@@ -1,6 +1,7 @@
 import type { MockInstance } from 'vitest';
 import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { act, render, screen, fireEvent } from '@testing-library/react';
+import { useSyncExternalStore } from 'react';
 import type { RefObject } from 'react';
 import { createActor, createAsyncLogic } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
@@ -42,6 +43,11 @@ let mockGraphicsProviderMounts = 0;
 let mockUnitSettings: Record<string, { renderTimeout: number }> = {};
 let mockFileTree: Map<string, { type: 'file' | 'dir'; name: string }>;
 let mockFileContent: { kind: string; text?: string };
+let mockMainEntryPath = 'main.scad';
+let mockSyncStatus: { readonly sync: { readonly state: 'checking' | 'backedUp' } } = {
+  sync: { state: 'backedUp' },
+};
+const mockSyncListeners = new Set<() => void>();
 let mockHoveredComponentId: string | undefined;
 let mockAreToolsRunning = false;
 let mockCadViewerSecondaryPointerMode: 'component-hit' | 'suppressed';
@@ -251,8 +257,19 @@ vi.mock('#hooks/use-project.js', () => ({
     },
     viewGraphics: mockViewGraphics,
     geometryUnits: mockGeometryUnits,
-    mainEntryPath: 'main.scad',
+    mainEntryPath: mockMainEntryPath,
   }),
+}));
+
+vi.mock('#hooks/use-revision-status.js', () => ({
+  useRevisionStatus: () =>
+    useSyncExternalStore(
+      (listener) => {
+        mockSyncListeners.add(listener);
+        return () => mockSyncListeners.delete(listener);
+      },
+      () => mockSyncStatus,
+    ),
 }));
 
 // =============================================================================
@@ -390,12 +407,17 @@ describe('ChatViewer reopen-renderer overlay', () => {
     mockGraphicsProviderMounts = 0;
     mockFileTree = new Map([[helperEntryPath, { type: 'file', name: helperEntryPath }]]);
     mockFileContent = { kind: 'text', text: 'cube();' };
+    mockMainEntryPath = 'main.scad';
+    mockSyncStatus = { sync: { state: 'backedUp' } };
+    mockSyncListeners.clear();
     mockUnitSettings = {};
     mockHoveredComponentId = undefined;
     mockAreToolsRunning = false;
     mockCadViewerSecondaryPointerMode = 'component-hit';
     mockCadViewerProps = undefined;
     mockViewGraphics.set('view-1', mockGraphicsActor);
+    vi.mocked(mockPanelApi.updateParameters).mockClear();
+    vi.mocked(mockPanelApi.setTitle).mockClear();
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
       callback(0);
       return 0;
@@ -590,6 +612,69 @@ describe('ChatViewer reopen-renderer overlay', () => {
     render(<ChatViewer viewId='view-1' entryPath='gone.scad' panelApi={mockPanelApi} />);
     expect(mockGraphicsProviderMounts).toBe(0);
     expect(mockCameraSeed).toBeUndefined();
+  });
+
+  it('shows the initial remote check, then follows the main file named by the synced manifest', () => {
+    mockFileTree = new Map();
+    mockFileContent = { kind: 'orphaned' };
+    mockSyncStatus = { sync: { state: 'checking' } };
+    const viewer = render(<ChatViewer viewId='view-1' entryPath='main.scad' panelApi={mockPanelApi} />);
+
+    expect(screen.getByRole('status')).toHaveTextContent('Checking synced files…');
+    expect(screen.queryByText('File not found')).not.toBeInTheDocument();
+
+    act(() => {
+      mockSyncStatus = { sync: { state: 'backedUp' } };
+      for (const listener of mockSyncListeners) {
+        listener();
+      }
+    });
+    expect(screen.getByText('File not found')).toBeInTheDocument();
+
+    mockMainEntryPath = 'bracket.scad';
+    viewer.rerender(<ChatViewer viewId='view-1' entryPath='main.scad' panelApi={mockPanelApi} profile='shared' />);
+
+    expect(mockProjectSend).toHaveBeenCalledWith({ type: 'createGeometryUnit', entryPath: 'bracket.scad' });
+    expect(mockEditorSend).toHaveBeenCalledWith({
+      type: 'setViewSettings',
+      viewId: 'view-1',
+      viewState: {
+        entryPath: 'bracket.scad',
+        graphicsSettings: {
+          ...defaultGraphicsSettings,
+          cameraView: undefined,
+          sectionView: undefined,
+          pinnedMeasurements: undefined,
+        },
+      },
+    });
+    expect(mockPanelApi.updateParameters).toHaveBeenCalledWith({ entryPath: 'bracket.scad' });
+    expect(mockPanelApi.setTitle).toHaveBeenCalledWith('bracket.scad');
+  });
+
+  it('keeps a viewer on a user-selected file when the synced main file changes', () => {
+    const viewer = render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+
+    mockMainEntryPath = 'bracket.scad';
+    viewer.rerender(
+      <ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} profile='shared' />,
+    );
+
+    expect(mockPanelApi.updateParameters).not.toHaveBeenCalled();
+  });
+
+  it('recovers a missing file when its content arrives at the same path', () => {
+    mockFileTree = new Map();
+    mockFileContent = { kind: 'orphaned' };
+    const viewer = render(<ChatViewer viewId='view-1' entryPath='main.scad' panelApi={mockPanelApi} />);
+    expect(screen.getByText('File not found')).toBeInTheDocument();
+
+    mockFileTree = new Map([['main.scad', { type: 'file', name: 'main.scad' }]]);
+    mockFileContent = { kind: 'text', text: 'cube();' };
+    viewer.rerender(<ChatViewer viewId='view-1' entryPath='main.scad' panelApi={mockPanelApi} profile='shared' />);
+
+    expect(screen.queryByText('File not found')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /reopen renderer/i })).toBeInTheDocument();
   });
 
   /* Finding 4 / E1: the render timeout is owned per file by the entry's CAD actor and seeded at

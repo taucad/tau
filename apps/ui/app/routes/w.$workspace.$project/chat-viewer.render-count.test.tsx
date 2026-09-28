@@ -122,8 +122,10 @@ vi.mock('#hooks/use-project.js', () => ({
     editorRef: editorStub,
     viewGraphics: new Map([['view-1', actors.graphics]]),
     geometryUnits: new Map([[entryPath, actors.cad]]),
+    mainEntryPath: entryPath,
   }),
 }));
+vi.mock('#hooks/use-revision-status.js', () => ({ useRevisionStatus: () => undefined }));
 vi.mock('#hooks/use-file-tree.js', () => ({
   useFileTreeSelector: <T,>(select: (tree: Map<string, unknown>) => T): T =>
     select(new Map([[entryPath, { type: 'file', name: entryPath }]])),

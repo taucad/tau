@@ -15,6 +15,8 @@ import { popoverSurfaceVariants } from '@taucad/ui/components/popover.variants';
 import { useProject } from '#hooks/use-project.js';
 import { useFileTreeSelector } from '#hooks/use-file-tree.js';
 import { useFileContent } from '#hooks/use-file-content.js';
+import { useRevisionStatus } from '#hooks/use-revision-status.js';
+import { Loader } from '#components/ui/loader.js';
 import { defaultGraphicsSettings } from '#constants/editor.constants.js';
 import { CadProvider, useCad, useCadSelector } from '#hooks/use-cad.js';
 import {
@@ -102,13 +104,46 @@ type ChatViewerProps = {
   readonly profile?: 'editor' | 'shared';
 };
 
+function MissingViewerFile({
+  entryPath,
+  onSelect,
+}: {
+  readonly entryPath: string;
+  readonly onSelect: (path: string) => void;
+}): React.JSX.Element {
+  const checkingRemote = useRevisionStatus()?.sync.state === 'checking';
+  return (
+    <div className='flex h-full flex-col items-center justify-center gap-4 text-muted-foreground'>
+      {checkingRemote ? (
+        <Loader className='size-12 motion-reduce:animate-none' />
+      ) : (
+        <FileX className='size-12 stroke-1' />
+      )}
+      <div className='flex flex-col items-center gap-1' role={checkingRemote ? 'status' : undefined}>
+        <p className='text-sm font-medium'>{checkingRemote ? 'Checking synced files…' : 'File not found'}</p>
+        <p className='max-w-60 truncate text-xs'>{entryPath}</p>
+      </div>
+      <FileSelector
+        selectedFile={undefined}
+        placeholder='Select a file to render…'
+        className='h-8 w-50'
+        title='Viewport File'
+        description='Choose a file to render in the viewport'
+        searchPlaceholder='Search files…'
+        emptyMessage='No files found.'
+        onSelect={onSelect}
+      />
+    </div>
+  );
+}
+
 export const ChatViewer = memo(function ({
   viewId,
   entryPath,
   panelApi,
   profile = 'editor',
 }: ChatViewerProps): React.JSX.Element {
-  const { projectRef, editorRef, viewGraphics, geometryUnits } = useProject();
+  const { projectRef, editorRef, viewGraphics, geometryUnits, mainEntryPath } = useProject();
   // Get the per-view graphics machine
   const graphicsActor = viewGraphics.get(viewId);
 
@@ -216,6 +251,17 @@ export const ChatViewer = memo(function ({
     [projectRef, editorRef, geometryUnits, graphicsActor, viewId, panelApi, viewSettings, unitSettings],
   );
 
+  // A cloud project opens with a placeholder main file. Follow the real main
+  // when its synced manifest arrives, but keep viewers on other chosen files.
+  const previousMainEntryPath = useRef(mainEntryPath);
+  useEffect(() => {
+    const previous = previousMainEntryPath.current;
+    previousMainEntryPath.current = mainEntryPath;
+    if (entryPath === previous && mainEntryPath && mainEntryPath !== previous) {
+      handleFileSelect(mainEntryPath);
+    }
+  }, [entryPath, handleFileSelect, mainEntryPath]);
+
   // If no graphics actor yet, render a placeholder
   if (!graphicsActor) {
     return (
@@ -267,25 +313,7 @@ export const ChatViewer = memo(function ({
 
   // If the entry path doesn't exist in the file tree, show a friendly "not found" screen
   if (isMissing) {
-    return (
-      <div className='flex h-full flex-col items-center justify-center gap-4 text-muted-foreground'>
-        <FileX className='size-12 stroke-1' />
-        <div className='flex flex-col items-center gap-1'>
-          <p className='text-sm font-medium'>File not found</p>
-          <p className='max-w-60 truncate text-xs'>{entryPath}</p>
-        </div>
-        <FileSelector
-          selectedFile={undefined}
-          placeholder='Select a file to render…'
-          className='h-8 w-50'
-          title='Viewport File'
-          description='Choose a file to render in the viewport'
-          searchPlaceholder='Search files…'
-          emptyMessage='No files found.'
-          onSelect={handleFileSelect}
-        />
-      </div>
-    );
+    return <MissingViewerFile entryPath={entryPath} onSelect={handleFileSelect} />;
   }
 
   return (

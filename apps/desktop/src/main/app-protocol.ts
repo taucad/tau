@@ -54,14 +54,18 @@ const pinnedContentTypes: Readonly<Record<string, string>> = {
   '.wasm': 'application/wasm',
 };
 
+/** Vite's `build.assetsDir` inside the client root: every emitted chunk, worker and `.wasm`. */
+const bundlerAssetDirectory = 'assets';
+
 /**
  * Resolve one `app://` request to a file inside the client root.
  *
  * Every path that does not name an existing file falls back to `index.html`:
  * the manifest has 19 client routes plus a `*` catch-all, and the SPA owns
- * routing once it boots. A missing *asset* (a path carrying an extension) is a
- * genuine 404 instead — answering a missing `.js` with HTML produces a strict
- * MIME failure that reads like a bundler bug.
+ * routing once it boots. A route may carry a dot (`/s/builtin~replicad.birdhouse`),
+ * so an extension says nothing. A missing file under the bundler's `assets/`
+ * directory is a genuine 404 instead — answering a missing `.js` with HTML
+ * produces a strict MIME failure that reads like a bundler bug.
  *
  * @param requestUrl - The full `app://…` request URL.
  * @param clientRoot - Absolute path of `apps/ui/desktop/build/client`.
@@ -96,7 +100,7 @@ export const resolveAppRequest = (requestUrl: string, clientRoot: string): strin
   if (existsSync(candidate) && statSync(candidate).isFile()) {
     return candidate;
   }
-  return extname(candidate) === '' ? indexPath : undefined;
+  return candidate.startsWith(join(root, bundlerAssetDirectory) + sep) ? undefined : indexPath;
 };
 
 /** The `protocol` surface this module uses, narrowed for tests. */

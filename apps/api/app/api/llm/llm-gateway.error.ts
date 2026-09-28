@@ -1,5 +1,4 @@
-import { HttpException } from '@nestjs/common';
-import type { HttpStatus } from '@nestjs/common';
+import { ForbiddenException, HttpException, HttpStatus } from '@nestjs/common';
 import type { GatewayErrorCode } from '@taucad/agent-host/wire';
 
 /**
@@ -7,6 +6,22 @@ import type { GatewayErrorCode } from '@taucad/agent-host/wire';
  * at build, so the existing devDependency on `@taucad/agent-host` is enough.
  */
 export type LlmGatewayErrorType = GatewayErrorCode;
+
+/** Turns the billing owner's closed-account refusal into the gateway's stable wire code. */
+export const isBillingAccountClosed = (error: unknown): boolean => {
+  if (!(error instanceof ForbiddenException)) {
+    return false;
+  }
+  const body = error.getResponse();
+  return typeof body === 'object' && 'code' in body && body.code === 'billing_account_closed';
+};
+
+export const billingAccountClosedError = (): LlmGatewayError =>
+  new LlmGatewayError(
+    HttpStatus.FORBIDDEN,
+    'BILLING_ACCOUNT_CLOSED',
+    'This Tau billing account is closed or restricted, so its model requests cannot be checked or charged.',
+  );
 
 export class LlmGatewayError extends HttpException {
   /**

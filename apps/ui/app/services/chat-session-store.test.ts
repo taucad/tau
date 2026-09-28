@@ -2,6 +2,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- mock for AI SDK's Chat / DefaultChatTransport classes uses the SDK's own PascalCase names and `~`-prefixed subscriber method names verbatim so the mock surface matches the real one. */
 /* eslint-disable @typescript-eslint/explicit-member-accessibility -- mock class constructors omit the `public` keyword to mirror the AI SDK's published shape. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { createActor } from 'xstate';
@@ -613,6 +614,66 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     expect(close).toHaveBeenCalledTimes(1);
     unpublish();
   });
+
+  for (const runningBeforeAck of [false, true]) {
+    it(`should watch a resumed attempt only after its running row ${runningBeforeAck ? 'already folded' : 'arrives later'}`, async () => {
+      const store = createStore();
+      const chatId = `chat_retry_watch_${runningBeforeAck}`;
+      const projectId = `project_retry_watch_${runningBeforeAck}`;
+      const runId = `req_retry_watch_${runningBeforeAck}`;
+      const command: HostCommand = {
+        type: 'resume',
+        commandId: `req_resume_watch_${runningBeforeAck}`,
+        payload: { chatId, runId },
+      };
+      const reply = Promise.withResolvers<CommandAnswer>();
+      const hostCommand = vi.fn(async () => reply.promise);
+      const close = vi.fn(async () => undefined);
+      const unpublish = store.publishProjectHostConnector(projectId, async () =>
+        mock<AgentHostClient>({ hostCommand, close }),
+      );
+      startTurnOwner(store, projectId);
+      const session = store.acquire(chatId, projectId);
+      await vi.waitFor(() => {
+        expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+      });
+      publishLogRows(store, chatId, [...runningRows(runId), lifecycleRow(2, 'failed', runId)]);
+      expect(store.getProjection(chatId)?.ledger.runs[runId]?.lifecycle).toBe('failed');
+      const chat = harness.created.find((entry) => entry.id === chatId)!;
+      const unpublishAdmission = publishChatTurnAdmission(chatId, async () => ({
+        runId,
+        leaseTurnId: undefined,
+        request: { kind: 'continue', command },
+      }));
+      const requested = store.requestTurn(chatId, { kind: 'continue' });
+      await vi.waitFor(() => {
+        expect(hostCommand).toHaveBeenCalledExactlyOnceWith(command);
+      });
+      const reopened = logRow(3, { runId, type: 'run.lifecycle', state: 'running', attempt: 2 });
+      if (runningBeforeAck) {
+        publishLogRows(store, chatId, [reopened], 3);
+      }
+      reply.resolve({ commandId: command.commandId, generation: 1, status: 'applied', effect: 'durable', cursor: 4 });
+      await requested;
+      await vi.waitFor(() => {
+        expect(close).toHaveBeenCalledOnce();
+      });
+      if (!runningBeforeAck) {
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, 0);
+        });
+        expect(chat.resumeStream).not.toHaveBeenCalled();
+        publishLogRows(store, chatId, [reopened], 3);
+      }
+      await vi.waitFor(() => {
+        expect(chat.resumeStream).toHaveBeenCalledOnce();
+      });
+      expect(hostCommand).toHaveBeenCalledOnce();
+      unpublishAdmission();
+      unpublish();
+      store.release(chatId);
+    });
+  }
 
   it('retires a hydrated legacy connection card after read-only catch-up, fresh output, and reload', async () => {
     const chatId = 'chat_recovered_connection';

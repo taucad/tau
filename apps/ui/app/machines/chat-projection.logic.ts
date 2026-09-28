@@ -227,13 +227,22 @@ const foldRunViews = (
     Object.entries(previousBlocks).map(([key, block]) => [key, { ...block }]),
   );
   for (const row of rows) {
+    const previous = views[row.runId];
+    const reopened = row.type === 'run.lifecycle' && row.state === 'running' && previous?.terminal !== undefined;
+    if (reopened) {
+      const prefix = `[${JSON.stringify(row.runId)},`;
+      for (const key of blocks.keys()) {
+        if (key.startsWith(prefix)) {
+          blocks.delete(key);
+        }
+      }
+    }
     const chunks = projectAgentHostEvent(row, blocks);
     const user = projectAgentHostUserTurn(row);
     const terminal =
       row.type === 'run.lifecycle' && (row.state === 'completed' || row.state === 'failed' || row.state === 'cancelled')
         ? row.state
         : undefined;
-    const previous = views[row.runId];
     if (
       chunks.length === 0 &&
       user === undefined &&
@@ -256,7 +265,10 @@ const foldRunViews = (
       ...views,
       [row.runId]: {
         admittedAt,
-        chunks: chunks.length === 0 ? (previous?.chunks ?? []) : [...(previous?.chunks ?? []), ...chunks],
+        chunks: [
+          ...(reopened ? previous.chunks.filter((chunk) => chunk.type === 'start') : (previous?.chunks ?? [])),
+          ...chunks,
+        ],
         ...(previous?.user === undefined && user === undefined ? {} : { user: user ?? previous?.user }),
         ...(row.type === 'run.lifecycle'
           ? terminal === undefined

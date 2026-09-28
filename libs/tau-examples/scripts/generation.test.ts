@@ -93,7 +93,7 @@ describe('generated example artifacts', () => {
     }
   });
 
-  it('has a valid 768×576 WebP for every entry supported by the generator runtime', async () => {
+  it('has a valid 1536×1152 WebP for every entry supported by the generator runtime', async () => {
     const supportedKernels: ReadonlySet<string> = exampleKernelIds;
     const renderable = manifest.filter(
       (entry) => entry.mainFile && supportedKernels.has(entry.kernel === 'openscad' ? 'openrscad' : entry.kernel),
@@ -111,8 +111,8 @@ describe('generated example artifacts', () => {
         expect(bytes.subarray(0, 4).toString('ascii')).toBe('RIFF');
         expect(bytes.subarray(8, 12).toString('ascii')).toBe('WEBP');
         const metadata = await sharp(bytes).metadata();
-        expect(metadata.width, `${entry.kernel}/${entry.name}`).toBe(768);
-        expect(metadata.height, `${entry.kernel}/${entry.name}`).toBe(576);
+        expect(metadata.width, `${entry.kernel}/${entry.name}`).toBe(1536);
+        expect(metadata.height, `${entry.kernel}/${entry.name}`).toBe(1152);
       }),
     );
   });

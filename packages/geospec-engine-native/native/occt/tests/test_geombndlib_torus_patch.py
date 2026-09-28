@@ -1,6 +1,7 @@
 """Check the pinned closed-form GeomBndLib_Torus patch box against the actual source and prior patches."""
 
 import hashlib
+import math
 from pathlib import Path
 import subprocess
 import tempfile
@@ -28,6 +29,90 @@ def patched_files(patch):
 def between(text, start, end):
     first = text.index(start)
     return text[first:text.index(end, first + len(start))]
+
+
+def closed_form_box(major, minor, u_bounds, v_bounds, origin=(0., 0., 0.),
+                    axes=((1., 0., 0.), (0., 1., 0.), (0., 0., 1.)), tolerance=0.):
+    """Numerical counterpart of the pinned C++ candidate formula; inputs are valid gp_Torus radii."""
+    x_axis, y_axis, z_axis = axes
+    u_min, u_max = u_bounds
+    v_min, v_max = v_bounds
+    u_candidates = [u_min, u_max]
+    for k in range(3):
+        alpha = math.atan2(y_axis[k], x_axis[k])
+        u_candidates.extend((alpha, alpha + math.pi))
+    v_candidates = [v_min, v_max, math.pi / 2., -math.pi / 2.]
+    for k in range(3):
+        for u in u_candidates:
+            beta = math.atan2(z_axis[k], x_axis[k] * math.cos(u) + y_axis[k] * math.sin(u))
+            v_candidates.extend((beta, beta + math.pi))
+    if minor >= major and minor > 0.:
+        phi = math.acos(-major / minor)
+        v_candidates.extend((phi, -phi))
+
+    def in_period(value, lower):
+        return max(lower, value + 2. * math.pi * math.ceil((lower - value) / (2. * math.pi)))
+
+    points = []
+    for u in u_candidates:
+        wrapped_u = in_period(u, u_min)
+        if wrapped_u > u_max:
+            continue
+        actual_u = u if u in u_bounds else wrapped_u
+        for v in v_candidates:
+            wrapped_v = in_period(v, v_min)
+            if wrapped_v > v_max:
+                continue
+            actual_v = v if v in v_bounds else wrapped_v
+            points.append(torus_point(major, minor, actual_u, actual_v, origin, axes))
+    assert points, 'patch box must contain a parameter-domain corner'
+    enlargement = max(tolerance, 1.e-7)  # Precision::Confusion() in pinned OCCT
+    return tuple(min(point[k] for point in points) - enlargement for k in range(3)), tuple(
+        max(point[k] for point in points) + enlargement for k in range(3))
+
+
+def torus_point(major, minor, u, v, origin, axes):
+    x_axis, y_axis, z_axis = axes
+    radial = major + minor * math.cos(v)
+    return tuple(origin[k] + radial * (math.cos(u) * x_axis[k] + math.sin(u) * y_axis[k])
+                 + minor * math.sin(v) * z_axis[k] for k in range(3))
+
+
+def check_numeric_boxes():
+    full = (0., 2. * math.pi)
+    for major, minor, radial, height in ((3., 1., 4., 1.), (1., 1., 2., 1.),
+                                         (1., 2., 3., 2.), (0., 2., 2., 2.),
+                                         (3., 0., 3., 0.)):
+        low, high = closed_form_box(major, minor, full, full)
+        for actual, expected in zip(low, (-radial, -radial, -height)):
+            assert math.isclose(actual, expected - 1.e-7, abs_tol=1.e-12), (major, minor, low)
+        for actual, expected in zip(high, (radial, radial, height)):
+            assert math.isclose(actual, expected + 1.e-7, abs_tol=1.e-12), (major, minor, high)
+
+    rotated_axes = ((1 / math.sqrt(2), 1 / math.sqrt(2), 0.),
+                    (-1 / math.sqrt(6), 1 / math.sqrt(6), 2 / math.sqrt(6)),
+                    (1 / math.sqrt(3), -1 / math.sqrt(3), 1 / math.sqrt(3)))
+    for major, minor, u_bounds, v_bounds, origin, axes in (
+        (3., 1., (5.6, 7.3), (5.7, 7.1), (0., 0., 0.), ((1., 0., 0.), (0., 1., 0.), (0., 0., 1.))),
+        (1., 2., (0.4, 4.8), (1.1, 5.6), (3., -5., 7.), rotated_axes),
+    ):
+        low, high = closed_form_box(major, minor, u_bounds, v_bounds, origin, axes)
+        sampled = [torus_point(major, minor,
+                               u_bounds[0] + (u_bounds[1] - u_bounds[0]) * i / 400,
+                               v_bounds[0] + (v_bounds[1] - v_bounds[0]) * j / 400, origin, axes)
+                   for i in range(401) for j in range(401)]
+        for k in range(3):
+            sample_min = min(point[k] for point in sampled)
+            sample_max = max(point[k] for point in sampled)
+            assert low[k] <= sample_min and high[k] >= sample_max, (k, low, high)
+            assert sample_min - low[k] < 0.001 and high[k] - sample_max < 0.001, (k, low, high)
+
+    base_low, base_high = closed_form_box(3., 1., full, full)
+    wide_low, wide_high = closed_form_box(3., 1., full, full, tolerance=0.25)
+    for base, wide in zip(base_low, wide_low):
+        assert math.isclose(base - wide, 0.25 - 1.e-7, abs_tol=1.e-12)
+    for base, wide in zip(base_high, wide_high):
+        assert math.isclose(wide - base, 0.25 - 1.e-7, abs_tol=1.e-12)
 
 
 def main():
@@ -76,7 +161,8 @@ def main():
                       'Bnd_Box GeomBndLib_Torus::Box(double theUMin,'):
             assert between(text, start, '\n}\n') == between(pristine, start, '\n}\n'), start
 
-    print('GeomBndLib_Torus: pinned patch after Resource_Unicode; applied hash, closed-form and kept-box guards pass')
+    check_numeric_boxes()
+    print('GeomBndLib_Torus: pinned patch, numerical boxes and kept-box guards pass')
 
 
 if __name__ == '__main__':

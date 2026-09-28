@@ -196,33 +196,38 @@ describe('ChatSessionStore.observe', () => {
 
   it('counts a projected run in an unopened chat before project Close', async () => {
     const store = new ChatSessionStore();
+    const classification = Promise.withResolvers<'stoppable'>();
     const release = store.observe('chat_unopened', 'project_2');
-    const unpublish = store.publishProjectHostConnector('project_2', async () => ({
-      read: async (): Promise<ReadAnswer> => ({
-        status: 'batch',
-        chatId: 'chat_unopened',
-        cursor: 0,
-        nextCursor: 2,
-        endCursor: 2,
-        events: [lifecycleRow(0, 'admitted'), lifecycleRow(1, 'running')],
-      }),
-      subscribe: (...parameters: Parameters<AgentHostClient['subscribe']>) => {
-        const onAnswer = parameters[3];
-        queueMicrotask(() => {
-          onAnswer?.({
-            status: 'batch',
-            chatId: 'chat_unopened',
-            cursor: 0,
-            nextCursor: 2,
-            endCursor: 2,
-            events: [lifecycleRow(0, 'admitted'), lifecycleRow(1, 'running')],
+    const unpublish = store.publishProjectHostConnector(
+      'project_2',
+      async () => ({
+        read: async (): Promise<ReadAnswer> => ({
+          status: 'batch',
+          chatId: 'chat_unopened',
+          cursor: 0,
+          nextCursor: 2,
+          endCursor: 2,
+          events: [lifecycleRow(0, 'admitted'), lifecycleRow(1, 'running')],
+        }),
+        subscribe: (...parameters: Parameters<AgentHostClient['subscribe']>) => {
+          const onAnswer = parameters[3];
+          queueMicrotask(() => {
+            onAnswer?.({
+              status: 'batch',
+              chatId: 'chat_unopened',
+              cursor: 0,
+              nextCursor: 2,
+              endCursor: 2,
+              events: [lifecycleRow(0, 'admitted'), lifecycleRow(1, 'running')],
+            });
           });
-        });
-        return () => undefined;
-      },
-      hostCommand: unusedHostCommand,
-      close: async () => undefined,
-    }));
+          return () => undefined;
+        },
+        hostCommand: unusedHostCommand,
+        close: async () => undefined,
+      }),
+      async () => classification.promise,
+    );
     await vi.waitFor(() => {
       expect(store.getProjection('chat_unopened')?.ledger.position.cursor).toBe(2);
     });
@@ -239,14 +244,16 @@ describe('ChatSessionStore.observe', () => {
       getSnapshot: () => ({ context: { runs, stoppableRuns } }),
       send,
     } as unknown as ProjectSessionActorRef);
-    await vi.waitFor(() =>
-      expect(send).toHaveBeenCalledWith({
-        type: 'projectedRunsChanged',
-        runs: ['chat_unopened'],
-        stoppableRuns: [],
-      }),
-    );
+    expect(send).toHaveBeenCalledWith({
+      type: 'projectedRunsChanged',
+      runs: ['chat_unopened'],
+      stoppableRuns: [],
+    });
     expect(runs).toEqual(['chat_unopened']);
+    classification.resolve('stoppable');
+    await vi.waitFor(() => {
+      expect(stoppableRuns).toEqual(['chat_unopened']);
+    });
     store.setProjectSession('project_2', undefined);
     unpublish();
     release();

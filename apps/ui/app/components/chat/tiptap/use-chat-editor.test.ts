@@ -42,6 +42,19 @@ describe('useChatEditor', () => {
     ]);
   });
 
+  it('should expose the editable area as a named multi-line textbox', async () => {
+    const { result } = renderHook(() => useChatEditor(createDefaultOptions({ placeholder: 'Ask Tau' })));
+
+    await waitFor(() => {
+      expect(result.current.editor).not.toBeNull();
+    });
+
+    const editable = result.current.editor!.view.dom;
+    expect(editable).toHaveAttribute('role', 'textbox');
+    expect(editable).toHaveAttribute('aria-multiline', 'true');
+    expect(editable).toHaveAccessibleName('Ask Tau');
+  });
+
   it('should hide disabled slash commands while showing enabled skill suggestions', async () => {
     const { result } = renderHook(() =>
       useChatEditor(

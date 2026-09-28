@@ -1,6 +1,5 @@
 import { util as zodUtility } from 'zod';
-import { createActor, createCallbackLogic } from 'xstate';
-import type { CallbackActorLogic, EventObject } from 'xstate';
+import { createActor } from 'xstate';
 import { getShortestPaths } from 'xstate/graph';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -269,11 +268,7 @@ describe('chatSessionMachine', () => {
     const actor = start();
     actor.send({ type: 'runLifecycle', phase: 'completed' });
 
-    expect(Object.keys(actor.getSnapshot().value as Record<string, unknown>).sort()).toEqual([
-      'host',
-      'revision',
-      'run',
-    ]);
+    expect(Object.keys(actor.getSnapshot().value as Record<string, unknown>).sort()).toEqual(['revision', 'run']);
     actor.stop();
   });
 
@@ -348,110 +343,14 @@ describe('chatSessionMachine', () => {
     actor.stop();
   });
 
-  it('starts and stops with its host binding as its only child', () => {
+  it('starts and stops without a page-owned host binding', () => {
     const actor = start();
     actor.send({ type: 'runLifecycle', phase: 'running' });
 
-    /* The binding is the chat session's one owned resource (C1): it lives for
-     * the actor's whole life, so a run reaching `running` must not have added
-     * a second child beside it. */
-    expect(Object.keys(actor.getSnapshot().children)).toEqual(['hostBinding']);
+    expect(Object.keys(actor.getSnapshot().children)).toEqual([]);
 
     actor.stop();
     expect(actor.getSnapshot().status).toBe('stopped');
-  });
-});
-
-/**
- * The chat's agent-host binding (C1, V6).
- *
- * The defect these rows exist for: the binding was registered from an effect in
- * `useCadChatClient`, a hook mounted once per transcript message plus four
- * other places. Every instance wrote one module-level registry and the last to
- * unmount deleted the entry, so a rewinding dispatch — which unmounts exactly
- * those newest instances — found the chat unconfigured. One actor, one
- * invocation.
- */
-describe('chatSessionMachine host region', () => {
-  /** Counts binding invocations and releases, in order. */
-  const countingBinding = (): {
-    readonly logic: CallbackActorLogic<EventObject, { chatId: string; placement: string }>;
-    readonly bound: string[];
-    readonly released: string[];
-  } => {
-    const bound: string[] = [];
-    const released: string[] = [];
-    const logic = createCallbackLogic<EventObject, { chatId: string; placement: string }>(({ input }) => {
-      bound.push(input.placement);
-      return () => {
-        released.push(input.placement);
-      };
-    });
-    return { logic, bound, released };
-  };
-
-  const startWithBinding = (binding: ReturnType<typeof countingBinding>) => {
-    const actor = createActor(chatSessionMachine.provide({ actors: { hostBinding: binding.logic } }), {
-      input: { chatId: 'chat-1', projectId: 'proj_1' },
-    });
-    actor.start();
-    return actor;
-  };
-
-  it('should bind the chat host exactly once, however often the agent config changes', () => {
-    const binding = countingBinding();
-    const actor = startWithBinding(binding);
-
-    for (const model of ['a', 'b', 'c']) {
-      actor.send({ type: 'agentConfigChanged', placement: 'tau' });
-      expect(model).toBeDefined();
-    }
-
-    expect(binding.bound).toEqual(['', 'tau']);
-    expect(binding.released).toEqual(['']);
-  });
-
-  it('should rebind once when the placement moves', () => {
-    const binding = countingBinding();
-    const actor = startWithBinding(binding);
-
-    actor.send({ type: 'agentConfigChanged', placement: 'tau' });
-    actor.send({ type: 'agentConfigChanged', placement: 'desktop' });
-    actor.send({ type: 'agentConfigChanged', placement: 'desktop' });
-
-    expect(binding.bound).toEqual(['', 'tau', 'desktop']);
-    expect(binding.released).toEqual(['', 'tau']);
-  });
-
-  it('should survive a host binding that throws, recording why (PV-S5, L3 D8)', () => {
-    const actor = createActor(
-      chatSessionMachine.provide({
-        actors: {
-          hostBinding: createCallbackLogic<EventObject, { chatId: string; placement: string }>(() => {
-            throw new Error('the worker refused the registration');
-          }),
-        },
-      }),
-      { input: { chatId: 'chat-1', projectId: 'proj_1' } },
-    );
-    actor.start();
-
-    expect(actor.getSnapshot().status).toBe('active');
-    expect(actor.getSnapshot().context.hostFailure).toBe('the worker refused the registration');
-    /* Still answers its public events. */
-    actor.send({ type: 'runLifecycle', phase: 'running', runId: 'run-1' });
-    expect(actor.getSnapshot().matches({ run: 'running' })).toBe(true);
-    actor.stop();
-  });
-
-  it('should release the binding when the chat session stops', () => {
-    const binding = countingBinding();
-    const actor = startWithBinding(binding);
-    actor.send({ type: 'agentConfigChanged', placement: 'tau' });
-
-    actor.stop();
-
-    expect(binding.released).toEqual(['', 'tau']);
   });
 });
 
@@ -818,7 +717,6 @@ describe('chatSessionMachine — the machine contract (PV-S5, MC-R17)', () => {
     },
     { type: 'adoptRun', runId: 'r' },
     { type: 'reconcileSettlement', runId: 'r', outcome: 'completed' },
-    { type: 'agentConfigChanged', placement: 'tau' },
     { type: 'interruptRecorded', state: 'requested' },
     { type: 'interruptRecorded', state: 'resolved' },
     { type: 'toolParts', inFlight: 1, approvals: 0 },
@@ -863,7 +761,6 @@ describe('chatSessionMachine — the machine contract (PV-S5, MC-R17)', () => {
       input: { chatId: 'chat-1', projectId: 'proj_1' },
       inspect: guard.inspect,
     }).start();
-    actor.send({ type: 'agentConfigChanged', placement: 'tau' });
     actor.send({ type: 'runLifecycle', phase: 'admitted', runId: 'run-1' });
     actor.send({ type: 'runLifecycle', phase: 'running', runId: 'run-1' });
     actor.send({ type: 'toolParts', inFlight: 1, approvals: 0 });

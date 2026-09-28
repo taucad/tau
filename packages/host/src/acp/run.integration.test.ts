@@ -161,6 +161,7 @@ const startHarness = async (
   const mcp = createHostMcpEndpoint({
     secret: randomBytes(32).toString('base64url'),
     registry,
+    workspaceRoot,
     ...(options.mcpNow === undefined ? {} : { now: options.mcpNow }),
   });
   closers.push(async () => mcp.close());

@@ -1,11 +1,11 @@
 import path from 'node:path';
-import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 import mdx from 'fumadocs-mdx/vite';
 import { defineConfig } from 'vitest/config';
 // oxlint-disable-next-line no-restricted-imports, import/extensions -- Vitest loads the Fumadocs config before app aliases are active.
 import * as MdxConfig from './app/lib/fumadocs/source.config.js';
 
 const projectRoot = import.meta.dirname;
+const collectionsDirectory = path.resolve(projectRoot, '../../node_modules/.cache/fumadocs/apps/docs');
 
 export default defineConfig({
   root: projectRoot,
@@ -16,17 +16,13 @@ export default defineConfig({
         find: 'fumadocs-core/server',
         replacement: path.resolve(projectRoot, 'app/lib/fumadocs/server-compat.ts'),
       },
-      {
-        find: /^#(.*)\.js$/u,
-        replacement: path.resolve(projectRoot, 'app/$1'),
-      },
+      { find: /^fumadocs-mdx:collections\//u, replacement: `${collectionsDirectory}/` },
     ],
   },
   plugins: [
-    nxViteTsPaths(),
     mdx(MdxConfig, {
       configPath: path.resolve(projectRoot, 'app/lib/fumadocs/source.config.ts'),
-      outDir: path.resolve(projectRoot, '../../node_modules/.cache/fumadocs/apps/docs'),
+      outDir: collectionsDirectory,
     }),
   ],
   test: {

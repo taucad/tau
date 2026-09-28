@@ -1,18 +1,30 @@
 import React from 'react';
 import type { ReactNode } from 'react';
 import type * as THREE from 'three';
+import { flushSync } from '@react-three/fiber';
 import { resolveMetersPerRenderUnit } from '@taucad/spatial';
 import { createThreeRenderMatrix } from '@taucad/three/spatial';
 import { Lights } from '#components/geometry/graphics/three/react/lights.js';
 import type { StudioLightingSettings } from '#components/geometry/graphics/three/utils/lights.utils.js';
 import { SectionContourFills } from '#components/geometry/graphics/three/react/section-contour-fill.js';
+import type { SectionCertification } from '#components/geometry/graphics/three/react/section-contour-fill.js';
 import { SectionClippingGroup } from '#components/geometry/graphics/three/react/section-clipping-group.js';
 import { SectionViewTestBridge } from '#components/geometry/graphics/three/react/section-view-test-bridge.js';
 import { useFeature } from '#flags/use-feature.js';
-import { useSectionView } from '#components/geometry/graphics/three/use-section-view.js';
+import {
+  useLiveSectionCutSet,
+  useSectionPieces,
+  useSectionStripes,
+} from '#components/geometry/graphics/three/use-section-view.js';
 import { useGeometryBounds } from '#components/geometry/graphics/three/use-geometry-bounds.js';
 import { useCameraFraming } from '#components/geometry/graphics/three/use-camera-framing.js';
-import { useGraphicsSelector, useRenderFrame, useRenderFrameRetarget, useSetRenderFrame } from '#hooks/use-graphics.js';
+import {
+  useGraphics,
+  useGraphicsSelector,
+  useRenderFrame,
+  useRenderFrameRetarget,
+  useSetRenderFrame,
+} from '#hooks/use-graphics.js';
 import { createSectionViewSafeSnapshotStore } from '#components/geometry/graphics/three/utils/section-view-safe-snapshot.js';
 import type { SectionViewSafeSnapshotStore } from '#components/geometry/graphics/three/utils/section-view-safe-snapshot.js';
 import { selectPresentedGeometryKey } from '#machines/graphics.machine.js';
@@ -57,31 +69,41 @@ type SectionViewSceneProperties = {
 
 /**
  * Section clipping and caps around the stage's model. The section view is read here rather than in
- * `Stage`, so a plane step re-renders this subtree but not `Stage`, whose re-render would hand the
+ * `Stage`, so a cut step re-renders this subtree but not `Stage`, whose re-render would hand the
  * clipping group a new child element and make it re-traverse the model.
+ *
+ * The caps certify the live cut list, and the clip removes only the committed one. The caps report a certification
+ * from their frame callback, which runs before the clip's; flushing it here re-renders the clip with the committed
+ * pieces within that frame, so the clip and the caps never draw different cut lists.
  */
-function SectionViewScene({ innerRef, snapshotRef, children }: SectionViewSceneProperties): React.JSX.Element {
-  const sectionView = useSectionView();
+export function SectionViewScene({ innerRef, snapshotRef, children }: SectionViewSceneProperties): React.JSX.Element {
+  const graphicsActor = useGraphics();
+  const isSectionViewActive = useGraphicsSelector((state) => state.context.isSectionViewActive);
+  const liveCutSet = useLiveSectionCutSet();
+  const committedPieces = useSectionPieces();
+  const { stripeFrequency, stripeWidth } = useSectionStripes();
+  const certify = React.useCallback(
+    (payload: SectionCertification): void => {
+      flushSync(() => {
+        graphicsActor.send({ type: 'setSectionCertification', payload });
+      });
+    },
+    [graphicsActor],
+  );
 
   return (
     <>
-      <SectionClippingGroup
-        enableLines={sectionView.enableLines}
-        enableMesh={sectionView.enableMesh}
-        enabled={sectionView.isActive}
-        innerRef={innerRef}
-        plane={sectionView.plane}
-        snapshotRef={snapshotRef}
-      >
+      <SectionClippingGroup innerRef={innerRef} pieces={committedPieces}>
         {children}
       </SectionClippingGroup>
       <SectionContourFills
-        enabled={sectionView.isActive && sectionView.enableMesh}
+        cutSet={liveCutSet}
+        enabled={isSectionViewActive}
         innerRef={innerRef}
-        plane={sectionView.plane}
         snapshotRef={snapshotRef}
-        stripeFrequency={sectionView.stripeFrequency}
-        stripeWidth={sectionView.stripeWidth}
+        stripeFrequency={stripeFrequency}
+        stripeWidth={stripeWidth}
+        onCertify={certify}
       />
     </>
   );

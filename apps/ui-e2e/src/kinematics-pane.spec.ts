@@ -283,6 +283,8 @@ test.describe('Kinematics pane', () => {
     const orbit: Vector = [48 * Math.cos(carrierAngle), 48 * Math.sin(carrierAngle), 0];
     expect(distance(transformPoint(planet, toGlbPoint(planetary.planetPin)), toGlbPoint(orbit))).toBeLessThan(1e-6);
     expectIdentity(await readMatrix(planetary.ring), 'grounded ring');
+    // The sun's followers wait in a closed group under it.
+    await target.click(selectors.getByRole('button', { name: 'Followers of sun' }));
     await target.expectValue(dofField('carrier'), '22.5');
     await target.expectValue(dofField('planet-1'), '-67.5');
     await target.expectAttribute(dofField('sun'), 'aria-valuetext', '90 °');
@@ -331,7 +333,8 @@ test.describe('Kinematics pane', () => {
     );
     await target.expectVisible(selectors.getByTestId('kinematics-play'));
 
-    await target.click(selectors.getByTestId('kinematics-reset'));
+    // The pose mark beside the file name resets it, as the Parameters header resets parameters.
+    await target.click(selectors.getByRole('button', { name: 'Reset pose to as built' }));
     await expect.poll(async () => readStateField('coordinates'), { timeout: 10_000 }).toEqual({ sun: 0 });
     expect(await readStateField('playback')).toMatchObject({ status: 'stopped', time: 0 });
     for (const componentId of planetary.links) {

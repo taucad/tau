@@ -13,7 +13,7 @@
 import { useEffect } from 'react';
 import { idPrefix } from '@taucad/types/constants';
 import { useProjects } from '#hooks/use-projects.js';
-import type { ProjectListItem } from '#types/project.types.js';
+import type { ProjectListItem } from '#types/project-library.types.js';
 import type { ProjectSlugs } from '#utils/project-url.utils.js';
 import { projectUrl, projectUrlOr } from '#utils/project-url.utils.js';
 import { legacyWorkspaceSlugTombstones } from '#filesystem/handle-store.js';

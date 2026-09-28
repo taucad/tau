@@ -85,16 +85,14 @@ describe('viewer split launchers', () => {
       pinnedMeasurements: [
         { id: 'measurement-1', frameId: 'tau:root', startPoint: [0, 0, 0], endPoint: [1, 0, 0], distance: 1 },
       ],
-      sectionView: { active: true, plane: 'xz', pivot: [1, 2, 3], rotation: [0, 0, 0], direction: -1 },
-      sectionDisplay: { clipLines: false, clipMesh: true, planeName: 'cartesian' },
+      sectionView: { active: true, cuts: [{ kind: 'plane', plane: 'xz', offset: 2, isFlipped: true }] },
     });
 
     expect(inherited.cameraFovAngle).toBe(42);
     expect(inherited.cameraView).toBeUndefined();
     expect(inherited.pinnedMeasurements).toBeUndefined();
-    // A cut is made through one file's geometry; how any cut is drawn is a pane preference (E2).
+    // Cuts are made through one file's geometry, so a new pane starts without them.
     expect(inherited.sectionView).toBeUndefined();
-    expect(inherited.sectionDisplay).toEqual({ clipLines: false, clipMesh: true, planeName: 'cartesian' });
     expect(inherited).not.toHaveProperty('componentDisplay');
   });
 

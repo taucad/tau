@@ -405,7 +405,7 @@ describe('getCategories', () => {
 
   it('should append unknown groups after known ones', () => {
     const items: ContextSuggestionItem[] = [
-      { id: '1', label: 'x', chipType: 'code', group: 'Custom Group' },
+      { id: '1', label: 'x', chipType: 'screenshot', group: 'Custom Group' },
       { id: '2', label: 'a.ts', chipType: 'file', group: filesFoldersGroup },
     ];
 

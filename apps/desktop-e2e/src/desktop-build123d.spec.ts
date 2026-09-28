@@ -611,8 +611,8 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
     const sphere = page.getByRole('button', { name: 'group-1-object-2', exact: true });
     await expectVisible(body, 60_000);
     await expectVisible(sphere, 60_000);
-    const bodyMaterial = await body.locator('[data-testid="component-color-icon"]').getAttribute('style');
-    expect(bodyMaterial).toContain('fill');
+    const bodyMaterial = await body.locator('[data-slot="material-swatch"]').getAttribute('style');
+    expect(bodyMaterial).toContain('background');
     await sphere.click();
     await expect.poll(async () => sphere.getAttribute('aria-pressed')).toBe('true');
 
@@ -693,7 +693,7 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
       target.__tauPicoGkObserver?.disconnect();
     });
     await expect
-      .poll(async () => body.locator('[data-testid="component-color-icon"]').getAttribute('style'))
+      .poll(async () => body.locator('[data-slot="material-swatch"]').getAttribute('style'))
       .toBe(bodyMaterial);
     await expectGeometryFramed(page);
 

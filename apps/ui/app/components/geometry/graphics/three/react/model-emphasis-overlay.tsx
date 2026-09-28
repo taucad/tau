@@ -19,7 +19,7 @@ import {
   Vector2,
   WebGLRenderTarget,
 } from 'three';
-import type { Camera, Material, Object3D, WebGLRenderer } from 'three';
+import type { Camera, Material, WebGLRenderer } from 'three';
 import type { ResolvedGraphicsBackend } from '#constants/editor.constants.js';
 import { useThreeGraphicsBackend } from '#components/geometry/graphics/three/three-graphics-backend-context.js';
 import { SceneOverlay, useOverlayDepthRestorer } from '#components/geometry/graphics/three/scene-overlay.js';
@@ -36,6 +36,9 @@ import {
 } from '#components/geometry/graphics/three/materials/model-emphasis-silhouette.node.js';
 import { silhouetteColor } from '#components/geometry/graphics/three/materials/model-emphasis-silhouette.js';
 import type { SilhouetteMaskSize } from '#components/geometry/graphics/three/materials/model-emphasis-silhouette.js';
+import { installSectionClip } from '#components/geometry/graphics/three/materials/section-clip.js';
+import type { SectionClip } from '#components/geometry/graphics/three/materials/section-clip.js';
+import { useSectionClip } from '#components/geometry/graphics/three/react/section-clipping-group.js';
 
 /** Frame-loop slots: after the main/post pass (1), before grid/axes overlays (2). */
 export const modelEmphasisMaskPriority = 1.4;
@@ -158,7 +161,15 @@ function createProxy(source: Mesh, material: Material): Mesh {
   return proxy;
 }
 
-export function createModelEmphasisResources(backend: ResolvedGraphicsBackend): ModelEmphasisResources {
+/**
+ * @param backend - The viewer's graphics backend.
+ * @param clip - The viewer's section clip. Coverage and wash take it, so the outline and tint follow what is drawn;
+ *   the visibility layer never does, so it still answers for the uncut solid.
+ */
+export function createModelEmphasisResources(
+  backend: ResolvedGraphicsBackend,
+  clip: SectionClip,
+): ModelEmphasisResources {
   const maskTarget = new WebGLRenderTarget(1, 1, {
     depthBuffer: true,
     stencilBuffer: false,
@@ -198,6 +209,9 @@ export function createModelEmphasisResources(backend: ResolvedGraphicsBackend): 
     },
   };
   const wash = { hover: createWashMaterial('hover'), selected: createWashMaterial('selected') };
+  for (const material of [mask.coverage.hover, mask.coverage.selected, wash.hover, wash.selected]) {
+    installSectionClip(material, clip);
+  }
   const proxies: Proxy[] = [];
 
   const setMaskSize = (size: SilhouetteMaskSize): void => {
@@ -262,29 +276,12 @@ export function syncModelEmphasisProxies(resources: ModelEmphasisResources, set:
   }
 }
 
-const firstMaterial = (object: Object3D): Material | undefined => {
-  const { material } = object as Mesh;
-  return Array.isArray(material) ? material[0] : material;
-};
-
-/** Per-frame CPU work: follow the sources' world transforms and section clipping. */
+/** Per-frame CPU work: follow the sources' world transforms. */
 export function syncModelEmphasisFrame(resources: ModelEmphasisResources): void {
   for (const { source, mask, visibility, wash } of resources.proxies) {
     mask.matrixWorld.copy(source.matrixWorld);
     visibility.matrixWorld.copy(source.matrixWorld);
     wash.matrixWorld.copy(source.matrixWorld);
-  }
-  // Only what is drawn on screen is clipped; the visibility layer answers for the uncut solid.
-  const planes = (resources.proxies[0] && firstMaterial(resources.proxies[0].source)?.clippingPlanes) ?? null;
-  for (const material of [
-    resources.mask.coverage.hover,
-    resources.mask.coverage.selected,
-    resources.wash.hover,
-    resources.wash.selected,
-  ]) {
-    if (material.clippingPlanes !== planes) {
-      material.clippingPlanes = planes;
-    }
   }
 }
 
@@ -359,9 +356,10 @@ export function ModelEmphasisOverlay(): JSX.Element {
   const rootScene = useThree((state) => state.scene);
   const invalidate = useThree((state) => state.invalidate);
   const backend = useThreeGraphicsBackend();
+  const clip = useSectionClip();
   const set = useModelEmphasisSet(rootScene);
   const active = set.hover.length > 0 || set.selected.length > 0;
-  const resources = useMemo(() => createModelEmphasisResources(backend), [backend]);
+  const resources = useMemo(() => createModelEmphasisResources(backend, clip), [backend, clip]);
 
   useEffect(
     () => () => {

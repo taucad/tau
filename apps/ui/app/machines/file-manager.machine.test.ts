@@ -205,6 +205,31 @@ describe('fileManagerMachine', () => {
     actor.stop();
   });
 
+  it('settles a refused replacement port and permits the worker to request another', async () => {
+    mockGetHomeStorageBackend.mockResolvedValue('node');
+    mockDesktopBridge = { nodeFs: { homeRoot: '/userData/home', connect: mockNodeFsConnect }, dialog: {} };
+    const actor = createActor(fileManagerMachine, { input: { rootDirectory: '/', shouldInitializeOnStart: true } });
+    actor.start();
+    await vi.waitFor(() => {
+      expect(actor.getSnapshot().value).toBe('ready');
+    });
+    const worker = workerTestState.instances[0]!;
+    mockNodeFsConnect.mockRejectedValueOnce(new Error('Services broker is quiescing'));
+    worker.dispatchEvent(Object.assign(new Event('message'), { data: { type: 'nodeFsPortRequest' } }));
+    await vi.waitFor(() => {
+      expect(worker.postMessage).toHaveBeenCalledWith({
+        type: 'nodeFsPortError',
+        message: 'Services broker is quiescing',
+      });
+    });
+    worker.dispatchEvent(Object.assign(new Event('message'), { data: { type: 'nodeFsPortRequest' } }));
+    await vi.waitFor(() => {
+      expect(mockNodeFsConnect).toHaveBeenCalledTimes(3);
+      expect(worker.postMessage.mock.calls.filter(([message]) => message?.type === 'nodeFsPort')).toHaveLength(2);
+    });
+    actor.stop();
+  });
+
   // R3 — the worker installs its `/` composition mount during module
   // evaluation, so the pinned engine has to reach it through the one
   // constructor option Vite's worker wrapper forwards.

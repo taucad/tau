@@ -556,10 +556,27 @@ const validateSchema = (
   }
 };
 
-const validateDefaults = (declaration: ParameterDeclaration): void => {
-  if (Object.keys(declaration.defaults).length === 0) {
-    return;
+// ponytail: @json-structure/sdk 0.7.0 rejects when `instance % multipleOf > 1e-10`, so `50 % 0.1` (≈ 0.0999…) fails.
+// The error carries no schema path, so the step is read back from its message; an unparsable message keeps the error.
+// Remove once the SDK compares the rounded quotient upstream.
+const isFloatMultipleOfFalsePositive = (error: ValidationError, values: Readonly<Record<string, unknown>>): boolean => {
+  if (error.code !== 'INSTANCE_NUMBER_MULTIPLE_OF') {
+    return false;
   }
+  const value = resolvePointer(values, error.path.replace(/^#/u, ''));
+  const step = Number(/ is not a multiple of (\S+)$/u.exec(error.message)?.[1]);
+  const quotient = typeof value === 'number' && step > 0 ? value / step : Number.NaN;
+  return Math.abs(quotient - Math.round(quotient)) <= Number.EPSILON * Math.max(1, Math.abs(quotient)) * 8;
+};
+
+type DefaultsValidation = Readonly<{
+  schema: JsonValue;
+  validator: InstanceValidator;
+  bindings: ReadonlyArray<Readonly<{ pointer: string; integer: boolean; decimal: boolean }>>;
+}>;
+
+// Everything here depends on the schema, resources and bindings only, so an admitted manifest prepares it once.
+const prepareDefaultsValidation = (declaration: Omit<ParameterDeclaration, 'defaults'>): DefaultsValidation => {
   const suppliedResources: Readonly<Record<string, JsonStructureSchema>> = {
     [rootResource]: declaration.schema,
     ...declaration.resources,
@@ -641,35 +658,41 @@ const validateDefaults = (declaration: ParameterDeclaration): void => {
   const external = new Map<string, JsonValue>(
     Object.entries(declaration.resources ?? {}).map(([uri, value]) => [uri, copySchemaForSdk(value)]),
   );
-  const result = new InstanceValidator({
+  const validator = new InstanceValidator({
     extended: true,
     allowImport: true,
     externalSchemas: external,
     maxValidationDepth: 64,
-  }).validate(structuredClone(declaration.defaults) as JsonValue, schema);
-  if (!result.isValid) {
+  });
+  const tables = deriveManifestTables(
+    { ...declaration, defaults: {} },
+    { id: 'parameter-default-admission', version: profile, revision: 'admission', capability: 'json-structure' },
+  );
+  const bindings = Object.entries(tables.bindings).map(([pointer, binding]) => {
+    const bindingSchema = suppliedResources[binding.schema.resource];
+    const bindingNode = bindingSchema && resolvePointer(bindingSchema, binding.schema.pointer);
+    return {
+      pointer,
+      integer: isRecord(bindingNode) && nodeTypes(bindingNode).includes('integer'),
+      decimal: binding.representation === 'decimal',
+    };
+  });
+  return { schema, validator, bindings };
+};
+
+const checkDefaults = (prepared: DefaultsValidation, defaults: Readonly<Record<string, unknown>>): void => {
+  const result = prepared.validator.validate(structuredClone(defaults) as JsonValue, prepared.schema);
+  const errors = result.errors.filter((error) => !isFloatMultipleOfFalsePositive(error, defaults));
+  if (errors.length > 0) {
     throw new ParameterAdmissionError(
-      result.errors.map((error) =>
+      errors.map((error) =>
         diagnostic('INVALID_SCHEMA', `default value: ${error.message}`, rootResource, error.path.replace(/^#/u, '')),
       ),
     );
   }
-  const tables = deriveManifestTables(declaration, {
-    id: 'parameter-default-admission',
-    version: profile,
-    revision: 'admission',
-    capability: 'json-structure',
-  });
-  for (const [pointer, binding] of Object.entries(tables.bindings)) {
-    const value = resolvePointer(declaration.defaults, pointer);
-    const bindingSchema = suppliedResources[binding.schema.resource];
-    const bindingNode = bindingSchema && resolvePointer(bindingSchema, binding.schema.pointer);
-    if (
-      value !== undefined &&
-      isRecord(bindingNode) &&
-      nodeTypes(bindingNode).includes('integer') &&
-      !Number.isSafeInteger(value)
-    ) {
+  for (const { pointer, integer, decimal } of prepared.bindings) {
+    const value = resolvePointer(defaults, pointer);
+    if (value !== undefined && integer && !Number.isSafeInteger(value)) {
       fail(
         diagnostic('INVALID_SCHEMA', 'default value: integer exceeds safe execution range', rootResource, '', {
           instancePointer: pointer,
@@ -677,11 +700,7 @@ const validateDefaults = (declaration: ParameterDeclaration): void => {
         }),
       );
     }
-    if (
-      value !== undefined &&
-      binding.representation === 'decimal' &&
-      (typeof value !== 'string' || !decimalLexicalPattern.test(value))
-    ) {
+    if (value !== undefined && decimal && (typeof value !== 'string' || !decimalLexicalPattern.test(value))) {
       fail(
         diagnostic('INVALID_SCHEMA', 'default value: invalid decimal lexical representation', rootResource, '', {
           instancePointer: pointer,
@@ -692,18 +711,36 @@ const validateDefaults = (declaration: ParameterDeclaration): void => {
   }
 };
 
+const validateDefaults = (declaration: ParameterDeclaration): void => {
+  if (Object.keys(declaration.defaults).length > 0) {
+    checkDefaults(prepareDefaultsValidation(declaration), declaration.defaults);
+  }
+};
+
+// Admitted manifests are deep-frozen, so a frozen manifest keeps its prepared validation; any other is prepared per call.
+const preparedManifestDefaults = new WeakMap<ParameterManifest, DefaultsValidation>();
+
 /** Validate a partial parameter value object with the same pinned SDK/profile used for producer defaults. @public */
 export const admitParameterValues = (manifest: ParameterManifest, values: Readonly<Record<string, unknown>>): void => {
   const defaults = cloneBoundedJson(values, limits);
   const admittedDefaults = isRecord(defaults)
     ? defaults
     : fail(diagnostic('INVALID_SCHEMA', 'parameter values must be an object', rootResource, ''));
-  validateDefaults({
-    schema: manifest.schema,
-    resources: manifest.resources,
-    defaults: admittedDefaults,
-    bindings: manifest.bindingDeclarations,
-  });
+  if (Object.keys(admittedDefaults).length === 0) {
+    return;
+  }
+  let prepared = preparedManifestDefaults.get(manifest);
+  if (!prepared) {
+    prepared = prepareDefaultsValidation({
+      schema: manifest.schema,
+      resources: manifest.resources,
+      bindings: manifest.bindingDeclarations,
+    });
+    if (Object.isFrozen(manifest)) {
+      preparedManifestDefaults.set(manifest, prepared);
+    }
+  }
+  checkDefaults(prepared, admittedDefaults);
 };
 
 type Visit = Readonly<{

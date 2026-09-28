@@ -418,7 +418,7 @@ export function useRevisions(): RevisionsView {
    */
   const unheld = log?.unheld === true;
   useEffect(() => {
-    if (unheld) {
+    if (unheld && status !== undefined) {
       void refetch({ cancelRefetch: false });
     }
   }, [refetch, status, unheld]);

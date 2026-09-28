@@ -53,7 +53,7 @@ const openSecondGeometryUnit = async (): Promise<void> => {
   }
 
   await target.hover(treeItem(secondaryPath));
-  await target.click(selectors.getByRole('button', { name: 'Actions for box-corner.js' }));
+  await target.click(selectors.getByRole('button', { name: 'More actions for box-corner.js', exact: true }));
   await target.click(selectors.getByRole('menuitem', { name: 'Open in Viewer' }));
   await target.expectVisible(selectors.getByCss(`.dv-tab[aria-label="${secondaryPath}"]`), 60_000);
 };
@@ -134,10 +134,10 @@ test('modernizes Console as a global-filtered multi-unit bottom-following log su
   await target.expectAttribute(main, 'aria-expanded', 'true');
   await target.expectAttribute(secondary, 'aria-expanded', 'false');
 
-  const filter = selectors.getByRole('textbox', { name: 'Filter logs' });
+  const filter = selectors.getByRole('searchbox', { name: 'Filter logs' });
   await target.expectVisible(filter);
   await target.expectAttribute(filter, 'placeholder', 'Filter logs...');
-  await target.expectCount(selectors.getByRole('textbox', { name: 'Filter logs' }), 1);
+  await target.expectCount(selectors.getByRole('searchbox', { name: 'Filter logs' }), 1);
   await target.expectVisible(selectors.getByRole('button', { name: 'Filter by log level' }));
   await target.expectVisible(selectors.getByRole('button', { name: 'Console settings' }));
   await target.expectVisible(selectors.getByRole('button', { name: 'Clear logs' }));

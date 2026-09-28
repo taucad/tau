@@ -490,7 +490,7 @@ const readRunMessage = async (events: readonly AgentLogEvent[]): Promise<MyUIMes
  * contributes its rebuilt assistant message, because the stream this
  * accompanies is what rebuilds that one. `undefined` streams no run. The map
  * also answers whether that stream may run at all: not when another device's
- * turns follow it, because the AI SDK continues the transcript's trailing
+ * assistant message trails the transcript, because the AI SDK continues the transcript's trailing
  * assistant message — another device's — so the streaming run is then rebuilt
  * in place from the log too, and `streams` is `false`.
  */
@@ -545,7 +545,10 @@ const rebuildTranscript = async (
   return (current) => {
     const messages = place(current, streamed, streamingRunId);
     const tail = messages.at(-1);
-    if (streamingRunId === undefined || tail === undefined || wholeIds.has(tail.id)) {
+    /* Only a trailing assistant message is continued. Any other tail — this
+     * run's own user turn, which a snapshot-only attach leaves out of the log —
+     * gets a fresh message from the stream. */
+    if (streamingRunId === undefined || tail?.role !== 'assistant' || wholeIds.has(tail.id)) {
       return { messages, streams: true };
     }
     /* ponytail: the run is rebuilt from what the log holds now, so a run still

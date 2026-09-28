@@ -1,11 +1,11 @@
 import { expect, it, vi } from 'vitest';
 import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
 import type { FsLike } from '@taucad/runtime/filesystem';
+import type * as RuntimeFileSystemModule from '@taucad/runtime/filesystem';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import { openBrowserProjectHost } from '#workers/agent-host.impl.js';
 import type { BrowserProjectHost } from '#workers/agent-host.impl.js';
 import { livePlacementPort } from '#workers/test/agent-host-resident.fixture.js';
-import type * as RuntimeFileSystemModule from '@taucad/runtime/filesystem';
 import type * as GeoSpecClientModule from '#workers/geospec-runner.client.js';
 
 /**

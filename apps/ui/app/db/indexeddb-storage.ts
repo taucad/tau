@@ -4,7 +4,7 @@ import type {
   PendingPermanentDeleteProjectOperation,
   PendingProjectOperation,
 } from '#types/pending-project-operation.types.js';
-import type { ProjectLibraryState } from '#types/project.types.js';
+import type { ProjectLibraryState } from '#types/project-library.types.js';
 import { metaConfig } from '#constants/meta.constants.js';
 import { KeyedMutex } from '#db/keyed-mutex.js';
 

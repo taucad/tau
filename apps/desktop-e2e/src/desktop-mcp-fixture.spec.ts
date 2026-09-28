@@ -33,11 +33,12 @@ import {
  * `NODE_ENV=test`, so nothing here can arm a shipped app. `skill-names` proves
  * that the same utility exposed packaged Tau skills through the adapter's native
  * root, and `mcp` makes it call `test_model` through the `tau` server it was
- * handed. A second turn exercises the desktop approval UI and exact ACP option
+ * handed; `mcp-screenshot` adds a `screenshot`, which the endpoint saves as a
+ * chat attachment under the project root the utility mounted it with. A second turn exercises the desktop approval UI and exact ACP option
  * round trip without pretending Tau owns the downstream standing-grant store.
  */
 
-const externalPrompt = 'updates noask skill-names mcp';
+const externalPrompt = 'updates noask skill-names mcp-screenshot';
 
 const workspaceRoot = resolve(import.meta.dirname, '../../..');
 const fakeAcpAgent = join(workspaceRoot, 'packages/host/src/acp/fixtures/fake-agent.ts');
@@ -115,6 +116,19 @@ test('serves the utility MCP endpoint to an agent it spawned', async () => {
       .findLast((line) => line.includes('"role":"tool-output"') && line.includes('"toolName":"test_model"'));
     expect(evidence).toMatch(/"content":\{"failures":.*"total":\d+\}/u);
     expect(evidence).toMatch(/"agentId":"codex"/u);
+    /* The capture left the MCP payload as a file of this chat: an endpoint
+     * mounted without its project root threw a Node `path` TypeError here
+     * after the renderer had already answered. */
+    await expect
+      .poll(() => readFileSync(eventsPath, 'utf8'), { timeout: 300_000 })
+      .toMatch(/"role":"tool-output","toolCallId":"[^"]+","toolName":"screenshot"/u);
+    const capture = readFileSync(eventsPath, 'utf8')
+      .split('\n')
+      .findLast((line) => line.includes('"role":"tool-output"') && line.includes('"toolName":"screenshot"'));
+    expect(capture).not.toMatch(/"isError":true/u);
+    const attachment = /attachments\/[\da-f]{64}\.(?:png|webp)/u.exec(capture ?? '')?.[0];
+    expect(attachment, capture).toBeDefined();
+    expect(existsSync(join(projectRootNow(), '.tau/chats', chatId, attachment!))).toBe(true);
     const durableLog = readFileSync(eventsPath, 'utf8');
     expect(durableLog).toMatch(/native-skill-names:.*cad-openscad/u);
     expect(durableLog).toMatch(/"name":"\$cad-openscad"/u);

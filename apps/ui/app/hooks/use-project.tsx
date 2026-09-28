@@ -518,6 +518,7 @@ export function ProjectProvider({
       }
       existing?.unsubscribe();
       const subscription = actor.on('settled', ({ outcome }) => {
+        performance.mark('tau:parameter-settled', { detail: { entryPath } });
         const cadRef = actorRef.getSnapshot().context.geometryUnits.get(entryPath);
         const current = parameterService.snapshot(entryPath);
         if (cadRef === undefined || current === undefined) {
@@ -528,6 +529,7 @@ export function ProjectProvider({
           /* Only the bytes the authority just persisted travel: the runtime resolves the values from
            * them and observes that revision itself, so the sidecar's own watch event has nothing left
            * to re-render, and this machine keeps no second copy of the stored values. */
+          performance.mark('tau:parameter-dispatch', { detail: { entryPath } });
           cadRef.send({ type: 'commitParameters', stage });
         }
       });

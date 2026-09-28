@@ -4,9 +4,9 @@ import type { EngineeringDiscipline } from '@taucad/types';
 import { cn } from '@taucad/ui/utils/cn';
 
 const colors = {
-  mechanical: 'text-blue',
-  electrical: 'text-yellow',
-  software: 'text-purple',
+  mechanical: 'text-information',
+  electrical: 'text-warning',
+  software: 'text-feature',
   firmware: 'text-green',
 } as const satisfies Record<EngineeringDiscipline, string>;
 

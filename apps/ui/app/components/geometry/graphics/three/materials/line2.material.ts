@@ -103,23 +103,6 @@ export const compositeOverViewportSrgb = (rgb: unknown, alpha: unknown, viewport
  * uses TSL **`cameraNear`** so the near estimate stays **`-camera.near`** in camera space for
  * both standard and reversed depth buffers.
  *
- * **Divergence 2 — section-view clipping.** `NodeMaterial.setupHardwareClipping` activates
- * vertex-stage `gl_ClipDistance` for every WebGPU NodeMaterial whenever the device exposes
- * the `clip-distances` feature. The hardware-clipping node references `positionView`, which
- * — in the vertex stage — falls through to **`modelViewMatrix * positionLocal`**. For a
- * `LineSegmentsGeometry` instance, `positionLocal` is the static unit-quad attribute reused
- * across every instanced segment via `instanceStart`/`instanceEnd`; the per-vertex clip
- * distance therefore depends only on the line mesh's local origin (not each segment's actual
- * world position) and uniformly keeps or culls every segment. With the mesh origin on the
- * kept side, every segment passes hardware clipping and edge lines bleed onto the
- * sectioned-off half of the model. WebGL is immune because the upstream `LineMaterial`
- * `ShaderMaterial` performs an explicit `mvPosition = (position.y < 0.5) ? start : end;`
- * fixup before `<clipping_planes_vertex>`. We disable hardware clipping so the framework
- * routes through the **software fragment-stage path** (`ClippingNode.setupDefault` /
- * `setupAlphaToCoverage`), which reconstructs `positionView` per fragment from
- * `cameraProjectionMatrixInverse * v_clipSpace` — perspective-correctly interpolated across
- * the line quad and aligned with the line's actual world position.
- *
  * **Divergence 3 — renderer-aware depth encoding.** Tau instantiates three different WebGPU
  * renderer presets in `apps/ui/app/components/geometry/graphics/three/renderer.ts`:
  * `viewport` runs with `reversedDepthBuffer: true` (closer = larger clip-z, GTAO benefit);
@@ -162,7 +145,6 @@ export const compositeOverViewportSrgb = (rgb: unknown, alpha: unknown, viewport
  * @see `docs/policy/webgpu-rendering-pipeline.md`
  * @see `docs/policy/graphics-backend-policy.md` (CB-3 / S7)
  * @see `docs/research/webgpu-line2-reversed-z-trim.md`
- * @see `docs/research/webgpu-fat-line-hardware-clipping-bug.md`
  * @see `docs/research/webgpu-fat-line-renderer-aware-depth.md`
  * @see `docs/research/webgpu-axes-srgb-blend-parity.md`
  */
@@ -223,20 +205,6 @@ export class Line2NodeMaterial extends ThreeLine2NodeMaterial {
 
   public override set alphaToCoverage(value: boolean) {
     super.alphaToCoverage = value;
-  }
-
-  /**
-   * Forces software fragment-stage clipping (`positionView` reconstructed from `clipSpace`
-   * per fragment) instead of vertex-stage hardware `gl_ClipDistance`. See class JSDoc
-   * "Divergence 2" for the smoking-gun chain. Bulk surface meshes elsewhere in the scene
-   * keep hardware clipping; this override is line-material-local.
-   *
-   * The `builder` parameter mirrors the upstream signature so this stays a true override
-   * even though the body ignores it.
-   */
-  // oxlint-disable-next-line no-unused-vars -- preserves override parity with NodeMaterial.setupHardwareClipping
-  public override setupHardwareClipping(builder: unknown): void {
-    (this as { hardwareClipping: boolean }).hardwareClipping = false;
   }
 
   /**

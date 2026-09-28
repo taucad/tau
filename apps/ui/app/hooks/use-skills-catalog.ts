@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { SkillMetadata } from '@taucad/chat';
+import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { createSkillResolver, titleFromSkillName } from '#lib/skill-resolver.js';
 
@@ -24,6 +25,30 @@ export function skillMetadataToSlashCommand(skill: SkillMetadata): {
     group: 'Skills',
     source: skill.source,
   };
+}
+
+/**
+ * Call `onChange` when the tree changes under `.agents/`, the only place skills and installed
+ * plugins live. Every other file write (a parameter commit, an agent edit) leaves the catalog as it was.
+ */
+function subscribeAgentsTree(treeService: FileTreeService, onChange: () => void): () => void {
+  const signature = (): string => {
+    let value = '';
+    for (const entry of treeService.getTreeSnapshot().values()) {
+      if (entry.path === '.agents' || entry.path.startsWith('.agents/')) {
+        value += `${entry.path}:${entry.type}:${String(entry.size)}:${String(entry.mtimeMs)}\n`;
+      }
+    }
+    return value;
+  };
+  let last = signature();
+  return treeService.subscribeTree(() => {
+    const next = signature();
+    if (next !== last) {
+      last = next;
+      onChange();
+    }
+  });
 }
 
 /**
@@ -66,9 +91,11 @@ export function useSkillsCatalog(): SkillMetadata[] {
     }
 
     void loadSkills();
-    const unsubscribe = treeService?.subscribeTree(() => {
-      void loadSkills();
-    });
+    const unsubscribe =
+      treeService &&
+      subscribeAgentsTree(treeService, () => {
+        void loadSkills();
+      });
     return () => {
       cancelled = true;
       unsubscribe?.();
@@ -110,9 +137,11 @@ export function usePromptSkillsCatalog(): SkillMetadata[] {
     }
 
     void loadSkills();
-    const unsubscribe = treeService?.subscribeTree(() => {
-      void loadSkills();
-    });
+    const unsubscribe =
+      treeService &&
+      subscribeAgentsTree(treeService, () => {
+        void loadSkills();
+      });
     return () => {
       cancelled = true;
       unsubscribe?.();

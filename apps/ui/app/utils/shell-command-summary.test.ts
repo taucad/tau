@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  describeCommandActions,
-  describeCommandTarget,
-  summarizeExternalCall,
-  summarizeShellCommand,
-} from '#utils/shell-command-summary.js';
+import { describeCommandActions, describeCommandTarget, summarizeShellCommand } from '#utils/shell-command-summary.js';
 
 const skills = String.raw`/Users/rifont/Library/Application\ Support/Tau/acp-skills/6948bcdbbd9e2686da178a27c0cab4cbd75563d01ebf21bee18f73829c4e7715/.agents/skills`;
 const skillsPath = skills.replace(String.raw`\ `, ' ');
@@ -47,14 +42,40 @@ describe('summarizeShellCommand', () => {
     ["grep -rn 'drawCircle' src 2>&1 | head", 'Searched for drawCircle in src'],
     ["find . -name '*.scad'", 'Searched for *.scad in .'],
     ["find src -type f -not -name '*.geospec.ts' -print 2>/dev/null | sort", 'Listed src'],
+    // Read-only git inspection: shown as a step rather than blocking the summary.
+    ["sed -n '1,220p' main.geospec.ts && git status --short", 'Read main.geospec.ts, checked git status'],
+    ['git status --short', 'Checked git status'],
+    ['git --no-pager diff --stat && git -C packages log --oneline -5', 'Checked git diff, git log'],
+    ['git diff -- main.scad | head -40', 'Checked git diff'],
+    // The reported case: the read succeeded; `command -v dotnet` exiting 1 failed the call.
+    [
+      `sed -n '267,322p' '${skillsPath}/geospec-authoring/api-types.md' && rg --files .tau && command -v dotnet && command -v node`,
+      'Read geospec-authoring/api-types.md, listed .tau, checked for dotnet, node',
+    ],
+    ['command -v openscad || true', 'Checked for openscad'],
+    ['which -a node python3', 'Checked for node, python3'],
+    [
+      'shasum -a 256 main.ts main.geospec.ts && git status --short',
+      'Hashed main.ts, main.geospec.ts, checked git status',
+    ],
+    ['wc -c /private/tmp/results.json', 'Counted results.json'],
+    ['wc -l main.ts main.geospec.ts', 'Counted main.ts, main.geospec.ts'],
     ['cat main.ts && rg -n foo src', 'Read main.ts, searched for foo in src'],
   ])('summarises %s', (command, header) => {
     expect(headerOf(command)).toBe(header);
   });
 
   it.each([
-    'git status --short',
-    'shasum -a 256 main.ts; git diff --check',
+    'git -c core.pager=less log',
+    'git diff --output=patch.diff',
+    'git diff --ext-diff',
+    "git commit -m 'x'",
+    'git push',
+    'git stash && cat a.ts',
+    // `command` without -v runs its argument.
+    'command openscad main.scad',
+    'shasum',
+    'wc -l',
     "sed -i 's/a/b/' main.ts",
     "sed -n '1,10p' a.ts > copy.ts",
     'cat $(ls)',
@@ -110,38 +131,5 @@ describe('describeCommandTarget', () => {
     ['/work/main.ts', { type: 'file', name: 'main.ts' }],
   ])('names %s', (path, target) => {
     expect(describeCommandTarget(path)).toEqual(target);
-  });
-});
-
-describe('summarizeExternalCall', () => {
-  it("renames Codex's single-read title only when it read a skill", () => {
-    const skill = summarizeExternalCall({
-      kind: 'read',
-      title: `Read file '${skillsPath}/cad-replicad/SKILL.md'`,
-      locations: [`${skillsPath}/cad-replicad/SKILL.md`],
-      input: {},
-    });
-    expect(skill).toMatchObject({ verb: 'Read', detail: 'skill cad-replicad', family: 'skill' });
-    expect(
-      summarizeExternalCall({ kind: 'read', title: 'View Image /tmp/a.png', locations: ['/tmp/a.png'], input: {} }),
-    ).toBeUndefined();
-  });
-
-  it('parses the raw input command of an execute call, with an active form', () => {
-    const summary = summarizeExternalCall({
-      kind: 'execute',
-      title: undefined,
-      locations: [],
-      input: { command: 'rg -n foo src', cwd: '/w' },
-    });
-    expect(summary).toMatchObject({
-      kind: 'search',
-      family: 'search',
-      activeVerb: 'Searching',
-      activeDetail: 'for foo in src',
-    });
-    expect(
-      summarizeExternalCall({ kind: 'execute', title: 'mcp.tau.test_model', locations: [], input: { files: [] } }),
-    ).toBeUndefined();
   });
 });

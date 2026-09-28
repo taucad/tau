@@ -1,0 +1,50 @@
+name: Branch typecheck
+
+# The working branch lands by push rather than by pull request, so `ci.yml`
+# never sees it. This gate typechecks every project the pushed commits affect:
+# the check an app whose bundler strips types (desktop's electron-vite) otherwise
+# never runs, which is how a missing required option shipped as a runtime
+# TypeError (docs/research/desktop-mcp-attachment-root-regression.md).
+on:
+  push:
+    branches: [geospec]
+
+permissions: # Required for nrwl/nx-set-shas to read workflow runs
+  contents: 'read'
+  actions: 'read'
+
+env:
+  NX_CLOUD_ACCESS_TOKEN: ${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
+
+# Never cancelled: the next push checks only its own commits, so a cancelled
+# run would leave the previous push's commits unchecked.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  typecheck:
+    name: Typecheck affected projects
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+
+      # Every commit of the push, not only its last: `github.event.before` is the
+      # branch head before this push. A new branch or a rewritten history has no
+      # usable `before`, so the base nx-set-shas exported stands in.
+      - name: Typecheck every project the push affects
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          base="$BEFORE"
+          if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            base="$NX_BASE"
+          fi
+          pnpm nx affected -t typecheck --base="$base" --head="$GITHUB_SHA"

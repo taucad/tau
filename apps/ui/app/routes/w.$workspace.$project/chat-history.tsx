@@ -32,6 +32,24 @@ import { ChatAttachmentDirectoriesContext, chatAttachmentDirectories } from '#co
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useChats } from '#hooks/use-chats.js';
 import { useProject } from '#hooks/use-project.js';
+import { useSkillsCatalog } from '#hooks/use-skills-catalog.js';
+import { commandInvocation } from '#utils/at-reference.utils.js';
+import type { MyUIMessage } from '@taucad/chat';
+
+/** Every command any ACP agent advertised in this chat, one invocation per line (a stable selector value). */
+function agentInvocationsKey(messages: readonly MyUIMessage[]): string {
+  const invocations = new Set<string>();
+  for (const message of messages) {
+    for (const part of message.parts) {
+      if (part.type === 'data-acp-session') {
+        for (const command of part.data.commands) {
+          invocations.add(commandInvocation(command.name));
+        }
+      }
+    }
+  }
+  return [...invocations].join('\n');
+}
 
 // Component-local CSS variable. Declared here (rather than in global.css)
 // to keep the chat-history pinning system self-contained — the only
@@ -132,6 +150,13 @@ export const ChatHistory = memo(function (props: {
   const { projectId } = useProject();
   const { chats } = useChats(projectId);
   const { activeChatId, persistenceActorRef } = useChatContext();
+  const skillsCatalog = useSkillsCatalog();
+  const agentInvocations = useChatSelector((state) => agentInvocationsKey(state.messages));
+  const skillInvocations = skillsCatalog.map((skill) => `/${skill.name}`).join('\n');
+  const knownTokens = useMemo(
+    () => new Set(`${skillInvocations}\n${agentInvocations}`.split('\n').filter(Boolean)),
+    [skillInvocations, agentInvocations],
+  );
   const attachmentDirectories = useMemo(
     () => chatAttachmentDirectories(projectId, activeChatId),
     [activeChatId, projectId],
@@ -292,7 +317,7 @@ export const ChatHistory = memo(function (props: {
           </FloatingPanelContentHeader>
 
           {/* Main chat content area */}
-          <AtReferenceProvider treeService={treeService} chats={chats}>
+          <AtReferenceProvider treeService={treeService} chats={chats} knownTokens={knownTokens}>
             <Virtuoso
               ref={virtuosoRef}
               data={groups}

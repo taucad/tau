@@ -2229,6 +2229,57 @@ describe('KernelWorker lifecycle', () => {
       expect(filesystem.mocks.mkdir).toHaveBeenCalledWith('sub', { recursive: true });
     });
 
+    it('should observe staged bytes the filesystem already holds without writing them again', async () => {
+      const stored = new Uint8Array([7, 8, 9]);
+      const filesystem = createMockFileSystem({ readFileResult: stored });
+      filesystem.mocks.readFiles.mockResolvedValue({ 'sub/main.ts': stored });
+      let watchHandler: ((event: WatchEvent) => void) | undefined;
+      Object.assign(filesystem, {
+        watch: vi.fn((_request: unknown, handler: (event: WatchEvent) => void) => {
+          watchHandler = handler;
+          return vi.fn();
+        }),
+      });
+      const worker = new MockKernelWorker({ middleware: [], onLog: noopLog, filesystem });
+      // @ts-expect-error - install the watch-capable proxy seam exercised by production initialization
+      worker.fileSystem = filesystem;
+      const file = createGeometryFile('sub/main.ts');
+
+      try {
+        await worker.handleStageAndOpenFile({ renderId: previewId(201), stage: {}, file, parameters: {} });
+        await vi.waitFor(() => {
+          expect(watchHandler).toBeDefined();
+        });
+        const staged = new Uint8Array(stored);
+        await worker.handleStageAndOpenFile({
+          renderId: previewId(202),
+          stage: { 'sub/main.ts': staged },
+          file,
+          parameters: {},
+        });
+
+        expect(filesystem.mocks.writeFile).not.toHaveBeenCalled();
+        expect(filesystem.mocks.mkdir).not.toHaveBeenCalled();
+        // @ts-expect-error - white-box: the staged bytes are the path's observed revision.
+        expect(worker.fileContentCache.get('sub/main.ts')).toBe(staged);
+        expect(worker.createGeometryCalls).toBe(2);
+
+        const states: string[] = [];
+        worker.onStateChanged = ({ state }) => states.push(state);
+        const reads = filesystem.mocks.readFile.mock.calls.length;
+        watchHandler!({ type: 'change', path: 'sub/main.ts' });
+        await vi.waitFor(() => {
+          expect(filesystem.mocks.readFile.mock.calls.length).toBeGreaterThan(reads);
+        });
+        await flushMicrotasks();
+
+        expect(states).toEqual([]);
+        expect(worker.createGeometryCalls).toBe(2);
+      } finally {
+        await worker.cleanup();
+      }
+    });
+
     it('opens the entry without staging when the stage map is empty', async () => {
       const filesystem = createMockFileSystem();
       filesystem.mocks.readFiles.mockResolvedValue({
@@ -3235,7 +3286,8 @@ describe('preview admission invariants', () => {
       await stageWriteEntered.promise;
       await flushMicrotasks();
 
-      expect(filesystem.mocks.readFile).not.toHaveBeenCalled();
+      // Staging reads once to learn whether storage already holds the bytes; the write's own watch echo reads nothing.
+      expect(filesystem.mocks.readFile).toHaveBeenCalledTimes(1);
       releaseStageWrite.resolve();
       await expect(result).resolves.toMatchObject({ success: true });
       // @ts-expect-error - wait for the production watch reconciliation lane to settle

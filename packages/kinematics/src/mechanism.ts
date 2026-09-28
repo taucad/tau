@@ -373,7 +373,10 @@ const checkJoint = (joint: unknown, path: string): Issue[] => {
     return [problem('UNSUPPORTED_JOINT', `${path}/type`, `Joint type ${show(type)} is not supported.`)];
   }
   const spec = jointSpecs[type];
-  const issues = unknownKeys(joint, ['type', 'parent', 'child', 'origin', ...spec.keys], path);
+  const issues = unknownKeys(joint, ['type', 'name', 'parent', 'child', 'origin', ...spec.keys], path);
+  if (joint['name'] !== undefined && typeof joint['name'] !== 'string') {
+    issues.push(problem('INVALID_SHAPE', `${path}/name`, 'A joint name must be a string.'));
+  }
   for (const key of ['parent', 'child']) {
     if (typeof joint[key] !== 'string') {
       issues.push(problem('INVALID_SHAPE', `${path}/${key}`, `Joint ${key} must be a link id string.`));

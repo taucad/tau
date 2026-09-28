@@ -89,9 +89,8 @@ describe('GLTF surface depth bias', () => {
     },
   );
 
-  it('restores the original state when component appearance becomes transparent', () => {
+  it('turns the bias off when component appearance becomes transparent, and back on when it is opaque again', () => {
     const material = new MeshStandardMaterial();
-    const priorHook = material.onBeforeCompile;
 
     applyGltfSurfaceDepthBias(material, 'webgl');
     material.transparent = true;
@@ -100,8 +99,35 @@ describe('GLTF surface depth bias', () => {
     applyGltfSurfaceDepthBias(material, 'webgl');
 
     expect(material.polygonOffset).toBe(false);
-    expect(material.onBeforeCompile).toBe(priorHook);
+    expect(compile(material).fragmentShader).not.toContain('tauSurfaceDepthOffset');
     expect(material.customProgramCacheKey()).not.toContain('tau-gltf-surface-depth-bias');
+
+    material.transparent = false;
+    material.depthWrite = true;
+    material.opacity = 1;
+    applyGltfSurfaceDepthBias(material, 'webgl');
+
+    expect(material.polygonOffset).toBe(true);
+    expect(compile(material).fragmentShader.match(/float tauSurfaceDepthOffset/g)).toHaveLength(1);
+    expect(material.customProgramCacheKey()).toContain('tau-gltf-surface-depth-bias');
+  });
+
+  it('keeps a hook composed after it when the bias turns off', () => {
+    const material = new MeshStandardMaterial();
+    applyGltfSurfaceDepthBias(material, 'webgl');
+    const biasHook = material.onBeforeCompile;
+    const laterHook = vi.fn();
+    material.onBeforeCompile = (shader, renderer): void => {
+      biasHook.call(material, shader, renderer);
+      laterHook();
+    };
+    material.transparent = true;
+    material.opacity = 0.5;
+
+    applyGltfSurfaceDepthBias(material, 'webgl');
+    compile(material);
+
+    expect(laterHook).toHaveBeenCalledOnce();
   });
 
   it('never biases an overlay, so nothing drawn over a surface can tie its depth', () => {

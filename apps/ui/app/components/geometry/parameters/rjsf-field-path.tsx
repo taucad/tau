@@ -1,6 +1,7 @@
 import { getDefaultRegistry } from '@rjsf/core';
+import { deepEquals } from '@rjsf/utils';
 import type { FieldProps, RegistryFieldsType, RJSFSchema } from '@rjsf/utils';
-import { createContext, createElement, useContext, useMemo } from 'react';
+import { createContext, createElement, memo, useContext, useMemo } from 'react';
 import type { RJSFContext } from '#components/geometry/parameters/rjsf-context.js';
 
 type RenderedFieldPath = {
@@ -18,7 +19,9 @@ const DefaultSchemaField = (() => {
   return field;
 })();
 
-const SchemaField = (props: FieldProps<Record<string, unknown>, RJSFSchema, RJSFContext>) => {
+/* `ObjectField` re-renders every child on any form data change; skipping on RJSF's own
+ * `SchemaField.shouldComponentUpdate` rule keeps a commit from re-rendering every field's wrapper. */
+const SchemaField = memo(function SchemaField(props: FieldProps<Record<string, unknown>, RJSFSchema, RJSFContext>) {
   const parent = useContext(renderedFieldPathContext);
   const fieldId = props.idSchema.$id;
   const indexValue: unknown = Object.getOwnPropertyDescriptor(props, 'index')?.value;
@@ -35,7 +38,7 @@ const SchemaField = (props: FieldProps<Record<string, unknown>, RJSFSchema, RJSF
       {createElement(DefaultSchemaField, props)}
     </renderedFieldPathContext.Provider>
   );
-};
+}, deepEquals);
 
 export const rjsfFields: RegistryFieldsType<Record<string, unknown>, RJSFSchema, RJSFContext> = { SchemaField };
 

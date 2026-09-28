@@ -139,6 +139,17 @@ const testPassSchema = z.object({
  */
 export type TestPass = z.infer<typeof testPassSchema>;
 
+/** Full GeoSpec result retained when its inline MCP response would be too large. @public */
+export const testModelResultArtifactSchema = z
+  .object({
+    path: z.string().regex(/^attachments\/[\da-f]{64}\.json$/u),
+    absolutePath: z.string().min(1),
+    mimeType: z.literal('application/json'),
+    byteLength: z.number().int().positive(),
+    sha256: z.string().regex(/^[\da-f]{64}$/u),
+  })
+  .strict();
+
 /**
  * Output schema for test_model tool.
  * Includes both failures (with detailed feedback) and passes (for UI display).
@@ -153,6 +164,12 @@ export const testModelOutputSchema = z.object({
     .array(sourceRevisionSchema)
     .optional()
     .describe('One entry per model the run loaded, naming the source it was evaluated from (R4).'),
+  fullResult: testModelResultArtifactSchema
+    .optional()
+    .describe('Full result artifact when inline details were reduced'),
+  omittedFailures: z.number().int().nonnegative().optional(),
+  omittedPasses: z.number().int().nonnegative().optional(),
+  omittedSourceRevisions: z.number().int().nonnegative().optional(),
 });
 /**
  * Inferred aggregate output from `test_model` / GeoSpec evaluation runs.

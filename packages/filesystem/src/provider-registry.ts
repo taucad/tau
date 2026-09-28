@@ -209,7 +209,15 @@ export class ProviderRegistry {
           throw new Error('This host has no node filesystem transport; a node storage root is unreachable.');
         }
         this._nodeFsChannel ??= this._openNodeFsChannel(this._createNodeFsPort);
-        return new NodeFsProviderClient(await this._nodeFsChannel, scope.path);
+        const opening = this._nodeFsChannel;
+        try {
+          return new NodeFsProviderClient(await opening, scope.path);
+        } catch (error) {
+          if (this._nodeFsChannel === opening) {
+            this._nodeFsChannel = undefined;
+          }
+          throw error;
+        }
       }
       default: {
         throw new Error(`Unknown backend: ${(scope as { backend: string }).backend}`);

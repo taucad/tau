@@ -9,7 +9,7 @@
 import type { MyMessagePart } from '@taucad/chat';
 import { isRecord } from '@taucad/utils/schema';
 import { agentApprovalToolName } from '#services/agent-host-event-projection.js';
-import { summarizeExternalCall } from '#utils/shell-command-summary.js';
+import { summarizeExternalCall } from '#utils/external-call-summary.js';
 
 export type ActivityCategory = 'text' | 'reasoning' | 'research' | 'write' | 'data' | 'skip';
 
@@ -198,6 +198,12 @@ const externalCallFacts = (part: MyMessagePart): { title: string | undefined; lo
   };
 };
 
+/** The summary an external call renders under, when Tau can name it. */
+const externalSummary = (part: MyMessagePart) =>
+  part.type === 'dynamic-tool'
+    ? summarizeExternalCall({ ...externalCallFacts(part), kind: externalToolKind(part), input: part.input })
+    : undefined;
+
 const tauMcpToolName = (part: MyMessagePart): string | undefined => {
   const tau = tauFacts(part);
   const nativeName = tau?.['nativeName'];
@@ -215,11 +221,7 @@ export const activityFamily = (part: MyMessagePart): ActivityFamily => {
     return nativeFamilies.get(nativeName) ?? 'other';
   }
   const kind = externalToolKind(part);
-  const summary =
-    part.type === 'dynamic-tool'
-      ? summarizeExternalCall({ ...externalCallFacts(part), kind, input: part.input })
-      : undefined;
-  return summary?.family ?? externalFamilies.get(kind ?? '') ?? 'other';
+  return externalSummary(part)?.family ?? externalFamilies.get(kind ?? '') ?? 'other';
 };
 
 /** Classify one message part without reordering it. */
@@ -281,9 +283,14 @@ const partState = (part: MyMessagePart): ActivityState => {
  */
 export const isActivityPartActive = (part: MyMessagePart): boolean => partState(part) === 'active';
 
-const displayTitle = (part: MyMessagePart): string => {
+const displayTitle = (part: MyMessagePart, isActive: boolean): string => {
   if (part.type !== 'dynamic-tool') {
     return 'Tool call';
+  }
+  /* The card's own phrase, so "Interact with subagent x" reads "Messaged subagent x" in both. */
+  const summary = externalSummary(part);
+  if (summary !== undefined) {
+    return `${isActive ? summary.activeVerb : summary.verb} ${isActive ? summary.activeDetail : summary.detail}`.trim();
   }
   const title = tauFacts(part)?.['title'];
   return typeof title === 'string' && title.trim() !== '' ? title.trim() : part.toolName;
@@ -330,9 +337,11 @@ export const describeActivity = (parts: readonly MyMessagePart[]): string => {
       const { state, suffix } = familyState(familyParts);
       const phrase =
         family === 'other'
-          ? `${displayTitle(familyParts.at(-1)!)}${
+          ? `${displayTitle(familyParts.at(-1)!, state === 'active')}${
               state === 'active'
-                ? ' — running'
+                ? externalSummary(familyParts.at(-1)!) === undefined
+                  ? ' — running'
+                  : ''
                 : state === 'approval'
                   ? ' — awaiting approval'
                   : state === 'error'

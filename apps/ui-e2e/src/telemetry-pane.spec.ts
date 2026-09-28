@@ -53,7 +53,7 @@ const openSecondGeometryUnit = async (): Promise<void> => {
   }
 
   await target.hover(treeItem(secondaryPath));
-  await target.click(selectors.getByRole('button', { name: 'Actions for box-corner.js' }));
+  await target.click(selectors.getByRole('button', { name: 'More actions for box-corner.js', exact: true }));
   await target.click(selectors.getByRole('menuitem', { name: 'Open in Viewer' }));
   await target.expectVisible(selectors.getByCss(`.dv-tab[aria-label="${secondaryPath}"]`), 60_000);
 };
@@ -148,10 +148,10 @@ test('modernizes Telemetry as a filterable, truthful, accessible trace explorer'
   await target.expectAttribute(main, 'aria-expanded', 'true');
   await target.expectAttribute(secondary, 'aria-expanded', 'false');
 
-  const filter = selectors.getByRole('textbox', { name: 'Filter telemetry' });
+  const filter = selectors.getByRole('searchbox', { name: 'Filter telemetry' });
   await target.expectVisible(filter);
   await target.expectAttribute(filter, 'placeholder', 'Filter telemetry...');
-  await target.expectCount(selectors.getByRole('textbox', { name: 'Filter telemetry' }), 1);
+  await target.expectCount(selectors.getByRole('searchbox', { name: 'Filter telemetry' }), 1);
   await target.expectCount(selectors.getByRole('button', { name: /show search|hide search/iu }), 0);
 
   await target.expectVisible(selectors.getByRole('button', { name: /^Selected trace: Latest$/u }), 60_000);

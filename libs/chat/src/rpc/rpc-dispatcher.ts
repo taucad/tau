@@ -49,7 +49,7 @@ export function createRpcDispatcher(deps: RpcDependencies): RpcDispatcher {
     [rpcName.globSearch]: async (args) => handleGlobSearch(args, deps.fileSystem),
     [rpcName.getKernelResult]: async (args, context) => handleGetKernelResult(args, deps.kernelClient, context),
     [rpcName.captureImages]: async (args, context) => handleCaptureImages(args, deps.images, context),
-    [rpcName.runGeoSpecTests]: async (args) => handleRunGeoSpecTests(args, deps.geospec),
+    [rpcName.runGeoSpecTests]: async (args, context) => handleRunGeoSpecTests(args, deps.geospec, context),
     [rpcName.exportGeometry]: async (args, context) =>
       handleExportGeometry(args, { graphics: deps.graphics, fileSystem: deps.fileSystem }, context),
     [rpcName.appendFile]: async (args) => handleAppendFile(args, deps.fileSystem),

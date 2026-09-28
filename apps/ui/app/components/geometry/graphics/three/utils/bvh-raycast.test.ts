@@ -1,13 +1,29 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
+import { isSectionRemoved, resolveSectionPieces } from '#components/geometry/graphics/section-cuts.js';
+import type { SectionCut } from '#components/geometry/graphics/section-cuts.js';
 import * as bvhCache from '#components/geometry/graphics/three/utils/bvh-cache.js';
 import { raycastFirstVisibleMeshHit } from '#components/geometry/graphics/three/utils/bvh-raycast.js';
+import type { RaycastClipState } from '#components/geometry/graphics/three/utils/bvh-raycast.js';
 
 function createTriangleMesh(z: number): THREE.Mesh {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array([-1, -1, z, 1, -1, z, 0, 1, z]), 3));
   return new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }));
 }
+
+/** One triangle per corner list, double-sided. */
+function createTrianglesMesh(triangles: ReadonlyArray<readonly number[]>): THREE.Mesh {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(triangles.flat()), 3));
+  return new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }));
+}
+
+/** The clip of `cuts`, with metres as render units. */
+const clipOf = (...cuts: SectionCut[]): RaycastClipState => ({ enabled: true, pieces: resolveSectionPieces(cuts) });
+
+/** Removes everything above z = -1.5. */
+const aboveMinusOnePointFive: SectionCut = { id: 'xy', kind: 'plane', plane: 'xy', offset: -1.5, isFlipped: false };
 
 function createDoubleTriangleMesh(): THREE.Mesh {
   const geometry = new THREE.BufferGeometry();
@@ -170,10 +186,7 @@ describe('raycastFirstVisibleMeshHit', () => {
     const hit = raycastFirstVisibleMeshHit({
       raycaster,
       meshes: [mesh],
-      clipping: {
-        enabled: true,
-        planes: [new THREE.Plane(new THREE.Vector3(0, 0, -1), -1.5)],
-      },
+      clipping: clipOf(aboveMinusOnePointFive),
     });
 
     expect(hit?.object).toBe(mesh);
@@ -189,10 +202,7 @@ describe('raycastFirstVisibleMeshHit', () => {
     const hit = raycastFirstVisibleMeshHit({
       raycaster,
       meshes: [mesh],
-      clipping: {
-        enabled: false,
-        planes: [new THREE.Plane(new THREE.Vector3(0, 0, -1), -1.5)],
-      },
+      clipping: { ...clipOf(aboveMinusOnePointFive), enabled: false },
     });
 
     expect(hit?.object).toBe(mesh);
@@ -215,10 +225,76 @@ describe('raycastFirstVisibleMeshHit', () => {
     const hit = raycastFirstVisibleMeshHit({
       raycaster,
       meshes: [mesh],
-      clipping: { enabled: true, planes: [new THREE.Plane(new THREE.Vector3(0, 0, -1), -1.5)] },
+      clipping: clipOf(aboveMinusOnePointFive),
     });
 
     expect(hit?.distance).toBeCloseTo(2);
     expect(hit?.point.z).toBeCloseTo(-2);
+  });
+
+  it('should keep the hit between two narrow cutaways and reject the hits inside them', () => {
+    // Triangles across the ray x = 0.5, z = 0 at y = 2 (75° about Z), 0.2 (22°) and -2 (284°).
+    const mesh = createTrianglesMesh([2, 0.2, -2].map((y) => [0, y, -1, 1, y, -1, 0.5, y, 1]));
+    const raycaster = new THREE.Raycaster(new THREE.Vector3(0.5, 10, 0), new THREE.Vector3(0, -1, 0));
+    const wedge = (id: string, start: number): SectionCut => ({
+      id,
+      kind: 'revolution',
+      axis: 'z',
+      origin: [0, 0, 0],
+      start,
+      sweep: 60,
+    });
+
+    const hit = raycastFirstVisibleMeshHit({
+      raycaster,
+      meshes: [mesh],
+      clipping: clipOf(wedge('around +y', 60), wedge('around -y', 240)),
+    });
+
+    expect(hit?.point.y).toBeCloseTo(0.2);
+  });
+
+  it('should keep a hit on a cut face', () => {
+    const mesh = createTrianglesMesh([
+      [-1, -1, -1.5, 1, -1, -1.5, 0, 1, -1.5],
+      [-1, -1, -2, 1, -1, -2, 0, 1, -2],
+    ]);
+    const raycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, 0, -1));
+
+    const hit = raycastFirstVisibleMeshHit({ raycaster, meshes: [mesh], clipping: clipOf(aboveMinusOnePointFive) });
+
+    expect(hit?.point.z).toBeCloseTo(-1.5);
+  });
+
+  it('should keep a hit on an oblique cut face that rounding puts a hair past it', () => {
+    // The start face of a 45° to 135° cutaway about X lies on z = y. cos 45° and sin 45° round an ulp apart, so
+    // (0, 0.5, 0.5), exactly on the face, tests 6e-17 past it: removed with no margin, and kept with the +ε one.
+    const cutaway: SectionCut = {
+      id: 'oblique',
+      kind: 'revolution',
+      axis: 'x',
+      origin: [0, 0, 0],
+      start: 45,
+      sweep: 90,
+    };
+    const clipping = clipOf(cutaway);
+    expect(isSectionRemoved([0, 0.5, 0.5], clipping.pieces)).toBe(true);
+    const mesh = createTrianglesMesh([[-1, 0.25, 0.25, 1, 0.25, 0.25, 0, 1, 1]]);
+    // Up from the kept side under the face, onto an exact point of it.
+    const raycaster = new THREE.Raycaster(new THREE.Vector3(0, 0.5, 0), new THREE.Vector3(0, 0, 1));
+
+    const hit = raycastFirstVisibleMeshHit({ raycaster, meshes: [mesh], clipping });
+
+    expect(hit?.point.toArray()).toEqual([0, 0.5, 0.5]);
+  });
+
+  it('should reject a hit on the plane the halves of a cutaway wider than 180° share', () => {
+    // 45° to 315° about Z: the halves meet on the -X half of y = 0, inside the removed wedge.
+    const mesh = createTrianglesMesh([[-1, 0, -1, -3, 0, -1, -2, 0, 1]]);
+    const raycaster = new THREE.Raycaster(new THREE.Vector3(-2, 5, 0), new THREE.Vector3(0, -1, 0));
+    const cutaway: SectionCut = { id: 'wide', kind: 'revolution', axis: 'z', origin: [0, 0, 0], start: 45, sweep: 270 };
+
+    expect(raycastFirstVisibleMeshHit({ raycaster, meshes: [mesh] })?.point.y).toBeCloseTo(0);
+    expect(raycastFirstVisibleMeshHit({ raycaster, meshes: [mesh], clipping: clipOf(cutaway) })).toBeUndefined();
   });
 });

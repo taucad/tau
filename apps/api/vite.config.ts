@@ -2,7 +2,6 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { defineConfig } from 'vite';
-import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 import { viteStaticCopy } from 'vite-plugin-static-copy';
 import { VitePluginNode as vitePluginNode } from 'vite-plugin-node';
 import { oxcRuntimeEsm } from '@taucad/vite/oxc-runtime-esm';
@@ -69,7 +68,6 @@ export default defineConfig(({ command, mode }) => {
     },
     plugins: [
       oxcRuntimeEsm(),
-      nxViteTsPaths(),
       viteStaticCopy({
         // `vite-plugin-node` builds an SSR environment; the plugin defaults to
         // 'client' and silently no-ops without this override (broke when

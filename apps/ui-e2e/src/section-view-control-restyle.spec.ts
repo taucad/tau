@@ -1,129 +1,45 @@
-import { expect, test } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { page as selectors } from 'vitest/browser';
+import { dismissCookies } from '#support/chat-attachments.js';
 import * as target from '#support/external-target.js';
+
+type Point = readonly [number, number, number];
+type ProjectedPoint = { x: number; y: number; visible: boolean };
+type RenderFrame = { anchorFrameId: string; originMeters: Point; metersPerRenderUnit: number };
+type SectionCut =
+  | { id: string; kind: 'plane'; plane: 'xy' | 'xz' | 'yz'; offset: number; isFlipped: boolean }
+  | { id: string; kind: 'revolution'; axis: 'x' | 'y' | 'z'; start: number; sweep: number };
 
 type SectionViewBridgeWindow = Window & {
   __TAU_SECTION_VIEW_TEST__?: {
-    showPlaneSelectors(): void;
-    getSelectorLabels(): string[];
-    setSectionView(state: {
-      plane: 'xy' | 'xz' | 'yz';
-      direction?: 1 | -1;
-      rotationRadians?: readonly [number, number, number];
-      pivot?: readonly [number, number, number];
-      translation?: number;
-    }): void;
-    setCamera(camera: {
-      position: readonly [number, number, number];
-      target?: readonly [number, number, number];
-      fov?: number;
-      zoom?: number;
-    }): void;
-    getPresentation(): {
-      sectionViewPivot: readonly [number, number, number];
-    };
-    getRenderFrame(): {
-      anchorFrameId: string;
-      originMeters: readonly [number, number, number];
-      metersPerRenderUnit: number;
-    };
-    setRenderFrame(renderFrame: {
-      anchorFrameId: string;
-      originMeters: readonly [number, number, number];
-      metersPerRenderUnit: number;
-    }): void;
-    projectWorldPoint(point: readonly [number, number, number]): { x: number; y: number; visible: boolean };
-    projectSectionTransformHandle(axis: 'X' | 'Y' | 'Z'): { x: number; y: number; visible: boolean } | undefined;
+    setSectionCuts(cuts: ReadonlyArray<{ kind: 'plane'; plane: 'xy' | 'xz' | 'yz' }>): string[];
+    selectSectionCut(id: string | undefined): void;
+    getSectionState(): { cuts: SectionCut[] };
+    projectSectionHandle(kind: 'plane', cutId: string): ProjectedPoint | undefined;
+    setCamera(camera: { position: Point; target?: Point; fov?: number; zoom?: number }): void;
+    getRenderFrame(): RenderFrame;
+    setRenderFrame(renderFrame: RenderFrame): void;
+    projectWorldPoint(point: Point): ProjectedPoint;
   };
 };
 
-type PixelStats = Readonly<{
-  sampledPixels: number;
-  distinctBuckets: number;
-  whiteish: number;
-  reddish: number;
-  greenish: number;
-  blueish: number;
-  darkTextish: number;
-  softTextEdge: number;
-}>;
-
-type CanvasSampleRegion = Readonly<{
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}>;
+type PixelStats = Readonly<{ sampledPixels: number; blueish: number; darkTextish: number }>;
+type CanvasSampleRegion = Readonly<{ x: number; y: number; width: number; height: number }>;
 
 const previewCanvasSelector = 'canvas[data-engine]';
 const sectionControlFixtureRoute = (backend: 'webgl' | 'webgpu'): string =>
   `/__e2e/example-fixture?locator=jscad.cube-cylinder-section-fixture&graphicsBackend=${backend}`;
-const expectedFaceSelectorLabels = ['Back', 'Bottom', 'Front', 'Left', 'Right', 'Top'];
+/** The fixture's bounds centre: a 50 mm cube standing on the XY plane. A plane's arrow stands on it. */
+const fixtureCenter: Point = [0, 0, 0.025];
 
 async function openSectionControlFixture(backend: 'webgl' | 'webgpu' = 'webgl'): Promise<void> {
   await target.setViewport({ width: 960, height: 720 });
   await target.navigate(sectionControlFixtureRoute(backend));
   await target.expectVisible(selectors.getByCss(previewCanvasSelector), 60_000);
+  // The banner sits over the bar's centre and the view cube's corner.
+  await dismissCookies();
   await target.expectGraphicsBackend(backend);
   await target.expectGeometryFramed();
-}
-
-async function driveObliqueTransformControls(): Promise<void> {
-  await target.evaluate(() => {
-    const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
-    if (!bridge) {
-      throw new Error('Section view e2e bridge is not installed.');
-    }
-
-    bridge.setCamera({
-      position: [0.072, -0.088, 0.054],
-      target: [0, 0, 0.008],
-      fov: 42,
-      zoom: 1.15,
-    });
-    bridge.setSectionView({
-      plane: 'yz',
-      direction: 1,
-      rotationRadians: [0, 0.44, 0],
-      pivot: [0, 0, 0.008],
-      translation: 0,
-    });
-  });
-}
-
-async function driveStackedPlaneSelectors(side: 'front' | 'reverse' = 'front'): Promise<void> {
-  const position = side === 'front' ? ([0.052, -0.068, 0.048] as const) : ([-0.052, 0.068, -0.048] as const);
-
-  await target.evaluate((nextPosition) => {
-    const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
-    if (!bridge) {
-      throw new Error('Section view e2e bridge is not installed.');
-    }
-
-    bridge.showPlaneSelectors();
-    const pivot = bridge.getPresentation().sectionViewPivot;
-    bridge.setCamera({
-      position: [pivot[0] + nextPosition[0], pivot[1] + nextPosition[1], pivot[2] + nextPosition[2]],
-      target: pivot,
-      fov: 38,
-      zoom: 1.4,
-    });
-  }, position);
-}
-
-async function expectAllFaceSelectorLabelsMounted(): Promise<void> {
-  await expect
-    .poll(async () =>
-      target.evaluate(() => {
-        const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
-        if (!bridge) {
-          throw new Error('Section view e2e bridge is not installed.');
-        }
-
-        return bridge.getSelectorLabels().sort();
-      }),
-    )
-    .toEqual(expectedFaceSelectorLabels);
 }
 
 async function waitForTwoAnimationFrames(): Promise<void> {
@@ -139,10 +55,72 @@ async function waitForTwoAnimationFrames(): Promise<void> {
   );
 }
 
-async function captureSectionCanvas(fileName: string): Promise<string> {
-  const canvas = selectors.getByCss(previewCanvasSelector);
-  await target.expectVisible(canvas, 60_000);
-  return target.screenshot(canvas, fileName);
+async function readCuts(): Promise<SectionCut[]> {
+  return target.evaluate(
+    () => (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__!.getSectionState().cuts,
+  );
+}
+
+async function readPlaneOffset(cutId: string): Promise<number | undefined> {
+  const cuts = await readCuts();
+  const cut = cuts.find(({ id }) => id === cutId);
+  return cut?.kind === 'plane' ? cut.offset : undefined;
+}
+
+async function projectArrow(cutId: string): Promise<ProjectedPoint | undefined> {
+  return target.evaluate(
+    (id) =>
+      (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__!.projectSectionHandle('plane', id),
+    cutId,
+  );
+}
+
+/** Cuts on `plane` through the bounds centre and selects the cut, so its push-pull arrow is drawn. */
+async function selectPlaneCut(
+  plane: 'xy' | 'yz',
+  camera: { position: Point; target: Point; fov: number; zoom: number },
+): Promise<string> {
+  const cutId = await target.evaluate(
+    ({ nextPlane, nextCamera }) => {
+      const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+      if (!bridge) {
+        throw new Error('Section view e2e bridge is not installed.');
+      }
+      bridge.setCamera(nextCamera);
+      const [id] = bridge.setSectionCuts([{ kind: 'plane', plane: nextPlane }]);
+      bridge.selectSectionCut(id);
+      return id!;
+    },
+    { nextPlane: plane, nextCamera: camera },
+  );
+  await waitForTwoAnimationFrames();
+  return cutId;
+}
+
+/** The arrow on screen, and a unit screen direction along the plane's normal from it. */
+async function readArrow(
+  cutId: string,
+  normal: Point,
+): Promise<{ handle: ProjectedPoint; unitX: number; unitY: number; offset: number }> {
+  const offset = await readPlaneOffset(cutId);
+  if (offset === undefined) {
+    throw new Error(`Plane cut ${cutId} is missing.`);
+  }
+  const axisIndex = normal.indexOf(1);
+  const ahead = fixtureCenter.map((value, index) => (index === axisIndex ? offset : value) + normal[index]! * 0.01);
+  const handle = await projectArrow(cutId);
+  const axisPoint = await target.evaluate(
+    (point) => (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__!.projectWorldPoint(point),
+    ahead as unknown as Point,
+  );
+  if (!handle?.visible) {
+    throw new Error(`The arrow of ${cutId} is not on screen: ${JSON.stringify(handle)}`);
+  }
+  const directionX = axisPoint.x - handle.x;
+  const directionY = axisPoint.y - handle.y;
+  const length = Math.hypot(directionX, directionY);
+  expect(length, 'the plane normal should not point at the camera').toBeGreaterThan(0);
+  return { handle, unitX: directionX / length, unitY: directionY / length, offset };
 }
 
 async function samplePng(pngBase64: string, region: CanvasSampleRegion): Promise<PixelStats> {
@@ -183,102 +161,65 @@ async function samplePng(pngBase64: string, region: CanvasSampleRegion): Promise
       );
 
       const { data } = context.getImageData(0, 0, sampleWidth, sampleHeight);
-      const histogram = new Map<number, number>();
-      let whiteish = 0;
-      let reddish = 0;
-      let greenish = 0;
       let blueish = 0;
       let darkTextish = 0;
-      let softTextEdge = 0;
-
       for (let index = 0; index < data.length; index += 4) {
         const r = data[index]!;
         const g = data[index + 1]!;
         const b = data[index + 2]!;
-        const maxChannelDelta = Math.max(Math.abs(r - g), Math.abs(g - b), Math.abs(r - b));
-        const bucket = Math.floor(r / 8) * 1024 + Math.floor(g / 8) * 32 + Math.floor(b / 8);
-        histogram.set(bucket, (histogram.get(bucket) ?? 0) + 1);
-
-        whiteish += Number(r > 180 && g > 180 && b > 180 && maxChannelDelta < 18);
-        reddish += Number(r > 145 && r > g + 25 && r > b + 25);
-        greenish += Number(g > 135 && g > r + 20 && g > b + 10);
         blueish += Number(b > 145 && b > r + 25 && b > g + 20);
         darkTextish += Number(r < 65 && g < 65 && b < 65);
-        softTextEdge += Number(
-          r >= 65 && r <= 190 && g >= 65 && g <= 190 && b >= 65 && b <= 190 && maxChannelDelta < 18,
-        );
       }
 
-      return {
-        sampledPixels: sampleWidth * sampleHeight,
-        distinctBuckets: histogram.size,
-        whiteish,
-        reddish,
-        greenish,
-        blueish,
-        darkTextish,
-        softTextEdge,
-      };
+      return { sampledPixels: sampleWidth * sampleHeight, blueish, darkTextish };
     },
     { pngBase64, sampleRegion: region },
   );
 }
 
-test.describe('Section view control restyle regressions', () => {
-  test('keeps React updates bounded during a sustained physical section-plane drag', async () => {
+/**
+ * The plane picker's square in page pixels, placed as `resolveSectionPlanePickerRect` places it: 11/12 of the view
+ * cube's size, just left of the cube and centred on it vertically.
+ */
+async function readPickerSquare(): Promise<{
+  canvas: Readonly<{ x: number; y: number; width: number; height: number }>;
+  left: number;
+  top: number;
+  size: number;
+}> {
+  const canvasBox = await target.boundingBox(selectors.getByCss(previewCanvasSelector));
+  const cubeBox = await target.boundingBox(selectors.getByCss('.viewport-gizmo-cube'));
+  if (!canvasBox || !cubeBox) {
+    throw new Error('The canvas or the view cube has no rendered box.');
+  }
+  const cubeSize = Math.min(cubeBox.width, cubeBox.height);
+  const size = Math.round((cubeSize * 11) / 12);
+  return { canvas: canvasBox, left: cubeBox.x + cubeSize / 24 - size, top: cubeBox.y + (cubeSize - size) / 2, size };
+}
+
+describe('Section view controls', () => {
+  it('should keep React updates bounded during a sustained plane-arrow drag', async () => {
     await openSectionControlFixture('webgl');
-    await target.evaluate(() => {
-      const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
-      if (!bridge) {
-        throw new Error('Section view e2e bridge is not installed.');
-      }
-
-      bridge.setCamera({
-        position: [0.096, -0.11, 0.078],
-        target: [0, 0, 0],
-        fov: 36,
-        zoom: 1.05,
-      });
-      bridge.setSectionView({
-        plane: 'xy',
-        direction: 1,
-        rotationRadians: [0, 0, 0],
-        pivot: [0, 0, 0],
-        translation: 0,
-      });
+    const cutId = await selectPlaneCut('xy', {
+      position: [0.096, -0.11, 0.078],
+      target: [0, 0, 0.025],
+      fov: 36,
+      zoom: 1.05,
     });
-    await waitForTwoAnimationFrames();
-
-    const before = await target.evaluate(() => {
-      const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
-      return {
-        handle: bridge.projectSectionTransformHandle('Z'),
-        pivot: bridge.getPresentation().sectionViewPivot,
-        axisPoint: bridge.projectWorldPoint([0, 0, 0.01]),
-      };
-    });
-    expect(before.handle?.visible).toBe(true);
-    const directionX = before.axisPoint.x - before.handle!.x;
-    const directionY = before.axisPoint.y - before.handle!.y;
-    const directionLength = Math.hypot(directionX, directionY);
-    expect(directionLength).toBeGreaterThan(0);
-    const unitX = directionX / directionLength;
-    const unitY = directionY / directionLength;
+    const { handle, unitX, unitY, offset: startOffset } = await readArrow(cutId, [0, 0, 1]);
     const eventBaseline = await target.events();
-    let movedPivot = before.pivot;
 
-    await target.mouseMove(before.handle!.x, before.handle!.y);
+    await target.mouseMove(handle.x, handle.y);
     await target.mouseDown();
     try {
-      await target.mouseMove(before.handle!.x + unitX * 28, before.handle!.y + unitY * 28, { steps: 12 });
-      movedPivot = await target.evaluate(
-        () =>
-          (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__!.getPresentation()
-            .sectionViewPivot,
-      );
-
-      await target.mouseMove(before.handle!.x - unitX * 28, before.handle!.y - unitY * 28, { steps: 64 });
-      await target.mouseMove(before.handle!.x + unitX * 36, before.handle!.y + unitY * 36, { steps: 64 });
+      await target.mouseMove(handle.x + unitX * 28, handle.y + unitY * 28, { steps: 12 });
+      await expect
+        .poll(async () => (await readPlaneOffset(cutId)) ?? startOffset, {
+          message: 'dragging the arrow along the normal should move the plane along it',
+        })
+        .toBeGreaterThan(startOffset);
+      await target.mouseMove(handle.x - unitX * 28, handle.y - unitY * 28, { steps: 64 });
+      await target.mouseMove(handle.x + unitX * 36, handle.y + unitY * 36, { steps: 64 });
     } finally {
       await target.mouseUp();
     }
@@ -293,197 +234,152 @@ test.describe('Section view control restyle regressions', () => {
         .map(({ text }) => text),
     ].filter((message) => message.includes('Maximum update depth exceeded'));
 
-    expect(updateDepthFailures, 'sustained section dragging should not recursively update React').toEqual([]);
-    expect(
-      movedPivot.some((value, index) => Math.abs(value - before.pivot[index]!) > 1e-6),
-      'the physical transform handle should move the section pivot',
-    ).toBe(true);
+    expect(updateDepthFailures, 'a sustained arrow drag should not recursively update React').toEqual([]);
     await target.expectVisible(selectors.getByCss(previewCanvasSelector));
   });
 
   for (const backend of ['webgl', 'webgpu'] as const) {
-    test(`keeps real section-arrow drags physical across render-frame retargeting in ${backend}`, async () => {
+    it(`should keep plane-arrow drags physical across render-frame retargeting in ${backend}`, async () => {
       await openSectionControlFixture(backend);
-      await driveObliqueTransformControls();
-      await waitForTwoAnimationFrames();
-      const before = await target.evaluate(() => {
-        const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
-        return {
-          handle: bridge.projectSectionTransformHandle('X'),
-          pivot: bridge.getPresentation().sectionViewPivot,
-          axisPoint: bridge.projectWorldPoint([0.01, 0, 0.008]),
-        };
+      const cutId = await selectPlaneCut('yz', {
+        position: [0.072, -0.088, 0.054],
+        target: [0, 0, 0.025],
+        fov: 42,
+        zoom: 1.15,
       });
-      expect(before.handle?.visible).toBe(true);
-      const directionX = before.axisPoint.x - before.handle!.x;
-      const directionY = before.axisPoint.y - before.handle!.y;
-      const directionLength = Math.hypot(directionX, directionY);
-      expect(directionLength).toBeGreaterThan(0);
+      const before = await readArrow(cutId, [1, 0, 0]);
       const dragPixels = 36;
 
-      await target.mouseMove(before.handle!.x, before.handle!.y);
+      await target.mouseMove(before.handle.x, before.handle.y);
       await target.mouseDown();
-      await target.mouseMove(
-        before.handle!.x + (directionX / directionLength) * dragPixels,
-        before.handle!.y + (directionY / directionLength) * dragPixels,
-        { steps: 8 },
-      );
+      await target.mouseMove(before.handle.x + before.unitX * dragPixels, before.handle.y + before.unitY * dragPixels, {
+        steps: 8,
+      });
       await target.mouseUp();
 
       await expect
-        .poll(async () =>
-          target.evaluate(
-            (startX) =>
-              Math.abs(
-                (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__!.getPresentation()
-                  .sectionViewPivot[0] - startX,
-              ),
-            before.pivot[0],
-          ),
-        )
+        .poll(async () => Math.abs(((await readPlaneOffset(cutId)) ?? before.offset) - before.offset))
         .toBeGreaterThan(1e-6);
-
-      const dragged = await target.evaluate(() => {
-        const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
-        return {
-          frame: bridge.getRenderFrame(),
-          handle: bridge.projectSectionTransformHandle('X'),
-          pivot: bridge.getPresentation().sectionViewPivot,
-        };
-      });
-      expect(Math.abs(dragged.pivot[0] - before.pivot[0])).toBeLessThan(0.05);
-      expect(dragged.handle?.visible).toBe(true);
+      const dragged = await readArrow(cutId, [1, 0, 0]);
+      expect(Math.abs(dragged.offset - before.offset), 'a short drag should move the plane a short way').toBeLessThan(
+        0.05,
+      );
 
       await target.evaluate(
-        ({ frame, pivot }) => {
+        (origin) => {
           const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
+          const frame = bridge.getRenderFrame();
           bridge.setRenderFrame({
             anchorFrameId: frame.anchorFrameId,
-            originMeters: [pivot[0] - 0.002, pivot[1] + 0.001, pivot[2]],
+            originMeters: origin,
             metersPerRenderUnit: frame.metersPerRenderUnit / 1000,
           });
         },
-        { frame: dragged.frame, pivot: dragged.pivot },
+        [dragged.offset - 0.002, fixtureCenter[1] + 0.001, fixtureCenter[2]] as const,
       );
       await waitForTwoAnimationFrames();
 
       await expect
-        .poll(async () =>
-          target.evaluate((expectedPivot) => {
-            const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
-            const handle = bridge.projectSectionTransformHandle('X');
-            const pivot = bridge.getPresentation().sectionViewPivot;
-            return Boolean(handle?.visible && pivot.every((value, index) => value === expectedPivot[index]));
-          }, dragged.pivot),
+        .poll(
+          async () => {
+            const arrow = await projectArrow(cutId);
+            return arrow?.visible === true && (await readPlaneOffset(cutId)) === dragged.offset;
+          },
+          {
+            message: 'retargeting the render frame should keep the cut and redraw its arrow',
+          },
         )
         .toBe(true);
-      const retargeted = await target.evaluate(() =>
-        (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__!.projectSectionTransformHandle(
-          'X',
-        ),
-      );
-      expect(Math.hypot(retargeted!.x - dragged.handle!.x, retargeted!.y - dragged.handle!.y)).toBeLessThanOrEqual(
-        0.25,
-      );
+      const retargeted = await projectArrow(cutId);
+      expect(
+        Math.hypot(retargeted!.x - dragged.handle.x, retargeted!.y - dragged.handle.y),
+        'the arrow should stay where it was drawn after the render frame moves and rescales',
+      ).toBeLessThanOrEqual(0.25);
     });
   }
 
-  test('renders solid bordered transform arrows without interior seam walls', async () => {
-    await openSectionControlFixture();
-    await driveObliqueTransformControls();
-    await target.delay(900);
+  it('should edit cuts from their chips and the editor', async () => {
+    await openSectionControlFixture('webgl');
+    const toggle = selectors.getByRole('button', { name: 'Section view' });
+    await target.click(toggle);
+    await target.expectAttribute(toggle, 'aria-pressed', 'true');
 
-    const png = await captureSectionCanvas('section-control-transform-arrows-webgl.png');
-    const stats = await samplePng(png, { x: 0.43, y: 0.44, width: 0.24, height: 0.2 });
-    const borderPixels = stats.reddish + stats.greenish + stats.blueish;
+    // The first cut is the XZ plane through the bounds centre, open in the editor.
+    await target.expectAttribute(selectors.getByRole('button', { name: 'Plane XZ 0 mm' }), 'aria-expanded', 'true');
+    await target.click(selectors.getByRole('radio', { name: 'XY' }));
+    await target.expectVisible(selectors.getByRole('button', { name: 'Plane XY 25 mm' }));
 
-    expect(stats.distinctBuckets, 'transform arrow view should contain varied rendered pixels').toBeGreaterThan(18);
-    expect(stats.reddish, 'red transform arrow border should remain visible').toBeGreaterThan(40);
-    expect(stats.greenish, 'green transform arrow border should remain visible').toBeGreaterThan(20);
-    expect(stats.blueish, 'blue transform arrow border should remain visible').toBeGreaterThan(100);
-    expect(borderPixels, 'axis-colored arrow borders should remain visible').toBeGreaterThan(160);
-    expect(stats.whiteish, 'white arrow cores should remain visible after the bordered extrusion fix').toBeGreaterThan(
-      18,
+    const offsetField = selectors.getByRole('spinbutton', { name: 'Offset in mm' });
+    await target.fill(offsetField, '12');
+    await target.press(offsetField, 'Enter');
+    await target.expectVisible(selectors.getByRole('button', { name: 'Plane XY 12 mm' }));
+    const [openCut] = await readCuts();
+    const wasFlipped = openCut?.kind === 'plane' && openCut.isFlipped;
+    const flip = selectors.getByRole('button', { name: 'Flip' });
+    await target.click(flip);
+    await target.expectAttribute(flip, 'aria-pressed', String(!wasFlipped));
+    expect(await readCuts()).toMatchObject([{ kind: 'plane', plane: 'xy', offset: 0.012, isFlipped: !wasFlipped }]);
+
+    await target.click(selectors.getByRole('button', { name: 'Add section' }));
+    await target.click(selectors.getByRole('menuitem', { name: /Revolution cutaway/u }));
+    // The new cut opens in the editor in place of the plane.
+    await target.expectAttribute(
+      selectors.getByRole('button', { name: 'Revolution cutaway 90° about Z' }),
+      'aria-expanded',
+      'true',
     );
-    expect(
-      stats.darkTextish,
-      `solid transform arrows should not gain a dark hollow interior: ${JSON.stringify(stats)}`,
-    ).toBeLessThan(borderPixels * 0.04);
+    await target.expectVisible(selectors.getByRole('radiogroup', { name: 'Axis' }));
+    await target.expectAttribute(selectors.getByRole('button', { name: 'Plane XY 12 mm' }), 'aria-expanded', 'false');
+    expect(await readCuts()).toMatchObject([
+      { kind: 'plane', plane: 'xy' },
+      { kind: 'revolution', axis: 'z', sweep: 90 },
+    ]);
+
+    await target.click(selectors.getByRole('button', { name: 'Remove revolution cutaway 90° about Z' }));
+    await target.expectCount(selectors.getByCss('[data-section-chip]'), 1);
+    await target.click(selectors.getByRole('button', { name: 'Remove plane XY 12 mm' }));
+    // Removing the last cut ends the section.
+    await target.expectAttribute(toggle, 'aria-pressed', 'false');
+    await target.expectCount(selectors.getByRole('group', { name: 'Section view options' }), 0);
   });
 
   for (const backend of ['webgl', 'webgpu'] as const) {
-    test(`renders half-width bordered selector bodies with labels occluded by nearer selector bodies in ${backend}`, async () => {
+    it(`should draw the plane picker beside the view cube and add a plane from a tile in ${backend}`, async () => {
       await openSectionControlFixture(backend);
-      await driveStackedPlaneSelectors();
-      await target.delay(900);
-      await expectAllFaceSelectorLabelsMounted();
-
-      const png = await captureSectionCanvas(`section-control-plane-selectors-${backend}.png`);
-      const stats = await samplePng(png, { x: 0.34, y: 0.38, width: 0.32, height: 0.28 });
-      const borderPixels = stats.reddish + stats.greenish + stats.blueish;
-
-      expect(stats.distinctBuckets, 'selector stack view should contain varied rendered pixels').toBeGreaterThan(20);
-      expect(borderPixels, 'selector colored borders should remain visible').toBeGreaterThan(160);
-      expect(
-        stats.whiteish,
-        `white selector cores should dominate half-width borders: ${JSON.stringify(stats)}`,
-      ).toBeGreaterThan(borderPixels * 1.15);
-      expect(stats.darkTextish, 'multiple visible selector labels should remain readable').toBeGreaterThan(45);
-      expect(
-        stats.softTextEdge,
-        `selector labels should preserve blended antialias edge pixels: ${JSON.stringify(stats)}`,
-      ).toBeGreaterThan(35);
-      expect(
-        stats.softTextEdge,
-        `selector labels should not collapse into hard alpha-tested black cutouts: ${JSON.stringify(stats)}`,
-      ).toBeGreaterThan(stats.darkTextish * 0.08);
-      expect(
-        stats.darkTextish,
-        `hidden labels should not overdraw every stacked body: ${JSON.stringify(stats)}`,
-      ).toBeLessThan(stats.whiteish * 0.24);
-
-      await driveStackedPlaneSelectors('reverse');
-      await target.delay(900);
-      await expectAllFaceSelectorLabelsMounted();
-
-      const reversePng = await captureSectionCanvas(`section-control-plane-selectors-reverse-${backend}.png`);
-      const reverseStats = await samplePng(reversePng, { x: 0.34, y: 0.38, width: 0.32, height: 0.28 });
-      expect(
-        reverseStats.darkTextish,
-        `reverse selector labels should be visible on the opposite selector caps: ${JSON.stringify(reverseStats)}`,
-      ).toBeGreaterThan(45);
-      expect(
-        reverseStats.softTextEdge,
-        `reverse selector labels should preserve blended antialias edges: ${JSON.stringify(reverseStats)}`,
-      ).toBeGreaterThan(35);
-
+      // Straight down: the XY tile faces the camera in the middle of the picker, and the others stand edge on.
       await target.evaluate(() => {
-        const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
-        if (!bridge) {
-          throw new Error('Section view e2e bridge is not installed.');
-        }
-
-        bridge.setSectionView({ plane: 'xy', direction: 1, pivot: [0, 0, 0] });
+        const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
+        bridge.setCamera({ position: [0, 0, 0.2], target: [0, 0, 0.025], fov: 38, zoom: 1 });
+        bridge.setSectionCuts([{ kind: 'plane', plane: 'yz' }]);
       });
+      await waitForTwoAnimationFrames();
       await target.delay(300);
-      await driveStackedPlaneSelectors();
-      await target.delay(900);
-      await expectAllFaceSelectorLabelsMounted();
 
-      const afterChangePng = await captureSectionCanvas(`section-control-plane-selectors-after-change-${backend}.png`);
-      const afterChangeStats = await samplePng(afterChangePng, { x: 0.32, y: 0.26, width: 0.38, height: 0.44 });
-      expect(
-        afterChangeStats.darkTextish,
-        `selector labels should remain visible after selecting a plane and reopening selector choices: ${JSON.stringify(
-          afterChangeStats,
-        )}`,
-      ).toBeGreaterThan(45);
-      expect(
-        afterChangeStats.softTextEdge,
-        `selector labels should remain antialiased after selecting a plane and reopening selector choices: ${JSON.stringify(
-          afterChangeStats,
-        )}`,
-      ).toBeGreaterThan(35);
+      const square = await readPickerSquare();
+      const png = await target.screenshot(
+        selectors.getByCss(previewCanvasSelector),
+        `section-plane-picker-top-${backend}.png`,
+      );
+      const stats = await samplePng(png, {
+        x: (square.left - square.canvas.x) / square.canvas.width,
+        y: (square.top - square.canvas.y) / square.canvas.height,
+        width: square.size / square.canvas.width,
+        height: square.size / square.canvas.height,
+      });
+      expect(stats.blueish, `the XY tile should face the camera: ${JSON.stringify(stats)}`).toBeGreaterThan(
+        stats.sampledPixels * 0.05,
+      );
+      expect(stats.darkTextish, `the XY tile should carry its label: ${JSON.stringify(stats)}`).toBeGreaterThan(20);
+
+      await target.mouseMove(square.left + square.size / 2, square.top + square.size / 2);
+      await target.mouseDown();
+      await target.mouseUp();
+      await expect
+        .poll(async () => {
+          const cuts = await readCuts();
+          return cuts.map((cut) => (cut.kind === 'plane' ? cut.plane : cut.axis));
+        })
+        .toEqual(['yz', 'xy']);
     });
   }
 });

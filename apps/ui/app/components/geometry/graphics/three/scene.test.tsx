@@ -43,8 +43,8 @@ vi.mock('#components/geometry/graphics/three/react/section-contour-fill.js', () 
   SectionContourFills: () => null,
 }));
 
-vi.mock('#components/geometry/graphics/three/react/section-view-controls.js', () => ({
-  SectionViewControls: () => null,
+vi.mock('#components/geometry/graphics/three/react/section-handles.js', () => ({
+  SectionHandles: () => null,
 }));
 
 vi.mock('#components/geometry/graphics/three/react/section-view-test-bridge.js', () => ({

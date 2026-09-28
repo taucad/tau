@@ -264,56 +264,49 @@ async function stopObservingProjectShell(): Promise<string | undefined> {
   });
 }
 
-type SectionViewInput = Readonly<{
-  plane: 'xy' | 'xz' | 'yz';
-  direction?: 1 | -1;
-  rotationRadians?: readonly [number, number, number];
-  pivot?: readonly [number, number, number];
-}>;
+type SectionCutValues =
+  | Readonly<{ kind: 'plane'; plane: 'xy' | 'xz' | 'yz'; offset: number; isFlipped: boolean }>
+  | Readonly<{
+      kind: 'revolution';
+      axis: 'x' | 'y' | 'z';
+      origin: readonly [number, number, number];
+      start: number;
+      sweep: number;
+    }>;
 
-type SectionViewEvidence = Readonly<{
-  isSectionViewActive: boolean;
-  selectedSectionViewId: string | undefined;
-  sectionViewDirection: 1 | -1;
-  sectionViewPivot: readonly [number, number, number];
-  sectionViewRotation: readonly [number, number, number];
-  enableClippingLines: boolean;
-  enableClippingMesh: boolean;
-}>;
+type SectionCutInput =
+  | Readonly<{ kind: 'plane'; plane: 'xy' | 'xz' | 'yz'; offset?: number; isFlipped?: boolean }>
+  | Readonly<{ kind: 'revolution'; axis: 'x' | 'y' | 'z'; start?: number; sweep?: number }>;
+
+type SectionViewEvidence = Readonly<{ isActive: boolean; cuts: readonly SectionCutValues[] }>;
 
 type DurableViewSettings = Readonly<{
   cameraFovAngle: number;
   upDirection: 'x' | 'y' | 'z';
   enableGrid: boolean;
-  sectionView?: Readonly<{
-    active: boolean;
-    plane?: 'xy' | 'xz' | 'yz';
-    pivot: readonly [number, number, number];
-    rotation: readonly [number, number, number];
-    direction: 1 | -1;
-  }>;
-  sectionDisplay?: Readonly<{ clipLines: boolean; clipMesh: boolean; planeName: 'cartesian' | 'face' }>;
+  sectionView?: Readonly<{ active: boolean; cuts: readonly SectionCutValues[] }>;
 }>;
 
 type SectionViewBridge = Readonly<{
-  setSectionView(state: SectionViewInput): void;
-  getPresentation(): SectionViewEvidence;
+  setSectionCuts(cuts: readonly SectionCutInput[]): string[];
+  getSectionState(): Readonly<{ isActive: boolean; cuts: ReadonlyArray<SectionCutValues & Readonly<{ id: string }>> }>;
   getViewSettings(): (DurableViewSettings & Record<string, unknown>) | undefined;
 }>;
 
-const setSectionView = async (state: SectionViewInput): Promise<void> => {
+const setSectionCuts = async (cuts: readonly SectionCutInput[]): Promise<void> => {
   await waitForCameraBridge();
-  await target.evaluate((nextState) => {
+  await target.evaluate((nextCuts) => {
     const bridge = (globalThis as typeof globalThis & { __TAU_SECTION_VIEW_TEST__?: SectionViewBridge })
       .__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       throw new Error('Graphics e2e bridge is unavailable.');
     }
-    bridge.setSectionView(nextState);
-  }, state);
+    bridge.setSectionCuts(nextCuts);
+  }, cuts);
   await waitForTwoFrames();
 };
 
+/** The live section's values; cut ids are made anew at every seed, so they are left out. */
 const readSectionView = async (): Promise<SectionViewEvidence> =>
   target.evaluate(() => {
     const bridge = (globalThis as typeof globalThis & { __TAU_SECTION_VIEW_TEST__?: SectionViewBridge })
@@ -321,7 +314,8 @@ const readSectionView = async (): Promise<SectionViewEvidence> =>
     if (!bridge) {
       throw new Error('Graphics e2e bridge is unavailable.');
     }
-    return bridge.getPresentation();
+    const { isActive, cuts } = bridge.getSectionState();
+    return { isActive, cuts: cuts.map(({ id: _id, ...values }) => values) };
   });
 
 /** The persisted record this view owns, narrowed to keys Law 4 calls durable. */
@@ -338,7 +332,6 @@ const readDurableViewSettings = async (): Promise<DurableViewSettings | undefine
       upDirection: settings.upDirection,
       enableGrid: settings.enableGrid,
       sectionView: settings.sectionView,
-      sectionDisplay: settings.sectionDisplay,
     };
   });
 
@@ -505,6 +498,25 @@ test('chat navigation preserves ordering until an accepted user submit advances 
     afterSubmit.chats.map(({ name, recencyAt }) => ({ name, recencyAt })),
   );
   expect(afterRevisit.projectLastActivityAt).toBe(afterSubmit.projectLastActivityAt);
+});
+
+test('sidebar chat opens its pane after the pane is closed', async () => {
+  await target.navigate('/__e2e/project-navigation');
+  await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 60_000);
+
+  const chat = selectors.getByRole('link', { name: 'Initial chat', exact: true });
+  const toggle = selectors.getByRole('button', { name: 'Toggle Chat lane' });
+  const isChatLanePressed = async (): Promise<string | undefined> => {
+    const result = await target.read(toggle, { attributes: ['aria-pressed'] });
+    return result.attributes['aria-pressed'] ?? undefined;
+  };
+  await target.expectVisible(chat, 60_000);
+  await target.expectVisible(toggle, 60_000);
+  await target.click(toggle);
+  await expect.poll(isChatLanePressed).toBe('false');
+
+  await target.click(chat);
+  await expect.poll(isChatLanePressed).toBe('true');
 });
 
 test('project and chat rows reveal their actions over a dissolving name', async () => {
@@ -736,7 +748,7 @@ test('project and chat rows reveal their actions over a dissolving name', async 
 });
 
 /* Law 4: a durable key restores identically whether the person returns to a live project or reloads
- * the tab. The camera proves the session substrate (W3); the section view proves the v11 seed (W5). */
+ * the tab. The camera proves the session substrate (W3); the section's cuts prove the v12 seed. */
 test('revisit and reload restore the same durable view settings', async () => {
   await target.navigate('/__e2e/project-navigation');
   await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 60_000);
@@ -750,25 +762,28 @@ test('revisit and reload restore the same durable view settings', async () => {
     zoom: 1,
     rollRadians: 0.37,
   });
-  await setSectionView({
-    plane: 'xz',
-    direction: -1,
-    rotationRadians: [0, 0.4, 0],
-    pivot: [0.011, 0.022, 0.033],
-  });
+  await setSectionCuts([
+    { kind: 'plane', plane: 'xz', offset: 0.022, isFlipped: true },
+    { kind: 'revolution', axis: 'z', start: 23, sweep: 120 },
+  ]);
   const sectionAfterCut = await readSectionView();
-  expect(sectionAfterCut.isSectionViewActive).toBe(true);
-  expect(sectionAfterCut.selectedSectionViewId).toBe('xz');
-  // The write side is debounced, so wait for the cut to reach the durable record.
+  expect(sectionAfterCut).toMatchObject({
+    isActive: true,
+    cuts: [
+      { kind: 'plane', plane: 'xz', offset: 0.022, isFlipped: true },
+      { kind: 'revolution', axis: 'z', start: 23, sweep: 120 },
+    ],
+  });
+  // The write side is debounced, so wait for the cuts to reach the durable record.
   await expect
     .poll(
       async () => {
-        const persisted = await readDurableViewSettings();
-        return persisted?.sectionView?.plane;
+        const durable = await readDurableViewSettings();
+        return durable?.sectionView;
       },
       { timeout: 30_000 },
     )
-    .toBe('xz');
+    .toEqual({ active: true, cuts: sectionAfterCut.cuts });
   const durableAfterCut = await readDurableViewSettings();
 
   await openRecentProject(projectNames.b);

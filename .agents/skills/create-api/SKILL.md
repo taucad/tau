@@ -17,6 +17,9 @@ document. Use [create-research](../create-research/SKILL.md) and its
 2. Trace the existing surface from author call sites through the host and final consumer. Read all
    relevant callers, exports, policy, and [review rubric](review-rubric.md). State the contract in
    three to six plain sentences.
+   For a second language or kernel targeting an existing wire feature, trace the canonical payload,
+   component identity, units/frame conversion, validation, export, and viewer consumer. Keep one
+   wire representation and show an output example alongside the authoring sketch.
 3. Sketch the same real use case under at least two viable options and the unchanged path. Show
    author, host, and agent call sites as applicable, followed by the proposed surface and misuse.
    Mark proposed declarations or stand-ins explicitly; never claim they ship.

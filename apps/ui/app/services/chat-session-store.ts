@@ -75,7 +75,7 @@ import { createChatInstance } from '#chat-clients/_internal/shared-chat-transpor
 import { BrowserPlacementChatTransport } from '#chat-clients/_internal/browser-agent-host-transport.js';
 import { hostAttachment } from '#chat-clients/_internal/host-attachment.js';
 import type { AgentHostClient } from '#services/agent-host-client.js';
-import { chatTurnAdmission, clearChatTurnServices } from '#chat-clients/_internal/chat-host-binding.js';
+import { chatTurnAdmission, chatTurnAdmit, clearChatTurnServices } from '#chat-clients/_internal/chat-host-binding.js';
 import type { CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
 import { ENV } from '#environment.config.js';
 import {
@@ -206,6 +206,8 @@ type InternalSession = ChatSession & {
   runHeld: boolean;
   /** This load dispatched the chat's seeded first turn; clear only after durable Start. */
   seededDispatch: boolean;
+  /** Durable seed waiting for the focused admission and project connector to publish. */
+  pendingSeedGesture: ChatTurnGesture | undefined;
   /** The one command being dispatched, and the SDK watch following its projected run. */
   activeCommand: HostCommand | undefined;
   commandAbort: AbortController | undefined;
@@ -536,6 +538,11 @@ export class ChatSessionStore {
   ): () => void {
     const connector = { connect, stoppability };
     this.#projectHostConnectors.set(projectId, connector);
+    for (const session of this.#sessions.values()) {
+      if (session.projectId === projectId) {
+        this.startPendingSeed(session.chatId);
+      }
+    }
     this.#projectRunKeys.delete(projectId);
     this.#refreshProjectRuns(projectId);
     for (const [chatId, observed] of this.#observed) {
@@ -838,6 +845,28 @@ export class ChatSessionStore {
       return;
     }
     await this.#requestTurn(session, gesture);
+  }
+
+  /**
+   * Start a loaded seed only when both of its real command dependencies are live.
+   *
+   * @param chatId - The chat whose durable startup intent was loaded.
+   * @public
+   */
+  public startPendingSeed(chatId: string): void {
+    const session = this.#sessions.get(chatId);
+    if (
+      session?.pendingSeedGesture === undefined ||
+      chatTurnAdmit(chatId) === undefined ||
+      this.#projectHostConnectors.get(session.projectId) === undefined
+    ) {
+      return;
+    }
+    const gesture = session.pendingSeedGesture;
+    session.pendingSeedGesture = undefined;
+    session.seededDispatch = true;
+    session.runHeld = true;
+    session.stateActorRef.send({ type: 'requestTurn', gesture });
   }
 
   /**
@@ -2087,15 +2116,14 @@ export class ChatSessionStore {
                   /* Keep the exact intent until Start is durably accepted. A
                    * reload between this load and host acknowledgement must
                    * resend the same command id and prompt. */
-                  session.runHeld = true;
-                  session.seededDispatch = true;
                   session.draftActorRef.send({ type: 'initializeFromChat' });
                   const seedGesture: ChatTurnGesture = {
                     kind: 'regenerate',
                     execution: loadedChat.activeExecution,
                     requestId: startupRequest.id,
                   };
-                  session.stateActorRef.send({ type: 'requestTurn', gesture: seedGesture });
+                  session.pendingSeedGesture = seedGesture;
+                  this.startPendingSeed(input.chatId);
                   return { chat: { ...loadedChat, error: undefined } };
                 }
               }
@@ -2207,6 +2235,7 @@ export class ChatSessionStore {
       viewRefcount: 1,
       runHeld: false,
       seededDispatch: false,
+      pendingSeedGesture: undefined,
       activeCommand: undefined,
       commandAbort: undefined,
       watch: undefined,
@@ -2267,14 +2296,9 @@ export class ChatSessionStore {
   /**
    * Whether this session's actor is taking a turn right now.
    *
-   * An admission is a reference on the session exactly as `runHeld` is, and it
-   * is the one window `runHeld` does not cover: that flag is set by `startRun`
-   * at *dispatch*, while the lease is taken by the admission before it. So
-   * disposing here stopped the actor and then deleted the turn-service registry
-   * the abandoned admission's own release reads, and the checkout stayed leased
-   * with nothing left that could retire it (T3-D2). Every later state is
-   * already held by `runHeld`, and the wait is bounded, so this reference is
-   * released by the admission ending either way.
+   * An active admission is a reference on the session until its answer lands.
+   * A seed still waiting for the focused route is durable on the chat row and
+   * holds no session: reacquisition can start it with its original command id.
    *
    * @param session - The chat to ask about.
    * @returns Whether its actor is in `run.queued.admitting`.

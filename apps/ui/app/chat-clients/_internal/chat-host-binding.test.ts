@@ -22,16 +22,8 @@ describe('chatTurnAdmission', () => {
 
   const turn: ChatTurn = { runId: 'run-1', leaseTurnId: 'user-1', request: { kind: 'regenerate' } };
 
-  /*
-   * T3-D4, I6. `loadChatActor` seeds a turn for any acquired chat with an
-   * eligible startup request, but only the *focused* chat mounts the
-   * `ChatTurnHost` that publishes an admission — so on a chat that never gets
-   * focus this wait had no publisher that could ever fire. Unbounded, it sat in
-   * `queued.admitting` forever, pinned by `runHeld`, with nothing on the row to
-   * click. A wait whose condition is not guaranteed to clear is bounded.
-   */
-  it('should refuse an admission no route ever publishes', async () => {
-    vi.useFakeTimers();
+  /* An absent focused publisher is an answer, not a peer timer. */
+  it('should refuse an admission no route ever publishes without waiting', async () => {
     const actor = createActor(chatTurnAdmission, {
       input: { chatId: 'chat-unpublished', gesture: { kind: 'regenerate' } },
     });
@@ -39,11 +31,11 @@ describe('chatTurnAdmission', () => {
     actor.subscribe({ error: (error: unknown) => failures.push(error) });
     actor.start();
 
-    await vi.advanceTimersByTimeAsync(31_000);
+    await vi.waitFor(() => {
+      expect(failures).toHaveLength(1);
+    });
 
-    expect(failures).toHaveLength(1);
     expect(failures[0]).toMatchObject({ message: 'This chat is not ready to run a turn yet.' });
-    vi.useRealTimers();
   });
 
   /*

@@ -68,7 +68,7 @@ const boundRunIds = new Map<string, string>();
 const activeClients = new Map<string, { readonly client: AgentHostClient; readonly runId: string }>();
 const clientSettlements = new Map<string, Promise<void>>();
 /** How the stream following a chat continues the native run an approval left paused (PV-S10). */
-const continuations = new Map<string, () => Promise<void>>();
+const continuations = new Map<string, (commandId?: string) => Promise<void>>();
 /** Chats whose next reattach may drive the host's own resume. @see requestBrowserAgentHostResume */
 const requestedResumes = new Set<string>();
 
@@ -852,7 +852,7 @@ const createHostStream = <Message extends UIMessage>(input: {
     let unsubscribe: (() => void) | undefined;
     let unsubscribeLive: (() => void) | undefined;
     let unsubscribeSettlement: (() => void) | undefined;
-    let continueRun: (() => Promise<void>) | undefined;
+    let continueRun: ((commandId?: string) => Promise<void>) | undefined;
     let { runId } = input;
     let closed = false;
     let cursor = 0;
@@ -1196,13 +1196,13 @@ const createHostStream = <Message extends UIMessage>(input: {
       /* The paused attempt's `turn.*` row already resolved the settlement gate, so the continued attempt's row is the
        * one to wait for. `terminalEvent` stays: `paused` is not terminal, and this stream is awaiting that very
        * promise, which a replacement would strand. */
-      continueRun = async (): Promise<void> => {
+      continueRun = async (commandId?: string): Promise<void> => {
         /* Re-armed once every row already delivered is projected, the paused attempt's settlement among them. */
         await projection;
         armSettlement();
         let snapshot: HostRunSnapshot;
         try {
-          snapshot = await client!.resume(input.chatId, runId!);
+          snapshot = await client!.resume(input.chatId, runId!, commandId);
         } catch (error) {
           /* Refused (another request pending, the run gone, another run live): no attempt opened, so none will
            * settle. Restored, the gate lets the stream end with the run instead of holding its client (GM.r2 M1). */
@@ -1485,6 +1485,10 @@ export const resolveBrowserAgentHostInterrupt = async (input: {
   readonly reason?: string | undefined;
   /** The exact option the human chose, when the request offered a list. */
   readonly optionId?: string | undefined;
+  /** Minted once at the approval click, then reused for every host re-send. */
+  readonly commandId: string;
+  /** A native approval's follow-up resume has its own sender-minted id. */
+  readonly resumeCommandId?: string | undefined;
 }): Promise<void> => {
   const active = activeClients.get(input.chatId);
   const attached = active?.runId === input.runId ? active : undefined;
@@ -1496,13 +1500,16 @@ export const resolveBrowserAgentHostInterrupt = async (input: {
       outcome: input.approved ? 'approved' : 'denied',
       ...(input.optionId ? { optionId: input.optionId } : {}),
       ...(input.reason ? { payload: { reason: input.reason } } : {}),
+      commandId: input.commandId,
     });
     if (!input.approved || answered.runId !== input.runId || answered.state !== 'paused') {
       return;
     }
     const continueRun = attached === undefined ? undefined : continuations.get(input.chatId);
     try {
-      await (continueRun === undefined ? client.resume(input.chatId, input.runId) : continueRun());
+      await (continueRun === undefined
+        ? client.resume(input.chatId, input.runId, input.resumeCommandId)
+        : continueRun(input.resumeCommandId));
     } catch (error) {
       /* Another request of the run still waits; its answer continues the run. */
       if (!(error instanceof AgentHostWorkerError) || error.code !== 'INTERRUPT_PENDING') {

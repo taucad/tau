@@ -2810,12 +2810,15 @@ describe('BrowserPlacementChatTransport', () => {
       interruptId: 'interrupt-approval',
       approved: true,
       reason: 'Proceed',
+      commandId: 'answer-approval',
+      resumeCommandId: 'resume-approval',
     });
 
     expect(resolveInterrupt).toHaveBeenCalledWith(chatId, runId, {
       interruptId: 'interrupt-approval',
       outcome: 'approved',
       payload: { reason: 'Proceed' },
+      commandId: 'answer-approval',
     });
     await firstChunk;
     await drain(reader);
@@ -2890,9 +2893,16 @@ describe('BrowserPlacementChatTransport', () => {
       expect(client.start).toHaveBeenCalledOnce();
     });
 
-    await resolveBrowserAgentHostInterrupt({ chatId, runId, interruptId: 'interrupt-print', approved: true });
+    await resolveBrowserAgentHostInterrupt({
+      chatId,
+      runId,
+      interruptId: 'interrupt-print',
+      approved: true,
+      commandId: 'answer-native',
+      resumeCommandId: 'resume-native',
+    });
 
-    expect(client.resume).toHaveBeenCalledExactlyOnceWith(chatId, runId);
+    expect(client.resume).toHaveBeenCalledExactlyOnceWith(chatId, runId, 'resume-native');
     row(5, { type: 'run.lifecycle', state: 'completed' });
     await drained;
     /* The paused attempt's settlement is not the continued attempt's: the stream holds its client for the second. */
@@ -2988,6 +2998,8 @@ describe('BrowserPlacementChatTransport', () => {
         runId,
         interruptId: 'interrupt-print',
         approved: true,
+        commandId: 'answer-refused',
+        resumeCommandId: 'resume-refused',
       });
       await (code === 'INTERRUPT_PENDING' ? answered : expect(answered).rejects.toMatchObject({ code }));
       /* The run ends cancelled (the other request denied, or another tab's Stop): a paused run's cancel settles no turn. */
@@ -3010,7 +3022,14 @@ describe('BrowserPlacementChatTransport', () => {
       },
     );
 
-    await resolveBrowserAgentHostInterrupt({ chatId, runId, interruptId: 'interrupt-print', approved: true });
+    await resolveBrowserAgentHostInterrupt({
+      chatId,
+      runId,
+      interruptId: 'interrupt-print',
+      approved: true,
+      commandId: 'answer-late',
+      resumeCommandId: 'resume-late',
+    });
     settled(4, 1);
     row(5, { type: 'run.lifecycle', state: 'completed', attempt: 2 });
     await drained;
@@ -3044,11 +3063,19 @@ describe('BrowserPlacementChatTransport', () => {
         createClient: async () => client,
       });
 
-      await resolveBrowserAgentHostInterrupt({ chatId, runId, interruptId: 'interrupt-print', approved });
+      await resolveBrowserAgentHostInterrupt({
+        chatId,
+        runId,
+        interruptId: 'interrupt-print',
+        approved,
+        commandId: 'answer-detached',
+        ...(approved ? { resumeCommandId: 'resume-detached' } : {}),
+      });
 
       expect(client.resolveInterrupt).toHaveBeenCalledExactlyOnceWith(chatId, runId, {
         interruptId: 'interrupt-print',
         outcome: approved ? 'approved' : 'denied',
+        commandId: 'answer-detached',
       });
       expect(client.resume).toHaveBeenCalledTimes(resumes);
       expect(client.close).toHaveBeenCalledOnce();

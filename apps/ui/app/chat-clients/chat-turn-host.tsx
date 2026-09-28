@@ -354,7 +354,10 @@ export function ChatTurnHost(): ReactNode {
           return { runId: resumableRunId, leaseTurnId: intent.leaseTurnId, request: { kind: 'continue' } };
         }
         /* One id for the host request and the settlement. */
-        const runId = generatePrefixedId(idPrefix.request);
+        const runId =
+          gesture.kind === 'regenerate' && gesture.requestId !== undefined
+            ? gesture.requestId
+            : generatePrefixedId(idPrefix.request);
         const body = createRunBody({
           agent: turnAgent,
           projectId,

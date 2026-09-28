@@ -357,11 +357,14 @@ function publishSettlementRecorder(chatId: string): ChatTurnSettlementInput[] {
  * @param chatId - The chat this admission belongs to.
  * @param request - What the admission composes, or a throw to refuse the turn.
  */
-function publishAdmission(chatId: string, request: () => Promise<ChatRequest> | ChatRequest): void {
-  publishChatTurnAdmission(chatId, async () => ({
+function publishAdmission(
+  chatId: string,
+  request: (gesture: ChatTurnGesture) => Promise<ChatRequest> | ChatRequest,
+): void {
+  publishChatTurnAdmission(chatId, async (gesture) => ({
     runId: `run_${chatId}`,
     leaseTurnId: undefined,
-    request: await request(),
+    request: await request(gesture),
   }));
 }
 
@@ -3204,14 +3207,18 @@ describe('ChatSessionStore', () => {
 
       // The effect binds the owner a render later; the held gesture must flush.
       startTurnOwner(store, 'resource_seed_late');
-      publishAdmission('chat_seed_late_owner', () => ({
-        kind: 'regenerate',
-        body: { agent: { profile: 'cad', execution: { kind: 'tau', model: 'cad-default' }, kernel: 'replicad' } },
-      }));
+      const admit = vi.fn(
+        (): ChatRequest => ({
+          kind: 'regenerate',
+          body: { agent: { profile: 'cad', execution: { kind: 'tau', model: 'cad-default' }, kernel: 'replicad' } },
+        }),
+      );
+      publishAdmission('chat_seed_late_owner', admit);
 
       await vi.waitFor(() => {
         expect(fake.regenerate).toHaveBeenCalledTimes(1);
       });
+      expect(admit).toHaveBeenCalledWith(expect.objectContaining({ kind: 'regenerate', requestId: 'req_seed_late' }));
 
       store.release('chat_seed_late_owner');
     });

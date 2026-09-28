@@ -488,6 +488,20 @@ describe('createBrowserAgentHostClient', () => {
     await client.close();
   });
 
+  it('uses a start gesture’s run id as its stable command id on a re-send', async () => {
+    const worker = new FakeResidentWorker();
+    const client = createTestClient(workerOf(worker));
+    const input = { chatId: 'chat-replay-key', runId: 'run-replay-key', trigger: 'submit', message: 'Build.' } as const;
+
+    await client.start(input);
+    await client.start(input);
+
+    expect(
+      worker.requests.filter((request) => request.name === 'start').map((request) => request.args['commandId']),
+    ).toEqual(['run-replay-key', 'run-replay-key']);
+    await client.close();
+  });
+
   it('keeps the capability seam closed when OPFS is unavailable', () => {
     vi.stubGlobal('Worker', vi.fn());
     vi.stubGlobal('BroadcastChannel', vi.fn());

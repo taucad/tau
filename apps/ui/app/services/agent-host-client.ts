@@ -656,7 +656,7 @@ export const createAgentHostClient = (
       return runCommand(
         {
           type: 'start',
-          commandId: gestureKey(),
+          commandId: input.runId,
           payload:
             input.trigger === 'submit'
               ? { ...base, trigger: 'submit' }

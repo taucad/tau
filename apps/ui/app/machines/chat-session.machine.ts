@@ -109,7 +109,7 @@ export type ChatRequest =
 export type ChatTurnGesture =
   | Readonly<{ kind: 'send'; message: MyUIMessage; attachments?: readonly StoredAttachmentRef[] }>
   | Readonly<{ kind: 'edit'; messageId: string; text: string; attachments?: readonly StoredAttachmentRef[] }>
-  | Readonly<{ kind: 'regenerate'; execution?: CadAgentExecution }>
+  | Readonly<{ kind: 'regenerate'; execution?: CadAgentExecution; requestId?: string }>
   /**
    * *Try again* on an error card: resume the stream if the host can still
    * continue it, and re-run the turn if it cannot. Only the admission knows

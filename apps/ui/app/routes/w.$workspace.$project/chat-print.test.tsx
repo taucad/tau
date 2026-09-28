@@ -45,6 +45,7 @@ import {
 import { submissionDefaults } from '#routes/w.$workspace.$project/chat-print-prepare.js';
 import {
   bambuStudioRequired,
+  describeStartConfirmations,
   developerModeRequired,
   startBlocker,
 } from '#routes/w.$workspace.$project/chat-print-send.js';

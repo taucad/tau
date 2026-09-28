@@ -30,9 +30,11 @@ type UsageTokens = {
  *
  * @returns The usage panel, or nothing when the project has no recorded usage.
  */
-export function ChatDetailsUsage(): React.JSX.Element | undefined {
+export function ChatDetailsUsage({ enabled = true }: { readonly enabled?: boolean } = {}):
+  | React.JSX.Element
+  | undefined {
   const { projectId } = useProject();
-  const { chats } = useChats(projectId);
+  const { chats } = useChats(projectId, { enabled });
 
   const { tokens, operationIds } = useMemo(() => {
     const usage: UsageTokens = {

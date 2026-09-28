@@ -55,6 +55,12 @@ const publishProjectHostConnector = vi.fn(
   },
 );
 const browserClientOptions: unknown[] = [];
+const browserHostLeaseReleases: Array<ReturnType<typeof vi.fn>> = [];
+const retainBrowserAgentHostProject = vi.fn((_options: unknown) => {
+  const release = vi.fn();
+  browserHostLeaseReleases.push(release);
+  return release;
+});
 const daemonClientTransports: unknown[] = [];
 const cancelProjectedRun = vi.fn(async (): Promise<'stopped' | 'continuing'> => 'stopped');
 const storedHostSettings = new Map<
@@ -84,6 +90,7 @@ vi.mock('#services/agent-host-client.js', async (importOriginal) => ({
     browserClientOptions.push(options);
     return { close: async () => undefined };
   },
+  retainBrowserAgentHostProject,
   createAgentHostClient: (transport: unknown) => {
     daemonClientTransports.push(transport);
     return { close: async () => undefined };
@@ -402,6 +409,8 @@ beforeEach(() => {
   publishProjectHostConnector.mockClear();
   connectorReleases.length = 0;
   browserClientOptions.length = 0;
+  retainBrowserAgentHostProject.mockClear();
+  browserHostLeaseReleases.length = 0;
   daemonClientTransports.length = 0;
   storedHostSettings.clear();
   cancelProjectedRun.mockClear();
@@ -496,6 +505,9 @@ describe('project route session identity', () => {
     const { Provider, view } = renderRouteProvider();
     await screen.findAllByTestId('project-session');
     expect(publishProjectHostConnector).toHaveBeenCalledWith(projectA, expect.any(Function), expect.any(Function));
+    const connector = publishProjectHostConnector.mock.calls[0]?.[1] as (chatId: string) => Promise<unknown>;
+    await connector('chat-browser');
+    expect(retainBrowserAgentHostProject).toHaveBeenCalledOnce();
 
     currentProjectId = projectB;
     view.rerender(<Provider>content</Provider>);
@@ -504,9 +516,10 @@ describe('project route session identity', () => {
     });
     expect(sessionIds()).toContain(projectA);
     expect(publishProjectHostConnector.mock.calls.map(([projectId]) => projectId)).toEqual([projectA, projectB]);
+    expect(browserHostLeaseReleases[0]).not.toHaveBeenCalled();
   });
 
-  it('opens unopened chats on their own persisted host and unpublishes on unmount', async () => {
+  it('opens unopened chats on their own persisted host and retains one browser host until unmount', async () => {
     fileManagerReady = true;
     storedHostSettings.set('chat-browser', {
       activeExecution: { kind: 'tau', model: 'model-browser' },
@@ -524,7 +537,9 @@ describe('project route session identity', () => {
 
     await connector('chat-browser');
     await connector('chat-daemon');
-    expect(browserClientOptions).toHaveLength(1);
+    await connector('chat-browser');
+    expect(browserClientOptions).toHaveLength(2);
+    expect(retainBrowserAgentHostProject).toHaveBeenCalledOnce();
     expect(browserClientOptions[0]).toMatchObject({
       authority: { projectId: projectA, workspaceId: 'live' },
       projectStorage: { projectId: projectA, backend: 'opfs' },
@@ -533,6 +548,7 @@ describe('project route session identity', () => {
     expect(daemonClientTransports).toHaveLength(1);
     view.unmount();
     expect(connectorReleases[0]).toHaveBeenCalledOnce();
+    expect(browserHostLeaseReleases[0]).toHaveBeenCalledOnce();
   });
   it('should settle parameters and both UI stores, and leave the cut to flushSync', async () => {
     const order: string[] = [];

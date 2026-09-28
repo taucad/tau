@@ -294,7 +294,7 @@ describe('ChatTextareaDesktop draft rehydration', () => {
     const editorScroller = editorContent?.parentElement;
     const bar = view.container.querySelector('[data-slot=composer-bar]');
 
-    expect(editorScroller).toHaveClass('overflow-y-auto', 'max-h-48');
+    expect(editorScroller).toHaveClass('overflow-y-auto', 'max-h-[min(12rem,30cqh)]');
     expect(editorContent).not.toHaveClass('overflow-y-auto');
     expect(bar?.parentElement).toBe(editorScroller?.parentElement);
     expect(bar).not.toHaveClass('absolute');

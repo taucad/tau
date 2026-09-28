@@ -6,7 +6,6 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/
 import { Button } from '@taucad/ui/components/button';
 import { ThoughtBubble } from '#components/icons/thought-bubble.js';
 import { MarkdownViewerChat } from '#components/markdown/markdown-viewer-chat.js';
-import { useStickToBottom } from '#hooks/use-stick-to-bottom.js';
 
 type ChatMessageReasoningProperties = {
   readonly parts: readonly ReasoningUIPart[];
@@ -67,7 +66,6 @@ export function ChatMessageReasoning({
   /* A streaming thought names itself; the duration only exists once it ends (R6). */
   const isThinking = isMessageActive && visibleParts.at(-1)?.state === 'streaming';
   const label = isThinking ? 'Thinking…' : thoughtLabel(visibleParts);
-  const { scrollRef, contentRef } = useStickToBottom(isMessageActive && isOpen);
 
   if (visibleParts.length === 0) {
     return undefined;
@@ -95,23 +93,20 @@ export function ChatMessageReasoning({
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div
-          ref={scrollRef}
           role='region'
           aria-label={`${label} details`}
-          className='reasoning-body relative max-h-[min(30rem,60svh)] scroll-shadows-y overflow-y-auto overscroll-contain pl-5 text-sm font-normal text-muted-foreground italic [&_*]:font-normal [&_*]:italic [&_h1]:text-inherit [&_h2]:text-inherit [&_h3]:text-inherit [&_h4]:text-inherit [&_h5]:text-inherit [&_h6]:text-inherit'
+          className='reasoning-body relative pl-5 text-sm font-normal text-muted-foreground italic [&_*]:font-normal [&_*]:italic [&_h1]:text-inherit [&_h2]:text-inherit [&_h3]:text-inherit [&_h4]:text-inherit [&_h5]:text-inherit [&_h6]:text-inherit'
         >
-          <div ref={contentRef}>
-            {visibleParts.map((part, index) => (
-              <MarkdownViewerChat
-                key={`${String(getReasoningStartedAtMs(part))}:${String(index)}`}
-                className='text-muted-foreground'
-                isStreaming={isMessageActive && index === visibleParts.length - 1}
-                isStreamingFade={isMessageActive && index === visibleParts.length - 1}
-              >
-                {part.text.trim()}
-              </MarkdownViewerChat>
-            ))}
-          </div>
+          {visibleParts.map((part, index) => (
+            <MarkdownViewerChat
+              key={`${String(getReasoningStartedAtMs(part))}:${String(index)}`}
+              className='text-muted-foreground'
+              isStreaming={isMessageActive && index === visibleParts.length - 1}
+              isStreamingFade={isMessageActive && index === visibleParts.length - 1}
+            >
+              {part.text.trim()}
+            </MarkdownViewerChat>
+          ))}
         </div>
       </CollapsibleContent>
     </Collapsible>

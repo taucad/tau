@@ -75,7 +75,7 @@ export const advancePrintRequest = (
   }
   const operationId = phase === 'upload' ? record.uploadOperationId : record.startOperationId;
   const receipt = operationId === undefined ? undefined : effects.get(operationId)?.receipt;
-  if (!receipt || (record.state === 'unknown' && receipt.status === 'unknown')) {
+  if (!receipt || (record.state === 'unknown' && receipt.status === 'unknown' && phase === 'start')) {
     return undefined;
   }
   if (receipt.status === 'rejected') {
@@ -84,6 +84,18 @@ export const advancePrintRequest = (
       state: phase === 'upload' ? 'failed' : 'rejected',
       receipt,
       failure: { code: receipt.code, message: receipt.message },
+    };
+  }
+  if (receipt.status === 'unknown' && phase === 'upload') {
+    // A start follows only a transferred upload, so an unconfirmed one started nothing and the request can be sent again.
+    return {
+      ...record,
+      state: 'failed',
+      receipt,
+      failure: {
+        code: 'MACHINE_UPLOAD_UNCONFIRMED',
+        message: 'The file did not finish uploading to the printer, so nothing was started. Send it again.',
+      },
     };
   }
   if (receipt.status === 'unknown') {

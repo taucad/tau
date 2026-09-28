@@ -894,7 +894,12 @@ export const connectBambuMachine = async (
             connectTimeout: 15_000,
             signal: uploadInput.signal,
           }));
-        } catch {
+        } catch (error) {
+          // The host's transport errors name the failure, never the access code.
+          await runtime.log({
+            level: 'warning',
+            message: `FTPS upload of ${uploadInput.remoteName} failed: ${(error instanceof Error ? error.message : String(error)).slice(0, 200)}`,
+          });
           return {
             status: 'unknown',
             reason: 'transfer-result-unavailable',

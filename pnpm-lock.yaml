@@ -547,8 +547,8 @@ catalogs:
       specifier: ^5.1.14
       version: 5.1.14
     nanoraster:
-      specifier: ^0.5.4
-      version: 0.5.4
+      specifier: ^0.5.5
+      version: 0.5.5
     netlify-cli:
       specifier: ^25.6.2
       version: 25.6.2
@@ -2002,7 +2002,7 @@ importers:
         version: 0.3.0
       nanoraster:
         specifier: 'catalog:'
-        version: 0.5.4
+        version: 0.5.5
       pino-pretty:
         specifier: 'catalog:'
         version: 13.1.3
@@ -3914,7 +3914,7 @@ importers:
         version: 3.4.1(@gltf-transform/core@4.4.0)(@gltf-transform/extensions@4.4.0)(@gltf-transform/functions@4.4.0)(esbuild-wasm@0.28.2)
       nanoraster:
         specifier: 'catalog:'
-        version: 0.5.4
+        version: 0.5.5
     devDependencies:
       '@taucad/camera':
         specifier: workspace:*
@@ -3926,8 +3926,8 @@ importers:
         specifier: 'catalog:'
         version: 1.7.2(next@16.3.2(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@playwright/test@1.61.0)(@types/node@26.3.0)(babel-plugin-macros@3.1.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.101.0))
       nanoraster-darwin-arm64:
-        specifier: 0.5.4
-        version: 0.5.4
+        specifier: 0.5.5
+        version: 0.5.5
       vite:
         specifier: 'catalog:'
         version: 8.0.10(@types/node@26.3.0)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.100.0)(sass@1.101.0)(stylus@0.64.0)(terser@5.48.0)(tsx@4.22.4)(yaml@2.9.0)
@@ -22364,110 +22364,110 @@ packages:
     engines: {node: ^18 || >=20}
     hasBin: true
 
-  nanoraster-android-arm-eabi@0.5.4:
-    resolution: {integrity: sha512-+/iQNbXyp0gq6EuKNaqexwjuG4IcyX+imJ6Qmw/8DVCkzsPhvJz1dhtU3e+Uboj3w58lf3LfvxiCd44/vQyYDQ==}
+  nanoraster-android-arm-eabi@0.5.5:
+    resolution: {integrity: sha512-J9nzp9o4gpkH//hhgCJ0ckpwI6nS/v+yExivtwXe1ej76WqGZiUW3eWhw4Pqabj3VVuvJeED0kJY/AeJl1av7w==}
     engines: {node: '>=22.13.0'}
     cpu: [arm]
     os: [android]
 
-  nanoraster-android-arm64@0.5.4:
-    resolution: {integrity: sha512-wY+IvrsyHpZVk1Eyh79ALr4JunpiLMBGzprAk1SHWnwOEcQyl7U1qU4f7oqH6BLzDiO4//LN6mKLlnMqlbguzg==}
+  nanoraster-android-arm64@0.5.5:
+    resolution: {integrity: sha512-kwk0QYN9RPXQFTXH/OCO9FbcLdPASITivHK2vsWRylqoVN22Jk/bteFvRarFwBlkHC91LDhZIvn6FpLvr+rZlA==}
     engines: {node: '>=22.13.0'}
     cpu: [arm64]
     os: [android]
 
-  nanoraster-darwin-arm64@0.5.4:
-    resolution: {integrity: sha512-HBUPpewk1uQwyPcvojmgfXWhFm9nRx/cXCZYebV46nB8s8AjwoZLDj3/Wz97HvfNf4SJIPggrwgUDXfPcGGQzQ==}
+  nanoraster-darwin-arm64@0.5.5:
+    resolution: {integrity: sha512-ac1wOwdyEk0DEQ+hdCGAYG7k+UlS5wgxur7LlFOcpWc3YKZpfhQG+ZWS5wIacKtUZq0T3aJ0vhb5ZiZ+4w3Xqw==}
     engines: {node: '>=22.13.0'}
     cpu: [arm64]
     os: [darwin]
 
-  nanoraster-darwin-x64@0.5.4:
-    resolution: {integrity: sha512-Dh2lZPGO41P+Ye8IZq1y9w78fURV1NmEGUi2U+hN1DK5qboItq/9034i0cy+XcWXI5iy2d1hOt+H+oq+Fe7NFw==}
+  nanoraster-darwin-x64@0.5.5:
+    resolution: {integrity: sha512-NI2gLEqMOaAm0n6pWXg/pC906ZTKV/jnOKRrq6+37oniS0Sd+u6aOH12JdRij0s7vjxd4QyVq2OSkgDhVXMUog==}
     engines: {node: '>=22.13.0'}
     cpu: [x64]
     os: [darwin]
 
-  nanoraster-freebsd-x64@0.5.4:
-    resolution: {integrity: sha512-S+nYNgkI+lf82UZWiUJL5dejtUrYaerku7U/bF1H/uCbAbTHlzEss5gBmzwvLzj3ZP7FisnDCgfyoqR3ltfcrQ==}
+  nanoraster-freebsd-x64@0.5.5:
+    resolution: {integrity: sha512-/kT3+ytxqjkOgsumedsy2Q+KDWOimRqybkPjSCh3NY8Ul2Mrb4dFfJBMRYEb0ef+7HhrVvLV9LVOjk/V3Uq2fg==}
     engines: {node: '>=22.13.0'}
     cpu: [x64]
     os: [freebsd]
 
-  nanoraster-linux-arm-gnueabihf@0.5.4:
-    resolution: {integrity: sha512-4BBCB+89XBu/ccpY45vPPEdsvzseSnjmIG7hSRXH94uYHeEsrLqLNwuC+DhKjkGhQt3xunFptbLKqe32wkGkeA==}
+  nanoraster-linux-arm-gnueabihf@0.5.5:
+    resolution: {integrity: sha512-q5JJWxZvGnhG1StBR3APPwnMNpEMzuV8V9aGDJX5ADKKg5RjHPA21Cvc2/Am3l7twTkSg80Wug+wPCEOHCnjyg==}
     engines: {node: '>=22.13.0'}
     cpu: [arm]
     os: [linux]
 
-  nanoraster-linux-arm-musleabihf@0.5.4:
-    resolution: {integrity: sha512-L7IlXqKy5F1aMZZYS335VDZX9uwuZOveT85PumLf4UlXdgDA0vCFIEgmx9hdgJ6R+hmCKYlciZope8/iPtnvdw==}
+  nanoraster-linux-arm-musleabihf@0.5.5:
+    resolution: {integrity: sha512-tIgxn6QrB7whSU1pL6Psw7/9KZCATh7+aRR/OqM36a7+68xiqnwH6yF65x5bFEAzY5HhqwgWIRAc4PhT2vJ9wg==}
     engines: {node: '>=22.13.0'}
     cpu: [arm]
     os: [linux]
 
-  nanoraster-linux-arm64-gnu@0.5.4:
-    resolution: {integrity: sha512-dVPRc30HoC3MQ4Gm8adWWXss4JujQO4XC4Jq9Z9X7bIKrEA5uy/ga7Sbk64slqjTdJEWseubqIHm26/G33V+Eg==}
+  nanoraster-linux-arm64-gnu@0.5.5:
+    resolution: {integrity: sha512-loTbNfSRBKE4ekpq7r2LVGKuWwBMc3FXNZCZYAbCc1cTfUOttJ4A9kdWt2v/+u4ptRw0eJAS50rfXEv2jjRNyQ==}
     engines: {node: '>=22.13.0'}
     cpu: [arm64]
     os: [linux]
     libc: [glibc]
 
-  nanoraster-linux-arm64-musl@0.5.4:
-    resolution: {integrity: sha512-hHU8y/bgAYlCTFFEdC6cfAoII8kQSwlryzCKqlf3/Bh0V93Ov1R7L/lkwHcxbMCdQvcPDr/euFC+qj1MBIs2zg==}
+  nanoraster-linux-arm64-musl@0.5.5:
+    resolution: {integrity: sha512-leTDOjMY2CnJEMUgMojv3LeFzOcOaLDZS0U7CMNYZBJq8JQwWESJDUWk4kzIyEY3Jbh2Q1sJcuSr/ET3ov1YDQ==}
     engines: {node: '>=22.13.0'}
     cpu: [arm64]
     os: [linux]
     libc: [musl]
 
-  nanoraster-linux-ppc64-gnu@0.5.4:
-    resolution: {integrity: sha512-qVFMIi5/dEWD3LzuN3WKF06sJ0RA2QpI3iG11UpGubLr6A7OQAhkw/pU8Xv0LHQCCybZUaoZ5pvR+uPSB6WOWQ==}
+  nanoraster-linux-ppc64-gnu@0.5.5:
+    resolution: {integrity: sha512-2VZEsDQ+t1xDAE7AQ+euXz5RYHrX5nhwu7z7/KEJ3MecaxHYZIFiwsO1+9M2snUPkXyKuFCk258fCREFXfcHsg==}
     engines: {node: '>=22.13.0'}
     cpu: [ppc64]
     os: [linux]
     libc: [glibc]
 
-  nanoraster-linux-s390x-gnu@0.5.4:
-    resolution: {integrity: sha512-pRAsRWGEx7KzxT21nZKvPz+xlY7NX9WN9owTmj1yezUFWG/7LQ1idDh6hzkvtGIlAzuSi9G6RsmO1vDR9q86lA==}
+  nanoraster-linux-s390x-gnu@0.5.5:
+    resolution: {integrity: sha512-euF5wuNV/+oD0qkxeQ+5Gj/F5bX7O5JAM9ECTY7kezd1lG/ZqPX2Gy0K94+Qiwm2nJ9mkxM5svCDTtrbTCc0ew==}
     engines: {node: '>=22.13.0'}
     cpu: [s390x]
     os: [linux]
     libc: [glibc]
 
-  nanoraster-linux-x64-gnu@0.5.4:
-    resolution: {integrity: sha512-w3wvQw+wp8DvW4DqiD7XN3BWlsOrnnNZgW+ZDP7H/PurjIRfFpxQoRVCcdMfSxGzL3sM7d5ELuJqXOGY/UUMig==}
+  nanoraster-linux-x64-gnu@0.5.5:
+    resolution: {integrity: sha512-4reKYqkAVmcAGnYTGaXCxORRrRpmuhOU+fQNKoTDkwuPXUvamBYUIIUaWZuVLir4hHHUejJMSF6Ix1jA8vOoNA==}
     engines: {node: '>=22.13.0'}
     cpu: [x64]
     os: [linux]
     libc: [glibc]
 
-  nanoraster-linux-x64-musl@0.5.4:
-    resolution: {integrity: sha512-JJn1dLs+6LHqsI3pVrNcJ618KfkympiKy/5Mcy+K4iee8hASt/C1B86K2fKJqvENIVzM3ZogQUAxSPKd3MGkkQ==}
+  nanoraster-linux-x64-musl@0.5.5:
+    resolution: {integrity: sha512-9hcdiTDDTkPHfdFZKZQ4khwfqayHEjFnZzbubwtvSnNtmlNBZ6L0nixAdR2vswmiAXyohzb3YoKJLgZ9DHVFVw==}
     engines: {node: '>=22.13.0'}
     cpu: [x64]
     os: [linux]
     libc: [musl]
 
-  nanoraster-win32-arm64-msvc@0.5.4:
-    resolution: {integrity: sha512-U7UwyzBUxpm4R4iwL2aRk6DP/MZF2OGY6/lSpausyBxNIYqv3vcALkX4CM1wRgJ7E7plZ8WGKL8upx+14FkbrQ==}
+  nanoraster-win32-arm64-msvc@0.5.5:
+    resolution: {integrity: sha512-f/VapMNwB1vAFatgoll0HaHDYEWp5z30c/9HTti/Pb3/4+/QklPKIq2d5BAAUd9k2ah3h8N+9u5xkIsatf8IOA==}
     engines: {node: '>=22.13.0'}
     cpu: [arm64]
     os: [win32]
 
-  nanoraster-win32-ia32-msvc@0.5.4:
-    resolution: {integrity: sha512-WtEWd6RkVEN/M1xBioRrThUOkSChIkBYgDPNE0Miy6cvIWqNJoGNEqiGRoMm6tOV/2Xscegjt69vmsZLn54WfA==}
+  nanoraster-win32-ia32-msvc@0.5.5:
+    resolution: {integrity: sha512-sXkEWCqcjp6Mxf9Syvyp3JhYTaCwX47nSEIGa8G/OiGeoORian9D2pXDGgxGL9yB9gzR4DKw0FcxMencIgBcTQ==}
     engines: {node: '>=22.13.0'}
     cpu: [ia32]
     os: [win32]
 
-  nanoraster-win32-x64-msvc@0.5.4:
-    resolution: {integrity: sha512-txiQ/ejwmVKtCBiJHxZwveKvvNNF7VRBKmKVIVnl0n44UEn8c+FihZp2nrIEgL7TwnnbOqSeccoB4sqUHHugbg==}
+  nanoraster-win32-x64-msvc@0.5.5:
+    resolution: {integrity: sha512-0aizX9ELhQhxQnoY5Ai7fo7DbGRWZBZFd3V5ek538YWWLdorNhOHWCiY2/9oqoYY2azKKkAziyBVN7pi0lbd5Q==}
     engines: {node: '>=22.13.0'}
     cpu: [x64]
     os: [win32]
 
-  nanoraster@0.5.4:
-    resolution: {integrity: sha512-C70rM7Hfp7AyvwcqAtqNdfGO1Qj6vJNL/moAC3eZcvrp76e8TD+HavbisDA+UnRPYvnVGFiOP+pir2VTAePang==}
+  nanoraster@0.5.5:
+    resolution: {integrity: sha512-hRCYyRAD4OJrEHnw/H0Tiizcg/YLnlS5nBGbOcmjdHzi/Nc+I9ttB4RYrgYBi/oJmfC0Yrr3EQqgbWcfNhWtJw==}
     engines: {node: '>=22.13.0'}
 
   nanospinner@1.2.2:
@@ -47520,71 +47520,71 @@ snapshots:
 
   nanoid@5.1.14: {}
 
-  nanoraster-android-arm-eabi@0.5.4:
+  nanoraster-android-arm-eabi@0.5.5:
     optional: true
 
-  nanoraster-android-arm64@0.5.4:
+  nanoraster-android-arm64@0.5.5:
     optional: true
 
-  nanoraster-darwin-arm64@0.5.4: {}
+  nanoraster-darwin-arm64@0.5.5: {}
 
-  nanoraster-darwin-x64@0.5.4:
+  nanoraster-darwin-x64@0.5.5:
     optional: true
 
-  nanoraster-freebsd-x64@0.5.4:
+  nanoraster-freebsd-x64@0.5.5:
     optional: true
 
-  nanoraster-linux-arm-gnueabihf@0.5.4:
+  nanoraster-linux-arm-gnueabihf@0.5.5:
     optional: true
 
-  nanoraster-linux-arm-musleabihf@0.5.4:
+  nanoraster-linux-arm-musleabihf@0.5.5:
     optional: true
 
-  nanoraster-linux-arm64-gnu@0.5.4:
+  nanoraster-linux-arm64-gnu@0.5.5:
     optional: true
 
-  nanoraster-linux-arm64-musl@0.5.4:
+  nanoraster-linux-arm64-musl@0.5.5:
     optional: true
 
-  nanoraster-linux-ppc64-gnu@0.5.4:
+  nanoraster-linux-ppc64-gnu@0.5.5:
     optional: true
 
-  nanoraster-linux-s390x-gnu@0.5.4:
+  nanoraster-linux-s390x-gnu@0.5.5:
     optional: true
 
-  nanoraster-linux-x64-gnu@0.5.4:
+  nanoraster-linux-x64-gnu@0.5.5:
     optional: true
 
-  nanoraster-linux-x64-musl@0.5.4:
+  nanoraster-linux-x64-musl@0.5.5:
     optional: true
 
-  nanoraster-win32-arm64-msvc@0.5.4:
+  nanoraster-win32-arm64-msvc@0.5.5:
     optional: true
 
-  nanoraster-win32-ia32-msvc@0.5.4:
+  nanoraster-win32-ia32-msvc@0.5.5:
     optional: true
 
-  nanoraster-win32-x64-msvc@0.5.4:
+  nanoraster-win32-x64-msvc@0.5.5:
     optional: true
 
-  nanoraster@0.5.4:
+  nanoraster@0.5.5:
     optionalDependencies:
-      nanoraster-android-arm-eabi: 0.5.4
-      nanoraster-android-arm64: 0.5.4
-      nanoraster-darwin-arm64: 0.5.4
-      nanoraster-darwin-x64: 0.5.4
-      nanoraster-freebsd-x64: 0.5.4
-      nanoraster-linux-arm-gnueabihf: 0.5.4
-      nanoraster-linux-arm-musleabihf: 0.5.4
-      nanoraster-linux-arm64-gnu: 0.5.4
-      nanoraster-linux-arm64-musl: 0.5.4
-      nanoraster-linux-ppc64-gnu: 0.5.4
-      nanoraster-linux-s390x-gnu: 0.5.4
-      nanoraster-linux-x64-gnu: 0.5.4
-      nanoraster-linux-x64-musl: 0.5.4
-      nanoraster-win32-arm64-msvc: 0.5.4
-      nanoraster-win32-ia32-msvc: 0.5.4
-      nanoraster-win32-x64-msvc: 0.5.4
+      nanoraster-android-arm-eabi: 0.5.5
+      nanoraster-android-arm64: 0.5.5
+      nanoraster-darwin-arm64: 0.5.5
+      nanoraster-darwin-x64: 0.5.5
+      nanoraster-freebsd-x64: 0.5.5
+      nanoraster-linux-arm-gnueabihf: 0.5.5
+      nanoraster-linux-arm-musleabihf: 0.5.5
+      nanoraster-linux-arm64-gnu: 0.5.5
+      nanoraster-linux-arm64-musl: 0.5.5
+      nanoraster-linux-ppc64-gnu: 0.5.5
+      nanoraster-linux-s390x-gnu: 0.5.5
+      nanoraster-linux-x64-gnu: 0.5.5
+      nanoraster-linux-x64-musl: 0.5.5
+      nanoraster-win32-arm64-msvc: 0.5.5
+      nanoraster-win32-ia32-msvc: 0.5.5
+      nanoraster-win32-x64-msvc: 0.5.5
 
   nanospinner@1.2.2:
     dependencies:

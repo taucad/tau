@@ -45,7 +45,7 @@ export function ProjectActionDropdown({ project, actions }: ProjectActionDropdow
         setIsConfirmingClose(true);
         return;
       }
-      actions.handleDelete(project);
+      await actions.handleDelete(project);
     } catch {
       toast.error(`Couldn’t check running work in ${project.name}. Try again.`);
     }

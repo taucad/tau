@@ -526,7 +526,7 @@ describe('ProjectNavigation', () => {
     });
   });
 
-  it('blocks Delete when another build still owns a run', async () => {
+  it('blocks Move to Trash when another build still owns a run', async () => {
     mockGetProjectClosePlan.mockResolvedValue({
       stoppableRunCount: 0,
       stoppableChatIds: [],
@@ -534,8 +534,10 @@ describe('ProjectNavigation', () => {
       continuingRuns: [{ id: 'run-foreign', label: 'Foreign chat', reason: 'other-build' }],
     });
     render(<ProjectNavigation />);
-    fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[0]!);
-    await waitFor(() => expect(mockGetProjectClosePlan).toHaveBeenCalledWith('proj_two'));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Move to Trash' })[0]!);
+    await waitFor(() => {
+      expect(mockGetProjectClosePlan).toHaveBeenCalledWith('proj_two');
+    });
     expect(screen.queryByRole('heading', { name: /close Two before deleting/u })).not.toBeInTheDocument();
     expect(projectsResult.deleteProject).not.toHaveBeenCalled();
     expect(mockCloseProject).not.toHaveBeenCalled();

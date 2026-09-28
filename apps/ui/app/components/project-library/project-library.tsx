@@ -245,7 +245,9 @@ export function ProjectLibrary(): React.JSX.Element {
           }
           return true;
         }
-        if (announce) toast.error(`Could not move ${project.name} to Trash`);
+        if (announce) {
+          toast.error(`Could not move ${project.name} to Trash`);
+        }
       } catch (error) {
         if (announce) {
           toast.error(`Could not move ${project.name} to Trash`, {
@@ -267,14 +269,15 @@ export function ProjectLibrary(): React.JSX.Element {
   );
 
   const handlePermanentlyDelete = useCallback(
-    (project: ProjectListItem) => {
-      void verifyProjectQuiescent(project.id)
-        .then(() => setPermanentDeleteTarget(project))
-        .catch((error: unknown) => {
-          toast.error(`Could not delete ${project.name} permanently`, {
-            description: error instanceof Error ? error.message : undefined,
-          });
+    async (project: ProjectListItem) => {
+      try {
+        await verifyProjectQuiescent(project.id);
+        setPermanentDeleteTarget(project);
+      } catch (error) {
+        toast.error(`Could not delete ${project.name} permanently`, {
+          description: error instanceof Error ? error.message : undefined,
         });
+      }
     },
     [verifyProjectQuiescent],
   );
@@ -971,26 +974,20 @@ function BulkActions({ table, deleteProject }: BulkActionsProps) {
 
   const handleBulkDelete = async (): Promise<void> => {
     setIsDeleting(true);
-    let successCount = 0;
-    let errorCount = 0;
-
-    for (const row of selectedRows) {
-      try {
-        const project = row.original;
-        /* Never selectable (D20): a Tau-Cloud-only row has nothing here to trash. */
-        if (isCloudOnly(project)) {
-          continue;
+    /* Never selectable (D20): a Tau-Cloud-only row has nothing here to trash. */
+    const projects = selectedRows.map((row) => row.original).filter((project) => !isCloudOnly(project));
+    const results = await Promise.all(
+      projects.map(async (project) => {
+        try {
+          return await deleteProject(project, { announce: false });
+        } catch (error) {
+          console.error('Error deleting project:', error);
+          return false;
         }
-        if (await deleteProject(project, { announce: false })) {
-          successCount++;
-        } else {
-          errorCount++;
-        }
-      } catch (error) {
-        errorCount++;
-        console.error('Error deleting project:', error);
-      }
-    }
+      }),
+    );
+    const successCount = results.filter(Boolean).length;
+    const errorCount = results.length - successCount;
 
     setIsDeleting(false);
     setShowDeleteDialog(false);

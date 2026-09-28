@@ -201,7 +201,7 @@ describe('ProjectChatList', () => {
   it('observes all listed chats while collapsed without rendering chat rows', () => {
     render(<ProjectChatList project={project} isProjectActive={false} isExpanded={false} />);
     expect(mockObserve).toHaveBeenCalledTimes(12);
-    expect(mockUseChatRecords).toHaveBeenCalledWith('proj_one');
+    expect(mockUseChatRecords).toHaveBeenCalledWith('proj_one', { includeDeleted: true });
     expect(mockUseChats).toHaveBeenCalledWith('proj_one', { enabled: false });
     expect(screen.queryByRole('link')).not.toBeInTheDocument();
   });
@@ -270,9 +270,12 @@ describe('ProjectChatList', () => {
 
   it('reveals trashed chats and restores one through the existing record', async () => {
     const restoreChat = vi.fn().mockResolvedValue(chat(2));
-    mockUseChats.mockReturnValue({
+    mockUseChatRecords.mockReturnValue({
       ...defaultChatsResult,
       chats: [chat(1), { ...chat(2), deletedAt: Date.now() }],
+    });
+    mockUseChats.mockReturnValue({
+      ...defaultChatsResult,
       restoreChat,
     });
     render(<ProjectChatList project={project} isProjectActive />);

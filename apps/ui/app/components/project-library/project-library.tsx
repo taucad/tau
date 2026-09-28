@@ -770,7 +770,7 @@ function UnifiedProjectList({ rows, viewMode, actions, onOpenCloudProject }: Uni
       <CollectionEmptyState className='min-h-[60vh]'>
         {/* Empty-library CTA — composer-only, no chat session to attach to. */}
         <ChatComposerProvider surface='library'>
-          <div className='mx-auto max-w-2xl space-y-6'>
+          <div className='mx-auto w-full max-w-2xl space-y-6'>
             <div className='flex flex-col items-center space-y-4 text-center'>
               <PackageX className='size-16 text-muted-foreground' strokeWidth={1} />
               <div className='space-y-2'>

@@ -380,6 +380,7 @@ structure Entry where
   committed : Bool := false
   settlements : List Settlement := []
   pending : List (Nat × Key) := []
+  resolved : List Nat := []
   openInv : Option Nat := none
   unreadable : Bool := false
   deriving Repr
@@ -506,7 +507,10 @@ def Ledger.known (L : Ledger) (e : Row) : Ledger :=
   | .S => L.settle e
   | .H => let en := L.entry e.run; L.put e.run { en with committed := true }
   | .O => let en := L.entry e.run; L.put e.run { en with pending := upsert e.arg e.key en.pending }
-  | .R => let en := L.entry e.run; L.put e.run { en with pending := erase e.arg en.pending }
+  | .R =>
+    let en := L.entry e.run
+    let en := { en with pending := erase e.arg en.pending }
+    L.put e.run { en with resolved := e.arg :: en.resolved }
   | .P =>
     match lookup (e.arg % 4) L.invs with
     | some _ => L.note .conflict e.key
@@ -610,6 +614,7 @@ def unsettled (L : Ledger) : List (Nat × Nat) :=
 /-- Refusal codes (the registry) and `ok`. -/
 inductive Code where
   | ok | chatRunLive | noRunAdmitted | runIdTaken | settlementWithoutRun | settlementConflict | invocationUnresolved
+  | interruptAlreadyResolved
   deriving DecidableEq, Repr
 
 inductive Cond where
@@ -693,6 +698,7 @@ def gateCode (L : Ledger) (e : Row) (invocations : Bool) : Code :=
     | none =>
       settlementTable (if en.life.isNone ∨ a > en.attempt then .unadmitted
         else if a < en.attempt ∨ en.append = .settled then .settled else en.append)
+  | .R => if e.arg ∈ en.resolved then .interruptAlreadyResolved else .ok
   | .P =>
     if invocations ∧ e.arg < 4 then
       let first := !L.invs.any (fun (_, i) => decide (i.run = e.run ∧ i.attempt = en.attempt))

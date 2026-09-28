@@ -7351,3 +7351,9 @@ QB refused identity-mismatch 15 0:0
 QB refused cursor-ahead 15 -
 QB refused identity-mismatch 15 5:0
 X
+T interrupt-resolved-twice
+A 0 appended
+A 1 appended
+A 2 appended
+QR INTERRUPT_ALREADY_RESOLVED
+X

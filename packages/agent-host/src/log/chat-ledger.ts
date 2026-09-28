@@ -70,6 +70,8 @@ export type RunEntry = Readonly<{
   settlements: ReadonlyArray<Readonly<{ attempt: number; row: RowKey; event: TurnSettlementEvent }>>;
   /** Each unresolved interrupt's id → the row that requested it. */
   pendingInterrupts: Readonly<Record<string, RowKey>>;
+  /** Interrupt ids with a recorded resolution, including unrecognized outcomes. */
+  resolvedInterrupts?: readonly string[];
   lastResolution?: LedgerInterruptResolution;
   /** The run's last prepared model attempt id, until a shown reply or a settled row closes it. */
   openInvocation?: string;
@@ -154,9 +156,10 @@ const envelopeKeys: ReadonlySet<string> = new Set([
 const endedStates: ReadonlySet<RunLifecycleState> = new Set(['completed', 'failed', 'cancelled']);
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
-type EntryDraft = Omit<Mutable<RunEntry>, 'settlements' | 'pendingInterrupts'> & {
+type EntryDraft = Omit<Mutable<RunEntry>, 'settlements' | 'pendingInterrupts' | 'resolvedInterrupts'> & {
   settlements: Array<RunEntry['settlements'][number]>;
   pendingInterrupts: Record<string, RowKey>;
+  resolvedInterrupts: string[];
 };
 type Draft = {
   -readonly [K in keyof ChatLedger]: K extends 'terms' | 'runs' | 'applied' | 'invocations'
@@ -186,6 +189,7 @@ const stubEntry = (): RunEntry => ({
   committed: false,
   settlements: [],
   pendingInterrupts: {},
+  resolvedInterrupts: [],
   opaque: false,
 });
 
@@ -291,6 +295,7 @@ const createFold = (ledger: ChatLedger) => {
       ...base,
       settlements: [...base.settlements],
       pendingInterrupts: { ...base.pendingInterrupts },
+      resolvedInterrupts: [...(base.resolvedInterrupts ?? [])],
     };
     draft.runs[runId] = copy;
     touched.add(runId);
@@ -410,6 +415,9 @@ const createFold = (ledger: ChatLedger) => {
           return;
         }
         Reflect.deleteProperty(entry.pendingInterrupts, event.interruptId);
+        if (!entry.resolvedInterrupts.includes(event.interruptId)) {
+          entry.resolvedInterrupts.push(event.interruptId);
+        }
         const resolution = resolutionOf(event.interruptId, event.payload);
         if (resolution) {
           entry.lastResolution = resolution;
@@ -794,6 +802,9 @@ const gateCode = (ledger: ChatLedger, row: AgentLogEvent, invocations: boolean):
           : entry.appendState;
     const code = settlementTable.table[state].settle;
     return code === 'ok' ? undefined : code;
+  }
+  if (row.type === 'interrupt.recorded' && row.phase === 'resolved') {
+    return entry?.resolvedInterrupts?.includes(row.interruptId) ? 'INTERRUPT_ALREADY_RESOLVED' : undefined;
   }
   if (invocations && row.type === 'model.invocation-prepared' && row.purpose === 'generation') {
     const attempt = entry?.attempt ?? 1;

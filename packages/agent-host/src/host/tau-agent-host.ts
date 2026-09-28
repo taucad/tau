@@ -747,6 +747,17 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   const createId = options.createId ?? createPortableId;
   const now = options.now ?? (() => new Date());
   const stores = new Map<string, ChatStore>();
+  const deferredLogCloses = new Map<
+    string,
+    {
+      owners: number;
+      drop: boolean;
+      dropping: boolean;
+      done: PromiseWithResolvers<void>;
+      failure?: unknown;
+    }
+  >();
+  const approvalScans = new Set<Readonly<{ chatId: string; done: Promise<void> }>>();
   /** Every run id this host has seen → its chat, for the verbs that name only a run. */
   const runChats = new Map<string, string>();
   /** Each chat's start or resume in flight, for {@link TauAgentHost.waitForAdmission}. */
@@ -769,6 +780,73 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     if (closed) {
       throw coded('HOST_CLOSED' satisfies RefusalCode, 'The Tau agent host is closed.');
     }
+  };
+
+  /** A closed host needs the durable rows in memory; an external tool callback may outlive its close. */
+  const drainApprovalScans = async (chatId?: string): Promise<void> => {
+    const pending: Array<Promise<void>> = [];
+    for (const scan of approvalScans) {
+      if (chatId === undefined || scan.chatId === chatId) {
+        pending.push(scan.done);
+      }
+    }
+    await Promise.all(pending);
+  };
+
+  /** Concurrent retirements keep their registry fences independent; the final owner closes the shared log. */
+  const deferLogClose = async (chatId: string): Promise<(drop: boolean) => Promise<void>> => {
+    let state = deferredLogCloses.get(chatId);
+    if (state?.dropping) {
+      await state.done.promise;
+      if (closed) {
+        return async () => undefined;
+      }
+      return deferLogClose(chatId);
+    }
+    if (state === undefined) {
+      state = { owners: 0, drop: false, dropping: false, done: Promise.withResolvers<void>() };
+      deferredLogCloses.set(chatId, state);
+    }
+    state.owners++;
+    return async (drop) => {
+      state.drop ||= drop;
+      state.owners--;
+      if (state.owners === 0) {
+        state.dropping = true;
+        try {
+          if (state.drop) {
+            await drainApprovalScans(chatId);
+            await serial(chatId, async () => dropLog(chatId));
+          }
+        } catch (error) {
+          state.failure = error;
+        } finally {
+          state.done.resolve();
+          deferredLogCloses.delete(chatId);
+        }
+      }
+      await state.done.promise;
+      if ('failure' in state) {
+        throw state.failure;
+      }
+    };
+  };
+
+  const waitForChatTeardown = (chatId: string): Promise<void> | undefined => {
+    if (!deferredLogCloses.has(chatId)) {
+      return undefined;
+    }
+    const wait = async (): Promise<void> => {
+      for (;;) {
+        const pending = deferredLogCloses.get(chatId);
+        if (pending === undefined) {
+          return;
+        }
+        // oxlint-disable-next-line no-await-in-loop -- a later teardown may start before this waiter resumes.
+        await pending.done.promise;
+      }
+    };
+    return wait();
   };
 
   /** Run `work` after everything already queued on the chat; a failure does not wedge the queue. */
@@ -893,15 +971,21 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
    *
    * @param chatId - The chat the command named.
    * @param runId - The run it named.
-   * @param commandId - The command whose answers to hand over, or none for every answer of the run.
+   * @param selection - The command whose answers to hand over, or none for every answer of the run, and the log-read barrier.
    */
-  const answerApprovals = async (chatId: string, runId: string, commandId?: string): Promise<void> => {
+  const answerApprovals = async (
+    chatId: string,
+    runId: string,
+    selection: Readonly<{ commandId: string | undefined; scanned: () => void }>,
+  ): Promise<void> => {
     const { answerApproval } = options.toolRegistry;
     if (answerApproval === undefined) {
       return;
     }
     const asked = new Map<string, Readonly<{ toolName: string; payload: JsonObject }>>();
-    for (const row of await readRows(chatId)) {
+    const rows = await readRows(chatId);
+    selection.scanned();
+    for (const row of rows) {
       if (row.runId !== runId || row.type !== 'interrupt.recorded' || !isJsonObject(row.payload)) {
         continue;
       }
@@ -912,7 +996,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       } else if (
         row.phase === 'resolved' &&
         asked.has(row.interruptId) &&
-        (commandId === undefined || row.commandId === commandId)
+        (selection.commandId === undefined || row.commandId === selection.commandId)
       ) {
         const { outcome, optionId, response } = row.payload;
         if (outcome === 'approved' || outcome === 'denied' || outcome === 'cancelled') {
@@ -1714,7 +1798,9 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       store.deliver = undefined;
       store.live.clear();
       await closeExternalChat(chatId).catch(() => undefined);
-      await serial(chatId, async () => dropLog(chatId));
+      if (!closed && !deferredLogCloses.has(chatId)) {
+        await serial(chatId, async () => dropLog(chatId));
+      }
     },
     ...(options.placement === undefined ? {} : { placement: options.placement }),
   };
@@ -1787,6 +1873,20 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   };
 
   const execute = async (command: HostCommand): Promise<CommandAnswer> => {
+    const teardown = waitForChatTeardown(command.payload.chatId);
+    if (teardown !== undefined) {
+      await teardown;
+    }
+    if (closed) {
+      return {
+        commandId: command.commandId,
+        generation: 0,
+        status: 'refused',
+        effect: 'not-applied',
+        code: 'HOST_CLOSED',
+        message: 'The Tau agent host is closed.',
+      };
+    }
     if (command.type === 'attach') {
       const { chatId } = command.payload;
       const claim = await registry.claim(chatId);
@@ -1814,16 +1914,25 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     const answer = registry.execute(command);
     if (command.type === 'resolve-interrupt' || command.type === 'cancel' || command.type === 'resume') {
       const { chatId, runId } = command.payload;
+      const scanned = Promise.withResolvers<void>();
+      const scan = { chatId, done: scanned.promise };
+      approvalScans.add(scan);
+      const finishScan = (): void => {
+        scanned.resolve();
+        approvalScans.delete(scan);
+      };
       /* A resume reconciles every answer of its run; an answer or a Stop hands over only what its own rows resolved. */
       const answeredBy = command.type === 'resume' ? undefined : command.commandId;
       const answerTools = async (): Promise<void> => {
         try {
           const applied = await answer;
           if (applied.status === 'applied') {
-            await answerApprovals(chatId, runId, answeredBy);
+            await answerApprovals(chatId, runId, { commandId: answeredBy, scanned: finishScan });
           }
         } catch (error) {
           console.error('[agent-host] a tool could not act on the answer to its approval', chatId, runId, error);
+        } finally {
+          finishScan();
         }
       };
       /* Not awaited: an approved print uploads before it answers, and the command answers when its rows are durable. */
@@ -1913,6 +2022,11 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     },
     resume: async (chatId, key) => {
       assertOpen();
+      const teardown = waitForChatTeardown(chatId);
+      if (teardown !== undefined) {
+        await teardown;
+      }
+      assertOpen();
       const ledger = await ledgerOf(chatId);
       const runId = ledger.currentRunId;
       if (runId === undefined) {
@@ -1951,6 +2065,11 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       return runId === undefined || described?.runId === runId ? described : undefined;
     },
     markAbandoned: async (chatId) => {
+      assertOpen();
+      const teardown = waitForChatTeardown(chatId);
+      if (teardown !== undefined) {
+        await teardown;
+      }
       assertOpen();
       /* Opening the chat's incarnation abandons an orphan as its term's claim (RA-R9). */
       const claim = await registry.claim(chatId);
@@ -2094,6 +2213,10 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       registry.assume(chatId, `${String(epoch)}:${createId()}`);
     },
     claim: async (chatId) => {
+      const teardown = waitForChatTeardown(chatId);
+      if (teardown !== undefined) {
+        await teardown;
+      }
       if (closed) {
         return {
           refused: {
@@ -2109,15 +2232,31 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       return registry.claim(chatId);
     },
     relinquish: async (chatId) => {
-      await registry.relinquish(chatId);
-      wake(storeOf(chatId));
-      await closeExternalChat(chatId).catch(() => undefined);
-      await serial(chatId, async () => dropLog(chatId));
+      if (closed) {
+        await closing;
+        return;
+      }
+      const finish = await deferLogClose(chatId);
+      let drop = false;
+      try {
+        await registry.relinquish(chatId);
+        wake(storeOf(chatId));
+        await closeExternalChat(chatId).catch(() => undefined);
+        drop = true;
+      } finally {
+        await finish(drop);
+      }
     },
     evictChat: async (chatId) => {
       assertOpen();
-      await registry.evict(chatId);
-      await serial(chatId, async () => dropLog(chatId));
+      const finish = await deferLogClose(chatId);
+      let drop = false;
+      try {
+        await registry.evict(chatId);
+        drop = true;
+      } finally {
+        await finish(drop);
+      }
     },
     /* One close: a concurrent second call awaits the first rather than resolving early. A close that failed is let
      * go, so the next call tries again (W6.r1 round 4). */
@@ -2125,6 +2264,8 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       closing ??= (async () => {
         closed = true;
         await registry.close();
+        await Promise.allSettled([...deferredLogCloses.values()].map(async ({ done }) => done.promise));
+        await drainApprovalScans();
         for (const store of stores.values()) {
           wake(store);
         }

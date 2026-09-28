@@ -1039,6 +1039,7 @@
   {
     "kind": "model",
     "geometry": "3d",
+    "featured": true,
     "kernel": "replicad",
     "name": "kestrel-240-quadcopter",
     "mainFile": "main.ts",

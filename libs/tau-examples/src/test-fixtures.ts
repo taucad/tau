@@ -62,6 +62,8 @@ export type TestFixture = {
   readonly kernel: string;
   readonly manifest: ProjectManifest;
   readonly thumbnailUrl?: string;
+  /** The thumbnail drawn for a card shown at twice the usual size, with proportionally thinner edges. */
+  readonly featuredThumbnailUrl?: string;
   readonly assets: readonly TestFixtureAsset[];
 };
 

@@ -1,12 +1,15 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import { createHash, randomUUID, X509Certificate } from 'node:crypto';
 import { createSocket } from 'node:dgram';
 import { once } from 'node:events';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createServer as createTlsServer } from 'node:tls';
 
-import type { MachineArtifactReference } from '@taucad/runtime/machine';
+import type { MachineArtifactReference, MachineTransportTrust } from '@taucad/runtime/machine';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -273,4 +276,100 @@ describe('createNodeMachineRuntime', () => {
       server.close();
     }
   });
+
+  it('should finish an FTPS upload that outlasts its timeout while the printer keeps reading', async () => {
+    const directory = await sandbox();
+    /* The only way Node gets a self-signed certificate without a dependency. */
+    execFileSync(
+      'openssl',
+      [
+        'req',
+        '-x509',
+        '-newkey',
+        'rsa:2048',
+        '-nodes',
+        '-subj',
+        '/CN=printer',
+        '-days',
+        '1',
+        '-keyout',
+        'key.pem',
+        '-out',
+        'cert.pem',
+      ],
+      { cwd: directory, stdio: 'ignore' },
+    );
+    const credentials = {
+      cert: await readFile(join(directory, 'cert.pem')),
+      key: await readFile(join(directory, 'key.pem')),
+    };
+    const upload = new Uint8Array(8 * 1024 * 1024).fill(7);
+    let received = 0;
+    let replyOnControl: ((line: string) => void) | undefined;
+    /* The data channel drains about 4 MiB/s, so the 8 MiB upload lasts twice the 1 s timeout. */
+    const data = createTlsServer(credentials, (socket) => {
+      socket.on('error', () => undefined);
+      socket.on('data', (chunk: Uint8Array<ArrayBuffer>) => {
+        received += chunk.byteLength;
+        socket.pause();
+        setTimeout(() => socket.resume(), (chunk.byteLength / (4 * 1024 * 1024)) * 1000);
+      });
+      socket.on('end', () => replyOnControl?.('226 Transfer complete'));
+    });
+    data.listen(0, '127.0.0.1');
+    await once(data, 'listening');
+    const { port: dataPort } = data.address() as AddressInfo;
+    /* Implicit FTPS on the control channel, answering only what basic-ftp sends for one upload. */
+    const control = createTlsServer(credentials, (socket) => {
+      socket.on('error', () => undefined);
+      const reply = (line: string): void => {
+        socket.write(`${line}\r\n`);
+      };
+      replyOnControl = reply;
+      reply('220 ready');
+      socket.on('data', (chunk: Uint8Array<ArrayBuffer>) => {
+        for (const line of Buffer.from(chunk).toString('latin1').split('\r\n').filter(Boolean)) {
+          const command = line.split(' ')[0]!.toUpperCase();
+          const answers = new Map([
+            ['USER', '331 password'],
+            ['PASS', '230 logged in'],
+            ['FEAT', '211 end'],
+            ['EPSV', `229 passive (|||${dataPort}|)`],
+            ['STOR', '150 ready'],
+            ['SIZE', `213 ${received}`],
+            ['QUIT', '221 bye'],
+          ]);
+          reply(answers.get(command) ?? '200 ok');
+        }
+      });
+    });
+    control.listen(0, '127.0.0.1');
+    await once(control, 'listening');
+    const { port } = control.address() as AddressInfo;
+    const secrets = createMachineSecretStore({ vault: createMemorySecretVault() });
+    secrets.stage('vault:machine/fixture/printer-1', '11111111');
+    const { uploadFile } = createNodeMachineRuntime({ secrets, readArtifact: async () => bytes }).connection();
+    if (!uploadFile) {
+      throw new Error('expected the node runtime to upload files');
+    }
+    const digest = `sha256:${createHash('sha256').update(new X509Certificate(credentials.cert).raw).digest('hex')}`;
+    try {
+      await expect(
+        uploadFile({
+          endpoint: { address: '127.0.0.1', port },
+          trust: { type: 'pinned', digest: digest as Extract<MachineTransportTrust, { type: 'pinned' }>['digest'] },
+          secretRef: 'vault:machine/fixture/printer-1',
+          username: 'bblp',
+          remoteName: 'tau-fixture.gcode.3mf',
+          bytes: upload,
+          connectTimeout: 1000,
+          signal: new AbortController().signal,
+        }),
+      ).resolves.toEqual({ bytesWritten: upload.byteLength });
+      expect(received).toBe(upload.byteLength);
+    } finally {
+      control.close();
+      data.close();
+    }
+  }, 20_000);
 });

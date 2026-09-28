@@ -401,14 +401,14 @@ export const ChatTextareaDesktop = memo(function ({
     // and intentionally takes NO `className` passthrough — see
     // ChatTextareaBorderBeam's docs for why. All layout / styling
     // overrides live on the inner border container below.
-    <div className='relative size-full' data-chat-composer={mode}>
+    <div className='relative w-full' data-chat-composer={mode}>
       <ChatTextareaBorderBeam isActive={isSubmitting} className={radius} />
 
       <div
         ref={containerReference}
         className={cn(
           'group/chat-textarea @container',
-          'relative flex size-full flex-col border bg-background',
+          'relative flex w-full flex-col border bg-background',
           radius,
           'cursor-text overflow-hidden',
           'shadow-md',
@@ -431,7 +431,7 @@ export const ChatTextareaDesktop = memo(function ({
         />
 
         {/* Editor */}
-        <div className={cn('flex min-h-0 min-w-0 flex-1 flex-col overflow-auto')} onClick={handleEditorAreaClick}>
+        <div className='max-h-48 min-h-12 min-w-0 overflow-y-auto' onClick={handleEditorAreaClick}>
           <ChatEditor
             editor={editor}
             className='pt-2'
@@ -597,11 +597,7 @@ export const ChatTextareaBar = memo(function ({
   );
 
   return (
-    <div
-      ref={barRef}
-      data-slot='composer-bar'
-      className='group/bar absolute inset-x-2 bottom-2 flex items-center justify-between gap-2'
-    >
+    <div ref={barRef} data-slot='composer-bar' className='group/bar flex items-center justify-between gap-2 px-2 pb-2'>
       <div data-slot='composer-left' className='flex shrink-0 flex-row items-center gap-0.5'>
         <ChatAddMenu
           enableContextActions={enableContextActions}

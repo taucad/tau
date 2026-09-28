@@ -3,7 +3,6 @@ import { ChevronRight, LoaderCircle, Wrench } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { Button } from '@taucad/ui/components/button';
-import { useStickToBottom } from '#hooks/use-stick-to-bottom.js';
 
 type ChatActivityGroupProps = {
   readonly summary: string;
@@ -26,7 +25,6 @@ export function ChatActivityGroup({
   const isOpen = userOpen ?? isActive;
   /* Expanded, the running row's own card spins; collapsed, the header is the only surface (R7). */
   const isBusy = hasActiveRows && !isOpen;
-  const { scrollRef, contentRef } = useStickToBottom(isActive && isOpen);
 
   return (
     <Collapsible open={isOpen} onOpenChange={setUserOpen}>
@@ -54,15 +52,8 @@ export function ChatActivityGroup({
         </Button>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <div
-          ref={scrollRef}
-          role='region'
-          aria-label={`${summary} details`}
-          className='flex max-h-80 scroll-shadows-y flex-col overflow-y-auto overscroll-contain'
-        >
-          <div ref={contentRef} className='flex flex-col'>
-            {children}
-          </div>
+        <div role='region' aria-label={`${summary} details`} className='flex flex-col'>
+          {children}
         </div>
       </CollapsibleContent>
     </Collapsible>

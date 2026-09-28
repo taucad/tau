@@ -3,7 +3,8 @@
 1. Author `main.ts` with ES module imports from `replicad`, camelCase names, exported `defaultParams`, and a default `main(params)` returning `Shape3D` or `ShapeConfig[]`.
 2. Prefer BRep-native construction: holes in the source sketch, revolved wall profiles for round shells, and separate named `ShapeConfig` parts when a fused solid is unnecessary.
 3. Use analytical arcs/circles where they fit. For involutes, airfoils, spirals, or cycloids, sample about eight control points and use `drawPointsInterpolation(points)` instead of chained lines.
-4. Verify the entry point and every renderable library file independently.
+4. If the requested assembly has parts that move relative to one another, read `kinematics-reference.md`. Return separate named parts, export `mechanism` with joints and an animation for every intended independent motion, and verify the Kinematics pane can play them. Static single-body models need no mechanism.
+5. Verify the entry point and every renderable library file independently. For moving models, fix mechanism warnings even if geometry renders.
 
 For multiple files, import helpers with explicit ESM paths such as `./lib/widget.js`. Library files export geometry builders; `main.ts` assembles them. A standalone test target must export a default `main` returning geometry.
 

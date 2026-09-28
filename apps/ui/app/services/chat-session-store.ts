@@ -370,6 +370,7 @@ type ObservedChat = {
   projectId: string;
   refs: number;
   attachment?: Actor<typeof hostAttachment>;
+  status: 'unknown' | 'attached' | 'lost' | 'refused';
   retry?: ReturnType<typeof setTimeout>;
   attempts: number;
 };
@@ -536,7 +537,7 @@ export class ChatSessionStore {
     if (existing !== undefined && existing.projectId !== projectId) {
       throw new Error(`Chat ${chatId} is already observed in project ${existing.projectId}.`);
     }
-    const observed = existing ?? { projectId, refs: 0, attempts: 0 };
+    const observed: ObservedChat = existing ?? { projectId, refs: 0, attempts: 0, status: 'unknown' };
     observed.refs += 1;
     if (existing === undefined) {
       this.#observed.set(chatId, observed);
@@ -576,6 +577,7 @@ export class ChatSessionStore {
         continue;
       }
       this.#stopObservedAttachment(observed);
+      this.#projectionTopics.get(chatId)?.emit();
       observed.attempts = 0;
       this.#startObservedAttachment(chatId, observed);
     }
@@ -590,6 +592,9 @@ export class ChatSessionStore {
         if (observed.projectId === projectId) {
           this.#stopObservedAttachment(observed);
         }
+      }
+      for (const chatId of this.observedChatIdsOf(projectId)) {
+        this.#projectionTopics.get(chatId)?.emit();
       }
     };
   }
@@ -935,6 +940,11 @@ export class ChatSessionStore {
    */
   public getProjection(chatId: string): ChatProjection | undefined {
     return this.#projectionContext(chatId);
+  }
+
+  /** The current read-only host attachment's verified state, never a run lifecycle. @public */
+  public getAttachmentStatus(chatId: string): ObservedChat['status'] {
+    return this.#observed.get(chatId)?.status ?? 'unknown';
   }
 
   /**
@@ -1382,6 +1392,7 @@ export class ChatSessionStore {
     observed.retry = undefined;
     observed.attachment?.stop();
     observed.attachment = undefined;
+    observed.status = 'unknown';
   }
 
   #startObservedAttachment(chatId: string, observed: ObservedChat): void {
@@ -1398,6 +1409,13 @@ export class ChatSessionStore {
           if (observed.attachment !== attachment) {
             return;
           }
+          observed.status =
+            event.type === 'attachment.attached'
+              ? 'attached'
+              : event.type === 'attachment.refused'
+                ? 'refused'
+                : 'lost';
+          this.#projectionTopics.get(chatId)?.emit();
           if (event.type === 'attachment.attached') {
             observed.attempts = 0;
             return;
@@ -1708,7 +1726,10 @@ export class ChatSessionStore {
       session.activeCommand = undefined;
       session.persistenceActorRef.send({
         type: 'setPersistedError',
-        error: parseErrorForPersistence(error instanceof Error ? error : new Error(String(error))),
+        error: {
+          ...parseErrorForPersistence(error instanceof Error ? error : new Error(String(error))),
+          requestId: command.commandId,
+        },
       });
       session.stateActorRef.send({
         type: 'runLifecycle',
@@ -2352,13 +2373,9 @@ export class ChatSessionStore {
       transport,
       /* The SDK closes a view stream; only the projected host log ends a run. */
       onFinish: () => undefined,
-      onError(error) {
-        persistenceActorRef.send({ type: 'handleError', error });
-        persistenceActorRef.send({
-          type: 'setPersistedError',
-          error: parseErrorForPersistence(error),
-        });
-      },
+      // SDK watch errors are presentation-local. The host log owns durable
+      // run failure; a retired stream callback must not rewrite chat.error.
+      onError: () => undefined,
     });
 
     // Wire the AI SDK Chat's snapshot callbacks into per-chatId subscriber

@@ -5,6 +5,7 @@ import { errorCategory } from '@taucad/types/constants';
 import type { ChatError as NormalizedChatError } from '@taucad/types';
 import { Button } from '@taucad/ui/components/button';
 import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
+import type { CombinedChatState } from '#hooks/use-chat.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { CodeViewer } from '#components/code/code-viewer.js';
 import { MarkdownViewer } from '#components/markdown/markdown-viewer.js';
@@ -24,6 +25,38 @@ import { ChatErrorProviderAccount } from '#routes/w.$workspace.$project/chat-err
 import { useOpenNewChat } from '#routes/w.$workspace.$project/use-open-new-chat.js';
 import { isResumableRunFailure } from '@taucad/agent-host';
 import { externalAgentStopCodes, externalAgentStopSchema } from '@taucad/agent-host/wire';
+import { selectCaughtUp, selectCurrentRun, selectRunFailure } from '#machines/chat-projection.logic.js';
+
+const projectedFailureErrors = new WeakMap<Readonly<{ runId: string; text: string }>, NormalizedChatError>();
+
+/** Only the caught-up host log can retire a legacy chat-wide error. */
+export function selectVisibleChatError(
+  state: Pick<CombinedChatState, 'projection' | 'attachmentStatus' | 'error' | 'persistedError'>,
+): NormalizedChatError | undefined {
+  const { projection } = state;
+  const caughtUp = projection !== undefined && selectCaughtUp(projection);
+  const run = projection === undefined || !caughtUp ? undefined : selectCurrentRun(projection);
+  if (projection !== undefined && run?.lifecycle === 'failed') {
+    const failure = selectRunFailure(projection, run.runId);
+    if (failure !== undefined) {
+      const key = projection.failure;
+      if (key !== undefined) {
+        let parsed = projectedFailureErrors.get(key);
+        if (parsed === undefined) {
+          parsed = parseErrorForPersistence(new Error(failure));
+          projectedFailureErrors.set(key, parsed);
+        }
+        return parsed;
+      }
+    }
+  }
+  if (caughtUp && state.attachmentStatus === 'attached') {
+    // A command refusal carries its command identity. A chat-wide legacy error
+    // does not, and cannot outrank the current host's verified healthy log.
+    return state.persistedError?.requestId ? state.persistedError : undefined;
+  }
+  return state.error ? parseErrorForPersistence(state.error) : state.persistedError;
+}
 
 /**
  * Attempts to format a string as pretty-printed JSON.
@@ -297,13 +330,7 @@ function codedErrorCard({
 export const ChatError = memo(function ({ className }: { readonly className?: string }): React.ReactNode {
   const [genericDetailsOpen, setGenericDetailsOpen] = useState(false);
   // Derive parsed error inside selector - prefer runtime error, fallback to persisted
-  const parsedError = useChatSelector((state): NormalizedChatError | undefined => {
-    if (state.error) {
-      return parseErrorForPersistence(state.error);
-    }
-
-    return state.persistedError;
-  });
+  const parsedError = useChatSelector(selectVisibleChatError);
   const { regenerate } = useChatActions();
   const { openNewChat, isReady: canOpenNewChat } = useOpenNewChat();
 

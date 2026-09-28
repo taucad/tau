@@ -35,6 +35,7 @@ import {
   createBrowserAgentHostClient,
   createAgentHostClient,
   readBrowserRunStoppability,
+  retainBrowserAgentHostProject,
 } from '#services/agent-host-client.js';
 import { createDaemonAgentHostTransport } from '#services/daemon-agent-host-client.js';
 import { daemonPlacementOf } from '#lib/agent-host-placement.js';
@@ -162,6 +163,7 @@ function ProjectSessionBinding({
   const [testingEnabled] = useCookie(cookieName.chatTestingEnabled, true);
   const computeMode = useComputeReuseMode();
   const nativeGeoSpec = useFeature('nativeGeoSpec');
+  const browserHostRelease = useRef<(() => void) | undefined>(undefined);
   const choices = useRef({ defaultExecution, defaultKernel, testingEnabled, computeMode, nativeGeoSpec, resolveModel });
   useEffect(() => {
     choices.current = { defaultExecution, defaultKernel, testingEnabled, computeMode, nativeGeoSpec, resolveModel };
@@ -184,6 +186,7 @@ function ProjectSessionBinding({
     if (client === undefined || !viewsReady) {
       return;
     }
+    let connectorActive = true;
     const connect = async (chatId: string) => {
       const stored = await chatSessions.getChatHostSettings(chatId);
       const {
@@ -242,7 +245,10 @@ function ProjectSessionBinding({
       }
       const openRevisionSession = (kind: 'placement' | 'reader') => () =>
         fileManagerRef.getSnapshot().context.openRevisionSessionPort?.(kind, projectId);
-      return createBrowserAgentHostClient({
+      if (!connectorActive) {
+        throw new Error(`Project ${projectId}'s host connector closed before chat ${chatId} attached.`);
+      }
+      const options = {
         openFileSystemBridge: openProjectRootBridge,
         openProjectRootBridge,
         openRevisionsPort: openRevisionSession('reader'),
@@ -266,9 +272,12 @@ function ProjectSessionBinding({
         }),
         runtimeConfig: createUiRuntimeConfig(ENV),
         geoSpecEngine: nativeGeoSpecChoice ? 'native' : 'legacy',
-      });
+      } as const;
+      const hostClient = createBrowserAgentHostClient(options);
+      browserHostRelease.current ??= retainBrowserAgentHostProject(options);
+      return hostClient;
     };
-    return chatSessions.publishProjectHostConnector(projectId, connect, async (chatId) => {
+    const unpublish = chatSessions.publishProjectHostConnector(projectId, connect, async (chatId) => {
       const stored = await chatSessions.getChatHostSettings(chatId);
       const execution = stored?.activeExecution ?? choices.current.defaultExecution;
       const daemonHostId = daemonPlacementOf(execution);
@@ -283,7 +292,18 @@ function ProjectSessionBinding({
       }
       return readBrowserRunStoppability(projectId, chatId);
     });
+    return () => {
+      connectorActive = false;
+      unpublish();
+    };
   }, [chatSessions, client, fileManagerRef, projectId, viewsReady, workspace]);
+  useEffect(
+    () => () => {
+      browserHostRelease.current?.();
+      browserHostRelease.current = undefined;
+    },
+    [projectId],
+  );
   /* Fetch writes name only a foreign segment path. The projection owns the bytes and transcript; a local host
    * log is still followed exclusively through its cursor. */
   useEffect(() => {

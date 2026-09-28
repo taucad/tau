@@ -854,6 +854,16 @@ export const readBrowserRunStoppability = async (
 ): Promise<'stoppable' | 'other-build' | 'background-window'> => residentAgentWorker().stoppability(projectId, chatId);
 
 /**
+ * Keep a browser project's existing host provided while its route is live. Short-lived command and observer clients
+ * still close independently; the returned release ends the host only after the project session closes.
+ *
+ * @param options - The first real browser-host options for this project.
+ * @returns An idempotent release of the project binding's host reference.
+ */
+export const retainBrowserAgentHostProject = (options: AgentHostClientOptions): (() => void) =>
+  residentAgentWorker(options.createWorker).acquire(options);
+
+/**
  * The resident-worker transport: one stream on the project's host per client, over the agent channel client, whose
  * outbox re-sends unanswered commands by key after a redial (SC-R6, SC-R7).
  *

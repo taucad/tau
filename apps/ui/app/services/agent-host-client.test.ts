@@ -16,6 +16,7 @@ import {
   createBrowserAgentHostClient,
   getBrowserAgentHostCapability,
   probeBrowserAgentHostCapability,
+  retainBrowserAgentHostProject,
   residentAgentWorker,
 } from '#services/agent-host-client.js';
 import type { AgentHostWorkerProtocol } from '#workers/agent-host.contract.js';
@@ -385,7 +386,7 @@ const promptBlocks = (): Parameters<typeof createBrowserAgentHostClient>[0]['sys
   { type: 'text', text: 'dynamic' },
 ];
 
-const createTestClient = (
+const testOptions = (
   createWorker: () => Worker,
   overrides: Partial<Parameters<typeof createBrowserAgentHostClient>[0]> = {},
 ) => {
@@ -393,7 +394,7 @@ const createTestClient = (
   // A bridge is opened per host incarnation, so a replacement gets fresh ports.
   const openBridge = (): FileSystemBridgeConnection =>
     ({ port: new MessageChannel().port1, dispose: vi.fn() }) as unknown as FileSystemBridgeConnection;
-  return createBrowserAgentHostClient({
+  return {
     ...baseOptions,
     systemPromptBlocks: promptBlocks(),
     openFileSystemBridge: openBridge,
@@ -402,8 +403,13 @@ const createTestClient = (
     createWorker,
     principal: async () => undefined,
     ...overrides,
-  });
+  };
 };
+
+const createTestClient = (
+  createWorker: () => Worker,
+  overrides: Partial<Parameters<typeof createBrowserAgentHostClient>[0]> = {},
+) => createBrowserAgentHostClient(testOptions(createWorker, overrides));
 
 /** A bridge opener that records each bridge's `dispose`, in opening order. */
 const trackedBridges = () => {
@@ -920,6 +926,45 @@ describe('re-brokering project hosts', () => {
 
 /* RH-R4, T3: a project host lives while a client of the project does; the last close releases the incarnation. */
 describe('releasing project hosts', () => {
+  it('should keep an accepted run on one host across a zero-client window until its project closes', async () => {
+    const worker = new FakeResidentWorker();
+    const createWorker = workerOf(worker);
+    const bridges = trackedBridges();
+    let principal = 'account-one';
+    const options = testOptions(createWorker, {
+      openFileSystemBridge: bridges.open,
+      openProjectRootBridge: bridges.open,
+      principal: async () => principal,
+    });
+    const releaseProject = retainBrowserAgentHostProject(options);
+    const command = createBrowserAgentHostClient(options);
+    await startRun(command, 'chat-a', 'run-a', 'A.');
+    await command.close();
+
+    expect(requestsNamed(worker, 'release')).toEqual([]);
+    const observer = createBrowserAgentHostClient(options);
+    await expect(attachChat(observer, 'chat-a')).resolves.toMatchObject({ status: 'applied' });
+    expect(requestsNamed(worker, 'provide')).toHaveLength(1);
+    await observer.close();
+    expect(requestsNamed(worker, 'release')).toEqual([]);
+
+    releaseProject();
+    releaseProject();
+    await vi.waitFor(() => {
+      expect(requestsNamed(worker, 'release')).toHaveLength(1);
+      expect(bridges.counts()).toEqual([1, 1]);
+    });
+    principal = 'account-two';
+    const nextProject = createBrowserAgentHostClient(options);
+    await expect(attachChat(nextProject, 'chat-b')).resolves.toMatchObject({ status: 'applied' });
+    expect(requestsNamed(worker, 'provide')).toHaveLength(2);
+    expect(requestsNamed(worker, 'provide')[1]?.args).toMatchObject({ principal: 'account-two' });
+    await nextProject.close();
+    await vi.waitFor(() => {
+      expect(bridges.counts()).toEqual([1, 1, 1, 1]);
+    });
+  });
+
   it('should release the project host by its incarnation when the last client closes', async () => {
     const worker = new FakeResidentWorker();
     const createWorker = workerOf(worker);

@@ -566,7 +566,31 @@ export const createAgentHostClient = (
       }
     });
     const replaySnapshot = async (): Promise<HostRunSnapshot> => {
-      const { snapshot } = await attachCommand(initial.chatId);
+      let attached: Attached | undefined;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- Retry the read-only attachment, never the admission.
+          attached = await attachCommand(initial.chatId);
+          break;
+        } catch (error) {
+          if (!(error instanceof AgentHostWorkerError) || error.code !== 'COMMAND_TIMEOUT') {
+            throw error;
+          }
+          if (attempt === 2) {
+            throw new AgentHostWorkerError(
+              'RUN_IDLE_TIMEOUT',
+              `Agent host control connection for run ${initial.runId} did not answer three liveness probes.`,
+            );
+          }
+        }
+      }
+      if (!attached) {
+        throw new AgentHostWorkerError(
+          'RUN_IDLE_TIMEOUT',
+          `Agent host replay for run ${initial.runId} did not return.`,
+        );
+      }
+      const { snapshot } = attached;
       if (!snapshot || snapshot.runId !== initial.runId) {
         throw new AgentHostWorkerError(
           'RUN_SNAPSHOT_MISSING',

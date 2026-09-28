@@ -57,20 +57,10 @@ export type BambuSimulator = Readonly<{
       amsMapping: readonly number[];
       bedLeveling: boolean;
       expectedBedType: string;
-      expectedFilamentDiameter: Readonly<{
-        value: number;
-        unit: string;
-        kind: string;
-        space: 'linear';
-      }>;
+      expectedFilamentDiameter: number;
       expectedMaterials: ReadonlyArray<Readonly<{ slot: number; materialId: string }>>;
       expectedModel: 'X1C';
-      expectedNozzleDiameter: Readonly<{
-        value: number;
-        unit: string;
-        kind: string;
-        space: 'linear';
-      }>;
+      expectedNozzleDiameter: number;
       flowCalibration: boolean;
       timelapse: boolean;
     }>

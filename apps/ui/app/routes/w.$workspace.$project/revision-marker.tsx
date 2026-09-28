@@ -94,6 +94,8 @@ const changeLabels: Readonly<Record<RevisionDiffEntry['kind'], string>> = {
   deleted: 'Deleted',
 };
 
+const initialFileRows = 3;
+
 /**
  * What *Compare* opens under a file row: the shared `DiffViewer` flush inside
  * the file list, or why there is nothing to read yet.
@@ -221,13 +223,14 @@ function FileList({
   // oxlint-disable-next-line typescript/no-restricted-types -- required by React
 }): React.JSX.Element | null {
   const [comparing, setComparing] = useState<string>();
+  const [isExpanded, setIsExpanded] = useState(false);
   const id = useId();
   if (changes.length === 0) {
     return null;
   }
   return (
     <ul aria-label={label} className='flex flex-col divide-y overflow-hidden rounded-md border bg-background'>
-      {changes.map((change, index) => (
+      {(isExpanded ? changes : changes.slice(0, initialFileRows)).map((change, index) => (
         <Collapsible
           key={change.path}
           asChild
@@ -270,6 +273,21 @@ function FileList({
           </li>
         </Collapsible>
       ))}
+      {changes.length > initialFileRows ? (
+        <li>
+          <button
+            type='button'
+            aria-expanded={isExpanded}
+            className='flex min-h-6 w-full cursor-action items-center justify-center px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:focus-outline motion-reduce:transition-none'
+            onClick={() => {
+              setIsExpanded((expanded) => !expanded);
+              setComparing(undefined);
+            }}
+          >
+            {isExpanded ? 'Collapse files' : `Show all ${String(changes.length)} files`}
+          </button>
+        </li>
+      ) : null}
     </ul>
   );
 }

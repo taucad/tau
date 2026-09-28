@@ -100,6 +100,50 @@ const openAndLend = async (harness: Harness): Promise<void> => {
 };
 
 describe('acpSession', () => {
+  it('should probe an idle model and queue a turn until the option update settles', async () => {
+    const harness = start({ lend: undefined });
+    const { actor, fakes, commands } = harness;
+    const probed: unknown[] = [];
+    actor.on('modelProbed', (event) => probed.push(event));
+    await flush();
+    harness.answer({ protocolVersion, agentCapabilities: {} });
+    harness.answer({ sessionId: 'acp-1', configOptions: [modelOption] });
+    expect(actor.getSnapshot().matches({ idle: 'resting' })).toBe(true);
+
+    actor.send({ type: 'probeModel', requestId: 'probe-1', model: 'large' });
+    expect(harness.lastCall()).toMatchObject({
+      method: 'session/set_config_option',
+      params: { sessionId: 'acp-1', configId: 'model', value: 'large' },
+    });
+    actor.send({ type: 'lend', lend: { ...lent, model: 'large' } });
+    expect(fakes.active('lentTurn')).toBe(0);
+
+    const updated = { ...modelOption, currentValue: 'large' };
+    harness.answer({ configOptions: [updated] });
+    expect(probed).toMatchObject([{ requestId: 'probe-1', configOptions: [updated] }]);
+    expect(actor.getSnapshot().context.configOptions).toEqual([updated]);
+    expect(fakes.active('lentTurn')).toBe(1);
+    fakes.sendBack('lentTurn', { type: 'lentReady' });
+    expect(harness.lastCall()).toMatchObject({ method: 'session/prompt' });
+    expect(commands('connection').filter((event) => event['method'] === 'session/set_config_option')).toHaveLength(1);
+    actor.stop();
+    harness.parent.stop();
+  });
+
+  it('should leave unsupported model discovery unanswered without a vendor call', async () => {
+    const harness = start({ lend: undefined });
+    const probed: unknown[] = [];
+    harness.actor.on('modelProbed', (event) => probed.push(event));
+    await flush();
+    harness.answer({ protocolVersion, agentCapabilities: {} });
+    harness.answer({ sessionId: 'acp-1', configOptions: [modelOption] });
+    harness.actor.send({ type: 'probeModel', requestId: 'probe-1', model: 'absent' });
+    expect(probed).toMatchObject([{ requestId: 'probe-1', configOptions: undefined }]);
+    expect(harness.lastCall()).toMatchObject({ method: 'session/new' });
+    harness.actor.stop();
+    harness.parent.stop();
+  });
+
   it('cancel answers pending permissions, waits 2 s, then answers the turn from closed after SIGKILL', async () => {
     const harness = await (async () => {
       const opened = start();
@@ -378,6 +422,7 @@ const sampled = (snapshot: AnyMachineSnapshot): AnyEventObject[] => {
     ...settled,
     { type: 'lend', lend: { ...lent, requestId: 'run-1:1' } },
     { type: 'lend', lend: { ...lent, requestId: 'run-1:2', model: 'large' } },
+    { type: 'probeModel', requestId: 'probe-1', model: 'large' },
     { type: 'cancel' },
     { type: 'close' },
     { type: 'sessionUpdate', sessionId: 'acp-1', update: { sessionUpdate: 'current_mode_update', currentModeId: 'm' } },
@@ -416,6 +461,7 @@ const graph = (withRecord: boolean): PathOptions => ({
       snapshot.context.lent?.model,
       snapshot.context.queued !== undefined,
       snapshot.context.stale,
+      snapshot.context.probeRequestId !== undefined,
     ]),
 });
 

@@ -32,6 +32,7 @@ import type {
   ClientRequestResponsesByMethod,
   ContentBlock,
   McpServer,
+  SessionConfigOption,
   SessionUpdate,
   Usage as AcpUsage,
 } from '@agentclientprotocol/sdk';
@@ -269,13 +270,19 @@ export type AcpSessionReport =
   | { readonly type: 'closed'; readonly key: string; readonly failure: AcpFailure | undefined };
 
 type Report = AcpSessionReport;
+type ProbeReport = {
+  readonly type: 'modelProbed';
+  readonly requestId: string;
+  readonly configOptions: readonly SessionConfigOption[] | undefined;
+  readonly failure: AcpFailure | undefined;
+};
 
 /* What the pure helpers enqueue: sends to the two invoked children or the parent, and reports. */
 type Enqueue = {
   sendTo(target: 'connection', event: AcpConnectionCommand): void;
   sendTo(target: 'lentTurn', event: AcpLentTurnCommand): void;
   sendTo(target: AnyActorRef, event: Report): void;
-  emit(event: Report): void;
+  emit(event: Report | ProbeReport): void;
   raise(
     event: { readonly type: 'killDue' },
     options: { readonly id: string } & Readonly<Record<'delay', number>> /* E17: acpKillGrace */,
@@ -989,7 +996,7 @@ const machineDefinition = setup({
       schemas: { context: busyContextSchema },
       states: { binding: {}, configuring: {}, prompting: {}, cancelling: {}, flushing: {}, recording: {} },
     },
-    idle: { id: 'idle', states: { resting: {}, persisting: {} } },
+    idle: { id: 'idle', states: { resting: {}, probing: {}, persisting: {} } },
     closing: {
       id: 'closing',
       schemas: { context: closingContextSchema },
@@ -1073,6 +1080,15 @@ export const acpSessionMachine = machineDefinition.createMachine({
   }),
   /* Anything a state does not take for itself. */
   on: {
+    probeModel: refines('Stutter', ({ event }, enq) => {
+      enq.emit({
+        type: 'modelProbed',
+        requestId: event.requestId,
+        configOptions: undefined,
+        failure: { code: 'CHAT_RUN_LIVE', message: 'This ACP session is not idle for model discovery.' },
+      });
+      return {};
+    }),
     /* An answer nobody waits on: the state that asked has moved on (MC-R18). */
     callSettled: refines('Stutter', () => ({})),
     /* E17 after a cancel bound: SIGKILL the group, whatever state the child is in by now. */
@@ -1460,6 +1476,28 @@ export const acpSessionMachine = machineDefinition.createMachine({
       states: {
         resting: {
           on: {
+            probeModel: refines('Stutter', ({ context, event }, enq) => {
+              const choice = modelChoice(context.configOptions);
+              if (!choice?.values.includes(event.model) || choice.currentValue === event.model) {
+                enq.emit({
+                  type: 'modelProbed',
+                  requestId: event.requestId,
+                  configOptions: choice?.values.includes(event.model) ? context.configOptions : undefined,
+                  failure: undefined,
+                });
+                return {};
+              }
+              return {
+                target: 'probing',
+                context: {
+                  probeRequestId: event.requestId,
+                  ...ask(context, enq, {
+                    method: 'session/set_config_option',
+                    params: { sessionId: context.acpSessionId ?? '', configId: choice.configId, value: event.model },
+                  }),
+                },
+              };
+            }),
             /* A failed presentation write is retried first (`persisting` serves or refuses the lend). */
             lend: refines('Acquire', ({ context, event }) =>
               context.stale ? { target: 'persisting', context: { queued: event.lend } } : lend(event.lend),
@@ -1469,6 +1507,63 @@ export const acpSessionMachine = machineDefinition.createMachine({
                 ? { target: 'persisting', context: folded(context, event.update) }
                 : {},
             ),
+          },
+        },
+        probing: {
+          on: {
+            lend: refines('Acquire', ({ context, event }, enq) => {
+              if (context.queued !== undefined) {
+                tell(context, enq, {
+                  type: 'turnEnded',
+                  key: context.key,
+                  requestId: event.lend.requestId,
+                  outcome: failed({ code: 'CHAT_RUN_LIVE', message: 'This chat already has a queued ACP turn.' }),
+                  resting: true,
+                });
+                return {};
+              }
+              return { context: { queued: event.lend } };
+            }),
+            callSettled: refines('Stutter', ({ context, event }, enq) => {
+              if (!answers(context, event.id)) {
+                return {};
+              }
+              if ('error' in event.answer) {
+                enq.emit({
+                  type: 'modelProbed',
+                  requestId: context.probeRequestId ?? '',
+                  configOptions: undefined,
+                  failure: failureOfCall(context, event.answer.error),
+                });
+                const next = context.queued === undefined ? undefined : lend(context.queued);
+                return next === undefined
+                  ? { target: 'resting', context: { pending: undefined, probeRequestId: undefined } }
+                  : {
+                      target: next.target,
+                      context: { ...next.context, pending: undefined, probeRequestId: undefined },
+                    };
+              }
+              if (event.answer.method !== 'session/set_config_option') {
+                return {};
+              }
+              const { configOptions } = event.answer.result;
+              enq.emit({
+                type: 'modelProbed',
+                requestId: context.probeRequestId ?? '',
+                configOptions,
+                failure: undefined,
+              });
+              const patch = {
+                pending: undefined,
+                probeRequestId: undefined,
+                configOptions,
+                presentation: { ...context.presentation, configOptions: configOptions.map((option) => asJson(option)) },
+              };
+              const next = context.queued === undefined ? undefined : lend(context.queued);
+              return next === undefined
+                ? { target: 'resting', context: patch }
+                : { target: next.target, context: { ...next.context, ...patch } };
+            }),
           },
         },
         /* One presentation write in flight; a newer state and a lend wait for it. */

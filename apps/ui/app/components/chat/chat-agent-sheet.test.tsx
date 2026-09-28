@@ -73,7 +73,6 @@ vi.mock('#hooks/use-models.js', () => ({
 }));
 
 vi.mock('#hooks/use-cad-agent-config.js', () => ({
-  useAgentHostPlacements: () => ({ targets: state.placements, loading: false }),
   useBrowserAgentHostProjectAvailability: () => ({ status: 'available' }),
 }));
 
@@ -116,7 +115,7 @@ const codex = (refusal?: ExternalAgentDescriptor['refusal']): AgentHostPlacement
 const renderSheet = (focusEditor = vi.fn(), agentConfig: AgentConfig = noConfig) => {
   render(
     <TooltipProvider>
-      <ChatAgentSheet agentConfig={agentConfig} focusEditor={focusEditor} />
+      <ChatAgentSheet agentConfig={agentConfig} placements={state.placements} focusEditor={focusEditor} />
     </TooltipProvider>,
   );
   return { focusEditor };
@@ -288,6 +287,35 @@ describe('ChatAgentSheet', () => {
     renderSheet(vi.fn(), agentConfig);
 
     expect(screen.getByRole('button', { name: 'Agent and model: Codex, GPT-5.6-Sol, Fast mode' })).toBeInTheDocument();
+  });
+
+  it('shows and changes a discovered ACP reasoning option before the first session', async () => {
+    state.execution = { kind: 'acp', hostId: 'desktop', agentId: 'codex' };
+    state.placements = [codex()];
+    const select = vi.fn();
+    renderSheet(vi.fn(), {
+      options: [
+        {
+          type: 'select',
+          id: 'thought_level',
+          name: 'Thinking',
+          category: 'thought_level',
+          currentValue: 'medium',
+          options: [
+            { value: 'low', name: 'Low' },
+            { value: 'medium', name: 'Medium' },
+            { value: 'high', name: 'High' },
+          ],
+        },
+      ],
+      valueOf: (option) => option.currentValue,
+      select,
+    });
+    await userEvent.click(screen.getByRole('button', { name: /Codex.*reasoning Medium/u }));
+    await userEvent.click(
+      within(screen.getByRole('tablist', { name: /Reasoning for Codex/u })).getByRole('tab', { name: 'High' }),
+    );
+    expect(select).toHaveBeenCalledWith('thought_level', 'high');
   });
 
   it('steps back one view on Escape, and closes only from the settings', async () => {

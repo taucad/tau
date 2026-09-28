@@ -29,7 +29,7 @@ import { RefreshGenerationGuard } from '@taucad/fs-client/refresh-generation-gua
 import { createDomVisibilityProvider } from '@taucad/fs-client/visibility-provider';
 import { createComposedViewClient } from '@taucad/fs-client/composed-view-client';
 import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
-import { bundledTypesWorkspaceRootSegment, dependencyMountRoot } from '#lib/bundled-types-tree.constants.js';
+import { dependencyMountRoot } from '#lib/bundled-types-tree.constants.js';
 import type { FileManagerProxy } from '#machines/file-manager.machine.types.js';
 import {
   formatWorkerError,
@@ -600,23 +600,6 @@ const initializeServicesActor = fromSafeAsync<
 
     initializedTreeService.connectToContentService(initializedContentService);
 
-    // The root listing carries the mount's own row; eagerly load each package
-    // directory inside it through the regular treeService so the file tree renders
-    // the bundled-types subtree without user interaction (cmd+click was the
-    // smoking gun before R1). The mount is populated by the FM worker before
-    // `workerReady`, so these listings always see the full set of kernel typings.
-    try {
-      const rootEntries = await initializedTreeService.listDirectory(bundledTypesWorkspaceRootSegment, { signal });
-      await Promise.all(
-        rootEntries
-          .filter((entry) => entry.isFolder)
-          .map(async (entry) =>
-            initializedTreeService.listDirectory(`${bundledTypesWorkspaceRootSegment}/${entry.name}`, { signal }),
-          ),
-      );
-    } catch {
-      // Bundled types remain lazily loadable through the regular tree path.
-    }
     signal.throwIfAborted();
     ownsConstructed = false;
     return {

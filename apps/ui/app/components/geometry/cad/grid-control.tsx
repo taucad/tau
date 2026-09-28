@@ -78,9 +78,9 @@ export function GridSizeIndicator(): React.ReactNode {
               className='h-7 gap-1 px-2 font-mono text-xs tabular-nums has-[>svg]:px-2'
             >
               {/* Below 520 px of viewer width the readout keeps its value and drops its glyph. */}
-              <Grid3X3 className='hidden size-3.5 text-muted-foreground @min-[520px]/viewer:block' />
+              <Grid3X3 className='hidden size-3.5 @min-[520px]/viewer:block' />
               {gridLabel}
-              {isGridSizeLocked ? <Lock className='size-3 text-muted-foreground' /> : null}
+              {isGridSizeLocked ? <Lock className='size-3' /> : null}
             </Button>
           </DropdownMenuTrigger>
         </TooltipTrigger>

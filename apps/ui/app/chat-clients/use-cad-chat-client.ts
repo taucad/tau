@@ -226,8 +226,15 @@ export const useCadChatClient = (): CadChatClient => {
           : undefined;
       const answeredRunId = browserRun?.runId ?? detachedRunId;
       if (answeredRunId !== undefined) {
+        /* The log, not the current picker, owns this run's kind. A stale card
+         * without a recorded run cannot safely invent a native Resume. */
+        const recordedRun = store.getProjection(activeChatId)?.ledger.runs[answeredRunId];
+        if (recordedRun === undefined) {
+          return;
+        }
         const commandId = generatePrefixedId(idPrefix.request);
-        const resumeCommandId = approved ? generatePrefixedId(idPrefix.request) : undefined;
+        const resumeCommandId =
+          approved && recordedRun.kind === 'tau' ? generatePrefixedId(idPrefix.request) : undefined;
         await resolveBrowserAgentHostInterrupt({
           chatId: activeChatId,
           runId: answeredRunId,
@@ -245,7 +252,7 @@ export const useCadChatClient = (): CadChatClient => {
       /* An approval without a current host run is stale. It cannot create a
        * run through the SDK: only a host command may answer its interrupt. */
     },
-    [activeChatId, agent.execution, chat],
+    [activeChatId, agent.execution, chat, store],
   );
 
   return {

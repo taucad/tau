@@ -3083,6 +3083,32 @@ describe('BrowserPlacementChatTransport', () => {
     },
   );
 
+  it('does not resume an external run after resolving its approval', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-external-approval';
+    const runId = 'run-external-approval';
+    const client = clientFor(chatId, runId, {
+      resolveInterrupt: vi.fn(async () => snapshot(chatId, runId, 'paused')),
+      resume: vi.fn(async () => snapshot(chatId, runId, 'running')),
+    });
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({ projectId: 'project-external', backend: 'opfs', providerBasePath: 'external' }),
+      createClient: async () => client,
+    });
+
+    await resolveBrowserAgentHostInterrupt({
+      chatId,
+      runId,
+      interruptId: 'interrupt-external',
+      approved: true,
+      commandId: 'answer-external',
+    });
+
+    expect(client.resolveInterrupt).toHaveBeenCalledOnce();
+    expect(client.resume).not.toHaveBeenCalled();
+    unregister();
+  });
+
   it('rebuilds the run it reattaches to instead of appending a second copy of every assistant text', async () => {
     // The operator's rung-2 reload, from the daemon's own log: every assistant
     // turn rendered twice — once as the structured projection, once again as

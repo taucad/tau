@@ -38,10 +38,10 @@ export const entry = workbenchRecords.view.serialize({ version: 1, entry: 'main.
 // @ts-expect-error graphicsBackend is this computer's capability: device record, never the project view.
 export const backend = workbenchRecords.view.serialize({ version: 1, entryPath: 'main.ts', graphicsBackend: 'webgpu' });
 
-// @ts-expect-error component display is per entry in entries.json (shared by every view), not a view field.
 export const componentsOnView = workbenchRecords.view.serialize({
   version: 1,
   entryPath: 'main.ts',
+  // @ts-expect-error component display is per entry in entries.json, not a view field.
   components: { hidden: ['lid'] },
 });
 

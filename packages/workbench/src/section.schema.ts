@@ -1,9 +1,4 @@
-// Abridged, shared by every option: the A2 v12 section cut list, restated provider-safe.
-// Source: geospec 96c6a9bf0 apps/ui/app/components/geometry/graphics/section-cuts.ts:30-68 and
-// apps/ui/app/constants/editor.constants.ts:205-218 (the v12 cut list landed on geospec; charter I9 is satisfied).
-// Difference from the landed schema: discriminants are one-member enums, not `z.literal`, because a literal becomes
-// JSON Schema `const`, which Vertex refuses (libs/chat/src/schemas/provider-tool-schema-compat.test.ts:11-14).
-// Parsing is identical.
+// Shared section grammar for persisted views and provider-facing tool fields.
 import { z } from 'zod';
 
 /** Metres, in the `tau:root` frame. */

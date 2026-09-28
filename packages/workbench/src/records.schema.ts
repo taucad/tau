@@ -1,12 +1,3 @@
-// Shared by the workbench-package and chat-lib options: the record grammar itself. Only the package and the
-// reader/serializer API differ between those options. keep-in-app has no file grammar.
-//
-// Revision 3 (2026-09-28) applies the agent-workbench-control blueprint's B2–B4 corrections, traced from geospec
-// 96c6a9bf0 by lanes V1 and V2: per-lane tab kinds, empty groups, uniqueness, pane-id enum, `look` camera,
-// field of view 0–90, grid unit, measurement ids, revolution start, entries keyed by path with the owner's names.
-// Revision 4 (2026-09-28, blueprint review R6–R9): a view has a `name` shown on its tab; a look `direction` is any
-// vector from the model toward the camera; lengths are described as metres; a view file lives as long as a tab names it.
-//
 // Two layers:
 // - Provider-safe parts (tabs, camera, display, view fields, entry settings): no `const`, no `$ref`, no key-constrained
 //   records, so the control tool's input schema composes them unchanged (one grammar for files and tool, charter I2).
@@ -14,7 +5,6 @@
 //   accepts in a tool schema; the tool takes a two-level subset instead (control-tool guide).
 import { z } from 'zod';
 import type { CameraView } from '@taucad/camera';
-import { isSafeRelativePath } from '@taucad/utils/path';
 import { sectionSchema, vectorSchema } from '#section.schema.js';
 
 /**
@@ -58,7 +48,18 @@ export const projectPathSchema = z
   .string()
   .min(1)
   .max(1024)
-  .refine(isSafeRelativePath, 'Use a canonical project-relative path.');
+  .refine(
+    (path) =>
+      !path.startsWith('/') &&
+      !path.includes('\\') &&
+      !/^[A-Za-z][A-Za-z0-9+.-]*:/u.test(path) &&
+      ![...path].some((character) => {
+        const code = character.codePointAt(0)!;
+        return code <= 0x1f || (code >= 0x7f && code <= 0x9f);
+      }) &&
+      path.split('/').every((segment) => segment.length > 0 && segment !== '.' && segment !== '..'),
+    'Use a canonical project-relative path.',
+  );
 
 // ---------------------------------------------------------------------------------------------------------------
 // Tabs and the lane trees (layout.json)

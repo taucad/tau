@@ -185,8 +185,17 @@ export function ProjectNavigation(): React.JSX.Element {
                     void navigate(`${projectUrl(project.slugs)}?${parameters.toString()}`);
                   }}
                   onDelete={async () => {
-                    await deleteProject(project.id);
-                    toast.success(`Deleted ${project.name}`);
+                    try {
+                      const trashed = await deleteProject(project.id);
+                      if (trashed) {
+                        toast.success(`Moved ${project.name} to Trash`);
+                      } else {
+                        toast.error(`Could not move ${project.name} to Trash`);
+                      }
+                    } catch (error) {
+                      toast.error(`Could not move ${project.name} to Trash`);
+                      console.error('Error trashing project:', error);
+                    }
                   }}
                 />
               </Fragment>
@@ -331,7 +340,7 @@ function ProjectNavigationItem({
         }}
       >
         <Trash2 aria-hidden />
-        Delete
+        Move to Trash
       </Item>
     </>
   );

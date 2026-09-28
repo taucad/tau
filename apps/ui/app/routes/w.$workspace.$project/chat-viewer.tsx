@@ -233,7 +233,7 @@ export const ChatViewer = memo(function ({
         <FileSelector
           selectedFile={undefined}
           placeholder='Select file to render…'
-          className='h-8 w-[200px]'
+          className='h-8 w-50'
           title='Viewport File'
           description='Choose which file to render in the viewport'
           searchPlaceholder='Search files…'
@@ -254,7 +254,7 @@ export const ChatViewer = memo(function ({
           selectedFile={undefined}
           initialPath={entryPath}
           placeholder='Select a file to render…'
-          className='h-8 w-[200px]'
+          className='h-8 w-50'
           title='Viewport File'
           description='Choose a file to render in the viewport'
           searchPlaceholder='Search files…'
@@ -277,7 +277,7 @@ export const ChatViewer = memo(function ({
         <FileSelector
           selectedFile={undefined}
           placeholder='Select a file to render…'
-          className='h-8 w-[200px]'
+          className='h-8 w-50'
           title='Viewport File'
           description='Choose a file to render in the viewport'
           searchPlaceholder='Search files…'

@@ -223,7 +223,7 @@ export function ComboBoxResponsive<T>({
       <PopoverContent
         {...properties}
         {...popoverProperties}
-        className={cn('w-[200px] overflow-hidden p-0', className, popoverProperties?.className)}
+        className={cn('w-50 overflow-hidden p-0', className, popoverProperties?.className)}
         onPointerDownOutside={(event) => {
           popoverProperties?.onPointerDownOutside?.(event);
           pointerDismissedReference.current = !event.defaultPrevented;

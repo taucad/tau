@@ -803,7 +803,7 @@ function UnifiedProjectList({ rows, viewMode, actions, onOpenCloudProject }: Uni
   return (
     <div className='space-y-4'>
       <div className='flex items-center justify-between gap-2'>
-        <DataTableSearch table={table} placeholder='Search projects...' containerClassName='grow' />
+        <DataTableSearch table={table} placeholder='Search projects…' containerClassName='grow' />
         <div className='flex items-center gap-2'>
           {/* Add bulk actions when rows are selected */}
           {table.getFilteredSelectedRowModel().rows.length > 0 && (

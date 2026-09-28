@@ -102,7 +102,7 @@ export const searchLibrary = async (
   options: Readonly<{ projectsUrl: string; name: string }>,
 ): Promise<void> => {
   await page.goto(options.projectsUrl, { waitUntil: 'domcontentloaded' });
-  await page.getByPlaceholder('Search projects...').first().fill(options.name);
+  await page.getByPlaceholder('Search projects…').first().fill(options.name);
 };
 
 /** A library card this device holds: its link is *Open <name>* (D20). */

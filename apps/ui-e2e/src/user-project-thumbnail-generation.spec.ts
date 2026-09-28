@@ -15,7 +15,7 @@ type ThumbnailState = {
 
 async function openProjectThumbnail(name = projectName): Promise<Locator> {
   await target.navigate('/projects', 'secondary');
-  await target.fill(selectors.getByPlaceholder('Search projects...'), name, 'secondary');
+  await target.fill(selectors.getByPlaceholder('Search projects…'), name, 'secondary');
   const thumbnail = selectors.getByRole('img', { name, exact: true });
   await target.expectVisible(thumbnail, 60_000, 'secondary');
   return thumbnail;
@@ -139,7 +139,7 @@ test('user project thumbnails follow settled sources, persist, and match the liv
     expect(updatedThumbnail).toMatchObject({ width: 768, height: 576 });
 
     await target.reload('secondary');
-    await target.fill(selectors.getByPlaceholder('Search projects...'), projectName, 'secondary');
+    await target.fill(selectors.getByPlaceholder('Search projects…'), projectName, 'secondary');
     await target.click(selectors.getByRole('button', { name: 'Search', exact: true }));
     await target.fill(selectors.getByPlaceholder('Search projects, chats, and actions…'), 'Update thumbnail');
     await target.click(selectors.getByText('Update thumbnail', { exact: true }));

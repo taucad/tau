@@ -7,6 +7,27 @@ import type { ProjectSessionActorRef } from '#machines/project-session.machine.j
 import { publishChatLogAnswer } from '#chat-clients/_internal/browser-agent-host-transport.js';
 
 describe('ChatSessionStore.observe', () => {
+  it('retains an unreadable fault without retrying the same log forever', async () => {
+    const store = new ChatSessionStore();
+    const release = store.observe('chat_unreadable', 'project_1');
+    const connect = vi.fn(async () => ({
+      read: vi.fn(),
+      subscribe: (...parameters: Parameters<AgentHostClient['subscribe']>) => {
+        queueMicrotask(() => {
+          parameters[3]?.({ status: 'refused', chatId: 'chat_unreadable', reason: 'unreadable' });
+          parameters[2]?.();
+        });
+        return vi.fn();
+      },
+      close: async () => undefined,
+    }));
+    const unpublish = store.publishProjectHostConnector('project_1', connect);
+    await vi.waitFor(() => expect(store.getProjection('chat_unreadable')?.fault).toBeDefined());
+    await new Promise<void>((resolve) => setTimeout(resolve, 350));
+    expect(connect).toHaveBeenCalledOnce();
+    unpublish();
+    release();
+  });
   it('reads every observed chat without acquiring an SDK session and preserves its cursor across connector churn', async () => {
     const store = new ChatSessionStore();
     const close = vi.fn(async () => undefined);
@@ -20,10 +41,27 @@ describe('ChatSessionStore.observe', () => {
         events: cursor === 0 ? [lifecycleRow(0, 'admitted')] : [],
       }),
     );
+    const subscribe = vi.fn((...parameters: Parameters<AgentHostClient['subscribe']>) => {
+      const input = parameters[0];
+      const onAnswer = parameters[3];
+      if (input.cursor === 0) {
+        queueMicrotask(() => {
+          onAnswer?.({
+            status: 'batch',
+            chatId: input.chatId,
+            cursor: 0,
+            nextCursor: 1,
+            endCursor: 1,
+            events: [lifecycleRow(0, 'admitted')],
+          });
+        });
+      }
+      return vi.fn();
+    });
     const connect = vi.fn(
       async (_chatId: string): Promise<Pick<AgentHostClient, 'read' | 'subscribe' | 'close'>> => ({
         read,
-        subscribe: () => () => undefined,
+        subscribe,
         close,
       }),
     );
@@ -33,7 +71,7 @@ describe('ChatSessionStore.observe', () => {
     expect(store.observedChatIdsOf('project_1')).toEqual(['chat_a', 'chat_b']);
     const unpublish = store.publishProjectHostConnector('project_1', connect);
     await vi.waitFor(() => {
-      expect(read).toHaveBeenCalledTimes(2);
+      expect(subscribe).toHaveBeenCalledTimes(2);
     });
     expect(store.getProjection('chat_a')?.ledger.position.cursor).toBe(1);
     expect(store.getProjection('chat_b')?.ledger.position.cursor).toBe(1);
@@ -49,9 +87,10 @@ describe('ChatSessionStore.observe', () => {
     expect(close).toHaveBeenCalledTimes(2);
     const unpublishAgain = store.publishProjectHostConnector('project_1', connect);
     await vi.waitFor(() => {
-      expect(read).toHaveBeenCalledTimes(4);
+      expect(subscribe).toHaveBeenCalledTimes(4);
     });
-    expect(read.mock.calls.slice(2).map(([input]) => input.cursor)).toEqual([1, 1]);
+    expect(subscribe.mock.calls.slice(2).map(([input]) => input.cursor)).toEqual([1, 1]);
+    expect(read).not.toHaveBeenCalled();
     unpublishAgain();
     releaseA();
     releaseB();
@@ -70,7 +109,20 @@ describe('ChatSessionStore.observe', () => {
         endCursor: 2,
         events: [lifecycleRow(0, 'admitted'), lifecycleRow(1, 'running')],
       }),
-      subscribe: () => () => undefined,
+      subscribe: (...parameters: Parameters<AgentHostClient['subscribe']>) => {
+        const onAnswer = parameters[3];
+        queueMicrotask(() => {
+          onAnswer?.({
+            status: 'batch',
+            chatId: 'chat_unopened',
+            cursor: 0,
+            nextCursor: 2,
+            endCursor: 2,
+            events: [lifecycleRow(0, 'admitted'), lifecycleRow(1, 'running')],
+          });
+        });
+        return () => undefined;
+      },
       close: async () => undefined,
     }));
     await vi.waitFor(() => {

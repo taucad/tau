@@ -18,118 +18,62 @@ export type HostAttachmentInput = Readonly<{
   }) => void;
 }>;
 
-/** Read the log from its cursor; subscriber loss only detaches. @public */
+/** Follow the host's one log reader; an idle chat attaches without waiting on an empty read. @public */
 export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInput>(({ input, sendBack }) => {
   let closed = false;
-  let reading = false;
-  let pending = false;
+  let terminalRefusal = false;
   let unsubscribe: (() => void) | undefined;
   let client: Pick<AgentHostClient, 'read' | 'subscribe' | 'close'> | undefined;
   const report = (event: {
     type: 'attachment.attached' | 'attachment.lost' | 'attachment.refused';
     reason?: string;
   }): void => {
-    if (closed) {
-      return;
-    }
-    sendBack(event);
-    input.onStatus?.(event);
-  };
-  const isClosed = (): boolean => closed;
-  const hasPending = (): boolean => pending;
-
-  const readAll = async (): Promise<boolean> => {
-    if (reading) {
-      pending = true;
-      return true;
-    }
-    reading = true;
-    try {
-      for (;;) {
-        pending = false;
-        let caughtUp = false;
-        /* A finite page bound catches a host that never lets its end cursor be reached. */
-        for (let page = 0; page < 10_000; page++) {
-          if (isClosed()) {
-            return false;
-          }
-          const position = selectPosition(input.projection.getSnapshot().context);
-          if (client === undefined) {
-            return false;
-          }
-          // oxlint-disable-next-line eslint/no-await-in-loop -- log pages must be read in cursor order.
-          const answer = await client.read({
-            chatId: input.chatId,
-            cursor: position.cursor,
-            last: position.last,
-          });
-          if (isClosed()) {
-            return false;
-          }
-          input.projection.send({ type: 'batch', answer });
-          if (
-            answer.status === 'refused' &&
-            (answer.reason === 'cursor-ahead' || answer.reason === 'identity-mismatch')
-          ) {
-            continue;
-          }
-          if (answer.status === 'refused') {
-            report({
-              type: answer.reason === 'unreadable' ? 'attachment.refused' : 'attachment.lost',
-              reason: answer.reason,
-            });
-            return false;
-          }
-          const next = selectPosition(input.projection.getSnapshot().context).cursor;
-          if (next === answer.endCursor) {
-            caughtUp = true;
-            break;
-          }
-          if (next <= position.cursor) {
-            report({ type: 'attachment.lost', reason: 'read made no progress' });
-            return false;
-          }
-        }
-        if (!caughtUp) {
-          report({ type: 'attachment.lost', reason: 'read page limit' });
-          return false;
-        }
-        if (!hasPending()) {
-          return !isClosed();
-        }
-      }
-    } catch (error) {
-      report({ type: 'attachment.lost', reason: error instanceof Error ? error.message : String(error) });
-      return false;
-    } finally {
-      reading = false;
+    if (!closed) {
+      sendBack(event);
+      input.onStatus?.(event);
     }
   };
 
   const begin = async (): Promise<void> => {
     try {
       client = await input.connect();
+      if (closed) {
+        await client.close();
+        return;
+      }
+      unsubscribe = client.subscribe(
+        { chatId: input.chatId, ...selectPosition(input.projection.getSnapshot().context) },
+        () => undefined,
+        () => {
+          if (!terminalRefusal) {
+            report({ type: 'attachment.lost', reason: 'subscriber ended' });
+          }
+        },
+        (answer) => {
+          if (closed) {
+            return;
+          }
+          input.projection.send({ type: 'batch', answer });
+          if (answer.status === 'refused') {
+            if (answer.reason === 'unreadable') {
+              terminalRefusal = true;
+              report({ type: 'attachment.refused', reason: answer.reason });
+            } else if (answer.reason === 'owner-fenced') {
+              report({ type: 'attachment.lost', reason: answer.reason });
+            }
+          } else if (
+            answer.events.length > 0 &&
+            selectPosition(input.projection.getSnapshot().context).cursor < answer.nextCursor
+          ) {
+            report({ type: 'attachment.lost', reason: 'read made no progress' });
+          }
+          return selectPosition(input.projection.getSnapshot().context).last;
+        },
+      );
+      report({ type: 'attachment.attached' });
     } catch (error) {
       report({ type: 'attachment.lost', reason: error instanceof Error ? error.message : String(error) });
-      return;
     }
-    if (closed) {
-      void client.close();
-      return;
-    }
-    if (!(await readAll())) {
-      return;
-    }
-    unsubscribe = client.subscribe(
-      { chatId: input.chatId, cursor: selectPosition(input.projection.getSnapshot().context).cursor },
-      () => {
-        void readAll();
-      },
-      () => {
-        report({ type: 'attachment.lost', reason: 'subscriber ended' });
-      },
-    );
-    report({ type: 'attachment.attached' });
   };
   void begin();
   return () => {

@@ -279,7 +279,7 @@ theorem t9_refused_writes_nothing (F : File) (A : App) (e : Row) (h : (append F 
   rcases append_cases F A e with h1 | h1
   · exact h1.1
   · exact absurd h1.2.2.1 h
-  
+
 /-- **T9** (a stale view writes nothing): an appender whose view is not the file — another writer appended, or a
 torn tail it did not see — never writes. -/
 theorem t9_stale_writes_nothing (F : File) (A : App) (e : Row) (h : current F A = false) :

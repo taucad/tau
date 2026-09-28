@@ -1399,6 +1399,37 @@ describe('model attempts another account funded', () => {
 });
 
 describe('transport stream state', () => {
+  it('should stop before requesting a model when cancellation lands during invocation preparation', async () => {
+    const preparing = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<string>();
+    const controller = new AbortController();
+    const stream = vi.fn(async function* (): AsyncGenerator<ModelStreamEvent> {
+      yield { type: 'completed', stopReason: 'stop' };
+    });
+    const output = await createTransportStreamFunction({
+      transport: { funding: fundedFacet(), stream },
+      providerKind: 'openai',
+      identities: new MessageIdentities(() => 'cancel-message'),
+      toolInputIds: new Map(),
+      createId: () => 'cancel-id',
+      prepareInvocation: async () => {
+        preparing.resolve();
+        return release.promise;
+      },
+    })(stubModel, { messages: [] }, { signal: controller.signal });
+    const reading = (async (): Promise<void> => {
+      for await (const event of output) {
+        void event;
+      }
+    })();
+
+    await preparing.promise;
+    controller.abort();
+    release.resolve('attempt-cancelled');
+    await reading;
+    expect(stream).not.toHaveBeenCalled();
+  });
+
   const streamFor = async (
     events: readonly ModelStreamEvent[],
     onLiveDelta?: Parameters<typeof createTransportStreamFunction>[0]['onLiveDelta'],

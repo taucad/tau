@@ -19,6 +19,7 @@ import type { AgentLogEvent, JsonObject, ProviderMessage } from '#log/event-type
 import { GatewayModelTransportError } from '#transport/gateway-model-transport.js';
 import type { GatewayModelErrorCode } from '#transport/gateway-model-transport.js';
 import type { HostCompactionError } from '#harness/compaction.js';
+import { fundedFacet } from '#harness/harness.fixture.js';
 
 import {
   tauInternal,
@@ -62,6 +63,51 @@ const appendSettlement = async (
 const orphanedFirstTurn: readonly SeededLogEvent[] = completedFirstTurn.slice(0, 3);
 
 describe('createTauAgentHost', () => {
+  it('should cancel before the first model request while invocation preparation is pending', async () => {
+    const file = createMemoryLogFile();
+    const preparing = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const stream = vi.fn(async function* (): AsyncGenerator<ModelStreamEvent> {
+      yield { type: 'completed', stopReason: 'stop' };
+    });
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: async () => {
+          const log = await file.open();
+          return {
+            ...log,
+            append: async (event: AgentLogEvent) => {
+              if (event.type === 'model.invocation-prepared') {
+                preparing.resolve();
+                await release.promise;
+              }
+              return log.append(event);
+            },
+          };
+        },
+        transport: { funding: fundedFacet(), stream },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: 'pre-request-cancel',
+      }),
+    );
+    const admission = host.admit({
+      chatId: 'chat-pre-request-cancel',
+      runId: 'run-pre-request-cancel',
+      trigger: 'submit',
+      message: { id: 'turn-pre-request-cancel', role: 'user', content: 'Go.' },
+    });
+    await preparing.promise;
+    const cancellation = host.cancel({ runId: 'run-pre-request-cancel' });
+    release.resolve();
+    await Promise.all([admission, cancellation]);
+    expect(stream).not.toHaveBeenCalled();
+    await expect(host.snapshot('chat-pre-request-cancel')).resolves.toMatchObject({ state: 'cancelled' });
+    expect((await readLog(file)).filter((event) => event.type === 'run.lifecycle').at(-1)).toMatchObject({
+      state: 'cancelled',
+    });
+    await host.close();
+  });
+
   it('publishes live deltas before their durable assistant completion', async () => {
     const order: string[] = [];
     const file = createMemoryLogFile();

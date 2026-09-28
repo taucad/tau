@@ -1,4 +1,5 @@
 import type { LinksFunction, LoaderFunctionArgs, MetaFunction, ShouldRevalidateFunction } from 'react-router';
+import { lazy, Suspense } from 'react';
 import type { ReactNode } from 'react';
 import { throwRedirectIfSubdomain } from '#lib/react-router.lib.js';
 import { readThemeCookie } from '#theme-cookie.js';
@@ -14,15 +15,23 @@ import { WebAnalyticsProvider } from '#providers/web-analytics-provider.js';
 import { readConsentStatusFromHeader } from '#lib/cookie-consent.lib.js';
 import { ProductApp, RootErrorBoundary, RootLayout } from '#root-layout.js';
 import { RootCommandPaletteItems } from '#root-command-items.js';
-import { ExampleCommandPaletteItems } from '#components/nav/example-command-items.js';
 import type { Handle } from '#types/matches.types.js';
+
+// Every route mounts the palette items, so the example catalog loads on its own
+// chunk instead of joining each route's entry.
+const ExampleCommandPaletteItems = lazy(async () => {
+  const m = await import('#components/nav/example-command-items.js');
+  return { default: m.ExampleCommandPaletteItems };
+});
 
 export const handle: Handle = {
   commandPalette(match) {
     return (
       <>
         <RootCommandPaletteItems match={match} />
-        <ExampleCommandPaletteItems />
+        <Suspense fallback={null}>
+          <ExampleCommandPaletteItems />
+        </Suspense>
       </>
     );
   },

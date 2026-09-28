@@ -1834,7 +1834,7 @@ export class ChatSessionStore {
         void this.#restoreStoppedDraft(session, view.user);
       }
     }
-    if (session.stopRequested && run !== undefined && !opensRun(run.lifecycle) && run.lifecycle !== 'paused') {
+    if (session.stopRequested && run !== undefined && !opensRun(phase) && phase !== 'paused') {
       session.stopRequested = false;
       this.#chatTopics.get(chatId)?.emit();
     }

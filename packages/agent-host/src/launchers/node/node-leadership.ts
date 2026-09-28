@@ -19,6 +19,7 @@ export const createNodeLeadership = (host: LeadershipHost): LeadershipPort => ({
   execute: async (_chatId, _command, local) => local(undefined),
   read: async (_input, local) => local(),
   role: (chatId) => ({ role: host.writing(chatId) ? 'leader' : 'none', epoch: 0 }),
+  stoppability: (chatId) => (host.writing(chatId) ? 'stoppable' : 'background-window'),
   appended: () => undefined,
   fenced: () => undefined,
   quiescent: () => undefined,

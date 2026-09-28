@@ -438,6 +438,72 @@ const workerOf =
     worker as unknown as Worker;
 
 describe('createBrowserAgentHostClient', () => {
+  it('forwards a sender-minted command id and returns the host refusal unchanged', async () => {
+    const worker = new FakeResidentWorker();
+    worker.refusals.set('cancel', {
+      code: 'CHAT_RUN_LIVE',
+      message: 'The earlier run is settling.',
+      details: { state: 'settling' },
+    });
+    const client = createTestClient(workerOf(worker));
+    const command = {
+      type: 'cancel',
+      commandId: 'gesture-stop-1',
+      payload: { chatId: 'chat-1', runId: 'run-1' },
+    } as const;
+
+    await expect(client.hostCommand(command)).resolves.toMatchObject({
+      commandId: 'gesture-stop-1',
+      status: 'refused',
+      code: 'CHAT_RUN_LIVE',
+    });
+    await expect(client.hostCommand(command)).resolves.toMatchObject({
+      commandId: 'gesture-stop-1',
+      status: 'refused',
+    });
+    expect(
+      worker.requests.filter((request) => request.name === 'cancel').map((request) => request.args['commandId']),
+    ).toEqual(['gesture-stop-1', 'gesture-stop-1']);
+    await client.close();
+  });
+
+  it('keeps the approval and follow-up resume ids minted by the click', async () => {
+    const worker = new FakeResidentWorker();
+    const client = createTestClient(workerOf(worker));
+    await client.start({ chatId: 'chat-approval-id', runId: 'run-approval-id', trigger: 'submit', message: 'Print.' });
+
+    await client.resolveInterrupt('chat-approval-id', 'run-approval-id', {
+      interruptId: 'interrupt-1',
+      outcome: 'approved',
+      commandId: 'answer-1',
+    });
+    await client.resume('chat-approval-id', 'run-approval-id', 'resume-1');
+
+    expect(
+      worker.requests
+        .filter((request) => request.name === 'resolve-interrupt')
+        .map((request) => request.args['commandId']),
+    ).toEqual(['answer-1']);
+    expect(
+      worker.requests.filter((request) => request.name === 'resume').map((request) => request.args['commandId']),
+    ).toEqual(['resume-1']);
+    await client.close();
+  });
+
+  it('uses a start gesture’s run id as its stable command id on a re-send', async () => {
+    const worker = new FakeResidentWorker();
+    const client = createTestClient(workerOf(worker));
+    const input = { chatId: 'chat-replay-key', runId: 'run-replay-key', trigger: 'submit', message: 'Build.' } as const;
+
+    await client.start(input);
+    await client.start(input);
+
+    expect(
+      worker.requests.filter((request) => request.name === 'start').map((request) => request.args['commandId']),
+    ).toEqual(['run-replay-key', 'run-replay-key']);
+    await client.close();
+  });
+
   it('keeps the capability seam closed when OPFS is unavailable', () => {
     vi.stubGlobal('Worker', vi.fn());
     vi.stubGlobal('BroadcastChannel', vi.fn());
@@ -507,10 +573,20 @@ describe('createBrowserAgentHostClient', () => {
       geoSpecEngine: 'native',
     });
     const events: unknown[] = [];
+    const positions: Array<number | undefined> = [];
+    const answers: ReadAnswer[] = [];
     const liveEvents: unknown[] = [];
-    const unsubscribe = client.subscribe({ chatId: 'chat-1', cursor: 0 }, (_chatId, event) => {
-      events.push(event);
-    });
+    const unsubscribe = client.subscribe(
+      { chatId: 'chat-1', cursor: 0 },
+      (_chatId, event, position) => {
+        events.push(event);
+        positions.push(position);
+      },
+      undefined,
+      (answer) => {
+        answers.push(answer);
+      },
+    );
     const unsubscribeLive = client.subscribeLive?.('chat-1', (_chatId, event) => {
       liveEvents.push(event);
     });
@@ -555,6 +631,9 @@ describe('createBrowserAgentHostClient', () => {
     ]);
     expect(new Set(commands.map((request) => request.args['commandId'])).size).toBe(commands.length);
     await expect.poll(() => events).toHaveLength(4);
+    /* Each row carries its position in the log, which the page's projection folds at (PV-S7). */
+    expect(positions).toEqual([0, 1, 2, 3]);
+    expect(answers.filter((answer) => answer.status === 'batch' && answer.events.length > 0)).toHaveLength(4);
     expect(liveEvents).toEqual([liveDelta('chat-1', 'run-1', 'live')]);
 
     unsubscribe();
@@ -592,6 +671,29 @@ describe('createBrowserAgentHostClient', () => {
     });
     const reads = worker.requests.filter((request) => request.name === 'read').map((request) => request.args);
     expect(reads.at(-1)).toEqual({ chatId: 'chat-bounds', cursor: 0, limit: 16, maxBytes: 1_048_576 });
+    await client.close();
+  });
+
+  it('carries the folded row identity into the next long-poll read', async () => {
+    const worker = new FakeResidentWorker();
+    const client = createTestClient(workerOf(worker));
+    const last = { leaderEpoch: 'epoch-1', sequence: 0 };
+    const unsubscribe = client.subscribe(
+      { chatId: 'chat-identity', cursor: 0 },
+      () => undefined,
+      undefined,
+      (answer) => (answer.status === 'batch' && answer.events.length > 0 ? last : undefined),
+    );
+    await client.start({ chatId: 'chat-identity', runId: 'run-identity', trigger: 'submit', message: 'Build.' });
+
+    await vi.waitFor(() => {
+      expect(requestsNamed(worker, 'read').at(-1)?.args).toMatchObject({
+        chatId: 'chat-identity',
+        cursor: 1,
+        last,
+      });
+    });
+    unsubscribe();
     await client.close();
   });
 

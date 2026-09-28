@@ -1,9 +1,4 @@
-/**
- * R7: Hide the chat error banner while the persistence machine is between
- * transparent auto-retry attempts (`retryAttempt > 0`).
- */
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import type { MockInstance } from 'vitest';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
@@ -16,13 +11,14 @@ import type { CombinedChatState } from '#hooks/use-chat.js';
 import { useChatSelector } from '#hooks/use-chat.js';
 import { chatTurnNotStartedCode } from '#utils/error.utils.js';
 import { ChatError as ChatErrorBanner } from '#routes/w.$workspace.$project/chat-error.js';
+import { chatProjectionLogic, selectCurrentRun, selectRunFailure } from '#machines/chat-projection.logic.js';
+import { lifecycleRow, logRow } from '#machines/chat-projection.fixture.js';
+import { createActor } from 'xstate';
 import { ChatErrorTooLong } from '#routes/w.$workspace.$project/chat-error-too-long.js';
 
 const continueChat = vi.fn();
 const regenerate = vi.fn();
 const resumableFailureOverrides = vi.hoisted(() => new Set<string>());
-
-let mockRetryAttempt = 0;
 
 const googleInvalidArgumentBody = [
   {
@@ -40,7 +36,6 @@ const googleInvalidArgumentByteList = [...new TextEncoder().encode(JSON.stringif
 
 vi.mock('#hooks/use-chat.js', () => ({
   useChatActions: () => ({ continueChat, regenerate }),
-  useChatRetrySnapshot: () => ({ retryAttempt: mockRetryAttempt, retryMaxAttempts: 5 }),
   useChatSelector: vi.fn(),
 }));
 
@@ -95,9 +90,145 @@ const persisted = (error: ChatErrorPayload): void => {
 
 describe('ChatError', () => {
   beforeEach(() => {
-    mockRetryAttempt = 0;
     resumableFailureOverrides.clear();
     vi.clearAllMocks();
+  });
+
+  it('retires an untyped legacy connection card only after the current host log catches up', () => {
+    const projection = createActor(chatProjectionLogic).start();
+    const legacy: ChatErrorPayload = {
+      category: errorCategory.generic,
+      title: 'Something went wrong',
+      message: 'Channel closed (local)',
+    };
+    let attachmentStatus: CombinedChatState['attachmentStatus'] = 'lost';
+    vi.mocked(useChatSelector).mockImplementation((selector) =>
+      selector({
+        error: undefined,
+        persistedError: legacy,
+        projection: projection.getSnapshot().context,
+        attachmentStatus,
+      } as CombinedChatState),
+    );
+    const { rerender } = render(<ChatErrorBanner />);
+    expect(screen.getByText('Channel closed (local)')).toBeInTheDocument();
+    projection.send({
+      type: 'batch',
+      answer: { status: 'batch', cursor: 0, nextCursor: 0, endCursor: 0, events: [] },
+    });
+    attachmentStatus = 'attached';
+    rerender(<ChatErrorBanner className='recovered' />);
+    expect(screen.queryByText('Channel closed (local)')).not.toBeInTheDocument();
+    projection.stop();
+  });
+
+  it('keeps a current projected run failure visible after a healthy attachment replaces a stale SDK error', () => {
+    const projection = createActor(chatProjectionLogic).start();
+    projection.send({
+      type: 'batch',
+      answer: {
+        status: 'batch',
+        cursor: 0,
+        nextCursor: 3,
+        endCursor: 3,
+        events: [
+          lifecycleRow(0, 'admitted'),
+          lifecycleRow(1, 'running'),
+          logRow(2, {
+            type: 'run.lifecycle',
+            state: 'failed',
+            attempt: 1,
+            detail: { message: 'Current provider failure' },
+          }),
+        ],
+      },
+    });
+    expect(selectCurrentRun(projection.getSnapshot().context)?.lifecycle).toBe('failed');
+    expect(selectRunFailure(projection.getSnapshot().context, 'run_1')).toContain('Current provider failure');
+    vi.mocked(useChatSelector).mockImplementation((selector) =>
+      selector({
+        error: new Error('Old socket failure'),
+        persistedError: undefined,
+        projection: projection.getSnapshot().context,
+        attachmentStatus: 'attached',
+      } as CombinedChatState),
+    );
+    render(<ChatErrorBanner />);
+    expect(screen.getByText(/Current provider failure/u)).toBeInTheDocument();
+    expect(screen.queryByText('Old socket failure')).not.toBeInTheDocument();
+    projection.stop();
+  });
+
+  it('retires a refused Start after another device admits a later healthy run', () => {
+    const projection = createActor(chatProjectionLogic).start();
+    const oldRefusal: ChatErrorPayload = {
+      category: errorCategory.generic,
+      title: 'Start refused',
+      message: 'Old request was refused',
+      requestId: 'req_old',
+    };
+    vi.mocked(useChatSelector).mockImplementation((selector) =>
+      selector({
+        error: undefined,
+        persistedError: oldRefusal,
+        projection: projection.getSnapshot().context,
+        attachmentStatus: 'attached',
+      } as CombinedChatState),
+    );
+    const { rerender } = render(<ChatErrorBanner />);
+    expect(screen.getByText('Old request was refused')).toBeInTheDocument();
+
+    projection.send({
+      type: 'batch',
+      answer: { status: 'batch', cursor: 0, nextCursor: 0, endCursor: 0, events: [] },
+    });
+    rerender(<ChatErrorBanner className='caught-up-empty' />);
+    expect(screen.getByText('Old request was refused')).toBeInTheDocument();
+
+    projection.send({
+      type: 'batch',
+      answer: {
+        status: 'batch',
+        cursor: 0,
+        nextCursor: 2,
+        endCursor: 2,
+        events: [lifecycleRow(0, 'admitted', 'req_new'), lifecycleRow(1, 'completed', 'req_new')],
+      },
+    });
+    rerender(<ChatErrorBanner className='recovered' />);
+    expect(screen.queryByText('Old request was refused')).not.toBeInTheDocument();
+    projection.stop();
+  });
+
+  it('keeps a refused Resume only while its identified run is paused', () => {
+    const projection = createActor(chatProjectionLogic).start();
+    projection.send({
+      type: 'batch',
+      answer: {
+        status: 'batch',
+        cursor: 0,
+        nextCursor: 2,
+        endCursor: 2,
+        events: [lifecycleRow(0, 'admitted', 'req_paused'), lifecycleRow(1, 'paused', 'req_paused')],
+      },
+    });
+    vi.mocked(useChatSelector).mockImplementation((selector) =>
+      selector({
+        error: undefined,
+        persistedError: {
+          category: errorCategory.generic,
+          title: 'Resume refused',
+          message: 'Could not resume this run',
+          requestId: 'cmd_resume',
+          details: { runId: 'req_paused', commandType: 'resume' },
+        },
+        projection: projection.getSnapshot().context,
+        attachmentStatus: 'attached',
+      } as unknown as CombinedChatState),
+    );
+    render(<ChatErrorBanner />);
+    expect(screen.getByText('Could not resume this run')).toBeInTheDocument();
+    projection.stop();
   });
 
   /* F5: the rate-limit and service cards are routed by CATEGORY, so each also
@@ -333,7 +464,8 @@ describe('ChatError', () => {
     expect(screen.queryByRole('button', { name: /resume/iu })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Try again' }));
-    expect(continueChat).toHaveBeenCalledTimes(1);
+    expect(regenerate).toHaveBeenCalledTimes(1);
+    expect(continueChat).not.toHaveBeenCalled();
   });
 
   /* T2-D11. A resume the host cannot honour is not a failure: the turn is
@@ -355,7 +487,8 @@ describe('ChatError', () => {
     expect(screen.queryByTestId('code-viewer')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Try again' }));
-    expect(continueChat).toHaveBeenCalledTimes(1);
+    expect(regenerate).toHaveBeenCalledTimes(1);
+    expect(continueChat).not.toHaveBeenCalled();
   });
 
   /* E1. A run whose document died is recorded abandoned, not failed by
@@ -380,6 +513,48 @@ describe('ChatError', () => {
     expect(regenerate).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['LEADER_VERSION_MISMATCH', 'Another version of Tau is running this chat'],
+    ['RUN_UNREADABLE', 'This chat was continued in a newer version of Tau'],
+    ['HISTORY_INVALID', "Tau can't read this chat's history"],
+    ['EXTERNAL_AGENT_RECOVERY_UNKNOWN', 'Tau restarted while the agent waited for your approval'],
+  ] as const)('shows the approved recovery card for %s', (code, title) => {
+    persisted({ category: errorCategory.generic, title: 'Error', message: 'A coded refusal', code });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByText(title)).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+  });
+
+  it('announces a pending model attempt as named busy status, not a failure alert', () => {
+    persisted({
+      category: errorCategory.generic,
+      title: 'Error',
+      message: 'The host is checking the last model attempt.',
+      code: 'MODEL_ATTEMPT_PENDING',
+    });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByRole('status', { name: 'Checking whether the last model call finished' })).toHaveAttribute(
+      'aria-busy',
+      'true',
+    );
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('offers New chat for unreadable history without offering Resume', async () => {
+    const user = userEvent.setup();
+    persisted({ category: errorCategory.generic, title: 'Error', message: 'Bad history', code: 'HISTORY_INVALID' });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'New chat' }));
+    expect(openNewChat).toHaveBeenCalledOnce();
+  });
+
   /* A silent peer (a crashed worker, or a daemon past its liveness bound) leaves the command's effect unknown: the
    * start may never have been admitted, so the card claims no run and promises nothing. */
   it('should not claim a turn exists when its host stopped responding', async () => {
@@ -399,7 +574,8 @@ describe('ChatError', () => {
     expect(screen.queryByText('Everything up to here is saved.')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Try again' }));
-    expect(continueChat).toHaveBeenCalledTimes(1);
+    expect(regenerate).toHaveBeenCalledTimes(1);
+    expect(continueChat).not.toHaveBeenCalled();
   });
 
   /* A host whose hello names a wire this page cannot speak: nothing here can fix it, the host's Tau must change. */
@@ -420,7 +596,8 @@ describe('ChatError', () => {
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Try again' }));
-    expect(continueChat).toHaveBeenCalledTimes(1);
+    expect(regenerate).toHaveBeenCalledTimes(1);
+    expect(continueChat).not.toHaveBeenCalled();
   });
 
   it("should route an external agent's usage limit to its stop notice instead of the generic block", () => {
@@ -484,7 +661,7 @@ describe('ChatError', () => {
     expect(screen.getByText('codex stopped unexpectedly: Internal error')).toBeInTheDocument();
   });
 
-  it('T23: renders null when retryAttempt > 0 even with a persisted resumable error', () => {
+  it('renders the network banner for a dropped request', () => {
     const networkError: ChatErrorPayload = {
       category: errorCategory.network,
       title: 'Connection Error',
@@ -496,49 +673,12 @@ describe('ChatError', () => {
         persistedError: networkError,
       } as unknown as CombinedChatState),
     );
-    mockRetryAttempt = 2;
-
-    const { container } = render(<ChatErrorBanner />);
-    expect(container.firstChild).toBeNull();
-  });
-
-  it('T23: renders null for generic category when retrying', () => {
-    const genericError: ChatErrorPayload = {
-      category: errorCategory.generic,
-      title: 'Error',
-      message: 'network error',
-    };
-    vi.mocked(useChatSelector).mockImplementation((selector) =>
-      selector({
-        error: undefined,
-        persistedError: genericError,
-      } as unknown as CombinedChatState),
-    );
-    mockRetryAttempt = 1;
-
-    const { container } = render(<ChatErrorBanner />);
-    expect(container.firstChild).toBeNull();
-  });
-
-  it('renders the network banner when retryAttempt is 0', () => {
-    const networkError: ChatErrorPayload = {
-      category: errorCategory.network,
-      title: 'Connection Error',
-      message: 'Unable to connect',
-    };
-    vi.mocked(useChatSelector).mockImplementation((selector) =>
-      selector({
-        error: undefined,
-        persistedError: networkError,
-      } as unknown as CombinedChatState),
-    );
-    mockRetryAttempt = 0;
 
     render(<ChatErrorBanner />);
     expect(screen.getByText('Unable to reach Tau')).toBeInTheDocument();
   });
 
-  it('should continue the server-category fallback when Try again is clicked', async () => {
+  it('should replay the server-category fallback when Try again is clicked', async () => {
     const user = userEvent.setup();
     const serverError: ChatErrorPayload = {
       category: errorCategory.server,
@@ -551,18 +691,17 @@ describe('ChatError', () => {
         persistedError: serverError,
       } as unknown as CombinedChatState),
     );
-    mockRetryAttempt = 0;
 
     render(<ChatErrorBanner />);
     await user.click(screen.getByRole('button', { name: /try again/i }));
 
-    expect(continueChat).toHaveBeenCalledTimes(1);
-    expect(regenerate).not.toHaveBeenCalled();
+    expect(regenerate).toHaveBeenCalledTimes(1);
+    expect(continueChat).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: /resume/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^retry$/i })).not.toBeInTheDocument();
   });
 
-  it('should continue the generic fallback when Try again is clicked', async () => {
+  it('should replay the generic fallback when Try again is clicked', async () => {
     const user = userEvent.setup();
     const genericError: ChatErrorPayload = {
       category: errorCategory.generic,
@@ -575,19 +714,18 @@ describe('ChatError', () => {
         persistedError: genericError,
       } as unknown as CombinedChatState),
     );
-    mockRetryAttempt = 0;
 
     render(<ChatErrorBanner />);
 
     await user.click(screen.getByRole('button', { name: /try again/i }));
 
-    expect(continueChat).toHaveBeenCalledTimes(1);
-    expect(regenerate).not.toHaveBeenCalled();
+    expect(regenerate).toHaveBeenCalledTimes(1);
+    expect(continueChat).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: /resume/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^retry$/i })).not.toBeInTheDocument();
   });
 
-  it('should continue unknown fallback categories instead of regenerating', async () => {
+  it('should replay unknown fallback categories from Try again', async () => {
     const user = userEvent.setup();
     const unknownError = {
       category: 'unknown',
@@ -600,14 +738,13 @@ describe('ChatError', () => {
         persistedError: unknownError,
       } as unknown as CombinedChatState),
     );
-    mockRetryAttempt = 0;
 
     render(<ChatErrorBanner />);
 
     await user.click(screen.getByRole('button', { name: /try again/i }));
 
-    expect(continueChat).toHaveBeenCalledTimes(1);
-    expect(regenerate).not.toHaveBeenCalled();
+    expect(regenerate).toHaveBeenCalledTimes(1);
+    expect(continueChat).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: /resume/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^retry$/i })).not.toBeInTheDocument();
   });
@@ -630,7 +767,6 @@ describe('ChatError', () => {
         } satisfies ChatErrorPayload,
       } as unknown as CombinedChatState),
     );
-    mockRetryAttempt = 0;
 
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(<ChatErrorBanner />, {
@@ -667,7 +803,6 @@ describe('ChatError', () => {
       snapshots.push([value, selector(state)]);
       return value;
     });
-    mockRetryAttempt = 0;
 
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(<ChatErrorBanner />, {
@@ -701,7 +836,6 @@ describe('ChatError', () => {
         persistedError: creditError,
       } as unknown as CombinedChatState),
     );
-    mockRetryAttempt = 0;
 
     /* `ChatErrorCredits` reads live entitlements to choose its top-up route. */
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -733,75 +867,10 @@ describe('ChatError', () => {
         persistedError: undefined,
       } as unknown as CombinedChatState),
     );
-    mockRetryAttempt = 0;
 
     render(<ChatErrorBanner />);
 
     expect(screen.getByText('Request contains an invalid argument.')).toBeInTheDocument();
     expect(screen.queryByText(/91,123,10/)).not.toBeInTheDocument();
-  });
-
-  describe('hook-order stability across retryAttempt transitions', () => {
-    /**
-     * Regression for React error #300 ("Rendered fewer hooks than expected").
-     *
-     * Earlier versions of this component placed the `if (retryAttempt > 0) return null;`
-     * gate ABOVE the `useChatSelector` / `useChatActions` calls, so a transient
-     * 0 -> N -> 0 retry burst on the SAME fiber changed the hook count between
-     * renders and the surrounding `<FloatingPanel>` boundary surfaced the
-     * "Chat Unavailable" screen. This test re-renders the same fiber across
-     * the transition and asserts React stays silent on hook diffs.
-     */
-    let consoleErrorSpy: MockInstance<typeof console.error>;
-
-    beforeEach(() => {
-      consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {
-        return undefined;
-      });
-    });
-
-    afterEach(() => {
-      consoleErrorSpy.mockRestore();
-    });
-
-    it('survives retryAttempt 0 -> 2 -> 0 on the same fiber without a hook-order warning', () => {
-      const networkError: ChatErrorPayload = {
-        category: errorCategory.network,
-        title: 'Connection Error',
-        message: 'Unable to connect',
-      };
-      vi.mocked(useChatSelector).mockImplementation((selector) =>
-        selector({
-          error: undefined,
-          persistedError: networkError,
-        } as unknown as CombinedChatState),
-      );
-
-      mockRetryAttempt = 0;
-      const { rerender, container } = render(<ChatErrorBanner key='same-fiber' />);
-      expect(screen.getByText('Unable to reach Tau')).toBeInTheDocument();
-
-      mockRetryAttempt = 2;
-      rerender(<ChatErrorBanner key='same-fiber' className='force-rerender' />);
-      expect(container.firstChild).toBeNull();
-
-      mockRetryAttempt = 0;
-      rerender(<ChatErrorBanner key='same-fiber' />);
-      expect(screen.getByText('Unable to reach Tau')).toBeInTheDocument();
-
-      const calls = consoleErrorSpy.mock.calls as ReadonlyArray<readonly unknown[]>;
-      const hookErrors = calls.filter((call) =>
-        call.some(
-          (argument) =>
-            typeof argument === 'string' &&
-            (argument.includes('Rendered fewer hooks than expected') ||
-              argument.includes('Rendered more hooks than expected') ||
-              argument.includes('change in the order of Hooks') ||
-              argument.includes('Minified React error #300') ||
-              argument.includes('Minified React error #310')),
-        ),
-      );
-      expect(hookErrors).toEqual([]);
-    });
   });
 });

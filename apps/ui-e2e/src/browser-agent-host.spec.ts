@@ -241,22 +241,6 @@ const durableFailureReason = async (): Promise<string | undefined> => {
 };
 
 /**
- * Settlement's own failure line — nothing else in the app logs it.
- *
- * It fired six times in one second on the operator's first live turn: the
- * preview pipeline wrote `thumbnail.webp` into the live root between the
- * merge and its whole-tree verification, so the settlement failed on bytes it
- * never wrote and exhausted its five-attempt budget. This fixture's project
- * has no geometry pipeline to race, so the honest gate for that race is the
- * unit test in `chat-workspace-authority-provider.test.ts`; this is the cheap
- * net that catches any settlement failure the verticals do provoke.
- */
-const expectNoSettlementFailures = async (): Promise<void> => {
-  const { consoleMessages } = await target.events();
-  expect(consoleMessages.filter(({ text }) => text.includes('exact run settlement failed'))).toEqual([]);
-};
-
-/**
  * The turn was recorded authoritatively — S7's layout, not the retired one.
  *
  * The old assertion read `.tau/workspaces/publications/<id>.json` and checked
@@ -568,7 +552,6 @@ describe.each([
       events.find((event) => event.type === 'run.lifecycle' && event.state === 'admitted')?.storageDurability,
     ).toBe(durability);
     assertPublication(tree);
-    await expectNoSettlementFailures();
 
     await target.reload();
     await ensureChatOpen();
@@ -599,6 +582,31 @@ describe.each([
       1,
     );
     expect(new Set(eventLog(tree).map((event) => event.runId)).size).toBe(1);
+  });
+
+  /* The host has already written the terminal row before the page reloads. Reattaching
+   * reads that same durable answer; it does not create a second page-owned settlement. */
+  runs('keeps one host settlement and no new provider ask after reloading a completed run', async ({ skip }) => {
+    await prepareBrowserHost(backend);
+    await requireOpfsSession(skip, backend);
+    await submitAndWaitForPartial();
+    await target.releaseAgentHostGatewayFixture();
+    await target.expectVisible(selectors.getByText(finalText, { exact: true }), 120_000);
+
+    const before = await waitForLocalPublishedTree(backend);
+    const settlement = settledTurns(before);
+    expect(settlement).toHaveLength(1);
+    assertPublication(before);
+    const requests = await readGatewayRequestCount();
+
+    await target.reload();
+    await ensureChatOpen();
+    await target.expectVisible(selectors.getByText(finalText, { exact: true }), 60_000);
+
+    const after = await readActiveProjectTree(backend);
+    expect(settlementTypesOf(after)).toEqual(['turn.finalized']);
+    expect(settledTurns(after)).toEqual(settlement);
+    expect(await readGatewayRequestCount()).toBe(requests);
   });
 
   /*
@@ -691,12 +699,13 @@ describe('storage ladder', () => {
  * admitted, so its presence is the admission.
  */
 type SeededLease = Readonly<{
-  runId?: string;
-  turnId?: string;
-  chatId?: string;
-  checkoutId?: string;
-  authorityEpoch?: string;
-  startedAt?: number;
+  runId: string;
+  turnId: string;
+  chatId: string;
+  checkoutId: string;
+  attempt: number;
+  startedAt: number;
+  holder?: string;
 }>;
 
 const seededLease = async (): Promise<SeededLease | undefined> => {
@@ -707,18 +716,9 @@ const seededLease = async (): Promise<SeededLease | undefined> => {
 
 describe('seeded first turn', () => {
   test('starts the seeded turn once across a page reload', async () => {
-    // "New project → first prompt" is the operator's primary flow and the only
-    // dispatch that never runs `withWorkspace`: hydration replays the chat's
-    // one-shot `startupRequest` through the chat-session store's
-    // latest-agent-body fallback, so nothing marks the turn placed except its
-    // lease. Every other vertical here submits explicitly, and a turn whose
-    // lease is never written never settles — the agent's work never reaches the
-    // live tree and the next submit is blocked behind the admission wait. The
-    // seed route creates the project exactly the way the home composer does
-    // (pending first message + `startupRequest`). The turn dispatches before the
-    // capability probe answers, so it must WAIT for it: `pending` is not
-    // `unsupported`, and with the API placement gone there is nothing to
-    // downgrade to.
+    // "New project → first prompt" seeds one durable startup intent. The host
+    // accepts it once and the revisions root writes its attempt lease before
+    // execution. A reload must not silently admit it again.
     await target.installAgentHostGatewayFixture();
     await target.setViewport({ width: 1440, height: 900 });
     await target.navigate(`${seedRoute}?prompt=${encodeURIComponent(seedPrompt)}`);
@@ -726,26 +726,19 @@ describe('seeded first turn', () => {
     await ensureChatOpen();
 
     // No submit: the seeded turn dispatches itself.
-    // The lease is the contract under test: a seeded turn used to sit in the
-    // admission window forever, so settlement never published and the next
-    // submit hit the admission wait. `writeLease` runs after `prepare` placed
-    // the turn, so the record existing *is* the admission.
+    // The lease is the host-placed attempt's evidence, not a page claim.
     await expect.poll(seededLease, { timeout: 60_000, interval: 250 }).toMatchObject({
       chatId: expect.any(String) as unknown,
       checkoutId: expect.any(String) as unknown,
       turnId: expect.any(String) as unknown,
+      attempt: 1,
+      holder: expect.any(String) as unknown,
     });
-    // The full chain, not just the lease: the seeded turn used to admit as a
-    // `regenerate` against an empty durable log, which `packages/agent-host`
-    // refuses with HISTORY_PREFIX_INVALID — so it never reached the gateway,
-    // never bound a run, and "New project → first prompt" produced nothing.
-    // A lease alone proves nothing: any placed turn writes one.
+    // A lease alone proves no provider call; the seeded intent must reach the gateway.
     await expect.poll(readGatewayRequestCount, { timeout: 60_000 }).toBe(1);
-    // Run ids are `run_`-prefixed (`generatePrefixedId(idPrefix.run)`,
-    // `libs/types/src/constants/id.constants.ts:52`); `req_` was the retired
-    // claim's request id.
+    // The sender's command id is the durable run id for this attempt.
     await expect.poll(seededLease, { timeout: 60_000, interval: 250 }).toMatchObject({
-      runId: expect.stringMatching(/^run_/u) as unknown,
+      runId: expect.stringMatching(/^req_/u) as unknown,
     });
     await target.expectVisible(selectors.getByText(partialText, { exact: true }), 120_000);
     await target.reload();
@@ -777,7 +770,6 @@ describe('seeded first turn', () => {
     expect(eventLog(tree).filter((event) => event.type === 'run.lifecycle' && event.state === 'admitted')).toHaveLength(
       1,
     );
-    await expectNoSettlementFailures();
   });
 });
 
@@ -795,6 +787,63 @@ describe('durable log reattach after a reload', () => {
     expect(apiRequests.filter((path) => /^\/v1\/chat\/(?!projects\/)[^/]+\/runs\//u.test(path))).toEqual([]);
   };
 
+  test('should keep one host-written abandoned settlement across reloads before the person continues', async () => {
+    await prepareBrowserHost('home');
+    // The run is durably admitted and parked at the gateway gate; reloading here
+    // kills its worker mid-run, leaving a non-terminal log behind.
+    await submitAndWaitForPartial();
+    await target.reload();
+    await ensureChatOpen();
+
+    // The host records the orphan's failed lifecycle and one settlement, and
+    // does not ask the provider again without the person's continuation.
+    await expect
+      .poll(durableFailureReason, { timeout: 120_000 })
+      .toBe('The host executing this run is gone. Resume the turn to continue it.');
+    await expect
+      .poll(async () => settlementTypesOf(await readActiveProjectTree('home')).length, { timeout: 120_000 })
+      .toBe(1);
+    expect(await readGatewayRequestCount()).toBe(1);
+    await assertNoApiRunCalls();
+    const abandoned = eventLog(await readActiveProjectTree('home')).filter((event) => settlementTypes.has(event.type));
+    expect(abandoned).toHaveLength(1);
+
+    // Reopening a terminal log may refresh the view, but may not settle the
+    // dead document's turn a second time or re-ask the provider.
+    await target.reload();
+    await ensureChatOpen();
+    await target.expectVisible(continueAction, 60_000);
+    expect(eventLog(await readActiveProjectTree('home')).filter((event) => settlementTypes.has(event.type))).toEqual(
+      abandoned,
+    );
+    expect(await readGatewayRequestCount()).toBe(1);
+
+    /* The person's gesture is what spends. `RUN_ABANDONED` presents a resumable
+     * card, and Resume opens a second attempt of the same durable run. */
+    await target.expectVisible(continueAction, 60_000);
+    await target.click(continueAction);
+    /* The document that died left *its* request parked at the stream gate, and
+     * the fixture outlives the page. Waiting for a gate answered that stale one
+     * the instant it was asked, and the release below then took it (newest
+     * first) instead of the continuation's, which parked forever. The
+     * continuation is this turn's second ask, so wait for the ask before
+     * waiting for its gate. */
+    await expect.poll(readGatewayRequestCount, { timeout: 120_000 }).toBe(2);
+    await expect.poll(parkedGatewayCount, { timeout: 120_000 }).toBe(2);
+    await target.releaseAgentHostGatewayFixture();
+    await target.expectVisible(selectors.getByText(finalText, { exact: true }), 120_000);
+
+    const tree = await waitForLocalPublishedTree('home');
+    assertPublication(tree);
+    expect(settlementTypesOf(tree)).toEqual([abandoned[0]?.type, 'turn.finalized']);
+    expect(settledTurns(tree).at(-1)?.runId).toBe(abandoned[0]?.runId);
+    expect(eventLog(tree).filter((event) => event.type === 'run.lifecycle' && event.state === 'admitted')).toHaveLength(
+      1,
+    );
+    await expect.poll(seededLease, { timeout: 60_000, interval: 250 }).toBeUndefined();
+    await assertNoApiRunCalls();
+  });
+
   test('shows the durable abandonment reason and accepts a new turn', async () => {
     await prepareBrowserHost('home');
     await submitAndWaitForPartial();
@@ -810,14 +859,48 @@ describe('durable log reattach after a reload', () => {
     expect(settlementTypesOf(await readActiveProjectTree('home'))).toEqual(['turn.failed']);
     expect(abandoned.filter((event) => event.type === 'run.lifecycle' && event.state === 'admitted')).toHaveLength(1);
 
+    // A settled failure leaves the chat submittable again — the wedge this
+    // vertical exists for was a chat that accepted no further turn. A fresh
+    // send, not the card's continuation: this half is about the *next* turn.
+    const previousRunId = eventLog(await readActiveProjectTree('home')).find(
+      (event) => event.type === 'run.lifecycle' && event.state === 'admitted',
+    )?.runId;
+    const priorRequests = await readGatewayRequestCount();
     await target.type(composer, `${seedPrompt} Again.`);
     await target.click(selectors.getByCss('button:has(svg.lucide-arrow-up)').last());
-    await expect.poll(readGatewayRequestCount, { timeout: 120_000 }).toBe(2);
+    await expect.poll(readGatewayRequestCount, { timeout: 120_000 }).toBe(priorRequests + 1);
     await target.waitForAgentHostGatewayGate({ kind: 'stream', turn: `${seedPrompt} Again.` });
     await target.releaseAgentHostGatewayFixture(`${seedPrompt} Again.`);
     await expect
       .poll(async () => settlementTypesOf(await readActiveProjectTree('home')), { timeout: 120_000 })
       .toEqual(['turn.failed', 'turn.finalized']);
+    // The second run can finish before a lease poll sees it; its log rows are durable.
+    await expect
+      .poll(
+        async () => {
+          const events = eventLog(await readActiveProjectTree('home'));
+          const runId = events.find(
+            (event) => event.type === 'run.lifecycle' && event.state === 'admitted' && event.runId !== previousRunId,
+          )?.runId;
+          return runId === undefined
+            ? undefined
+            : {
+                runId,
+                states: events
+                  .filter((event) => event.runId === runId && event.type === 'run.lifecycle')
+                  .map((event) => event.state),
+                settlements: events
+                  .filter((event) => event.runId === runId && settlementTypes.has(event.type))
+                  .map((event) => event.type),
+              };
+        },
+        { timeout: 60_000 },
+      )
+      .toEqual({
+        runId: expect.stringMatching(/^req_/u) as unknown,
+        states: ['admitted', 'running', 'completed'],
+        settlements: ['turn.finalized'],
+      });
   });
 });
 

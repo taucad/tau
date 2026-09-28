@@ -8,17 +8,9 @@ import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
 import { useActiveChatSession } from '#hooks/active-chat-provider.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { attachmentSendBlockReason, buildUserMessage } from '#utils/chat.utils.js';
-import type { AttachmentReference } from '#utils/attachment.utils.js';
-import { useProject } from '#hooks/use-project.js';
-import {
-  getBrowserAgentHostRun,
-  resolveBrowserAgentHostInterrupt,
-  resumableBrowserAgentHostRunId,
-} from '#chat-clients/_internal/browser-agent-host-transport.js';
-import { daemonPlacementOf } from '#lib/agent-host-placement.js';
+import type { StoredAttachmentRef } from '#utils/attachment.utils.js';
 import { useModels } from '#hooks/use-models.js';
-import { createRunBody } from '#chat-clients/_internal/turn-body.js';
-import { browserHostId, useTurnAdmission } from '#chat-clients/_internal/use-turn-admission.js';
+import { useTurnAdmission } from '#chat-clients/_internal/use-turn-admission.js';
 
 /**
  * Input payload for {@link CadChatClient.submit}. Mirrors the surface the
@@ -32,7 +24,7 @@ import { browserHostId, useTurnAdmission } from '#chat-clients/_internal/use-tur
 export type CadChatSubmitInput = {
   readonly text: string;
   /** The draft's attachments, stored beside its record; the client promotes them before sending (D18). */
-  readonly attachments?: readonly AttachmentReference[];
+  readonly attachments?: readonly StoredAttachmentRef[];
 };
 
 /**
@@ -126,14 +118,12 @@ export const useCadChatClient = (): CadChatClient => {
   const actions = useChatActions();
   const agent = useCadAgentConfig();
   const status = useChatSelector((state) => state.status);
-  const requestInFlight = status === 'submitted' || status === 'streaming';
   // The CAD chat client is session-required by construction (it composes
   // `useActiveChatInstance` / `useChatActions`), so `activeChatId` is a
   // guaranteed `string` from the strict session context — no optional
   // branching needed.
   const { activeChatId } = useActiveChatSession();
   const store = useChatSessionStore();
-  const { projectId } = useProject();
   const { resolveModel } = useModels();
   /* This hook is a *view*: it composes gestures and reads the live chat. The
    * chat's agent-host binding and its admission belong to `ChatTurnHost`, which
@@ -156,7 +146,7 @@ export const useCadChatClient = (): CadChatClient => {
    * leaves the draft as it is and sends nothing.
    */
   const withAttachments = useCallback(
-    async (attachments: readonly AttachmentReference[], send: () => void | Promise<void>): Promise<void> => {
+    async (attachments: readonly StoredAttachmentRef[], send: () => void | Promise<void>): Promise<void> => {
       if (agent.execution.kind === 'tau' && attachments.length > 0) {
         const resolved = resolveModelRef.current(agent.execution.model);
         const blocked = attachmentSendBlockReason(attachments, {
@@ -219,52 +209,9 @@ export const useCadChatClient = (): CadChatClient => {
       decision?: { readonly reason?: string | undefined; readonly optionId?: string | undefined },
     ): Promise<void> => {
       const { reason, optionId } = decision ?? {};
-      const browserRun = getBrowserAgentHostRun(activeChatId);
-      /* A daemon-placed chat whose paused run no stream of this page follows is answered all the same, and the page
-       * then follows what the answer continued or ended (GM.r1 H1). */
-      const detachedRunId =
-        browserRun === undefined && daemonPlacementOf(agent.execution) !== undefined
-          ? resumableBrowserAgentHostRunId(activeChatId)
-          : undefined;
-      const answeredRunId = browserRun?.runId ?? detachedRunId;
-      if (answeredRunId !== undefined) {
-        await resolveBrowserAgentHostInterrupt({
-          chatId: activeChatId,
-          runId: answeredRunId,
-          interruptId: approvalId,
-          approved,
-          reason,
-          optionId,
-        });
-        if (detachedRunId !== undefined) {
-          void chat.resumeStream();
-        }
-        return;
-      }
-      /* The branch below is the browser placement's: it answers the paused run
-         over a new request that continues it. A daemon-placed chat with no run
-         left to answer drops the stale affordance instead (5-review N5). The
-         host places the continuation as its own attempt (W8 TS-S5). */
-      const runId = resumableBrowserAgentHostRunId(activeChatId);
-      if (requestInFlight || runId === undefined || daemonPlacementOf(agent.execution) !== undefined) {
-        return;
-      }
-      const runBody = store.startRun(
-        activeChatId,
-        createRunBody({ agent, projectId, execution: { hostId: browserHostId }, runId }),
-      );
-      try {
-        await chat.addToolApprovalResponse({
-          id: approvalId,
-          approved,
-          ...(reason ? { reason } : {}),
-          options: { body: runBody },
-        });
-      } catch {
-        store.endRun(activeChatId);
-      }
+      await store.respondToProjectedApproval(activeChatId, approvalId, { approved, reason, optionId });
     },
-    [activeChatId, agent, chat, projectId, requestInFlight, store],
+    [activeChatId, store],
   );
 
   return {

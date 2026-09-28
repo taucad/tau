@@ -5,13 +5,7 @@ import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
-import { useProject } from '#hooks/use-project.js';
 import { useRevisionClient } from '#hooks/use-revision-status.js';
-import {
-  getHostFinalizedTurns,
-  subscribeHostTurnSettlements,
-} from '#chat-clients/_internal/browser-agent-host-transport.js';
-import type { HostTurnSettlement } from '#chat-clients/_internal/browser-agent-host-transport.js';
 
 /**
  * Where one project's chats work, as the page records it.
@@ -21,8 +15,7 @@ import type { HostTurnSettlement } from '#chat-clients/_internal/browser-agent-h
  * checkout from `Chat.checkoutId`, takes the lease, runs the attempt on that
  * checkout's tools and appends the settlement row. What the page still owns is
  * the person's choice of checkout, written to the chat record here and nowhere
- * else, and the projection's two follow-ups: rereading the chats a fetch
- * projected, and adopting a daemon's recorded head.
+ * else, and rereading the chats a fetch projected.
  */
 type ChatWorkspaceAuthorityContextValue = Readonly<{
   /**
@@ -121,7 +114,6 @@ export const waitForRootedBridgeOpener = async (fileManagerRef: FileManagerRef):
 };
 
 export function ChatWorkspaceAuthorityProvider({ children }: { readonly children: ReactNode }): React.JSX.Element {
-  const { projectId } = useProject();
   const { patchChat, invalidateProjectedChats } = useProjectManager();
   const chatSessions = useChatSessionStore();
   /* This is a passive consumer of the retained project session's connection;
@@ -140,43 +132,6 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
       }),
     [chatSessions, invalidateProjectedChats, revisions],
   );
-  /* A daemon-hosted turn updates Git outside this worker. Adopt its attested
-   * head into the retained projection so the next native or ACP turn starts
-   * from the same checkout without requiring a page reload. The worker adopts
-   * only a head its own store already names; a cloud host's arrives through
-   * the sync fetch instead. */
-  useEffect(() => {
-    const adopted = new Set<string>();
-    const adopt = (event: HostTurnSettlement): void => {
-      if (
-        revisions === undefined ||
-        event.type !== 'turn.finalized' ||
-        event.projectId !== projectId ||
-        event.checkoutId === undefined ||
-        event.revisionId === undefined ||
-        event.treeId === undefined ||
-        revisions.status()?.headRevisionId === event.revisionId
-      ) {
-        return;
-      }
-      if (adopted.has(event.revisionId)) {
-        return;
-      }
-      adopted.add(event.revisionId);
-      revisions.send({
-        command: 'adoptHostFinalized',
-        checkoutId: event.checkoutId,
-        revisionId: event.revisionId,
-        treeId: event.treeId,
-        ...(event.branch === undefined ? {} : { branch: event.branch }),
-      });
-    };
-    const unsubscribe = subscribeHostTurnSettlements(adopt);
-    for (const event of getHostFinalizedTurns()) {
-      adopt(event);
-    }
-    return unsubscribe;
-  }, [projectId, revisions]);
   const placeChat = useCallback(
     async (chatId: string, checkoutId: string): Promise<void> => {
       await patchChat(chatId, 'checkoutId', checkoutId);

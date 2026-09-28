@@ -3,8 +3,7 @@
  *
  * The resident agent host places and settles every turn through the worker's
  * revision root; the page records the person's choice of checkout on the chat
- * record, rereads the chats a fetch projected, and adopts a daemon's recorded
- * head into its projection. Placement and settlement themselves are proved in
+ * record and rereads the chats a fetch projected. Placement and settlement themselves are proved in
  * `app/machines/file-manager.worker.revisions.test.ts` and
  * `packages/revisions/src/turn-placement.test.ts`.
  */
@@ -36,6 +35,30 @@ const revisionRoot = vi.hoisted(() => ({
   commands: [] as WorkerRevisionCommand[],
   /** Listeners the provider registered for the root's events. */
   eventListeners: new Set<(event: WorkerRevisionEvent) => void>(),
+}));
+const settlementTransport = vi.hoisted(() => ({
+  subscribe: vi.fn(() => () => undefined),
+  get: vi.fn(() => [
+    {
+      type: 'turn.finalized',
+      turnId: 'turn_daemon',
+      runId: 'run_daemon',
+      chatId: 'chat_daemon',
+      projectId: 'project_test',
+      checkoutId: 'live',
+      revisionId: 'rev-daemon',
+      treeId: 'tree-daemon',
+      branch: 'main',
+      changedPaths: ['main.scad'],
+      trigger: 'turn',
+      runIds: ['run_daemon'],
+    },
+  ]),
+}));
+
+vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', () => ({
+  subscribeHostTurnSettlements: settlementTransport.subscribe,
+  getHostFinalizedTurns: settlementTransport.get,
 }));
 
 vi.mock('#hooks/use-project.js', () => ({
@@ -73,6 +96,8 @@ beforeEach(() => {
   hookState.refreshFromStorage.mockClear();
   hookState.patchChat.mockClear();
   revisionRoot.commands.length = 0;
+  settlementTransport.subscribe.mockClear();
+  settlementTransport.get.mockClear();
 });
 
 describe('ChatWorkspaceAuthorityProvider', () => {
@@ -89,37 +114,13 @@ describe('ChatWorkspaceAuthorityProvider', () => {
     expect(hookState.invalidateProjectedChats).toHaveBeenCalledWith('project_test', ['chat_remote']);
   });
 
-  it('should adopt a finalized daemon turn into the browser revision projection', async () => {
-    const transport = await import('#chat-clients/_internal/browser-agent-host-transport.js');
-
-    act(() => {
-      transport.recordHostTurnSettlement({
-        type: 'turn.finalized',
-        turnId: 'turn_daemon',
-        runId: 'run_daemon',
-        chatId: 'chat_daemon',
-        projectId: 'project_test',
-        checkoutId: 'live',
-        revisionId: 'rev-daemon',
-        treeId: 'tree-daemon',
-        branch: 'main',
-        changedPaths: ['main.scad'],
-        trigger: 'turn',
-        runIds: ['run_daemon'],
-      });
-    });
-    /* A seeded turn can settle while the project is still being renamed. The
-     * final project provider mounts afterward and must replay that retained
-     * settlement rather than waiting for another turn. */
+  it('does not relay a finalized daemon turn into the browser revision projection', () => {
+    /* A seeded turn can settle before this provider mounts. Its row is not a page command. */
     renderHook(() => useChatWorkspaceAuthority(), { wrapper: wrapper() });
 
-    expect(revisionRoot.commands).toContainEqual({
-      command: 'adoptHostFinalized',
-      checkoutId: 'live',
-      revisionId: 'rev-daemon',
-      treeId: 'tree-daemon',
-      branch: 'main',
-    });
+    expect(revisionRoot.commands).toEqual([]);
+    expect(settlementTransport.subscribe).not.toHaveBeenCalled();
+    expect(settlementTransport.get).not.toHaveBeenCalled();
   });
 
   it('should write a chat’s checkout once when it is placed by id', async () => {

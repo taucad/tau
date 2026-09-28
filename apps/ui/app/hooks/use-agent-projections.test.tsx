@@ -146,6 +146,7 @@ describe('buildAgentProjection', () => {
       buildAgentProjection({
         chat: source,
         session,
+        unread: true,
         focusedChatId: 'chat-focused',
         defaultModel,
         resolveModel,
@@ -155,8 +156,8 @@ describe('buildAgentProjection', () => {
     ).toMatchObject({
       workspace: 'solver-node-3',
       branch: 'fea/load-case-b',
-      /* The completion is what the person has not seen; the machine's `read`
-       * region says so, and no second record does (I26). */
+      /* The completion is what the person has not seen; the store's derived answer says so, and no second record
+       * does (I26, PV-S8). */
       unread: true,
     });
 
@@ -221,8 +222,7 @@ describe('buildAgentProjection', () => {
   });
 
   /* W8 (D9, I26): the chat row is no source of unread. A legacy chat whose
-   * record still carries `hasUnreadTurn` reads unread only when its machine —
-   * restored from the unread record — says so. */
+   * record still carries `hasUnreadTurn` reads unread only when the store says so (PV-S8). */
   it('ignores a legacy hasUnreadTurn on the chat row', () => {
     const legacy = Object.assign(chat('chat-legacy', 100), { hasUnreadTurn: true });
 
@@ -263,7 +263,7 @@ describe('useAgentProjections', () => {
     const listeners = new Set<() => void>();
     const sessions = new Map(chats.map((chatEntity) => [chatEntity.id, buildSession({ chatEntity })] as const));
     for (const session of sessions.values()) {
-      session.stateActorRef?.send({ type: 'runLifecycle', phase: 'running' });
+      session.stateActorRef.send({ type: 'runLifecycle', phase: 'running' });
     }
     const store = {
       get: (chatId: string) => sessions.get(chatId),
@@ -272,6 +272,8 @@ describe('useAgentProjections', () => {
         return () => listeners.delete(listener);
       },
       subscribeMembership: () => () => undefined,
+      isUnread: () => false,
+      subscribeUnread: () => () => undefined,
       acquire: vi.fn(),
     } as unknown as ChatSessionStore;
     vi.mocked(useChats).mockReturnValue({
@@ -290,7 +292,7 @@ describe('useAgentProjections', () => {
     expect(store.acquire).not.toHaveBeenCalled();
 
     act(() => {
-      sessions.get('chat-background')?.stateActorRef?.send({ type: 'runLifecycle', phase: 'cancelled' });
+      sessions.get('chat-background')?.stateActorRef.send({ type: 'runLifecycle', phase: 'cancelled' });
     });
 
     expect(result.current.agents.find((agent) => agent.chatId === 'chat-background')?.state).toBe('idle');

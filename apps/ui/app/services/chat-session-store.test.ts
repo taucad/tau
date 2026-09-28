@@ -1,19 +1,19 @@
 // @vitest-environment node
 /* eslint-disable @typescript-eslint/naming-convention -- mock for AI SDK's Chat / DefaultChatTransport classes uses the SDK's own PascalCase names and `~`-prefixed subscriber method names verbatim so the mock surface matches the real one. */
 /* eslint-disable @typescript-eslint/explicit-member-accessibility -- mock class constructors omit the `public` keyword to mirror the AI SDK's published shape. */
-import type { Actor } from 'xstate';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mock } from 'vitest-mock-extended';
+import { readFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import { createActor } from 'xstate';
 import type { Chat as ChatEntity, ModelSupport, MyUIMessage } from '@taucad/chat';
+import { errorCategory } from '@taucad/types/constants';
 import type * as AiSdk from 'ai';
-import { chatTurnRequestSchema } from '@taucad/chat/schemas';
 import type { AgentHostClient } from '#services/agent-host-client.js';
-import { clearLedger, recordRpcOutcome } from '#services/rpc-ledger.js';
+import type { CommandAnswer, HostCommand } from '@taucad/agent-host/wire';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { uint8ArrayToBase64 } from 'uint8array-extras';
-import type { ChatRequest, ChatSessionActorRef, ChatTurnSettlementInput } from '#machines/chat-session.machine.js';
+import type { ChatRequest, ChatTurnGesture } from '#machines/chat-session.machine.js';
 import type { ProjectSessionActorRef } from '#machines/project-session.machine.js';
 import { projectSessionMachine } from '#machines/project-session.machine.js';
 import { spyOnSend } from '#lib/xstate-test.utils.js';
@@ -22,7 +22,13 @@ import {
   publishChatTurnAdmission,
   resetChatTurnServices,
 } from '#chat-clients/_internal/chat-host-binding.js';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
+import {
+  lifecycleRow,
+  logRow,
+  publishLogPage,
+  publishLogRows,
+  runningRows,
+} from '#machines/chat-projection.fixture.js';
 
 // ---------------------------------------------------------------------------
 // Hoisted test harness
@@ -170,10 +176,8 @@ vi.mock('#machines/inspector.js', () => ({
 }));
 
 const { ChatSessionStore } = await import('#services/chat-session-store.js');
+const { selectVisibleChatError } = await import('#routes/w.$workspace.$project/chat-error.js');
 const { attachmentSendBlockReason, buildUserMessage } = await import('#utils/chat.utils.js');
-const { bindDurableChatRun, sharedChatTransport } = await import('#chat-clients/_internal/shared-chat-transport.js');
-const transportModule = await import('#chat-clients/_internal/browser-agent-host-transport.js');
-const { recordHostFinalizedTurn, recordHostTurnSettlement, registerAgentHost } = transportModule;
 type StoreType = InstanceType<typeof ChatSessionStore>;
 type ChatSessionDeps = Parameters<StoreType['setDependencies']>[0];
 
@@ -186,12 +190,6 @@ type ChatSessionDeps = Parameters<StoreType['setDependencies']>[0];
 type StubDeps = {
   [K in Exclude<keyof ChatSessionDeps, 'client'>]: ReturnType<typeof vi.fn<ChatSessionDeps[K]>>;
 } & { client: MemoryClient };
-
-/** One read page for `chatId`, as the host answers it. */
-const page = <Fields extends { readonly cursor: number; readonly nextCursor: number; readonly endCursor: number }>(
-  chatId: string,
-  fields: Fields,
-): Fields & { readonly status: 'batch'; readonly chatId: string } => ({ status: 'batch', chatId, ...fields });
 
 const notFound = (path: string): Error => Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
 
@@ -291,20 +289,19 @@ async function settle(): Promise<void> {
   }
 }
 
+/** Every store here runs its chats on this logic, so a row can record the turns a chat ends (PV-S5: the store owns each chat's root). */
+const chatSession = chatSessionMachine.provide({
+  actors: { admitTurn: chatTurnAdmission },
+});
+
 function createStore(): StoreType {
-  const store = new ChatSessionStore();
+  const store = new ChatSessionStore({ chatSession });
   store.setDependencies(createStubDeps());
   return store;
 }
 
 /** Project sessions a row started, stopped after it. */
 const turnOwners: Array<{ stop: () => void }> = [];
-
-/* The host settles every turn (W8 TS-S6); these rows assert which run the chat's session actor ends, and how. */
-const recordedSettlements = new Map<string, ChatTurnSettlementInput[]>();
-const recordingSettlement = fromSafeAsync<void, ChatTurnSettlementInput>(async ({ input }) => {
-  recordedSettlements.get(input.chatId)?.push(input);
-});
 
 /**
  * Register the project session that owns a chat's turns (C3).
@@ -317,32 +314,11 @@ const recordingSettlement = fromSafeAsync<void, ChatTurnSettlementInput>(async (
  * @param projectId - The project whose session owns the chat.
  */
 function startTurnOwner(store: StoreType, projectId: string): void {
-  const session = createActor(
-    projectSessionMachine.provide({
-      actors: {
-        chatSession: chatSessionMachine.provide({
-          actors: { admitTurn: chatTurnAdmission, settleTurn: recordingSettlement },
-        }),
-      },
-    }),
-    { input: { projectId } },
-  );
+  const session = createActor(projectSessionMachine, { input: { projectId } });
   session.start();
   turnOwners.push(session);
   store.setFocusedProject(projectId);
   store.setProjectSession(projectId, session);
-}
-
-/**
- * Record every turn one chat's session actor ends.
- *
- * @param chatId - The chat whose settlements to record.
- * @returns The settlements the chat's session actor asked for, in order.
- */
-function publishSettlementRecorder(chatId: string): ChatTurnSettlementInput[] {
-  const settlements: ChatTurnSettlementInput[] = [];
-  recordedSettlements.set(chatId, settlements);
-  return settlements;
 }
 
 /**
@@ -355,69 +331,393 @@ function publishSettlementRecorder(chatId: string): ChatTurnSettlementInput[] {
  * @param chatId - The chat this admission belongs to.
  * @param request - What the admission composes, or a throw to refuse the turn.
  */
-function publishAdmission(chatId: string, request: () => Promise<ChatRequest> | ChatRequest): void {
-  publishChatTurnAdmission(chatId, async () => ({
+function publishAdmission(
+  chatId: string,
+  request: (gesture: ChatTurnGesture) => Promise<ChatRequest> | ChatRequest,
+): void {
+  publishChatTurnAdmission(chatId, async (gesture) => ({
     runId: `run_${chatId}`,
     leaseTurnId: undefined,
-    request: await request(),
+    request: await request(gesture),
   }));
 }
 
-/** A host whose run ended on the one failure a resume is allowed to continue. */
-function refusedAgentHostClient(chatId: string, runId: string): AgentHostClient {
-  return {
-    start: vi.fn(),
-    steer: vi.fn(),
-    cancel: vi.fn(),
-    resume: vi.fn(),
-    resolveInterrupt: vi.fn(),
-    attach: vi.fn(async () =>
-      page(chatId, {
+describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
+  it('materializes a reopened completed chat from a foreign segment and refreshes changed bytes', async () => {
+    const projectId = 'project_remote_transcript';
+    const chatId = 'chat_remote_transcript';
+    const path = `/projects/${projectId}/.tau/chats/${chatId}/events/other-device.jsonl`;
+    const rows = readFileSync(
+      new URL(
+        '../../../../packages/agent-host/specs/ChatLog/recorded/in-project-ping-pong-turn.jsonl',
+        pathToFileURL(import.meta.filename),
+      ),
+      'utf8',
+    );
+    const client = createMemoryClient();
+    await client.writeFile(path, new TextEncoder().encode(rows));
+    const store = new ChatSessionStore({ chatSession });
+    store.setDependencies(createStubDeps(client));
+    const hostCommand = vi.fn();
+    const unpublish = store.publishProjectHostConnector(
+      projectId,
+      async () =>
+        ({
+          hostCommand,
+          read: vi.fn(),
+          subscribe: (...parameters: Parameters<AgentHostClient['subscribe']>) => {
+            queueMicrotask(() =>
+              parameters[3]?.({
+                status: 'batch',
+                chatId,
+                cursor: 0,
+                nextCursor: 0,
+                endCursor: 0,
+                events: [],
+              }),
+            );
+            return vi.fn();
+          },
+          close: vi.fn(async () => undefined),
+        }) as unknown as AgentHostClient,
+    );
+    const unobserve = store.observe(chatId, projectId);
+    const session = store.acquire(chatId, projectId);
+
+    await store.refreshRemoteSegments(chatId, projectId);
+    await vi.waitFor(() => {
+      expect(session.chat.messages.some((message) => message.role === 'assistant')).toBe(true);
+    });
+
+    await client.writeFile(
+      path,
+      new TextEncoder().encode(
+        rows.replace('Browser host completed the workspace change.', 'Browser host verified the workspace change.'),
+      ),
+    );
+    await store.refreshRemoteSegments(chatId, projectId);
+    await vi.waitFor(() => {
+      expect(JSON.stringify(session.chat.messages)).toContain('Browser host verified the workspace change.');
+    });
+    expect(hostCommand).not.toHaveBeenCalled();
+    store.release(chatId);
+    unobserve();
+    unpublish();
+  });
+
+  it('keeps a seed intent and exact user message through reload before durable Start acknowledgement', async () => {
+    const deps = createStubDeps();
+    const seed: MyUIMessage = {
+      id: 'msg_seed_waiting_ack',
+      role: 'user',
+      parts: [{ type: 'text', text: 'Make a cube' }],
+      metadata: { status: 'pending' },
+    };
+    deps.getChat.mockResolvedValue(
+      chatRow('chat_seed_waiting_ack', 'project_seed_waiting_ack', {
+        messages: [seed],
+        startupRequest: {
+          id: 'req_seed_waiting_ack',
+          kind: 'regenerate-tail',
+          messageId: seed.id,
+          source: 'homepage-initial-message',
+          createdAt: 1,
+        },
+      }),
+    );
+    const first = new ChatSessionStore({ chatSession });
+    first.setDependencies(deps);
+    first.acquire('chat_seed_waiting_ack', 'project_seed_waiting_ack');
+    await vi.waitFor(() => {
+      expect(first.get('chat_seed_waiting_ack')?.chat.messages).toContainEqual(seed);
+    });
+    expect(deps.consumeChatStartupRequest).not.toHaveBeenCalled();
+
+    const reloaded = new ChatSessionStore({ chatSession });
+    reloaded.setDependencies(deps);
+    reloaded.acquire('chat_seed_waiting_ack', 'project_seed_waiting_ack');
+    await vi.waitFor(() => {
+      expect(reloaded.get('chat_seed_waiting_ack')?.chat.messages).toContainEqual(seed);
+    });
+    expect(deps.consumeChatStartupRequest).not.toHaveBeenCalled();
+  });
+
+  it('dispatches one admitted Start before the SDK watches its projected run', async () => {
+    const store = createStore();
+    const chatId = 'chat_live_command';
+    const projectId = 'project_live_command';
+    const command: HostCommand = {
+      type: 'start',
+      commandId: 'req_live_command',
+      payload: {
+        chatId,
+        runId: 'req_live_command',
+        message: { id: 'msg_live_command', role: 'user', content: 'Make a cube' },
+        trigger: 'submit',
+      },
+    };
+    const reply = Promise.withResolvers<CommandAnswer>();
+    const hostCommand = vi.fn(async () => reply.promise);
+    const close = vi.fn(async () => undefined);
+    const unpublish = store.publishProjectHostConnector(
+      projectId,
+      async () => ({ hostCommand, close }) as unknown as AgentHostClient,
+    );
+    startTurnOwner(store, projectId);
+    store.acquire(chatId, projectId);
+    publishAdmission(chatId, () => ({
+      kind: 'send',
+      message: { id: 'msg_live_command', role: 'user', parts: [{ type: 'text', text: 'Make a cube' }] },
+      command,
+    }));
+    const requested = store.requestTurn(chatId, {
+      kind: 'send',
+      message: { id: 'msg_live_command', role: 'user', parts: [{ type: 'text', text: 'Make a cube' }] },
+    });
+    await vi.waitFor(() => {
+      expect(hostCommand).toHaveBeenCalledExactlyOnceWith(command);
+    });
+    const chat = harness.created.find((entry) => entry.id === chatId)!;
+    expect(chat.sendMessage).not.toHaveBeenCalled();
+    reply.resolve({ commandId: command.commandId, generation: 1, status: 'applied', effect: 'durable', cursor: 1 });
+    await requested;
+    await vi.waitFor(() => {
+      expect(chat.sendMessage).toHaveBeenCalledTimes(1);
+    });
+    expect(close).toHaveBeenCalledTimes(1);
+    unpublish();
+  });
+
+  it('retires a hydrated legacy connection card after read-only catch-up, fresh output, and reload', async () => {
+    const chatId = 'chat_recovered_connection';
+    const projectId = 'project_recovered_connection';
+    const legacyError = {
+      category: errorCategory.generic,
+      title: 'Something went wrong',
+      message: 'Channel closed (local)',
+    };
+    const deps = createStubDeps();
+    deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { error: legacyError }));
+    const rows = [
+      ...runningRows('run_recovered_connection'),
+      logRow(2, {
+        runId: 'run_recovered_connection',
+        type: 'message.appended',
+        message: { id: 'msg_recovered_reply', role: 'assistant', content: 'Resumed output' },
+      }),
+      lifecycleRow(3, 'completed', 'run_recovered_connection'),
+    ];
+    const hostCommand = vi.fn<AgentHostClient['hostCommand']>();
+    const close = vi.fn(async () => undefined);
+    const connect = async (): Promise<Pick<AgentHostClient, 'hostCommand' | 'read' | 'subscribe' | 'close'>> => ({
+      hostCommand,
+      close,
+      read: vi.fn<AgentHostClient['read']>(async () => ({
+        status: 'batch',
+        chatId,
+        cursor: 0,
+        nextCursor: rows.length,
+        endCursor: rows.length,
+        events: rows,
+      })),
+      subscribe: (...args) => {
+        args[3]?.({
+          status: 'batch',
+          chatId,
+          cursor: 0,
+          nextCursor: rows.length,
+          endCursor: rows.length,
+          events: rows,
+        });
+        return () => undefined;
+      },
+    });
+
+    const open = async () => {
+      const store = new ChatSessionStore({ chatSession });
+      store.setDependencies(deps);
+      const session = store.acquire(chatId, projectId);
+      await vi.waitFor(() => {
+        expect(session.persistenceActorRef.getSnapshot().context.persistedError).toEqual(legacyError);
+      });
+      const visibleError = () =>
+        selectVisibleChatError({
+          error: session.chat.error,
+          persistedError: session.persistenceActorRef.getSnapshot().context.persistedError,
+          projection: store.getProjection(chatId),
+          attachmentStatus: store.getAttachmentStatus(chatId),
+        });
+      expect(visibleError()).toEqual(legacyError);
+      const unobserve = store.observe(chatId, projectId);
+      const unpublish = store.publishProjectHostConnector(projectId, connect);
+      await vi.waitFor(() => {
+        expect(store.getAttachmentStatus(chatId)).toBe('attached');
+        expect(
+          session.chat.messages.some((message) =>
+            message.parts.some((part) => part.type === 'text' && part.text === 'Resumed output'),
+          ),
+        ).toBe(true);
+      });
+      expect(visibleError()).toBeUndefined();
+      store.release(chatId);
+      unobserve();
+      unpublish();
+    };
+
+    await open();
+    await open();
+    expect(hostCommand).not.toHaveBeenCalled();
+  });
+
+  it('keeps the chat root idle after an empty caught-up log retires a legacy error', async () => {
+    const chatId = 'chat_empty_recovery';
+    const projectId = 'project_empty_recovery';
+    const deps = createStubDeps();
+    deps.getChat.mockResolvedValue(
+      chatRow(chatId, projectId, {
+        error: { category: errorCategory.generic, title: 'Old fault', message: 'Old channel closed' },
+      }),
+    );
+    const store = new ChatSessionStore({ chatSession });
+    store.setDependencies(deps);
+    const session = store.acquire(chatId, projectId);
+    await vi.waitFor(() => {
+      expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+    });
+    const unobserve = store.observe(chatId, projectId);
+    const hostCommand = vi.fn<AgentHostClient['hostCommand']>();
+    const unpublish = store.publishProjectHostConnector(
+      projectId,
+      async () =>
+        ({
+          hostCommand,
+          read: vi.fn<AgentHostClient['read']>(async () => ({
+            status: 'batch',
+            chatId,
+            cursor: 0,
+            nextCursor: 0,
+            endCursor: 0,
+            events: [],
+          })),
+          subscribe: (...args: Parameters<AgentHostClient['subscribe']>) => {
+            args[3]?.({ status: 'batch', chatId, cursor: 0, nextCursor: 0, endCursor: 0, events: [] });
+            return () => undefined;
+          },
+          close: vi.fn(async () => undefined),
+        }) as unknown as AgentHostClient,
+    );
+    await vi.waitFor(() => {
+      expect(store.getAttachmentStatus(chatId)).toBe('attached');
+    });
+    expect(session.stateActorRef.getSnapshot().matches({ run: 'idle' })).toBe(true);
+    expect(hostCommand).not.toHaveBeenCalled();
+    unpublish();
+    unobserve();
+    store.release(chatId);
+  });
+
+  it('ignores a retired attachment callback after a newer run fails', async () => {
+    const chatId = 'chat_attachment_generation';
+    const projectId = 'project_attachment_generation';
+    const store = createStore();
+    const answers: Array<Parameters<AgentHostClient['subscribe']>[3]> = [];
+    const hostCommand = vi.fn<AgentHostClient['hostCommand']>();
+    const connect = async (): Promise<Pick<AgentHostClient, 'hostCommand' | 'read' | 'subscribe' | 'close'>> => ({
+      hostCommand,
+      close: vi.fn(async () => undefined),
+      read: vi.fn<AgentHostClient['read']>(async () => ({
+        status: 'batch',
+        chatId,
         cursor: 0,
         nextCursor: 0,
         endCursor: 0,
         events: [],
-        snapshot: {
-          chatId,
-          runId,
-          turnId: 'm_user',
-          state: 'failed',
-          messages: [],
-          failure: {
-            code: 'INSUFFICIENT_CREDIT',
-            message: 'Insufficient Tau credit for this model request.',
-            status: 402,
-            details: {
-              requiredCreditAtoms: '3084332',
-              availableCreditAtoms: '1000000',
-              routeId: 'openai-gpt-6-astra',
-            },
-          },
-        } as const,
-      }),
-    ),
-    read: vi.fn(async () => page(chatId, { cursor: 0, nextCursor: 0, endCursor: 0, events: [] })),
-    subscribe: vi.fn(() => () => undefined),
-    close: vi.fn(async () => undefined),
-  };
-}
+      })),
+      subscribe: (...args) => {
+        answers.push(args[3]);
+        return () => undefined;
+      },
+    });
+    const unpublishOld = store.publishProjectHostConnector(projectId, connect);
+    const unobserve = store.observe(chatId, projectId);
+    await vi.waitFor(() => {
+      expect(answers).toHaveLength(1);
+    });
+    answers[0]?.({
+      status: 'batch',
+      chatId,
+      cursor: 0,
+      nextCursor: 2,
+      endCursor: 2,
+      events: runningRows('run_prior'),
+    });
+    expect(store.getAttachmentStatus(chatId)).toBe('attached');
 
-const testRunBody = Object.freeze({
-  agent: Object.freeze({
-    profile: 'cad',
-    execution: Object.freeze({ kind: 'tau', model: 'openai-gpt-5.5' }),
-    kernel: 'replicad',
-    mode: 'agent',
-    toolChoice: 'auto',
-    testingEnabled: true,
-  }),
-  projectId: 'project_test',
-  execution: Object.freeze({
-    hostId: 'host_test',
-    workspaceId: 'workspace_test',
-    baseRevisionId: 'revision_test',
-  }),
-  admission: Object.freeze({ version: 1, idempotencyKey: 'req_test_chat_session_store' }),
+    const unpublishCurrent = store.publishProjectHostConnector(projectId, connect);
+    await vi.waitFor(() => {
+      expect(answers).toHaveLength(2);
+    });
+    answers[1]?.({
+      status: 'batch',
+      chatId,
+      cursor: 2,
+      nextCursor: 5,
+      endCursor: 5,
+      events: [
+        lifecycleRow(2, 'admitted', 'run_current'),
+        lifecycleRow(3, 'running', 'run_current'),
+        logRow(4, {
+          runId: 'run_current',
+          type: 'run.lifecycle',
+          state: 'failed',
+          attempt: 1,
+          detail: { message: 'Current failure' },
+        }),
+      ],
+    });
+    const visibleError = () =>
+      selectVisibleChatError({
+        error: undefined,
+        persistedError: undefined,
+        projection: store.getProjection(chatId),
+        attachmentStatus: store.getAttachmentStatus(chatId),
+      });
+    expect(store.getAttachmentStatus(chatId)).toBe('attached');
+    expect(store.getProjection(chatId)?.ledger.currentRunId).toBe('run_current');
+    expect(store.getProjection(chatId)?.ledger.runs['run_current']?.lifecycle).toBe('failed');
+    expect(store.getProjection(chatId)?.failure?.text).toContain('Current failure');
+    expect(visibleError()?.message).toContain('Current failure');
+
+    answers[0]?.({
+      status: 'batch',
+      chatId,
+      cursor: 2,
+      nextCursor: 3,
+      endCursor: 3,
+      events: [lifecycleRow(2, 'completed', 'run_prior')],
+    });
+    answers[0]?.({
+      status: 'batch',
+      chatId,
+      cursor: 2,
+      nextCursor: 3,
+      endCursor: 3,
+      events: [
+        logRow(2, {
+          runId: 'run_prior',
+          type: 'run.lifecycle',
+          state: 'failed',
+          attempt: 1,
+          detail: { message: 'Old failure' },
+        }),
+      ],
+    });
+    expect(visibleError()?.message).toContain('Current failure');
+    expect(hostCommand).not.toHaveBeenCalled();
+    unobserve();
+    unpublishCurrent();
+    unpublishOld();
+  });
 });
 
 describe('ChatSessionStore — run accounting per project (R2)', () => {
@@ -428,41 +728,45 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
    * pin is about is *which* session hears a run start and settle.
    */
   const fakeSession = (projectId: string) => {
-    const heard: Array<{ type: string; chatId?: string }> = [];
+    const heard: Array<{ type: string; runs: string[]; stoppableRuns: string[] }> = [];
+    let runs: string[] = [];
+    let stoppableRuns: string[] = [];
     return {
       projectId,
       heard,
       ref: {
-        send: (event: { type: string; chatId?: string }) => {
+        send: (event: { type: string; runs: string[]; stoppableRuns: string[] }) => {
           heard.push(event);
+          if (event.type === 'projectedRunsChanged') {
+            runs = event.runs;
+            stoppableRuns = event.stoppableRuns;
+          }
         },
-        getSnapshot: () => ({ context: { chatRefs: {} } }),
+        getSnapshot: () => ({ context: { runs, stoppableRuns } }),
       } as unknown as Parameters<StoreType['setProjectSession']>[1],
     };
   };
 
-  it('sends a settling run to the chat’s own project, not the focused one', async () => {
+  it('projects a run to the chat’s own project, not the focused one', async () => {
     const store = createStore();
     const projectA = fakeSession('proj_a');
     const projectB = fakeSession('proj_b');
 
     store.setProjectSession('proj_a', projectA.ref);
     store.setFocusedProject('proj_a');
-    store.acquire('chat-a');
-    const fake = harness.created.find((entry) => entry.id === 'chat-a')!;
-    fake.status = 'streaming';
-    fake.emitStatusChange();
+    store.acquire('chat-a', 'proj_a');
+    const stopObserving = store.observe('chat-a', 'proj_a');
+    publishLogRows(store, 'chat-a', runningRows());
+    expect(projectA.heard).toContainEqual({ type: 'projectedRunsChanged', runs: ['chat-a'], stoppableRuns: [] });
 
     /* The person navigates to B while A's run is still going. */
     store.setProjectSession('proj_b', projectB.ref);
     store.setFocusedProject('proj_b');
-    fake.status = 'ready';
-    fake.emitStatusChange();
+    publishLogRows(store, 'chat-a', [lifecycleRow(2, 'completed')], 2);
 
-    expect(projectA.heard.filter((event) => event.type === 'runSettled')).toEqual([
-      { type: 'runSettled', chatId: 'chat-a' },
-    ]);
-    expect(projectB.heard.filter((event) => event.type === 'runSettled')).toEqual([]);
+    expect(projectA.heard.at(-1)).toEqual({ type: 'projectedRunsChanged', runs: [], stoppableRuns: [] });
+    expect(projectB.heard).toEqual([]);
+    stopObserving();
     store.release('chat-a');
     store.setProjectSession('proj_a', undefined);
     store.setProjectSession('proj_b', undefined);
@@ -477,16 +781,19 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     store.setFocusedProject('proj_b');
 
     store.acquire('chat-a', 'proj_a');
+    // @ts-expect-error -- focus never names a chat's project: its caller does (PV-A10).
+    store.acquire('chat-a');
+    store.release('chat-a');
 
-    expect(projectA.heard).toContainEqual({ type: 'openChat', chatId: 'chat-a' });
-    expect(projectB.heard).not.toContainEqual({ type: 'openChat', chatId: 'chat-a' });
+    expect([...store.chatRootsOf('proj_a').keys()]).toEqual(['chat-a']);
+    expect(store.chatRootsOf('proj_b').size).toBe(0);
     store.release('chat-a');
     store.setProjectSession('proj_a', undefined);
     store.setProjectSession('proj_b', undefined);
   });
 
-  it('rebinds a chat acquired during a focus switch to its durable project before the run starts', async () => {
-    const store = new ChatSessionStore();
+  it('binds a chat acquired during a focus switch to its caller’s project before its row loads', async () => {
+    const store = new ChatSessionStore({ chatSession });
     const deps = createStubDeps();
     let resolveLoadedChat!: (chat: ChatEntity) => void;
     const loadedChat = new Promise<ChatEntity>((resolve) => {
@@ -495,34 +802,17 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     deps.getChat.mockImplementation(async () => loadedChat);
     store.setDependencies(deps);
 
-    const boundSession = (projectId: string) => {
-      const heard: Array<{ type: string; chatId?: string }> = [];
-      const chatRef = { send: vi.fn() } as unknown as ChatSessionActorRef;
-      const chatReferences = new Map<string, ChatSessionActorRef>();
-      const ref = {
-        send: (event: { type: string; chatId?: string }) => {
-          heard.push(event);
-          if (event.type === 'openChat' && event.chatId !== undefined) {
-            chatReferences.set(event.chatId, chatRef);
-          } else if (event.type === 'chatClosed' && event.chatId !== undefined) {
-            chatReferences.delete(event.chatId);
-          }
-        },
-        getSnapshot: () => ({ context: { chatRefs: Object.fromEntries(chatReferences) } }),
-      } as unknown as ProjectSessionActorRef;
-      return { projectId, heard, chatRef, ref };
-    };
-    const projectA = boundSession('proj_a');
-    const projectB = boundSession('proj_b');
+    const projectA = fakeSession('proj_a');
+    const projectB = fakeSession('proj_b');
     store.setProjectSession('proj_a', projectA.ref);
     store.setProjectSession('proj_b', projectB.ref);
     store.setFocusedProject('proj_b');
 
     /* React renders A's new chat before ProjectSessionBinding's focus effect
-     * runs, so acquisition still sees B. The durable chat row is the first
-     * authoritative ownership fact available to the store. */
-    const session = store.acquire('chat_a');
-    expect(session.stateActorRef).toBe(projectB.chatRef);
+     * runs, so focus still says B. The caller names A (PV-S4). */
+    const session = store.acquire('chat_a', 'proj_a');
+    const stopObserving = store.observe('chat_a', 'proj_a');
+    expect(store.chatRootsOf('proj_a').get('chat_a')).toBe(session.stateActorRef);
     expect(session.persistenceActorRef.getSnapshot().value).toMatchObject({ chatLoading: 'loading' });
     await vi.waitFor(() => {
       expect(deps.getChat).toHaveBeenCalledWith('chat_a');
@@ -538,23 +828,68 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     });
 
     await vi.waitFor(() => {
-      expect(session.stateActorRef).toBe(projectA.chatRef);
+      expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
     });
-    const fake = harness.created.find((entry) => entry.id === 'chat_a')!;
-    fake.status = 'streaming';
-    fake.emitStatusChange();
+    publishLogRows(store, 'chat_a', runningRows());
 
-    expect(projectB.heard).toContainEqual({ type: 'chatClosed', chatId: 'chat_a' });
-    expect(projectA.heard).toContainEqual({ type: 'openChat', chatId: 'chat_a' });
-    expect(projectA.heard).toContainEqual({ type: 'runStarted', chatId: 'chat_a' });
-    expect(projectB.heard).not.toContainEqual({ type: 'runStarted', chatId: 'chat_a' });
+    expect(projectB.heard).toEqual([]);
+    expect(projectA.heard).toContainEqual({ type: 'projectedRunsChanged', runs: ['chat_a'], stoppableRuns: [] });
+    stopObserving();
     store.release('chat_a');
     store.setProjectSession('proj_a', undefined);
     store.setProjectSession('proj_b', undefined);
   });
 
+  it('takes a gesture made before any route effect registered its project, rather than parking it (PV-S5)', () => {
+    const store = createStore();
+    const session = store.acquire('chat_unbound', 'proj_unbound');
+    const gesture: ChatTurnGesture = { kind: 'regenerate' };
+
+    void store.requestTurn('chat_unbound', gesture);
+
+    expect(session.stateActorRef.getSnapshot().context.pendingGesture).toBe(gesture);
+    store.release('chat_unbound');
+  });
+
+  it('keeps the agents pane’s chat machine across a project session re-registration (PV-S5)', () => {
+    const store = createStore();
+    store.setProjectSession('proj_pane', fakeSession('proj_pane').ref);
+    const session = store.acquire('chat_pane', 'proj_pane');
+    const machine = session.stateActorRef;
+    expect(machine).toBeDefined();
+
+    /* The project's route remounts: its binding unregisters and registers a new session. */
+    store.setProjectSession('proj_pane', undefined);
+    store.setProjectSession('proj_pane', fakeSession('proj_pane').ref);
+
+    /* The pane subscribed to `machine` when the chat joined; it must still be the chat's machine. */
+    expect(session.stateActorRef).toBe(machine);
+    expect(machine.getSnapshot().status).toBe('active');
+    store.release('chat_pane');
+    store.setProjectSession('proj_pane', undefined);
+  });
+
+  it('forwards its project’s revision facts to a chat, whether it joined before or after them (PV-S5)', () => {
+    const store = createStore();
+    const revisionOf = (chatId: string) =>
+      (store.get(chatId)!.stateActorRef.getSnapshot().value as { revision: Record<string, string> }).revision;
+
+    store.acquire('chat_facts_early', 'proj_facts');
+    store.setRevisionFacts('proj_facts', { dirty: true, sync: 'pending', branch: 'main' });
+    store.acquire('chat_facts_late', 'proj_facts');
+    store.acquire('chat_facts_other', 'proj_other');
+
+    for (const chatId of ['chat_facts_early', 'chat_facts_late']) {
+      expect(revisionOf(chatId)).toMatchObject({ tree: 'dirty', sync: 'pending' });
+    }
+    expect(revisionOf('chat_facts_other')).not.toMatchObject({ tree: 'dirty' });
+    for (const chatId of ['chat_facts_early', 'chat_facts_late', 'chat_facts_other']) {
+      store.release(chatId);
+    }
+  });
+
   it('should ignore a delayed hydration after the session is released', async () => {
-    const store = new ChatSessionStore();
+    const store = new ChatSessionStore({ chatSession });
     const deps = createStubDeps();
     let resolveLoadedChat!: (chat: ChatEntity) => void;
     const loadedChat = new Promise<ChatEntity>((resolve) => {
@@ -569,14 +904,14 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     store.setFocusedProject('proj_b');
 
     try {
-      store.acquire('chat_delayed_release');
+      const root = store.acquire('chat_delayed_release', 'proj_b').stateActorRef;
       await vi.waitFor(() => {
         expect(deps.getChat).toHaveBeenCalledWith('chat_delayed_release');
       });
       store.release('chat_delayed_release');
       resolveLoadedChat({
         id: 'chat_delayed_release',
-        resourceId: 'proj_a',
+        resourceId: 'proj_b',
         name: 'Released chat',
         messages: [],
         createdAt: 0,
@@ -587,11 +922,10 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
       await Promise.resolve();
 
       expect(store.get('chat_delayed_release')).toBeUndefined();
+      expect(root.getSnapshot().status).toBe('stopped');
+      expect(store.chatRootsOf('proj_b').size).toBe(0);
       expect(projectA.heard).toEqual([]);
-      expect(projectB.heard).toEqual([
-        { type: 'openChat', chatId: 'chat_delayed_release' },
-        { type: 'chatClosed', chatId: 'chat_delayed_release' },
-      ]);
+      expect(projectB.heard).toEqual([]);
     } finally {
       store.setProjectSession('proj_a', undefined);
       store.setProjectSession('proj_b', undefined);
@@ -599,7 +933,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
   });
 
   it('should not let a released hydration close a reacquired replacement', async () => {
-    const store = new ChatSessionStore();
+    const store = new ChatSessionStore({ chatSession });
     const deps = createStubDeps();
     let resolveFirstLoad!: (chat: ChatEntity) => void;
     const firstLoad = new Promise<ChatEntity>((resolve) => {
@@ -618,12 +952,12 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     store.setFocusedProject('proj_b');
 
     try {
-      const released = store.acquire('chat_reacquired');
+      const released = store.acquire('chat_reacquired', 'proj_b');
       await vi.waitFor(() => {
         expect(deps.getChat).toHaveBeenCalledTimes(1);
       });
       store.release('chat_reacquired');
-      const replacement = store.acquire('chat_reacquired');
+      const replacement = store.acquire('chat_reacquired', 'proj_b');
       await vi.waitFor(() => {
         expect(deps.getChat).toHaveBeenCalledTimes(2);
       });
@@ -631,7 +965,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
 
       resolveFirstLoad({
         id: 'chat_reacquired',
-        resourceId: 'proj_a',
+        resourceId: 'proj_b',
         name: 'Reacquired chat',
         messages: [],
         createdAt: 0,
@@ -642,12 +976,10 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
       await Promise.resolve();
 
       expect(store.get('chat_reacquired')).toBe(replacement);
+      expect(released.stateActorRef.getSnapshot().status).toBe('stopped');
+      expect(replacement.stateActorRef.getSnapshot().status).toBe('active');
+      expect(store.chatRootsOf('proj_b').get('chat_reacquired')).toBe(replacement.stateActorRef);
       expect(projectA.heard).toEqual([]);
-      expect(projectB.heard).toEqual([
-        { type: 'openChat', chatId: 'chat_reacquired' },
-        { type: 'chatClosed', chatId: 'chat_reacquired' },
-        { type: 'openChat', chatId: 'chat_reacquired' },
-      ]);
     } finally {
       store.release('chat_reacquired');
       resolveReplacementLoad({
@@ -663,8 +995,8 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     }
   });
 
-  it('should bind admission before an early settlement arrives during hydration', async () => {
-    const store = new ChatSessionStore();
+  it('keeps an early projected run with its owner through hydration', async () => {
+    const store = new ChatSessionStore({ chatSession });
     const deps = createStubDeps();
     let resolveLoadedChat!: (chat: ChatEntity) => void;
     const loadedChat = new Promise<ChatEntity>((resolve) => {
@@ -673,59 +1005,24 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     deps.getChat.mockImplementation(async () => loadedChat);
     store.setDependencies(deps);
 
-    const realSession = (projectId: string) => {
-      const heard: Array<{ type: string; chatId?: string }> = [];
-      const chatReferences = new Map<string, Actor<typeof chatSessionMachine>>();
-      const ref = mock<ProjectSessionActorRef>();
-      const snapshot = mock<ReturnType<ProjectSessionActorRef['getSnapshot']>>();
-      Object.defineProperty(snapshot, 'context', {
-        get: () => ({ chatRefs: Object.fromEntries(chatReferences) }),
-      });
-      vi.mocked(ref.send).mockImplementation((event) => {
-        heard.push(event);
-        if (event.type === 'openChat' && !chatReferences.has(event.chatId)) {
-          chatReferences.set(
-            event.chatId,
-            createActor(chatSessionMachine, { input: { chatId: event.chatId, projectId } }).start(),
-          );
-        } else if (event.type === 'chatClosed') {
-          chatReferences.get(event.chatId)?.stop();
-          chatReferences.delete(event.chatId);
-        }
-      });
-      vi.mocked(ref.getSnapshot).mockReturnValue(snapshot);
-      return { heard, chatReferences, ref };
-    };
-    const projectA = realSession('proj_a');
-    const projectB = realSession('proj_b');
+    const projectA = fakeSession('proj_a');
+    const projectB = fakeSession('proj_b');
     store.setProjectSession('proj_a', projectA.ref);
     store.setProjectSession('proj_b', projectB.ref);
     store.setFocusedProject('proj_b');
+    const stopObserving = store.observe('chat_early_settlement', 'proj_a');
 
     try {
-      const session = store.acquire('chat_early_settlement');
+      const session = store.acquire('chat_early_settlement', 'proj_a');
       await vi.waitFor(() => {
         expect(deps.getChat).toHaveBeenCalledWith('chat_early_settlement');
       });
       const runId = 'req_early_settlement';
-      store.startRun('chat_early_settlement', {
-        ...testRunBody,
-        projectId: 'proj_a',
-        admission: { version: 1, idempotencyKey: runId },
-      });
-      const fake = harness.created.find((entry) => entry.id === 'chat_early_settlement')!;
-      fake.status = 'streaming';
-      fake.emitStatusChange();
-      recordHostFinalizedTurn({
-        type: 'turn.finalized',
-        turnId: 'turn_early_settlement',
-        runId,
-        chatId: 'chat_early_settlement',
-        projectId: 'proj_a',
-        checkoutId: 'live',
-        changedPaths: [],
-        trigger: 'turn',
-        runIds: [runId],
+      publishLogRows(store, 'chat_early_settlement', runningRows(runId));
+      expect(projectA.heard).toContainEqual({
+        type: 'projectedRunsChanged',
+        runs: ['chat_early_settlement'],
+        stoppableRuns: [],
       });
 
       resolveLoadedChat({
@@ -739,354 +1036,108 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
       await vi.waitFor(() => {
         expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
       });
-      fake.status = 'ready';
-      fake.emitStatusChange();
+      publishLogRows(store, 'chat_early_settlement', [lifecycleRow(2, 'completed', runId)], 2);
 
-      const chatA = projectA.chatReferences.get('chat_early_settlement');
-      expect(chatA?.getSnapshot().matches({ run: 'done' })).toBe(true);
-      expect(projectA.heard.filter((event) => event.type === 'runStarted')).toEqual([
-        { type: 'runStarted', chatId: 'chat_early_settlement' },
-      ]);
-      expect(projectA.heard.filter((event) => event.type === 'runSettled')).toEqual([
-        { type: 'runSettled', chatId: 'chat_early_settlement' },
-      ]);
-      expect(projectB.heard.filter((event) => event.type === 'runStarted' || event.type === 'runSettled')).toEqual([]);
+      const chatA = session.stateActorRef;
+      expect(chatA.getSnapshot().matches({ run: 'done' })).toBe(true);
+      expect(projectA.heard.at(-1)).toEqual({ type: 'projectedRunsChanged', runs: [], stoppableRuns: [] });
+      expect(projectB.heard).toEqual([]);
     } finally {
-      store.endRun('chat_early_settlement');
+      stopObserving();
       store.release('chat_early_settlement');
       store.setProjectSession('proj_a', undefined);
       store.setProjectSession('proj_b', undefined);
-      for (const actor of [...projectA.chatReferences.values(), ...projectB.chatReferences.values()]) {
-        actor.stop();
-      }
     }
   });
 });
 
-describe('ChatSessionStore — host-attested settlement (P71)', () => {
-  const sessionProjectRef = (chatId: string, actor: ChatSessionActorRef) => {
-    const ref = mock<ProjectSessionActorRef>();
-    const chatReferences: Record<string, ChatSessionActorRef> = {};
-    const snapshot = mock<ReturnType<ProjectSessionActorRef['getSnapshot']>>({
-      context: { chatRefs: chatReferences },
-    });
-    chatReferences[chatId] = actor;
-    vi.mocked(ref.getSnapshot).mockReturnValue(snapshot);
-    return ref;
+describe('ChatSessionStore — run phase from the log (PV-S7, G02)', () => {
+  const countingProject = () => {
+    const heard: Array<{ type: string; runs: string[]; stoppableRuns: string[] }> = [];
+    let runs: string[] = [];
+    let stoppableRuns: string[] = [];
+    const ref = {
+      send: (event: { type: string; runs: string[]; stoppableRuns: string[] }) => {
+        heard.push(event);
+        if (event.type === 'projectedRunsChanged') {
+          runs = event.runs;
+          stoppableRuns = event.stoppableRuns;
+        }
+      },
+      getSnapshot: () => ({ context: { runs, stoppableRuns } }),
+    } as unknown as ProjectSessionActorRef;
+    return { heard, ref };
   };
 
-  it('buffers an early matching settlement until the run enters finishing', () => {
+  it('shows an idle chat none of the history its log replays, and counts no run (W0.2)', () => {
     const store = createStore();
-    const chatId = 'chat-ordered-settlement';
-    const runId = testRunBody.admission.idempotencyKey;
-    const actor = createActor(chatSessionMachine, {
-      input: { chatId, projectId: 'project-settlement' },
-    }).start();
+    const project = countingProject();
+    store.setProjectSession('proj_history', project.ref);
+    const actor = store.acquire('chat_history', 'proj_history').stateActorRef;
 
-    try {
-      store.setFocusedProject('project-settlement');
-      store.setProjectSession('project-settlement', sessionProjectRef(chatId, actor));
-      store.acquire(chatId);
-      store.startRun(chatId, testRunBody);
-      const fake = harness.created.find((entry) => entry.id === chatId);
-      expect(fake).toBeDefined();
-      if (fake === undefined) {
-        return;
-      }
-      fake.status = 'streaming';
-      fake.emitStatusChange();
+    publishLogRows(store, 'chat_history', [...runningRows('run_old'), lifecycleRow(2, 'completed', 'run_old')]);
 
-      recordHostFinalizedTurn({
-        type: 'turn.finalized',
-        turnId: 'turn-ordered-settlement',
-        runId,
-        chatId,
-        projectId: 'project-settlement',
-        checkoutId: 'live',
-        changedPaths: [],
-        trigger: 'turn',
-        runIds: [runId],
-      });
-      expect(actor.getSnapshot().matches({ run: 'running' })).toBe(true);
-
-      fake.status = 'ready';
-      fake.emitStatusChange();
-      expect(actor.getSnapshot().matches({ run: 'done' })).toBe(true);
-    } finally {
-      store.release(chatId);
-      store.setProjectSession('project-settlement', undefined);
-      actor.stop();
-    }
+    expect(actor.getSnapshot().matches({ run: 'idle' })).toBe(true);
+    expect(project.heard).toEqual([]);
+    store.release('chat_history');
+    store.setProjectSession('proj_history', undefined);
   });
 
-  it('does not settle a newer run with an older settlement from the same chat', () => {
+  it('reports a replayed run only once the replay holds the log to its end', () => {
     const store = createStore();
-    const chatId = 'chat-correlated-settlement';
-    const currentRunId = 'req_current_chat_session_store';
-    const actor = createActor(chatSessionMachine, {
-      input: { chatId, projectId: 'project-settlement' },
-    }).start();
+    const project = countingProject();
+    store.setProjectSession('proj_pages', project.ref);
+    const actor = store.acquire('chat_pages', 'proj_pages').stateActorRef;
+    const stopObserving = store.observe('chat_pages', 'proj_pages');
 
-    try {
-      store.setFocusedProject('project-settlement');
-      store.setProjectSession('project-settlement', sessionProjectRef(chatId, actor));
-      store.acquire(chatId);
-      store.startRun(chatId, {
-        ...testRunBody,
-        admission: { version: 1, idempotencyKey: currentRunId },
-      });
-      const fake = harness.created.find((entry) => entry.id === chatId);
-      expect(fake).toBeDefined();
-      if (fake === undefined) {
-        return;
-      }
-      fake.status = 'streaming';
-      fake.emitStatusChange();
-      fake.status = 'ready';
-      fake.emitStatusChange();
-      expect(actor.getSnapshot().matches({ run: 'finishing' })).toBe(true);
+    /* The first page of a three-row log: the run it shows running may have ended in the next. */
+    publishLogPage(store, 'chat_pages', runningRows(), { cursor: 0, endCursor: 3 });
+    expect(actor.getSnapshot().matches({ run: 'idle' })).toBe(true);
+    expect(project.heard).toEqual([]);
 
-      recordHostFinalizedTurn({
-        type: 'turn.finalized',
-        turnId: 'turn-old',
-        runId: 'run-old',
-        chatId,
-        projectId: 'project-settlement',
-        checkoutId: 'live',
-        changedPaths: [],
-        trigger: 'turn',
-        runIds: ['run-old'],
-      });
-      expect(actor.getSnapshot().matches({ run: 'finishing' })).toBe(true);
-
-      recordHostFinalizedTurn({
-        type: 'turn.finalized',
-        turnId: 'turn-current',
-        runId: currentRunId,
-        chatId,
-        projectId: 'project-settlement',
-        checkoutId: 'live',
-        changedPaths: [],
-        trigger: 'turn',
-        runIds: [currentRunId],
-      });
-      expect(actor.getSnapshot().matches({ run: 'done' })).toBe(true);
-    } finally {
-      store.release(chatId);
-      store.setProjectSession('project-settlement', undefined);
-      actor.stop();
-    }
-  });
-
-  it("keeps a completed run finishing until that chat's own settlement is observed", () => {
-    const store = createStore();
-    const chatA = createActor(chatSessionMachine, {
-      input: { chatId: 'chat-a', projectId: 'project-settlement' },
-    }).start();
-    const chatB = createActor(chatSessionMachine, {
-      input: { chatId: 'chat-b', projectId: 'project-settlement' },
-    }).start();
-    const projectRef = {
-      send: () => undefined,
-      getSnapshot: () => ({ context: { chatRefs: { 'chat-a': chatA, 'chat-b': chatB } } }),
-    } as unknown as Parameters<StoreType['setProjectSession']>[1];
-
-    try {
-      store.setFocusedProject('project-settlement');
-      store.setProjectSession('project-settlement', projectRef);
-      store.acquire('chat-a');
-      store.acquire('chat-b');
-      chatA.send({ type: 'runLifecycle', phase: 'running', runId: 'run-a' });
-      chatA.send({ type: 'runLifecycle', phase: 'completed', runId: 'run-a' });
-
-      expect(chatA.getSnapshot().matches({ run: 'finishing' })).toBe(true);
-      recordHostFinalizedTurn({
-        type: 'turn.finalized',
-        turnId: 'turn-b',
-        runId: 'run-b',
-        chatId: 'chat-b',
-        projectId: 'project-settlement',
-        checkoutId: 'live',
-        changedPaths: [],
-        trigger: 'turn',
-        runIds: ['run-b'],
-      });
-      expect(chatA.getSnapshot().matches({ run: 'finishing' })).toBe(true);
-
-      recordHostFinalizedTurn({
-        type: 'turn.finalized',
-        turnId: 'turn-a',
-        runId: 'run-a',
-        chatId: 'chat-a',
-        projectId: 'project-settlement',
-        checkoutId: 'live',
-        changedPaths: [],
-        trigger: 'turn',
-        runIds: ['run-a'],
-      });
-      expect(chatA.getSnapshot().matches({ run: 'done' })).toBe(true);
-    } finally {
-      store.release('chat-a');
-      store.release('chat-b');
-      store.setProjectSession('project-settlement', undefined);
-      chatA.stop();
-      chatB.stop();
-    }
-  });
-
-  it('routes failed and conflicted outcomes only to their matching chats', () => {
-    const store = createStore();
-    const failed: Array<Record<string, unknown>> = [];
-    const conflicted: Array<Record<string, unknown>> = [];
-    const projectRef = {
-      send: () => undefined,
-      getSnapshot: () => ({
-        context: {
-          chatRefs: {
-            'chat-failed': { send: (event: Record<string, unknown>) => failed.push(event) },
-            'chat-conflicted': { send: (event: Record<string, unknown>) => conflicted.push(event) },
-          },
-        },
-      }),
-    } as unknown as Parameters<StoreType['setProjectSession']>[1];
-
-    store.setFocusedProject('project-settlement');
-    store.setProjectSession('project-settlement', projectRef);
-    store.acquire('chat-failed');
-    store.acquire('chat-conflicted');
-    try {
-      recordHostTurnSettlement({
-        type: 'turn.failed',
-        turnId: 'turn-failed',
-        runId: 'run-failed',
-        chatId: 'chat-failed',
-        checkoutId: 'live',
-        reason: 'revision cut failed',
-      });
-      recordHostTurnSettlement({
-        type: 'turn.conflicted',
-        turnId: 'turn-conflicted',
-        runId: 'run-conflicted',
-        chatId: 'chat-conflicted',
-        checkoutId: 'live',
-      });
-
-      expect(failed).toContainEqual({
-        type: 'turnFailedObserved',
-        runId: 'run-failed',
-        turnId: 'turn-failed',
-        reason: 'revision cut failed',
-      });
-      expect(failed).not.toContainEqual({
-        type: 'turnConflictedObserved',
-        runId: 'run-conflicted',
-        turnId: 'turn-conflicted',
-      });
-      expect(conflicted).toContainEqual({
-        type: 'turnConflictedObserved',
-        runId: 'run-conflicted',
-        turnId: 'turn-conflicted',
-      });
-      expect(conflicted).not.toContainEqual({
-        type: 'turnFailedObserved',
-        runId: 'run-failed',
-        turnId: 'turn-failed',
-        reason: 'revision cut failed',
-      });
-    } finally {
-      store.release('chat-failed');
-      store.release('chat-conflicted');
-      store.setProjectSession('project-settlement', undefined);
-    }
-  });
-
-  it('rehydrates a terminal chat card from its durable settlement', () => {
-    const store = createStore();
-    const chatId = 'chat-persisted-settlement';
-    const chat = createActor(chatSessionMachine, {
-      input: { chatId, projectId: 'project-persisted-settlement' },
-    }).start();
-    const projectRef = {
-      send: () => undefined,
-      getSnapshot: () => ({ context: { chatRefs: { [chatId]: chat } } }),
-    } as unknown as Parameters<StoreType['setProjectSession']>[1];
-    recordHostFinalizedTurn({
-      type: 'turn.finalized',
-      turnId: 'turn-persisted-settlement',
-      runId: 'run-persisted-settlement',
-      chatId,
-      projectId: 'project-persisted-settlement',
-      checkoutId: 'live',
-      branch: 'main',
-      changedPaths: [],
-      trigger: 'turn',
-      runIds: ['run-persisted-settlement'],
-    });
-
-    store.setFocusedProject('project-persisted-settlement');
-    store.acquire(chatId);
-    store.setProjectSession('project-persisted-settlement', projectRef);
-
-    expect(chat.getSnapshot().matches({ run: 'done' })).toBe(true);
-    expect(chat.getSnapshot().matches({ read: 'unread' })).toBe(true);
-
-    store.release(chatId);
-    store.setProjectSession('project-persisted-settlement', undefined);
-    chat.stop();
-  });
-
-  it('replays a settlement discovered while the durable chat is loading', async () => {
-    const store = new ChatSessionStore();
-    const deps = createStubDeps();
-    const chatId = 'chat-loading-settlement';
-    const projectId = 'project-loading-settlement';
-    const chat = createActor(chatSessionMachine, { input: { chatId, projectId } }).start();
-    const loading = Promise.withResolvers<Awaited<ReturnType<ChatSessionDeps['getChat']>>>();
-    const projectRef = {
-      send: () => undefined,
-      getSnapshot: () => ({ context: { chatRefs: { [chatId]: chat } } }),
-    } as unknown as Parameters<StoreType['setProjectSession']>[1];
-    deps.getChat.mockImplementation(async () => loading.promise);
-    store.setDependencies(deps);
-    store.setProjectSession(projectId, projectRef);
-    store.acquire(chatId, projectId);
-    recordHostFinalizedTurn({
-      type: 'turn.finalized',
-      turnId: 'turn-loading-settlement',
-      runId: 'run-loading-settlement',
-      chatId,
-      projectId,
-      checkoutId: 'live',
-      branch: 'main',
-      changedPaths: [],
-      trigger: 'turn',
-      runIds: ['run-loading-settlement'],
-    });
-    loading.resolve({
-      id: chatId,
-      name: 'Loaded chat',
-      resourceId: projectId,
-      messages: [],
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    });
-
-    await vi.waitFor(() => {
-      expect(chat.getSnapshot().matches({ run: 'done' })).toBe(true);
-      expect(chat.getSnapshot().matches({ read: 'unread' })).toBe(true);
-    });
-
-    store.release(chatId);
-    store.setProjectSession(projectId, undefined);
-    chat.stop();
+    publishLogRows(
+      store,
+      'chat_pages',
+      [logRow(2, { type: 'message.appended', message: { id: 'm2', role: 'assistant', content: 'Hi.' } })],
+      2,
+    );
+    expect(actor.getSnapshot().matches({ run: 'running' })).toBe(true);
+    expect(project.heard).toEqual([{ type: 'projectedRunsChanged', runs: ['chat_pages'], stoppableRuns: [] }]);
+    stopObserving();
+    store.release('chat_pages');
+    store.setProjectSession('proj_pages', undefined);
   });
 });
 
-describe('ChatSessionStore — persisted failure replay (P59)', () => {
-  /* A reload finds the failed turn in IndexedDB, not on a live run: nothing
-   * ever sent the chat's machine a lifecycle for it, so the row read `Idle`
-   * for work that ended badly. Binding is the moment to say so. */
-  it('replays a persisted failure into the chat machine as it binds, and settles no run', () => {
+describe('ChatSessionStore — historical host outcomes from the projection (PV-S13)', () => {
+  it.each(['turn.failed', 'turn.conflicted'] as const)('retains a %s row without a page settlement replay', (type) => {
+    const store = createStore();
+    const chatId = `chat_historical_${type}`;
+    const runId = `run_historical_${type}`;
+    const stopObserving = store.observe(chatId, 'project_history');
+    publishLogRows(store, chatId, [
+      ...runningRows(runId),
+      lifecycleRow(2, type === 'turn.failed' ? 'failed' : 'completed', runId),
+      logRow(3, {
+        type,
+        runId,
+        turnId: 'turn_history',
+        chatId,
+        ...(type === 'turn.failed' ? { reason: 'revision cut failed' } : {}),
+      }),
+    ]);
+
+    expect(store.getProjection(chatId)?.ledger.runs[runId]?.settlements).toMatchObject([
+      { event: { type, runId, turnId: 'turn_history', chatId } },
+    ]);
+    expect(store.get(chatId)).toBeUndefined();
+    stopObserving();
+  });
+});
+describe('ChatSessionStore — persisted failure diagnosis (P59)', () => {
+  /* A chat-wide record error remains available to the card while attachment
+   * is unknown, but it never manufactures a host run for the sidebar. */
+  it('leaves a hydrated refusal diagnostic out of the chat run machine', async () => {
     const store = createStore();
     const heard: Array<Record<string, unknown>> = [];
     const projectHeard: Array<{ type: string }> = [];
@@ -1094,63 +1145,57 @@ describe('ChatSessionStore — persisted failure replay (P59)', () => {
       send: (event: { type: string }) => {
         projectHeard.push(event);
       },
-      getSnapshot: () => ({
-        context: {
-          chatRefs: {
-            'chat-reloaded': {
-              send: (event: Record<string, unknown>) => {
-                heard.push(event);
-              },
-            },
-          },
-        },
-      }),
+      getSnapshot: () => ({ context: { runs: [] } }),
     } as unknown as Parameters<StoreType['setProjectSession']>[1];
 
     store.setFocusedProject('proj_reload');
-    store.acquire('chat-reloaded');
-    const fake = harness.created.find((entry) => entry.id === 'chat-reloaded')!;
+    store.setProjectSession('proj_reload', projectRef);
+    const session = store.acquire('chat_reloaded', 'proj_reload');
+    spyOnSend(session.stateActorRef, (event) => {
+      heard.push(event);
+    });
+    const fake = harness.created.find((entry) => entry.id === 'chat_reloaded')!;
     fake.status = 'error';
     fake.error = new Error('the model refused');
 
-    store.setProjectSession('proj_reload', projectRef);
+    /* The chat's row lands: that is when its persisted failure is known (PV-S5). */
+    await vi.waitFor(() => {
+      expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+    });
 
-    expect(heard).toContainEqual({ type: 'runLifecycle', phase: 'failed', reason: 'the model refused' });
-    /* A historical failure is not a run this session admitted (P59). */
-    expect(projectHeard.filter((event) => event.type === 'runSettled')).toEqual([]);
-    store.release('chat-reloaded');
+    expect(heard).toEqual([]);
+    expect(session.stateActorRef.getSnapshot().matches({ run: 'idle' })).toBe(true);
+    /* A refused command has no projected run for the project to count. */
+    expect(projectHeard).toEqual([]);
+    store.release('chat_reloaded');
     store.setProjectSession('proj_reload', undefined);
   });
 
-  it('leaves a live run alone, replaying nothing over it', () => {
+  it('leaves a live run alone, replaying nothing over it', async () => {
     const store = createStore();
     const heard: Array<Record<string, unknown>> = [];
     const projectRef = {
       send: () => undefined,
-      getSnapshot: () => ({
-        context: {
-          chatRefs: {
-            'chat-streaming': {
-              send: (event: Record<string, unknown>) => {
-                heard.push(event);
-              },
-            },
-          },
-        },
-      }),
+      getSnapshot: () => ({ context: { runs: [] } }),
     } as unknown as Parameters<StoreType['setProjectSession']>[1];
 
     store.setFocusedProject('proj_live');
-    store.acquire('chat-streaming');
-    const fake = harness.created.find((entry) => entry.id === 'chat-streaming')!;
+    store.setProjectSession('proj_live', projectRef);
+    const session = store.acquire('chat_streaming', 'proj_live');
+    spyOnSend(session.stateActorRef, (event) => {
+      heard.push(event);
+    });
+    const fake = harness.created.find((entry) => entry.id === 'chat_streaming')!;
     fake.status = 'streaming';
     fake.emitStatusChange();
     fake.error = new Error('an error from the turn before');
 
-    store.setProjectSession('proj_live', projectRef);
+    await vi.waitFor(() => {
+      expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+    });
 
     expect(heard.filter((event) => event['phase'] === 'failed')).toEqual([]);
-    store.release('chat-streaming');
+    store.release('chat_streaming');
     store.setProjectSession('proj_live', undefined);
   });
 });
@@ -1171,7 +1216,7 @@ describe('ChatSessionStore', () => {
   });
 
   it('routes accepted user activity through the current dependency set', async () => {
-    const store = new ChatSessionStore();
+    const store = new ChatSessionStore({ chatSession });
     const deps = createStubDeps();
     store.setDependencies(deps);
 
@@ -1180,190 +1225,161 @@ describe('ChatSessionStore', () => {
     expect(deps.touchChatRecency).toHaveBeenCalledWith('chat_activity', 123);
   });
 
-  it('updates the active dynamic tool name when counts stay unchanged', () => {
+  it('updates the active tool name from the log when counts stay unchanged (PV-S7)', () => {
     const store = createStore();
-    const session = store.acquire('chat_tool_name');
-    const fake = harness.created.find((entry) => entry.id === 'chat_tool_name')!;
-    const actor = createActor(chatSessionMachine, {
-      input: { chatId: 'chat_tool_name', projectId: 'project_1' },
-    }).start();
-    session.stateActorRef = actor;
-    const activeToolMessage = (toolName: string): MyUIMessage => ({
-      id: 'assistant_1',
-      role: 'assistant',
-      parts: [{ type: 'dynamic-tool', toolName, toolCallId: 'tool_1', state: 'input-streaming', input: {} }],
-    });
+    const session = store.acquire('chat_tool_name', 'project_1');
+    const actor = session.stateActorRef;
+    const toolRow = (sequence: number, message: Readonly<{ role: string; toolCallId: string; toolName: string }>) =>
+      logRow(sequence, { type: 'message.appended', message: { id: `m${String(sequence)}`, ...message } });
 
-    fake.messages = [activeToolMessage('search')];
-    fake.emitMessagesChange();
-    expect(actor.getSnapshot().context.toolName).toBe('search');
+    publishLogRows(store, 'chat_tool_name', [
+      ...runningRows(),
+      toolRow(2, { role: 'tool-input', toolCallId: 'tool_1', toolName: 'search' }),
+    ]);
+    expect(actor.getSnapshot().context).toMatchObject({ toolsInFlight: 1, toolName: 'search' });
 
-    fake.messages = [activeToolMessage('edit_file')];
-    fake.emitMessagesChange();
-    expect(actor.getSnapshot().context.toolName).toBe('edit_file');
-
-    actor.stop();
+    publishLogRows(
+      store,
+      'chat_tool_name',
+      [
+        toolRow(3, { role: 'tool-output', toolCallId: 'tool_1', toolName: 'search' }),
+        toolRow(4, { role: 'tool-input', toolCallId: 'tool_2', toolName: 'edit_file' }),
+      ],
+      3,
+    );
+    expect(actor.getSnapshot().context).toMatchObject({ toolsInFlight: 1, toolName: 'edit_file' });
+    store.release('chat_tool_name');
   });
 
   /* Rewritten for W7: the store's unread decision is written to the project's
    * unread record (D9) instead of `setChatUnreadState`, which is gone. Each row
    * keeps its original trigger and asserts the record on disk. */
-  describe('unread lifecycle', () => {
+  /* PV-S8: unread is derived. A chat is unread while its log's newest attention row (a run that completed or failed, or
+   * an interrupt it opened) is not the row its read receipt names; the store writes a receipt only when the person
+   * sees the chat. Nothing is written to say a chat is unread. */
+  describe('unread lifecycle (PV-S8)', () => {
     const projectId = 'proj_unread';
     const unreadPath = `/.tau/composers/chats/${projectId}/unread.json`;
     const storeInProject = (): { store: StoreType; deps: StubDeps } => {
-      const store = new ChatSessionStore();
+      const store = new ChatSessionStore({ chatSession });
       const deps = createStubDeps();
       deps.getChat.mockImplementation(async (chatId) => chatRow(chatId, projectId));
       store.setDependencies(deps);
       return { store, deps };
     };
-    const unreadWrites = (deps: StubDeps): number =>
-      vi.mocked(deps.client.writeFile).mock.calls.filter(([path]) => path === unreadPath).length;
+    const ended = (store: StoreType, chatId: string, state: string): void => {
+      publishLogRows(store, chatId, [...runningRows(), lifecycleRow(2, state)]);
+    };
+    const requested = logRow(2, {
+      type: 'interrupt.recorded',
+      interruptId: 'i1',
+      phase: 'requested',
+      reason: 'approval',
+    });
 
-    it('marks unattended terminal success and error, but not abort or disconnect', async () => {
+    it('marks an unattended run that completed or failed, and never one the person cancelled', async () => {
       const { store, deps } = storeInProject();
-
-      store.retainDurableRun({ chatId: 'chat_success', runId: 'run_chat_success' });
-      finishRun(harness.created.at(-1)!);
-      for (const [chatId, options] of [
-        ['chat_error', { isError: true }],
-        ['chat_abort', { isAbort: true }],
-        ['chat_disconnect', { isDisconnect: true }],
-      ] as const) {
-        store.retainDurableRun({ chatId, runId: `run_${chatId}` });
-        harness.created.at(-1)!.finish(options);
+      for (const chatId of ['chat_success', 'chat_error', 'chat_cancelled']) {
+        store.acquire(chatId, projectId);
       }
 
-      await vi.waitFor(() => {
-        expect(deps.client.json(unreadPath)).toEqual({
-          version: 1,
-          unread: { chat_success: true, chat_error: true },
-        });
-      });
+      ended(store, 'chat_success', 'completed');
+      ended(store, 'chat_error', 'failed');
+      ended(store, 'chat_cancelled', 'cancelled');
+
+      expect(store.isUnread('chat_success')).toBe(true);
+      expect(store.isUnread('chat_error')).toBe(true);
+      expect(store.isUnread('chat_cancelled')).toBe(false);
       await settle();
-      expect(deps.client.json(unreadPath)).toEqual({ version: 1, unread: { chat_success: true, chat_error: true } });
-    });
-
-    it('marks a new unattended approval once while it remains pending', async () => {
-      const { store, deps } = storeInProject();
-      vi.spyOn(deps.client, 'writeFile');
-      store.retainDurableRun({ chatId: 'chat_approval', runId: 'run_approval' });
-      const chat = harness.created[0]!;
-      const approval = {
-        type: 'tool-delete_file',
-        toolCallId: 'tool-1',
-        state: 'approval-requested',
-        input: { targetFile: 'main.ts' },
-        approval: { id: 'approval-1' },
-      } as unknown as MyUIMessage['parts'][number];
-      chat.messages = [{ id: 'assistant-1', role: 'assistant', parts: [approval] }];
-
-      chat.emitMessagesChange();
-      chat.emitMessagesChange();
-
-      await vi.waitFor(() => {
-        expect(deps.client.json(unreadPath)).toEqual({ version: 1, unread: { chat_approval: true } });
-      });
-      await settle();
-      expect(unreadWrites(deps)).toBe(1);
-    });
-
-    it('does not mark terminal or approval events viewed in an active document', async () => {
-      const { store, deps } = storeInProject();
-      store.acquire('chat_active');
-      store.focusChat('chat_active');
-      const chat = harness.created[0]!;
-      chat.messages = [
-        {
-          id: 'assistant-1',
-          role: 'assistant',
-          parts: [
-            {
-              type: 'tool-delete_file',
-              toolCallId: 'tool-1',
-              state: 'approval-requested',
-              input: { targetFile: 'main.ts' },
-              approval: { id: 'approval-1' },
-            } as unknown as MyUIMessage['parts'][number],
-          ],
-        },
-      ];
-
-      chat.emitMessagesChange();
-      chat.finish();
-
-      await vi.waitFor(() => {
-        expect(deps.getChat).toHaveBeenCalledWith('chat_active');
-      });
-      await settle();
+      /* Unread is an answer, not a record: nothing is written until the person sees a chat. */
       expect(deps.client.json(unreadPath)).toBeUndefined();
-      expect(store.isUnread('chat_active')).toBe(false);
     });
 
-    /* An opened chat resumes, and a host holding no run for it closes the stream without a chunk. Its
-     * `onFinish` lands after focus has moved on, and marking it left a chat nothing ran in unread. */
-    it('should not mark a chat unread when its resume ends without output after focus moved away', async () => {
-      const { store, deps } = storeInProject();
-      store.acquire('chat_opened');
+    it('marks an interrupt opened while the person is away', () => {
+      const { store } = storeInProject();
+      store.acquire('chat_approval', projectId);
+
+      publishLogRows(store, 'chat_approval', [...runningRows(), requested]);
+
+      expect(store.isUnread('chat_approval')).toBe(true);
+    });
+
+    /* L3 D1: an empty resume appends no row. With W0.2's guard reverted the SDK finishes that request, and a store
+     * that marked unread on the request's finish marked a chat nothing ran in. */
+    it('never marks unread for an empty resume, even when the SDK finishes its request', async () => {
+      const { store } = storeInProject();
+      store.acquire('chat_opened', projectId);
       store.focusChat('chat_opened');
+      ended(store, 'chat_opened', 'completed');
+      expect(store.isUnread('chat_opened')).toBe(false);
       store.focusChat('chat_next');
       store.blurChat('chat_opened');
-      const chat = harness.created[0]!;
 
-      for (const status of ['submitted', 'ready'] as const) {
-        chat.status = status;
-        chat.emitStatusChange();
-      }
-      chat.finish();
-
-      await vi.waitFor(() => {
-        expect(deps.getChat).toHaveBeenCalledWith('chat_opened');
-      });
+      /* The resume replays the rows the projection already holds, then the SDK walks submitted → ready. */
+      ended(store, 'chat_opened', 'completed');
+      finishRun(harness.created[0]!);
       await settle();
-      expect(deps.client.json(unreadPath)).toBeUndefined();
+
       expect(store.isUnread('chat_opened')).toBe(false);
     });
 
-    /* R3: every sidebar row holds a view of its chat, so a view alone is not the person reading it. */
-    it('should mark a chat that finishes while another chat is focused in an active document', async () => {
+    it('reads a chat the person is looking at through each new attention row, writing that row as its receipt', async () => {
       const { store, deps } = storeInProject();
-      store.acquire('chat_listed');
-      store.acquire('chat_focused');
+      store.acquire('chat_active', projectId);
+      store.focusChat('chat_active');
+
+      publishLogRows(store, 'chat_active', [...runningRows(), requested]);
+      publishLogRows(store, 'chat_active', [lifecycleRow(3, 'completed')], 3);
+
+      expect(store.isUnread('chat_active')).toBe(false);
+      await vi.waitFor(() => {
+        expect(deps.client.json(unreadPath)).toEqual({
+          version: 1,
+          readThrough: { chat_active: { leaderEpoch: 'g1', sequence: 3 } },
+        });
+      });
+    });
+
+    /* R3: every sidebar row holds a view of its chat, so a view alone is not the person reading it. */
+    it('should mark a chat that finishes while another chat is focused in an active document', () => {
+      const { store } = storeInProject();
+      store.acquire('chat_listed', projectId);
+      store.acquire('chat_focused', projectId);
       store.focusChat('chat_focused');
 
-      finishRun(harness.created[0]!);
+      ended(store, 'chat_listed', 'completed');
 
-      await vi.waitFor(() => {
-        expect(deps.client.json(unreadPath)).toEqual({ version: 1, unread: { chat_listed: true } });
-      });
       expect(store.isUnread('chat_listed')).toBe(true);
     });
 
-    it('should mark the focused chat once focus has moved away from it', async () => {
-      const { store, deps } = storeInProject();
-      store.acquire('chat_left');
-      store.focusChat('chat_left');
-      store.focusChat('chat_next');
-      store.blurChat('chat_left');
-
-      finishRun(harness.created[0]!);
-
-      await vi.waitFor(() => {
-        expect(deps.client.json(unreadPath)).toEqual({ version: 1, unread: { chat_left: true } });
-      });
-    });
-
-    it('marks a terminal event when its mounted view is hidden', async () => {
+    it('marks a run that ends while its focused view is hidden, and clears it when the person looks', async () => {
       vi.stubGlobal('document', { visibilityState: 'hidden', hasFocus: () => false });
       const { store, deps } = storeInProject();
-      store.acquire('chat_hidden');
+      store.acquire('chat_hidden', projectId);
+      store.focusChat('chat_hidden');
 
-      finishRun(harness.created[0]!);
+      ended(store, 'chat_hidden', 'completed');
+      expect(store.isUnread('chat_hidden')).toBe(true);
 
+      store.markViewed('chat_hidden');
+      expect(store.isUnread('chat_hidden')).toBe(false);
       await vi.waitFor(() => {
-        expect(deps.client.json(unreadPath)).toEqual({ version: 1, unread: { chat_hidden: true } });
+        expect(deps.client.json(unreadPath)).toEqual({
+          version: 1,
+          readThrough: { chat_hidden: { leaderEpoch: 'g1', sequence: 2 } },
+        });
       });
+      /* A newer attention row is unread again: the receipt names the row the person saw. */
+      publishLogRows(
+        store,
+        'chat_hidden',
+        [
+          lifecycleRow(3, 'admitted', 'run_2'),
+          lifecycleRow(4, 'running', 'run_2'),
+          lifecycleRow(5, 'completed', 'run_2'),
+        ],
+        3,
+      );
       expect(store.isUnread('chat_hidden')).toBe(true);
     });
   });
@@ -1383,7 +1399,7 @@ describe('ChatSessionStore', () => {
      */
     it('should not dispose a chat whose turn owner is still admitting', async () => {
       const store = createStore();
-      store.acquire('chat_dispose_admitting');
+      store.acquire('chat_dispose_admitting', 'resource_dispose_admitting');
       startTurnOwner(store, 'resource_dispose_admitting');
       publishChatTurnAdmission(
         'chat_dispose_admitting',
@@ -1398,7 +1414,7 @@ describe('ChatSessionStore', () => {
         expect(
           store
             .get('chat_dispose_admitting')
-            ?.stateActorRef?.getSnapshot()
+            ?.stateActorRef.getSnapshot()
             .matches({ run: { queued: 'admitting' } }),
         ).toBe(true);
       });
@@ -1409,292 +1425,40 @@ describe('ChatSessionStore', () => {
     });
 
     /*
-     * T3-D11. `requestTurn` resolves when the actor leaves `queued.admitting`,
-     * through a `next`-only observer. An actor stopped while admitting never
-     * emits again, so the promise never settled — and it is what the composer's
-     * editable lock awaits, so the editor stayed read-only until reload.
+     * T3-D11 said an actor stopped mid-admission never emits again, so the composer's editable lock never settled.
+     * The project session no longer owns the chat (PV-S5): stopping it leaves the chat's root admitting, and the
+     * admission's answer is what releases the composer. The store never stops a root that is admitting.
      */
-    it('should release the composer when the turn owner is stopped mid-admission', async () => {
+    it('keeps a turn admitting when its project session stops, since the store owns the chat (PV-S5)', async () => {
       const store = createStore();
-      store.acquire('chat_stopped_admitting');
+      store.acquire('chat_stopped_admitting', 'resource_stopped_admitting');
       startTurnOwner(store, 'resource_stopped_admitting');
       const owner = turnOwners.at(-1)!;
-      publishChatTurnAdmission(
-        'chat_stopped_admitting',
-        async () =>
-          new Promise<never>(() => {
-            /* Never answers: the admission is in flight for the whole row. */
-          }),
-      );
+      const admission = Promise.withResolvers<ChatRequest>();
+      publishAdmission('chat_stopped_admitting', async () => admission.promise);
+      const root = store.get('chat_stopped_admitting')!.stateActorRef;
 
       const requested = store.requestTurn('chat_stopped_admitting', { kind: 'regenerate' });
       await vi.waitFor(() => {
-        expect(
-          store
-            .get('chat_stopped_admitting')
-            ?.stateActorRef?.getSnapshot()
-            .matches({ run: { queued: 'admitting' } }),
-        ).toBe(true);
+        expect(root.getSnapshot().matches({ run: { queued: 'admitting' } })).toBe(true);
       });
 
-      // The idle policy stops the project session, and its chat children with it.
+      // The idle policy stops the project session; the chat's root is the store's.
       owner.stop();
+      expect(root.getSnapshot().status).toBe('active');
 
+      admission.resolve({
+        kind: 'regenerate',
+        body: { agent: { profile: 'cad', execution: { kind: 'tau', model: 'cad-default' }, kernel: 'replicad' } },
+      });
       await expect(requested).resolves.toBeUndefined();
-    });
-
-    /*
-     * W10-8c, the same wait from the other side. The gesture arrives *after*
-     * the owner was stopped: the store still holds the stale ref, whose last
-     * snapshot still matches `admitting`, and subscribing to a stopped actor
-     * registers no observer at all (XState drops it, and only emits `complete`
-     * for a snapshot whose status is `done` — a machine stopped mid-run is
-     * still `active`). Nothing ever calls back, so the promise the composer's
-     * editable lock awaits never settles.
-     */
-    it('should release the composer for a gesture made after its turn owner was stopped', async () => {
-      const store = createStore();
-      store.acquire('chat_stopped_before');
-      startTurnOwner(store, 'resource_stopped_before');
-      const owner = turnOwners.at(-1)!;
-      publishChatTurnAdmission(
-        'chat_stopped_before',
-        async () =>
-          new Promise<never>(() => {
-            /* Never answers: the admission is in flight for the whole row. */
-          }),
-      );
-
-      void store.requestTurn('chat_stopped_before', { kind: 'regenerate' });
-      await vi.waitFor(() => {
-        expect(
-          store
-            .get('chat_stopped_before')
-            ?.stateActorRef?.getSnapshot()
-            .matches({ run: { queued: 'admitting' } }),
-        ).toBe(true);
-      });
-      owner.stop();
-
-      await expect(store.requestTurn('chat_stopped_before', { kind: 'regenerate' })).resolves.toBeUndefined();
-    });
-
-    it('retains and resumes an API-discovered run without a focused view', async () => {
-      const store = createStore();
-
-      const session = store.retainDurableRun({ chatId: 'chat_background', runId: 'run_background' });
-
-      expect(store.list()).toContain('chat_background');
-      expect(session).toBe(store.get('chat_background'));
-      await vi.waitFor(() => {
-        expect(harness.created[0]?.resumeStream).toHaveBeenCalledOnce();
-      });
-    });
-
-    it('restores one canonical user row before its durable assistant idempotently', () => {
-      const store = createStore();
-      const session = store.retainDurableRun({
-        chatId: 'chat_durable_user',
-        runId: 'run_durable_user',
-        state: 'terminal',
-      });
-      session.chat.messages = [{ id: 'run_durable_user', role: 'assistant', parts: [] }];
-      const message: MyUIMessage = {
-        id: 'message_durable_user',
-        role: 'user',
-        parts: [{ type: 'text', text: 'Restore me.' }],
-        metadata: { status: 'success' },
-      };
-
-      expect(
-        store.reconcileDurableUserMessage({
-          chatId: 'chat_durable_user',
-          runId: 'run_durable_user',
-          message,
-        }),
-      ).toBe(true);
-      expect(
-        store.reconcileDurableUserMessage({
-          chatId: 'chat_durable_user',
-          runId: 'run_durable_user',
-          message,
-        }),
-      ).toBe(false);
-      expect(session.chat.messages.map(({ id }) => id)).toEqual(['message_durable_user', 'run_durable_user']);
-    });
-
-    it('resumes a durable run discovered after the mounted chat finished loading', async () => {
-      const store = new ChatSessionStore();
-      const deps = createStubDeps();
-      deps.getChat.mockResolvedValue({
-        id: 'chat_recovery',
-        resourceId: 'project_test',
-        name: 'Recovery chat',
-        messages: [],
-        createdAt: 1,
-        updatedAt: 1,
-        recencyAt: 1,
-      });
-      store.setDependencies(deps);
-      const session = store.acquire('chat_recovery');
-
-      await vi.waitFor(() => {
-        expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
-      });
-      store.retainDurableRun({ chatId: 'chat_recovery', runId: 'run_recovery', state: 'active' });
-
-      await vi.waitFor(() => {
-        expect(harness.created[0]?.resumeStream).toHaveBeenCalledOnce();
-      });
-    });
-
-    it('fences release of a waiting run after an approval admission replaces its runId', () => {
-      const store = createStore();
-      store.retainDurableRun({ chatId: 'chat_approval', runId: 'run_waiting', state: 'active' });
-      store.retainDurableRun({ chatId: 'chat_approval', runId: 'run_approval', state: 'active' });
-
-      store.releaseDurableRun({ chatId: 'chat_approval', runId: 'run_waiting' });
-
-      expect(store.getDurableRunId('chat_approval')).toBe('run_approval');
-      expect(store.get('chat_approval')).toBeDefined();
-    });
-
-    /**
-     * C6/V10: a reload finds this chat's run terminal in the host's log with no
-     * settlement in it — the tab that ran it closed before the revision root
-     * answered. Nothing will ever attest it, so the chat's session actor is
-     * told to settle it, once, and the chat stops waiting in `finishing`.
-     */
-    it('should settle a reloaded terminal run the log holds no settlement for', async () => {
-      const store = createStore();
-      startTurnOwner(store, 'project_reconcile');
-      const settlements = publishSettlementRecorder('chat_reconcile');
-      store.acquire('chat_reconcile');
-      store.retainDurableRun({ chatId: 'chat_reconcile', runId: 'run_reconcile', state: 'active' });
-
-      harness.created.find((entry) => entry.id === 'chat_reconcile')!.finish();
-
-      await vi.waitFor(() => {
-        expect(settlements).toEqual([
-          { chatId: 'chat_reconcile', runId: 'run_reconcile', leaseTurnId: undefined, outcome: 'completed' },
-        ]);
-      });
-    });
-
-    /**
-     * T2-D4 / I7. After a reload the run this page settles is the one the
-     * *host's* log named — the stream resolved it from there — and not whatever
-     * run id reload discovery retained from a workspace claim this document
-     * never wrote. Keying the reconciliation on page memory settled a run the
-     * host does not hold, or none at all.
-     */
-    it('should settle the run the host named, not the one page memory retained', async () => {
-      const store = createStore();
-      startTurnOwner(store, 'project_host_named');
-      const settlements = publishSettlementRecorder('chat_host_named');
-      store.acquire('chat_host_named');
-      // Reload discovery retained a *stale* claim's run; the reattach then
-      // resolved the run the chat's log actually ends on.
-      store.retainDurableRun({ chatId: 'chat_host_named', runId: 'run_stale_claim', state: 'active' });
-      bindDurableChatRun('chat_host_named', 'run_from_host_log');
-
-      harness.created.find((entry) => entry.id === 'chat_host_named')!.finish();
-
-      await vi.waitFor(() => {
-        expect(settlements).toEqual([
-          { chatId: 'chat_host_named', runId: 'run_from_host_log', leaseTurnId: undefined, outcome: 'completed' },
-        ]);
-      });
-    });
-
-    /**
-     * I4/I7. A takeover records an abandoned run as `failed` and never drives
-     * it, so the reattach that found it closes cleanly — nothing aborted and
-     * nothing errored. Reading the SDK's own flags then settled that run as
-     * *completed*, which asks the revision root to record a dead turn's writes
-     * as its revision. How the run ended is the host's fact.
-     */
-    it('should settle an abandoned run as failed, not as the clean stream it replayed', async () => {
-      const store = createStore();
-      startTurnOwner(store, 'project_abandoned');
-      const settlements = publishSettlementRecorder('chat_abandoned');
-      const abandoned = vi.spyOn(transportModule, 'getBrowserAgentHostRun').mockReturnValue({
-        runId: 'run_abandoned',
-        state: 'failed',
-        eventCount: 4,
-        failure: { code: 'RUN_ABANDONED', message: 'The host executing this run is gone.' },
-      });
-
-      try {
-        store.acquire('chat_abandoned');
-        bindDurableChatRun('chat_abandoned', 'run_abandoned');
-
-        harness.created.find((entry) => entry.id === 'chat_abandoned')!.finish();
-
-        await vi.waitFor(() => {
-          expect(settlements).toEqual([
-            { chatId: 'chat_abandoned', runId: 'run_abandoned', leaseTurnId: undefined, outcome: 'failed' },
-          ]);
-        });
-      } finally {
-        abandoned.mockRestore();
-      }
-    });
-
-    /**
-     * V5: a run outlives the view that started it. Navigating away and back
-     * gives the chat a *new* session actor while its run is still in flight;
-     * an actor that starts `idle` there admits a second turn over a live one,
-     * and the host refuses it — the page ends the turn on a banner for a
-     * condition it created itself.
-     */
-    it('should adopt a run still in flight when its chat gets a new session actor', () => {
-      const store = createStore();
-      startTurnOwner(store, 'project_adopt');
-      const live = vi.spyOn(transportModule, 'getBrowserAgentHostRun').mockReturnValue({
-        runId: 'run_live',
-        state: 'running',
-        eventCount: 2,
-      });
-
-      try {
-        const session = store.acquire('chat_adopt');
-
-        const snapshot = session.stateActorRef!.getSnapshot();
-        expect(snapshot.matches({ run: 'running' })).toBe(true);
-        expect(snapshot.context.activeRunId).toBe('run_live');
-      } finally {
-        live.mockRestore();
-      }
-    });
-
-    it('should notify status subscribers when a durable run is released', () => {
-      const store = createStore();
-      store.acquire('chat_release');
-      store.retainDurableRun({ chatId: 'chat_release', runId: 'run_release', state: 'terminal' });
-      const status = vi.fn();
-      store.subscribeStatus('chat_release', status);
-
-      store.releaseDurableRun({ chatId: 'chat_release', runId: 'run_release' });
-
-      expect(status).toHaveBeenCalledTimes(1);
-      expect(store.getDurableRunId('chat_release')).toBeUndefined();
-    });
-
-    it('adopts a freshly admitted transport run before settling a waiting response', () => {
-      const store = createStore();
-      store.acquire('chat_fresh_waiting');
-      bindDurableChatRun('chat_fresh_waiting', 'run_fresh_waiting');
-
-      harness.created[0]?.finish();
-
-      expect(store.getDurableRunId('chat_fresh_waiting')).toBe('run_fresh_waiting');
-      expect(store.getDurableRunState('chat_fresh_waiting')).toBe('terminal');
+      expect(root.getSnapshot().matches({ run: { queued: 'admitting' } })).toBe(false);
+      store.release('chat_stopped_admitting');
     });
 
     it('creates a session lazily on first acquire', () => {
       const store = createStore();
-      const session = store.acquire('chat_a');
+      const session = store.acquire('chat_a', 'project_test');
 
       expect(session.chatId).toBe('chat_a');
       expect(session.chat.id).toBe('chat_a');
@@ -1703,561 +1467,10 @@ describe('ChatSessionStore', () => {
       expect(harness.created).toHaveLength(1);
     });
 
-    it('does not resume a loaded chat without a durable run', async () => {
-      const store = new ChatSessionStore();
-      const deps = createStubDeps();
-      deps.getChat.mockResolvedValue({
-        id: 'chat_idle',
-        resourceId: 'project_test',
-        name: 'Idle chat',
-        messages: [],
-        createdAt: 1,
-        updatedAt: 1,
-        recencyAt: 1,
-      });
-      store.setDependencies(deps);
-
-      store.acquire('chat_idle');
-
-      await vi.waitFor(() => {
-        expect(deps.getChat).toHaveBeenCalledWith('chat_idle');
-      });
-      expect(harness.created[0]?.resumeStream).not.toHaveBeenCalled();
-    });
-
-    it('reattaches a host-placed chat to its host log, once per host', async () => {
-      const store = new ChatSessionStore();
-      const deps = createStubDeps();
-      deps.getChat.mockResolvedValue({
-        id: 'chat_daemon',
-        resourceId: 'project_test',
-        name: 'Daemon chat',
-        messages: [],
-        createdAt: 1,
-        updatedAt: 1,
-        recencyAt: 1,
-      });
-      store.setDependencies(deps);
-      const session = store.acquire('chat_daemon');
-      await vi.waitFor(() => {
-        expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
-      });
-
-      // The registration effect re-runs whenever the per-turn agent config
-      // changes; only the first one may reattach.
-      store.reattachHostChat({ chatId: 'chat_daemon', hostId: 'origin' });
-      store.reattachHostChat({ chatId: 'chat_daemon', hostId: 'origin' });
-
-      await vi.waitFor(() => {
-        expect(harness.created[0]?.resumeStream).toHaveBeenCalledOnce();
-      });
-    });
-
-    /*
-     * I7. `ChatTurnHost` mounts as soon as a chat is focused, and its binding
-     * publishes once per placement — so a reattach that lands while the chat's
-     * row is still being read has no later pass to catch it. Dropped, the log
-     * was never attached: no `RUN_ABANDONED`, no settlement, and the next open
-     * reconciled the same run again. The condition is the store's, so the
-     * request waits here rather than on a React dependency array.
-     */
-    it('holds a reattach requested while the chat is loading and applies it once, after the load', async () => {
-      const store = new ChatSessionStore();
-      const deps = createStubDeps();
-      const chatId = 'chat_loading_reattach';
-      const loading = Promise.withResolvers<ChatEntity>();
-      deps.getChat.mockReturnValue(loading.promise);
-      store.setDependencies(deps);
-      const session = store.acquire(chatId);
-      await vi.waitFor(() => {
-        expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(true);
-      });
-
-      store.reattachHostChat({ chatId, hostId: 'tau' });
-      store.reattachHostChat({ chatId, hostId: 'tau' });
-      await Promise.resolve();
-      expect(harness.created[0]?.resumeStream).not.toHaveBeenCalled();
-
-      loading.resolve(chatRow(chatId, 'project_test', { name: 'Late-loading chat' }));
-
-      await vi.waitFor(() => {
-        expect(harness.created[0]?.resumeStream).toHaveBeenCalledOnce();
-      });
-    });
-
-    /*
-     * A chat whose seeded first turn this page is dispatching has nothing to
-     * reattach to: the dispatch opens the host stream itself. Reattaching
-     * anyway opened a *second* one — and on rung 2 that means a second relay
-     * session, which the daemon (capacity 1) refused with 409 BUSY 325 ms after
-     * the first, so the seeded turn never ran (live proof 2026-09-03 06:20:33).
-     */
-    it('leaves a seeded first turn to its own dispatch instead of reattaching over it', async () => {
-      const store = new ChatSessionStore();
-      const deps = createStubDeps();
-      const seededMessage: MyUIMessage = {
-        id: 'msg_seeded_pending',
-        role: 'user',
-        parts: [{ type: 'text', text: 'Build a bracket.' }],
-        metadata: { createdAt: 1_700_000_000_000, status: 'pending' },
-      };
-      const seededChat: ChatEntity = {
-        id: 'chat_seeded_daemon',
-        resourceId: 'project_test',
-        name: 'Seeded daemon chat',
-        messages: [seededMessage],
-        startupRequest: {
-          id: 'req_seeded',
-          kind: 'regenerate-tail',
-          messageId: seededMessage.id,
-          source: 'homepage-initial-message',
-          createdAt: 1_700_000_000_000,
-        },
-        createdAt: 1_700_000_000_000,
-        updatedAt: 1_700_000_000_000,
-      };
-      deps.getChat.mockResolvedValue(seededChat);
-      deps.consumeChatStartupRequest.mockResolvedValue({ ...seededChat, startupRequest: undefined });
-      store.setDependencies(deps);
-      store.acquire('chat_seeded_daemon');
-      await vi.waitFor(() => {
-        expect(deps.consumeChatStartupRequest).toHaveBeenCalledWith('chat_seeded_daemon', 'req_seeded');
-      });
-
-      store.reattachHostChat({ chatId: 'chat_seeded_daemon', hostId: 'origin' });
-
-      await Promise.resolve();
-      const seededSession = harness.created.find((entry) => entry.id === 'chat_seeded_daemon');
-      expect(seededSession?.resumeStream).not.toHaveBeenCalled();
-    });
-
-    it('never reattaches a host-placed chat over a run of its own', async () => {
-      const store = new ChatSessionStore();
-      const deps = createStubDeps();
-      deps.getChat.mockResolvedValue({
-        id: 'chat_daemon_busy',
-        resourceId: 'project_test',
-        name: 'Busy daemon chat',
-        messages: [],
-        createdAt: 1,
-        updatedAt: 1,
-        recencyAt: 1,
-      });
-      store.setDependencies(deps);
-      const session = store.acquire('chat_daemon_busy');
-      await vi.waitFor(() => {
-        expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
-      });
-      const chat = harness.created[0]!;
-      chat.status = 'streaming';
-      chat.emitStatusChange();
-
-      store.reattachHostChat({ chatId: 'chat_daemon_busy', hostId: 'origin' });
-
-      await Promise.resolve();
-      expect(chat.resumeStream).not.toHaveBeenCalled();
-    });
-
-    /*
-     * On desktop every Tau turn is host-placed, so the registration effect
-     * reattaches every chat — including one with nothing to resume. The SDK
-     * still drives `submitted → ready`, and reporting that as a run left the
-     * chat machine in `run.finishing` waiting for a settlement no run can send:
-     * the sidebar said "Live, busy / Finishing…" forever.
-     */
-    it('should leave the chat idle when a host reattach finds no run', async () => {
-      const store = new ChatSessionStore();
-      const deps = createStubDeps();
-      const chatId = 'chat_reattach_no_run';
-      deps.getChat.mockResolvedValue(chatRow(chatId, 'project_reattach', { name: 'Empty chat' }));
-      store.setDependencies(deps);
-      const actor = createActor(chatSessionMachine, {
-        input: { chatId, projectId: 'project_reattach' },
-      }).start();
-      const heard: string[] = [];
-      const projectRef = {
-        send: (event: { type: string }) => {
-          heard.push(event.type);
-        },
-        getSnapshot: () => ({ context: { chatRefs: { [chatId]: actor } } }),
-      } as unknown as ProjectSessionActorRef;
-
-      try {
-        store.setFocusedProject('project_reattach');
-        store.setProjectSession('project_reattach', projectRef);
-        const session = store.acquire(chatId);
-        await vi.waitFor(() => {
-          expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
-        });
-
-        store.reattachHostChat({ chatId, hostId: 'origin' });
-        const fake = harness.created.findLast((entry) => entry.id === chatId)!;
-        fake.status = 'submitted';
-        fake.emitStatusChange();
-        fake.status = 'ready';
-        fake.emitStatusChange();
-
-        expect(heard).not.toContain('runStarted');
-        expect(heard).not.toContain('runSettled');
-        // `run: 'idle'` is what `selectChatStatus` reads as the row's `idle`;
-        // services must not import from `#hooks`, so assert the machine state.
-        expect(actor.getSnapshot().matches({ run: 'idle' })).toBe(true);
-      } finally {
-        store.release(chatId);
-        store.setProjectSession('project_reattach', undefined);
-        actor.stop();
-      }
-    });
-
-    /*
-     * Replaying a completed host log retains its run id so the transport can
-     * rebuild that run's transcript. The AI SDK still reports `submitted`
-     * while it opens the replay, but that transport status is not a new turn:
-     * treating the retained id as liveness revives the terminal run and leaves
-     * the row waiting in `finishing` for a second settlement.
-     */
-    it('should not revive a terminal run while its host log reattaches', async () => {
-      const store = new ChatSessionStore();
-      const deps = createStubDeps();
-      const chatId = 'chat_reattach_terminal';
-      deps.getChat.mockResolvedValue(chatRow(chatId, 'project_reattach', { name: 'Completed ACP chat' }));
-      store.setDependencies(deps);
-      const actor = createActor(chatSessionMachine, {
-        input: { chatId, projectId: 'project_reattach' },
-      }).start();
-      const heard: string[] = [];
-      const projectRef = {
-        send: (event: { type: string }) => {
-          heard.push(event.type);
-        },
-        getSnapshot: () => ({ context: { chatRefs: { [chatId]: actor } } }),
-      } as unknown as ProjectSessionActorRef;
-
-      try {
-        store.setFocusedProject('project_reattach');
-        store.setProjectSession('project_reattach', projectRef);
-        const session = store.acquire(chatId);
-        await vi.waitFor(() => {
-          expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
-        });
-
-        bindDurableChatRun(chatId, 'run_already_terminal');
-        store.reattachHostChat({ chatId, hostId: 'origin' });
-        const fake = harness.created.findLast((entry) => entry.id === chatId)!;
-        fake.status = 'submitted';
-        fake.emitStatusChange();
-        fake.status = 'ready';
-        fake.emitStatusChange();
-
-        expect(heard).not.toContain('runStarted');
-        expect(heard).not.toContain('runSettled');
-        expect(actor.getSnapshot().matches({ run: 'idle' })).toBe(true);
-      } finally {
-        store.release(chatId);
-        store.setProjectSession('project_reattach', undefined);
-        actor.stop();
-      }
-    });
-
-    /*
-     * The same reattach, refused. An unreachable host drives the SDK
-     * `submitted → error` before any run binds, so the "no run identity"
-     * suppression above was still armed on the error tick: the row stayed idle
-     * about a reattach that failed outright and the project session never heard
-     * the run settle.
-     */
-    it('should surface a host reattach that fails before a run binds', async () => {
-      const store = new ChatSessionStore();
-      const deps = createStubDeps();
-      const chatId = 'chat_reattach_failed';
-      deps.getChat.mockResolvedValue(chatRow(chatId, 'project_reattach', { name: 'Unreachable host chat' }));
-      store.setDependencies(deps);
-      const actor = createActor(chatSessionMachine, {
-        input: { chatId, projectId: 'project_reattach' },
-      }).start();
-      const heard: string[] = [];
-      const projectRef = {
-        send: (event: { type: string }) => {
-          heard.push(event.type);
-        },
-        getSnapshot: () => ({ context: { chatRefs: { [chatId]: actor } } }),
-      } as unknown as ProjectSessionActorRef;
-
-      try {
-        store.setFocusedProject('project_reattach');
-        store.setProjectSession('project_reattach', projectRef);
-        const session = store.acquire(chatId);
-        await vi.waitFor(() => {
-          expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
-        });
-
-        store.reattachHostChat({ chatId, hostId: 'origin' });
-        const fake = harness.created.findLast((entry) => entry.id === chatId)!;
-        fake.status = 'submitted';
-        fake.emitStatusChange();
-        /* The AI SDK's `setStatus` order: `status` (and its callbacks) first, `error` after. */
-        fake.status = 'error';
-        fake.emitStatusChange();
-        fake.error = new Error('host unreachable');
-        fake.emitErrorChange();
-
-        expect(heard).toContain('runSettled');
-        expect(actor.getSnapshot().matches({ run: 'failed' })).toBe(true);
-        expect(actor.getSnapshot().context.failureReason).toBe('host unreachable');
-      } finally {
-        store.release(chatId);
-        store.setProjectSession('project_reattach', undefined);
-        actor.stop();
-      }
-    });
-
-    /*
-     * The same reattached chat, now running a turn of its own. The run's hold
-     * is released the instant persistence reports idle — before the SDK's
-     * `ready` reaches the store — so the *settlement* names no run either. The
-     * "no run identity" suppression is about a run nobody can ever settle
-     * being OPENED; applied to a run already reported open it dropped the
-     * `completed`, leaving the sidebar row running and *Close* still asking
-     * (R3-F2).
-     */
-    it("should settle a reattached chat's run whose identity cleared before the final status", async () => {
-      const store = new ChatSessionStore();
-      const deps = createStubDeps();
-      const chatId = 'chat_reattach_settles';
-      deps.getChat.mockResolvedValue(chatRow(chatId, 'project_reattach', { name: 'Reattached chat' }));
-      store.setDependencies(deps);
-      const actor = createActor(chatSessionMachine, {
-        input: { chatId, projectId: 'project_reattach' },
-      }).start();
-      const heard: string[] = [];
-      const projectRef = {
-        send: (event: { type: string }) => {
-          heard.push(event.type);
-        },
-        getSnapshot: () => ({ context: { chatRefs: { [chatId]: actor } } }),
-      } as unknown as ProjectSessionActorRef;
-
-      try {
-        store.setFocusedProject('project_reattach');
-        store.setProjectSession('project_reattach', projectRef);
-        const session = store.acquire(chatId);
-        await vi.waitFor(() => {
-          expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
-        });
-
-        store.reattachHostChat({ chatId, hostId: 'origin' });
-        const fake = harness.created.findLast((entry) => entry.id === chatId)!;
-        store.startRun(chatId, { chatId, projectId: 'project_reattach' });
-        fake.status = 'streaming';
-        fake.emitStatusChange();
-        expect(heard).toContain('runStarted');
-
-        // The release clears the active body before the SDK reports `ready`.
-        store.endRun(chatId);
-        fake.status = 'ready';
-        fake.emitStatusChange();
-
-        expect(heard).toContain('runSettled');
-        expect(actor.getSnapshot().matches({ run: 'finishing' })).toBe(true);
-      } finally {
-        store.release(chatId);
-        store.setProjectSession('project_reattach', undefined);
-        actor.stop();
-      }
-    });
-
-    /*
-     * The transcript this store restored from local persistence already holds
-     * the run the host is about to replay from cursor 0, and the AI SDK
-     * *continues* a trailing assistant message on a resume — so the replay used
-     * to append a second copy of every text block to it (tool and data parts
-     * are keyed and merge; text parts are keyed by nothing). The log is the
-     * authority: the transport names the run once `attach` has answered, and
-     * the store drops that run's own message so the replay rebuilds it. Only a
-     * run still going streams; a settled one is rebuilt in place from the log.
-     */
-    it('drops the live run a host reattach is about to rebuild from its transcript', async () => {
-      const store = createStore();
-      const chatId = 'chat_reattach_rebuild';
-      const runId = 'run_reattach_rebuild';
-      const userMessage: MyUIMessage = {
-        id: 'msg_reattach_rebuild',
-        role: 'user',
-        parts: [{ type: 'text', text: 'Build it.' }],
-      };
-      const session = store.acquire(chatId);
-      session.chat.messages = [userMessage, { id: runId, role: 'assistant', parts: [{ type: 'text', text: 'Done.' }] }];
-      const hostClient: AgentHostClient = {
-        start: vi.fn(),
-        steer: vi.fn(),
-        cancel: vi.fn(),
-        resume: vi.fn(),
-        resolveInterrupt: vi.fn(),
-        attach: vi.fn(async () =>
-          page(chatId, {
-            cursor: 0,
-            nextCursor: 0,
-            endCursor: 0,
-            events: [],
-            snapshot: { chatId, runId, turnId: userMessage.id, state: 'running', messages: [] } as const,
-          }),
-        ),
-        read: vi.fn(async () =>
-          page(chatId, {
-            cursor: 0,
-            nextCursor: 0,
-            endCursor: 0,
-            events: [],
-          }),
-        ),
-        subscribe: vi.fn(() => () => undefined),
-        close: vi.fn(async () => undefined),
-      };
-      const unregister = registerAgentHost(chatId, {
-        projectStorage: async () => {
-          throw new Error('A daemon-placed turn reads its workspace from the daemon.');
-        },
-        createClient: async () => hostClient,
-      });
-
-      const stream = await sharedChatTransport.reconnectToStream({ chatId, metadata: undefined });
-
-      expect(session.chat.messages).toEqual([userMessage]);
-      await stream?.getReader().cancel();
-      unregister();
-      store.release(chatId);
-    });
-
-    /*
-     * The banner's Resume dispatches `continue`. Reattaching only recovers a run
-     * the host is still driving, so a turn the gateway refused at admission — no
-     * credit, rate limit, a dead tool — left nothing to attach to and Resume did
-     * nothing at all. It has to dispatch the turn again instead.
-     */
-    /*
-     * Whether a *Try again* re-runs the turn or resumes its stream is the
-     * chat admission's call (C3) — only it knows if the host can still
-     * continue the run — and `ChatTurnHost` owns it. The store carries out
-     * what it composed and reaches no second verdict; the row that pins the
-     * decision is in `use-cad-chat-client.test.tsx`.
-     */
-
-    /*
-     * I1. The banner's *Resume* is an attempt at a run that has already ended,
-     * so there is no live `activeRunBody` left to fall back on — the settlement
-     * that ended the run cleared it — and `ChatTurnHost` composes no body for a
-     * continuation on purpose (no body, no rewind trigger). Requiring one
-     * refused the dispatch with *"No agent configuration is available"* after
-     * the turn had been admitted and its lease taken, so the chat sat in
-     * `queued.dispatched` and the person's Resume did nothing at all.
-     * `reconnectToStream` reads no body: the host continues the run from its
-     * own durable log.
-     */
-    it('dispatches a bodyless continuation, because a resume carries no run body', async () => {
-      const chatId = 'chat_resume_bodyless';
-      const store = createStore();
-      const session = store.acquire(chatId);
-      const fake = harness.created.at(-1)!;
-
-      session.persistenceActorRef.send({ type: 'startRequest', request: { kind: 'continue' } });
-
-      await vi.waitFor(() => {
-        expect(fake.resumeStream).toHaveBeenCalledOnce();
-      });
-    });
-
-    it('does not arm the host resume from a continue no browser host can consume', async () => {
-      const chatId = 'chat_resume_request_unplaced';
-      const store = createStore();
-      const session = store.acquire(chatId);
-      const fake = harness.created.at(-1)!;
-
-      session.persistenceActorRef.send({
-        type: 'startRequest',
-        request: { kind: 'continue', body: testRunBody },
-      });
-      await vi.waitFor(() => {
-        expect(fake.resumeStream).toHaveBeenCalledOnce();
-      });
-
-      // The same chat later gains a browser host whose run ended on a refusal a
-      // resume could continue. Reattaching it is a read, and must spend nothing.
-      const hostClient = refusedAgentHostClient(chatId, 'run_resume_request_unplaced');
-      const unregister = registerAgentHost(chatId, {
-        projectStorage: async () => {
-          throw new Error('Unused by this reattach.');
-        },
-        createClient: async () => hostClient,
-      });
-      const reattached = await sharedChatTransport.reconnectToStream({ chatId, metadata: undefined });
-      await reattached?.getReader().cancel();
-
-      expect(hostClient.resume).not.toHaveBeenCalled();
-
-      unregister();
-      store.release(chatId);
-    });
-
-    /*
-     * W0.3 (L3 D3). A reattached run streams outside the request lifecycle, so
-     * the persistence machine is idle and dropped the person's Stop; the
-     * resumed stream carries no abort signal either. Stop is the host's
-     * `cancel` for the attached run.
-     */
-    it('should send the host cancel for a reattached run when the person stops it', async () => {
-      const chatId = 'chat_stop_reattached';
-      const runId = 'run_stop_reattached';
-      const store = createStore();
-      store.acquire(chatId);
-      const running = { chatId, runId, turnId: 'turn_stop_reattached', state: 'running', messages: [] } as const;
-      const hostClient: AgentHostClient = {
-        start: vi.fn(),
-        steer: vi.fn(),
-        cancel: vi.fn(async () => ({ ...running, state: 'cancelled' }) as const),
-        resume: vi.fn(),
-        resolveInterrupt: vi.fn(),
-        attach: vi.fn(async () =>
-          page(chatId, {
-            cursor: 0,
-            nextCursor: 0,
-            endCursor: 0,
-            events: [],
-            snapshot: running,
-          }),
-        ),
-        read: vi.fn(async () =>
-          page(chatId, {
-            cursor: 0,
-            nextCursor: 0,
-            endCursor: 0,
-            events: [],
-          }),
-        ),
-        subscribe: vi.fn(() => () => undefined),
-        close: vi.fn(async () => undefined),
-      };
-      const unregister = registerAgentHost(chatId, {
-        projectStorage: async () => {
-          throw new Error('Unused by this reattach.');
-        },
-        createClient: async () => hostClient,
-      });
-      const reattached = await sharedChatTransport.reconnectToStream({ chatId, metadata: undefined });
-
-      store.stopRun(chatId);
-
-      await vi.waitFor(() => {
-        expect(hostClient.cancel).toHaveBeenCalledWith(runId);
-      });
-      await reattached?.getReader().cancel();
-      unregister();
-      store.release(chatId);
-    });
-
     it('returns the same session on subsequent acquires for the same chatId', () => {
       const store = createStore();
-      const first = store.acquire('chat_a');
-      const second = store.acquire('chat_a');
+      const first = store.acquire('chat_a', 'project_test');
+      const second = store.acquire('chat_a', 'project_test');
 
       expect(second).toBe(first);
       expect(second.chat).toBe(first.chat);
@@ -2268,8 +1481,8 @@ describe('ChatSessionStore', () => {
 
     it('keeps the session live until the final release', () => {
       const store = createStore();
-      store.acquire('chat_a');
-      store.acquire('chat_a');
+      store.acquire('chat_a', 'project_test');
+      store.acquire('chat_a', 'project_test');
 
       store.release('chat_a');
       expect(store.get('chat_a')).toBeDefined();
@@ -2280,7 +1493,7 @@ describe('ChatSessionStore', () => {
 
     it('disposes the persistence and draft actors on the final release', () => {
       const store = createStore();
-      const session = store.acquire('chat_a');
+      const session = store.acquire('chat_a', 'project_test');
       const persistenceSnapshotBefore = session.persistenceActorRef.getSnapshot();
       const draftSnapshotBefore = session.draftActorRef.getSnapshot();
 
@@ -2302,7 +1515,7 @@ describe('ChatSessionStore', () => {
 
     it('does not throw when releasing more times than acquired', () => {
       const store = createStore();
-      store.acquire('chat_a');
+      store.acquire('chat_a', 'project_test');
       store.release('chat_a');
 
       expect(() => {
@@ -2313,72 +1526,13 @@ describe('ChatSessionStore', () => {
 
     it('creates a fresh session after a previous release (no zombie state)', () => {
       const store = createStore();
-      const first = store.acquire('chat_a');
+      const first = store.acquire('chat_a', 'project_test');
       store.release('chat_a');
 
-      const second = store.acquire('chat_a');
+      const second = store.acquire('chat_a', 'project_test');
       expect(second).not.toBe(first);
       expect(second.chat).not.toBe(first.chat);
       expect(harness.created).toHaveLength(2);
-    });
-
-    it('keeps a streaming chat alive across focused navigation and releases only its view reference', async () => {
-      const store = createStore();
-      const chatA = store.acquire('chat_a');
-      chatA.persistenceActorRef.send({
-        type: 'startRequest',
-        request: { kind: 'continue', body: testRunBody },
-      });
-
-      store.release('chat_a');
-      const chatB = store.acquire('chat_b');
-
-      expect(store.get('chat_a')).toBe(chatA);
-      expect(store.get('chat_b')).toBe(chatB);
-      expect(chatA.persistenceActorRef.getSnapshot().status).toBe('active');
-
-      chatA.persistenceActorRef.send({
-        type: 'requestFinished',
-        messages: [],
-        isAbort: false,
-        isError: false,
-        isDisconnect: false,
-      });
-      await Promise.resolve();
-
-      expect(store.get('chat_a')).toBeUndefined();
-      expect(store.get('chat_b')).toBe(chatB);
-    });
-
-    it('releases the non-view run hold after cancellation reaches terminal state', async () => {
-      const store = createStore();
-      const session = store.acquire('chat_cancelled');
-      session.persistenceActorRef.send({
-        type: 'startRequest',
-        request: { kind: 'continue', body: testRunBody },
-      });
-      store.release('chat_cancelled');
-
-      session.persistenceActorRef.send({ type: 'stopRequest' });
-      session.persistenceActorRef.send({
-        type: 'requestFinished',
-        messages: [
-          {
-            id: 'msg_cancelled',
-            role: 'user',
-            parts: [{ type: 'text', text: 'cancel me' }],
-            metadata: { createdAt: 1, status: 'pending' },
-          },
-        ],
-        isAbort: true,
-        isError: false,
-        isDisconnect: false,
-      });
-      await Promise.resolve();
-
-      expect(store.get('chat_cancelled')).toBeUndefined();
-      expect(session.persistenceActorRef.getSnapshot().status).toBe('stopped');
-      expect(session.draftActorRef.getSnapshot().status).toBe('stopped');
     });
   });
 
@@ -2389,8 +1543,8 @@ describe('ChatSessionStore', () => {
   describe('per-chatId isolation', () => {
     it('creates an independent session for each chatId', () => {
       const store = createStore();
-      const a = store.acquire('chat_a');
-      const b = store.acquire('chat_b');
+      const a = store.acquire('chat_a', 'project_test');
+      const b = store.acquire('chat_b', 'project_test');
 
       expect(a.chat).not.toBe(b.chat);
       expect(a.persistenceActorRef).not.toBe(b.persistenceActorRef);
@@ -2400,8 +1554,8 @@ describe('ChatSessionStore', () => {
 
     it('releasing one session does not affect the other', () => {
       const store = createStore();
-      const a = store.acquire('chat_a');
-      const b = store.acquire('chat_b');
+      const a = store.acquire('chat_a', 'project_test');
+      const b = store.acquire('chat_b', 'project_test');
 
       store.release('chat_a');
 
@@ -2422,21 +1576,21 @@ describe('ChatSessionStore', () => {
       const listener = vi.fn();
       store.subscribeMembership(listener);
 
-      store.acquire('chat_a');
+      store.acquire('chat_a', 'project_test');
       // Membership notifications fan out on a microtask so an in-render
       // acquire never triggers a re-entrant React update.
       await Promise.resolve();
       expect(listener).toHaveBeenCalledTimes(1);
 
-      store.acquire('chat_a');
+      store.acquire('chat_a', 'project_test');
       await Promise.resolve();
       expect(listener).toHaveBeenCalledTimes(1);
     });
 
     it('notifies membership subscribers on final release only', async () => {
       const store = createStore();
-      store.acquire('chat_a');
-      store.acquire('chat_a');
+      store.acquire('chat_a', 'project_test');
+      store.acquire('chat_a', 'project_test');
       await Promise.resolve();
 
       const listener = vi.fn();
@@ -2456,9 +1610,9 @@ describe('ChatSessionStore', () => {
       const listener = vi.fn();
       store.subscribeMembership(listener);
 
-      store.acquire('chat_a');
-      store.acquire('chat_b');
-      store.acquire('chat_c');
+      store.acquire('chat_a', 'project_test');
+      store.acquire('chat_b', 'project_test');
+      store.acquire('chat_c', 'project_test');
       expect(listener).not.toHaveBeenCalled();
 
       await Promise.resolve();
@@ -2467,12 +1621,12 @@ describe('ChatSessionStore', () => {
 
     it('exposes a stable list reference until membership changes', () => {
       const store = createStore();
-      store.acquire('chat_a');
+      store.acquire('chat_a', 'project_test');
       const first = store.list();
       const second = store.list();
       expect(second).toBe(first);
 
-      store.acquire('chat_b');
+      store.acquire('chat_b', 'project_test');
       expect(store.list()).not.toBe(first);
       expect([...store.list()].sort()).toEqual(['chat_a', 'chat_b']);
     });
@@ -2483,7 +1637,7 @@ describe('ChatSessionStore', () => {
       const unsubscribe = store.subscribeMembership(listener);
       unsubscribe();
 
-      store.acquire('chat_a');
+      store.acquire('chat_a', 'project_test');
       await Promise.resolve();
       expect(listener).not.toHaveBeenCalled();
     });
@@ -2496,7 +1650,7 @@ describe('ChatSessionStore', () => {
   describe('subscribeChat', () => {
     it('fires when the underlying chat messages change', () => {
       const store = createStore();
-      store.acquire('chat_a');
+      store.acquire('chat_a', 'project_test');
       const fake = harness.created[0]!;
       const listener = vi.fn();
       store.subscribeChat('chat_a', listener);
@@ -2507,7 +1661,7 @@ describe('ChatSessionStore', () => {
 
     it('fires when the underlying chat status changes', () => {
       const store = createStore();
-      store.acquire('chat_a');
+      store.acquire('chat_a', 'project_test');
       const fake = harness.created[0]!;
       const listener = vi.fn();
       store.subscribeChat('chat_a', listener);
@@ -2518,8 +1672,8 @@ describe('ChatSessionStore', () => {
 
     it('does not wake subscribers from a different chatId', () => {
       const store = createStore();
-      store.acquire('chat_a');
-      store.acquire('chat_b');
+      store.acquire('chat_a', 'project_test');
+      store.acquire('chat_b', 'project_test');
       const fakeA = harness.created[0]!;
 
       const listenerA = vi.fn();
@@ -2537,7 +1691,7 @@ describe('ChatSessionStore', () => {
       const listener = vi.fn();
       store.subscribeChat('chat_a', listener);
 
-      store.acquire('chat_a');
+      store.acquire('chat_a', 'project_test');
       const fake = harness.created[0]!;
       fake.emitMessagesChange();
 
@@ -2546,7 +1700,7 @@ describe('ChatSessionStore', () => {
 
     it('stops invoking listeners after unsubscribe', () => {
       const store = createStore();
-      store.acquire('chat_a');
+      store.acquire('chat_a', 'project_test');
       const fake = harness.created[0]!;
       const listener = vi.fn();
       const unsubscribe = store.subscribeChat('chat_a', listener);
@@ -2565,7 +1719,7 @@ describe('ChatSessionStore', () => {
     it('keeps every distinct session live and active under simultaneous acquires', () => {
       const store = createStore();
       const ids = ['chat_a', 'chat_b', 'chat_c', 'chat_d'];
-      const sessions = ids.map((id) => store.acquire(id));
+      const sessions = ids.map((id) => store.acquire(id, 'project_test'));
 
       for (const session of sessions) {
         expect(session.persistenceActorRef.getSnapshot().status).toBe('active');
@@ -2577,8 +1731,8 @@ describe('ChatSessionStore', () => {
 
     it("releasing one chat does not stop another chat's actors or unsubscribe its listeners", () => {
       const store = createStore();
-      const a = store.acquire('chat_a');
-      const b = store.acquire('chat_b');
+      const a = store.acquire('chat_a', 'project_test');
+      const b = store.acquire('chat_b', 'project_test');
 
       const listenerA = vi.fn();
       const listenerB = vi.fn();
@@ -2602,7 +1756,7 @@ describe('ChatSessionStore', () => {
 
     it('fans out a single chat event to every subscriber bound to that chatId', () => {
       const store = createStore();
-      store.acquire('chat_a');
+      store.acquire('chat_a', 'project_test');
       const fake = harness.created[0]!;
 
       const listeners = [vi.fn(), vi.fn(), vi.fn()];
@@ -2619,14 +1773,14 @@ describe('ChatSessionStore', () => {
     it('per-chat listener buckets are isolated across re-acquire cycles', () => {
       const store = createStore();
       // First lifecycle: subscribe + drop the subscription via release.
-      store.acquire('chat_a');
+      store.acquire('chat_a', 'project_test');
       const stale = vi.fn();
       const unsubscribeStale = store.subscribeChat('chat_a', stale);
       store.release('chat_a');
       unsubscribeStale();
 
       // Second lifecycle: a brand-new Chat instance + a new subscriber.
-      store.acquire('chat_a');
+      store.acquire('chat_a', 'project_test');
       const fake = harness.created.at(-1)!;
       const fresh = vi.fn();
       store.subscribeChat('chat_a', fresh);
@@ -2636,432 +1790,119 @@ describe('ChatSessionStore', () => {
       expect(fresh).toHaveBeenCalledTimes(1);
       expect(stale).not.toHaveBeenCalled();
     });
-
-    it('subscribeStatus notifies only its own chatId', () => {
-      const store = createStore();
-      store.acquire('chat_a');
-      store.acquire('chat_b');
-
-      const fakeA = harness.created.find((chat) => chat.id === 'chat_a')!;
-      const fakeB = harness.created.find((chat) => chat.id === 'chat_b')!;
-
-      const statusA = vi.fn();
-      const statusB = vi.fn();
-      store.subscribeStatus('chat_a', statusA);
-      store.subscribeStatus('chat_b', statusB);
-
-      fakeA.status = 'streaming';
-      fakeA.emitStatusChange();
-
-      expect(statusA).toHaveBeenCalledTimes(1);
-      expect(statusB).not.toHaveBeenCalled();
-
-      fakeB.status = 'submitted';
-      fakeB.emitStatusChange();
-
-      expect(statusA).toHaveBeenCalledTimes(1);
-      expect(statusB).toHaveBeenCalledTimes(1);
-    });
   });
 
-  describe('milestone incremental persistence', () => {
-    it('queues debounced IndexedDB persistence when milestone parts appear on the trailing assistant row', async () => {
-      vi.useFakeTimers();
-      const chatIdForMilestonePersistence = 'chat_milestone_integration';
-      const store = new ChatSessionStore();
+  describe('projected empty-cancel draft restore', () => {
+    const open = async (chatId: string, projectId: string) => {
+      const store = new ChatSessionStore({ chatSession });
       const deps = createStubDeps();
+      deps.getChat.mockResolvedValue(chatRow(chatId, projectId));
       store.setDependencies(deps);
+      const session = store.acquire(chatId, projectId);
+      await vi.waitFor(() => {
+        expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+      });
+      const hostCommand = vi.fn<AgentHostClient['hostCommand']>(async (command) => ({
+        commandId: command.commandId,
+        generation: 1,
+        status: 'applied',
+        effect: 'durable',
+        cursor: 3,
+      }));
+      const unpublish = store.publishProjectHostConnector(
+        projectId,
+        async () => ({ hostCommand, close: vi.fn(async () => undefined) }) as unknown as AgentHostClient,
+      );
+      return { store, deps, session, hostCommand, unpublish };
+    };
 
-      store.acquire(chatIdForMilestonePersistence);
-      await vi.runOnlyPendingTimersAsync();
-      deps.patchChat.mockClear();
-
-      const fake = harness.created.at(-1)!;
-      fake.messages = [
-        {
-          id: 'm_as_ms',
-          role: 'assistant',
-          metadata: { createdAt: 1 },
-          parts: [
-            {
-              type: 'tool-create_file',
-              toolCallId: 'tc_done_ms',
-              state: 'output-available',
-              input: { targetFile: 'a.scad', content: '//' },
-              output: {
-                message: 'ok',
-                diffStats: {
-                  linesAdded: 1,
-                  linesRemoved: 0,
-                  originalContent: '',
-                  modifiedContent: '//',
-                },
-              },
-            },
-          ],
-        },
-      ];
-
-      fake.emitMessagesChange();
-      await vi.advanceTimersByTimeAsync(100);
-      await vi.runOnlyPendingTimersAsync();
-
-      expect(deps.patchChat).toHaveBeenCalledTimes(1);
-      expect(deps.patchChat).toHaveBeenCalledWith(chatIdForMilestonePersistence, 'messages', fake.messages);
-
-      vi.useRealTimers();
-
-      store.release(chatIdForMilestonePersistence);
-    });
-
-    it('preserves ledger-success tools through stop finalization while restoring output on the stalled tool part', async () => {
-      vi.useFakeTimers();
-
-      try {
-        const chatLedgerStopIntegration = 'chat_stop_ledger_integration';
-        const diffOutputB = {
-          message: '',
-          diffStats: {
-            linesAdded: 1,
-            linesRemoved: 0,
-            originalContent: '',
-            modifiedContent: '// b',
-          },
-        };
-
-        const store = new ChatSessionStore();
-        const deps = createStubDeps();
-        store.setDependencies(deps);
-
-        const session = store.acquire(chatLedgerStopIntegration);
-        await Promise.resolve();
-
-        deps.patchChat.mockClear();
-
-        const fake = harness.created.at(-1)!;
-        fake.messages = [
-          {
-            id: 'm_as_ls',
-            role: 'assistant',
-            metadata: { createdAt: 2 },
-            parts: [
-              {
-                type: 'tool-create_file',
-                toolCallId: 'tool_call_settled_integration',
-                state: 'output-available',
-                input: { targetFile: 'a.scad', content: '// a' },
-                output: {
-                  message: '',
-                  diffStats: {
-                    linesAdded: 1,
-                    linesRemoved: 0,
-                    originalContent: '',
-                    modifiedContent: '// a',
-                  },
-                },
-              },
-              {
-                type: 'tool-create_file',
-                toolCallId: 'tool_call_rpc_settled_but_ui_pending',
-                state: 'input-available',
-                input: { targetFile: 'b.scad', content: '// b' },
-              },
+    it('restores a cancelled user-only turn and its attachment only after the host confirms cancellation', async () => {
+      const chatId = 'chat_projected_empty_cancel';
+      const projectId = 'project_projected_empty_cancel';
+      const runId = 'run_projected_empty_cancel';
+      const { store, deps, session, hostCommand, unpublish } = await open(chatId, projectId);
+      deps.client.files.set(`${chatAttachmentsDirectory(projectId, chatId)}/${pngHash}.png`, pngBytes);
+      publishLogRows(store, chatId, [
+        ...runningRows(runId),
+        logRow(2, {
+          runId,
+          type: 'message.appended',
+          message: {
+            id: 'msg_projected_cancel',
+            role: 'user',
+            content: [
+              { type: 'text', text: 'Keep my prompt' },
+              { type: 'file-ref', path: pngUrl, mimeType: 'image/png' },
             ],
           },
-        ];
+        }),
+      ]);
+      expect(store.getProjection(chatId)?.views[runId]?.user?.id).toBe('msg_projected_cancel');
 
-        session.persistenceActorRef.send({ type: 'startRequest', request: { kind: 'regenerate' } });
-        session.persistenceActorRef.send({ type: 'stopRequest' });
+      store.stopRun(chatId);
+      await vi.waitFor(() => {
+        expect(hostCommand).toHaveBeenCalledTimes(1);
+      });
+      expect(hostCommand.mock.calls[0]?.[0].type).toBe('cancel');
+      expect(session.draftActorRef.getSnapshot().context.draftText).toBe('');
 
-        recordRpcOutcome(chatLedgerStopIntegration, 'tool_call_rpc_settled_but_ui_pending', {
-          kind: 'success',
-          output: diffOutputB,
-        });
-
-        session.persistenceActorRef.send({
-          type: 'requestFinished',
-          messages: [...fake.messages],
-          isAbort: true,
-          isError: false,
-          isDisconnect: false,
-        });
-
-        await vi.advanceTimersByTimeAsync(100);
-        await vi.runOnlyPendingTimersAsync();
-
-        const lastPatchCallArgs = deps.patchChat.mock.calls.at(-1);
-        expect(lastPatchCallArgs).toBeDefined();
-        const persistedMessages = lastPatchCallArgs![2];
-        expect(Array.isArray(persistedMessages)).toBe(true);
-        const msgs = persistedMessages as MyUIMessage[];
-
-        const lastAssistant = msgs.at(-1);
-        expect(lastAssistant?.role).toBe('assistant');
-        const parts = lastAssistant?.parts ?? [];
-        expect((parts[0] as { state: string }).state).toBe('output-available');
-
-        expect((parts[1] as { state: string }).state).toBe('output-available');
-        expect((parts[1] as { output: typeof diffOutputB }).output).toEqual(diffOutputB);
-
-        store.release(chatLedgerStopIntegration);
-        clearLedger(chatLedgerStopIntegration);
-      } finally {
-        vi.useRealTimers();
-      }
-    });
-  });
-
-  describe('empty-cancel draft restore', () => {
-    it('lifts the cancelled user message back into the draft, truncates chat.messages, and atomically persists transcript plus draft', async () => {
-      vi.useFakeTimers();
-      try {
-        const chatId = 'chat_restore_empty_cancel';
-        const projectId = 'proj_restore';
-        const store = new ChatSessionStore();
-        const deps = createStubDeps();
-        deps.getChat.mockResolvedValue(chatRow(chatId, projectId));
-        deps.client.files.set(`${chatAttachmentsDirectory(projectId, chatId)}/${pngHash}.png`, pngBytes);
-        store.setDependencies(deps);
-
-        const session = store.acquire(chatId);
-        await vi.runOnlyPendingTimersAsync();
-        deps.patchChat.mockClear();
-
-        const fake = harness.created.at(-1)!;
-        const priorUser: MyUIMessage = {
-          id: 'msg_user_prior',
-          role: 'user',
-          parts: [{ type: 'text', text: 'prior turn' }],
-          metadata: { createdAt: 0, status: 'pending' },
-        };
-        const priorAssistant: MyUIMessage = {
-          id: 'msg_assistant_prior',
-          role: 'assistant',
-          parts: [{ type: 'text', text: 'prior reply' }],
-          metadata: { createdAt: 1, status: 'pending' },
-        };
-        const cancelledUser: MyUIMessage = {
-          id: 'msg_user_cancelled',
-          role: 'user',
-          parts: [
-            { type: 'text', text: 'help me iterate on this' },
-            { type: 'file', url: pngUrl, mediaType: 'image/png' },
-          ],
-          metadata: { createdAt: 2, status: 'pending' },
-        };
-        const emptyAssistantPlaceholder: MyUIMessage = {
-          id: 'msg_assistant_empty',
-          role: 'assistant',
-          parts: [],
-          metadata: { createdAt: 3, status: 'pending' },
-        };
-        fake.messages = [priorUser, priorAssistant, cancelledUser, emptyAssistantPlaceholder];
-
-        session.persistenceActorRef.send({
-          type: 'startRequest',
-          request: { kind: 'send', message: cancelledUser },
-        });
-        session.persistenceActorRef.send({ type: 'stopRequest' });
-        session.persistenceActorRef.send({
-          type: 'requestFinished',
-          messages: [...fake.messages],
-          isAbort: true,
-          isError: false,
-          isDisconnect: false,
-        });
-
-        // The trailing user message + empty assistant placeholder both come off
-        // chat.messages; only the older turn remains.
-        expect(fake.messages).toEqual([priorUser, priorAssistant]);
-
-        const draftSnapshot = session.draftActorRef.getSnapshot();
-        expect(draftSnapshot.context.draftText).toBe('help me iterate on this');
-        // Rewritten for W7: the draft holds the attachment by reference, not a data URL.
-        expect(draftSnapshot.context.draftAttachments).toEqual([{ hash: pngHash, mediaType: 'image/png' }]);
-
-        // The bytes are copied back beside the record before the record references them (D18).
-        await vi.waitFor(() => {
-          expect(deps.commitCancelledDraftRestore).toHaveBeenCalledTimes(1);
+      publishLogRows(store, chatId, [lifecycleRow(3, 'cancelled', runId)], 3);
+      expect(store.getProjection(chatId)?.ledger.runs[runId]?.lifecycle).toBe('cancelled');
+      await vi.waitFor(() => {
+        expect(session.draftActorRef.getSnapshot().context).toMatchObject({
+          draftText: 'Keep my prompt',
+          draftAttachments: [{ hash: pngHash, mediaType: 'image/png' }],
         });
         expect(deps.client.files.get(`${draftAttachmentsDirectory(projectId, chatId)}/${pngHash}.png`)).toEqual(
           pngBytes,
         );
-        await vi.waitFor(() => {
-          expect(deps.client.json(composerPath(projectId, chatId))).toMatchObject({
-            draft: { parts: cancelledUser.parts },
-          });
-        });
-        const [restoreChatId, restoreInput] = deps.commitCancelledDraftRestore.mock.calls[0]!;
-        expect(restoreChatId).toBe(chatId);
-        expect(restoreInput.messages).toEqual([priorUser, priorAssistant]);
-        // W8: the draft is the composer record's (asserted above), never the chat row's.
-        expect(restoreInput).not.toHaveProperty('draft');
-        expect(deps.patchChat.mock.calls.some(([, key]) => key === 'messages')).toBe(false);
-
-        store.release(chatId);
-      } finally {
-        vi.useRealTimers();
-      }
+      });
+      expect(store.getProjection(chatId)?.views[runId]?.user?.id).toBe('msg_projected_cancel');
+      expect(deps.commitCancelledDraftRestore).not.toHaveBeenCalled();
+      expect(deps.patchChat.mock.calls.some(([, key]) => key === 'messages')).toBe(false);
+      store.release(chatId);
+      unpublish();
     });
 
-    it('does not restore the draft when an assistant message has already streamed content (cancel-after-stream keeps applyStoppedRequest behaviour)', async () => {
-      vi.useFakeTimers();
-      try {
-        const chatId = 'chat_restore_after_stream';
-        const store = new ChatSessionStore();
-        const deps = createStubDeps();
-        store.setDependencies(deps);
+    it('keeps a cancelled turn with assistant output in the transcript instead of restoring its draft', async () => {
+      const chatId = 'chat_projected_partial_cancel';
+      const projectId = 'project_projected_partial_cancel';
+      const runId = 'run_projected_partial_cancel';
+      const { store, deps, session, hostCommand, unpublish } = await open(chatId, projectId);
+      publishLogRows(store, chatId, [
+        ...runningRows(runId),
+        logRow(2, {
+          runId,
+          type: 'message.appended',
+          message: { id: 'msg_partial_user', role: 'user', content: 'Keep working' },
+        }),
+        logRow(3, {
+          runId,
+          type: 'message.appended',
+          message: { id: 'msg_partial_assistant', role: 'assistant', content: 'Partial answer' },
+        }),
+      ]);
 
-        const session = store.acquire(chatId);
-        await vi.runOnlyPendingTimersAsync();
-        deps.patchChat.mockClear();
-
-        const fake = harness.created.at(-1)!;
-        const userMessage: MyUIMessage = {
-          id: 'msg_user_partial',
-          role: 'user',
-          parts: [{ type: 'text', text: 'should stay in transcript' }],
-          metadata: { createdAt: 0, status: 'pending' },
-        };
-        const assistantWithContent: MyUIMessage = {
-          id: 'msg_assistant_partial',
-          role: 'assistant',
-          parts: [{ type: 'text', text: 'partial token' }],
-          metadata: { createdAt: 1, status: 'pending' },
-        };
-        fake.messages = [userMessage, assistantWithContent];
-
-        session.persistenceActorRef.send({
-          type: 'startRequest',
-          request: { kind: 'send', message: userMessage },
-        });
-        session.persistenceActorRef.send({ type: 'stopRequest' });
-        session.persistenceActorRef.send({
-          type: 'requestFinished',
-          messages: [...fake.messages],
-          isAbort: true,
-          isError: false,
-          isDisconnect: false,
-        });
-
-        // `chat.messages` is preserved (both turns still on screen); the prior
-        // `applyStoppedRequest` path runs and finalises the partial assistant.
-        expect(fake.messages).toHaveLength(2);
-        expect(fake.messages[0]?.id).toBe('msg_user_partial');
-        expect(fake.messages[1]?.id).toBe('msg_assistant_partial');
-
-        // Draft must remain untouched.
-        const draftSnapshot = session.draftActorRef.getSnapshot();
-        expect(draftSnapshot.context.draftText).toBe('');
-        expect(draftSnapshot.context.draftAttachments).toEqual([]);
-
-        await vi.advanceTimersByTimeAsync(100);
-        await vi.runOnlyPendingTimersAsync();
-
-        store.release(chatId);
-      } finally {
-        vi.useRealTimers();
-      }
-    });
-
-    it('persists empty-cancel restore across immediate release and reacquire without replaying the startup request', async () => {
-      const chatId = 'chat_release_reacquire_after_empty_cancel';
-      const cancelledUser: MyUIMessage = {
-        id: 'msg_initial_prompt',
-        role: 'user',
-        parts: [{ type: 'text', text: 'make a planetary gear' }],
-        metadata: { createdAt: 1, status: 'pending' },
-      };
-      const emptyAssistant: MyUIMessage = {
-        id: 'msg_empty_assistant',
-        role: 'assistant',
-        parts: [],
-        metadata: { createdAt: 2, status: 'pending' },
-      };
-      let storedChat: ChatEntity = {
-        id: chatId,
-        resourceId: 'resource_release_reacquire',
-        name: 'Initial design',
-        messages: [cancelledUser],
-        startupRequest: {
-          id: 'req_initial_prompt',
-          kind: 'regenerate-tail',
-          messageId: cancelledUser.id,
-          source: 'homepage-initial-message',
-          createdAt: 0,
-        },
-        createdAt: 0,
-        updatedAt: 0,
-      };
-      const store = new ChatSessionStore();
-      const deps = createStubDeps();
-      deps.getChat.mockImplementation(async () => storedChat);
-      deps.consumeChatStartupRequest.mockImplementation(async () => {
-        storedChat = { ...storedChat, startupRequest: undefined };
-        return storedChat;
-      });
-      // Rewritten for W7: the row no longer carries the draft; the chat's composer record does.
-      deps.commitCancelledDraftRestore.mockImplementation(async (_chatId, input) => {
-        storedChat = {
-          ...storedChat,
-          messages: input.messages,
-          startupRequest:
-            input.clearStartupRequestId && storedChat.startupRequest?.id === input.clearStartupRequestId
-              ? undefined
-              : storedChat.startupRequest,
-        };
-        return storedChat;
-      });
-      store.setDependencies(deps);
-
-      startTurnOwner(store, 'resource_release_reacquire');
-      publishAdmission(chatId, () => ({
-        kind: 'regenerate',
-        body: { agent: { profile: 'cad', execution: { kind: 'tau', model: 'cad-default' }, kernel: 'replicad' } },
-      }));
-      const firstSession = store.acquire(chatId);
-
-      const firstFake = harness.created.find((entry) => entry.id === chatId)!;
+      store.stopRun(chatId);
       await vi.waitFor(() => {
-        expect(firstFake.regenerate).toHaveBeenCalledTimes(1);
+        expect(hostCommand).toHaveBeenCalledTimes(1);
       });
-
-      firstFake.messages = [cancelledUser, emptyAssistant];
-      firstSession.persistenceActorRef.send({ type: 'stopRequest' });
-      firstSession.persistenceActorRef.send({
-        type: 'requestFinished',
-        messages: [...firstFake.messages],
-        isAbort: true,
-        isError: false,
-        isDisconnect: false,
+      publishLogRows(store, chatId, [lifecycleRow(4, 'cancelled', runId)], 4);
+      await vi.waitFor(() => {
+        expect(session.chat.messages.flatMap((message) => message.parts)).toEqual(
+          expect.arrayContaining([expect.objectContaining({ type: 'text', text: 'Partial answer' })]),
+        );
       });
-
+      expect(session.draftActorRef.getSnapshot().context.draftText).toBe('');
+      expect(deps.commitCancelledDraftRestore).not.toHaveBeenCalled();
       store.release(chatId);
-      // The draft reaches the record before the transcript is truncated, so the truncation is awaited here.
-      await vi.waitFor(() => {
-        expect(storedChat.messages).toEqual([]);
-      });
-      const secondSession = store.acquire(chatId);
-
-      await vi.waitFor(() => {
-        expect(secondSession.draftActorRef.getSnapshot().context.draftText).toBe('make a planetary gear');
-      });
-      expect(deps.client.json(composerPath('resource_release_reacquire', chatId))).toMatchObject({
-        draft: { parts: cancelledUser.parts },
-      });
-
-      const secondFake = harness.created.at(-1)!;
-      expect(secondFake.id).toBe(chatId);
-      expect(secondFake.regenerate).not.toHaveBeenCalled();
-      expect(secondFake.messages).toEqual([]);
-
-      store.release(chatId);
+      unpublish();
     });
   });
 
   describe('hydration on acquire', () => {
     it('calls deps.getChat on first acquire so hydration kicks off', async () => {
-      const store = new ChatSessionStore();
+      const store = new ChatSessionStore({ chatSession });
       const deps = createStubDeps();
       store.setDependencies(deps);
 
@@ -3075,7 +1916,7 @@ describe('ChatSessionStore', () => {
       };
       deps.getChat.mockResolvedValue(sampleChat);
 
-      store.acquire('chat_a');
+      store.acquire('chat_a', 'resource_1');
 
       // Microtask flush so the persistence actor's loadChatActor invokes deps.getChat.
       await Promise.resolve();
@@ -3084,272 +1925,9 @@ describe('ChatSessionStore', () => {
       expect(deps.getChat).toHaveBeenCalledWith('chat_a');
     });
 
-    it('waits for the chat admission before dispatching a consumed startup request', async () => {
-      const store = new ChatSessionStore();
-      const deps = createStubDeps();
-      store.setDependencies(deps);
-
-      const legacyStartupMetadata: NonNullable<MyUIMessage['metadata']> & Record<string, unknown> = {
-        createdAt: 1_700_000_000_000,
-        status: 'pending',
-        // Legacy extra fields must never become wire config; they remain
-        // display metadata only.
-        model: 'legacy-stale-model',
-        kernel: 'replicad',
-        mode: 'agent',
-        toolChoice: 'auto',
-        testingEnabled: false,
-      };
-      const startupUserMessage: MyUIMessage = {
-        id: 'msg_startup_pending',
-        role: 'user',
-        parts: [{ type: 'text', text: 'homepage prompt' }],
-        metadata: legacyStartupMetadata,
-      };
-
-      const startupChat: ChatEntity = {
-        id: 'chat_startup_hydration',
-        resourceId: 'resource_startup',
-        name: 'Startup chat',
-        messages: [startupUserMessage],
-        startupRequest: {
-          id: 'req_startup',
-          kind: 'regenerate-tail',
-          messageId: startupUserMessage.id,
-          source: 'homepage-initial-message',
-          createdAt: 1_700_000_000_000,
-        },
-        createdAt: 1_700_000_000_000,
-        updatedAt: 1_700_000_000_000,
-      };
-      const consumedChat = { ...startupChat, startupRequest: undefined };
-      deps.getChat.mockResolvedValue(startupChat);
-      deps.consumeChatStartupRequest.mockResolvedValue(consumedChat);
-
-      const liveBody = {
-        agent: {
-          profile: 'cad',
-          execution: { kind: 'tau', model: 'openai-gpt-5.5' },
-          kernel: 'replicad',
-          mode: 'agent',
-          toolChoice: 'auto',
-          testingEnabled: true,
-        },
-        projectId: 'project_startup',
-        execution: {
-          hostId: 'host_startup',
-          workspaceId: 'workspace_startup',
-          baseRevisionId: 'revision_startup',
-        },
-      };
-      startTurnOwner(store, 'resource_startup');
-      store.acquire('chat_startup_hydration');
-
-      // Reproduce the real mount order: IndexedDB hydration can consume the
-      // startup marker before the route publishes the chat's admission. The
-      // admission actor waits for it; nothing polls and nothing times out.
-      await vi.waitFor(() => {
-        expect(deps.consumeChatStartupRequest).toHaveBeenCalledWith('chat_startup_hydration', 'req_startup');
-      });
-
-      const fake = harness.created.find((entry) => entry.id === 'chat_startup_hydration')!;
-      expect(fake.regenerate).not.toHaveBeenCalled();
-
-      publishAdmission('chat_startup_hydration', () => ({ kind: 'regenerate', body: liveBody }));
-      await vi.waitFor(() => {
-        expect(fake.regenerate).toHaveBeenCalledTimes(1);
-      });
-
-      expect(fake.regenerate).toHaveBeenCalledTimes(1);
-      const dispatchedOptions = fake.regenerate.mock.calls[0]![0] as { body?: Record<string, unknown> } | undefined;
-      expect(dispatchedOptions?.body).toEqual({
-        ...liveBody,
-        admission: { version: 1, idempotencyKey: expect.stringMatching(/^req_/u) as unknown },
-      });
-
-      const wireBody = {
-        id: 'chat_startup_hydration',
-        messages: startupChat.messages,
-        ...dispatchedOptions?.body,
-      };
-      const parsed = chatTurnRequestSchema.parse(wireBody);
-      expect(parsed.agent).toMatchObject({
-        profile: 'cad',
-        // Live agent values survive — never the legacy persisted metadata.
-        execution: { kind: 'tau', model: 'openai-gpt-5.5' },
-        testingEnabled: true,
-      });
-
-      store.release('chat_startup_hydration');
-    });
-    /*
-     * V3a. The loader consumes the homepage seed as soon as the row loads, but
-     * the chat's owner is bound by an effect (`project-live-sessions.tsx:221`
-     * -> `setProjectSession`). A chat acquired on the route's first render
-     * consumed its seed before that effect ran, and the optional chain on
-     * `session.stateActorRef` dropped the `requestTurn` on the floor: one-shot
-     * request burnt, no lease, no banner, prompt gone on reload (signed-out
-     * repro 2026-09-19). The gesture has to wait for the owner, not the owner
-     * for the gesture.
-     */
-    it('dispatches a seeded first turn consumed before its project session bound', async () => {
-      const store = new ChatSessionStore();
-      const deps = createStubDeps();
-      store.setDependencies(deps);
-
-      const seededMessage: MyUIMessage = {
-        id: 'msg_seed_late_owner',
-        role: 'user',
-        parts: [{ type: 'text', text: 'Design a 1000L IBC tank.' }],
-        metadata: { createdAt: 1_700_000_000_000, status: 'pending' },
-      };
-      const seededChat: ChatEntity = {
-        id: 'chat_seed_late_owner',
-        resourceId: 'resource_seed_late',
-        name: 'Seeded chat',
-        messages: [seededMessage],
-        startupRequest: {
-          id: 'req_seed_late',
-          kind: 'regenerate-tail',
-          messageId: seededMessage.id,
-          source: 'homepage-initial-message',
-          createdAt: 1_700_000_000_000,
-        },
-        createdAt: 1_700_000_000_000,
-        updatedAt: 1_700_000_000_000,
-      };
-      deps.getChat.mockResolvedValue(seededChat);
-      deps.consumeChatStartupRequest.mockResolvedValue({ ...seededChat, startupRequest: undefined });
-
-      // No turn owner yet: the route's registration effect has not run.
-      store.acquire('chat_seed_late_owner');
-      await vi.waitFor(() => {
-        expect(deps.consumeChatStartupRequest).toHaveBeenCalledWith('chat_seed_late_owner', 'req_seed_late');
-      });
-      const fake = harness.created.find((entry) => entry.id === 'chat_seed_late_owner')!;
-      expect(fake.regenerate).not.toHaveBeenCalled();
-
-      // The effect binds the owner a render later; the held gesture must flush.
-      startTurnOwner(store, 'resource_seed_late');
-      publishAdmission('chat_seed_late_owner', () => ({
-        kind: 'regenerate',
-        body: { agent: { profile: 'cad', execution: { kind: 'tau', model: 'cad-default' }, kernel: 'replicad' } },
-      }));
-
-      await vi.waitFor(() => {
-        expect(fake.regenerate).toHaveBeenCalledTimes(1);
-      });
-
-      store.release('chat_seed_late_owner');
-    });
-
-    /*
-     * T3-D3. The seed was protected from an unbound owner (V3a); the person's
-     * own gestures were not — `requestTurn` returned silently whenever
-     * `stateActorRef` was undefined, which is every chat of a project between
-     * `setProjectSession(id, undefined)` and the next registration, and every
-     * chat whose project session the idle policy stopped. The composer had
-     * already cleared, so the message was gone with no banner and no transcript
-     * row. One parking slot, one flush site, for every gesture.
-     */
-    it('holds a gesture made before the project session binds and admits it on bind', async () => {
-      const store = createStore();
-      store.acquire('chat_unbound_gesture');
-      const fake = harness.created.find((entry) => entry.id === 'chat_unbound_gesture')!;
-
-      // No project session: the chat has no owner to ask.
-      await store.requestTurn('chat_unbound_gesture', { kind: 'regenerate' });
-      expect(fake.regenerate).not.toHaveBeenCalled();
-
-      startTurnOwner(store, 'resource_unbound_gesture');
-      publishAdmission('chat_unbound_gesture', () => ({
-        kind: 'regenerate',
-        body: { agent: { profile: 'cad', execution: { kind: 'tau', model: 'cad-default' }, kernel: 'replicad' } },
-      }));
-
-      await vi.waitFor(() => {
-        expect(fake.regenerate).toHaveBeenCalledTimes(1);
-      });
-
-      store.release('chat_unbound_gesture');
-    });
-
-    /*
-     * W10-4, I5. A gesture parked on an unbound owner lives in one in-memory
-     * field that dies with the document: it is in neither the transcript nor
-     * the composer, which is exactly what I5 forbids. The composer keeps the
-     * text until something takes the gesture — and the flush that admits it is
-     * what clears it, once.
-     */
-    it('keeps a send parked on an unbound owner in the composer until its flush admits it', async () => {
-      const store = createStore();
-      const session = store.acquire('chat_parked_draft');
-      const fake = harness.created.find((entry) => entry.id === 'chat_parked_draft')!;
-      const message = buildUserMessage({ text: 'parked message' });
-      session.draftActorRef.send({ type: 'setDraftText', text: 'parked message' });
-
-      await store.requestTurn('chat_parked_draft', { kind: 'send', message });
-
-      expect(session.draftActorRef.getSnapshot().context.draftText).toBe('parked message');
-
-      startTurnOwner(store, 'resource_parked_draft');
-      publishAdmission('chat_parked_draft', () => ({
-        kind: 'send',
-        message,
-        body: { agent: { profile: 'cad', execution: { kind: 'tau', model: 'cad-default' }, kernel: 'replicad' } },
-      }));
-
-      await vi.waitFor(() => {
-        expect(fake.sendMessage).toHaveBeenCalledTimes(1);
-      });
-      await vi.waitFor(() => {
-        expect(session.draftActorRef.getSnapshot().context.draftText).toBe('');
-      });
-
-      store.release('chat_parked_draft');
-    });
-
-    /*
-     * The other half of that contract: the composer is cleared for the gesture
-     * that took it, never over what the person has written since. A parked send
-     * can sit there for as long as the chat has no owner, which is long enough
-     * to start typing the next message.
-     */
-    it('does not clear a composer the person has typed into since the parked send was made', async () => {
-      const store = createStore();
-      const session = store.acquire('chat_parked_retyped');
-      const fake = harness.created.find((entry) => entry.id === 'chat_parked_retyped')!;
-      const message = buildUserMessage({ text: 'parked message' });
-      session.draftActorRef.send({ type: 'setDraftText', text: 'parked message' });
-
-      await store.requestTurn('chat_parked_retyped', { kind: 'send', message });
-      session.draftActorRef.send({ type: 'setDraftText', text: 'and now something else' });
-
-      startTurnOwner(store, 'resource_parked_retyped');
-      publishAdmission('chat_parked_retyped', () => ({
-        kind: 'send',
-        message,
-        body: { agent: { profile: 'cad', execution: { kind: 'tau', model: 'cad-default' }, kernel: 'replicad' } },
-      }));
-
-      await vi.waitFor(() => {
-        expect(fake.sendMessage).toHaveBeenCalledTimes(1);
-      });
-      expect(session.draftActorRef.getSnapshot().context.draftText).toBe('and now something else');
-
-      store.release('chat_parked_retyped');
-    });
-
-    /*
-     * W10-C / the browser-rows lane's read of `#settleComposer`. Two gestures
-     * over one admission: the second displaces the first, and *both*
-     * `requestTurn` calls answer the composer when the machine finally leaves
-     * `admitting`. Whichever order they answer in, the send that never reached
-     * the transcript is what the composer holds (I5, E2).
-     */
     it('returns a displaced send to the composer whichever requestTurn call observes it', async () => {
       const store = createStore();
-      const session = store.acquire('chat_two_sends');
+      const session = store.acquire('chat_two_sends', 'resource_two_sends');
       startTurnOwner(store, 'resource_two_sends');
       const admitted = Promise.withResolvers<void>();
       const second = buildUserMessage({ text: 'second message' });
@@ -3386,7 +1964,7 @@ describe('ChatSessionStore', () => {
      * send's — and its own `requestTurn` resolves last, holding the clear. */
     it('returns a send displaced by an edit to the composer', async () => {
       const store = createStore();
-      const session = store.acquire('chat_send_then_edit');
+      const session = store.acquire('chat_send_then_edit', 'resource_send_then_edit');
       startTurnOwner(store, 'resource_send_then_edit');
       const admitted = Promise.withResolvers<void>();
       publishChatTurnAdmission('chat_send_then_edit', async (gesture) => {
@@ -3421,44 +1999,8 @@ describe('ChatSessionStore', () => {
       store.release('chat_send_then_edit');
     });
 
-    /*
-     * W10-1: the two halves of `#bindSessionOwner` meeting. The flush puts the
-     * parked gesture into `run.queued.admitting`; the discovery below it sent
-     * `adoptRun` for the chat's still-live run — and the root-level handler
-     * honoured it mid-admission, stopping the admission actor and taking the
-     * person's message with it, composer already cleared.
-     */
-    it('admits a gesture parked on an unbound owner while a run of that chat is still live', async () => {
-      const store = createStore();
-      store.acquire('chat_parked_live_run');
-      const fake = harness.created.find((entry) => entry.id === 'chat_parked_live_run')!;
-      const live = vi.spyOn(transportModule, 'getBrowserAgentHostRun').mockReturnValue({
-        runId: 'run_live_elsewhere',
-        state: 'running',
-        eventCount: 2,
-      });
-
-      try {
-        await store.requestTurn('chat_parked_live_run', { kind: 'regenerate' });
-        expect(fake.regenerate).not.toHaveBeenCalled();
-
-        startTurnOwner(store, 'resource_parked_live_run');
-        publishAdmission('chat_parked_live_run', () => ({
-          kind: 'regenerate',
-          body: { agent: { profile: 'cad', execution: { kind: 'tau', model: 'cad-default' }, kernel: 'replicad' } },
-        }));
-
-        await vi.waitFor(() => {
-          expect(fake.regenerate).toHaveBeenCalledTimes(1);
-        });
-      } finally {
-        live.mockRestore();
-        store.release('chat_parked_live_run');
-      }
-    });
-
-    it('restores a plain pending user tail to draft on hydration without regenerating', async () => {
-      const store = new ChatSessionStore();
+    it('does not rewrite or replay a log-derived pending tail without a seed intent', async () => {
+      const store = new ChatSessionStore({ chatSession });
       const deps = createStubDeps();
       store.setDependencies(deps);
 
@@ -3468,901 +2010,29 @@ describe('ChatSessionStore', () => {
         parts: [{ type: 'text', text: 'do not auto run' }],
         metadata: { createdAt: 1, status: 'pending' },
       };
-      const orphanChat: ChatEntity = {
+      const logDerivedChat: ChatEntity = {
         id: 'chat_orphan_pending',
         resourceId: 'resource_orphan',
-        name: 'Orphan pending',
+        name: 'Log-derived pending',
         messages: [pendingUserMessage],
         createdAt: 0,
         updatedAt: 0,
       };
-      const restoredChat: ChatEntity = { ...orphanChat, messages: [] };
-      deps.getChat.mockResolvedValue(orphanChat);
-      deps.commitCancelledDraftRestore.mockResolvedValue(restoredChat);
+      deps.getChat.mockResolvedValue(logDerivedChat);
 
-      const session = store.acquire('chat_orphan_pending');
-
-      // The restored draft reaches its record before the transcript is truncated (W7), which takes more than two ticks.
+      const session = store.acquire('chat_orphan_pending', 'resource_orphan');
       await vi.waitFor(() => {
-        expect(deps.commitCancelledDraftRestore).toHaveBeenCalledOnce();
+        expect(session.chat.messages).toContainEqual(pendingUserMessage);
       });
 
       const fake = harness.created.find((entry) => entry.id === 'chat_orphan_pending')!;
       expect(fake.regenerate).not.toHaveBeenCalled();
       expect(deps.consumeChatStartupRequest).not.toHaveBeenCalled();
-      const [restoreChatId, restoreInput] = deps.commitCancelledDraftRestore.mock.calls[0]!;
-      expect(restoreChatId).toBe('chat_orphan_pending');
-      expect(restoreInput.messages).toEqual([]);
-      // W8: the restored draft goes to the composer (asserted below), never the chat row.
-      expect(restoreInput).not.toHaveProperty('draft');
-      expect(restoreInput.clearStartupRequestId).toBeUndefined();
-      expect(fake.messages).toEqual([]);
-      expect(session.draftActorRef.getSnapshot().context.draftText).toBe('do not auto run');
+      expect(deps.commitCancelledDraftRestore).not.toHaveBeenCalled();
+      expect(fake.messages).toContainEqual(pendingUserMessage);
+      expect(session.draftActorRef.getSnapshot().context.draftText).toBe('');
 
       store.release('chat_orphan_pending');
-    });
-
-    it('trims an empty assistant placeholder when healing an orphan pending tail', async () => {
-      const store = new ChatSessionStore();
-      const deps = createStubDeps();
-      store.setDependencies(deps);
-
-      const priorAssistant: MyUIMessage = {
-        id: 'msg_prior_assistant',
-        role: 'assistant',
-        parts: [{ type: 'text', text: 'prior' }],
-        metadata: { createdAt: 0, status: 'success' },
-      };
-      const pendingUserMessage: MyUIMessage = {
-        id: 'msg_orphan_pending_with_placeholder',
-        role: 'user',
-        parts: [{ type: 'text', text: 'recover me' }],
-        metadata: { createdAt: 1, status: 'pending' },
-      };
-      const emptyAssistant: MyUIMessage = {
-        id: 'msg_empty_assistant',
-        role: 'assistant',
-        parts: [],
-        metadata: { createdAt: 2, status: 'pending' },
-      };
-      const orphanChat: ChatEntity = {
-        id: 'chat_orphan_placeholder',
-        resourceId: 'resource_orphan',
-        name: 'Orphan placeholder',
-        messages: [priorAssistant, pendingUserMessage, emptyAssistant],
-        createdAt: 0,
-        updatedAt: 0,
-      };
-      deps.getChat.mockResolvedValue(orphanChat);
-
-      const session = store.acquire('chat_orphan_placeholder');
-
-      // The restored draft reaches its record before the transcript is truncated (W7), which takes more than two ticks.
-      await vi.waitFor(() => {
-        expect(deps.commitCancelledDraftRestore).toHaveBeenCalledOnce();
-      });
-
-      const fake = harness.created.find((entry) => entry.id === 'chat_orphan_placeholder')!;
-      expect(fake.regenerate).not.toHaveBeenCalled();
-      const [restoreChatId, restoreInput] = deps.commitCancelledDraftRestore.mock.calls[0]!;
-      expect(restoreChatId).toBe('chat_orphan_placeholder');
-      expect(restoreInput.messages).toEqual([priorAssistant]);
-      // W8: the restored draft goes to the composer (asserted below), never the chat row.
-      expect(restoreInput).not.toHaveProperty('draft');
-      expect(restoreInput.clearStartupRequestId).toBeUndefined();
-      expect(fake.messages).toEqual([priorAssistant]);
-      expect(session.draftActorRef.getSnapshot().context.draftText).toBe('recover me');
-
-      store.release('chat_orphan_placeholder');
-    });
-
-    /**
-     * One durable chat row, as `getChat` / `consumeChatStartupRequest` /
-     * `commitCancelledDraftRestore` see it. Two loaders over the same rows are
-     * the remount; the stub set must therefore hold state, or the second loader
-     * would consume a request the first one already took.
-     */
-    const seededRow = (chatId: string, overrides: Partial<ChatEntity> = {}) => {
-      const seedMessage: MyUIMessage = {
-        id: `${chatId}_msg_seed`,
-        role: 'user',
-        parts: [{ type: 'text', text: 'Create a cube with a cylindrical cutout.' }],
-        metadata: { createdAt: 1_700_000_000_000, status: 'pending' },
-      };
-      const startupRequest = {
-        id: `${chatId}_req`,
-        kind: 'regenerate-tail',
-        messageId: seedMessage.id,
-        source: 'homepage-initial-message',
-        createdAt: 1_700_000_000_000,
-      } as const;
-      let row: ChatEntity = {
-        ...chatRow(chatId, 'project_seed', { name: 'Seeded chat', messages: [seedMessage], startupRequest }),
-        ...overrides,
-      };
-      const deps = createStubDeps();
-      deps.getChat.mockImplementation(async () => row);
-      deps.consumeChatStartupRequest.mockImplementation(async (_chatId, requestId) => {
-        if (row.startupRequest?.id !== requestId) {
-          return undefined;
-        }
-        row = { ...row, startupRequest: undefined };
-        return row;
-      });
-      deps.commitCancelledDraftRestore.mockImplementation(async (_chatId, input) => {
-        row = { ...row, messages: input.messages, startupRequest: undefined };
-        return row;
-      });
-      const store = new ChatSessionStore();
-      store.setDependencies(deps);
-      return { deps, seedMessage, startupRequest, store };
-    };
-
-    /*
-     * Home → project navigation changes the provider list that `Compose` nests
-     * the shell in, so React remounts `AppSidebar` and with it the row that is
-     * the seeded chat's only holder. The session used to be disposed inside the
-     * wait for a body factory, its replacement found the request already
-     * consumed, and the prompt came back as a draft with no banner.
-     */
-    it('should dispatch the seeded first turn when its only view is released and reacquired before the route publishes its admission', async () => {
-      const chatId = 'chat_seed_remount';
-      const { deps, startupRequest, store } = seededRow(chatId);
-
-      startTurnOwner(store, 'project_seed');
-      const first = store.acquire(chatId);
-      await vi.waitFor(() => {
-        expect(deps.consumeChatStartupRequest).toHaveBeenCalledWith(chatId, startupRequest.id);
-      });
-
-      store.release(chatId);
-      const second = store.acquire(chatId);
-      expect(second).toBe(first);
-
-      publishAdmission(chatId, () => ({ kind: 'regenerate', body: testRunBody }));
-      const fake = harness.created.findLast((entry) => entry.id === chatId)!;
-      await vi.waitFor(() => {
-        expect(fake.regenerate).toHaveBeenCalledTimes(1);
-      });
-      expect(deps.commitCancelledDraftRestore).not.toHaveBeenCalled();
-
-      store.release(chatId);
-    });
-
-    /*
-     * Another loader already took this request, so the consume answers with
-     * nothing to dispatch. The hold was taken before the await either way, and
-     * only this branch gives it back.
-     */
-    it('should release the hold when the startup request is already gone', async () => {
-      const chatId = 'chat_seed_consumed_elsewhere';
-      const { deps, startupRequest, store } = seededRow(chatId);
-      deps.consumeChatStartupRequest.mockResolvedValue(undefined);
-
-      store.acquire(chatId);
-      await vi.waitFor(() => {
-        expect(deps.consumeChatStartupRequest).toHaveBeenCalledWith(chatId, startupRequest.id);
-      });
-      await settle();
-      store.release(chatId);
-
-      expect(store.get(chatId)).toBeUndefined();
-    });
-
-    /*
-     * The consume is a filesystem patch and can reject. Nothing else releases
-     * the hold that guards it — the request was never started, so the lifecycle
-     * release never runs — and the session stayed in the store forever: no
-     * draft flush, no `chatClosed`, and re-acquiring returned the zombie.
-     */
-    it('should release the hold when the startup-request consume rejects', async () => {
-      const chatId = 'chat_seed_consume_rejects';
-      const { deps, store } = seededRow(chatId);
-      deps.consumeChatStartupRequest.mockRejectedValue(new Error('workspace patch failed'));
-
-      const session = store.acquire(chatId);
-      await vi.waitFor(() => {
-        expect(session.persistenceActorRef.getSnapshot().context.loadError?.message).toContain(
-          'workspace patch failed',
-        );
-      });
-      store.release(chatId);
-
-      expect(store.get(chatId)).toBeUndefined();
-    });
-
-    /* The turn's owner is the chat's session actor (C3): a seeded dispatch that
-     * cannot be admitted fails *there*, and the banner the person sees is the
-     * one the admission itself raises. What the store owes is that nothing is
-     * left dispatched — no request went out, and no hold outlives the failure. */
-    it('should surface a failure when a seeded dispatch cannot be admitted', async () => {
-      const chatId = 'chat_seed_compose_failure';
-      const { deps, startupRequest, store } = seededRow(chatId);
-      startTurnOwner(store, 'project_seed');
-      const session = store.acquire(chatId);
-      await vi.waitFor(() => {
-        expect(deps.consumeChatStartupRequest).toHaveBeenCalledWith(chatId, startupRequest.id);
-      });
-
-      publishAdmission(chatId, () => {
-        throw new Error('durable workspace admission failed');
-      });
-
-      await vi.waitFor(() => {
-        const snapshot = session.stateActorRef!.getSnapshot();
-        expect(snapshot.matches({ run: 'failed' })).toBe(true);
-        expect(snapshot.context.failureReason).toContain('durable workspace admission failed');
-      });
-      expect(session.persistenceActorRef.getSnapshot().matches({ requestLifecycle: 'idle' })).toBe(true);
-
-      store.release(chatId);
-    });
-
-    /*
-     * A reload between project creation and dispatch: the seed message lives
-     * only in the chat store's in-memory hold, so the row reads `messages: []`.
-     * Consuming the request there drops the prompt with no draft restore.
-     */
-    it('should keep the startup request when the seed message is not loaded yet', async () => {
-      const chatId = 'chat_seed_unloaded';
-      const { deps, store } = seededRow(chatId, { messages: [] });
-
-      store.acquire(chatId);
-      await vi.waitFor(() => {
-        expect(deps.getChat).toHaveBeenCalledWith(chatId);
-      });
-      await settle();
-
-      expect(deps.consumeChatStartupRequest).not.toHaveBeenCalled();
-      const row = await deps.getChat(chatId);
-      expect(row?.startupRequest).toBeDefined();
-
-      store.release(chatId);
-    });
-
-    /*
-     * The shell remount lands again *after* the seeded turn, now that its hold
-     * outlives the dispatch and `#scheduleRunReleaseIfTerminal` gives it back.
-     * The replacement session starts with an empty `Chat` and reads its history
-     * asynchronously — on desktop `chat.json` carries no `messages` (P26), so
-     * that read derives the transcript from the chat's log across the
-     * filesystem worker. A submit landing inside that read made the loader's
-     * "already accumulating" guard drop the whole durable history, permanently:
-     * nothing reads the row a second time, and a browser-placed chat has no
-     * reattach to rebuild it from the log either.
-     */
-    it('should keep the seeded first turn in the transcript when the second turn is submitted after its hold was released', async () => {
-      const chatId = 'chat_seed_second_turn';
-      const { deps, seedMessage, startupRequest, store } = seededRow(chatId);
-
-      startTurnOwner(store, 'project_seed');
-      store.acquire(chatId);
-      await vi.waitFor(() => {
-        expect(deps.consumeChatStartupRequest).toHaveBeenCalledWith(chatId, startupRequest.id);
-      });
-      publishAdmission(chatId, () => ({ kind: 'regenerate', body: testRunBody }));
-      const seededChat = harness.created.findLast((entry) => entry.id === chatId)!;
-      await vi.waitFor(() => {
-        expect(seededChat.regenerate).toHaveBeenCalledTimes(1);
-      });
-
-      const answeredSeed: MyUIMessage = { ...seedMessage, metadata: { createdAt: 1, status: 'success' } };
-      const seededReply: MyUIMessage = {
-        id: 'req_seed_run',
-        role: 'assistant',
-        parts: [{ type: 'text', text: 'Browser host completed the workspace change.' }],
-        metadata: { createdAt: 2, status: 'success' },
-      };
-      seededChat.messages = [answeredSeed, seededReply];
-      seededChat.finish();
-      await settle();
-
-      // The seeded turn's hold is back, so the shell's remount disposes the session.
-      store.release(chatId);
-      expect(store.get(chatId)).toBeUndefined();
-
-      const loaded = Promise.withResolvers<ChatEntity>();
-      deps.getChat.mockImplementation(async () => loaded.promise);
-      const replacement = store.acquire(chatId);
-      const secondChat = harness.created.findLast((entry) => entry.id === chatId)!;
-      expect(secondChat).not.toBe(seededChat);
-
-      // The person submits the attachment turn before that read answers.
-      const attachmentTurn: MyUIMessage = {
-        id: 'msg_attachment_turn',
-        role: 'user',
-        parts: [{ type: 'text', text: 'Read the attached specification.' }],
-        metadata: { createdAt: 3, status: 'pending' },
-      };
-      replacement.persistenceActorRef.send({
-        type: 'startRequest',
-        request: { kind: 'send', message: attachmentTurn, body: testRunBody },
-      });
-      await vi.waitFor(() => {
-        expect(secondChat.sendMessage).toHaveBeenCalledTimes(1);
-      });
-      // What the AI SDK does inside `sendMessage`.
-      secondChat.messages = [...secondChat.messages, attachmentTurn];
-
-      loaded.resolve(chatRow(chatId, 'project_seed', { name: 'Seeded chat', messages: [answeredSeed, seededReply] }));
-      await settle();
-
-      expect(secondChat.messages.map((message) => message.id)).toEqual([
-        answeredSeed.id,
-        seededReply.id,
-        attachmentTurn.id,
-      ]);
-      // The in-flight turn is a live request, never a cancelled draft to heal.
-      expect(deps.commitCancelledDraftRestore).not.toHaveBeenCalled();
-
-      store.release(chatId);
-    });
-  });
-
-  // ===========================================================================
-  // R4 + R1: onFinish forwards isDisconnect, dispatchRequest({kind:'continue'})
-  // calls makeRequest({trigger:'submit-message'}) without slicing chat.messages
-  // ===========================================================================
-  describe('resumable streams (R4 plumbing + R1 continue dispatch)', () => {
-    it('dispatchRequest { kind: "continue" } calls chat.resumeStream() and does NOT mutate chat.messages', async () => {
-      const store = createStore();
-      const session = store.acquire('chat_resume');
-      const fake = harness.created.find((entry) => entry.id === 'chat_resume')!;
-      const before: MyUIMessage[] = [
-        // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- minimal MyUIMessage shape for test
-        {
-          id: 'msg_user_1',
-          role: 'user',
-          parts: [{ type: 'text', text: 'hi' }],
-          metadata: { createdAt: 0 },
-        },
-      ];
-      fake.messages = before;
-      const beforeRef = fake.messages;
-
-      session.persistenceActorRef.send({
-        type: 'startRequest',
-        request: { kind: 'continue', body: testRunBody },
-      });
-
-      // The dispatchRequest listener defers AI SDK calls onto a microtask
-      // so they never run nested inside an outer makeRequest's finally
-      // (see docs/research/chat-followup-message-swallow.md).
-      await Promise.resolve();
-
-      expect(fake.resumeStream).toHaveBeenCalledTimes(1);
-      expect(fake.resumeStream).toHaveBeenCalledWith({ body: testRunBody });
-      // Identity check: chat.messages reference unchanged.
-      expect(fake.messages).toBe(beforeRef);
-      expect(fake.regenerate).not.toHaveBeenCalled();
-      expect(fake.sendMessage).not.toHaveBeenCalled();
-    });
-
-    /**
-     * Regression: when the user clicks the "Try again" button on the
-     * `ChatErrorServiceUnavailable` banner (or the persistence machine's
-     * transparent auto-retry fires), the resumed POST must still carry the
-     * top-level `agent` block required by `chatTurnRequestSchema`. Before the
-     * fix the `continue` dispatch resumed without forwarding a body, the AI SDK
-     * transport produced `{ id, messages, trigger }`, and the API rejected it
-     * with `agent: expected object, received undefined`.
-     *
-     * Since C3 the chat's admission composes the body for every turn it opens,
-     * so a bodyless `continue` is only ever a *resume of the run already
-     * running* — it reuses that run's admitted body rather than composing a
-     * second one.
-     */
-    it('reuses the running turn\u2019s body on a bodyless `continue` so the resumed POST carries the agent block', async () => {
-      const store = createStore();
-      const session = store.acquire('chat_resume_agent');
-      const fake = harness.created.find((entry) => entry.id === 'chat_resume_agent')!;
-
-      const admitted = store.startRun('chat_resume_agent', {
-        agent: { profile: 'cad', execution: { kind: 'tau', model: 'cad-default' }, kernel: 'replicad' },
-      });
-
-      session.persistenceActorRef.send({ type: 'startRequest', request: { kind: 'continue' } });
-
-      await vi.waitFor(() => {
-        expect(fake.resumeStream).toHaveBeenCalledTimes(1);
-      });
-      expect(fake.resumeStream).toHaveBeenCalledWith({ body: admitted });
-      expect(admitted['admission']).toEqual({
-        version: 1,
-        idempotencyKey: expect.stringMatching(/^req_/u) as unknown,
-      });
-    });
-  });
-
-  // ===========================================================================
-  // Edit-resubmit dispatch
-  //
-  // The API reads agent config (model/kernel/mode/toolChoice/testingEnabled)
-  // from the top-level `agent` block on the wire body (built inside the
-  // chat-client from `useCadAgentConfig`), NOT from per-message metadata.
-  // `buildEditedMessage` therefore only resets the user-facing fields
-  // (text/image parts, createdAt, status) and forwards `request.body` to
-  // `chat.regenerate` so model selection travels via `body.agent`.
-  // ===========================================================================
-  describe('edit-resubmit dispatch', () => {
-    it('rebuilds the edited message with refreshed createdAt/status and forwards `request.body` to chat.regenerate', async () => {
-      const store = createStore();
-      const session = store.acquire('chat_edit_kernel');
-      const fake = harness.created.find((entry) => entry.id === 'chat_edit_kernel')!;
-
-      const originalMessage: MyUIMessage = {
-        id: 'msg_original',
-        role: 'user',
-        parts: [{ type: 'text', text: 'original prompt' }],
-        metadata: { createdAt: 100, status: 'error' },
-      };
-      fake.messages = [originalMessage];
-
-      const overrideBody = {
-        agent: { profile: 'cad', execution: { kind: 'tau', model: 'new-model' }, kernel: 'replicad' },
-      };
-      session.persistenceActorRef.send({
-        type: 'startRequest',
-        request: {
-          kind: 'edit',
-          messageId: 'msg_original',
-          content: 'edited prompt',
-          body: overrideBody,
-        },
-      });
-
-      await Promise.resolve();
-
-      expect(fake.regenerate).toHaveBeenCalledTimes(1);
-      expect(fake.regenerate).toHaveBeenCalledWith({
-        body: {
-          ...overrideBody,
-          admission: { version: 1, idempotencyKey: expect.stringMatching(/^req_/u) as unknown },
-        },
-      });
-      const rebuilt = fake.messages.at(-1)!;
-      expect(rebuilt.id).toBe('msg_original');
-      expect(rebuilt.role).toBe('user');
-      const text = rebuilt.parts.find((part): part is { type: 'text'; text: string } => part.type === 'text');
-      expect(text?.text).toBe('edited prompt');
-      expect(rebuilt.metadata?.status).toBe('pending');
-      expect(typeof rebuilt.metadata?.createdAt).toBe('number');
-    });
-
-    /* T3-D5: the admission refuses an edit whose message has gone, so this
-     * dispatch is only reachable in the microtask between `turnAdmitted` and
-     * the dispatch itself. It used to `return` silently — no request, no
-     * banner, `requestLifecycle` stuck in `invoking` and the turn's lease held
-     * until reload. Every dispatch that cannot run ends its request. */
-    it('ends the request when the edited message vanished before the dispatch ran', async () => {
-      const store = createStore();
-      const session = store.acquire('chat_edit_vanished');
-      const fake = harness.created.find((entry) => entry.id === 'chat_edit_vanished')!;
-      fake.messages = [];
-
-      session.persistenceActorRef.send({
-        type: 'startRequest',
-        request: {
-          kind: 'edit',
-          messageId: 'msg_gone',
-          content: 'edited prompt',
-          body: { agent: { profile: 'cad', execution: { kind: 'tau', model: 'm' }, kernel: 'replicad' } },
-        },
-      });
-
-      await vi.waitFor(() => {
-        expect(session.persistenceActorRef.getSnapshot().matches({ requestLifecycle: 'idle' })).toBe(true);
-      });
-      expect(fake.regenerate).not.toHaveBeenCalled();
-    });
-  });
-
-  // ===========================================================================
-  // Request body fallback
-  //
-  // Every turn is opened by the chat's admission, which composes the body and
-  // mints the run id with it (C3/V9). The only bodyless dispatch left is the
-  // persistence machine's own transparent auto-retry: a second *request*
-  // inside the turn already running, which must reuse that run's admitted body
-  // rather than mint a second admission for the same run.
-  // ===========================================================================
-  describe('request body fallback (R10/t17)', () => {
-    it('reuses the running turn\u2019s admitted body when a dispatch supplies none', async () => {
-      const store = createStore();
-      const session = store.acquire('chat_hydration_regen');
-      const fake = harness.created.find((entry) => entry.id === 'chat_hydration_regen')!;
-
-      const admitted = store.startRun('chat_hydration_regen', {
-        agent: { profile: 'cad', execution: { kind: 'tau', model: 'cad-default' }, kernel: 'replicad' },
-      });
-
-      session.persistenceActorRef.send({ type: 'startRequest', request: { kind: 'regenerate' } });
-
-      await vi.waitFor(() => {
-        expect(fake.regenerate).toHaveBeenCalledTimes(1);
-      });
-      expect(fake.regenerate).toHaveBeenCalledWith({ body: admitted });
-    });
-  });
-
-  // ===========================================================================
-  // Preempt-clobber defense: the dispatchRequest listener must not call into
-  // AI SDK's `Chat.sendMessage` / `Chat.regenerate` / `Chat.makeRequest`
-  // synchronously inside the persistence machine's emit transition.
-  //
-  // Why: `chat.onFinish` synchronously sends `requestFinished` to the
-  // machine from inside AI SDK's `Chat.makeRequest` finally block. When the
-  // machine resumes a queued `pendingRequest` from `stopping → invoking`,
-  // it emits `applyResumedRequest` followed by `dispatchRequest` in the
-  // same transition. If `dispatchRequest`'s listener calls `chat.sendMessage`
-  // synchronously, the new `makeRequest`'s `this.activeResponse = ...`
-  // assignment lands BEFORE the outer makeRequest's finally runs its trailing
-  // `this.activeResponse = void 0`. The outer finally clobbers the new
-  // activeResponse, and when the new makeRequest's own finally later accesses
-  // `this.activeResponse.state.message` (no optional chaining in ai@6.0.175)
-  // it throws a TypeError that the surrounding try/catch swallows --
-  // `onFinish` for the new request never fires, the machine never receives
-  // `requestFinished`, and follow-up sends are silently dropped.
-  //
-  // See docs/research/chat-followup-message-swallow.md for the full trace.
-  // ===========================================================================
-  describe('preempt-clobber defense', () => {
-    it('does NOT call chat.sendMessage synchronously inside startRequest dispatch (deferred onto a microtask)', async () => {
-      const store = createStore();
-      const session = store.acquire('chat_clobber_send');
-      const fake = harness.created.find((entry) => entry.id === 'chat_clobber_send')!;
-
-      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- minimal MyUIMessage shape for test
-      const message: MyUIMessage = {
-        id: 'msg_user_B',
-        role: 'user',
-        parts: [{ type: 'text', text: 'follow-up' }],
-        metadata: { createdAt: 0, status: 'pending' },
-      } as MyUIMessage;
-
-      session.persistenceActorRef.send({
-        type: 'startRequest',
-        request: { kind: 'send', message, body: testRunBody },
-      });
-
-      // Synchronous assertion: the listener has NOT touched the AI SDK yet.
-      // This is the core fix -- a synchronous call would re-enter
-      // `Chat.makeRequest` inside an outer makeRequest's finally and trigger
-      // the activeResponse clobber.
-      expect(fake.sendMessage).not.toHaveBeenCalled();
-
-      await Promise.resolve();
-
-      expect(fake.sendMessage).toHaveBeenCalledTimes(1);
-      expect(fake.sendMessage).toHaveBeenCalledWith(message, { body: testRunBody });
-    });
-
-    it('does NOT call chat.regenerate synchronously inside startRequest dispatch', async () => {
-      const store = createStore();
-      const session = store.acquire('chat_clobber_regen');
-      const fake = harness.created.find((entry) => entry.id === 'chat_clobber_regen')!;
-
-      session.persistenceActorRef.send({
-        type: 'startRequest',
-        request: { kind: 'regenerate', body: testRunBody },
-      });
-
-      expect(fake.regenerate).not.toHaveBeenCalled();
-
-      await Promise.resolve();
-
-      expect(fake.regenerate).toHaveBeenCalledTimes(1);
-    });
-
-    it('does NOT call chat.resumeStream synchronously inside continue dispatch', async () => {
-      const store = createStore();
-      const session = store.acquire('chat_clobber_continue');
-      const fake = harness.created.find((entry) => entry.id === 'chat_clobber_continue')!;
-
-      session.persistenceActorRef.send({
-        type: 'startRequest',
-        request: { kind: 'continue', body: testRunBody },
-      });
-
-      expect(fake.resumeStream).not.toHaveBeenCalled();
-
-      await Promise.resolve();
-
-      expect(fake.resumeStream).toHaveBeenCalledTimes(1);
-      expect(fake.resumeStream).toHaveBeenCalledWith({ body: testRunBody });
-    });
-
-    it('end-to-end preempt path: applyResumedRequest mutates chat.messages SYNCHRONOUSLY, dispatchRequest defers chat.sendMessage onto the next microtask', async () => {
-      // This is the critical ordering. `applyResumedRequest` must mutate
-      // `chat.messages = sanitized` synchronously inside the transition so
-      // that when the deferred `dispatchRequest` listener fires
-      // `chat.sendMessage(B)` on the next microtask, the AI SDK sees the
-      // sanitized message tail (with the partial assistant turn finalised)
-      // rather than the in-flight pre-preempt array.
-      const store = createStore();
-      const session = store.acquire('chat_preempt_ordering');
-      const fake = harness.created.find((entry) => entry.id === 'chat_preempt_ordering')!;
-
-      const initialMessages: MyUIMessage[] = [
-        // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- minimal MyUIMessage shape for test
-        {
-          id: 'msg_user_A',
-          role: 'user',
-          parts: [{ type: 'text', text: 'first turn' }],
-          metadata: { createdAt: 0 },
-        },
-      ];
-      fake.messages = initialMessages;
-
-      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- minimal MyUIMessage shape for test
-      const pendingMessage: MyUIMessage = {
-        id: 'msg_user_B',
-        role: 'user',
-        parts: [{ type: 'text', text: 'preempting follow-up' }],
-        metadata: { createdAt: 1, status: 'pending' },
-      } as MyUIMessage;
-
-      // Kick off A (idle -> invoking).
-      session.persistenceActorRef.send({
-        type: 'startRequest',
-        request: { kind: 'send', message: initialMessages[0]!, body: testRunBody },
-      });
-      // Drain the microtask so the listener fires for A.
-      await Promise.resolve();
-      fake.sendMessage.mockClear();
-
-      // Preempt with B (invoking -> stopping, pendingRequest = B-send).
-      session.persistenceActorRef.send({
-        type: 'startRequest',
-        request: { kind: 'send', message: pendingMessage, body: testRunBody },
-      });
-      expect(session.persistenceActorRef.getSnapshot().matches({ requestLifecycle: 'stopping' })).toBe(true);
-
-      // Simulate AI SDK's onFinish wiring: AI SDK aborts A, then calls onFinish
-      // with the current messages. This is the synchronous re-entry we are
-      // defending against.
-      session.persistenceActorRef.send({
-        type: 'requestFinished',
-        messages: initialMessages,
-        isAbort: true,
-        isError: false,
-        isDisconnect: false,
-      });
-
-      // Synchronous post-conditions:
-      // 1. Machine has transitioned stopping -> invoking (preempt branch).
-      expect(session.persistenceActorRef.getSnapshot().matches({ requestLifecycle: 'invoking' })).toBe(true);
-      // 2. applyResumedRequest fired synchronously and mutated chat.messages.
-      //    `finalizeInterruptedToolParts` returns the same reference when no
-      //    sanitisation is needed, so we observe identity preservation.
-      expect(fake.messages).toBe(initialMessages);
-      // 3. dispatchRequest's chat.sendMessage call was deferred (not yet seen).
-      expect(fake.sendMessage).not.toHaveBeenCalled();
-
-      // Drain the microtask: chat.sendMessage(B) now fires.
-      await Promise.resolve();
-      expect(fake.sendMessage).toHaveBeenCalledTimes(1);
-      expect(fake.sendMessage).toHaveBeenCalledWith(pendingMessage, { body: testRunBody });
-    });
-
-    it('should finalize static and dynamic in-progress tool parts before dispatching a preempting follow-up', async () => {
-      const store = createStore();
-      const session = store.acquire('chat_preempt_tools');
-      const fake = harness.created.find((entry) => entry.id === 'chat_preempt_tools')!;
-
-      const interruptedMessages: MyUIMessage[] = [
-        {
-          id: 'msg_user_A',
-          role: 'user',
-          parts: [{ type: 'text', text: 'first turn' }],
-          metadata: { createdAt: 0 },
-        },
-        {
-          id: 'msg_assistant_A',
-          role: 'assistant',
-          parts: [
-            {
-              type: 'tool-edit_file',
-              toolCallId: 'tc_edit',
-              state: 'input-available',
-              input: { targetFile: 'main.scad', codeEdit: 'cube([1, 1, 1]);' },
-            },
-            {
-              type: 'dynamic-tool',
-              toolName: 'provider_native_search',
-              toolCallId: 'tc_dynamic',
-              state: 'input-streaming',
-              input: ['partial', { nested: true }],
-            },
-          ],
-          metadata: { createdAt: 1 },
-        },
-      ];
-      fake.messages = interruptedMessages;
-
-      const pendingMessage: MyUIMessage = {
-        id: 'msg_user_B',
-        role: 'user',
-        parts: [{ type: 'text', text: 'preempting follow-up' }],
-        metadata: { createdAt: 2, status: 'pending' },
-      };
-
-      session.persistenceActorRef.send({
-        type: 'startRequest',
-        request: { kind: 'send', message: interruptedMessages[0]!, body: testRunBody },
-      });
-      await Promise.resolve();
-      fake.sendMessage.mockClear();
-
-      session.persistenceActorRef.send({
-        type: 'startRequest',
-        request: { kind: 'send', message: pendingMessage, body: testRunBody },
-      });
-      session.persistenceActorRef.send({
-        type: 'requestFinished',
-        messages: interruptedMessages,
-        isAbort: true,
-        isError: false,
-        isDisconnect: false,
-      });
-
-      expect(fake.messages).not.toBe(interruptedMessages);
-      const assistant = fake.messages.at(-1);
-      if (assistant?.role !== 'assistant') {
-        throw new Error('expected finalized assistant tail');
-      }
-      const [staticTool, dynamicTool] = assistant.parts;
-      expect(staticTool).toMatchObject({
-        type: 'tool-edit_file',
-        toolCallId: 'tc_edit',
-        state: 'output-error',
-      });
-      expect(dynamicTool).toMatchObject({
-        type: 'dynamic-tool',
-        toolName: 'provider_native_search',
-        toolCallId: 'tc_dynamic',
-        state: 'output-error',
-        input: ['partial', { nested: true }],
-      });
-      if (!staticTool || !('errorText' in staticTool) || typeof staticTool.errorText !== 'string') {
-        throw new Error('expected finalized static tool errorText');
-      }
-      if (!dynamicTool || !('errorText' in dynamicTool) || typeof dynamicTool.errorText !== 'string') {
-        throw new Error('expected finalized dynamic tool errorText');
-      }
-      expect(JSON.parse(staticTool.errorText) as Record<string, unknown>).toMatchObject({
-        errorCode: 'USER_INTERRUPTED',
-        toolName: 'edit_file',
-        toolCallId: 'tc_edit',
-      });
-      expect(JSON.parse(dynamicTool.errorText) as Record<string, unknown>).toMatchObject({
-        errorCode: 'USER_INTERRUPTED',
-        toolName: 'provider_native_search',
-        toolCallId: 'tc_dynamic',
-      });
-      expect(fake.sendMessage).not.toHaveBeenCalled();
-
-      await Promise.resolve();
-      expect(fake.sendMessage).toHaveBeenCalledTimes(1);
-      expect(fake.sendMessage).toHaveBeenCalledWith(pendingMessage, { body: testRunBody });
-    });
-  });
-
-  describe('tool cause attribution (TT3)', () => {
-    it('does not persist on disconnect retry; completion persists after streamResumed + messages', async () => {
-      vi.useFakeTimers();
-      try {
-        const chatId = 'chat_tt3_retry';
-        const store = new ChatSessionStore();
-        const deps = createStubDeps();
-        store.setDependencies(deps);
-
-        const session = store.acquire(chatId);
-        await Promise.resolve();
-        deps.patchChat.mockClear();
-
-        const fake = harness.created.at(-1)!;
-        fake.messages = [
-          {
-            id: 'm_as',
-            role: 'assistant',
-            metadata: { createdAt: 2 },
-            parts: [
-              {
-                type: 'tool-create_file',
-                toolCallId: 'tc_tt3',
-                state: 'input-streaming',
-                input: { targetFile: 'z.scad', content: '//' },
-              },
-            ],
-          },
-        ];
-
-        /* A turn always arrives with the body its admission composed; a
-         * bodyless dispatch is its own (separately pinned) failure and would
-         * persist an error over the tool state this row is about. */
-        session.persistenceActorRef.send({ type: 'startRequest', request: { kind: 'regenerate', body: testRunBody } });
-
-        session.persistenceActorRef.send({
-          type: 'requestFinished',
-          messages: [...fake.messages],
-          isAbort: false,
-          isError: true,
-          isDisconnect: true,
-        });
-
-        expect(session.persistenceActorRef.getSnapshot().matches({ requestLifecycle: 'retrying' })).toBe(true);
-        expect((fake.messages[0]!.parts[0] as { state: string }).state).toBe('input-streaming');
-        expect(deps.patchChat).not.toHaveBeenCalled();
-
-        const output = {
-          message: '',
-          diffStats: {
-            linesAdded: 1,
-            linesRemoved: 0,
-            originalContent: '',
-            modifiedContent: '// ok',
-          },
-        };
-
-        fake.messages = [
-          {
-            ...fake.messages[0]!,
-            parts: [
-              {
-                type: 'tool-create_file',
-                toolCallId: 'tc_tt3',
-                state: 'output-available',
-                input: { targetFile: 'z.scad', content: '//' },
-                output,
-              },
-            ],
-          },
-        ];
-
-        session.persistenceActorRef.send({ type: 'streamResumed' });
-        fake.emitMessagesChange();
-
-        await vi.advanceTimersByTimeAsync(100);
-        await vi.runOnlyPendingTimersAsync();
-
-        expect(deps.patchChat).toHaveBeenCalled();
-        const persisted = deps.patchChat.mock.calls.at(-1)![2] as MyUIMessage[];
-        const persistedPart = persisted.at(-1)?.parts[0] as { state: string; output: typeof output };
-        expect(persistedPart.state).toBe('output-available');
-        expect(persistedPart.output).toEqual(output);
-
-        store.release(chatId);
-      } finally {
-        vi.useRealTimers();
-      }
-    });
-  });
-
-  describe('streamResumed (R6)', () => {
-    it('T21: sends streamResumed to the persistence actor only on transition into streaming', () => {
-      const store = createStore();
-      const session = store.acquire('chat_r6');
-      const fake = harness.created.find((entry) => entry.id === 'chat_r6')!;
-      const sendSpy = spyOnSend(session.persistenceActorRef);
-
-      const countStreamResumed = (): number =>
-        sendSpy.mock.calls.filter((call) => call[0].type === 'streamResumed').length;
-
-      fake.status = 'submitted';
-      fake.emitStatusChange();
-      const afterSubmitted = countStreamResumed();
-
-      fake.status = 'streaming';
-      fake.emitStatusChange();
-      const afterStreaming = countStreamResumed();
-
-      expect(afterSubmitted).toBe(0);
-      expect(afterStreaming).toBe(1);
-
-      // Idempotent repeated "streaming" emissions without a status change.
-      fake.emitStatusChange();
-      expect(countStreamResumed()).toBe(1);
     });
   });
 });
@@ -4395,7 +2065,7 @@ describe('ChatSessionStore — composer records (W7)', () => {
   });
 
   const openStore = (client: MemoryClient, row: ChatEntity = chatRow(chatId, projectId)) => {
-    const store = new ChatSessionStore();
+    const store = new ChatSessionStore({ chatSession });
     const deps = createStubDeps(client);
     deps.getChat.mockImplementation(async (id) => (id === row.id ? row : undefined));
     store.setDependencies(deps);
@@ -4423,7 +2093,7 @@ describe('ChatSessionStore — composer records (W7)', () => {
   it('restores the draft, both attachments, tool choice and mode through a fresh store', async () => {
     const client = createMemoryClient();
     const first = openStore(client);
-    const session = first.store.acquire(chatId);
+    const session = first.store.acquire(chatId, projectId);
     await attachBoth(session);
     session.draftActorRef.send({ type: 'setDraftText', text: 'model the bracket per the spec' });
     session.draftActorRef.send({ type: 'setDraftToolChoice', toolChoice: 'none' });
@@ -4443,7 +2113,7 @@ describe('ChatSessionStore — composer records (W7)', () => {
     );
 
     const second = openStore(client);
-    const restored = second.store.acquire(chatId);
+    const restored = second.store.acquire(chatId, projectId);
     await vi.waitFor(() => {
       expect(restored.draftActorRef.getSnapshot().context).toMatchObject({
         draftText: 'model the bracket per the spec',
@@ -4458,27 +2128,38 @@ describe('ChatSessionStore — composer records (W7)', () => {
     second.store.release(chatId);
   });
 
-  it('keeps unread across a fresh store and clears it when the chat is viewed', async () => {
+  it('keeps a read receipt across a fresh store, and reads a legacy unread mark as a receipt that matches no row', async () => {
     vi.stubGlobal('document', { visibilityState: 'hidden', hasFocus: () => false });
     const client = createMemoryClient();
+    const log = [...runningRows(), lifecycleRow(2, 'completed')];
+    await client.writeFile(
+      unreadPath,
+      new TextEncoder().encode(JSON.stringify({ version: 1, unread: { [chatId]: true } })),
+    );
     const first = openStore(client);
-    first.store.acquire(chatId);
-    finishRun(harness.created.at(-1)!);
+    first.store.acquire(chatId, projectId);
+    /* Before this page reads the chat's log, the legacy mark answers (D9). */
     await vi.waitFor(() => {
-      expect(client.json(unreadPath)).toEqual({ version: 1, unread: { [chatId]: true } });
+      expect(first.store.isUnread(chatId)).toBe(true);
+    });
+    publishLogRows(first.store, chatId, log);
+    expect(first.store.isUnread(chatId)).toBe(true);
+
+    first.store.markViewed(chatId);
+    expect(first.store.isUnread(chatId)).toBe(false);
+    await vi.waitFor(() => {
+      expect(client.json(unreadPath)).toEqual({
+        version: 1,
+        readThrough: { [chatId]: { leaderEpoch: 'g1', sequence: 2 } },
+      });
     });
     first.store.release(chatId);
 
     const second = openStore(client);
-    second.store.acquire(chatId);
+    second.store.acquire(chatId, projectId);
+    publishLogRows(second.store, chatId, log);
     await vi.waitFor(() => {
-      expect(second.store.isUnread(chatId)).toBe(true);
-    });
-
-    second.store.markViewed(chatId);
-
-    await vi.waitFor(() => {
-      expect(client.json(unreadPath)).toEqual({ version: 1 });
+      expect(second.store.unreadRecordRef(projectId).getSnapshot().matches({ lifecycle: 'usable' })).toBe(true);
     });
     expect(second.store.isUnread(chatId)).toBe(false);
     second.store.release(chatId);
@@ -4495,21 +2176,50 @@ describe('ChatSessionStore — composer records (W7)', () => {
   it('should hand a displaced send back to the composer with its attachment still usable', async () => {
     const client = createMemoryClient();
     const { store } = openStore(client);
-    const session = store.acquire(chatId);
+    const session = store.acquire(chatId, projectId);
     startTurnOwner(store, projectId);
-    publishAdmission(chatId, () => ({ kind: 'regenerate', body: testRunBody }));
+    const runId = 'req_attachment_displacement';
+    const command: HostCommand = {
+      type: 'start',
+      commandId: runId,
+      payload: {
+        chatId,
+        runId,
+        message: { id: 'msg_attachment_displacement', role: 'user', content: 'first message' },
+        trigger: 'submit',
+      },
+    };
+    const hostCommand = vi.fn(
+      async (): Promise<CommandAnswer> => ({
+        commandId: runId,
+        generation: 1,
+        status: 'applied',
+        effect: 'durable',
+        cursor: 1,
+      }),
+    );
+    const unpublish = store.publishProjectHostConnector(
+      projectId,
+      async () => ({ hostCommand, close: vi.fn(async () => undefined) }) as unknown as AgentHostClient,
+    );
+    publishAdmission(chatId, (gesture) => ({
+      kind: 'send',
+      message: gesture.kind === 'send' ? gesture.message : buildUserMessage({ text: 'first message' }),
+      command,
+    }));
     await attachBoth(session);
     const { draftAttachments } = session.draftActorRef.getSnapshot().context;
     await store.promoteDraftAttachments(chatId, draftAttachments);
     const second = buildUserMessage({ text: 'second message', attachments: draftAttachments });
 
     await store.requestTurn(chatId, { kind: 'send', message: buildUserMessage({ text: 'first message' }) });
-    // Queued behind the live turn: the composer clears and its blobs are let go.
-    await store.requestTurn(chatId, { kind: 'send', message: second, attachments: draftAttachments });
-    expect(client.namesUnder(draftAttachmentsDirectory(projectId, chatId))).toEqual([]);
-
-    // Displaced by a third gesture, so it comes back — bytes included.
-    await store.requestTurn(chatId, { kind: 'send', message: buildUserMessage({ text: 'third message' }) });
+    await vi.waitFor(() => {
+      expect(hostCommand).toHaveBeenCalledExactlyOnceWith(command);
+    });
+    publishLogRows(store, chatId, runningRows(runId));
+    const displaced = store.requestTurn(chatId, { kind: 'send', message: second, attachments: draftAttachments });
+    const third = store.requestTurn(chatId, { kind: 'send', message: buildUserMessage({ text: 'third message' }) });
+    await Promise.all([displaced, third]);
 
     await vi.waitFor(() => {
       expect(session.draftActorRef.getSnapshot().context).toMatchObject({
@@ -4524,13 +2234,13 @@ describe('ChatSessionStore — composer records (W7)', () => {
       [`${pngHash}.png`, `${pdfHash}.pdf`].sort(),
     );
     store.release(chatId);
+    unpublish();
   });
 
-  it('promotes both blobs into the chat directory on send and clears the draft-stage copies', async () => {
+  it('promotes both blobs into the chat directory and clears the draft-stage copies', async () => {
     const client = createMemoryClient();
     const { store } = openStore(client);
-    const session = store.acquire(chatId);
-    const fake = harness.created.at(-1)!;
+    const session = store.acquire(chatId, projectId);
     await attachBoth(session);
     const { draftAttachments } = session.draftActorRef.getSnapshot().context;
 
@@ -4539,16 +2249,10 @@ describe('ChatSessionStore — composer records (W7)', () => {
     expect(client.files.get(`${chatAttachmentsDirectory(projectId, chatId)}/${pngHash}.png`)).toEqual(pngBytes);
     expect(client.files.get(`${chatAttachmentsDirectory(projectId, chatId)}/${pdfHash}.pdf`)).toEqual(pdfBytes);
 
-    // What `useChatActions().sendMessage` does once the message is built.
     const message = buildUserMessage({ text: 'read the spec', attachments: draftAttachments });
     session.draftActorRef.send({ type: 'clearDraft' });
     await store.releaseDraftAttachments(chatId);
-    session.persistenceActorRef.send({ type: 'startRequest', request: { kind: 'send', message, body: testRunBody } });
-
-    await vi.waitFor(() => {
-      expect(fake.sendMessage).toHaveBeenCalledOnce();
-    });
-    expect(fake.sendMessage.mock.calls[0]![0]).toMatchObject({
+    expect(message).toMatchObject({
       role: 'user',
       parts: [
         {
@@ -4577,7 +2281,7 @@ describe('ChatSessionStore — composer records (W7)', () => {
   it('leaves the draft intact and copies nothing it cannot finish when promotion fails', async () => {
     const client = createMemoryClient();
     const { store } = openStore(client);
-    const session = store.acquire(chatId);
+    const session = store.acquire(chatId, projectId);
     await attachBoth(session);
     const before = session.draftActorRef.getSnapshot().context.draftAttachments;
     client.files.delete(`${draftAttachmentsDirectory(projectId, chatId)}/${pdfHash}.pdf`);
@@ -4585,15 +2289,53 @@ describe('ChatSessionStore — composer records (W7)', () => {
     await expect(store.promoteDraftAttachments(chatId, before)).rejects.toThrow(/missing/u);
 
     expect(session.draftActorRef.getSnapshot().context.draftAttachments).toEqual(before);
-    // The image copied before the PDF failed is taken back: nothing references it (G10).
-    expect(client.namesUnder(chatAttachmentsDirectory(projectId, chatId))).toEqual([]);
+    /* The image copied before the PDF failed stays: it is content-addressed, so another tab's send may name it
+     * (PV-R12). An orphan lives until the chat is deleted. */
+    expect(client.namesUnder(chatAttachmentsDirectory(projectId, chatId))).toEqual([`${pngHash}.png`]);
     store.release(chatId);
+  });
+
+  /*
+   * PV-A9 (L4 D-108, I37). Blobs are content-addressed, so another tab's send can reference the very bytes a failing
+   * promotion copied. The rollback that took them back deleted a blob a sent message names.
+   */
+  it('keeps a promoted blob when a concurrent send fails', async () => {
+    const client = createMemoryClient();
+    const tabA = openStore(client);
+    const tabB = openStore(client);
+    const sessionA = tabA.store.acquire(chatId, projectId);
+    tabB.store.acquire(chatId, projectId);
+    await attachBoth(sessionA);
+    const before = sessionA.draftActorRef.getSnapshot().context.draftAttachments;
+    const pdfDraft = `${draftAttachmentsDirectory(projectId, chatId)}/${pdfHash}.pdf`;
+    const pdfRead = Promise.withResolvers<void>();
+    const { readFile } = client;
+    client.readFile = async function (path: string) {
+      if (path === pdfDraft) {
+        await pdfRead.promise;
+        throw notFound(path);
+      }
+      return readFile.call(this, path);
+    };
+    const failing = tabA.store.promoteDraftAttachments(chatId, before);
+    await vi.waitFor(() => {
+      expect(client.namesUnder(chatAttachmentsDirectory(projectId, chatId))).toEqual([`${pngHash}.png`]);
+    });
+
+    // Tab B sends the same image: the chat already holds it, so B copies nothing and its message names it.
+    await tabB.store.promoteDraftAttachments(chatId, before.slice(0, 1));
+    pdfRead.resolve();
+
+    await expect(failing).rejects.toThrow(/missing/u);
+    expect(client.namesUnder(chatAttachmentsDirectory(projectId, chatId))).toEqual([`${pngHash}.png`]);
+    tabA.store.release(chatId);
+    tabB.store.release(chatId);
   });
 
   it('should keep a blob an earlier message holds when a later promotion fails (G10)', async () => {
     const client = createMemoryClient();
     const { store } = openStore(client);
-    const session = store.acquire(chatId);
+    const session = store.acquire(chatId, projectId);
     await attachBoth(session);
     const before = session.draftActorRef.getSnapshot().context.draftAttachments;
     await store.promoteDraftAttachments(chatId, before.slice(0, 1));
@@ -4676,6 +2418,22 @@ describe('ChatSessionStore — composer records (W7)', () => {
     store.release(chatId);
   });
 
+  /* LT09: `waitFor` rejects when its actor stops first. A gone draft has nothing left to flush, and the close must
+   * still flush every other record rather than fail on it. */
+  it('flushes the other records when one draft actor is gone before its save lands (PV-S5, LT09)', async () => {
+    const client = createMemoryClient();
+    const { store } = openStore(client);
+    const session = store.acquire(chatId, projectId);
+    await vi.waitFor(() => {
+      expect(session.composerRecordRef.getSnapshot().matches({ lifecycle: 'usable' })).toBe(true);
+    });
+    session.draftActorRef.send({ type: 'setDraftText', text: 'typed before the draft went away' });
+    session.draftActorRef.stop();
+
+    await expect(store.flushComposerRecords()).resolves.toBeUndefined();
+    store.release(chatId);
+  });
+
   it('should write a record that is waiting out a retry when flushed (R9)', async () => {
     const client = createMemoryClient();
     const { store } = openStore(client);
@@ -4704,7 +2462,8 @@ describe('ChatSessionStore — composer records (W7)', () => {
     store.unreadRecordRef(projectId).on('writeFailed', failed);
     vi.spyOn(client, 'writeFile').mockRejectedValueOnce(Object.assign(new Error('EACCES'), { code: 'EACCES' }));
 
-    finishRun(harness.created.at(-1)!);
+    publishLogRows(store, chatId, [...runningRows(), lifecycleRow(2, 'completed')]);
+    store.markViewed(chatId);
 
     await vi.waitFor(() => {
       expect(failed).toHaveBeenCalledOnce();
@@ -4717,7 +2476,7 @@ describe('ChatSessionStore — composer records (W7)', () => {
     client.failingReads.add(composerPath(projectId, chatId));
     const transcript: MyUIMessage[] = [{ id: 'msg_1', role: 'user', parts: [{ type: 'text', text: 'earlier' }] }];
     const { store } = openStore(client, chatRow(chatId, projectId, { messages: transcript }));
-    const session = store.acquire(chatId);
+    const session = store.acquire(chatId, projectId);
     const unreadable = vi.fn();
     session.composerRecordRef.on('recordUnreadable', unreadable);
 
@@ -4742,7 +2501,7 @@ describe('ChatSessionStore — composer records (W7)', () => {
   it('disables send with the reason when the selected model cannot read a PDF in the draft', async () => {
     const client = createMemoryClient();
     const { store } = openStore(client);
-    const session = store.acquire(chatId);
+    const session = store.acquire(chatId, projectId);
     await attachBoth(session);
     const gate = (model: SelectedModel): string | undefined =>
       attachmentSendBlockReason(session.draftActorRef.getSnapshot().context.draftAttachments, model);
@@ -4765,19 +2524,18 @@ describe('ChatSessionStore — unread restore and live-record deletion (W8)', ()
   const chatId = 'chat_w8';
   const unreadPath = `/.tau/composers/chats/${projectId}/unread.json`;
 
-  /** A store over one device's disk, with a live project session holding a real chat machine. */
+  /** A store over one device's disk, with a live project session; the store owns the chat's machine (PV-S5). */
   const openStore = (client: MemoryClient) => {
-    const store = new ChatSessionStore();
+    const store = new ChatSessionStore({ chatSession });
     const deps = createStubDeps(client);
     deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
     store.setDependencies(deps);
-    const chat = createActor(chatSessionMachine, { input: { chatId, projectId } }).start();
     const projectRef = {
       send: () => undefined,
-      getSnapshot: () => ({ context: { chatRefs: { [chatId]: chat }, runs: new Set() } }),
+      getSnapshot: () => ({ context: { runs: [] } }),
     } as unknown as Parameters<StoreType['setProjectSession']>[1];
     store.setProjectSession(projectId, projectRef);
-    return { store, chat };
+    return { store };
   };
 
   beforeEach(() => {
@@ -4789,33 +2547,29 @@ describe('ChatSessionStore — unread restore and live-record deletion (W8)', ()
     vi.unstubAllGlobals();
   });
 
-  it('restores unread into the chat machine of a fresh store (unreadRestored)', async () => {
+  it('answers unread for a fresh store from the chat’s log and the receipt on disk', async () => {
     vi.stubGlobal('document', { visibilityState: 'hidden', hasFocus: () => false });
     const client = createMemoryClient();
     const first = openStore(client);
     first.store.acquire(chatId, projectId);
-    finishRun(harness.created.at(-1)!);
-    await vi.waitFor(() => {
-      expect(client.json(unreadPath)).toEqual({ version: 1, unread: { [chatId]: true } });
-    });
+    publishLogRows(first.store, chatId, [...runningRows(), lifecycleRow(2, 'completed')]);
+    expect(first.store.isUnread(chatId)).toBe(true);
     first.store.release(chatId);
 
     const second = openStore(client);
-    expect(second.chat.getSnapshot().matches({ read: 'read' })).toBe(true);
     second.store.acquire(chatId, projectId);
+    const woke = vi.fn();
+    second.store.subscribeUnread(woke);
+    publishLogRows(second.store, chatId, [...runningRows(), lifecycleRow(2, 'completed')]);
 
-    await vi.waitFor(() => {
-      expect(second.chat.getSnapshot().matches({ read: 'unread' })).toBe(true);
-    });
     expect(second.store.isUnread(chatId)).toBe(true);
+    expect(woke).toHaveBeenCalled();
     second.store.release(chatId);
-    first.chat.stop();
-    second.chat.stop();
   });
 
   it('stops the live record actor when its chat is deleted, so a later patch cannot write the record back', async () => {
     const client = createMemoryClient();
-    const { store, chat } = openStore(client);
+    const { store } = openStore(client);
     const session = store.acquire(chatId, projectId);
     const draft = (text: string): MyUIMessage => ({
       id: 'draft',
@@ -4840,13 +2594,12 @@ describe('ChatSessionStore — unread restore and live-record deletion (W8)', ()
     expect(client.json(composerPath(projectId, chatId))).toBeUndefined();
     expect(session.composerRecordRef.getSnapshot().status).toBe('done');
     store.release(chatId);
-    chat.stop();
   });
 
   it('does not recreate unread.json for a late unread decision after its project is deleted', async () => {
     vi.stubGlobal('document', { visibilityState: 'hidden', hasFocus: () => false });
     const client = createMemoryClient();
-    const { store, chat } = openStore(client);
+    const { store } = openStore(client);
     store.acquire(chatId, projectId);
     store.markViewed(chatId);
     await settle();
@@ -4858,6 +2611,5 @@ describe('ChatSessionStore — unread restore and live-record deletion (W8)', ()
     expect(client.json(unreadPath)).toBeUndefined();
     expect(client.namesUnder(`/.tau/composers/chats/${projectId}`)).toEqual([]);
     store.release(chatId);
-    chat.stop();
   });
 });

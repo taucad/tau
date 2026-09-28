@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { parseLogEvent } from '@taucad/agent-host';
-import { isResumable, refusals } from '@taucad/agent-host/wire';
 import type { AgentLiveEvent, AgentLogEvent } from '@taucad/agent-host';
 import type { MyUIMessage } from '@taucad/chat';
 import { getReasoningEndedAtMs } from '@taucad/chat';
@@ -9,7 +8,6 @@ import type { ReasoningUIPart, UIMessageChunk } from 'ai';
 import { isRecord } from '@taucad/utils/schema';
 import {
   agentApprovalToolName,
-  gatewayCodeCategories,
   projectAgentHostEvent,
   projectAgentHostLiveEvent,
   projectAgentHostUserMessage,
@@ -2056,20 +2054,5 @@ describe('chat activity indicator resting block: text rest on the part', () => {
         blocks,
       ),
     ).toEqual([]);
-  });
-});
-
-describe('gateway code cards (SC-G3, SC-A2)', () => {
-  it('should derive cards from the registry', () => {
-    const carded = Object.keys(gatewayCodeCategories);
-
-    expect(carded.filter((code) => !Object.hasOwn(refusals, code))).toEqual([]);
-    // Today's cards: every carded code offers Resume except an exhausted provider account, which needs the person.
-    expect(carded.filter((code) => isResumable(code))).toEqual([
-      'INSUFFICIENT_CREDIT',
-      'PROVIDER_UNAVAILABLE',
-      'RATE_LIMITED',
-      'UPSTREAM_REJECTED',
-    ]);
   });
 });

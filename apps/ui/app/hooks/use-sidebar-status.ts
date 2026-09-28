@@ -4,16 +4,17 @@
  * Every glyph the sidebar shows is derived here, from the `sessions`,
  * `project-session`, `chat-session` and `project-revisions` snapshots at read
  * time. Nothing about a row is persisted: the only durable status in the whole
- * surface is the project's per-device unread record, and even that is read off
- * the chat's own `read` region, which `ChatSessionStore` restores from it (D9).
- * The store is its one writer; this module never writes it.
+ * surface is the project's per-device read receipts, which `ChatSessionStore`
+ * compares with each chat's log to answer unread (D9, PV-S8). The store is
+ * their one writer; this module never writes them.
  *
  * Two shapes, on purpose:
  *
  * - `ChatSidebarStatus` is a chat's whole vocabulary and comes from **one**
- *   snapshot, the chat's own machine. The branch and dirty facets ride on it
- *   because `project-session` broadcasts `revisionState` to every chat it owns;
- *   the chat's revision marker reads them, the sidebar does not (v2 D4).
+ *   snapshot, the chat's own machine, a root `ChatSessionStore` owns (PV-S5).
+ *   The branch and dirty facets ride on it because the store forwards the
+ *   project's revision facts to every chat of the project; the chat's revision
+ *   marker reads them, the sidebar does not (v2 D4).
  * - `ProjectSidebarStatus` is the one coalesced object per project (S46) that
  *   the project row and the close dialogs read. It joins the registry's
  *   liveness, its chats' statuses and the worker's `RevisionStatus` projection
@@ -42,6 +43,15 @@ import { useSessions } from '#hooks/use-sessions.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ChatSidebarState } from '#types/chat-sidebar.types.js';
 import { actorSessionIdOf } from '#lib/xstate.lib.js';
+import type { ChatSessionStore } from '#services/chat-session-store.js';
+import {
+  selectCaughtUp,
+  selectCurrentRun,
+  selectOpenInterrupts,
+  selectRunFailure,
+  selectToolsInFlight,
+} from '#machines/chat-projection.logic.js';
+import type { ChatProjection } from '#machines/chat-projection.logic.js';
 
 /**
  * Everything a chat row draws, from that chat's own machine.
@@ -154,18 +164,13 @@ const chatRunState = (snapshot: ChatSnapshot): ChatSidebarState => {
   if (snapshot.matches({ run: { running: { waiting: 'input' } } })) {
     return 'question';
   }
-  if (snapshot.matches({ run: { running: 'reconnecting' } })) {
-    return 'reconnecting';
-  }
   if (snapshot.matches({ run: { running: 'tool' } })) {
     return 'tool';
   }
   if (snapshot.matches({ run: { running: 'generating' } })) {
     return 'working';
   }
-  if (snapshot.matches({ run: 'finishing' })) {
-    return 'finishing';
-  }
+  /* A run reads Done at its terminal row; the revision card owns "Saving revision" (§5.10). */
   if (snapshot.matches({ run: 'done' })) {
     return 'done';
   }
@@ -176,15 +181,16 @@ const chatRunState = (snapshot: ChatSnapshot): ChatSidebarState => {
 };
 
 /**
- * One chat row, from one snapshot.
+ * One chat row, from its machine's snapshot and the store's unread answer.
  *
  * @param snapshot - That chat's `chat-session` snapshot.
+ * @param unread - Whether the store says the chat is unread (PV-S8).
  * @returns What the row draws.
  * @public
  */
-export const selectChatStatus = (snapshot: ChatSnapshot): ChatSidebarStatus => ({
+export const selectChatStatus = (snapshot: ChatSnapshot, unread: boolean): ChatSidebarStatus => ({
   state: chatRunState(snapshot),
-  unread: snapshot.matches({ read: 'unread' }),
+  unread,
   toolName: snapshot.context.toolName,
   pendingApprovalCount: snapshot.context.pendingApprovalCount,
   failureReason: snapshot.context.failureReason,
@@ -192,6 +198,45 @@ export const selectChatStatus = (snapshot: ChatSnapshot): ChatSidebarStatus => (
   branch: snapshot.matches({ revision: { line: 'onBranch' } }) ? snapshot.context.branch : undefined,
   dirty: snapshot.matches({ revision: { tree: 'dirty' } }),
 });
+
+/** An unopened listed chat reads the host log, not an SDK session. */
+export const selectProjectedChatStatus = (
+  projection: ChatProjection,
+  unread: boolean,
+  revisions?: RevisionStatusProjection,
+): ChatSidebarStatus => {
+  const run = selectCaughtUp(projection) ? selectCurrentRun(projection) : undefined;
+  const tools = selectToolsInFlight(projection);
+  const approvals = Object.keys(selectOpenInterrupts(projection)).length;
+  const state: ChatSidebarState =
+    run === undefined
+      ? 'idle'
+      : run.lifecycle === 'admitted'
+        ? 'queued'
+        : run.lifecycle === 'running'
+          ? tools.count > 0
+            ? 'tool'
+            : 'working'
+          : run.lifecycle === 'paused'
+            ? approvals > 0
+              ? 'approval'
+              : 'question'
+            : run.lifecycle === 'completed'
+              ? 'done'
+              : run.lifecycle === 'failed'
+                ? 'failed'
+                : 'stopped';
+  const branch = revisions?.line.kind === 'branch' ? revisions.line.name : undefined;
+  return {
+    state,
+    unread,
+    toolName: tools.toolName,
+    pendingApprovalCount: approvals,
+    failureReason: run === undefined ? undefined : selectRunFailure(projection, run.runId),
+    branch: branch === 'main' ? undefined : branch,
+    dirty: revisions?.dirty ?? false,
+  };
+};
 
 /**
  * The row's second line, or `undefined` when the row has nothing to say.
@@ -224,9 +269,6 @@ export const chatStatusLabel = (status: ChatSidebarStatus): string | undefined =
     case 'reconnecting': {
       return 'Reconnecting…';
     }
-    case 'finishing': {
-      return 'Finishing…';
-    }
     case 'done': {
       return 'Done';
     }
@@ -256,8 +298,7 @@ export const selectChatFacts = (status: ChatSidebarStatus): SidebarFacts => {
     case 'queued':
     case 'working':
     case 'tool':
-    case 'reconnecting':
-    case 'finishing': {
+    case 'reconnecting': {
       return { mark: 'running', sentence };
     }
     case 'approval': {
@@ -494,30 +535,65 @@ export const selectProjectFacts = (row: ProjectSidebarRow, expanded: boolean): S
 const projectSessionOf = (sessions: SessionsActorRef, projectId: string): ProjectSessionActorRef | undefined =>
   sessions.getSnapshot().context.refs[projectId];
 
+const noChatRoots: ReadonlyMap<string, ChatSessionActorRef> = new Map();
+
+/* A closed project has no chat to report: its row reads the registry's reason alone. */
 const chatReferencesOf = (
   sessions: SessionsActorRef,
+  chats: ChatSessionStore,
   projectId: string,
-): Readonly<Record<string, ChatSessionActorRef>> =>
-  projectSessionOf(sessions, projectId)?.getSnapshot().context.chatRefs ?? {};
+): ReadonlyMap<string, ChatSessionActorRef> =>
+  projectSessionOf(sessions, projectId) === undefined ? noChatRoots : chats.chatRootsOf(projectId);
+
+const readChatStatus = ({
+  chats,
+  chatId,
+  ref,
+  projectId,
+}: {
+  chats: ChatSessionStore;
+  chatId: string;
+  ref: ChatSessionActorRef | undefined;
+  projectId: string;
+}): ChatSidebarStatus | undefined => {
+  if (ref !== undefined) {
+    return selectChatStatus(ref.getSnapshot(), chats.isUnread(chatId));
+  }
+  const projection = chats.getProjection(chatId);
+  return projection === undefined
+    ? undefined
+    : selectProjectedChatStatus(projection, chats.isUnread(chatId), peekRevisionClient(projectId)?.status());
+};
 
 /**
  * The one coalesced object, built once per project.
  *
  * @param sessions - The registry actor.
+ * @param chats - The chat store, whose roots are the chats' machines (PV-S5).
  * @param projectId - The project the row is about.
  * @returns That project's coalesced status.
  * @public
  */
-export const readProjectStatus = (sessions: SessionsActorRef, projectId: string): ProjectSidebarStatus => {
-  const chatReferences = Object.entries(chatReferencesOf(sessions, projectId));
+export const readProjectStatus = (
+  sessions: SessionsActorRef,
+  chats: ChatSessionStore,
+  projectId: string,
+): ProjectSidebarStatus => {
+  const references = chatReferencesOf(sessions, chats, projectId);
+  const chatIds = new Set([...chats.observedChatIdsOf(projectId), ...references.keys()]);
   return {
     session: selectProjectLiveness(sessions.getSnapshot().context, projectId),
     /* The session's own record of a region that did not come up (R4). */
     runtimeFailure: projectSessionOf(sessions, projectId)?.getSnapshot().context.failures['runtime'],
     chats:
-      chatReferences.length === 0
+      chatIds.size === 0
         ? emptyChats
-        : new Map(chatReferences.map(([chatId, ref]) => [chatId, selectChatStatus(ref.getSnapshot())])),
+        : new Map(
+            [...chatIds].flatMap((chatId) => {
+              const status = readChatStatus({ chats, chatId, ref: references.get(chatId), projectId });
+              return status === undefined ? [] : [[chatId, status] as const];
+            }),
+          ),
     revisions: peekRevisionClient(projectId)?.status(),
   };
 };
@@ -550,18 +626,22 @@ const projectRowKey = (row: ProjectSidebarRow): string => Object.values(row).joi
  * Ponytail: one binder, rebound only when the chat set changes.
  *
  * A sidebar row wakes on its own actors — the registry (a project opened or
- * closed), the project session (a chat spawned, the revision facts moved) and
- * the chat machines it draws. Rebinding on every notification would unsubscribe
- * listeners from inside an emit, so the id list is compared first and the churn
- * happens only when a chat actually appears or goes.
+ * closed), the project session (its failures), the chat store (a chat joined
+ * or left) and the chat machines it draws. Rebinding on every notification
+ * would unsubscribe listeners from inside an emit, so the id list is compared
+ * first and the churn happens only when a chat actually appears or goes. The
+ * chat machines are the store's roots, so a chat's machine never swaps under a
+ * row (PV-S5).
  */
 const bindProject = ({
   sessions,
+  chats,
   projectId,
   chatIds,
   listener,
 }: {
   readonly sessions: SessionsActorRef;
+  readonly chats: ChatSessionStore;
   readonly projectId: string;
   readonly chatIds?: () => readonly string[];
   readonly listener: () => void;
@@ -571,21 +651,17 @@ const bindProject = ({
   let sessionScan: { unsubscribe: () => void } | undefined;
   const rebind = (): void => {
     const session = projectSessionOf(sessions, projectId);
-    const ids = chatIds?.() ?? Object.keys(chatReferencesOf(sessions, projectId));
-    /*
-     * R3: the revision client is created by the project's route subtree, later
+    const references = chatReferencesOf(sessions, chats, projectId);
+    const ids = chatIds?.() ?? [...new Set([...chats.observedChatIdsOf(projectId), ...references.keys()])];
+    /* R3: the revision client is created by the project's route subtree, later
      * than this bind, so its presence has to be in the key or a project row
-     * never subscribes to the projection it draws its branch and sync from.
-     * R4: `openChat` spawns a *fresh* actor for an id it no longer holds, so
-     * ids alone would leave the row bound to a stopped machine — the session id
-     * is the identity that changes with the swap.
-     */
-    const references = chatReferencesOf(sessions, projectId);
+     * never subscribes to the projection it draws its branch and sync from. */
     const key = [
       session === undefined ? 'closed' : 'live',
       peekRevisionClient(projectId) === undefined ? 'no-client' : 'client',
+      /* R4: a chat released and acquired again gets a fresh root under the same id, so the actor is the identity. */
       ...ids.map((id) => {
-        const reference = references[id];
+        const reference = references.get(id);
         return reference === undefined ? id : actorSessionIdOf(reference);
       }),
     ].join(keySeparator);
@@ -601,13 +677,14 @@ const bindProject = ({
         subscription.unsubscribe();
       });
       for (const id of ids) {
-        const ref = references[id];
+        const ref = references.get(id);
         if (ref !== undefined) {
           const chatSubscription = ref.subscribe(listener);
           bound.push(() => {
             chatSubscription.unsubscribe();
           });
         }
+        bound.push(chats.subscribeProjection(id, listener));
       }
     }
     const client = peekRevisionClient(projectId);
@@ -618,14 +695,10 @@ const bindProject = ({
       off();
     }
   };
-  /* A chat spawning moves the session's snapshot, not the registry's, so the
-   * rebind check rides on the session's own notification too — next microtask,
-   * because unsubscribing inside an emit is what the guard above avoids. */
+  /* The session's failures move its own snapshot, not the registry's (R4). */
   const watchSession = (): void => {
     sessionScan?.unsubscribe();
-    sessionScan = projectSessionOf(sessions, projectId)?.subscribe(() => {
-      queueMicrotask(rebind);
-    });
+    sessionScan = projectSessionOf(sessions, projectId)?.subscribe(listener);
   };
   rebind();
   watchSession();
@@ -634,9 +707,17 @@ const bindProject = ({
     watchSession();
     listener();
   });
+  /* Membership is coalesced onto a microtask by the store, so this never rebinds inside an emit. */
+  const unsubscribeMembership = chats.subscribeMembership(() => {
+    rebind();
+    listener();
+  });
+  const unsubscribeUnread = chats.subscribeUnread(listener);
   return () => {
     registry.unsubscribe();
     sessionScan?.unsubscribe();
+    unsubscribeMembership();
+    unsubscribeUnread();
     for (const off of bound) {
       off();
     }
@@ -656,16 +737,17 @@ const bindProject = ({
  */
 export const useProjectSidebarRow = (projectId: string): ProjectSidebarRow => {
   const sessions = useSessions();
+  const chats = useChatSessionStore();
   const idleWindow = sessions.getSnapshot().context.idleWindowMilliseconds;
   const subscribe = useCallback(
-    (listener: () => void) => bindProject({ sessions, projectId, listener }),
-    [projectId, sessions],
+    (listener: () => void) => bindProject({ sessions, chats, projectId, listener }),
+    [chats, projectId, sessions],
   );
   const cache = useRef<{ key: string; value: ProjectSidebarRow } | undefined>(undefined);
   const getSnapshot = useCallback(() => {
-    const row = selectProjectRow(readProjectStatus(sessions, projectId), idleWindow);
+    const row = selectProjectRow(readProjectStatus(sessions, chats, projectId), idleWindow);
     return keep(cache, `${projectId}${keySeparator}${projectRowKey(row)}`, row);
-  }, [idleWindow, projectId, sessions]);
+  }, [chats, idleWindow, projectId, sessions]);
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 };
 
@@ -679,17 +761,18 @@ export const useProjectSidebarRow = (projectId: string): ProjectSidebarRow => {
  */
 export const useChatSidebarStatus = (projectId: string, chatId: string): ChatSidebarStatus | undefined => {
   const sessions = useSessions();
+  const chats = useChatSessionStore();
   const chatIds = useCallback(() => [chatId], [chatId]);
   const subscribe = useCallback(
-    (listener: () => void) => bindProject({ sessions, projectId, chatIds, listener }),
-    [chatIds, projectId, sessions],
+    (listener: () => void) => bindProject({ sessions, chats, projectId, chatIds, listener }),
+    [chatIds, chats, projectId, sessions],
   );
   const cache = useRef<{ key: string; value: ChatSidebarStatus | undefined } | undefined>(undefined);
   const getSnapshot = useCallback((): ChatSidebarStatus | undefined => {
-    const ref = chatReferencesOf(sessions, projectId)[chatId];
-    const status = ref === undefined ? undefined : selectChatStatus(ref.getSnapshot());
+    const ref = chatReferencesOf(sessions, chats, projectId).get(chatId);
+    const status = readChatStatus({ chats, chatId, ref, projectId });
     return keep(cache, `${projectId}${keySeparator}${chatId}${keySeparator}${chatKey(status)}`, status);
-  }, [chatId, projectId, sessions]);
+  }, [chatId, chats, projectId, sessions]);
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 };
 
@@ -753,7 +836,7 @@ export const useSidebarCommands = (): SidebarCommands => {
        * of vanishing. */
       closeChat: (projectId, chatId) => {
         chatSessions.stopRun(chatId);
-        chatReferencesOf(sessions, projectId)[chatId]?.send({ type: 'close' });
+        chatReferencesOf(sessions, chatSessions, projectId).get(chatId)?.send({ type: 'close' });
       },
       closeProject: (projectId) => {
         const session = projectSessionOf(sessions, projectId);

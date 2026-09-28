@@ -14,6 +14,7 @@ import type { ChatComposerContextValue } from '#hooks/active-chat-provider.js';
 import type { DraftAttachmentOptions } from '#hooks/use-chat.js';
 import type { DraftAttachment, DraftAttachmentSource } from '#hooks/draft.machine.js';
 import type { ChatTextareaSubmitPayload } from '#components/chat/chat-textarea-types.js';
+import { storedRef } from '#utils/attachment.test-utils.js';
 
 // ---------------------------------------------------------------------------
 // Unified composer-context mock — `useChatTextareaLogic` is a single
@@ -77,7 +78,11 @@ let draftState = defaultDraftState;
 
 const mockUseChatSelector = vi.fn((selector: (state: unknown) => unknown) => selector(draftState));
 
-const storedPdf: DraftAttachment = { hash: 'b'.repeat(64), mediaType: 'application/pdf', filename: 'spec.pdf' };
+const storedPdf: DraftAttachment = storedRef({
+  hash: 'b'.repeat(64),
+  mediaType: 'application/pdf',
+  filename: 'spec.pdf',
+});
 
 vi.mock('#hooks/use-chat.js', () => ({
   useChatActions: () => chatActionsMock,
@@ -142,7 +147,10 @@ describe('useChatTextareaLogic — onSubmit surface', () => {
 
   it('should admit ACP images and PDFs offline without using the stale Tau model', () => {
     mockActiveModel = { ...makeResolvedModel('anthropic-claude-haiku-4.5'), isResolved: false, model: undefined };
-    draftState = { ...defaultDraftState, draftAttachments: [{ hash: 'a'.repeat(64), mediaType: 'image/png' }] };
+    draftState = {
+      ...defaultDraftState,
+      draftAttachments: [storedRef({ hash: 'a'.repeat(64), mediaType: 'image/png' })],
+    };
 
     const { result, rerender } = renderHook(() =>
       useChatTextareaLogic({ ref: undefined, onSubmit: vi.fn(async () => undefined) }),

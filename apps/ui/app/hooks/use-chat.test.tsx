@@ -9,14 +9,8 @@ import type { ChatError } from '@taucad/types';
 import { resolveKernel } from '@taucad/types/constants';
 import { createActor } from 'xstate';
 import { projectSessionMachine } from '#machines/project-session.machine.js';
-import { chatSessionMachine } from '#machines/chat-session.machine.js';
 import type { ChatTurn, ChatTurnGesture } from '#machines/chat-session.machine.js';
-import {
-  chatTurnAdmission,
-  chatTurnSettlement,
-  publishChatTurnAdmission,
-  resetChatTurnServices,
-} from '#chat-clients/_internal/chat-host-binding.js';
+import { publishChatTurnAdmission, resetChatTurnServices } from '#chat-clients/_internal/chat-host-binding.js';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
 
 // ---------------------------------------------------------------------------
@@ -314,7 +308,9 @@ function createWrapper(chatId: string = defaultTestChatId) {
   return function Wrapper({ children }: { readonly children: ReactNode }) {
     return (
       <ChatSessionStoreProvider>
-        <ActiveChatProvider chatId={chatId}>{children}</ActiveChatProvider>
+        <ActiveChatProvider chatId={chatId} projectId={testProjectId}>
+          {children}
+        </ActiveChatProvider>
       </ChatSessionStoreProvider>
     );
   };
@@ -378,16 +374,7 @@ const testAdmission = async (gesture: ChatTurnGesture): Promise<ChatTurn> => ({
  * admission published through the same seam production uses.
  */
 function startTurnOwner(store: ChatSessionStore, chatId: string, admit = testAdmission): () => void {
-  const session = createActor(
-    projectSessionMachine.provide({
-      actors: {
-        chatSession: chatSessionMachine.provide({
-          actors: { admitTurn: chatTurnAdmission, settleTurn: chatTurnSettlement },
-        }),
-      },
-    }),
-    { input: { projectId: testProjectId } },
-  );
+  const session = createActor(projectSessionMachine, { input: { projectId: testProjectId } });
   session.start();
   const unpublish = publishChatTurnAdmission(chatId, admit);
   store.setFocusedProject(testProjectId);
@@ -440,7 +427,7 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
   // are translated faithfully by the store-side dispatch listeners.
   // ===========================================================================
 
-  it('records accepted user actions once and ignores invalid targets and stop', () => {
+  it('records an accepted send once and ignores invalid targets and stop', async () => {
     const { result } = renderHook(() => ({ actions: useChatActions(), store: useChatSessionStore() }), {
       wrapper: createWrapper(defaultTestChatId),
     });
@@ -452,22 +439,36 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
       stopTurnOwner = startTurnOwner(result.current.store, defaultTestChatId);
     });
 
+    await act(async () => {
+      await result.current.actions.sendMessage(user);
+    });
     act(() => {
-      void result.current.actions.sendMessage(user);
-      result.current.actions.regenerate();
-      result.current.actions.continueChat();
-      result.current.actions.editMessage(user.id, 'edited');
       result.current.actions.stop();
       result.current.actions.editMessage('missing-edit', 'ignored');
     });
 
-    expect(harness.touchChatRecency).toHaveBeenCalledTimes(4);
-    expect(harness.touchChatRecency).toHaveBeenNthCalledWith(1, defaultTestChatId, user.metadata?.createdAt);
-    expect(harness.touchChatRecency.mock.calls.slice(1)).toEqual([
-      [defaultTestChatId, expect.any(Number)],
-      [defaultTestChatId, expect.any(Number)],
-      [defaultTestChatId, expect.any(Number)],
-    ]);
+    /* Once, when the turn is taken (PV-S6), at the message's own time. */
+    expect(harness.touchChatRecency).toHaveBeenCalledOnce();
+    expect(harness.touchChatRecency).toHaveBeenCalledWith(defaultTestChatId, user.metadata?.createdAt);
+  });
+
+  /* L3 D16, LT08: recency counts a taken gesture. A send the admission refuses never became a turn. */
+  it('leaves recency alone when the admission refuses a send (PV-S6)', async () => {
+    const { result } = renderHook(() => ({ actions: useChatActions(), store: useChatSessionStore() }), {
+      wrapper: createWrapper(defaultTestChatId),
+    });
+    act(() => {
+      stopTurnOwner = startTurnOwner(result.current.store, defaultTestChatId, async () => {
+        throw new Error('No credit left for this turn.');
+      });
+    });
+
+    await act(async () => {
+      await result.current.actions.sendMessage(makeUserMessage('msg_refused', 'refused'));
+    });
+
+    expect(getFake(defaultTestChatId).sendMessage).not.toHaveBeenCalled();
+    expect(harness.touchChatRecency).not.toHaveBeenCalled();
   });
 
   it('routes a `send` request through to chat.sendMessage', async () => {
@@ -891,204 +892,34 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // R4: onFinish forwards `isDisconnect` to the persistence machine.
-  // The machine then opens its `retrying` substate to drive transparent
-  // auto-retry. The store is the only seam between the AI SDK callback and
-  // the actor event so this test pins the wiring at the public boundary.
-  // ---------------------------------------------------------------------------
-
-  it('forwards isDisconnect=true into the requestFinished event so requestLifecycle enters `retrying`', async () => {
+  it('leaves a disconnected stream for explicit recovery without changing its transcript', async () => {
     const { result } = renderProvider('chat_disco');
     const persistenceActorRef = result.current.context.persistenceActorRef!;
-
     await waitFor(() => {
       expect(persistenceActorRef.getSnapshot().matches({ chatLoading: 'idle' })).toBe(true);
     });
 
+    const userMessage = makeUserMessage('msg_send', 'go');
     act(() => {
-      void result.current.actions.sendMessage(makeUserMessage('msg_send', 'go'));
+      void result.current.actions.sendMessage(userMessage);
     });
-
     const fake = getFake('chat_disco');
     await waitFor(() => {
-      expect(fake.sendMessage).toHaveBeenCalledTimes(1);
+      expect(fake.sendMessage).toHaveBeenCalledOnce();
     });
-
+    fake.messages = [userMessage];
+    const transcript = fake.messages;
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     act(() => {
-      fake.onFinish({ messages: [], isAbort: false, isError: true, isDisconnect: true });
+      fake.onError(new Error('Failed to fetch'));
+      fake.onFinish({ messages: fake.messages, isAbort: false, isError: true, isDisconnect: true });
     });
-
-    expect(persistenceActorRef.getSnapshot().matches({ requestLifecycle: 'retrying' })).toBe(true);
-    expect(persistenceActorRef.getSnapshot().context.retryAttempt).toBe(1);
-  });
-
-  it('forwards isDisconnect=false (e.g. structured 4xx) so requestLifecycle settles in `idle`', async () => {
-    const { result } = renderProvider('chat_no_disco');
-    const persistenceActorRef = result.current.context.persistenceActorRef!;
-
-    await waitFor(() => {
-      expect(persistenceActorRef.getSnapshot().matches({ chatLoading: 'idle' })).toBe(true);
-    });
-
-    act(() => {
-      void result.current.actions.sendMessage(makeUserMessage('msg_send', 'go'));
-    });
-
-    const fake = getFake('chat_no_disco');
-
-    act(() => {
-      fake.onFinish({ messages: [], isAbort: false, isError: true, isDisconnect: false });
-    });
+    consoleErrorSpy.mockRestore();
 
     expect(persistenceActorRef.getSnapshot().matches({ requestLifecycle: 'idle' })).toBe(true);
-    expect(persistenceActorRef.getSnapshot().context.retryAttempt).toBe(0);
-  });
-
-  // ---------------------------------------------------------------------------
-  // T15 / T16: full integration cycles for transparent auto-retry.
-  //
-  // These exercise the end-to-end wiring across:
-  //   onFinish (R4) -> requestFinished -> retrying -> backoff -> dispatchRequest
-  //                 -> chat.makeRequest -> onFinish (success) -> idle
-  //
-  // Both paths assert that chat.messages is preserved across the cycle so
-  // the user never sees the partial-assistant flicker that prompted this work.
-  // ---------------------------------------------------------------------------
-
-  it('full cycle: success after one retry preserves chat.messages and never trips the banner', async () => {
-    const { result } = renderProvider('chat_t15');
-    const persistenceActorRef = result.current.context.persistenceActorRef!;
-
-    await waitFor(() => {
-      expect(persistenceActorRef.getSnapshot().matches({ chatLoading: 'idle' })).toBe(true);
-    });
-
-    // Switch to fake timers AFTER loading so loadChatActor microtasks settle
-    // first; otherwise the actor never reaches `chatLoading.idle` and every
-    // following waitFor times out.
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
-    try {
-      const userMessage = makeUserMessage('msg_user', 'render a cube');
-      act(() => {
-        void result.current.actions.sendMessage(userMessage);
-      });
-      // The turn is admitted before it dispatches (C3); let that promise land.
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(0);
-      });
-
-      const fake = getFake('chat_t15');
-      fake.messages = [
-        userMessage,
-        // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- minimal test message
-        {
-          id: 'msg_assistant',
-          role: 'assistant',
-          parts: [{ type: 'text', text: 'thinking', state: 'streaming' }],
-          metadata: { createdAt: 0 },
-        } as MyUIMessage,
-      ];
-      const partialMessagesRef = fake.messages;
-
-      act(() => {
-        fake.onFinish({ messages: fake.messages, isAbort: false, isError: true, isDisconnect: true });
-      });
-
-      expect(persistenceActorRef.getSnapshot().matches({ requestLifecycle: 'retrying' })).toBe(true);
-      expect(persistenceActorRef.getSnapshot().context.retryAttempt).toBe(1);
-      expect(fake.messages).toBe(partialMessagesRef);
-
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(700);
-      });
-
-      expect(fake.resumeStream).toHaveBeenCalledTimes(1);
-      expect(persistenceActorRef.getSnapshot().matches({ requestLifecycle: 'invoking' })).toBe(true);
-
-      act(() => {
-        fake.onFinish({ messages: fake.messages, isAbort: false, isError: false, isDisconnect: false });
-      });
-
-      expect(persistenceActorRef.getSnapshot().matches({ requestLifecycle: 'idle' })).toBe(true);
-      expect(persistenceActorRef.getSnapshot().context.retryAttempt).toBe(0);
-      expect(persistenceActorRef.getSnapshot().context.persistedError).toBeUndefined();
-      expect(fake.messages).toBe(partialMessagesRef);
-      expect(harness.touchChatRecency).toHaveBeenCalledOnce();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('full cycle: budget exhaustion preserves chat.messages and surfaces persistedError', async () => {
-    const { result } = renderProvider('chat_t16');
-    const persistenceActorRef = result.current.context.persistenceActorRef!;
-
-    await waitFor(() => {
-      expect(persistenceActorRef.getSnapshot().matches({ chatLoading: 'idle' })).toBe(true);
-    });
-
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
-    try {
-      const userMessage = makeUserMessage('msg_user', 'render a cube');
-      act(() => {
-        void result.current.actions.sendMessage(userMessage);
-      });
-      // The turn is admitted before it dispatches (C3); let that promise land.
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(0);
-      });
-
-      const fake = getFake('chat_t16');
-      fake.messages = [
-        userMessage,
-        // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- minimal test message
-        {
-          id: 'msg_assistant',
-          role: 'assistant',
-          parts: [{ type: 'text', text: 'partial...', state: 'streaming' }],
-          metadata: { createdAt: 0 },
-        } as MyUIMessage,
-      ];
-      const partialMessagesRef = fake.messages;
-      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-
-      act(() => {
-        fake.onError(new Error('Failed to fetch'));
-      });
-
-      for (let attempt = 1; attempt <= 5; attempt++) {
-        act(() => {
-          fake.onFinish({ messages: fake.messages, isAbort: false, isError: true, isDisconnect: true });
-        });
-        expect(persistenceActorRef.getSnapshot().matches({ requestLifecycle: 'retrying' })).toBe(true);
-        expect(persistenceActorRef.getSnapshot().context.retryAttempt).toBe(attempt);
-
-        // oxlint-disable-next-line no-await-in-loop -- sequential timer advancement is the entire point of this loop; parallelising would race the actor transitions
-        await act(async () => {
-          await vi.advanceTimersByTimeAsync(60_000);
-        });
-        expect(persistenceActorRef.getSnapshot().matches({ requestLifecycle: 'invoking' })).toBe(true);
-      }
-
-      // 6th disconnect: budget exhausted -> idle, persistedError preserved.
-      act(() => {
-        fake.onFinish({ messages: fake.messages, isAbort: false, isError: true, isDisconnect: true });
-      });
-
-      consoleErrorSpy.mockRestore();
-      expect(persistenceActorRef.getSnapshot().matches({ requestLifecycle: 'idle' })).toBe(true);
-      expect(persistenceActorRef.getSnapshot().context.persistedError).toMatchObject({
-        message: 'Failed to fetch',
-      });
-      // Critical: across the entire 5-retry chain plus exhaustion, the
-      // partial assistant tail in chat.messages is untouched.
-      expect(fake.messages).toBe(partialMessagesRef);
-      expect(fake.regenerate).not.toHaveBeenCalled();
-      expect(fake.sendMessage).toHaveBeenCalledTimes(1);
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(persistenceActorRef.getSnapshot().context.persistedError).toMatchObject({ message: 'Failed to fetch' });
+    expect(fake.messages).toBe(transcript);
+    expect(fake.resumeStream).not.toHaveBeenCalled();
   });
 });
 
@@ -1147,9 +978,11 @@ describe('hooks resolution rules', () => {
       return (
         <ChatSessionStoreProvider>
           {/* Background session: ActiveChatProvider acquires chat_background from the store. */}
-          <ActiveChatProvider chatId='chat_background'>
+          <ActiveChatProvider chatId='chat_background' projectId={testProjectId}>
             {/* Inner foreground binding: ActiveChatProvider acquires chat_foreground. */}
-            <ActiveChatProvider chatId='chat_foreground'>{children}</ActiveChatProvider>
+            <ActiveChatProvider chatId='chat_foreground' projectId={testProjectId}>
+              {children}
+            </ActiveChatProvider>
           </ActiveChatProvider>
         </ChatSessionStoreProvider>
       );

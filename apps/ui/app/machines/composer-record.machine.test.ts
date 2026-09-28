@@ -9,15 +9,17 @@
 
 /* oxlint-disable no-await-in-loop -- every await here sequences one machine step after another; running them in parallel would defeat the interleaving these rows pin. */
 
-import { createActor } from 'xstate';
+import { createActor, createAsyncLogic } from 'xstate';
+import type { EventFromLogic } from 'xstate';
+import { guardActors } from '@taucad/xstate-testing/inspect';
+import { unansweredEvents } from '@taucad/xstate-testing/paths';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { MyUIMessage } from '@taucad/chat';
 import type { ComposerRecord, ComposerRecordPatch, ComposerRecordReadResult } from '#db/composer-record-store.js';
 import { ComposerRecordInputError } from '#db/composer-record-store.js';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
 import * as machineModule from './composer-record.machine.js';
-import { composerRecordMachine } from './composer-record.machine.js';
+import { composerRecordIgnoredEvents, composerRecordMachine } from './composer-record.machine.js';
 import type { ComposerRecordMachineEmitted } from './composer-record.machine.js';
 
 const isMachine = (value: unknown): boolean =>
@@ -44,6 +46,7 @@ type Options = {
   readonly write?: (fields: ComposerRecordPatch, index: number) => Promise<void> | undefined;
   readonly remove?: () => Promise<void>;
   readonly retryMaxAttempts?: number;
+  readonly inspect?: ReturnType<typeof guardActors>['inspect'];
 };
 
 const createHarness = (
@@ -59,30 +62,39 @@ const createHarness = (
   const actor = createActor(
     composerRecordMachine.provide({
       actors: {
-        readRecordActor: fromSafeAsync(async () => {
-          const result = await (options.read?.() ?? Promise.resolve<ComposerRecordReadResult>({ status: 'absent' }));
-          harness.reads.push(result);
-          return { type: 'recordRead', result };
+        readRecordActor: createAsyncLogic({
+          run: async () => {
+            const result = await (options.read?.() ?? Promise.resolve<ComposerRecordReadResult>({ status: 'absent' }));
+            harness.reads.push(result);
+            return { type: 'recordRead', result };
+          },
         }),
-        writePatchActor: fromSafeAsync(async ({ input }: { input: ComposerRecordPatch }) => {
-          const index = harness.writes.length;
-          harness.writes.push(input);
-          const custom = options.write?.(input, index);
-          if (custom !== undefined) {
-            await custom;
-            return;
-          }
-          await new Promise<void>((resolve, reject) => {
-            harness.settle.push({ resolve, reject });
-          });
+        writePatchActor: createAsyncLogic({
+          run: async ({ input }: { input: ComposerRecordPatch }) => {
+            const index = harness.writes.length;
+            harness.writes.push(input);
+            const custom = options.write?.(input, index);
+            if (custom !== undefined) {
+              await custom;
+              return;
+            }
+            await new Promise<void>((resolve, reject) => {
+              harness.settle.push({ resolve, reject });
+            });
+          },
         }),
-        removeRecordActor: fromSafeAsync(async () => {
-          harness.removes.push(harness.writes.length);
-          await (options.remove?.() ?? Promise.resolve());
+        removeRecordActor: createAsyncLogic({
+          run: async () => {
+            harness.removes.push(harness.writes.length);
+            await (options.remove?.() ?? Promise.resolve());
+          },
         }),
       },
     }),
-    { input: { retryMaxAttempts: options.retryMaxAttempts } },
+    {
+      input: { retryMaxAttempts: options.retryMaxAttempts },
+      ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
+    },
   );
 
   actor.on('*', (event) => {
@@ -624,5 +636,44 @@ describe('composerRecordMachine', () => {
 
     expect(vi.getTimerCount()).toBe(scheduled);
     actor.stop();
+  });
+});
+
+describe('composerRecordMachine — the machine contract (PV-S5, MC-R17)', () => {
+  it('answers every sampled event, or declares it ignored, in every reachable state', () => {
+    /* `recordRead` is raised by the read's own `onDone`, never sent from outside. */
+    const events = [
+      { type: 'patch', fields: { draft: userMessage('hi') } },
+      { type: 'patch', fields: {} },
+      { type: 'flushNow' },
+      { type: 'remove' },
+    ] satisfies Array<EventFromLogic<typeof composerRecordMachine>>;
+    expect(
+      unansweredEvents(composerRecordMachine, {
+        input: {},
+        events,
+        limit: 100_000,
+        ignore: composerRecordIgnoredEvents,
+        serializeState: (snapshot) =>
+          JSON.stringify([
+            snapshot.value,
+            Object.keys(snapshot.context.pending as Record<string, unknown>),
+            snapshot.context.attempt,
+          ]),
+      }),
+    ).toEqual([]);
+  });
+
+  it('leaves no dead letter, unanswered delivery or fault from load through a write to removal', async () => {
+    const guard = guardActors({ ignore: { 'composer-record': composerRecordIgnoredEvents } });
+    const { actor, harness } = createHarness({ inspect: guard.inspect, write: async () => undefined });
+    actor.start();
+    await flush();
+    actor.send({ type: 'patch', fields: { draft: userMessage('hello') } });
+    await flush();
+    actor.send({ type: 'remove' });
+    await flush();
+    expect(harness.removes).toEqual([1]);
+    expect(actor.getSnapshot().status).toBe('done');
   });
 });

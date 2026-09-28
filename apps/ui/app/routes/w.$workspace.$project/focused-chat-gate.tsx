@@ -109,7 +109,7 @@ export function ChatInterfaceSessionGate({
 }): React.JSX.Element {
   'use no memo';
 
-  const { editorRef } = useProject();
+  const { editorRef, projectId } = useProject();
   const focusedChatId = useSelector(editorRef, (state) => state.context.focusedChatId);
   const [lastValidChatId, setLastValidChatId] = useState<string | undefined>(focusedChatId);
 
@@ -126,7 +126,7 @@ export function ChatInterfaceSessionGate({
   }
 
   return (
-    <ActiveChatProvider chatId={lastValidChatId}>
+    <ActiveChatProvider chatId={lastValidChatId} projectId={projectId}>
       {/* The chat's one turn host: it owns the agent-host binding and the
           bodyless body factory, which every consumer of `useCadChatClient`
           used to write over each other. */}

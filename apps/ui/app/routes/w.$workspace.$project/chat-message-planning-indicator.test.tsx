@@ -11,7 +11,6 @@ import { render, screen } from '@testing-library/react';
 import { messageRole } from '@taucad/chat/constants';
 import type { MyUIMessage } from '@taucad/chat';
 import { ChatMessagePlanning } from '#routes/w.$workspace.$project/chat-message-planning.js';
-import type { ChatRetrySnapshot } from '#hooks/use-chat.js';
 import { useChatSidebarStatus } from '#hooks/use-sidebar-status.js';
 import type { ChatSidebarStatus } from '#hooks/use-sidebar-status.js';
 import type { ChatSidebarState } from '#types/chat-sidebar.types.js';
@@ -23,15 +22,11 @@ type SelectorState = {
 };
 
 let mockSelectorState: SelectorState = { status: 'streaming', messages: [], messagesById: new Map() };
-let mockRetrySnapshot: ChatRetrySnapshot = { retryAttempt: 0, retryMaxAttempts: 5 };
 
 vi.mock('#hooks/use-chat.js', () => ({
   useChatContext: () => ({ activeChatId: 'chat-1' }),
   useChatSelector<T>(selector: (state: SelectorState) => T): T {
     return selector(mockSelectorState);
-  },
-  useChatRetrySnapshot(): ChatRetrySnapshot {
-    return mockRetrySnapshot;
   },
 }));
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'project-1' }) }));
@@ -77,7 +72,6 @@ const tool = (state: string, extra: Record<string, unknown> = {}): Record<string
 const indicator = () => screen.queryByRole('status');
 
 beforeEach(() => {
-  mockRetrySnapshot = { retryAttempt: 0, retryMaxAttempts: 5 };
   setRun('working');
 });
 
@@ -169,19 +163,11 @@ describe('ChatMessagePlanning', () => {
     expect(indicator()).toHaveTextContent('Reconnecting…');
   });
 
-  it('S15: counts transport retries even while parts are still open', () => {
+  it('S15: shows host reconnection even while parts are still open', () => {
     setRun('reconnecting');
-    mockRetrySnapshot = { retryAttempt: 2, retryMaxAttempts: 5 };
     setChat('error', [assistant('a1', [tool('input-streaming')])]);
     render(<ChatMessagePlanning messageId='a1' />);
-    expect(indicator()).toHaveTextContent('Reconnecting… 2/5');
-  });
-
-  it('S18: says Finishing up while the completed run saves', () => {
-    setRun('finishing');
-    setChat('ready', [assistant('a1', [{ type: 'text', text: 'Done', state: 'done' }])]);
-    render(<ChatMessagePlanning messageId='a1' />);
-    expect(indicator()).toHaveTextContent('Finishing up…');
+    expect(indicator()).toHaveTextContent(/^Reconnecting…$/u);
   });
 
   it.each(['done', 'failed', 'stopped', 'idle'] as const)(

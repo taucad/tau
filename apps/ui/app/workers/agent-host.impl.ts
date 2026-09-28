@@ -77,6 +77,8 @@ export type ResidentWorkerContext = Readonly<{
 /** One project host incarnation (RH-R4): its launcher serves every stream of the project. */
 export type BrowserProjectHost = Readonly<{
   hostId: string;
+  /** Read this host's current leadership actor without taking a lock. */
+  stoppability: (chatId: string) => ReturnType<AgentLauncher['stoppability']>;
   /** Serve one stream; closing it only detaches (D17). */
   connect: (port: MessagePort) => void;
   /** Swap in fresh bridges, as after a file-manager restart; the launcher and its runs stay (RV1-F1). */
@@ -690,6 +692,7 @@ const composeProjectHost = async (
 
   return {
     hostId: provide.hostId,
+    stoppability: (chatId) => launcher.stoppability(chatId),
     connect: (port) => {
       const channel = serveAgentChannel(port, launcher, {
         build: agentHostWorkerBuild,

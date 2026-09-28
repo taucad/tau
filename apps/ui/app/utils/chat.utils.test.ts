@@ -11,6 +11,7 @@ import {
 import type { RequestTerminationCause } from '#hooks/chat-persistence.machine.js';
 import { clearLedger, recordRpcOutcome } from '#services/rpc-ledger.js';
 import { metaConfig } from '#constants/meta.constants.js';
+import { storedRef } from '#utils/attachment.test-utils.js';
 
 const baseMessage = (parts: MyUIMessage['parts']): MyUIMessage => ({
   id: 'msg-1',
@@ -805,8 +806,8 @@ describe('buildUserMessage', () => {
     const message = buildUserMessage({
       text: '  model the bracket  ',
       attachments: [
-        { hash: imageHash, mediaType: 'image/jpeg' },
-        { hash: documentHash, mediaType: 'application/pdf', filename: 'bracket-spec.pdf' },
+        storedRef({ hash: imageHash, mediaType: 'image/jpeg' }),
+        storedRef({ hash: documentHash, mediaType: 'application/pdf', filename: 'bracket-spec.pdf' }),
       ],
     });
 
@@ -827,7 +828,7 @@ describe('buildUserMessage', () => {
   it('should carry the byte length only when the reference knows it (P29)', () => {
     const message = buildUserMessage({
       text: '',
-      attachments: [{ hash: imageHash, mediaType: 'image/png', byteLength: 42 }],
+      attachments: [storedRef({ hash: imageHash, mediaType: 'image/png', byteLength: 42 })],
     });
 
     expect(message.parts).toEqual([

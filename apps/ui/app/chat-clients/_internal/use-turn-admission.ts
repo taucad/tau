@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback } from 'react';
 import type { CadAgentExecution } from '@taucad/chat';
 import type { ChatExecutionTarget } from '@taucad/chat/schemas';
 import { awaitAgentHostAvailability } from '#hooks/use-cad-agent-config.js';
@@ -10,7 +10,6 @@ import { useProject } from '#hooks/use-project.js';
 import { isBrowserAgentHostProviderKind } from '#services/agent-host-client.js';
 import { daemonPlacementOf } from '#lib/agent-host-placement.js';
 import { useModels } from '#hooks/use-models.js';
-import type { ResolvedModel } from '#hooks/use-models.js';
 import { randomUuid } from '@taucad/utils/id';
 
 /**
@@ -18,9 +17,6 @@ import { randomUuid } from '@taucad/utils/id';
  * so the target names no checkout and no base (W8 TS-S5; `chatExecutionTargetSchema`).
  */
 export const browserHostId = `host_${randomUuid()}`;
-
-/** Upper bound on waiting for `GET /v1/models` to answer before a turn composes. Milliseconds. */
-const modelCatalogWaitTimeout = 20_000;
 
 /** The single admission path every verb of one chat goes through. @public */
 export type TurnAdmission = Readonly<{
@@ -34,8 +30,6 @@ export type TurnAdmission = Readonly<{
   admitExecution: (turnExecution?: CadAgentExecution) => Promise<ChatExecutionTarget>;
   /** Surface a dropped dispatch on the same banner the transport errors use. */
   surfaceDispatchFailure: (error: unknown) => void;
-  /** The catalog row for one model, waiting out a cold `GET /v1/models`. */
-  awaitResolvedModel: (modelId: string) => Promise<ResolvedModel>;
 }>;
 
 /**
@@ -54,27 +48,6 @@ export const useTurnAdmission = (liveExecution: CadAgentExecution): TurnAdmissio
   const { projectId } = useProject();
   const { resolveModel } = useModels();
   const creditPreflight = useCreditPreflight();
-  // Always the current resolver: a dispatch composed before `GET /v1/models`
-  // answers must read the catalog row that arrives *while* it waits, not the
-  // unresolved one its render closed over.
-  const resolveModelRef = useRef(resolveModel);
-  useEffect(() => {
-    resolveModelRef.current = resolveModel;
-  }, [resolveModel]);
-
-  const awaitResolvedModel = useCallback(async (modelId: string): Promise<ResolvedModel> => {
-    const deadline = Date.now() + modelCatalogWaitTimeout;
-    let resolved = resolveModelRef.current(modelId);
-    while (!resolved.isResolved && Date.now() < deadline) {
-      // oxlint-disable-next-line no-await-in-loop -- polling the catalog is inherently serial
-      await new Promise<void>((resolve) => {
-        globalThis.setTimeout(resolve, 100);
-      });
-      resolved = resolveModelRef.current(modelId);
-    }
-    return resolved;
-  }, []);
-
   const admitExecution = useCallback(
     async (turnExecution: CadAgentExecution = liveExecution): Promise<ChatExecutionTarget> => {
       const daemonHostId = daemonPlacementOf(turnExecution);
@@ -102,11 +75,9 @@ export const useTurnAdmission = (liveExecution: CadAgentExecution): TurnAdmissio
        * subscription, so there is no row to resolve and no gateway wire to
        * refuse. */
       if (turnExecution.kind === 'tau') {
-        // The host config is built from the model's catalog row (provider wire,
-        // context window, rates). The seeded first turn composes before
-        // `GET /v1/models` answers, and reading an unresolved row threw the
-        // turn away instead of waiting the moment out.
-        const resolved = await awaitResolvedModel(turnExecution.model);
+        // Catalog lookup is advisory here: M1 refuses an unknown model, while
+        // the picker refreshes from its own subscription. Admission never polls.
+        const resolved = resolveModel(turnExecution.model);
         // The availability above is per project; the model's wire is per
         // turn. A resolved catalog row the browser host cannot speak (the
         // `tau` replay row, for one) must refuse here, before a body is
@@ -132,7 +103,7 @@ export const useTurnAdmission = (liveExecution: CadAgentExecution): TurnAdmissio
        * worker's revision root (W8 TS-S5). */
       return { hostId: daemonHostId ?? browserHostId };
     },
-    [awaitResolvedModel, creditPreflight, liveExecution, projectId],
+    [creditPreflight, liveExecution, projectId, resolveModel],
   );
 
   const surfaceDispatchFailure = useCallback(
@@ -152,5 +123,5 @@ export const useTurnAdmission = (liveExecution: CadAgentExecution): TurnAdmissio
     [activeChatId, store],
   );
 
-  return { admitExecution, surfaceDispatchFailure, awaitResolvedModel };
+  return { admitExecution, surfaceDispatchFailure };
 };

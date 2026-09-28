@@ -1201,12 +1201,15 @@ export const FileEditor = memo(function ({
   const { modelService, markerService } = useMonacoServices();
   const planModeEnabled = useFeature('planMode');
   const handledSaveCompletion = useRef<Promise<void> | undefined>(undefined);
-  const openFiles = useSelector(editorRef, (state) => state.context.openFiles);
   // Resolve the live path via the stable paneId. The path param the
   // panel was created with is a starting hint only — once the panel is
   // mounted, the rename participant updates `openFiles[i].path` in
   // place and this selector picks the fresh path.
-  const liveEntry = openFiles.find((file) => file.paneId === paneId);
+  const liveEntry = useSelector(
+    editorRef,
+    (state) => state.context.openFiles.find((file) => file.paneId === paneId),
+    (previous, next) => previous?.path === next?.path && previous?.readOnly === next?.readOnly,
+  );
   const filePath = liveEntry?.path ?? filePathFromParams;
   const readOnly = isPaneReadOnly(readOnlyFromParams ?? liveEntry?.readOnly, useFileTreeEntry(filePath)?.provenance);
   const paneParameters = parameters ?? { filePath: filePathFromParams, readOnly: readOnlyFromParams };

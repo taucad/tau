@@ -1034,6 +1034,12 @@ function Sheet({
       const { model: _model, ...base }: AcpAgentExecution = isSameAgent
         ? execution
         : { kind: 'acp', hostId: agent.hostId, agentId: agent.agentId };
+      const thoughtId = configOptionOf(agentConfig, 'thought_level')?.id;
+      if (isSameAgent && execution.model !== modelId && thoughtId && base.config) {
+        const config = { ...base.config };
+        delete config[thoughtId];
+        base.config = Object.keys(config).length === 0 ? undefined : config;
+      }
       setActiveExecution(modelId === undefined ? base : { ...base, model: modelId });
     }
     returnTo.current = 'level';

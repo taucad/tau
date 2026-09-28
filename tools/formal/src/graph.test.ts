@@ -1,6 +1,10 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import type { SpecView } from '#graph.js';
-import { buildSpecGraph, coveringSuite, suiteBehaviours, walkPaths } from '#graph.js';
+import { staleFiles } from '#export.js';
+import type { SpecGraph, SpecView } from '#graph.js';
+import { buildSpecGraph, coveringSuite, readSpecGraph, serializeGraph, suiteBehaviours, walkPaths } from '#graph.js';
 
 const state = (phase: string, act: string, retries = 0): SpecView => ({ act: [act], turn: { phase, retries } });
 const init = state('idle', 'Init');
@@ -58,5 +62,26 @@ describe('spec graph', () => {
     ).toEqual([
       { path: 1, step: 2, action: '["Retry"]', allowed: [retried], actual: { turn: { phase: 'busy', retries: 2 } } },
     ]);
+  });
+
+  it('should retain every state and transition when a large graph is compacted', () => {
+    const graph: SpecGraph = {
+      initial: [0],
+      views: Array.from({ length: 1200 }, (_, id) => ({ id, payload: 'x'.repeat(1000) })),
+      edges: Array.from({ length: 1199 }, (_, from) => [from, from + 1, 'Next']),
+    };
+    const directory = mkdtempSync(path.join(tmpdir(), 'formal-graph-'));
+    try {
+      const file = path.join(directory, 'graph.json');
+      const serialized = serializeGraph(graph);
+      expect(serialized.length).toBeLessThan(1_000_000);
+      writeFileSync(file, serialized);
+      expect(readSpecGraph(file)).toEqual(graph);
+      expect(staleFiles({ [file]: serialized })).toEqual([]);
+      writeFileSync(file, JSON.stringify({ ...JSON.parse(serialized), edges: [] }));
+      expect(staleFiles({ [file]: serialized })).toEqual([file]);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });

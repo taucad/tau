@@ -31,6 +31,12 @@ describe('galleryProjects', () => {
     expect(galleryProjects[0]?.locator).toBe(featuredCommunityLocator);
   });
 
+  it('should give the featured example its thinner-edged featured thumbnail', () => {
+    // Opt a new featured example in with `"featured": true` in its example.json, then regenerate thumbnails.
+    expect(galleryProjects[0]?.featuredThumbnail).toBeDefined();
+    expect(galleryProjects[0]?.featuredThumbnail).not.toBe(galleryProjects[0]?.thumbnail);
+  });
+
   it('should show the first ten curated examples on both landing variants', () => {
     // Both landings render `galleryProjects` with `limit={10}`; a new builtin must not displace these.
     expect(galleryProjects.slice(0, 10).map(({ locator }) => locator)).toEqual([

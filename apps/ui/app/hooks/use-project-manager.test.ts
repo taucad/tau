@@ -1617,6 +1617,50 @@ describe('useProjectManager.createProject', () => {
     expect(mockListProjectManifests).toHaveBeenCalledTimes(2);
   });
 
+  it.each([
+    { change: 'fileDeleted', path: '/test-project/tau.json', next: { roots: [], entries: [] }, status: 'missing' },
+    {
+      change: 'fileWritten',
+      path: '/test-project-copy/tau.json',
+      next: {
+        roots: validProjectDiscovery.roots,
+        entries: [
+          { status: 'duplicate-id', manifest: fakeProject, locator: fakeLocator },
+          {
+            status: 'duplicate-id',
+            manifest: fakeProject,
+            locator: { ...fakeLocator, relativeDirectory: 'test-project-copy' },
+          },
+        ],
+      },
+      status: 'conflict',
+    },
+  ] as const)('does not admit a stale in-flight route after $change', async ({ change, path, next, status }) => {
+    mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toMatchObject({ status: 'ready' });
+
+    const staleScan = Promise.withResolvers<void>();
+    const scanStarted = Promise.withResolvers<void>();
+    mockListProjectManifests
+      .mockImplementationOnce(async () => {
+        scanStarted.resolve();
+        await staleScan.promise;
+        return validProjectDiscovery;
+      })
+      .mockResolvedValue(next);
+    const listing = result.current.getProjectListing();
+    await scanStarted.promise;
+    act(() => emitWorkerChange(change, path));
+    const route = result.current.getProjectRouteAccess(fakeProject.id);
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    staleScan.resolve();
+
+    await listing;
+    await expect(route).resolves.toMatchObject({ status });
+    expect(mockListProjectManifests).toHaveBeenCalledTimes(3);
+  });
+
   it('does not replay bootstrap work after project root configuration changes', async () => {
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
     await result.current.getProjectRouteAccess(fakeProject.id);

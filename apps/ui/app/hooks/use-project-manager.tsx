@@ -625,6 +625,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
   /** Settle attempts per pending operation this session (DF11 retry cap). */
   const recoveryAttemptsRef = useRef(new Map<string, number>());
   const discoveryPassRef = useRef<Promise<ProjectDiscoveryResult> | undefined>(undefined);
+  const discoveryPassEpochRef = useRef<number | undefined>(undefined);
   const connectionTraceRef = useRef<WorkspaceConnectionTrace | undefined>(undefined);
   const connectionPromiseRef = useRef<Promise<ConnectedWorkspace | undefined> | undefined>(undefined);
   /**
@@ -1330,9 +1331,11 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
           return await runDiscoveryPass(options);
         } finally {
           discoveryPassRef.current = undefined;
+          discoveryPassEpochRef.current = undefined;
         }
       })();
       discoveryPassRef.current = pass;
+      discoveryPassEpochRef.current = discoveryEpochRef.current;
       return pass;
     },
     [runDiscoveryPass],
@@ -1592,43 +1595,63 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     async (projectId: string): Promise<ProjectRouteAccess> => {
       await ensureDiscoveryReady();
       const worker = await getReadiedWorker();
-      const recovery = [...recoveriesRef.current.values()].find((entry) => entry.projectId === projectId);
-      if (recovery?.status === 'recovering') {
-        return { status: 'recovering', recovery };
+      for (;;) {
+        const recovery = [...recoveriesRef.current.values()].find((entry) => entry.projectId === projectId);
+        if (recovery?.status === 'recovering') {
+          return { status: 'recovering', recovery };
+        }
+        if (recovery?.status === 'failed') {
+          return { status: 'recovery-failed', recovery };
+        }
+        const snapshot = discoverySnapshotRef.current;
+        let epoch = discoveryEpochRef.current;
+        let discovery: ProjectDiscoveryResult;
+        if (snapshot?.epoch === epoch) {
+          discovery = snapshot.result;
+        } else {
+          const pending = discoverProjects();
+          epoch = discoveryPassEpochRef.current ?? epoch;
+          discovery = await pending;
+          if (epoch !== discoveryEpochRef.current) {
+            continue;
+          }
+        }
+        const valid = discovery.entries.find(
+          (entry): entry is Extract<ProjectDiscoveryEntry, { status: 'valid' }> =>
+            entry.status === 'valid' && entry.manifest.id === projectId,
+        );
+        if (valid) {
+          const library = await ensureProjectLibraryState(worker, projectId);
+          if (epoch !== discoveryEpochRef.current) {
+            continue;
+          }
+          return library.deletedAt === undefined
+            ? { status: 'ready', project: valid.manifest }
+            : { status: 'trashed', project: valid.manifest };
+        }
+        if (discovery.entries.some((entry) => entry.status === 'route-blocked' && entry.manifest.id === projectId)) {
+          return { status: 'unavailable' };
+        }
+        if (discovery.entries.some((entry) => entry.status === 'duplicate-id' && entry.manifest.id === projectId)) {
+          return { status: 'conflict' };
+        }
+        const config = await getProjectFileSystemConfig(projectId);
+        if (epoch !== discoveryEpochRef.current) {
+          continue;
+        }
+        if (
+          config &&
+          config.backend !== 'memory' &&
+          discovery.roots.some(
+            (root) =>
+              root.status === 'inaccessible' &&
+              persistentStorageRootKey(root.root) === persistentStorageRootKey(config),
+          )
+        ) {
+          return { status: 'unavailable' };
+        }
+        return { status: 'missing' };
       }
-      if (recovery?.status === 'failed') {
-        return { status: 'recovery-failed', recovery };
-      }
-      const snapshot = discoverySnapshotRef.current;
-      const discovery = snapshot?.epoch === discoveryEpochRef.current ? snapshot.result : await discoverProjects();
-      const valid = discovery.entries.find(
-        (entry): entry is Extract<ProjectDiscoveryEntry, { status: 'valid' }> =>
-          entry.status === 'valid' && entry.manifest.id === projectId,
-      );
-      if (valid) {
-        const library = await ensureProjectLibraryState(worker, projectId);
-        return library.deletedAt === undefined
-          ? { status: 'ready', project: valid.manifest }
-          : { status: 'trashed', project: valid.manifest };
-      }
-      if (discovery.entries.some((entry) => entry.status === 'route-blocked' && entry.manifest.id === projectId)) {
-        return { status: 'unavailable' };
-      }
-      if (discovery.entries.some((entry) => entry.status === 'duplicate-id' && entry.manifest.id === projectId)) {
-        return { status: 'conflict' };
-      }
-      const config = await getProjectFileSystemConfig(projectId);
-      if (
-        config &&
-        config.backend !== 'memory' &&
-        discovery.roots.some(
-          (root) =>
-            root.status === 'inaccessible' && persistentStorageRootKey(root.root) === persistentStorageRootKey(config),
-        )
-      ) {
-        return { status: 'unavailable' };
-      }
-      return { status: 'missing' };
     },
     [discoverProjects, ensureDiscoveryReady, ensureProjectLibraryState, getReadiedWorker],
   );

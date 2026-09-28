@@ -1,5 +1,6 @@
 import { desktopBridge, isDesktopTarget } from '#filesystem/desktop-bridge.js';
 import { desktopWorkspaceRoot, openAgentHostChannel } from '#lib/agent-host-placement.js';
+import { isFeatureEnabled } from '#flags/feature-flags.js';
 import { probeBrowserAgentHostCapability } from '#services/agent-host-client.js';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
@@ -32,7 +33,11 @@ export const registerProjectAgentHost = async (
   const workspaceRoot = await desktopWorkspaceRoot(projectId);
   await bridge.agentHost.retain(workspaceRoot, projectId, attachmentId);
   try {
-    const client = await openAgentHostChannel('desktop', { workspaceRoot, projectId });
+    const client = await openAgentHostChannel('desktop', {
+      workspaceRoot,
+      projectId,
+      geoSpecEngine: isFeatureEnabled('nativeGeoSpec') ? 'native' : 'legacy',
+    });
     try {
       /* `attach` answers at once and opens nothing for a chat nothing wrote (W0.12); a `read` would park. */
       const answer = await client.execute({

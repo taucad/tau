@@ -1,0 +1,16 @@
+{
+  "purpose": "Canonical encoding of definition path/hash records only; no Engine construction or geometric verifier execution",
+  "node": "v24.10.0",
+  "nodeExecutable": "/Users/rifont/.nvm/versions/node/v24.10.0/bin/node",
+  "nodeExecutableSha256": "9e759d34d97af8a71b75854d20af297794611155406997f06d796b5e0f6d573b",
+  "encoderAddon": "docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lead/matcher-full-entry/native-b55-artifacts/installed/@taucad/geospec-engine-native-darwin-arm64/geospec-engine-native.darwin-arm64.node",
+  "encoderAddonSha256": "5cb5e0d27c11fd298e76a1b2acb1972a89c1c113d8486eca60f1c8cbb6af060f",
+  "encoderCodecSha256": "3aa512f1f3c0313ee45a508a970af445717eea6236cdb7c051c69a599f628d7c",
+  "recordsSha256": "757e741b398ec5b722e2ae0c524db6dd61cb98573b5b860b954957cf1ec7b81e",
+  "canonicalBytes": 5464,
+  "verifierSourceHash": "831b4425151e11660c9e07f86babfecfd3adaaaf273991a623ce7ae9e0ad59b3",
+  "independentAsciiEncodingEqual": true,
+  "newVerifierBinaryProduced": false,
+  "definitionSourceCount": 8,
+  "dependencyArchiveCount": 37
+}

@@ -83,6 +83,13 @@ const rpcForTool: Readonly<
   [toolName.updateTodos]: { rpc: rpcName.writeTodos },
 };
 
+const geospecAuthoringRecipes = {
+  legacy:
+    "Selected GeoSpec API: legacy. Import describe, it, and expectGeo from 'geospec'; import loadModel from 'geospec/model'. Load with await loadModel({ file: 'main.ts' }) and assert with expectGeo(model).",
+  native:
+    "Selected GeoSpec API: native. Import describe, it, and expectNativeGeo from 'geospec'; import loadNativeModel from 'geospec/runner/native'. Load with await loadNativeModel({ file: 'main.ts' }) and await every expectNativeGeo(model) assertion.",
+} as const;
+
 /**
  * Records Tau writes on the agent's behalf. The agent's own composed view keeps
  * `.tau/artifacts` and `.tau/chats` read-only, so these writes go through the
@@ -198,6 +205,8 @@ export type ChatToolRegistryOptions = {
   readonly images?: RpcImageClient | undefined;
   /** Backs `test_model`. */
   readonly geospec?: RpcGeoSpecClient | undefined;
+  /** Authoring API served by `geospec`; the caller pairs it with the selected runner. Defaults to legacy. */
+  readonly geospecAuthoringMode?: 'legacy' | 'native' | undefined;
   /** Backs `use_skill`. */
   readonly skillResolver?: RpcSkillResolver | undefined;
   /** Backs the read-only `revisions` tool; a host without a revision graph omits it. */
@@ -251,7 +260,10 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
   const byName = new Map<string, (typeof schemas)[number]>(schemas.map((entry) => [entry.toolName, entry]));
   const definitions: HostToolDefinition[] = schemas.map((entry) => ({
     name: entry.toolName,
-    description: toolDescriptions[entry.toolName as keyof typeof toolDescriptions],
+    description:
+      entry.toolName === toolName.testModel
+        ? `${toolDescriptions[toolName.testModel]}\n\n${geospecAuthoringRecipes[options.geospecAuthoringMode ?? 'legacy']}`
+        : toolDescriptions[entry.toolName as keyof typeof toolDescriptions],
     // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- draft-7 JSON Schema is JSON by construction.
     inputSchema: toProviderToolJsonSchema(entry.schema) as JsonObject,
     ...(rpcForTool[entry.toolName]?.sequential === true ? { executionMode: 'sequential' } : {}),

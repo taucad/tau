@@ -2292,7 +2292,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       ]);
     }
 
-    const missingDependencies = missingPaths.filter((path) => roles.get(path) !== 'additional');
+    // Middleware dependencies may be absent (the normal compute path hashes them as 'missing').
+    // Keep them selected for existence/coherence checks; kernel dependencies still require bytes.
+    const missingDependencies = missingPaths.filter((path) => roles.get(path) === 'kernel-dependency');
     const unresolvedPaths = [...new Set([...initial.unresolvedPaths, ...missingDependencies])].sort();
     const issues: KernelIssue[] =
       unresolvedPaths.length === 0

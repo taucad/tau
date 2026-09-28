@@ -1,0 +1,59 @@
+[package]
+name = "geospec-engine-native-occt"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.88"
+license = "Apache-2.0"
+publish = false
+build = "build.rs"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+geospec-engine-native-core = { path = "../../../rust" }
+serde = { version = "=1.0.219", features = ["derive"] }
+
+[build-dependencies]
+cc = "=1.4.4"
+
+[features]
+# Compiles the bridge through native/occt/tests/qualification.cpp, the
+# synthetic OCCT controls that tests/qualification.rs runs.
+qualification = []
+
+[dev-dependencies]
+serde_json = { version = "=1.0.143", features = ["float_roundtrip"] }
+
+[[test]]
+name = "trimmed_cylinder"
+path = "tests/trimmed_cylinder.rs"
+
+[[test]]
+name = "set_containment"
+path = "tests/set_containment.rs"
+
+[[test]]
+name = "report_bundle"
+path = "tests/report_bundle.rs"
+
+[[test]]
+name = "parallel_plane_distance_source"
+path = "tests/parallel_plane_distance_source.rs"
+
+[[test]]
+name = "circular_bores"
+path = "tests/circular_bores.rs"
+
+[[test]]
+name = "box_clearance_subjects"
+path = "tests/box_clearance_subjects.rs"
+
+[[test]]
+name = "edge_treatments"
+path = "tests/edge_treatments.rs"
+
+[[test]]
+name = "qualification"
+path = "tests/qualification.rs"
+required-features = ["qualification"]

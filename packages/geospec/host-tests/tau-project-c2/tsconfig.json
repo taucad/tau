@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.spec.json",
+  "compilerOptions": {
+    "paths": {
+      "@taucad/geospec-engine-native/node": [
+        "../../../../node_modules/.cache/geospec-engine-native/m3-geometry-a1/principal-integration-a14/node/node_modules/@taucad/geospec-engine-native/dist/node.d.mts"
+      ]
+    }
+  },
+  "files": [],
+  "include": ["**/*.ts", "*.mts"]
+}

@@ -501,7 +501,11 @@ describe('createBrowserAgentHostClient', () => {
   it('provides the project host once and drives start, steer, cancel, resume and live events over one stream', async () => {
     const worker = new FakeResidentWorker();
     const openComputeStorePort = vi.fn();
-    const client = createTestClient(workerOf(worker), { computeMode: 'off', openComputeStorePort });
+    const client = createTestClient(workerOf(worker), {
+      computeMode: 'off',
+      openComputeStorePort,
+      geoSpecEngine: 'native',
+    });
     const events: unknown[] = [];
     const liveEvents: unknown[] = [];
     const unsubscribe = client.subscribe({ chatId: 'chat-1', cursor: 0 }, (_chatId, event) => {
@@ -527,6 +531,7 @@ describe('createBrowserAgentHostClient', () => {
       args: {
         projectId: 'project-one',
         computeMode: 'off',
+        geoSpecEngine: 'native',
         authority: { projectId: 'project-one', workspaceId: 'workspace-one' },
         model: { providerKind: 'openai' },
       },

@@ -318,6 +318,57 @@ describe('ChatAgentSheet', () => {
     expect(select).toHaveBeenCalledWith('thought_level', 'high');
   });
 
+  it('clears a previous model’s reasoning choice when choosing another ACP model', async () => {
+    state.execution = {
+      kind: 'acp',
+      hostId: 'desktop',
+      agentId: 'codex',
+      model: 'gpt-5.6-sol',
+      config: { reasoning_effort: 'ultra' },
+    };
+    const placement = codex();
+    state.placements = [
+      {
+        ...placement,
+        externalAgents: [
+          {
+            id: 'codex',
+            displayName: 'Codex',
+            defaultModel: 'gpt-5.6-sol',
+            models: [
+              { id: 'gpt-5.6-sol', name: 'GPT-5.6-Sol' },
+              { id: 'gpt-5.5', name: 'GPT-5.5' },
+            ],
+          },
+        ],
+      },
+    ];
+    renderSheet(vi.fn(), {
+      options: [
+        {
+          type: 'select',
+          id: 'reasoning_effort',
+          name: 'Reasoning effort',
+          category: 'thought_level',
+          currentValue: 'medium',
+          options: [{ value: 'ultra', name: 'Ultra' }],
+        },
+      ],
+      valueOf: (option) => option.currentValue,
+      select: vi.fn(),
+    });
+    await userEvent.click(screen.getByRole('button', { name: /^Agent and model/u }));
+    await userEvent.click(screen.getByRole('button', { name: /^Model: .*Change$/u }));
+    await userEvent.click(screen.getByRole('option', { name: 'GPT-5.5' }));
+
+    expect(setActiveExecution).toHaveBeenCalledWith({
+      kind: 'acp',
+      hostId: 'desktop',
+      agentId: 'codex',
+      model: 'gpt-5.5',
+    });
+  });
+
   it('steps back one view on Escape, and closes only from the settings', async () => {
     const { focusEditor } = renderSheet();
     await userEvent.click(screen.getByRole('button', { name: /^Agent and model/u }));

@@ -30,7 +30,7 @@ const nativeOpenCascadeArtifacts = [
 ] as const;
 
 const packageConfig: UserConfig = {
-  // Six entries: the library, the host-neutral and Node registrations, the
+  // Entries include the library, host-neutral and Node registrations, the
   // `geospec` bin, the light WASM URL, and the pool worker's thread entry — a worker loads a URL,
   // so its module must exist as a real file beside the runner that spawns it.
   entry: [
@@ -39,6 +39,9 @@ const packageConfig: UserConfig = {
     'src/register-node.ts',
     'src/cli/main.ts',
     'src/runner/node/pool-worker-entry.ts',
+    'src/runner/node/native-pool-worker-entry.ts',
+    'src/runner/node/native-pool-runner.ts',
+    'src/runner/node/node-vm-filesystem.ts',
     'src/native/opencascade-wasm.ts',
   ],
   sourcemap: false,

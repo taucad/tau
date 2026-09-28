@@ -1,0 +1,731 @@
+#!/usr/bin/env python3
+"""Pure host checks for the selected native deployment floor; no build or product load.
+
+Usage: python3 -B packages/geospec-engine-native/scripts/test_deployment_target.py
+Exit: 0 success; 1 assertion failure. Tool discovery and execution are mocked.
+"""
+
+import ast
+from contextlib import ExitStack
+from copy import deepcopy
+import hashlib
+import importlib.util
+import io
+import json
+import os
+from pathlib import Path
+import re
+import shlex
+import subprocess
+import tarfile
+import tempfile
+from types import SimpleNamespace
+import unittest
+from unittest.mock import call, patch
+
+
+SCRIPTS = Path(__file__).resolve().parent
+
+
+def load_script(name):
+    spec = importlib.util.spec_from_file_location(name, SCRIPTS / f'{name}.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+prepare = load_script('prepare-delivery')
+materials = load_script('generate-delivery-materials')
+
+
+class DeploymentTargetTest(unittest.TestCase):
+    def test_should_carry_job_limits_and_owned_git_ceilings_through_env_i(self):
+        tools = {name: f'/recorded/{name}/bin/{name}'
+                 for name in ['node', 'python3', 'cmake', 'ninja', 'git', 'rustup', 'xcrun', 'bash']}
+        closure = {
+            'cache': '/recorded/build', 'output': '/recorded/output',
+            'occtPrefix': '/recorded/prep/occt-mixed/install',
+            'rustPrefix': '/recorded/rust', 'sdkPrefix': '/recorded/sdk',
+            'sourceRoot': str(materials.ROOT), 'preparationCache': '/recorded/prep',
+            'environment': {'HOME': '/recorded/home', 'EM_CONFIG': '/recorded/config'},
+            'wasmEh': prepare.RECIPE['wasmEh'],
+            'tools': tools,
+            **{name: f'/recorded/tools/{name}' for name in ['rustc', 'cargo', 'emcc', 'emxx', 'emar']},
+        }
+        mixed = {'closure': closure, 'attribution': {'mock': True},
+                 'commands': [{'executable': '/usr/bin/env', 'args': []}],
+                 'prefix': {'environment': {}, 'command': ['/usr/bin/env']}}
+        with patch.object(Path, 'read_text', return_value='# mocked Emscripten config\n'):
+            recipe = materials.mixed_producer_recipe(mixed)
+        self.assertNotIn('EMCC_CORES', recipe['recordedEnvironment'])
+        closure['wasmSimd'] = prepare.RECIPE['wasmSimd']
+        closure['occtPrefix'] = '/recorded/prep/occt-mixed-simd128/install'
+        with patch.object(Path, 'read_text', return_value='# mocked Emscripten config\n'):
+            simd_recipe = materials.mixed_producer_recipe(mixed)
+        self.assertEqual(simd_recipe['recordedEnvironment']['CARGO_ENCODED_RUSTFLAGS'],
+                         '-C\x1ftarget-feature=+simd128')
+        self.assertTrue(simd_recipe['recordedEnvironment']['CXXFLAGS_wasm32_unknown_emscripten']
+                        .startswith('-msimd128 '))
+        self.assertIn('occt-mixed-simd128', simd_recipe['rebuildMixedPrefix'])
+        self.assertIn('occt-mixed-simd128/install', simd_recipe['prepare'])
+        recipe = simd_recipe
+        exported = {name: '/owned path/' + name for name in recipe['requiredExportedVariables']}
+        exported['GEOSPEC_SOURCE_ROOT'] = str(SCRIPTS)
+        ceiling = ':'.join(exported[name] for name in
+                           ['GEOSPEC_RELINK_ROOT', 'GEOSPEC_MIXED_PREP', 'GEOSPEC_MIXED_BUILD'])
+        for jobs in [None, '1']:
+            env = {'PATH': '/usr/bin:/bin', **exported}
+            if jobs is not None:
+                env['GEOSPEC_OCCT_JOBS'] = jobs
+            for key in ['rebuildMixedPrefix', 'buildAndLink']:
+                with self.subTest(jobs=jobs, route=key):
+                    # The only inner executable is /usr/bin/env, never a compiler or Git.
+                    output = subprocess.check_output(['/bin/bash', '-c', recipe[key]], env=env, text=True)
+                    inner = dict(line.split('=', 1) for line in output.splitlines())
+                    for name in ['GEOSPEC_OCCT_JOBS', 'EMCC_CORES', 'CARGO_BUILD_JOBS', 'BINARYEN_CORES']:
+                        self.assertEqual(inner[name], jobs or '2')
+                    self.assertEqual(inner['GIT_CEILING_DIRECTORIES'], ceiling)
+
+    def contract(self, kind):
+        context = {
+            'compiler': {'clang': Path('/tools/clang'), 'clang++': Path('/tools/clang++')},
+            'sdkPath': Path('/tools/sdk'),
+            'supportPayloads': {'native': {}, 'mixed': {}},
+            'toolMetadata': {},
+        }
+        paths = {key: Path('/tools') / key for key in ['bash', 'git', 'node']}
+        with patch.object(prepare, 'digest', return_value='mock-source-pin'):
+            return prepare.prefix_contract(kind, paths, {}, context)
+
+    def recipe(self):
+        workspace = (materials.ROOT / 'pnpm-workspace.yaml').read_text()
+        version = re.search(r"^\s*'@napi-rs/cli':\s*([^\s#]+)", workspace, re.MULTILINE)[1]
+        with patch.object(materials, 'selected_executable', side_effect=lambda name: Path('/tools') / name), \
+                patch.object(materials, 'run', return_value='/tools/selected\n'), \
+                patch.object(materials, 'executable_identity', return_value={'mock': True}):
+            return materials.native_producer_recipe({'selectedVersion': version})
+
+    def test_should_select_the_ruled_floor(self):
+        self.assertEqual(prepare.RECIPE['macosDeploymentTarget'], '11.0')
+
+    def test_should_select_the_floor_in_all_workspace_producer_commands(self):
+        recipe = self.recipe()
+        for route in recipe['sourceSelectedRoutes'].values():
+            command = next(c for c in route if 'napi build --manifest-path' in c) if isinstance(route, list) else route
+            words = shlex.split(command)
+            self.assertTrue(words[0].startswith('MACOSX_DEPLOYMENT_TARGET='))
+            # Preserve the real reader; replace all producer execution with env printing.
+            prefix = command.split(' GEOSPEC_PRODUCER_ROUTE=', 1)[0]
+            output = subprocess.check_output(['/bin/bash', '-c', prefix + ' /usr/bin/env'],
+                                             cwd=materials.ROOT, text=True)
+            self.assertIn('MACOSX_DEPLOYMENT_TARGET=11.0', output.splitlines())
+
+    def test_should_preserve_target_defaults_and_honor_absolute_cargo_target_dir(self):
+        defaults = {
+            'node': str(materials.ROOT / 'node_modules/.cache/geospec-engine-native/node-target'),
+            'python313': 'node_modules/.cache/geospec-engine-native/python-target',
+            'python314': 'node_modules/.cache/geospec-engine-native/python314-target',
+        }
+        for name, route in self.recipe()['sourceSelectedRoutes'].items():
+            command = next(c for c in route if 'napi build --manifest-path' in c) if isinstance(route, list) else route
+            argument = re.search(r'--target-dir ("[^"]*"|\S+)', command)[1]
+            for override in [None, '', '/owned build/fresh-target']:
+                with self.subTest(route=name, override=override):
+                    env = {'PATH': '/usr/bin:/bin'}
+                    if override is not None:
+                        env['CARGO_TARGET_DIR'] = override
+                    # Expand only the real target argument; no producer command runs.
+                    output = subprocess.check_output(['/bin/bash', '-c', 'printf "%s\\n" ' + argument],
+                                                     cwd=materials.ROOT, env=env, text=True)
+                    self.assertEqual(output.splitlines(), [override or defaults[name]])
+
+    def test_should_bind_native_environment_and_cmake_to_the_same_selection(self):
+        native = self.contract('native')
+        mixed = self.contract('mixed')
+        for target in ['11.0', '12.0']:
+            with self.subTest(target=target), patch.dict(prepare.RECIPE, macosDeploymentTarget=target):
+                contract = self.contract('native')
+                self.assertEqual(contract['environment']['MACOSX_DEPLOYMENT_TARGET'], target)
+                self.assertIn(f'-DCMAKE_OSX_DEPLOYMENT_TARGET={target}', contract['command'])
+                self.assertEqual(self.contract('mixed'), mixed)
+                if target != '11.0':
+                    self.assertNotEqual(contract, native)
+        self.assertNotIn('MACOSX_DEPLOYMENT_TARGET', mixed['environment'])
+
+    def test_should_emit_the_selected_floor_for_all_standalone_native_builds(self):
+        read_json = materials.read_json
+        selected = read_json(SCRIPTS / 'selected-delivery.json')
+        for target in ['11.0', '12.0']:
+            def read_selection(path):
+                if Path(path) == SCRIPTS / 'selected-delivery.json':
+                    return {**selected, 'macosDeploymentTarget': target}
+                return read_json(path)
+
+            with self.subTest(target=target), patch.object(materials, 'read_json', side_effect=read_selection):
+                recipe = self.recipe()
+                self.assertEqual(recipe['environment']['MACOSX_DEPLOYMENT_TARGET'], target)
+                for command in recipe['standaloneRoutes'].values():
+                    words = shlex.split(command.replace('\\\n', ''))
+                    self.assertEqual([w for w in words if w.startswith('MACOSX_DEPLOYMENT_TARGET=')],
+                                     [f'MACOSX_DEPLOYMENT_TARGET={target}'])
+
+                # Render only the actual README template, without its filesystem/tool producer.
+                tree = ast.parse((SCRIPTS / 'generate-delivery-materials.py').read_text())
+                template = next(n for n in ast.walk(tree) if isinstance(n, ast.JoinedStr)
+                                and isinstance(n.values[0], ast.Constant)
+                                and n.values[0].value.startswith('# GeoSpec native source and relink material'))
+                readme = eval(compile(ast.Expression(template), '<README template>', 'eval'),
+                              {'archive_name': 'occt.tar.gz', 'native_recipe': recipe, 'shlex': shlex})
+                self.assertIn(f'export MACOSX_DEPLOYMENT_TARGET={target}', readme)
+                self.assertIn('-DCMAKE_OSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET"', readme)
+
+
+class PreparationContractTest(unittest.TestCase):
+    """Real receipt functions over inert bytes; no compiler, tool or product runs."""
+
+    def setUp(self):
+        self.stack = ExitStack()
+        self.addCleanup(self.stack.close)
+        self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory())).resolve()
+        self.cache = self.root / 'cache'
+        self.package = self.root / 'package'
+        self.prefix = self.cache / 'occt-mixed-simd128'
+        for directory in [self.prefix / 'install/lib', self.prefix / 'build',
+                          self.package / 'native/occt', self.cache / 'downloads']:
+            directory.mkdir(parents=True)
+        self.builder = self.package / 'native/occt/build-occt.sh'
+        self.builder.write_text('inert builder bytes')
+        archive = self.cache / 'downloads/occt.tar.gz'
+        archive.write_text('inert source archive bytes')
+        self.recipe = deepcopy(prepare.RECIPE)
+        self.recipe['occt']['sha256'] = prepare.digest(archive)
+        self.recipe_path = self.root / 'selected-delivery.json'
+        self.recipe_path.write_text(json.dumps(self.recipe))
+        self.original_recipe = self.prefix / 'selected-delivery.json'
+        self.original_recipe.write_bytes(self.recipe_path.read_bytes())
+        self.library = self.prefix / 'install/lib/libTKMock.a'
+        self.library.write_text('inert library bytes')
+        self.header = self.prefix / 'install/mock.hxx'
+        self.header.write_text('inert header bytes')
+        (self.prefix / 'build/CMakeCache.txt').write_text('inert CMake cache')
+        (self.prefix / 'static-toolkit-closure.txt').write_text('lib/libTKMock.a\n')
+        self.paths = {}
+        for name in ['bash', 'git', 'node', 'python3', 'rustc', 'cargo', 'emcc', 'emxx', 'emar']:
+            self.paths[name] = self.root / name
+            self.paths[name].write_text('inert tool: ' + name)
+        self.context = {
+            'compiler': {'clang': self.root / 'clang', 'clang++': self.root / 'clang++'},
+            'sdkPath': self.root / 'sdk',
+            'supportPayloads': {'native': {'sha256': 'native-support'}, 'mixed': {'sha256': 'mixed-support'}},
+            'toolMetadata': {'executables': {'emcc': {'sha256': prepare.digest(self.paths['emcc'])}}},
+        }
+        config = self.cache / 'emscripten.config'
+        config.write_text('inert config')
+        (self.cache / 'tool-metadata.json').write_text('{}')
+        self.env = {'EM_CONFIG': str(config), 'PATH': '/inert/tools'}
+        self.stack.enter_context(patch.dict(os.environ, {}, clear=True))
+        for name, value in {'CACHE': self.cache, 'PACKAGE': self.package, 'RECIPE': self.recipe,
+                            'RECIPE_PATH': self.recipe_path, 'SOURCE': self.cache / 'sources/occt',
+                            'MIXED': self.prefix / 'install',
+                            'MIXED_INPUTS': self.cache / 'mixed-inputs-simd128.json',
+                            'RUST': self.root / 'rust'}.items():
+            self.stack.enter_context(patch.object(prepare, name, value))
+        self.receipt_path = self.prefix / 'prefix-receipt.json'
+        self.receipt = prepare.create_prefix_receipt(self.prefix, self.contract())
+        prepare.write_json(self.receipt_path, self.receipt)
+
+    def contract(self, kind='mixed'):
+        return prepare.prefix_contract(kind, self.paths, self.env, self.context)
+
+    def verify(self):
+        return prepare.verify_prefix(self.prefix, self.contract())
+
+    def test_should_prepare_only_selected_prefix_after_common_gates(self):
+        for selection, expected in [(None, ['native', 'mixed']), ('mixed', ['mixed']), ('native', ['native'])]:
+            with self.subTest(selection=selection), \
+                    patch.object(prepare, 'room') as room, \
+                    patch.object(prepare, 'prepare_sources') as sources, \
+                    patch.object(prepare, 'prefix_context', return_value=self.context) as context, \
+                    patch.object(prepare, 'prepare_prefix') as build:
+                prepare.prepare_prefixes(self.paths, self.env, build_prefix=selection)
+                room.assert_called_once_with('prefixes')
+                sources.assert_called_once_with()
+                context.assert_called_once_with(self.paths, self.env)
+                self.assertEqual(build.call_args_list,
+                                 [call(kind, self.paths, self.env, self.context) for kind in expected])
+
+        with patch.object(prepare, 'room', side_effect=ValueError('disk gate')), \
+                patch.object(prepare, 'prepare_sources') as sources, \
+                patch.object(prepare, 'prepare_prefix') as build:
+            with self.assertRaisesRegex(ValueError, 'disk gate'):
+                prepare.prepare_prefixes(self.paths, self.env, build_prefix='mixed')
+            sources.assert_not_called()
+            build.assert_not_called()
+
+    def test_should_reject_combining_build_and_reuse_prefix_selectors(self):
+        with patch.object(prepare.sys, 'argv', ['prepare-delivery.py', 'prefixes',
+                                               '--build-prefix', 'mixed', '--reuse-prefix', 'native']), \
+                patch.object(prepare.sys, 'stderr', new_callable=io.StringIO) as stderr:
+            with self.assertRaises(SystemExit) as error:
+                prepare.main()
+            self.assertEqual(error.exception.code, 2)
+            self.assertIn('not allowed with argument', stderr.getvalue())
+
+    def test_should_reserve_build_space_only_for_build_routes(self):
+        for name in ['occt', *prepare.RECIPE['headers']]:
+            (self.cache / 'sources' / name).mkdir(parents=True)
+            (self.cache / 'downloads' / f'{name}.tar.gz').touch()
+        for stage, required_gib in [('prefixes', 14), ('reuse-prefix', 6)]:
+            with self.subTest(stage=stage):
+                required = required_gib * 1024 ** 3
+                with patch.object(prepare.shutil, 'disk_usage', return_value=SimpleNamespace(free=required)):
+                    prepare.room(stage)
+                with patch.object(prepare.shutil, 'disk_usage', return_value=SimpleNamespace(free=required - 1)):
+                    with self.assertRaisesRegex(ValueError, f'requires {required} free bytes'):
+                        prepare.room(stage)
+        with patch.object(prepare, 'SOURCE', self.cache / 'missing-source'):
+            with patch.object(prepare.shutil, 'disk_usage', return_value=SimpleNamespace(free=6 * 1024 ** 3)):
+                with self.assertRaisesRegex(ValueError, f'requires {7 * 1024 ** 3} free bytes'):
+                    prepare.room('reuse-prefix')
+            with patch.object(prepare.shutil, 'disk_usage', return_value=SimpleNamespace(free=7 * 1024 ** 3)):
+                prepare.room('reuse-prefix')
+
+        with patch.object(prepare, 'room') as room, \
+                patch.object(prepare, 'prepare_sources') as sources, \
+                patch.object(prepare, 'prefix_context', return_value=self.context), \
+                patch.object(prepare, 'producer_builder', return_value=self.builder), \
+                patch.object(prepare, 'prepare_prefix') as build:
+            # Exercise real receipt verification over the existing inert prefix.
+            prepare.prepare_prefixes(self.paths, self.env, reuse_prefix='mixed')
+            room.assert_called_once_with('reuse-prefix')
+            sources.assert_called_once_with()
+            build.assert_not_called()
+
+    def sdk_support_fixture(self):
+        sdk = self.root / 'sdk'
+        self.stack.enter_context(patch.object(prepare, 'SDK', sdk))
+        self.env['EM_CACHE'] = str(self.cache / 'em-cache')
+        contents = {
+            sdk / 'bin/clang': 'compiler', sdk / 'lib/library': 'support',
+            sdk / 'emscripten/tools/cache/required.py': 'genuine support named cache',
+            sdk / 'emscripten/cache/unused.js': 'unused derived output',
+            Path(self.env['EM_CACHE']) / 'sysroot/include/header.h': 'selected header',
+        }
+        for path, value in contents.items():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(value)
+        roots = {f'sdk/{name}': sdk / name for name in ['bin', 'lib', 'emscripten']}
+        self.context['supportPayloads']['mixed'] = prepare.support_payload(roots)
+        receipt = prepare.create_prefix_receipt(self.prefix, self.contract())
+        prepare.write_json(self.receipt_path, receipt)
+        self.evidence_path = self.root / 'retained-mixed-inputs.json'
+        rows = {path for root in roots.values() for path in prepare.files(root)}
+        rows.update([self.receipt_path, Path(self.env['EM_CONFIG'])])
+        prepare.write_json(self.evidence_path, {
+            'schema': 'geospec-mixed-build-inputs-v2', 'sdkPrefix': str(sdk),
+            'environment': dict(self.env),
+            'inputs': [{'path': str(path), 'sha256': prepare.digest(path)} for path in sorted(rows)],
+        })
+        self.context['supportPayloads']['mixed'] = prepare.support_payload(roots, prepare.unused_sdk_cache(self.env))
+        self.stack.enter_context(patch.dict(os.environ, GEOSPEC_OCCT_SUPPORT_INPUTS=str(self.evidence_path)))
+        return contents, receipt
+
+    def test_should_reconstruct_support_in_historical_path_component_order(self):
+        root = self.root / 'support'
+        recorded = {root / 'a.py': 'a' * 64, root / 'a/child.py': 'b' * 64}
+        # Path sorting puts the directory component "a" before "a.py";
+        # lexicographic full-string sorting reverses these historical rows.
+        rows = [{'path': 'sdk/a/child.py', 'sha256': 'b' * 64},
+                {'path': 'sdk/a.py', 'sha256': 'a' * 64}]
+        expected = hashlib.sha256(json.dumps(rows, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+        self.assertEqual(prepare.support_payload({'sdk': root}, recorded=recorded),
+                         {'roots': {'sdk': str(root)}, 'files': 2, 'sha256': expected})
+
+    def test_should_migrate_unused_default_cache_without_rewriting_historical_receipt(self):
+        contents, receipt = self.sdk_support_fixture()
+        original = self.receipt_path.read_bytes()
+        unused = prepare.SDK / 'emscripten/cache/unused.js'
+        unused.unlink()
+        result = self.verify()
+        migration = result['supportMigration']
+        self.assertFalse(migration['prefixRebuilt'])
+        self.assertEqual(migration['schema'], 'geospec-sdk-support-migration-v2')
+        self.assertEqual(migration['originalReceipt']['sha256'], prepare.digest(self.receipt_path))
+        self.assertEqual(migration['originalSupport'], receipt['supportPayload'])
+        self.assertEqual(migration['excludedFiles'], 1)
+        self.assertEqual(migration['effectiveSupport']['files'], 3)
+        self.assertEqual(self.receipt_path.read_bytes(), original)
+        # Recheck current support from actual inert bytes, including another directory named cache.
+        self.assertIn(prepare.SDK / 'emscripten/tools/cache/required.py', contents)
+        self.assertEqual(prepare.support_payload(migration['originalSupport']['roots'],
+                                                prepare.unused_sdk_cache(self.env)),
+                         migration['effectiveSupport'])
+
+    def test_should_carry_migration_and_selected_cache_through_actual_manifest_functions(self):
+        self.sdk_support_fixture()
+        roots = [prepare.SDK / name for name in ['bin', 'lib', 'emscripten']]
+        roots.append(Path(self.env['EM_CACHE']))
+        with ExitStack() as mocked:
+            replacements = {
+                'prepare_sources': None, 'validate_tools': None, 'prefix_context': self.context,
+                'tool_paths': self.paths, 'environment': self.env, 'input_roots': roots,
+                'source_files': {self.recipe_path, self.builder}, 'libraries': [self.library],
+            }
+            for name, value in replacements.items():
+                mocked.enter_context(patch.object(prepare, name, return_value=value))
+            mocked.enter_context(patch.object(prepare, 'run', side_effect=lambda command, *args, **kwargs:
+                                              '{"packages": []}' if 'metadata' in command else 'inert-head'))
+            prepare.prepare_inputs(self.paths, self.env)
+            manifest_path = self.cache / 'mixed-inputs-simd128.json'
+            manifest = json.loads(manifest_path.read_text())
+            selected = {row['path']: row['sha256'] for row in manifest['inputs']}
+            self.assertIn(str(Path(self.env['EM_CACHE']) / 'sysroot/include/header.h'), selected)
+            self.assertIn(str(prepare.SDK / 'emscripten/tools/cache/required.py'), selected)
+            self.assertNotIn(str(prepare.SDK / 'emscripten/cache/unused.js'), selected)
+            self.assertNotIn(str(self.evidence_path), selected)
+            self.assertEqual(manifest['prefixSupportMigration']['evidence']['sha256'],
+                             prepare.digest(self.evidence_path))
+            # Original external evidence is genuinely unavailable. Reconstruct the
+            # receipt aggregate from carried rows, not from a migration summary.
+            transported = self.root / 'transport-mixed-inputs.json'
+            transported.write_bytes(manifest_path.read_bytes())
+            self.evidence_path.unlink()
+            migration = json.loads(transported.read_text())['prefixSupportMigration']
+            carried = {Path(row['path']): row['sha256'] for row in migration['supportEvidence']['inputs']}
+            original = json.loads(self.receipt_path.read_text())
+            self.assertEqual(prepare.support_payload(original['supportPayload']['roots'], recorded=carried),
+                             original['supportPayload'])
+            with patch.dict(os.environ, {}, clear=True):
+                prepare.verify_manifest(transported)
+                self.assertEqual(prepare.digest(transported), prepare.digest(manifest_path))
+                changed = json.loads(transported.read_text())
+                changed['wasmSimd']['rustFlags'] = []
+                prepare.write_json(transported, changed)
+                with self.assertRaisesRegex(ValueError, 'Wrong fixed SIMD flags'):
+                    prepare.verify_manifest(transported)
+
+    def test_should_require_explicit_external_cache_for_support_projection(self):
+        self.sdk_support_fixture()
+        for value in ['', 'relative', str(prepare.SDK / 'emscripten/cache'),
+                      str(prepare.SDK / 'emscripten'), str(prepare.SDK / 'emscripten/cache/nested')]:
+            with self.subTest(cache=value), self.assertRaisesRegex(ValueError, 'EM_CACHE'):
+                prepare.unused_sdk_cache({**self.env, 'EM_CACHE': value})
+        alias = self.root / 'cache-alias'
+        alias.symlink_to(prepare.SDK / 'emscripten/cache', target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, 'EM_CACHE'):
+            prepare.unused_sdk_cache({**self.env, 'EM_CACHE': str(alias)})
+
+    def test_should_bind_historical_rows_receipt_and_projected_membership(self):
+        self.sdk_support_fixture()
+        evidence_bytes = self.evidence_path.read_bytes()
+        evidence = json.loads(evidence_bytes)
+        for change, message in [
+            ({'inputs': evidence['inputs'] + [evidence['inputs'][0]]}, 'duplicate'),
+            ({'inputs': [r for r in evidence['inputs'] if r['path'] != str(self.receipt_path)]}, 'receipt hash'),
+            ({'inputs': [r for r in evidence['inputs'] if not r['path'].endswith('unused.js')]}, 'aggregate'),
+            ({'environment': {**self.env, 'EM_CACHE': '/other-cache'}}, 'EM_CACHE differs'),
+        ]:
+            with self.subTest(message=message):
+                prepare.write_json(self.evidence_path, {**evidence, **change})
+                with self.assertRaisesRegex(ValueError, message):
+                    self.verify()
+                self.evidence_path.write_bytes(evidence_bytes)
+        self.context['supportPayloads']['mixed']['sha256'] = 'different-current-support'
+        with self.assertRaisesRegex(ValueError, 'Projected SDK support'):
+            self.verify()
+
+    def test_should_preserve_original_recipe_and_receipt_after_native_only_selection_change(self):
+        receipt_bytes = self.receipt_path.read_bytes()
+        recipe_bytes = self.original_recipe.read_bytes()
+        self.recipe['macosDeploymentTarget'] = '12.0'
+        self.recipe_path.write_text(json.dumps(self.recipe))
+        self.assertNotEqual(self.contract()['recipeSha256'], self.receipt['recipeSha256'])
+        self.assertEqual(self.verify(), self.receipt)
+        self.assertEqual(self.receipt_path.read_bytes(), receipt_bytes)
+        self.assertEqual(self.original_recipe.read_bytes(), recipe_bytes)
+
+    def test_should_require_original_recipe_bytes_for_older_prefix(self):
+        self.original_recipe.unlink()
+        self.recipe['macosDeploymentTarget'] = '12.0'
+        self.recipe_path.write_text(json.dumps(self.recipe))
+        with self.assertRaisesRegex(ValueError, 'Original prefix recipe bytes required'):
+            self.verify()
+
+    def test_should_accept_explicit_hash_matching_original_recipe(self):
+        retained = self.root / 'retained-producer-selection.json'
+        self.original_recipe.rename(retained)
+        self.recipe['macosDeploymentTarget'] = '12.0'
+        self.recipe_path.write_text(json.dumps(self.recipe))
+        with patch.dict(os.environ, GEOSPEC_OCCT_PRODUCER_RECIPE=str(retained)):
+            self.assertEqual(self.verify(), self.receipt)
+
+    def test_should_refuse_changed_mixed_option(self):
+        self.recipe['mixedOcctOptions'] = [*self.recipe['mixedOcctOptions'], '-DUSE_FREETYPE=OFF']
+        with self.assertRaisesRegex(ValueError, 'Prefix receipt command changed'):
+            self.verify()
+
+    def test_should_bind_simd_to_occt_compilation_and_separate_prefix(self):
+        command = self.contract()['command']
+        self.assertIn('-DUSE_TBB=OFF', command)
+        for flag in ['-DCMAKE_C_FLAGS=', '-DCMAKE_CXX_FLAGS=']:
+            self.assertTrue(any(option.startswith(flag) and all(selected in option for selected in
+                                ['-msimd128', *self.recipe['wasmEh']['compileFlags'],
+                                 '-UOCC_CONVERT_SIGNALS']) for option in command))
+        self.assertEqual(prepare.MIXED_PREFIX, 'occt-mixed-simd128')
+        self.assertEqual(self.verify(), self.receipt)
+
+    def test_should_reject_mixed_signal_conversion_with_wasm_longjmp(self):
+        self.recipe['mixedOcctOptions'] = [option.replace(' -UOCC_CONVERT_SIGNALS', '')
+                                           for option in self.recipe['mixedOcctOptions']]
+        with self.assertRaisesRegex(ValueError, 'no POSIX signal conversion'):
+            self.contract()
+
+    def test_should_reject_js_eh_or_longjmp_in_native_eh_prefix(self):
+        original = list(self.recipe['mixedOcctOptions'])
+        for incompatible in ['-fexceptions', '-sDISABLE_EXCEPTION_CATCHING=0',
+                             '-sSUPPORT_LONGJMP=emscripten']:
+            with self.subTest(incompatible=incompatible):
+                self.recipe['mixedOcctOptions'] = [*original[:-1], original[-1] + ' ' + incompatible]
+                with self.assertRaisesRegex(ValueError, 'cannot mix with JavaScript EH or longjmp'):
+                    self.contract()
+        self.recipe['mixedOcctOptions'] = original
+
+    def test_should_refuse_changed_selected_source_archives(self):
+        selections = [self.recipe['occt'], *self.recipe['headers'].values()]
+        for selection in selections:
+            original = selection['sha256']
+            with self.subTest(source=original):
+                selection['sha256'] = 'different-source'
+                with self.assertRaisesRegex(ValueError, 'Prefix source selection changed'):
+                    self.verify()
+                selection['sha256'] = original
+
+    def test_should_refuse_changed_tools_support_builder_and_semantic_environment(self):
+        mutations = {
+            'toolMetadata': {'executables': {'emcc': {'sha256': 'different-tool'}}},
+            'supportPayload': {'sha256': 'different-support'},
+            'builderSha256': 'different-builder',
+            'sourceArchiveSha256': 'different-archive',
+            'environment': {**self.receipt['environment'], 'CXXFLAGS': '-different'},
+        }
+        for field, value in mutations.items():
+            with self.subTest(field=field):
+                contract = self.contract()
+                contract[field] = value
+                with self.assertRaisesRegex(ValueError, f'Prefix receipt {field} changed'):
+                    prepare.verify_prefix(self.prefix, contract)
+
+    def test_should_refuse_changed_installed_outputs_and_cache(self):
+        for path in [self.library, self.header, self.prefix / 'build/CMakeCache.txt']:
+            original = path.read_bytes()
+            with self.subTest(path=path.name):
+                path.write_text('different bytes')
+                with self.assertRaisesRegex(ValueError, 'Installed prefix outputs changed|Changed prefix cache output'):
+                    self.verify()
+                path.write_bytes(original)
+        (self.prefix / 'install/lib/libTKExtra.a').write_text('extra library')
+        with self.assertRaisesRegex(ValueError, 'Prefix toolkit inventory changed'):
+            self.verify()
+
+    def test_should_refuse_native_floor_change_even_when_recipe_is_historical(self):
+        native = prepare.create_prefix_receipt(self.prefix, self.contract('native'))
+        prepare.write_json(self.receipt_path, native)
+        self.recipe['macosDeploymentTarget'] = '12.0'
+        self.recipe_path.write_text(json.dumps(self.recipe))
+        with self.assertRaisesRegex(ValueError, 'Prefix receipt command changed'):
+            prepare.verify_prefix(self.prefix, self.contract('native'))
+
+    def test_should_treat_job_controls_as_scheduling_without_rewriting_receipt(self):
+        self.env.update(prepare.scheduling_environment())
+        self.assertEqual(self.verify(), self.receipt)
+        for variable in prepare.SCHEDULING_VARIABLES:
+            self.env[variable] = '1'
+        self.assertEqual(self.verify(), self.receipt)
+        self.assertNotIn('EMCC_CORES', self.receipt['environment'])
+
+    def test_should_put_validated_default_and_explicit_caps_in_actual_prepared_environment(self):
+        env = prepare.environment(self.paths)
+        for variable in prepare.SCHEDULING_VARIABLES:
+            self.assertEqual(env[variable], '2')
+        with patch.dict(os.environ, GEOSPEC_OCCT_JOBS='1', BINARYEN_CORES='2'):
+            env = prepare.environment(self.paths)
+            self.assertEqual(env['CARGO_BUILD_JOBS'], '1')
+            self.assertEqual(env['EMCC_CORES'], '1')
+            self.assertEqual(env['BINARYEN_CORES'], '2')
+        for variable in prepare.SCHEDULING_VARIABLES:
+            for value in ['0', '-1', '1.5', '', 'two']:
+                with self.subTest(variable=variable, value=value), patch.dict(os.environ, {variable: value}):
+                    with self.assertRaisesRegex(ValueError, variable + ' must be a positive integer'):
+                        prepare.environment(self.paths)
+
+    def test_should_prepare_and_verify_mixed_inputs_without_any_native_prefix(self):
+        self.env.update(prepare.scheduling_environment())
+        with ExitStack() as mocked:
+            replacements = {
+                'prepare_sources': None, 'validate_tools': None,
+                'prefix_context': self.context, 'tool_paths': self.paths, 'environment': self.env,
+                'input_roots': [], 'source_files': {self.recipe_path, self.builder},
+                'libraries': [self.library],
+            }
+            for name, value in replacements.items():
+                mocked.enter_context(patch.object(prepare, name, return_value=value))
+            mocked.enter_context(patch.object(prepare, 'run', side_effect=lambda command, *args, **kwargs:
+                                              '{"packages": []}' if 'metadata' in command else 'inert-head'))
+            prepare.prepare_inputs(self.paths, self.env)
+        manifest = json.loads((self.cache / 'mixed-inputs-simd128.json').read_text())
+        self.assertFalse((self.cache / 'occt-native').exists())
+        self.assertEqual(manifest['prefixRecovery'], {'mixed': None})
+        self.assertEqual(manifest['recipeSha256'], prepare.digest(self.recipe_path))
+        self.assertEqual(manifest['prefixProducerRecipe'], str(self.original_recipe))
+        self.assertEqual(manifest['wasmSimd'], self.recipe['wasmSimd'])
+        self.assertEqual(manifest['wasmEh'], self.recipe['wasmEh'])
+        self.assertEqual(manifest['cache'], str(self.cache / 'mixed-build-simd128'))
+        self.assertEqual(manifest['occtPrefix'], str(self.prefix / 'install'))
+        inputs = {row['path']: row['sha256'] for row in manifest['inputs']}
+        self.assertEqual(inputs[str(self.original_recipe)], prepare.digest(self.original_recipe))
+        self.assertNotIn(str(self.cache / 'occt-native/prefix-receipt.json'), inputs)
+        for variable in prepare.SCHEDULING_VARIABLES:
+            self.assertEqual(manifest['environment'][variable], '2')
+
+    def test_should_fetch_pinned_rust_src_registry_before_the_input_closure(self):
+        library = prepare.RUST / 'lib/rustlib/src/rust/library'
+        library.mkdir(parents=True)
+        (library / 'Cargo.toml').write_text('inert rust-src workspace')
+        lock = library / 'Cargo.lock'
+        events = []
+
+        def run(command, *args, **kwargs):
+            events.append(tuple(map(str, command[1:])))
+            # MT -Zbuild-std resolves the library members from the Rust prefix itself.
+            return json.dumps({'packages': [{'manifest_path': str(library / 'std/Cargo.toml')}]}) \
+                if 'metadata' in command else 'inert-head'
+
+        def prepare_with(pin):
+            with ExitStack() as mocked:
+                replacements = {
+                    'prepare_sources': None, 'validate_tools': None, 'prefix_context': self.context,
+                    'tool_paths': self.paths, 'environment': self.env, 'input_roots': [],
+                    'source_files': {self.recipe_path, self.builder}, 'libraries': [self.library],
+                }
+                for name, value in replacements.items():
+                    mocked.enter_context(patch.object(prepare, name, return_value=value))
+                mocked.enter_context(patch.object(prepare, 'RUST_SRC_LOCK_SHA256', pin))
+                mocked.enter_context(patch.object(prepare, 'run', side_effect=run))
+                closure = prepare.required_inputs
+                mocked.enter_context(patch.object(prepare, 'required_inputs', side_effect=lambda manifest:
+                                                  events.append(('closure',)) or closure(manifest)))
+                prepare.prepare_inputs(self.paths, self.env)
+
+        fetch = ('fetch', '--locked', '--manifest-path', str(library / 'Cargo.toml'))
+        lock.write_text('selected rust-src lock')
+        prepare_with(prepare.digest(lock))
+        self.assertLess(events.index(fetch), events.index(('closure',)))
+        self.assertTrue(prepare.MIXED_INPUTS.is_file())
+
+        prepare.MIXED_INPUTS.unlink()
+        events.clear()
+        with self.assertRaisesRegex(ValueError, 'Unselected rust-src library lock'):
+            prepare_with('0' * 64)
+        self.assertNotIn(fetch, events)
+        self.assertFalse(prepare.MIXED_INPUTS.exists())
+
+        # ST needs no rust-src; the MT builder refuses its absence before compiling.
+        lock.unlink()
+        prepare_with('0' * 64)
+        self.assertNotIn(fetch, events)
+
+
+class MixedRecipeMaterialTest(unittest.TestCase):
+    """Copy and archive inert provenance bytes; do not run a material producer."""
+
+    def setUp(self):
+        self.stack = ExitStack()
+        self.addCleanup(self.stack.close)
+        self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory())).resolve()
+        self.output = self.root / 'kit'
+        self.package = self.root / 'package'
+        sdk = self.root / 'sdk'
+        for path in [self.output / 'receipts', self.output / 'archives', self.package / 'scripts', sdk / 'emscripten']:
+            path.mkdir(parents=True)
+        for name in ['package.json', 'package-lock.json']:
+            (sdk / 'emscripten' / name).write_text('{}')
+        self.current = self.package / 'scripts/selected-delivery.json'
+        self.current.write_text('{"headers": {}, "macosDeploymentTarget": "12.0"}\n')
+        self.original = self.root / 'original-selection.json'
+        self.original.write_text('{"headers": {}, "macosDeploymentTarget": "11.0"}\n')
+        self.receipt = self.root / 'prefix-receipt.json'
+        materials.write_json(self.receipt, {'recipeSha256': materials.digest(self.original)})
+        self.closure = {
+            'prefixProducerRecipe': str(self.original), 'sdkPrefix': str(sdk),
+            'preparationCache': str(self.root / 'cache'),
+            'inputs': [{'path': str(p), 'sha256': materials.digest(p)} for p in [self.current, self.original]],
+        }
+        self.mixed = {'closure': self.closure, 'paths': {}, 'prefixReceipt': self.receipt,
+                      'metadata': {}, 'attribution': {'status': 'current-mixed'}}
+        self.stack.enter_context(patch.object(materials, 'PACKAGE', self.package))
+        self.stack.enter_context(patch.object(materials, 'mixed_producer_recipe', return_value={'mock': True}))
+        self.stack.enter_context(patch.object(materials, 'mixed_tool_licenses', return_value=[]))
+
+    def test_should_retain_selected_original_recipe_and_hash_reference_in_archive(self):
+        # Exercise the unchanged material copier with a carried historical rowset,
+        # not just a path/hash reference to an unavailable external manifest.
+        roots = {'sdk/bin': str(self.root / 'sdk/bin')}
+        rows = [{'path': str(self.root / 'sdk/bin/clang'), 'sha256': 'a' * 64}]
+        support = prepare.support_payload(roots, recorded={Path(r['path']): r['sha256'] for r in rows})
+        materials.write_json(self.receipt, {'recipeSha256': materials.digest(self.original), 'supportPayload': support})
+        self.closure['prefixSupportMigration'] = {
+            'schema': 'geospec-sdk-support-migration-v2',
+            'originalReceipt': {'path': str(self.receipt), 'sha256': materials.digest(self.receipt)},
+            'supportEvidence': {'schema': 'geospec-sdk-support-evidence-v1', 'inputs': rows},
+        }
+        inputs_path = self.root / 'current-mixed-inputs.json'
+        materials.write_json(inputs_path, self.closure)
+        self.mixed['paths']['inputs'] = inputs_path
+        original = self.original.read_bytes()
+        receipt = self.receipt.read_bytes()
+        result = materials.copy_mixed_material(self.output, self.mixed)
+        selected = result['prefixProducerRecipe']
+        self.assertEqual((self.output / selected['path']).read_bytes(), original)
+        self.assertEqual(selected['sha256'], materials.digest(self.original))
+        self.assertEqual(selected['prefixReceiptSha256'], materials.digest(self.receipt))
+        archive = self.root / 'kit.tar.gz'
+        materials.make_relink_archive(self.output, archive)
+        materials.verify_relink_archive(self.output, archive)
+        with tarfile.open(archive) as bundle:
+            with bundle.extractfile(materials.SOURCE_RELINK_ROOT + '/' + selected['path']) as member:
+                self.assertEqual(member.read(), original)
+            with bundle.extractfile(materials.SOURCE_RELINK_ROOT + '/receipts/mixed-inputs.json') as member:
+                carried = json.load(member)['prefixSupportMigration']
+            with bundle.extractfile(materials.SOURCE_RELINK_ROOT + '/receipts/mixed-prefix-receipt.json') as member:
+                prefix_bytes = member.read()
+            self.assertEqual(hashlib.sha256(prefix_bytes).hexdigest(), carried['originalReceipt']['sha256'])
+            prefix_support = json.loads(prefix_bytes)['supportPayload']
+            recorded = {Path(r['path']): r['sha256'] for r in carried['supportEvidence']['inputs']}
+            self.assertEqual(prepare.support_payload(prefix_support['roots'], recorded=recorded), prefix_support)
+        self.assertEqual(self.original.read_bytes(), original)
+        self.assertEqual(self.receipt.read_bytes(), receipt)
+
+    def test_should_accept_implicit_historical_current_recipe_only_when_both_pins_match(self):
+        del self.closure['prefixProducerRecipe']
+        materials.write_json(self.receipt, {'recipeSha256': materials.digest(self.current)})
+        result = materials.copy_mixed_material(self.output, self.mixed)
+        self.assertEqual((self.output / result['prefixProducerRecipe']['path']).read_bytes(), self.current.read_bytes())
+
+    def test_should_not_substitute_new_current_recipe_for_missing_historical_selection(self):
+        del self.closure['prefixProducerRecipe']
+        with self.assertRaisesRegex(ValueError, 'Mixed prefix recipe differs from its producer receipt'):
+            materials.copy_mixed_material(self.output, self.mixed)
+
+    def test_should_refuse_selected_recipe_outside_recorded_input_pin(self):
+        self.closure['inputs'] = []
+        with self.assertRaisesRegex(ValueError, 'Mixed prefix recipe differs from its input pin'):
+            materials.copy_mixed_material(self.output, self.mixed)
+
+    def test_should_refuse_selected_recipe_from_different_prefix_receipt(self):
+        materials.write_json(self.receipt, {'recipeSha256': materials.digest(self.current)})
+        with self.assertRaisesRegex(ValueError, 'Mixed prefix recipe differs from its producer receipt'):
+            materials.copy_mixed_material(self.output, self.mixed)
+
+
+if __name__ == '__main__':
+    unittest.main()

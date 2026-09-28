@@ -97,13 +97,20 @@ const triangle: { format: 'mesh-buffer'; name: string; positions: number[]; indi
 describe('default runtime roster', () => {
   it('matches production @taucad package dependencies', async () => {
     const sourceUrl = new URL('default-runtime.ts', import.meta.url);
+    const nativeWorkerUrl = new URL('../runner/node/native-pool-worker-entry.ts', import.meta.url);
     const manifestUrl = new URL('../../package.json', import.meta.url);
-    const [source, manifestSource] = await Promise.all([readFile(sourceUrl, 'utf8'), readFile(manifestUrl, 'utf8')]);
+    const [source, nativeWorkerSource, manifestSource] = await Promise.all([
+      readFile(sourceUrl, 'utf8'),
+      readFile(nativeWorkerUrl, 'utf8'),
+      readFile(manifestUrl, 'utf8'),
+    ]);
     const manifest = JSON.parse(manifestSource) as { dependencies?: Record<string, string> };
     const expected = Object.keys(manifest.dependencies ?? {}).filter(
       (name) =>
         name.startsWith('@taucad/') &&
-        !['@taucad/runtime', '@taucad/occt-core', '@taucad/geometry-core'].includes(name),
+        !['@taucad/runtime', '@taucad/occt-core', '@taucad/geometry-core', '@taucad/geospec-engine-native'].includes(
+          name,
+        ),
     );
     const actual = ts
       .preProcessFile(source, true, true)
@@ -111,6 +118,10 @@ describe('default runtime roster', () => {
       .filter((specifier) => specifier.startsWith('@taucad/') && !specifier.startsWith('@taucad/runtime'));
 
     expect(actual.toSorted()).toEqual(expected.toSorted());
+    expect(manifest.dependencies).toHaveProperty('@taucad/geospec-engine-native');
+    expect(ts.preProcessFile(nativeWorkerSource, true, true).importedFiles.map(({ fileName }) => fileName)).toContain(
+      '@taucad/geospec-engine-native/node',
+    );
   });
 });
 
@@ -315,7 +326,7 @@ describe('loadModel — the runtime branch', () => {
   it('retains successful-export issues and analyzes retained evidence without exporting again', async () => {
     registerGeoSpecEngine(geoSpecEngineImplementation);
     const issues: KernelIssue[] = ['warning', 'error', 'info'].map((severity) => ({
-      code: 'RUNTIME',
+      code: 'UNKNOWN',
       type: 'kernel',
       severity: severity as KernelIssue['severity'],
       message: `Original ${severity}`,

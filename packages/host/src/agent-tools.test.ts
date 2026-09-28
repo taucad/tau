@@ -163,6 +163,24 @@ const waitForFileEvent = async (
 };
 
 describe('createHostToolRegistry', () => {
+  it.each([undefined, 'legacy', 'native'] as const)(
+    'should publish the explicit %s factory authoring contract before opening its runner',
+    async (geospecAuthoringMode) => {
+      const geospecRunner = vi.fn<() => Promise<GeoSpecRunner>>();
+      const registry = createHostToolRegistry({
+        workspaceRoot: await makeWorkspace(),
+        geospecRunner,
+        geospecAuthoringMode,
+      });
+      const description = registry.list().find((tool) => tool.name === 'test_model')?.description;
+      const native = geospecAuthoringMode === 'native';
+      expect(description).toContain(native ? 'expectNativeGeo' : 'expectGeo');
+      expect(description).toContain(native ? 'loadNativeModel' : 'loadModel');
+      expect(description).not.toContain(native ? 'expectGeo' : 'expectNativeGeo');
+      expect(geospecRunner).not.toHaveBeenCalled();
+    },
+  );
+
   it('offers the file tools and use_skill with no runtime, and never a geometry tool it cannot serve', async () => {
     const registry = createHostToolRegistry({ workspaceRoot: await makeWorkspace() });
     const names = registry.list().map((tool) => tool.name);

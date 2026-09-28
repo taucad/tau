@@ -1,96 +1,45 @@
 import { z } from 'zod';
+import {
+  parseAdoptableProjectManifestBytes,
+  parseProjectManifestBytes,
+  projectIdSchema,
+  projectManifestMaxBytes,
+  projectManifestSchema,
+  projectManifestSchemaUrl,
+  projectRelativePathSchema,
+  projectToManifest,
+  serializeProjectManifest,
+} from '@taucad/project-core';
+import type {
+  AdoptableProjectManifest,
+  AdoptableProjectManifestParseResult,
+  ProjectManifest,
+  ProjectManifestParseIssue as CoreProjectManifestParseIssue,
+  ProjectManifestParseResult,
+} from '@taucad/project-core';
 
-/** Canonical JSON Schema URL embedded in every `tau.json`. @public */
-export const projectManifestSchemaUrl = 'https://tau.new/schemas/tau-schema-v1.json';
-/** Maximum accepted encoded manifest size in bytes. @public */
-export const projectManifestMaxBytes = 256 * 1024;
+/* oxlint-disable no-barrel-files/no-barrel-files -- This private entrypoint forwards the public project manifest authority without duplicating schemas. */
+export {
+  parseAdoptableProjectManifestBytes,
+  parseProjectManifestBytes,
+  projectIdSchema,
+  projectManifestMaxBytes,
+  projectManifestSchema,
+  projectManifestSchemaUrl,
+  projectRelativePathSchema,
+  projectToManifest,
+  serializeProjectManifest,
+};
+export type {
+  AdoptableProjectManifest,
+  AdoptableProjectManifestParseResult,
+  ProjectManifest,
+  ProjectManifestParseResult,
+};
+/* oxlint-enable no-barrel-files/no-barrel-files */
 
-/** Runtime validator for stable Tau project identifiers. @public */
-export const projectIdSchema = z.string().regex(/^proj_[\dA-Za-z]{21}$/);
-
-/** Runtime validator for normalized project-relative POSIX paths. @public */
-export const projectRelativePathSchema = z
-  .string()
-  .max(2048)
-  .refine((path) => {
-    if (path.length === 0 || path.includes('\0') || path.includes('\\') || path.startsWith('/')) {
-      return false;
-    }
-    return path.split('/').every((segment) => segment.length > 0 && segment !== '.' && segment !== '..');
-  }, 'Expected a normalized project-relative POSIX path');
-
-const projectAssetSchema = z
-  .object({
-    entryPath: projectRelativePathSchema,
-    thumbnail: projectRelativePathSchema.optional(),
-  })
-  .strict();
-
-/** Strict runtime schema for the unreleased v1 `tau.json` contract. @public */
-export const projectManifestSchema = z
-  .object({
-    $schema: z.literal(projectManifestSchemaUrl),
-    id: projectIdSchema,
-    name: z.string().max(200),
-    description: z.string().max(10_000),
-    tags: z.array(z.string().max(100)).max(64),
-    assets: z
-      .object({
-        main: projectAssetSchema,
-      })
-      .strict(),
-    /* Absent means on. A project that should stay files-only carries
-     * `"syncChats": false` and no `refs/tau/chats/*` is ever written for it, so
-     * nothing exists for a push to offer (D25, A30, W17). It lives here rather
-     * than in a host store because it is a property of the project: a clone
-     * inherits the decision instead of quietly re-enabling it. */
-    syncChats: z
-      .boolean()
-      .optional()
-      .describe(
-        "Whether this project's chats sync with its remotes. Absent means on; false keeps the project files-only, and no refs/tau/chats/* is written for it.",
-      ),
-    /* Generated exports are large, reproducible records. They stay device-local
-     * unless the project explicitly opts into their dedicated evidence ref. */
-    syncLargeExports: z
-      .boolean()
-      .optional()
-      .describe('Whether generated exports and evidence sync on refs/tau/evidence/exports. Absent means off.'),
-  })
-  .strict();
-
-/** Validated project manifest stored as `tau.json`. @public */
-export type ProjectManifest = z.infer<typeof projectManifestSchema>;
-
-/** Manifest fields accepted before assigning an identity during explicit adoption. @public */
-export type AdoptableProjectManifest = Omit<ProjectManifest, 'id'>;
-
-/**
- * Why a manifest is not strictly valid.
- *
- * `manifest-unreadable` and `manifest-missing` are never produced by parsing:
- * discovery raises them when the bytes could not be obtained (a provider
- * failure that is not simple absence), or when a directory holding Tau state
- * has lost its `tau.json`.
- *
- * @public
- */
-export type ProjectManifestParseIssue =
-  | { readonly code: 'manifest-unreadable'; readonly message: string }
-  | { readonly code: 'manifest-missing' }
-  | { readonly code: 'manifest-too-large'; readonly maxBytes: number }
-  | { readonly code: 'manifest-invalid-json'; readonly message: string }
-  | {
-      readonly code: 'manifest-unknown-schema';
-      readonly found: unknown;
-      readonly supported: typeof projectManifestSchemaUrl;
-    }
-  | { readonly code: 'manifest-invalid'; readonly issues: readonly z.core.$ZodIssue[] };
-
-/** Result of parsing a fully identified manifest. @public */
-export type ProjectManifestParseResult =
-  | { readonly success: true; readonly data: ProjectManifest }
-  | { readonly success: false; readonly issue: ProjectManifestParseIssue };
+/** Strict parser issues plus discovery's missing-manifest issue. @public */
+export type ProjectManifestParseIssue = CoreProjectManifestParseIssue | { readonly code: 'manifest-missing' };
 
 /**
  * Result of reading `tau.json` for use, as opposed to validating it.
@@ -115,55 +64,6 @@ export type ProjectManifestReadResult =
       /** The salvaged declaration an explicit Adopt would write, present when only the identity is missing. */
       readonly adoptable?: AdoptableProjectManifest;
     };
-
-const decodeProjectManifestBytes = (
-  bytes: Uint8Array<ArrayBuffer>,
-):
-  | { readonly success: true; readonly input: unknown }
-  | { readonly success: false; readonly issue: ProjectManifestParseIssue } => {
-  if (bytes.byteLength > projectManifestMaxBytes) {
-    return { success: false, issue: { code: 'manifest-too-large', maxBytes: projectManifestMaxBytes } };
-  }
-
-  let input: unknown;
-  try {
-    input = JSON.parse(new TextDecoder().decode(bytes));
-  } catch (error) {
-    return {
-      success: false,
-      issue: { code: 'manifest-invalid-json', message: error instanceof Error ? error.message : String(error) },
-    };
-  }
-
-  const foundSchema =
-    typeof input === 'object' && input !== null && !Array.isArray(input)
-      ? (input as Record<string, unknown>)['$schema']
-      : undefined;
-  if (foundSchema !== projectManifestSchemaUrl) {
-    return {
-      success: false,
-      issue: {
-        code: 'manifest-unknown-schema',
-        found: foundSchema,
-        supported: projectManifestSchemaUrl,
-      },
-    };
-  }
-
-  return { success: true, input };
-};
-
-/** Parse and validate encoded `tau.json` bytes. @public */
-export const parseProjectManifestBytes = (bytes: Uint8Array<ArrayBuffer>): ProjectManifestParseResult => {
-  const decoded = decodeProjectManifestBytes(bytes);
-  if (!decoded.success) {
-    return decoded;
-  }
-  const parsed = projectManifestSchema.safeParse(decoded.input);
-  return parsed.success
-    ? { success: true, data: parsed.data }
-    : { success: false, issue: { code: 'manifest-invalid', issues: parsed.error.issues } };
-};
 
 /** What a degraded manifest names as its main entry when its own `entryPath` is unusable. */
 const fallbackEntryPath = 'main.ts';
@@ -373,31 +273,4 @@ export const checkProjectManifestReplacement = (
   return existing?.success === true && existing.data.id !== proposed.data.id
     ? `tau.json must keep the project id ${existing.data.id}.`
     : undefined;
-};
-
-/**
- * Build the durable manifest from an app-owned project view. Extra local state
- * is deliberately ignored instead of leaking into `tau.json`.
- * @public
- */
-export const projectToManifest = (project: Omit<ProjectManifest, '$schema'> | ProjectManifest): ProjectManifest => ({
-  $schema: projectManifestSchemaUrl,
-  id: project.id,
-  name: project.name,
-  description: project.description,
-  tags: [...project.tags],
-  assets: {
-    main: {
-      entryPath: project.assets.main.entryPath,
-      ...(project.assets.main.thumbnail === undefined ? {} : { thumbnail: project.assets.main.thumbnail }),
-    },
-  },
-  ...(project.syncChats === undefined ? {} : { syncChats: project.syncChats }),
-  ...(project.syncLargeExports === undefined ? {} : { syncLargeExports: project.syncLargeExports }),
-});
-
-/** Validate and deterministically encode a project manifest. @public */
-export const serializeProjectManifest = (manifest: ProjectManifest): Uint8Array<ArrayBuffer> => {
-  const parsed = projectManifestSchema.parse(manifest);
-  return new TextEncoder().encode(`${JSON.stringify(parsed, null, 2)}\n`);
 };

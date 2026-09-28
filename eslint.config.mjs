@@ -414,6 +414,8 @@ const config = [
       // inputs run through the runtime VM (see fixtures/README.md), not
       // library sources — same class as prompt examples and experiments.
       'packages/geospec-engine/fixtures/scripts/**',
+      // Pinned external CAD model sources are fixture bytes, not GeoSpec library code.
+      'packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/**',
       // Registry-gate fixtures are inert artifact inputs the gate parses as
       // text: their imports deliberately name packages that do not resolve,
       // and they live in no tsconfig project.

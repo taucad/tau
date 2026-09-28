@@ -1,0 +1,100 @@
+--- a/src/ModelingData/TKGeomBase/GeomBndLib/GeomBndLib_Torus.cxx
++++ b/src/ModelingData/TKGeomBase/GeomBndLib/GeomBndLib_Torus.cxx
+@@ -14,9 +14,16 @@
+ #include <GeomBndLib_Torus.hxx>
+ 
+ #include <BndLib.hxx>
++#include <ElCLib.hxx>
++#include <ElSLib.hxx>
+ #include <GeomAdaptor_Surface.hxx>
+ #include <GeomBndLib_OtherSurface.hxx>
++#include <Precision.hxx>
++#include <gp_Torus.hxx>
+ 
++#include <algorithm>
++#include <cmath>
++
+ //=================================================================================================
+ 
+ Bnd_Box GeomBndLib_Torus::Box(double theTol) const
+@@ -47,9 +54,77 @@
+                                      double theVMax,
+                                      double theTol) const
+ {
+-  GeomAdaptor_Surface     anAdaptor(myGeom);
+-  GeomBndLib_OtherSurface anOther(anAdaptor);
+-  return anOther.BoxOptimal(theUMin, theUMax, theVMin, theVMax, theTol);
++  // Closed form. Each coordinate k of P(u,v) = O + (R + r cos v)(cos u X + sin u Y) + r sin v Z
++  // is extreme on the patch only at a corner, on a v boundary at u = alpha_k or alpha_k + pi
++  // (alpha_k = atan2(Y_k, X_k)), on a u boundary at v = beta_k(u) or beta_k(u) + pi
++  // (beta_k(u) = atan2(Z_k, X_k cos u + Y_k sin u)), at an interior critical point
++  // (alpha_k, beta_k(alpha_k)), or, for a spindle torus (r >= R), on the circle cos v = -R/r.
++  // Every in-range pair of those parameters is a point of the patch, so the box is exact
++  // before the enlargement that GeomBndLib_OtherSurface::BoxOptimal also applies.
++  const gp_Torus aTorus = myGeom->Torus();
++  const double   aMajor = aTorus.MajorRadius();
++  const double   aMinor = aTorus.MinorRadius();
++  const gp_XYZ   aX     = aTorus.XAxis().Direction().XYZ();
++  const gp_XYZ   aY     = aTorus.YAxis().Direction().XYZ();
++  const gp_XYZ   aZ     = aTorus.Axis().Direction().XYZ();
++
++  double aU[8]  = {theUMin, theUMax};
++  int    aNbU   = 2;
++  for (int k = 1; k <= 3; ++k)
++  {
++    const double anAlpha = std::atan2(aY.Coord(k), aX.Coord(k));
++    aU[aNbU++]           = anAlpha;
++    aU[aNbU++]           = anAlpha + M_PI;
++  }
++  double aV[56] = {theVMin, theVMax, M_PI / 2., -M_PI / 2.};
++  int    aNbV   = 4;
++  for (int k = 1; k <= 3; ++k)
++  {
++    for (int i = 0; i < aNbU; ++i)
++    {
++      const double aBeta =
++        std::atan2(aZ.Coord(k), aX.Coord(k) * std::cos(aU[i]) + aY.Coord(k) * std::sin(aU[i]));
++      aV[aNbV++] = aBeta;
++      aV[aNbV++] = aBeta + M_PI;
++    }
++  }
++  if (aMinor >= aMajor && aMinor > 0.)
++  {
++    const double aPhi = std::acos(-aMajor / aMinor);
++    aV[aNbV++]        = aPhi;
++    aV[aNbV++]        = -aPhi;
++  }
++
++  // A candidate is kept when its period representative lies in the patch; the patch bounds
++  // themselves are evaluated as given.
++  const auto isInside = [](const double theT, const double theLo, const double theHi) {
++    const double aT = ElCLib::InPeriod(theT, theLo, theLo + 2. * M_PI);
++    return aT >= theLo && aT <= theHi;
++  };
++  Bnd_Box aBox;
++  for (int i = 0; i < aNbU; ++i)
++  {
++    if (!isInside(aU[i], theUMin, theUMax))
++    {
++      continue;
++    }
++    const double anU = (aU[i] == theUMin || aU[i] == theUMax)
++                         ? aU[i]
++                         : ElCLib::InPeriod(aU[i], theUMin, theUMin + 2. * M_PI);
++    for (int j = 0; j < aNbV; ++j)
++    {
++      if (!isInside(aV[j], theVMin, theVMax))
++      {
++        continue;
++      }
++      const double aVal = (aV[j] == theVMin || aV[j] == theVMax)
++                            ? aV[j]
++                            : ElCLib::InPeriod(aV[j], theVMin, theVMin + 2. * M_PI);
++      aBox.Add(ElSLib::TorusValue(anU, aVal, aTorus.Position(), aMajor, aMinor));
++    }
++  }
++  aBox.Enlarge(std::max(theTol, Precision::Confusion()));
++  return aBox;
+ }
+ 
+ //=================================================================================================

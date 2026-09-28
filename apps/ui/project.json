@@ -93,6 +93,12 @@
           "env": "TAU_DEBUG"
         },
         {
+          "env": "GEOSPEC_MT_STAGED_PACKAGE_ROOT"
+        },
+        {
+          "runtime": "node apps/ui/geospec-mt-assets-cache-key.ts"
+        },
+        {
           "env": "POSTHOG_CLIENT_KEY"
         },
         {
@@ -125,6 +131,12 @@
         "^production",
         {
           "env": "TAU_CLOUD_ENABLED"
+        },
+        {
+          "env": "GEOSPEC_MT_STAGED_PACKAGE_ROOT"
+        },
+        {
+          "runtime": "node apps/ui/geospec-mt-assets-cache-key.ts"
         }
       ],
       "command": "node ../../../tools/build-lock.mjs build -- react-router build --config vite.config.ts --sourcemapClient hidden",
@@ -145,6 +157,12 @@
         "^production",
         {
           "env": "TAU_CLOUD_ENABLED"
+        },
+        {
+          "env": "GEOSPEC_MT_STAGED_PACKAGE_ROOT"
+        },
+        {
+          "runtime": "node apps/ui/geospec-mt-assets-cache-key.ts"
         }
       ],
       "command": "node ../../../tools/build-lock.mjs build -- react-router build --config vite.config.ts --sourcemapClient hidden",

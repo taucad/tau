@@ -48,7 +48,7 @@ Every factual statement carries one of three marks. Use the words, in bold, or a
 **A service that is only planned** — chartered, not deployed — uses the same template with three
 changes, and invents nothing observed:
 
-- `status: draft`, and `environments` names the environments it is *planned for*, not where it runs.
+- `status: draft`, and `environments` names the environments it is _planned for_, not where it runs.
 - Every row of **Where it runs** and of **What it talks to** is marked `planned`, with the charter
   cited. There is no `observed` mark on a page for something that does not exist yet.
 - **Commands and consoles**, **Secrets (names)** and **Declared vs observed** say what does not exist
@@ -77,22 +77,24 @@ sources:
 
 ## Where it runs
 
-| Environment | Where | Size and count | Mark |
-| --- | --- | --- | --- |
-| development | <where> | <count> | declared |
-| staging | <where> | <count> | declared |
-| prod-us | <where> | <count> | observed <UTC timestamp> |
+| Environment | Where   | Size and count | Mark                     |
+| ----------- | ------- | -------------- | ------------------------ |
+| development | <where> | <count>        | declared                 |
+| staging     | <where> | <count>        | declared                 |
+| prod-us     | <where> | <count>        | observed <UTC timestamp> |
 
 <!-- A planned service: status: draft, every row below and above marked `planned` with the charter cited. -->
+
 | <environment it is planned for> | <where it would run> | <not deployed> | planned |
 
 ## What it talks to
 
-| Peer | Protocol | Direction | Auth | Credential name |
-| --- | --- | --- | --- | --- |
+| Peer   | Protocol                   | Direction         | Auth  | Credential name   |
+| ------ | -------------------------- | ----------------- | ----- | ----------------- |
 | <peer> | <https / postgres / redis> | <in / out / both> | <how> | `<VARIABLE_NAME>` |
 
 <!-- A planned service: add a Mark column and set every peer row to `planned`. -->
+
 | <planned peer> | <protocol> | <direction> | <how it would authenticate> | <none set yet> |
 
 ## What it depends on
@@ -101,8 +103,8 @@ sources:
 
 ## How it fails and how you would tell
 
-| Failure | Symptom | Signal that shows it | Playbook |
-| --- | --- | --- | --- |
+| Failure   | Symptom          | Signal that shows it             | Playbook        |
+| --------- | ---------------- | -------------------------------- | --------------- |
 | <failure> | <what users see> | <log line, metric, health field> | `<playbooks/…>` |
 
 ## Commands and consoles
@@ -115,14 +117,14 @@ Expected: `<expected output>`
 
 ## Secrets (names)
 
-| Name | Owner | Source of truth | Rotation page |
-| --- | --- | --- | --- |
+| Name              | Owner | Source of truth   | Rotation page                  |
+| ----------------- | ----- | ----------------- | ------------------------------ |
 | `<VARIABLE_NAME>` | <who> | <where it is set> | `<operate/secret-rotation.md>` |
 
 ## Declared vs observed
 
-| Claim | Declared | Observed | Divergence |
-| --- | --- | --- | --- |
+| Claim   | Declared      | Observed             | Divergence         |
+| ------- | ------------- | -------------------- | ------------------ |
 | <claim> | <source path> | <what was seen, UTC> | <none, or the gap> |
 
 ## Open items
@@ -185,8 +187,8 @@ Expected: `<expected output>`
 
 ## If it goes wrong
 
-| Symptom | Meaning | Next |
-| --- | --- | --- |
+| Symptom   | Meaning   | Next               |
+| --------- | --------- | ------------------ |
 | <symptom> | <meaning> | <playbook or step> |
 
 ## Last exercised
@@ -228,14 +230,14 @@ Expected: `<expected output>`
 
 ## Decide
 
-| Signal | Branch |
-| --- | --- |
+| Signal         | Branch         |
+| -------------- | -------------- |
 | <what you saw> | <which remedy> |
 
 ## Remedies
 
-| Remedy | Runbook |
-| --- | --- |
+| Remedy   | Runbook       |
+| -------- | ------------- |
 | <remedy> | `<operate/…>` |
 
 <Where no procedure exists: "no procedure exists; the only lever is <lever>".>
@@ -255,7 +257,7 @@ Expected: `<expected output>`
 
 ## register
 
-````markdown
+```markdown
 ---
 title: '<Register name>'
 description: '<One sentence: what this register enumerates.>'
@@ -273,14 +275,14 @@ sources:
 
 <One line of scope. Then the table — nothing else.>
 
-| <Item> | Owner | <Column> | <Column> | Mark |
-| --- | --- | --- | --- | --- |
-| <item> | <who> | <value> | <value> | declared |
-````
+| <Item> | Owner | <Column> | <Column> | Mark     |
+| ------ | ----- | -------- | -------- | -------- |
+| <item> | <who> | <value>  | <value>  | declared |
+```
 
 ## overview and reference
 
-````markdown
+```markdown
 ---
 title: '<Title>'
 description: '<One sentence.>'
@@ -298,13 +300,13 @@ sources:
 
 <Free structure; tables preferred over prose. Every claim still carries its mark, every command is
 still copy-pasteable, and secrets are still names only.>
-````
+```
 
 ## go-live checklist
 
 One page, `readiness/go-live-checklist.md`. `kind: register`, `review_days: 14`, and `sources` naming every path whose change can open or close a row.
 
-````markdown
+```markdown
 ---
 title: 'Go-live checklist'
 description: 'The canonical list of what must be true before launch, with the evidence that closed each row.'
@@ -327,14 +329,14 @@ names a launch gate is absorbed into a row here or linked from one.
 **Public launch** means <definition>. **Live collection** means <definition>. They are signed off
 separately and may happen on the same day.
 
-| | |
-| --- | --- |
+|             |                      |
+| ----------- | -------------------- |
 | Target date | <date, or 'not set'> |
-| Last review | <YYYY-MM-DD> |
-| Open `B` | <n> |
-| Open `B$` | <n> |
-| Accepted | <n> |
-| Done | <n> |
+| Last review | <YYYY-MM-DD>         |
+| Open `B`    | <n>                  |
+| Open `B$`   | <n>                  |
+| Accepted    | <n>                  |
+| Done        | <n>                  |
 
 Gate: `B` blocks public launch · `B$` blocks enabling live collection · `A` may launch with a
 recorded acceptance · `P` dated or post-launch obligation, mirrored in the calendar.
@@ -347,14 +349,14 @@ evidence; only the operator sets `accepted`, changes a `Gate` or signs off.
 
 ## <Area>
 
-| ID | Item | Gate | State | Owner | Closes when | Evidence | Links |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `<AREA-1>` | <what must be true> | `B` | `open` | <who> | <the command and its expected output, a run or commit URL, or the named operator decision> | <what was actually seen, with a UTC timestamp> | `<page>` |
+| ID         | Item                | Gate | State  | Owner | Closes when                                                                                | Evidence                                       | Links    |
+| ---------- | ------------------- | ---- | ------ | ----- | ------------------------------------------------------------------------------------------ | ---------------------------------------------- | -------- |
+| `<AREA-1>` | <what must be true> | `B`  | `open` | <who> | <the command and its expected output, a run or commit URL, or the named operator decision> | <what was actually seen, with a UTC timestamp> | `<page>` |
 
 ## Sign-off
 
-| Stage | Date | Operator | Handbook commit reviewed |
-| --- | --- | --- | --- |
-| Public launch | <YYYY-MM-DD> | <who> | `<sha>` |
-| Live collection | <YYYY-MM-DD> | <who> | `<sha>` |
-````
+| Stage           | Date         | Operator | Handbook commit reviewed |
+| --------------- | ------------ | -------- | ------------------------ |
+| Public launch   | <YYYY-MM-DD> | <who>    | `<sha>`                  |
+| Live collection | <YYYY-MM-DD> | <who>    | `<sha>`                  |
+```

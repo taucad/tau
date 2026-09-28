@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 1,
+  "taskId": "M3-HOLE-TOPOLOGY-FIXTURES-A1",
+  "authority": "direct hashes and identifiers for the eight ordinary default-writer AP242 fixture primaries",
+  "fixtures": [
+    {
+      "id": "through",
+      "path": "fixtures/01-through.step",
+      "sha256": "00e2bacbcfafa1ac4ec56a2c1b1676cc772ced4ef376afb6424e6f4051016bd0",
+      "bytes": 20583,
+      "entityRecordCount": 457,
+      "fileSchema": "AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF",
+      "root": {
+        "name": "m3-hole-through",
+        "labelEntry": "0:1:1:1"
+      },
+      "occurrenceSelectors": [
+        "path:m3-hole-through/through-part"
+      ]
+    },
+    {
+      "id": "blind",
+      "path": "fixtures/02-blind.step",
+      "sha256": "a611c95e238d10a5a8e80d461b496be06f602a1a6772cb1007bef7152fcd8c7d",
+      "bytes": 20788,
+      "entityRecordCount": 463,
+      "fileSchema": "AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF",
+      "root": {
+        "name": "m3-hole-blind",
+        "labelEntry": "0:1:1:1"
+      },
+      "occurrenceSelectors": [
+        "path:m3-hole-blind/blind-part"
+      ]
+    },
+    {
+      "id": "sealed-cavity",
+      "path": "fixtures/03-sealed-cavity.step",
+      "sha256": "3918eb690df1acb8c18e5c7d5c389085b31d254ce476ec82db2d3d7142b2ad60",
+      "bytes": 21107,
+      "entityRecordCount": 471,
+      "fileSchema": "AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF",
+      "root": {
+        "name": "m3-hole-sealed-cavity",
+        "labelEntry": "0:1:1:1"
+      },
+      "occurrenceSelectors": [
+        "path:m3-hole-sealed-cavity/sealed-cavity-part"
+      ]
+    },
+    {
+      "id": "edge-notch",
+      "path": "fixtures/04-edge-notch.step",
+      "sha256": "910aa2dd2aa3e78cf2897a0bd041ad7cf2954352bc7c8634692b8fe2689ed665",
+      "bytes": 27590,
+      "entityRecordCount": 607,
+      "fileSchema": "AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF",
+      "root": {
+        "name": "m3-hole-edge-notch",
+        "labelEntry": "0:1:1:1"
+      },
+      "occurrenceSelectors": [
+        "path:m3-hole-edge-notch/edge-notch-part"
+      ]
+    },
+    {
+      "id": "unrelated-assembly",
+      "path": "fixtures/05-unrelated-assembly.step",
+      "sha256": "83c1025be8d0926fd02af1f9930e297be13bea7319e62dd6918c2ab57569c54e",
+      "bytes": 36157,
+      "entityRecordCount": 810,
+      "fileSchema": "AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF",
+      "root": {
+        "name": "m3-hole-unrelated-assembly",
+        "labelEntry": "0:1:1:1"
+      },
+      "occurrenceSelectors": [
+        "path:m3-hole-unrelated-assembly/through-part",
+        "path:m3-hole-unrelated-assembly/unrelated-box"
+      ]
+    },
+    {
+      "id": "rigid-transformed",
+      "path": "fixtures/06-rigid-transformed.step",
+      "sha256": "68abb34ebddad3536b19d56461702fa89ffffe69127ad0bab99ff2647f9fd190",
+      "bytes": 20621,
+      "entityRecordCount": 457,
+      "fileSchema": "AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF",
+      "root": {
+        "name": "m3-hole-rigid-transformed",
+        "labelEntry": "0:1:1:1"
+      },
+      "occurrenceSelectors": [
+        "path:m3-hole-rigid-transformed/rotated-through-part"
+      ]
+    },
+    {
+      "id": "shared-instance",
+      "path": "fixtures/07-shared-instance.step",
+      "sha256": "b399d155fe7255965be2e9cb5674a03838d830ded1caad358e2c672a7f343807",
+      "bytes": 21199,
+      "entityRecordCount": 466,
+      "fileSchema": "AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF",
+      "root": {
+        "name": "m3-hole-shared-instance",
+        "labelEntry": "0:1:1:1"
+      },
+      "occurrenceSelectors": [
+        "path:m3-hole-shared-instance/through-instance-a",
+        "path:m3-hole-shared-instance/through-instance-b"
+      ]
+    },
+    {
+      "id": "obstructed-through",
+      "path": "fixtures/08-obstructed-through.step",
+      "sha256": "3a3b71d2e00b1944c13c9a3b103b0dbed5b42c720c2b71799374f93dc71e14ad",
+      "bytes": 73342,
+      "entityRecordCount": 1631,
+      "fileSchema": "AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF",
+      "root": {
+        "name": "m3-hole-obstructed-through",
+        "labelEntry": "0:1:1:1"
+      },
+      "occurrenceSelectors": [
+        "path:m3-hole-obstructed-through/obstructed-through-part"
+      ]
+    }
+  ]
+}

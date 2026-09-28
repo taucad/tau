@@ -1,0 +1,6 @@
+# Preserve exporter-authored STEP whitespace in hash-bound ordinary fixtures.
+fixtures/ap242-radius1-height10.step -text whitespace=-blank-at-eol
+fixtures/regular-solid-controls.step -text whitespace=-blank-at-eol
+fixtures/subject-and-cavity-target.step -text whitespace=-blank-at-eol
+# This test embeds an immutable STEP document as a Rust raw string.
+trimmed_cylinder.rs whitespace=-blank-at-eol

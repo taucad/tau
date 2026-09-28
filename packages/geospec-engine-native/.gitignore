@@ -1,0 +1,3 @@
+/bindings/node/generated/
+/bindings/wasm/generated/
+/bindings/emscripten/generated/

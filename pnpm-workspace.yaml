@@ -264,7 +264,7 @@ catalog:
   isomorphic-git: 1.38.5
   xstate: 6.0.0-alpha.59
   zod: ^4.4.3
-  nanoraster: ^0.5.4
+  nanoraster: ^0.5.5
   # Exact: @taucad/picovoxel's kernel version carries this release's build-time digests.
   picovoxel: 0.1.0
   n8ao: 1.10.2
@@ -286,6 +286,12 @@ catalog:
   '@streamdown/math': ^1.0.2
   '@streamdown/cjk': ^1.0.3
   '@streamdown/mermaid': ^1.0.2
+  '@getpaseo/protocol': 0.7.0-beta.1
+  '@getpaseo/client': 0.7.0-beta.1
+  '@getpaseo/relay': 0.7.0-beta.1
+  '@fastify/multipart': ^10.0.0
+  '@typescript/vfs': ^1.6.4
+  '@napi-rs/cli': 3.8.6
 catalogs:
   electron-vite7:
     electron-vite: 5.0.0

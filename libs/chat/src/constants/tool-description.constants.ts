@@ -17,7 +17,7 @@ export const toolDescriptions = {
   [toolName.testModel]: `Run GeoSpec tests against the current 3D model(s).
 
 No input recursively runs all *.geospec.ts or *.geospec.js files. Tests load
-Tau model files through geospec/model and assert geometry with expectGeo.
+Tau model files and assert measurable geometry requirements.
 
 Filter examples:
 - Run one file: { files: ['main.geospec.ts'] }

@@ -1,0 +1,79 @@
+{
+  "upstream": "https://github.com/Open-Cascade-SAS/OCCT",
+  "commit": "3d097a0328e71b826377d4814ab05ec3c3d23871",
+  "archiveUrl": "https://github.com/Open-Cascade-SAS/OCCT/archive/3d097a0328e71b826377d4814ab05ec3c3d23871.tar.gz",
+  "archiveSha256": "ac47dc1cd2404ff40678d4f64910894df79b689f14e1a584a5705cfe76df2ad3",
+  "archiveBytes": 45160653,
+  "expandedBytes": 200540479,
+  "sourceCache": "node_modules/.cache/geospec-engine-native/sources/occt",
+  "treeVerification": {
+    "method": "Archive regular files/symlinks checked against pinned Git ls-tree blob identities",
+    "checked": 34563,
+    "exactBlobMatches": 34556,
+    "expectedArchiveEolConversions": [
+      {
+        "path": "adm/scripts/migration_800/run_migration.bat",
+        "archiveBytes": 4012,
+        "gitBytes": 3886,
+        "crlfOnly": true,
+        "archiveSha256": "9bdc8139682091831fdcb4e49a3451311ce4f1212cd8ee6aaf5f527ba4f64663",
+        "gitSha256": "232dd39d5c672cf6161442894429e8ef03b4090bb94a52aef4fd1bb7ebd85fde"
+      },
+      {
+        "path": "adm/templates/DRAWEXE.vcxproj.user.in",
+        "archiveBytes": 2003,
+        "gitBytes": 1963,
+        "crlfOnly": true,
+        "archiveSha256": "e7aab0062d49e104e5bfd71e21c6fad34919e89bf54a42c206e8aa0d7eec7184",
+        "gitSha256": "9fea476304e5c1921f1e3d066dcc17c07d31cde547169184daf6888d67859346"
+      },
+      {
+        "path": "adm/templates/build.bat",
+        "archiveBytes": 1263,
+        "gitBytes": 1223,
+        "crlfOnly": true,
+        "archiveSha256": "49645120d3a5e5f247dccd4e494998e0ff67242ef03515e7e331930f14e9a4c9",
+        "gitSha256": "3005cce0a59edd53f3a5cba4b4cd316271673994e0951ad77bd9f05a04fbd018"
+      },
+      {
+        "path": "adm/templates/draw.bat",
+        "archiveBytes": 162,
+        "gitBytes": 155,
+        "crlfOnly": true,
+        "archiveSha256": "59c3a7a5d3b8c097f75876aba01edbfe083af173e8cce4ad6bb5e3f52731e810",
+        "gitSha256": "de44c27173a00a2648d7f0eae7919cbdc1e55fd2cf567af6919927fc00a0ccb7"
+      },
+      {
+        "path": "adm/templates/env.bat",
+        "archiveBytes": 14213,
+        "gitBytes": 13897,
+        "crlfOnly": true,
+        "archiveSha256": "268104d5722c7f0b7b76aead7211ca98ded5784c269a034ec49415d1c5eebe93",
+        "gitSha256": "6a95b57ddb2ee8a640917850edef4b070c8329d5cc361a9659e826b390993ac5"
+      },
+      {
+        "path": "adm/templates/install.bat",
+        "archiveBytes": 1272,
+        "gitBytes": 1232,
+        "crlfOnly": true,
+        "archiveSha256": "0660715a1172dcd7077ec39ebb117a70c232522f23127b080f9bebe91b03da63",
+        "gitSha256": "8571ab721662f11c2682c93342280028f6883741225829079431f71b6401e4e8"
+      },
+      {
+        "path": "adm/templates/msvc.bat",
+        "archiveBytes": 829,
+        "gitBytes": 807,
+        "crlfOnly": true,
+        "archiveSha256": "84e2cac37503958187e086e70d024dfda4c2028ff69d4e29e9c0b4ca2f682665",
+        "gitSha256": "422c8a6077e463cf2e1ef7173daeccb3a7ea3ea404b3e416ff1672d1851d96d0"
+      }
+    ],
+    "explanation": "Seven Windows script/template files use CRLF in archive as declared by pinned .gitattributes; all other archive file bytes match exact Git blobs. Archive bytes retained unchanged.",
+    "unexplainedDifferences": 0
+  },
+  "licenseFiles": [
+    "LICENSE_LGPL_21.txt",
+    "OCCT_LGPL_EXCEPTION.txt"
+  ],
+  "buildRequirement": "Fetch and verify this exact archive independent of optional repos or Brain; compiled bridge/source recipe is separate."
+}

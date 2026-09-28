@@ -1,0 +1,246 @@
+--- a/src/DataExchange/TKDESTEP/STEPConstruct/STEPConstruct_Assembly.cxx
++++ b/src/DataExchange/TKDESTEP/STEPConstruct/STEPConstruct_Assembly.cxx
+@@ -177,6 +177,47 @@
+ 
+ //=================================================================================================
+ 
++// Returns the product definition of the first SDR (exact type) that uses theRep.
++// Walks the graph's sharing list in place: Interface_Graph::Sharings() copies it,
++// which is quadratic when every NAUO of a widely instanced part checks its rep.
++static occ::handle<StepBasic_ProductDefinition> sdrProductDefinition(
++  const Interface_Graph&                      theGraph,
++  const occ::handle<StepRepr_Representation>& theRep)
++{
++  const int aNum = theGraph.EntityNumber(theRep);
++  if (aNum <= 0)
++  {
++    return nullptr;
++  }
++  const occ::handle<Standard_Type> tSDR = STANDARD_TYPE(StepShape_ShapeDefinitionRepresentation);
++  for (NCollection_List<int>::Iterator anIter(theGraph.SharingTable()->Value(aNum)); anIter.More();
++       anIter.Next())
++  {
++    const occ::handle<Standard_Transient>& enti = theGraph.Entity(anIter.Value());
++    if (enti->DynamicType() == tSDR)
++    {
++      occ::handle<StepShape_ShapeDefinitionRepresentation> SDR =
++        occ::down_cast<StepShape_ShapeDefinitionRepresentation>(enti);
++      if (SDR->UsedRepresentation() == theRep)
++      {
++        const occ::handle<StepRepr_PropertyDefinition> aPD = SDR->Definition().PropertyDefinition();
++        if (aPD)
++        {
++          occ::handle<StepBasic_ProductDefinition> aProductDefinition =
++            aPD->Definition().ProductDefinition();
++          if (!aProductDefinition.IsNull())
++          {
++            return aProductDefinition;
++          }
++        }
++      }
++    }
++  }
++  return nullptr;
++}
++
++//=================================================================================================
++
+ bool STEPConstruct_Assembly::CheckSRRReversesNAUO(
+   const Interface_Graph&                                            theGraph,
+   const occ::handle<StepShape_ContextDependentShapeRepresentation>& CDSR)
+@@ -192,54 +233,17 @@
+     return false;
+   }
+ 
+-  occ::handle<StepBasic_ProductDefinition> pd1, pd2;
+-  occ::handle<StepRepr_Representation>     rep1 = CDSR->RepresentationRelation()->Rep1();
+-  occ::handle<StepRepr_Representation>     rep2 = CDSR->RepresentationRelation()->Rep2();
++  occ::handle<StepRepr_Representation> rep1 = CDSR->RepresentationRelation()->Rep1();
++  occ::handle<StepRepr_Representation> rep2 = CDSR->RepresentationRelation()->Rep2();
+   if (rep1.IsNull() || rep2.IsNull())
+   {
+     return false;
+   }
+ 
+   // find SDRs corresponding to Rep1 and Rep2 and remember their PDs
+-  occ::handle<Standard_Type> tSDR   = STANDARD_TYPE(StepShape_ShapeDefinitionRepresentation);
+-  Interface_EntityIterator   anIter = theGraph.Sharings(rep1);
+-  for (; anIter.More() && pd1.IsNull(); anIter.Next())
+-  {
+-    const occ::handle<Standard_Transient>& enti = anIter.Value();
+-    if (enti->DynamicType() == tSDR)
+-    {
+-      occ::handle<StepShape_ShapeDefinitionRepresentation> SDR =
+-        occ::down_cast<StepShape_ShapeDefinitionRepresentation>(enti);
+-      if (SDR->UsedRepresentation() == rep1)
+-      {
+-        const occ::handle<StepRepr_PropertyDefinition> aPD = SDR->Definition().PropertyDefinition();
+-        if (aPD)
+-        {
+-          pd1 = aPD->Definition().ProductDefinition();
+-        }
+-      }
+-    }
+-  }
++  occ::handle<StepBasic_ProductDefinition> pd1 = sdrProductDefinition(theGraph, rep1);
++  occ::handle<StepBasic_ProductDefinition> pd2 = sdrProductDefinition(theGraph, rep2);
+ 
+-  anIter = theGraph.Sharings(rep2);
+-  for (; anIter.More() && pd2.IsNull(); anIter.Next())
+-  {
+-    const occ::handle<Standard_Transient>& enti = anIter.Value();
+-    if (enti->DynamicType() == tSDR)
+-    {
+-      occ::handle<StepShape_ShapeDefinitionRepresentation> SDR =
+-        occ::down_cast<StepShape_ShapeDefinitionRepresentation>(enti);
+-      if (SDR->UsedRepresentation() == rep2)
+-      {
+-        const occ::handle<StepRepr_PropertyDefinition> aPD = SDR->Definition().PropertyDefinition();
+-        if (aPD)
+-        {
+-          pd2 = aPD->Definition().ProductDefinition();
+-        }
+-      }
+-    }
+-  }
+-
+   // checks..
+ 
+   if (pd1 == nauo->RelatedProductDefinition() && // OK
+--- a/src/DataExchange/TKDESTEP/STEPControl/STEPControl_ActorRead.cxx
++++ b/src/DataExchange/TKDESTEP/STEPControl/STEPControl_ActorRead.cxx
+@@ -868,6 +868,7 @@
+   gp_Trsf                                  Trsf;
+   bool                                     iatrsf = false, SRRReversed = false, IsDepend = false;
+   occ::handle<StepRepr_ShapeRepresentationRelationship> SRR;
++  NCollection_Sequence<occ::handle<StepRepr_Representation>> aSRRReps;
+   Interface_EntityIterator                              subs1 = graph.Sharings(NAUO);
+   for (subs1.Start(); subs1.More(); subs1.Next())
+   {
+@@ -899,32 +900,39 @@
+         continue;
+       }
+       iatrsf = ComputeSRRWT(RR, TP, Trsf, theLocalFactors);
+-      // find real ProductDefinition used rep
+-      Interface_EntityIterator subs3 = TP->Graph().Sharings(rep);
+-      for (subs3.Start(); subs3.More(); subs3.Next())
++      // find real ProductDefinition used rep, walking its sharing list in place
++      // and only until PD is found: a full copy per NAUO is quadratic for widely
++      // instanced parts. The last SRR sharing rep is only a fallback (see below).
++      aSRRReps.Append(rep);
++      const int aRepNum = graph.EntityNumber(rep);
++      if (!PD.IsNull() || aRepNum <= 0)
+       {
+-        const occ::handle<Standard_Transient>& aSubs3Val = subs3.Value();
+-        if (occ::handle<StepShape_ShapeDefinitionRepresentation> SDR =
+-              occ::down_cast<StepShape_ShapeDefinitionRepresentation>(aSubs3Val))
++        continue;
++      }
++      const occ::handle<Standard_Type>& aSDRType = STANDARD_TYPE(StepShape_ShapeDefinitionRepresentation);
++      for (NCollection_List<int>::Iterator subs3(graph.SharingTable()->Value(aRepNum));
++           PD.IsNull() && subs3.More();
++           subs3.Next())
++      {
++        // IsKind() first: a failing dynamic_cast per shared entity dominates this walk
++        const occ::handle<Standard_Transient>& aSubs3Val = graph.Entity(subs3.Value());
++        if (!aSubs3Val->IsKind(aSDRType))
+         {
+-          occ::handle<StepRepr_ProductDefinitionShape> PDS1 =
+-            occ::down_cast<StepRepr_ProductDefinitionShape>(SDR->Definition().PropertyDefinition());
+-          if (PDS1.IsNull())
+-          {
+-            continue;
+-          }
+-          Interface_EntityIterator subs4 = graph.Shareds(PDS1);
+-          for (subs4.Start(); PD.IsNull() && subs4.More(); subs4.Next())
+-          {
+-            PD = occ::down_cast<StepBasic_ProductDefinition>(subs4.Value());
+-          }
++          continue;
+         }
+-        else if (aSubs3Val->IsKind(STANDARD_TYPE(StepRepr_ShapeRepresentationRelationship)))
++        occ::handle<StepShape_ShapeDefinitionRepresentation> SDR =
++          occ::down_cast<StepShape_ShapeDefinitionRepresentation>(aSubs3Val);
++        occ::handle<StepRepr_ProductDefinitionShape> PDS1 =
++          occ::down_cast<StepRepr_ProductDefinitionShape>(SDR->Definition().PropertyDefinition());
++        if (PDS1.IsNull())
+         {
+-          // NB: C cast is used instead of DownCast() to improve performance on some cases.
+-          // This saves ~10% of elapsed time on "testgrid perf de bug29* -parallel 0".
+-          SRR = (StepRepr_ShapeRepresentationRelationship*)(aSubs3Val.get());
++          continue;
+         }
++        Interface_EntityIterator subs4 = graph.Shareds(PDS1);
++        for (subs4.Start(); PD.IsNull() && subs4.More(); subs4.Next())
++        {
++          PD = occ::down_cast<StepBasic_ProductDefinition>(subs4.Value());
++        }
+       }
+     }
+   }
+@@ -962,6 +970,29 @@
+       }
+     }
+ 
++    // The last SRR sharing any rep searched above, in search order
++    const occ::handle<Standard_Type>& aSRRType =
++      STANDARD_TYPE(StepRepr_ShapeRepresentationRelationship);
++    for (int i = 1; theResult.IsNull() && i <= aSRRReps.Length(); i++)
++    {
++      const int aRepNum = graph.EntityNumber(aSRRReps.Value(i));
++      if (aRepNum <= 0)
++      {
++        continue;
++      }
++      for (NCollection_List<int>::Iterator anIter(graph.SharingTable()->Value(aRepNum));
++           anIter.More();
++           anIter.Next())
++      {
++        const occ::handle<Standard_Transient>& anEntity = graph.Entity(anIter.Value());
++        if (anEntity->IsKind(aSRRType))
++        {
++          // NB: C cast is used instead of DownCast() to improve performance on some cases.
++          SRR = (StepRepr_ShapeRepresentationRelationship*)(anEntity.get());
++        }
++      }
++    }
++
+     if (theResult.IsNull() && !SRR.IsNull())
+     {
+       binder = TP->Find(SRR);
+@@ -2426,24 +2457,31 @@
+   occ::handle<StepGeom_Axis2Placement3d> trg        = Target;
+   bool                                   isOKOrigin = false, isSwapOrigin = false;
+   bool                                   isOKTarget = false, isSwapTarget = false;
++  // Compare items by reference: ItemsValue() copies a handle per call.
++  const occ::handle<NCollection_HArray1<occ::handle<StepRepr_RepresentationItem>>> anOrigItems =
++    OrigContext->Items();
+   for (int i = 1; i <= OrigContext->NbItems(); i++)
+   {
+-    if (OrigContext->ItemsValue(i) == org)
++    const occ::handle<StepRepr_RepresentationItem>& anItem = anOrigItems->Value(i);
++    if (anItem == org)
+     {
+       isOKOrigin = true;
+     }
+-    else if (OrigContext->ItemsValue(i) == trg)
++    else if (anItem == trg)
+     {
+       isSwapTarget = true;
+     }
+   }
++  const occ::handle<NCollection_HArray1<occ::handle<StepRepr_RepresentationItem>>> aTargItems =
++    TargContext->Items();
+   for (int i = 1; i <= TargContext->NbItems(); i++)
+   {
+-    if (TargContext->ItemsValue(i) == trg)
++    const occ::handle<StepRepr_RepresentationItem>& anItem = aTargItems->Value(i);
++    if (anItem == trg)
+     {
+       isOKTarget = true;
+     }
+-    else if (TargContext->ItemsValue(i) == org)
++    else if (anItem == org)
+     {
+       isSwapOrigin = true;
+     }

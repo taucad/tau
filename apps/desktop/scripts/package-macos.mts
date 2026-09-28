@@ -3,7 +3,9 @@
 /**
  * Purpose: Assemble and verify Tau macOS packages, with signing/notarization selected explicitly.
  * Why: Quick Look extensions must enter Contents/PlugIns before one inside-out signing pass.
- * Environment: macOS, Xcode tools, built desktop/UI/native artifacts; optional TAU_MACOS_PACKAGE_OUTPUT_ROOT;
+ * Environment: macOS, Xcode tools, built desktop/UI/native artifacts;
+ * TAU_GEOSPEC_NATIVE_ASSEMBLY_ROOT selects the qualified assemble-package.sh output (required);
+ * optional TAU_MACOS_PACKAGE_OUTPUT_ROOT;
  * Apple credentials only for --release; --unsigned skips all package signing.
  * Usage: node --import @oxc-node/core/register scripts/package-macos.mts [--release | --unsigned] [--zip]
  * Output: <output root>/Tau-darwin-arm64/Tau.app, copied as APFS clones of its inputs; the distribution archive
@@ -28,7 +30,7 @@ import { packager } from '@electron/packager';
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
 import { parseMacosPackageMode } from './macos-package-mode.mjs';
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
-import { copyGeoSpecNative, copyRuntimeClosure, copyTree } from './runtime-closure.mjs';
+import { copyGeoSpecNative, copyGeoSpecNativeAssembly, copyRuntimeClosure, copyTree } from './runtime-closure.mjs';
 
 type PackageMetadata = {
   readonly name: string;
@@ -52,6 +54,14 @@ type PicoGkResourceManifest = {
 const desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const workspaceRoot = resolve(desktopRoot, '../..');
 const outputRoot = resolve(process.env['TAU_MACOS_PACKAGE_OUTPUT_ROOT'] ?? resolve(desktopRoot, 'package-out'));
+const geospecAssemblyInput = process.env['TAU_GEOSPEC_NATIVE_ASSEMBLY_ROOT'];
+if (!geospecAssemblyInput) {
+  throw new Error('Set TAU_GEOSPEC_NATIVE_ASSEMBLY_ROOT to the selected native assemble-package.sh output.');
+}
+const geospecAssemblyRoot = await realpath(resolve(workspaceRoot, geospecAssemblyInput));
+if (geospecAssemblyRoot === outputRoot || geospecAssemblyRoot.startsWith(`${outputRoot}/`)) {
+  throw new Error('GeoSpec native assembly must be outside the disposable package output root.');
+}
 const stageRoot = resolve(outputRoot, 'stage');
 const extensionRoot = resolve(desktopRoot, 'macos/dist/extensions');
 const hostInfo = resolve(desktopRoot, 'macos/generated/TauHost-Info.plist');
@@ -289,6 +299,10 @@ await Promise.all([
   mkdir(resolve(stageRoot, 'node_modules/@taulabs'), { recursive: true }),
   mkdir(resolve(stageRoot, 'node_modules/@esbuild'), { recursive: true }),
 ]);
+const geospecNativeDependencies = await copyGeoSpecNativeAssembly(
+  geospecAssemblyRoot,
+  resolve(stageRoot, 'node_modules'),
+);
 
 const metadata = await readJson<PackageMetadata>(resolve(desktopRoot, 'package.json'));
 const electron = await readJson<{ readonly version: string }>(
@@ -323,6 +337,7 @@ await Promise.all([
         main: metadata.main,
         type: metadata.type,
         dependencies: {
+          ...geospecNativeDependencies,
           '@taulabs/openrscad-engine': openrscadMetadata.version,
           '@taulabs/openrscad-engine-darwin-arm64': openrscadMetadata.version,
           '@esbuild/darwin-arm64': esbuildMetadata.version,

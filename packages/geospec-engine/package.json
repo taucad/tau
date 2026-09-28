@@ -9,7 +9,9 @@
     "./src/cli/main.ts",
     "./dist/cli/main.mjs",
     "./src/runner/node/pool-worker-entry.ts",
-    "./dist/runner/node/pool-worker-entry.mjs"
+    "./dist/runner/node/pool-worker-entry.mjs",
+    "./src/runner/node/native-pool-worker-entry.ts",
+    "./dist/runner/node/native-pool-worker-entry.mjs"
   ],
   "private": false,
   "repository": {
@@ -51,7 +53,9 @@
     },
     "./native/opencascade/single/wasm": "./native/opencascade/dist/geospec_opencascade_single.wasm",
     "./native/opencascade/single/wasm-url": "./src/native/opencascade-wasm.ts",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./node-filesystem": "./src/runner/node/node-vm-filesystem.ts",
+    "./native-pool/node": "./src/runner/node/native-pool-runner.ts"
   },
   "publishConfig": {
     "access": "public",
@@ -82,7 +86,17 @@
         "import": "./dist/native/opencascade-wasm.mjs",
         "default": "./dist/native/opencascade-wasm.mjs"
       },
-      "./package.json": "./package.json"
+      "./package.json": "./package.json",
+      "./node-filesystem": {
+        "types": "./dist/runner/node/node-vm-filesystem.d.mts",
+        "import": "./dist/runner/node/node-vm-filesystem.mjs",
+        "default": "./dist/runner/node/node-vm-filesystem.mjs"
+      },
+      "./native-pool/node": {
+        "types": "./dist/runner/node/native-pool-runner.d.mts",
+        "import": "./dist/runner/node/native-pool-runner.mjs",
+        "default": "./dist/runner/node/native-pool-runner.mjs"
+      }
     },
     "imports": {}
   },
@@ -101,6 +115,7 @@
     "@taucad/assimp": "workspace:*",
     "@taucad/brep": "workspace:*",
     "@taucad/esbuild": "workspace:*",
+    "@taucad/geospec-engine-native": "workspace:*",
     "@taucad/gltf": "workspace:*",
     "@taucad/geometry-core": "workspace:*",
     "@taucad/image": "workspace:*",

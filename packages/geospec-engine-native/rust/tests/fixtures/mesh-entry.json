@@ -1,0 +1,479 @@
+{
+  "task": "W2.A2/W5.mesh-entry",
+  "attempt": "A1",
+  "frozenAt": "2026-09-08T03:07:52Z",
+  "source": "6157d53b452e31908cb7b64a7b5ce95e5e40134a",
+  "sharedContractSha256": "0368b3d997213fff02ad2fd5cd5f5c0c8db4fcacd4d23f8119ba2d1430709fb1",
+  "candidateSourceRead": false,
+  "candidateComparisonsExecuted": false,
+  "oracle": "Literal records from accepted shared contract; Node stdlib Buffer LE packing/SHA256 and independently inspected reference arithmetic; ASCII object keys sorted and ECMAScript JSON.stringify once before execution. Expected strings below are immutable test inputs, never produced by candidate.",
+  "arithmeticNotes": {
+    "asymmetric": "Indices 2,0,1 omit extreme vertex 3. Min [-2,-3,-1], max [4,2,5].",
+    "baked": "Rz(+90deg) then translation [10,-4,2] applied to the three asymmetric points before packing; no transform API.",
+    "rounding": "x extrema 1 and 2^60 yield binary64 size 2^60, center 2^59; reconstructed min is 0, not raw 1. y/z use float32-widened 0.1/0.2/0.3.",
+    "budgets": "One triangle gives 3 referenced visits, plus 12 declared axes = 15; budget 14 refuses either polarity. Empty expectation cost 3, partial one axis cost 4."
+  },
+  "a1Compatibility": {
+    "originalTestSha256": "5d90470bd3e92b592cb0437cb45aabdbab76b8ce0caa4c36437eae15659dfd25",
+    "allowedChange": "initialize capability expectation only",
+    "initializeExpectedUtf8": "{\"requestId\":\"r1\",\"result\":{\"canonicalProfile\":\"geospec-jcs-v1\",\"capabilities\":[{\"name\":\"toHaveBoundingBox\",\"registryVersion\":4,\"scope\":\"mesh-buffer-whole-subject\"}],\"protocolVersion\":3,\"qualification\":\"experimental\",\"registryVersion\":4}}"
+  },
+  "fixtures": [
+    {
+      "name": "asymmetric",
+      "positions": [-2, 1, 3, 4, -3, 5, 1, 2, -1, 1000, 2000, 3000],
+      "indices": [2, 0, 1],
+      "hex": "47534d31040000000100000000000000000000c0000000000000f03f0000000000000840000000000000104000000000000008c00000000000001440000000000000f03f0000000000000040000000000000f0bf0000000000408f400000000000409f40000000000070a740020000000000000001000000",
+      "hash": "f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c",
+      "rawMin": [-2, -3, -1],
+      "rawMax": [4, 2, 5],
+      "measured": {
+        "min": [-2, -3, -1],
+        "max": [4, 2, 5],
+        "size": [6, 5, 6],
+        "center": [1, -0.5, 2]
+      },
+      "ingestRequestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"format\":\"mesh-buffer-v1\",\"frame\":{\"coordinateSystem\":\"z-up\",\"unit\":\"mm\"},\"method\":\"ingestSubject\",\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"i1\"}",
+      "ingestExpectedUtf8": "{\"requestId\":\"i1\",\"result\":{\"subject\":{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"format\":\"mesh-buffer-v1\"}}}"
+    },
+    {
+      "name": "baked",
+      "positions": [9, -6, 5, 13, 0, 7, 8, -3, 1],
+      "indices": [2, 0, 1],
+      "hex": "47534d310300000001000000000000000000224000000000000018c000000000000014400000000000002a4000000000000000000000000000001c40000000000000204000000000000008c0000000000000f03f020000000000000001000000",
+      "hash": "bc7162bd64af42a08a3ddf1b523fe32be6be5a5cd8a6f306d2cb5c3e5923a3a1",
+      "rawMin": [8, -6, 1],
+      "rawMax": [13, 0, 7],
+      "measured": {
+        "min": [8, -6, 1],
+        "max": [13, 0, 7],
+        "size": [5, 6, 6],
+        "center": [10.5, -3, 4]
+      },
+      "ingestRequestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"contentHash\":\"bc7162bd64af42a08a3ddf1b523fe32be6be5a5cd8a6f306d2cb5c3e5923a3a1\",\"format\":\"mesh-buffer-v1\",\"frame\":{\"coordinateSystem\":\"z-up\",\"unit\":\"mm\"},\"method\":\"ingestSubject\",\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"i1\"}",
+      "ingestExpectedUtf8": "{\"requestId\":\"i1\",\"result\":{\"subject\":{\"contentHash\":\"bc7162bd64af42a08a3ddf1b523fe32be6be5a5cd8a6f306d2cb5c3e5923a3a1\",\"format\":\"mesh-buffer-v1\"}}}"
+    },
+    {
+      "name": "rounding",
+      "positions": [1, 0.1, -0.1, 1152921504606847000, 0.3, 0.2, 2, 0.2, 0],
+      "indices": [0, 1, 2],
+      "hex": "47534d310300000001000000000000000000f03f9a9999999999b93f9a9999999999b9bf000000000000b043333333333333d33f9a9999999999c93f00000000000000409a9999999999c93f0000000000000000000000000100000002000000",
+      "hash": "344eb0828c2122562f61877704077a2d84c3bc3657b729813e7479bfed1d2d55",
+      "rawMin": [1, 0.10000000149011612, -0.10000000149011612],
+      "rawMax": [1152921504606847000, 0.30000001192092896, 0.20000000298023224],
+      "measured": {
+        "min": [0, 0.10000000149011612, -0.10000000149011612],
+        "max": [1152921504606847000, 0.30000001192092896, 0.20000000298023224],
+        "size": [1152921504606847000, 0.20000001043081284, 0.30000000447034836],
+        "center": [576460752303423500, 0.20000000670552254, 0.05000000074505806]
+      },
+      "ingestRequestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"contentHash\":\"344eb0828c2122562f61877704077a2d84c3bc3657b729813e7479bfed1d2d55\",\"format\":\"mesh-buffer-v1\",\"frame\":{\"coordinateSystem\":\"z-up\",\"unit\":\"mm\"},\"method\":\"ingestSubject\",\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"i1\"}",
+      "ingestExpectedUtf8": "{\"requestId\":\"i1\",\"result\":{\"subject\":{\"contentHash\":\"344eb0828c2122562f61877704077a2d84c3bc3657b729813e7479bfed1d2d55\",\"format\":\"mesh-buffer-v1\"}}}"
+    },
+    {
+      "name": "degenerate",
+      "hex": "47534d31040000000100000000000000000000c0000000000000f03f0000000000000840000000000000104000000000000008c00000000000001440000000000000f03f0000000000000040000000000000f0bf0000000000408f400000000000409f40000000000070a740000000000000000000000000",
+      "hash": "a3258208fa428e83663ecce0984be4da6ca4a2fdf44a88003ba9ac316be4a260",
+      "measured": {
+        "min": [-2, 1, 3],
+        "max": [-2, 1, 3],
+        "size": [0, 0, 0],
+        "center": [-2, 1, 3]
+      },
+      "ingestRequestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"contentHash\":\"a3258208fa428e83663ecce0984be4da6ca4a2fdf44a88003ba9ac316be4a260\",\"format\":\"mesh-buffer-v1\",\"frame\":{\"coordinateSystem\":\"z-up\",\"unit\":\"mm\"},\"method\":\"ingestSubject\",\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"i1\"}",
+      "ingestExpectedUtf8": "{\"requestId\":\"i1\",\"result\":{\"subject\":{\"contentHash\":\"a3258208fa428e83663ecce0984be4da6ca4a2fdf44a88003ba9ac316be4a260\",\"format\":\"mesh-buffer-v1\"}}}"
+    }
+  ],
+  "evaluations": [
+    {
+      "name": "asymmetric-all-fields",
+      "fixture": "asymmetric",
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"asymmetric-all-fields\",\"payload\":{\"arguments\":[],\"expected\":{\"center\":{\"x\":1,\"y\":-0.5,\"z\":2},\"max\":[4,2,5],\"min\":[-2,-3,-1],\"size\":{\"x\":6,\"y\":5,\"z\":6},\"tolerance\":0},\"kind\":\"boundingBox\"},\"polarity\":\"positive\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":15}],\"subjects\":[{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedUtf8": "{\"requestId\":\"r1\",\"result\":{\"results\":[{\"claimId\":\"asymmetric-all-fields\",\"diagnostics\":[],\"evidence\":{\"axisFailures\":[],\"expected\":{\"center\":{\"x\":1,\"y\":-0.5,\"z\":2},\"max\":[4,2,5],\"min\":[-2,-3,-1],\"size\":{\"x\":6,\"y\":5,\"z\":6},\"tolerance\":0},\"measured\":{\"center\":[1,-0.5,2],\"max\":[4,2,5],\"min\":[-2,-3,-1],\"size\":[6,5,6]},\"polarity\":\"positive\",\"positiveSatisfied\":true,\"profile\":\"mesh-bounds-v1\",\"scope\":\"whole-subject\",\"source\":\"mesh\",\"subjectContentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"tolerance\":0},\"status\":\"passed\"}]}}"
+    },
+    {
+      "name": "all-axis-failure-order",
+      "fixture": "asymmetric",
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"all-axis-failure-order\",\"payload\":{\"expected\":{\"center\":{\"x\":0,\"y\":0,\"z\":0},\"max\":[0,0,0],\"min\":{\"x\":0,\"y\":0,\"z\":0},\"size\":{\"x\":0,\"y\":0,\"z\":0},\"tolerance\":0},\"kind\":\"boundingBox\"},\"polarity\":\"positive\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":15}],\"subjects\":[{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedUtf8": "{\"requestId\":\"r1\",\"result\":{\"results\":[{\"claimId\":\"all-axis-failure-order\",\"diagnostics\":[{\"code\":\"GEOSPEC_BOUNDING_BOX_MISMATCH\",\"details\":{\"axisFailures\":[{\"actual\":-2,\"axis\":\"x\",\"expected\":0,\"field\":\"min\"},{\"actual\":-3,\"axis\":\"y\",\"expected\":0,\"field\":\"min\"},{\"actual\":-1,\"axis\":\"z\",\"expected\":0,\"field\":\"min\"},{\"actual\":4,\"axis\":\"x\",\"expected\":0,\"field\":\"max\"},{\"actual\":2,\"axis\":\"y\",\"expected\":0,\"field\":\"max\"},{\"actual\":5,\"axis\":\"z\",\"expected\":0,\"field\":\"max\"},{\"actual\":6,\"axis\":\"x\",\"expected\":0,\"field\":\"size\"},{\"actual\":5,\"axis\":\"y\",\"expected\":0,\"field\":\"size\"},{\"actual\":6,\"axis\":\"z\",\"expected\":0,\"field\":\"size\"},{\"actual\":1,\"axis\":\"x\",\"expected\":0,\"field\":\"center\"},{\"actual\":-0.5,\"axis\":\"y\",\"expected\":0,\"field\":\"center\"},{\"actual\":2,\"axis\":\"z\",\"expected\":0,\"field\":\"center\"}],\"evidence\":\"mesh\",\"matcher\":\"toHaveBoundingBox\",\"measured\":{\"center\":[1,-0.5,2],\"max\":[4,2,5],\"min\":[-2,-3,-1],\"size\":[6,5,6]},\"tolerance\":0},\"message\":\"Bounding box is off the declared bounds on min.x, min.y, min.z, max.x, max.y, max.z, size.x, size.y, size.z, center.x, center.y, center.z (tolerance 0).\",\"severity\":\"error\",\"spatial\":{\"center\":[1,-0.5,2],\"max\":[4,2,5],\"min\":[-2,-3,-1]},\"suggestion\":\"Correct the model dimensions, or widen the declared bounding-box tolerance.\"}],\"evidence\":{\"axisFailures\":[{\"actual\":-2,\"axis\":\"x\",\"expected\":0,\"field\":\"min\"},{\"actual\":-3,\"axis\":\"y\",\"expected\":0,\"field\":\"min\"},{\"actual\":-1,\"axis\":\"z\",\"expected\":0,\"field\":\"min\"},{\"actual\":4,\"axis\":\"x\",\"expected\":0,\"field\":\"max\"},{\"actual\":2,\"axis\":\"y\",\"expected\":0,\"field\":\"max\"},{\"actual\":5,\"axis\":\"z\",\"expected\":0,\"field\":\"max\"},{\"actual\":6,\"axis\":\"x\",\"expected\":0,\"field\":\"size\"},{\"actual\":5,\"axis\":\"y\",\"expected\":0,\"field\":\"size\"},{\"actual\":6,\"axis\":\"z\",\"expected\":0,\"field\":\"size\"},{\"actual\":1,\"axis\":\"x\",\"expected\":0,\"field\":\"center\"},{\"actual\":-0.5,\"axis\":\"y\",\"expected\":0,\"field\":\"center\"},{\"actual\":2,\"axis\":\"z\",\"expected\":0,\"field\":\"center\"}],\"expected\":{\"center\":{\"x\":0,\"y\":0,\"z\":0},\"max\":[0,0,0],\"min\":{\"x\":0,\"y\":0,\"z\":0},\"size\":{\"x\":0,\"y\":0,\"z\":0},\"tolerance\":0},\"measured\":{\"center\":[1,-0.5,2],\"max\":[4,2,5],\"min\":[-2,-3,-1],\"size\":[6,5,6]},\"polarity\":\"positive\",\"positiveSatisfied\":false,\"profile\":\"mesh-bounds-v1\",\"scope\":\"whole-subject\",\"source\":\"mesh\",\"subjectContentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"tolerance\":0},\"status\":\"failed\"}]}}"
+    },
+    {
+      "name": "negative-unsatisfied",
+      "fixture": "asymmetric",
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"negative-unsatisfied\",\"payload\":{\"expected\":{\"center\":{\"x\":0,\"y\":0,\"z\":0},\"max\":[0,0,0],\"min\":{\"x\":0,\"y\":0,\"z\":0},\"size\":{\"x\":0,\"y\":0,\"z\":0},\"tolerance\":0},\"kind\":\"boundingBox\"},\"polarity\":\"negative\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":15}],\"subjects\":[{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedUtf8": "{\"requestId\":\"r1\",\"result\":{\"results\":[{\"claimId\":\"negative-unsatisfied\",\"diagnostics\":[],\"evidence\":{\"axisFailures\":[{\"actual\":-2,\"axis\":\"x\",\"expected\":0,\"field\":\"min\"},{\"actual\":-3,\"axis\":\"y\",\"expected\":0,\"field\":\"min\"},{\"actual\":-1,\"axis\":\"z\",\"expected\":0,\"field\":\"min\"},{\"actual\":4,\"axis\":\"x\",\"expected\":0,\"field\":\"max\"},{\"actual\":2,\"axis\":\"y\",\"expected\":0,\"field\":\"max\"},{\"actual\":5,\"axis\":\"z\",\"expected\":0,\"field\":\"max\"},{\"actual\":6,\"axis\":\"x\",\"expected\":0,\"field\":\"size\"},{\"actual\":5,\"axis\":\"y\",\"expected\":0,\"field\":\"size\"},{\"actual\":6,\"axis\":\"z\",\"expected\":0,\"field\":\"size\"},{\"actual\":1,\"axis\":\"x\",\"expected\":0,\"field\":\"center\"},{\"actual\":-0.5,\"axis\":\"y\",\"expected\":0,\"field\":\"center\"},{\"actual\":2,\"axis\":\"z\",\"expected\":0,\"field\":\"center\"}],\"expected\":{\"center\":{\"x\":0,\"y\":0,\"z\":0},\"max\":[0,0,0],\"min\":{\"x\":0,\"y\":0,\"z\":0},\"size\":{\"x\":0,\"y\":0,\"z\":0},\"tolerance\":0},\"measured\":{\"center\":[1,-0.5,2],\"max\":[4,2,5],\"min\":[-2,-3,-1],\"size\":[6,5,6]},\"polarity\":\"negative\",\"positiveSatisfied\":false,\"profile\":\"mesh-bounds-v1\",\"scope\":\"whole-subject\",\"source\":\"mesh\",\"subjectContentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"tolerance\":0},\"status\":\"passed\"}]}}"
+    },
+    {
+      "name": "negative-satisfied",
+      "fixture": "asymmetric",
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"negative-satisfied\",\"payload\":{\"expected\":{\"center\":{\"x\":1,\"y\":-0.5,\"z\":2},\"max\":[4,2,5],\"min\":[-2,-3,-1],\"size\":{\"x\":6,\"y\":5,\"z\":6},\"tolerance\":0},\"kind\":\"boundingBox\"},\"polarity\":\"negative\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":15}],\"subjects\":[{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedUtf8": "{\"requestId\":\"r1\",\"result\":{\"results\":[{\"claimId\":\"negative-satisfied\",\"diagnostics\":[{\"code\":\"GEOSPEC_NEGATED_BOUNDING_BOX_MATCH\",\"details\":{\"evidence\":\"mesh\",\"matcher\":\"toHaveBoundingBox\",\"measured\":{\"center\":[1,-0.5,2],\"max\":[4,2,5],\"min\":[-2,-3,-1],\"size\":[6,5,6]},\"polarity\":\"negative\",\"tolerance\":0},\"message\":\"Bounding box satisfies the declared bounds, but the claim requires it not to.\",\"severity\":\"error\",\"spatial\":{\"center\":[1,-0.5,2],\"max\":[4,2,5],\"min\":[-2,-3,-1]},\"suggestion\":\"Correct the model dimensions, or revise the negated bounding-box requirement.\"}],\"evidence\":{\"axisFailures\":[],\"expected\":{\"center\":{\"x\":1,\"y\":-0.5,\"z\":2},\"max\":[4,2,5],\"min\":[-2,-3,-1],\"size\":{\"x\":6,\"y\":5,\"z\":6},\"tolerance\":0},\"measured\":{\"center\":[1,-0.5,2],\"max\":[4,2,5],\"min\":[-2,-3,-1],\"size\":[6,5,6]},\"polarity\":\"negative\",\"positiveSatisfied\":true,\"profile\":\"mesh-bounds-v1\",\"scope\":\"whole-subject\",\"source\":\"mesh\",\"subjectContentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"tolerance\":0},\"status\":\"failed\"}]}}"
+    },
+    {
+      "name": "baked-rotation-translation",
+      "fixture": "baked",
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"baked-rotation-translation\",\"payload\":{\"expected\":{\"center\":{\"x\":10.5,\"y\":-3,\"z\":4},\"max\":[13,0,7],\"min\":[8,-6,1],\"size\":{\"x\":5,\"y\":6,\"z\":6},\"tolerance\":0},\"kind\":\"boundingBox\"},\"polarity\":\"positive\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":15}],\"subjects\":[{\"contentHash\":\"bc7162bd64af42a08a3ddf1b523fe32be6be5a5cd8a6f306d2cb5c3e5923a3a1\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedUtf8": "{\"requestId\":\"r1\",\"result\":{\"results\":[{\"claimId\":\"baked-rotation-translation\",\"diagnostics\":[],\"evidence\":{\"axisFailures\":[],\"expected\":{\"center\":{\"x\":10.5,\"y\":-3,\"z\":4},\"max\":[13,0,7],\"min\":[8,-6,1],\"size\":{\"x\":5,\"y\":6,\"z\":6},\"tolerance\":0},\"measured\":{\"center\":[10.5,-3,4],\"max\":[13,0,7],\"min\":[8,-6,1],\"size\":[5,6,6]},\"polarity\":\"positive\",\"positiveSatisfied\":true,\"profile\":\"mesh-bounds-v1\",\"scope\":\"whole-subject\",\"source\":\"mesh\",\"subjectContentHash\":\"bc7162bd64af42a08a3ddf1b523fe32be6be5a5cd8a6f306d2cb5c3e5923a3a1\",\"tolerance\":0},\"status\":\"passed\"}]}}"
+    },
+    {
+      "name": "float32-and-reconstructed-extrema",
+      "fixture": "rounding",
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"float32-and-reconstructed-extrema\",\"payload\":{\"expected\":{\"center\":{\"x\":576460752303423500,\"y\":0.20000000670552254,\"z\":0.05000000074505806},\"max\":[1152921504606847000,0.30000001192092896,0.20000000298023224],\"min\":[0,0.10000000149011612,-0.10000000149011612],\"size\":{\"x\":1152921504606847000,\"y\":0.20000001043081284,\"z\":0.30000000447034836},\"tolerance\":0},\"kind\":\"boundingBox\"},\"polarity\":\"positive\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":15}],\"subjects\":[{\"contentHash\":\"344eb0828c2122562f61877704077a2d84c3bc3657b729813e7479bfed1d2d55\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedUtf8": "{\"requestId\":\"r1\",\"result\":{\"results\":[{\"claimId\":\"float32-and-reconstructed-extrema\",\"diagnostics\":[],\"evidence\":{\"axisFailures\":[],\"expected\":{\"center\":{\"x\":576460752303423500,\"y\":0.20000000670552254,\"z\":0.05000000074505806},\"max\":[1152921504606847000,0.30000001192092896,0.20000000298023224],\"min\":[0,0.10000000149011612,-0.10000000149011612],\"size\":{\"x\":1152921504606847000,\"y\":0.20000001043081284,\"z\":0.30000000447034836},\"tolerance\":0},\"measured\":{\"center\":[576460752303423500,0.20000000670552254,0.05000000074505806],\"max\":[1152921504606847000,0.30000001192092896,0.20000000298023224],\"min\":[0,0.10000000149011612,-0.10000000149011612],\"size\":[1152921504606847000,0.20000001043081284,0.30000000447034836]},\"polarity\":\"positive\",\"positiveSatisfied\":true,\"profile\":\"mesh-bounds-v1\",\"scope\":\"whole-subject\",\"source\":\"mesh\",\"subjectContentHash\":\"344eb0828c2122562f61877704077a2d84c3bc3657b729813e7479bfed1d2d55\",\"tolerance\":0},\"status\":\"passed\"}]}}"
+    },
+    {
+      "name": "degenerate-envelope",
+      "fixture": "degenerate",
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"degenerate-envelope\",\"payload\":{\"expected\":{\"center\":{\"x\":-2,\"y\":1,\"z\":3},\"max\":[-2,1,3],\"min\":[-2,1,3],\"size\":{\"x\":0,\"y\":0,\"z\":0},\"tolerance\":0},\"kind\":\"boundingBox\"},\"polarity\":\"positive\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":15}],\"subjects\":[{\"contentHash\":\"a3258208fa428e83663ecce0984be4da6ca4a2fdf44a88003ba9ac316be4a260\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedUtf8": "{\"requestId\":\"r1\",\"result\":{\"results\":[{\"claimId\":\"degenerate-envelope\",\"diagnostics\":[],\"evidence\":{\"axisFailures\":[],\"expected\":{\"center\":{\"x\":-2,\"y\":1,\"z\":3},\"max\":[-2,1,3],\"min\":[-2,1,3],\"size\":{\"x\":0,\"y\":0,\"z\":0},\"tolerance\":0},\"measured\":{\"center\":[-2,1,3],\"max\":[-2,1,3],\"min\":[-2,1,3],\"size\":[0,0,0]},\"polarity\":\"positive\",\"positiveSatisfied\":true,\"profile\":\"mesh-bounds-v1\",\"scope\":\"whole-subject\",\"source\":\"mesh\",\"subjectContentHash\":\"a3258208fa428e83663ecce0984be4da6ca4a2fdf44a88003ba9ac316be4a260\",\"tolerance\":0},\"status\":\"passed\"}]}}"
+    },
+    {
+      "name": "tolerance-equality",
+      "fixture": "asymmetric",
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"tolerance-equality\",\"payload\":{\"expected\":{\"max\":{\"x\":4.125},\"tolerance\":0.125},\"kind\":\"boundingBox\"},\"polarity\":\"positive\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":4}],\"subjects\":[{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedUtf8": "{\"requestId\":\"r1\",\"result\":{\"results\":[{\"claimId\":\"tolerance-equality\",\"diagnostics\":[],\"evidence\":{\"axisFailures\":[],\"expected\":{\"max\":{\"x\":4.125},\"tolerance\":0.125},\"measured\":{\"center\":[1,-0.5,2],\"max\":[4,2,5],\"min\":[-2,-3,-1],\"size\":[6,5,6]},\"polarity\":\"positive\",\"positiveSatisfied\":true,\"profile\":\"mesh-bounds-v1\",\"scope\":\"whole-subject\",\"source\":\"mesh\",\"subjectContentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"tolerance\":0.125},\"status\":\"passed\"}]}}"
+    },
+    {
+      "name": "tolerance-outside",
+      "fixture": "asymmetric",
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"tolerance-outside\",\"payload\":{\"expected\":{\"max\":{\"x\":4.25},\"tolerance\":0.125},\"kind\":\"boundingBox\"},\"polarity\":\"positive\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":4}],\"subjects\":[{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedUtf8": "{\"requestId\":\"r1\",\"result\":{\"results\":[{\"claimId\":\"tolerance-outside\",\"diagnostics\":[{\"code\":\"GEOSPEC_BOUNDING_BOX_MISMATCH\",\"details\":{\"axisFailures\":[{\"actual\":4,\"axis\":\"x\",\"expected\":4.25,\"field\":\"max\"}],\"evidence\":\"mesh\",\"matcher\":\"toHaveBoundingBox\",\"measured\":{\"center\":[1,-0.5,2],\"max\":[4,2,5],\"min\":[-2,-3,-1],\"size\":[6,5,6]},\"tolerance\":0.125},\"message\":\"Bounding box is off the declared bounds on max.x (tolerance 0.125).\",\"severity\":\"error\",\"spatial\":{\"center\":[1,-0.5,2],\"max\":[4,2,5],\"min\":[-2,-3,-1]},\"suggestion\":\"Correct the model dimensions, or widen the declared bounding-box tolerance.\"}],\"evidence\":{\"axisFailures\":[{\"actual\":4,\"axis\":\"x\",\"expected\":4.25,\"field\":\"max\"}],\"expected\":{\"max\":{\"x\":4.25},\"tolerance\":0.125},\"measured\":{\"center\":[1,-0.5,2],\"max\":[4,2,5],\"min\":[-2,-3,-1],\"size\":[6,5,6]},\"polarity\":\"positive\",\"positiveSatisfied\":false,\"profile\":\"mesh-bounds-v1\",\"scope\":\"whole-subject\",\"source\":\"mesh\",\"subjectContentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"tolerance\":0.125},\"status\":\"failed\"}]}}"
+    },
+    {
+      "name": "default-tolerance-inside",
+      "fixture": "asymmetric",
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"default-tolerance-inside\",\"payload\":{\"expected\":{\"max\":{\"x\":4.015625}},\"kind\":\"boundingBox\"},\"polarity\":\"positive\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":4}],\"subjects\":[{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedUtf8": "{\"requestId\":\"r1\",\"result\":{\"results\":[{\"claimId\":\"default-tolerance-inside\",\"diagnostics\":[],\"evidence\":{\"axisFailures\":[],\"expected\":{\"max\":{\"x\":4.015625}},\"measured\":{\"center\":[1,-0.5,2],\"max\":[4,2,5],\"min\":[-2,-3,-1],\"size\":[6,5,6]},\"polarity\":\"positive\",\"positiveSatisfied\":true,\"profile\":\"mesh-bounds-v1\",\"scope\":\"whole-subject\",\"source\":\"mesh\",\"subjectContentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"tolerance\":0.02},\"status\":\"passed\"}]}}"
+    },
+    {
+      "name": "default-tolerance-outside",
+      "fixture": "asymmetric",
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"default-tolerance-outside\",\"payload\":{\"expected\":{\"max\":{\"x\":4.03125}},\"kind\":\"boundingBox\"},\"polarity\":\"positive\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":4}],\"subjects\":[{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedUtf8": "{\"requestId\":\"r1\",\"result\":{\"results\":[{\"claimId\":\"default-tolerance-outside\",\"diagnostics\":[{\"code\":\"GEOSPEC_BOUNDING_BOX_MISMATCH\",\"details\":{\"axisFailures\":[{\"actual\":4,\"axis\":\"x\",\"expected\":4.03125,\"field\":\"max\"}],\"evidence\":\"mesh\",\"matcher\":\"toHaveBoundingBox\",\"measured\":{\"center\":[1,-0.5,2],\"max\":[4,2,5],\"min\":[-2,-3,-1],\"size\":[6,5,6]},\"tolerance\":0.02},\"message\":\"Bounding box is off the declared bounds on max.x (tolerance 0.02).\",\"severity\":\"error\",\"spatial\":{\"center\":[1,-0.5,2],\"max\":[4,2,5],\"min\":[-2,-3,-1]},\"suggestion\":\"Correct the model dimensions, or widen the declared bounding-box tolerance.\"}],\"evidence\":{\"axisFailures\":[{\"actual\":4,\"axis\":\"x\",\"expected\":4.03125,\"field\":\"max\"}],\"expected\":{\"max\":{\"x\":4.03125}},\"measured\":{\"center\":[1,-0.5,2],\"max\":[4,2,5],\"min\":[-2,-3,-1],\"size\":[6,5,6]},\"polarity\":\"positive\",\"positiveSatisfied\":false,\"profile\":\"mesh-bounds-v1\",\"scope\":\"whole-subject\",\"source\":\"mesh\",\"subjectContentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"tolerance\":0.02},\"status\":\"failed\"}]}}"
+    },
+    {
+      "name": "zero-tolerance",
+      "fixture": "asymmetric",
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"zero-tolerance\",\"payload\":{\"expected\":{\"max\":{\"x\":4.015625},\"tolerance\":0},\"kind\":\"boundingBox\"},\"polarity\":\"positive\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":4}],\"subjects\":[{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedUtf8": "{\"requestId\":\"r1\",\"result\":{\"results\":[{\"claimId\":\"zero-tolerance\",\"diagnostics\":[{\"code\":\"GEOSPEC_BOUNDING_BOX_MISMATCH\",\"details\":{\"axisFailures\":[{\"actual\":4,\"axis\":\"x\",\"expected\":4.015625,\"field\":\"max\"}],\"evidence\":\"mesh\",\"matcher\":\"toHaveBoundingBox\",\"measured\":{\"center\":[1,-0.5,2],\"max\":[4,2,5],\"min\":[-2,-3,-1],\"size\":[6,5,6]},\"tolerance\":0},\"message\":\"Bounding box is off the declared bounds on max.x (tolerance 0).\",\"severity\":\"error\",\"spatial\":{\"center\":[1,-0.5,2],\"max\":[4,2,5],\"min\":[-2,-3,-1]},\"suggestion\":\"Correct the model dimensions, or widen the declared bounding-box tolerance.\"}],\"evidence\":{\"axisFailures\":[{\"actual\":4,\"axis\":\"x\",\"expected\":4.015625,\"field\":\"max\"}],\"expected\":{\"max\":{\"x\":4.015625},\"tolerance\":0},\"measured\":{\"center\":[1,-0.5,2],\"max\":[4,2,5],\"min\":[-2,-3,-1],\"size\":[6,5,6]},\"polarity\":\"positive\",\"positiveSatisfied\":false,\"profile\":\"mesh-bounds-v1\",\"scope\":\"whole-subject\",\"source\":\"mesh\",\"subjectContentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"tolerance\":0},\"status\":\"failed\"}]}}"
+    },
+    {
+      "name": "empty-expectation",
+      "fixture": "asymmetric",
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"empty-expectation\",\"payload\":{\"expected\":{},\"kind\":\"boundingBox\"},\"polarity\":\"positive\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":3}],\"subjects\":[{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedUtf8": "{\"requestId\":\"r1\",\"result\":{\"results\":[{\"claimId\":\"empty-expectation\",\"diagnostics\":[],\"evidence\":{\"axisFailures\":[],\"expected\":{},\"measured\":{\"center\":[1,-0.5,2],\"max\":[4,2,5],\"min\":[-2,-3,-1],\"size\":[6,5,6]},\"polarity\":\"positive\",\"positiveSatisfied\":true,\"profile\":\"mesh-bounds-v1\",\"scope\":\"whole-subject\",\"source\":\"mesh\",\"subjectContentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"tolerance\":0.02},\"status\":\"passed\"}]}}"
+    },
+    {
+      "name": "empty-axis-objects",
+      "fixture": "asymmetric",
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"empty-axis-objects\",\"payload\":{\"expected\":{\"center\":{},\"max\":{},\"min\":{},\"size\":{}},\"kind\":\"boundingBox\"},\"polarity\":\"positive\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":3}],\"subjects\":[{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedUtf8": "{\"requestId\":\"r1\",\"result\":{\"results\":[{\"claimId\":\"empty-axis-objects\",\"diagnostics\":[],\"evidence\":{\"axisFailures\":[],\"expected\":{\"center\":{},\"max\":{},\"min\":{},\"size\":{}},\"measured\":{\"center\":[1,-0.5,2],\"max\":[4,2,5],\"min\":[-2,-3,-1],\"size\":[6,5,6]},\"polarity\":\"positive\",\"positiveSatisfied\":true,\"profile\":\"mesh-bounds-v1\",\"scope\":\"whole-subject\",\"source\":\"mesh\",\"subjectContentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"tolerance\":0.02},\"status\":\"passed\"}]}}"
+    },
+    {
+      "name": "one-argument-lowering",
+      "fixture": "asymmetric",
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"one-argument-lowering\",\"payload\":{\"arguments\":[{\"size\":{\"x\":6,\"y\":5}}],\"expected\":{\"size\":{\"x\":6,\"y\":5}},\"kind\":\"boundingBox\"},\"polarity\":\"positive\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":5}],\"subjects\":[{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedUtf8": "{\"requestId\":\"r1\",\"result\":{\"results\":[{\"claimId\":\"one-argument-lowering\",\"diagnostics\":[],\"evidence\":{\"axisFailures\":[],\"expected\":{\"size\":{\"x\":6,\"y\":5}},\"measured\":{\"center\":[1,-0.5,2],\"max\":[4,2,5],\"min\":[-2,-3,-1],\"size\":[6,5,6]},\"polarity\":\"positive\",\"positiveSatisfied\":true,\"profile\":\"mesh-bounds-v1\",\"scope\":\"whole-subject\",\"source\":\"mesh\",\"subjectContentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"tolerance\":0.02},\"status\":\"passed\"}]}}"
+    },
+    {
+      "name": "two-argument-lowering",
+      "fixture": "asymmetric",
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"two-argument-lowering\",\"payload\":{\"arguments\":[[-2,-3,-1],[4,2,5]],\"expected\":{\"max\":[4,2,5],\"min\":[-2,-3,-1]},\"kind\":\"boundingBox\"},\"polarity\":\"positive\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":9}],\"subjects\":[{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedUtf8": "{\"requestId\":\"r1\",\"result\":{\"results\":[{\"claimId\":\"two-argument-lowering\",\"diagnostics\":[],\"evidence\":{\"axisFailures\":[],\"expected\":{\"max\":[4,2,5],\"min\":[-2,-3,-1]},\"measured\":{\"center\":[1,-0.5,2],\"max\":[4,2,5],\"min\":[-2,-3,-1],\"size\":[6,5,6]},\"polarity\":\"positive\",\"positiveSatisfied\":true,\"profile\":\"mesh-bounds-v1\",\"scope\":\"whole-subject\",\"source\":\"mesh\",\"subjectContentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"tolerance\":0.02},\"status\":\"passed\"}]}}"
+    },
+    {
+      "name": "insufficient-budget-positive",
+      "fixture": "asymmetric",
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"insufficient-budget-positive\",\"payload\":{\"expected\":{\"center\":{\"x\":1,\"y\":-0.5,\"z\":2},\"max\":[4,2,5],\"min\":[-2,-3,-1],\"size\":{\"x\":6,\"y\":5,\"z\":6},\"tolerance\":0},\"kind\":\"boundingBox\"},\"polarity\":\"positive\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":14}],\"subjects\":[{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedUtf8": "{\"requestId\":\"r1\",\"result\":{\"results\":[{\"claimId\":\"insufficient-budget-positive\",\"diagnostics\":[{\"code\":\"MATCHER_TIMEOUT\",\"details\":{\"requiredWorkUnits\":15,\"workUnitBudget\":14},\"message\":\"Bounding-box work exceeds the declared work-unit budget.\",\"severity\":\"error\"}],\"status\":\"refused\"}]}}"
+    },
+    {
+      "name": "insufficient-budget-negative",
+      "fixture": "asymmetric",
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"insufficient-budget-negative\",\"payload\":{\"expected\":{\"center\":{\"x\":1,\"y\":-0.5,\"z\":2},\"max\":[4,2,5],\"min\":[-2,-3,-1],\"size\":{\"x\":6,\"y\":5,\"z\":6},\"tolerance\":0},\"kind\":\"boundingBox\"},\"polarity\":\"negative\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":14}],\"subjects\":[{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedUtf8": "{\"requestId\":\"r1\",\"result\":{\"results\":[{\"claimId\":\"insufficient-budget-negative\",\"diagnostics\":[{\"code\":\"MATCHER_TIMEOUT\",\"details\":{\"requiredWorkUnits\":15,\"workUnitBudget\":14},\"message\":\"Bounding-box work exceeds the declared work-unit budget.\",\"severity\":\"error\"}],\"status\":\"refused\"}]}}"
+    },
+    {
+      "name": "distinct-identical-claims-in-authored-order",
+      "fixture": "asymmetric",
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"negative-unsatisfied\",\"payload\":{\"expected\":{\"center\":{\"x\":0,\"y\":0,\"z\":0},\"max\":[0,0,0],\"min\":{\"x\":0,\"y\":0,\"z\":0},\"size\":{\"x\":0,\"y\":0,\"z\":0},\"tolerance\":0},\"kind\":\"boundingBox\"},\"polarity\":\"negative\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":15},{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"same-geometry-second\",\"payload\":{\"expected\":{\"center\":{\"x\":0,\"y\":0,\"z\":0},\"max\":[0,0,0],\"min\":{\"x\":0,\"y\":0,\"z\":0},\"size\":{\"x\":0,\"y\":0,\"z\":0},\"tolerance\":0},\"kind\":\"boundingBox\"},\"polarity\":\"negative\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":15}],\"subjects\":[{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedUtf8": "{\"requestId\":\"r1\",\"result\":{\"results\":[{\"claimId\":\"negative-unsatisfied\",\"diagnostics\":[],\"evidence\":{\"axisFailures\":[{\"actual\":-2,\"axis\":\"x\",\"expected\":0,\"field\":\"min\"},{\"actual\":-3,\"axis\":\"y\",\"expected\":0,\"field\":\"min\"},{\"actual\":-1,\"axis\":\"z\",\"expected\":0,\"field\":\"min\"},{\"actual\":4,\"axis\":\"x\",\"expected\":0,\"field\":\"max\"},{\"actual\":2,\"axis\":\"y\",\"expected\":0,\"field\":\"max\"},{\"actual\":5,\"axis\":\"z\",\"expected\":0,\"field\":\"max\"},{\"actual\":6,\"axis\":\"x\",\"expected\":0,\"field\":\"size\"},{\"actual\":5,\"axis\":\"y\",\"expected\":0,\"field\":\"size\"},{\"actual\":6,\"axis\":\"z\",\"expected\":0,\"field\":\"size\"},{\"actual\":1,\"axis\":\"x\",\"expected\":0,\"field\":\"center\"},{\"actual\":-0.5,\"axis\":\"y\",\"expected\":0,\"field\":\"center\"},{\"actual\":2,\"axis\":\"z\",\"expected\":0,\"field\":\"center\"}],\"expected\":{\"center\":{\"x\":0,\"y\":0,\"z\":0},\"max\":[0,0,0],\"min\":{\"x\":0,\"y\":0,\"z\":0},\"size\":{\"x\":0,\"y\":0,\"z\":0},\"tolerance\":0},\"measured\":{\"center\":[1,-0.5,2],\"max\":[4,2,5],\"min\":[-2,-3,-1],\"size\":[6,5,6]},\"polarity\":\"negative\",\"positiveSatisfied\":false,\"profile\":\"mesh-bounds-v1\",\"scope\":\"whole-subject\",\"source\":\"mesh\",\"subjectContentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"tolerance\":0},\"status\":\"passed\"},{\"claimId\":\"same-geometry-second\",\"diagnostics\":[],\"evidence\":{\"axisFailures\":[{\"actual\":-2,\"axis\":\"x\",\"expected\":0,\"field\":\"min\"},{\"actual\":-3,\"axis\":\"y\",\"expected\":0,\"field\":\"min\"},{\"actual\":-1,\"axis\":\"z\",\"expected\":0,\"field\":\"min\"},{\"actual\":4,\"axis\":\"x\",\"expected\":0,\"field\":\"max\"},{\"actual\":2,\"axis\":\"y\",\"expected\":0,\"field\":\"max\"},{\"actual\":5,\"axis\":\"z\",\"expected\":0,\"field\":\"max\"},{\"actual\":6,\"axis\":\"x\",\"expected\":0,\"field\":\"size\"},{\"actual\":5,\"axis\":\"y\",\"expected\":0,\"field\":\"size\"},{\"actual\":6,\"axis\":\"z\",\"expected\":0,\"field\":\"size\"},{\"actual\":1,\"axis\":\"x\",\"expected\":0,\"field\":\"center\"},{\"actual\":-0.5,\"axis\":\"y\",\"expected\":0,\"field\":\"center\"},{\"actual\":2,\"axis\":\"z\",\"expected\":0,\"field\":\"center\"}],\"expected\":{\"center\":{\"x\":0,\"y\":0,\"z\":0},\"max\":[0,0,0],\"min\":{\"x\":0,\"y\":0,\"z\":0},\"size\":{\"x\":0,\"y\":0,\"z\":0},\"tolerance\":0},\"measured\":{\"center\":[1,-0.5,2],\"max\":[4,2,5],\"min\":[-2,-3,-1],\"size\":[6,5,6]},\"polarity\":\"negative\",\"positiveSatisfied\":false,\"profile\":\"mesh-bounds-v1\",\"scope\":\"whole-subject\",\"source\":\"mesh\",\"subjectContentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"tolerance\":0},\"status\":\"passed\"}]}}"
+    }
+  ],
+  "invalidClaims": [
+    {
+      "name": "missing-ingested-content",
+      "fixture": "asymmetric",
+      "ingest": false,
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"asymmetric-all-fields\",\"payload\":{\"arguments\":[],\"expected\":{\"center\":{\"x\":1,\"y\":-0.5,\"z\":2},\"max\":[4,2,5],\"min\":[-2,-3,-1],\"size\":{\"x\":6,\"y\":5,\"z\":6},\"tolerance\":0},\"kind\":\"boundingBox\"},\"polarity\":\"positive\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":15}],\"subjects\":[{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedCode": "invalid-claim"
+    },
+    {
+      "name": "missing-ingested-content-negative",
+      "fixture": "asymmetric",
+      "ingest": false,
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"asymmetric-all-fields\",\"payload\":{\"arguments\":[],\"expected\":{\"center\":{\"x\":1,\"y\":-0.5,\"z\":2},\"max\":[4,2,5],\"min\":[-2,-3,-1],\"size\":{\"x\":6,\"y\":5,\"z\":6},\"tolerance\":0},\"kind\":\"boundingBox\"},\"polarity\":\"negative\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":15}],\"subjects\":[{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedCode": "invalid-claim"
+    },
+    {
+      "name": "null-expected",
+      "fixture": "asymmetric",
+      "ingest": true,
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"asymmetric-all-fields\",\"payload\":{\"arguments\":[],\"expected\":null,\"kind\":\"boundingBox\"},\"polarity\":\"positive\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":15}],\"subjects\":[{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedCode": "invalid-claim"
+    },
+    {
+      "name": "array-expected",
+      "fixture": "asymmetric",
+      "ingest": true,
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"asymmetric-all-fields\",\"payload\":{\"arguments\":[],\"expected\":[],\"kind\":\"boundingBox\"},\"polarity\":\"positive\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":15}],\"subjects\":[{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedCode": "invalid-claim"
+    },
+    {
+      "name": "null-min",
+      "fixture": "asymmetric",
+      "ingest": true,
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"asymmetric-all-fields\",\"payload\":{\"arguments\":[],\"expected\":{\"min\":null},\"kind\":\"boundingBox\"},\"polarity\":\"positive\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":15}],\"subjects\":[{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedCode": "invalid-claim"
+    },
+    {
+      "name": "short-min",
+      "fixture": "asymmetric",
+      "ingest": true,
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"asymmetric-all-fields\",\"payload\":{\"arguments\":[],\"expected\":{\"min\":[0,0]},\"kind\":\"boundingBox\"},\"polarity\":\"positive\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":15}],\"subjects\":[{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedCode": "invalid-claim"
+    },
+    {
+      "name": "long-max",
+      "fixture": "asymmetric",
+      "ingest": true,
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"asymmetric-all-fields\",\"payload\":{\"arguments\":[],\"expected\":{\"max\":[0,0,0,0]},\"kind\":\"boundingBox\"},\"polarity\":\"positive\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":15}],\"subjects\":[{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedCode": "invalid-claim"
+    },
+    {
+      "name": "array-size",
+      "fixture": "asymmetric",
+      "ingest": true,
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"asymmetric-all-fields\",\"payload\":{\"arguments\":[],\"expected\":{\"size\":[6,5,6]},\"kind\":\"boundingBox\"},\"polarity\":\"positive\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":15}],\"subjects\":[{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedCode": "invalid-claim"
+    },
+    {
+      "name": "array-center",
+      "fixture": "asymmetric",
+      "ingest": true,
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"asymmetric-all-fields\",\"payload\":{\"arguments\":[],\"expected\":{\"center\":[1,-0.5,2]},\"kind\":\"boundingBox\"},\"polarity\":\"positive\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":15}],\"subjects\":[{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedCode": "invalid-claim"
+    },
+    {
+      "name": "string-axis",
+      "fixture": "asymmetric",
+      "ingest": true,
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"asymmetric-all-fields\",\"payload\":{\"arguments\":[],\"expected\":{\"size\":{\"x\":\"6\"}},\"kind\":\"boundingBox\"},\"polarity\":\"positive\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":15}],\"subjects\":[{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedCode": "invalid-claim"
+    },
+    {
+      "name": "unknown-axis",
+      "fixture": "asymmetric",
+      "ingest": true,
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"asymmetric-all-fields\",\"payload\":{\"arguments\":[],\"expected\":{\"size\":{\"w\":6}},\"kind\":\"boundingBox\"},\"polarity\":\"positive\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":15}],\"subjects\":[{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedCode": "invalid-claim"
+    },
+    {
+      "name": "negative-tolerance",
+      "fixture": "asymmetric",
+      "ingest": true,
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"asymmetric-all-fields\",\"payload\":{\"arguments\":[],\"expected\":{\"tolerance\":-0.01},\"kind\":\"boundingBox\"},\"polarity\":\"positive\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":15}],\"subjects\":[{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedCode": "invalid-claim"
+    },
+    {
+      "name": "null-tolerance",
+      "fixture": "asymmetric",
+      "ingest": true,
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"asymmetric-all-fields\",\"payload\":{\"arguments\":[],\"expected\":{\"tolerance\":null},\"kind\":\"boundingBox\"},\"polarity\":\"positive\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":15}],\"subjects\":[{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedCode": "invalid-claim"
+    },
+    {
+      "name": "selector",
+      "fixture": "asymmetric",
+      "ingest": true,
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"asymmetric-all-fields\",\"payload\":{\"arguments\":[],\"expected\":{\"selector\":\"face\"},\"kind\":\"boundingBox\"},\"polarity\":\"positive\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":15}],\"subjects\":[{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedCode": "invalid-claim"
+    },
+    {
+      "name": "occurrence",
+      "fixture": "asymmetric",
+      "ingest": true,
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"asymmetric-all-fields\",\"payload\":{\"arguments\":[],\"expected\":{\"occurrence\":\"part\"},\"kind\":\"boundingBox\"},\"polarity\":\"positive\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":15}],\"subjects\":[{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedCode": "invalid-claim"
+    },
+    {
+      "name": "brep",
+      "fixture": "asymmetric",
+      "ingest": true,
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"asymmetric-all-fields\",\"payload\":{\"arguments\":[],\"expected\":{\"evidence\":\"brep\"},\"kind\":\"boundingBox\"},\"polarity\":\"positive\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":15}],\"subjects\":[{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedCode": "invalid-claim"
+    },
+    {
+      "name": "missing-expected",
+      "fixture": "asymmetric",
+      "ingest": true,
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"asymmetric-all-fields\",\"payload\":{\"arguments\":[],\"kind\":\"boundingBox\"},\"polarity\":\"positive\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":15}],\"subjects\":[{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedCode": "invalid-claim"
+    },
+    {
+      "name": "wrong-kind",
+      "fixture": "asymmetric",
+      "ingest": true,
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"asymmetric-all-fields\",\"payload\":{\"arguments\":[],\"expected\":{\"center\":{\"x\":1,\"y\":-0.5,\"z\":2},\"max\":[4,2,5],\"min\":[-2,-3,-1],\"size\":{\"x\":6,\"y\":5,\"z\":6},\"tolerance\":0},\"kind\":\"volume\"},\"polarity\":\"positive\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":15}],\"subjects\":[{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedCode": "invalid-claim"
+    },
+    {
+      "name": "payload-selector",
+      "fixture": "asymmetric",
+      "ingest": true,
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"asymmetric-all-fields\",\"payload\":{\"arguments\":[],\"expected\":{\"center\":{\"x\":1,\"y\":-0.5,\"z\":2},\"max\":[4,2,5],\"min\":[-2,-3,-1],\"size\":{\"x\":6,\"y\":5,\"z\":6},\"tolerance\":0},\"kind\":\"boundingBox\",\"selector\":\"face\"},\"polarity\":\"positive\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":15}],\"subjects\":[{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedCode": "invalid-claim"
+    },
+    {
+      "name": "conflicting-one-argument",
+      "fixture": "asymmetric",
+      "ingest": true,
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"asymmetric-all-fields\",\"payload\":{\"arguments\":[{\"size\":{\"x\":99}}],\"expected\":{\"center\":{\"x\":1,\"y\":-0.5,\"z\":2},\"max\":[4,2,5],\"min\":[-2,-3,-1],\"size\":{\"x\":6,\"y\":5,\"z\":6},\"tolerance\":0},\"kind\":\"boundingBox\"},\"polarity\":\"positive\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":15}],\"subjects\":[{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedCode": "invalid-claim"
+    },
+    {
+      "name": "conflicting-two-arguments",
+      "fixture": "asymmetric",
+      "ingest": true,
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"asymmetric-all-fields\",\"payload\":{\"arguments\":[[0,0,0],[1,1,1]],\"expected\":{\"center\":{\"x\":1,\"y\":-0.5,\"z\":2},\"max\":[4,2,5],\"min\":[-2,-3,-1],\"size\":{\"x\":6,\"y\":5,\"z\":6},\"tolerance\":0},\"kind\":\"boundingBox\"},\"polarity\":\"positive\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":15}],\"subjects\":[{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedCode": "invalid-claim"
+    },
+    {
+      "name": "too-many-arguments",
+      "fixture": "asymmetric",
+      "ingest": true,
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"asymmetric-all-fields\",\"payload\":{\"arguments\":[{},{},{}],\"expected\":{\"center\":{\"x\":1,\"y\":-0.5,\"z\":2},\"max\":[4,2,5],\"min\":[-2,-3,-1],\"size\":{\"x\":6,\"y\":5,\"z\":6},\"tolerance\":0},\"kind\":\"boundingBox\"},\"polarity\":\"positive\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":15}],\"subjects\":[{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedCode": "invalid-claim"
+    },
+    {
+      "name": "null-arguments",
+      "fixture": "asymmetric",
+      "ingest": true,
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"asymmetric-all-fields\",\"payload\":{\"arguments\":null,\"expected\":{\"center\":{\"x\":1,\"y\":-0.5,\"z\":2},\"max\":[4,2,5],\"min\":[-2,-3,-1],\"size\":{\"x\":6,\"y\":5,\"z\":6},\"tolerance\":0},\"kind\":\"boundingBox\"},\"polarity\":\"positive\",\"subjectSlots\":[\"s1\"],\"workUnitBudget\":15}],\"subjects\":[{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedCode": "invalid-claim"
+    },
+    {
+      "name": "zero-subject-slots",
+      "fixture": "asymmetric",
+      "ingest": true,
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"asymmetric-all-fields\",\"payload\":{\"arguments\":[],\"expected\":{\"center\":{\"x\":1,\"y\":-0.5,\"z\":2},\"max\":[4,2,5],\"min\":[-2,-3,-1],\"size\":{\"x\":6,\"y\":5,\"z\":6},\"tolerance\":0},\"kind\":\"boundingBox\"},\"polarity\":\"positive\",\"subjectSlots\":[],\"workUnitBudget\":15}],\"subjects\":[{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedCode": "invalid-claim"
+    },
+    {
+      "name": "two-subject-slots",
+      "fixture": "asymmetric",
+      "ingest": true,
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"asymmetric-all-fields\",\"payload\":{\"arguments\":[],\"expected\":{\"center\":{\"x\":1,\"y\":-0.5,\"z\":2},\"max\":[4,2,5],\"min\":[-2,-3,-1],\"size\":{\"x\":6,\"y\":5,\"z\":6},\"tolerance\":0},\"kind\":\"boundingBox\"},\"polarity\":\"positive\",\"subjectSlots\":[\"s1\",\"s1\"],\"workUnitBudget\":15}],\"subjects\":[{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedCode": "invalid-claim"
+    },
+    {
+      "name": "unresolved-slot",
+      "fixture": "asymmetric",
+      "ingest": true,
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"method\":\"submitClaims\",\"plan\":{\"claims\":[{\"capability\":\"toHaveBoundingBox\",\"claimId\":\"asymmetric-all-fields\",\"payload\":{\"arguments\":[],\"expected\":{\"center\":{\"x\":1,\"y\":-0.5,\"z\":2},\"max\":[4,2,5],\"min\":[-2,-3,-1],\"size\":{\"x\":6,\"y\":5,\"z\":6},\"tolerance\":0},\"kind\":\"boundingBox\"},\"polarity\":\"positive\",\"subjectSlots\":[\"missing\"],\"workUnitBudget\":15}],\"subjects\":[{\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"slot\":\"s1\"}]},\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"r1\"}",
+      "expectedCode": "invalid-claim"
+    }
+  ],
+  "invalidIngest": [
+    {
+      "name": "bad-magic",
+      "hex": "00534d31040000000100000000000000000000c0000000000000f03f0000000000000840000000000000104000000000000008c00000000000001440000000000000f03f0000000000000040000000000000f0bf0000000000408f400000000000409f40000000000070a740020000000000000001000000",
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"contentHash\":\"cd38c0022ec38fb6d4f0309fdb1feaa4c343c15bab601953daa1fd304fe2f96b\",\"format\":\"mesh-buffer-v1\",\"frame\":{\"coordinateSystem\":\"z-up\",\"unit\":\"mm\"},\"method\":\"ingestSubject\",\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"i1\"}",
+      "expectedCode": "invalid-request"
+    },
+    {
+      "name": "zero-vertices",
+      "hex": "47534d31000000000100000000000000000000c0000000000000f03f0000000000000840000000000000104000000000000008c00000000000001440000000000000f03f0000000000000040000000000000f0bf0000000000408f400000000000409f40000000000070a740020000000000000001000000",
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"contentHash\":\"6ff898e97d20c342e0615520f30ea2dbdc75924ac11e40f7129f30657cfba602\",\"format\":\"mesh-buffer-v1\",\"frame\":{\"coordinateSystem\":\"z-up\",\"unit\":\"mm\"},\"method\":\"ingestSubject\",\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"i1\"}",
+      "expectedCode": "invalid-request"
+    },
+    {
+      "name": "zero-triangles",
+      "hex": "47534d31040000000000000000000000000000c0000000000000f03f0000000000000840000000000000104000000000000008c00000000000001440000000000000f03f0000000000000040000000000000f0bf0000000000408f400000000000409f40000000000070a740020000000000000001000000",
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"contentHash\":\"412152df6a252bd743be36432d3df43488902d4f56fa02c33a754b43bb4ee4f4\",\"format\":\"mesh-buffer-v1\",\"frame\":{\"coordinateSystem\":\"z-up\",\"unit\":\"mm\"},\"method\":\"ingestSubject\",\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"i1\"}",
+      "expectedCode": "invalid-request"
+    },
+    {
+      "name": "index-out-of-range",
+      "hex": "47534d31040000000100000000000000000000c0000000000000f03f0000000000000840000000000000104000000000000008c00000000000001440000000000000f03f0000000000000040000000000000f0bf0000000000408f400000000000409f40000000000070a740040000000000000001000000",
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"contentHash\":\"2fc4d6e43f28e6a5aabe89f41271f8d9cce860d27fcd0784fcee9650e5285c86\",\"format\":\"mesh-buffer-v1\",\"frame\":{\"coordinateSystem\":\"z-up\",\"unit\":\"mm\"},\"method\":\"ingestSubject\",\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"i1\"}",
+      "expectedCode": "invalid-request"
+    },
+    {
+      "name": "unused-nan",
+      "hex": "47534d31040000000100000000000000000000c0000000000000f03f0000000000000840000000000000104000000000000008c00000000000001440000000000000f03f0000000000000040000000000000f0bf000000000000f87f0000000000409f40000000000070a740020000000000000001000000",
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"contentHash\":\"ac9a5655ee4deeca6bd9d6bf2959392985ed956a4f479baca5031354599b768d\",\"format\":\"mesh-buffer-v1\",\"frame\":{\"coordinateSystem\":\"z-up\",\"unit\":\"mm\"},\"method\":\"ingestSubject\",\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"i1\"}",
+      "expectedCode": "invalid-request"
+    },
+    {
+      "name": "unused-infinity",
+      "hex": "47534d31040000000100000000000000000000c0000000000000f03f0000000000000840000000000000104000000000000008c00000000000001440000000000000f03f0000000000000040000000000000f0bf000000000000f07f0000000000409f40000000000070a740020000000000000001000000",
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"contentHash\":\"8e0812bd0448938653aff9e61504b5d5178b45bce91cb4a93f7a969b0dbd2f96\",\"format\":\"mesh-buffer-v1\",\"frame\":{\"coordinateSystem\":\"z-up\",\"unit\":\"mm\"},\"method\":\"ingestSubject\",\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"i1\"}",
+      "expectedCode": "invalid-request"
+    },
+    {
+      "name": "f32-overflow",
+      "hex": "47534d310400000001000000a55cc3f129633d48000000000000f03f0000000000000840000000000000104000000000000008c00000000000001440000000000000f03f0000000000000040000000000000f0bf0000000000408f400000000000409f40000000000070a740020000000000000001000000",
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"contentHash\":\"2adf140b05bd74cbce785eb295b2cb3a331bc6370dfd287f0a09cbab40e190b5\",\"format\":\"mesh-buffer-v1\",\"frame\":{\"coordinateSystem\":\"z-up\",\"unit\":\"mm\"},\"method\":\"ingestSubject\",\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"i1\"}",
+      "expectedCode": "invalid-request"
+    },
+    {
+      "name": "truncated",
+      "hex": "47534d31040000000100000000000000000000c0000000000000f03f0000000000000840000000000000104000000000000008c00000000000001440000000000000f03f0000000000000040000000000000f0bf0000000000408f400000000000409f40000000000070a7400200000000000000010000",
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"contentHash\":\"beda2419e423d3dd7aa3dd97d1e3b46f889110fa4b8f4b29e8eecf6b10daa4a7\",\"format\":\"mesh-buffer-v1\",\"frame\":{\"coordinateSystem\":\"z-up\",\"unit\":\"mm\"},\"method\":\"ingestSubject\",\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"i1\"}",
+      "expectedCode": "invalid-request"
+    },
+    {
+      "name": "trailing",
+      "hex": "47534d31040000000100000000000000000000c0000000000000f03f0000000000000840000000000000104000000000000008c00000000000001440000000000000f03f0000000000000040000000000000f0bf0000000000408f400000000000409f40000000000070a74002000000000000000100000000",
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"contentHash\":\"788fd40a21657dbe9ded178631acad2960b0a2c5ae0c23d056395c91c93e3e91\",\"format\":\"mesh-buffer-v1\",\"frame\":{\"coordinateSystem\":\"z-up\",\"unit\":\"mm\"},\"method\":\"ingestSubject\",\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"i1\"}",
+      "expectedCode": "invalid-request"
+    },
+    {
+      "name": "hash-mismatch",
+      "hex": "47534d31040000000100000000000000000000c0000000000000f03f0000000000000840000000000000104000000000000008c00000000000001440000000000000f03f0000000000000040000000000000f0bf0000000000408f400000000000409f40000000000070a740020000000000000001000000",
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"contentHash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"format\":\"mesh-buffer-v1\",\"frame\":{\"coordinateSystem\":\"z-up\",\"unit\":\"mm\"},\"method\":\"ingestSubject\",\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"i1\"}",
+      "expectedCode": "invalid-request"
+    },
+    {
+      "name": "uppercase-hash",
+      "hex": "47534d31040000000100000000000000000000c0000000000000f03f0000000000000840000000000000104000000000000008c00000000000001440000000000000f03f0000000000000040000000000000f0bf0000000000408f400000000000409f40000000000070a740020000000000000001000000",
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"contentHash\":\"F93889051580E4D5885A5FF8E915BE6F1AA8FD04F30CFE765D313AFAA0A2300C\",\"format\":\"mesh-buffer-v1\",\"frame\":{\"coordinateSystem\":\"z-up\",\"unit\":\"mm\"},\"method\":\"ingestSubject\",\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"i1\"}",
+      "expectedCode": "invalid-request"
+    },
+    {
+      "name": "frame-units",
+      "hex": "47534d31040000000100000000000000000000c0000000000000f03f0000000000000840000000000000104000000000000008c00000000000001440000000000000f03f0000000000000040000000000000f0bf0000000000408f400000000000409f40000000000070a740020000000000000001000000",
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"format\":\"mesh-buffer-v1\",\"frame\":{\"coordinateSystem\":\"z-up\",\"unit\":\"m\"},\"method\":\"ingestSubject\",\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"i1\"}",
+      "expectedCode": "invalid-request"
+    },
+    {
+      "name": "frame-coordinate-system",
+      "hex": "47534d31040000000100000000000000000000c0000000000000f03f0000000000000840000000000000104000000000000008c00000000000001440000000000000f03f0000000000000040000000000000f0bf0000000000408f400000000000409f40000000000070a740020000000000000001000000",
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"format\":\"mesh-buffer-v1\",\"frame\":{\"coordinateSystem\":\"y-up\",\"unit\":\"mm\"},\"method\":\"ingestSubject\",\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"i1\"}",
+      "expectedCode": "invalid-request"
+    },
+    {
+      "name": "frame-transform",
+      "hex": "47534d31040000000100000000000000000000c0000000000000f03f0000000000000840000000000000104000000000000008c00000000000001440000000000000f03f0000000000000040000000000000f0bf0000000000408f400000000000409f40000000000070a740020000000000000001000000",
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"format\":\"mesh-buffer-v1\",\"frame\":{\"coordinateSystem\":\"z-up\",\"transform\":[],\"unit\":\"mm\"},\"method\":\"ingestSubject\",\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"i1\"}",
+      "expectedCode": "invalid-request"
+    },
+    {
+      "name": "unknown-format",
+      "hex": "47534d31040000000100000000000000000000c0000000000000f03f0000000000000840000000000000104000000000000008c00000000000001440000000000000f03f0000000000000040000000000000f0bf0000000000408f400000000000409f40000000000070a740020000000000000001000000",
+      "requestUtf8": "{\"canonicalProfile\":\"geospec-jcs-v1\",\"contentHash\":\"f93889051580e4d5885a5ff8e915be6f1aa8fd04f30cfe765d313afaa0a2300c\",\"format\":\"glb\",\"frame\":{\"coordinateSystem\":\"z-up\",\"unit\":\"mm\"},\"method\":\"ingestSubject\",\"protocolVersion\":3,\"registryVersion\":4,\"requestId\":\"i1\"}",
+      "expectedCode": "unsupported-version"
+    }
+  ]
+}

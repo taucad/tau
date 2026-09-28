@@ -1,0 +1,106 @@
+{
+  "status": "proposed-before-candidate-comparison",
+  "proposedRuling": "W2.C-REQUIRED-PAIR-01",
+  "sources": [
+    {
+      "path": "packages/geospec-engine/src/mesh/overlap.ts",
+      "sha256": "00b9d352e15effc35dcf90a2cafa1d7009fcce8725961ed552d5efb282c6fd6b"
+    },
+    {
+      "path": "packages/geospec-engine-native/rust/src/matchers/proofs.rs",
+      "sha256": "2f367764fcdad87d22ee9e63cec488bd98aa938e1368ee42790b5cf81f4b2399"
+    },
+    {
+      "path": "packages/geospec-engine-native/rust/src/result.rs",
+      "sha256": "8c9399a3c32ad9e70ad5552fcf726d593a2b964325c6989848088309736cd91c"
+    }
+  ],
+  "legacySourceObservation": "overlap.ts selectedPairSet loops distinct component pairs and returns empty allowed/selected when no selector pair matches; candidatePairs is then empty. Rust phase2 currently preserves this optional-filter behavior.",
+  "decisionRequested": "For each authored entry in nonempty pairs, require at least one distinct matched component pair; otherwise noninvertible GEOSPEC_SELECTOR_UNMATCHED in authored selector order. Optional allowances may match nothing. Omitted pairs retain all-pairs behavior. Explicit pairs=[] remains explicit empty filter with no required entries; do not invent a new malformed-input rule.",
+  "reason": "Explicit requested pairs in an assertion or analyzeMeshOverlap identify required measurement scope; an unresolved request cannot prove absence of interference. This is a named successor correction, not a fix to legacy identity indexing.",
+  "additionalPredeclaredControls": [
+    {
+      "labels": [
+        "A",
+        "B"
+      ],
+      "pairs": [
+        {
+          "left": "A",
+          "right": "B"
+        },
+        {
+          "left": "A",
+          "right": "absent"
+        }
+      ],
+      "unmatchedPairIndices": [
+        1
+      ]
+    },
+    {
+      "labels": [
+        "A"
+      ],
+      "pairs": [
+        {
+          "left": "A",
+          "right": "A"
+        }
+      ],
+      "unmatchedPairIndices": [
+        0
+      ]
+    },
+    {
+      "labels": [
+        "A",
+        "B"
+      ],
+      "pairs": [
+        {
+          "left": "A",
+          "right": "B"
+        }
+      ],
+      "allowances": [
+        {
+          "left": "absent",
+          "right": "B"
+        }
+      ],
+      "unmatchedPairIndices": []
+    }
+  ],
+  "rows": [
+    {
+      "polarity": "positive",
+      "labels": [
+        "A",
+        "B"
+      ],
+      "pairs": [
+        {
+          "left": "A",
+          "right": "absent"
+        }
+      ],
+      "expectedCanonicalResultUtf8": "{\"claimId\":\"required-pair\",\"diagnostics\":[{\"code\":\"GEOSPEC_SELECTOR_UNMATCHED\",\"details\":{\"matcher\":\"toHaveNoComponentInterference\",\"pair\":{\"left\":\"A\",\"right\":\"absent\"},\"pairIndex\":0},\"message\":\"Requested component pair at index 0 did not match two distinct components.\",\"severity\":\"error\"}],\"status\":\"refused\"}"
+    },
+    {
+      "polarity": "negative",
+      "labels": [
+        "A",
+        "B"
+      ],
+      "pairs": [
+        {
+          "left": "A",
+          "right": "absent"
+        }
+      ],
+      "expectedCanonicalResultUtf8": "{\"claimId\":\"required-pair\",\"diagnostics\":[{\"code\":\"GEOSPEC_SELECTOR_UNMATCHED\",\"details\":{\"matcher\":\"toHaveNoComponentInterference\",\"pair\":{\"left\":\"A\",\"right\":\"absent\"},\"pairIndex\":0},\"message\":\"Requested component pair at index 0 did not match two distinct components.\",\"severity\":\"error\"}],\"status\":\"refused\"}"
+    }
+  ],
+  "oracleInstruction": "After Principal ruling, independently join full authored/canonical plan strings and ancillary query counterpart. These exact minimal refusal result strings are proposed semantics authored without candidate execution; no numerical geometry outputs change."
+}

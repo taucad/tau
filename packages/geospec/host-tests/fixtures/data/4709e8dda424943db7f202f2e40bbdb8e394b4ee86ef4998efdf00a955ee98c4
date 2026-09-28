@@ -1,0 +1,157 @@
+{
+  "authority": "continuousContractDecision adopted exact schedule + independent intent.json box boundaries",
+  "sourceInputsSha256": "6ccb5bd597728f65748244334c16a663c6469d18887545b7c173060e657187a6",
+  "derivation": "R1 + N domain requests; insertion1+6N; grid1+C*(N+2)+A; points(P+I)*C; section1+(P-1)*(2nx+1)*ny*nz. No candidate outputs used.",
+  "controls": [
+    {
+      "id": "insertion-budget-15",
+      "baseRowId": "insertion-depth3-band3-positive",
+      "budget": 15,
+      "stages": {
+        "report": 1,
+        "selectedDomains": 2,
+        "insertion": 13
+      },
+      "expectedUnitsUsed": 16,
+      "expectedStatus": "refused",
+      "expectedDiagnosticCode": "MATCHER_TIMEOUT",
+      "dimensions": null,
+      "cells": null,
+      "internalAdjacencies": null,
+      "runs": [
+        "cold",
+        "warm"
+      ],
+      "warmup": "same geometric claim/8M budget/different claimId, then exact original target plan; no input or current result substitution"
+    },
+    {
+      "id": "insertion-budget-16",
+      "baseRowId": "insertion-depth3-band3-positive",
+      "budget": 16,
+      "stages": {
+        "report": 1,
+        "selectedDomains": 2,
+        "insertion": 13
+      },
+      "expectedUnitsUsed": 16,
+      "expectedStatus": "passed",
+      "expectedDiagnosticCode": null,
+      "dimensions": null,
+      "cells": null,
+      "internalAdjacencies": null,
+      "runs": [
+        "cold",
+        "warm"
+      ],
+      "warmup": "same geometric claim/8M budget/different claimId, then exact original target plan; no input or current result substitution"
+    },
+    {
+      "id": "wide-budget-117",
+      "baseRowId": "wide-channel-min4-positive",
+      "budget": 117,
+      "stages": {
+        "report": 1,
+        "selectedDomains": 4,
+        "grid": 67,
+        "points": 18,
+        "section": 28
+      },
+      "expectedUnitsUsed": 118,
+      "expectedStatus": "refused",
+      "expectedDiagnosticCode": "MATCHER_TIMEOUT",
+      "dimensions": [
+        1,
+        3,
+        3
+      ],
+      "cells": 9,
+      "internalAdjacencies": 12,
+      "runs": [
+        "cold",
+        "warm"
+      ],
+      "warmup": "same geometric claim/8M budget/different claimId, then exact original target plan; no input or current result substitution"
+    },
+    {
+      "id": "wide-budget-118",
+      "baseRowId": "wide-channel-min4-positive",
+      "budget": 118,
+      "stages": {
+        "report": 1,
+        "selectedDomains": 4,
+        "grid": 67,
+        "points": 18,
+        "section": 28
+      },
+      "expectedUnitsUsed": 118,
+      "expectedStatus": "passed",
+      "expectedDiagnosticCode": null,
+      "dimensions": [
+        1,
+        3,
+        3
+      ],
+      "cells": 9,
+      "internalAdjacencies": 12,
+      "runs": [
+        "cold",
+        "warm"
+      ],
+      "warmup": "same geometric claim/8M budget/different claimId, then exact original target plan; no input or current result substitution"
+    },
+    {
+      "id": "narrow-budget-1255",
+      "baseRowId": "narrow-channel-min1-positive",
+      "budget": 1255,
+      "stages": {
+        "report": 1,
+        "selectedDomains": 8,
+        "grid": 921,
+        "points": 150,
+        "section": 176
+      },
+      "expectedUnitsUsed": 1256,
+      "expectedStatus": "refused",
+      "expectedDiagnosticCode": "MATCHER_TIMEOUT",
+      "dimensions": [
+        3,
+        5,
+        5
+      ],
+      "cells": 75,
+      "internalAdjacencies": 170,
+      "runs": [
+        "cold",
+        "warm"
+      ],
+      "warmup": "same geometric claim/8M budget/different claimId, then exact original target plan; no input or current result substitution"
+    },
+    {
+      "id": "narrow-budget-1256",
+      "baseRowId": "narrow-channel-min1-positive",
+      "budget": 1256,
+      "stages": {
+        "report": 1,
+        "selectedDomains": 8,
+        "grid": 921,
+        "points": 150,
+        "section": 176
+      },
+      "expectedUnitsUsed": 1256,
+      "expectedStatus": "failed",
+      "expectedDiagnosticCode": null,
+      "dimensions": [
+        3,
+        5,
+        5
+      ],
+      "cells": 75,
+      "internalAdjacencies": 170,
+      "runs": [
+        "cold",
+        "warm"
+      ],
+      "warmup": "same geometric claim/8M budget/different claimId, then exact original target plan; no input or current result substitution"
+    }
+  ]
+}

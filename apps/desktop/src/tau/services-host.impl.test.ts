@@ -35,6 +35,7 @@ import type { AgentHostConfig, ServicesHostOptions, UtilityMessage, UtilityPort 
 const projectHostCalls = vi.hoisted(() => [] as Array<Parameters<typeof TauHost.createProjectHostActor>[0]>);
 const servedHosts = vi.hoisted(() => [] as TauHost.ProjectHost[]);
 const toolRegistryCalls = vi.hoisted(() => [] as Array<Parameters<typeof AgentTools.createHostToolRegistry>[0]>);
+const toolRegistries = vi.hoisted(() => [] as Array<ReturnType<typeof AgentTools.createHostToolRegistry>>);
 const runtimeClientCalls = vi.hoisted(() => [] as Array<ReturnType<typeof RuntimeClient.createRuntimeClient>>);
 /** The options of every model transport the utility built (this test build is self-host, `tauCloudBuildEnabled`). */
 const transportCalls = vi.hoisted(
@@ -110,7 +111,9 @@ vi.mock('@taucad/host/agent-tools', async (importOriginal) => {
     ...actual,
     createHostToolRegistry: (options: Parameters<typeof actual.createHostToolRegistry>[0]) => {
       toolRegistryCalls.push(options);
-      return actual.createHostToolRegistry(options);
+      const registry = actual.createHostToolRegistry(options);
+      toolRegistries.push(registry);
+      return registry;
     },
   };
 });
@@ -792,6 +795,7 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     projectHostCalls.length = 0;
     servedHosts.length = 0;
     toolRegistryCalls.length = 0;
+    toolRegistries.length = 0;
     runtimeClientCalls.length = 0;
     /* `dispose` closes each launcher without waiting, and a revision store that
        is still finishing its own creation holds the directory: retry rather than
@@ -866,10 +870,12 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
    * `MessagePort` there speaks `on/off/start/close` exactly as Electron's
    * `MessagePortMain` does, which is why one binding spans both.
    */
+  // oxlint-disable-next-line max-params -- Keep existing fixture calls intact while exercising the optional host selection.
   const connect = (
     host: ReturnType<typeof hostHarness>['host'],
     workspaceRoot: string,
     projectId = 'proj_test',
+    geoSpecEngine?: 'legacy' | 'native',
   ): AgentChannelClient => {
     const channel = new MessageChannel();
     channels.push(channel);
@@ -882,6 +888,7 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
             workspaceRoot,
             nativeTrustFile: '/trust/widget',
             projectId,
+            ...(geoSpecEngine === undefined ? {} : { geoSpecEngine }),
           },
         },
         [channel.port1 as unknown as UtilityPort],
@@ -1325,12 +1332,81 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
 
     const served = log.mock.calls.filter(([event]) => event === 'agent-host-served');
     expect(served).toEqual([
-      ['agent-host-served', { workspaceRoot: physicalRoot, reused: false }],
+      ['agent-host-served', { workspaceRoot: physicalRoot, reused: false, geoSpecEngine: 'legacy' }],
       /* A second window on the same project attaches to the run already
          executing; a second launcher would fork the durable log. */
-      ['agent-host-served', { workspaceRoot: physicalRoot, reused: true }],
+      ['agent-host-served', { workspaceRoot: physicalRoot, reused: true, geoSpecEngine: 'legacy' }],
     ]);
   });
+
+  it.each([undefined, 'legacy', 'native'] as const)(
+    'should publish the selected %s desktop authoring recipe before a model turn',
+    async (geoSpecEngine) => {
+      const { host, workspaceRoot } = await configuredHost();
+      const client = connect(host, workspaceRoot, 'proj_test', geoSpecEngine);
+      await expect(attachUnwritten(client, 'chat-guidance')).resolves.toMatchObject(unwrittenAttach);
+      expect(toolRegistryCalls).toHaveLength(1);
+      expect(toolRegistryCalls[0]?.geospecAuthoringMode).toBe(geoSpecEngine ?? 'legacy');
+      const description = toolRegistries[0]?.list().find((tool) => tool.name === 'test_model')?.description;
+      const native = geoSpecEngine === 'native';
+      expect(description).toContain(native ? 'expectNativeGeo' : 'expectGeo');
+      expect(description).toContain(native ? 'loadNativeModel' : 'loadModel');
+      expect(description).not.toContain(native ? 'expectGeo' : 'expectNativeGeo');
+    },
+  );
+
+  it('should refuse an invalid GeoSpec engine before opening a project host', async () => {
+    const { host, log, workspaceRoot } = await configuredHost();
+    const port = stubPort();
+    host.handleMessage(
+      frame(
+        {
+          type: 'concern',
+          concern: 'agentHost',
+          context: { workspaceRoot, projectId: 'proj_test', geoSpecEngine: 'unknown' },
+        },
+        [port],
+      ),
+    );
+
+    await vi.waitFor(() => {
+      expect(port.close).toHaveBeenCalledOnce();
+    });
+    expect(log).toHaveBeenCalledWith('agent-host.invalid-geospec-engine', { geoSpecEngine: 'unknown' });
+    expect(projectHostCalls).toHaveLength(0);
+  });
+
+  it.each(['legacy', 'native'] as const)(
+    'should snapshot the GeoSpec engine %s per root and require reload for an explicit change',
+    async (geoSpecEngine) => {
+      const { host, log, physicalRoot, workspaceRoot } = await configuredHost();
+      const first = connect(host, workspaceRoot, 'proj_test', geoSpecEngine);
+      await expect(attachUnwritten(first, 'chat-choice')).resolves.toMatchObject(unwrittenAttach);
+      connect(host, workspaceRoot, 'proj_test', geoSpecEngine);
+      // Omission always means legacy, including a reconnect.
+      if (geoSpecEngine === 'legacy') {
+        connect(host, workspaceRoot);
+      }
+      connect(host, workspaceRoot, 'proj_test', geoSpecEngine === 'native' ? 'legacy' : 'native');
+
+      expect(toolRegistryCalls).toHaveLength(1);
+      expect(log.mock.calls.filter(([event]) => event === 'agent-host-served')).toEqual([
+        ['agent-host-served', { workspaceRoot: physicalRoot, reused: false, geoSpecEngine }],
+        ['agent-host-served', { workspaceRoot: physicalRoot, reused: true, geoSpecEngine }],
+        ...(geoSpecEngine === 'legacy'
+          ? [['agent-host-served', { workspaceRoot: physicalRoot, reused: true, geoSpecEngine }]]
+          : []),
+      ]);
+      expect(log).toHaveBeenCalledWith('agent-host.geospec-engine-mismatch', {
+        workspaceRoot: physicalRoot,
+        current: geoSpecEngine,
+        requested: geoSpecEngine === 'native' ? 'legacy' : 'native',
+        reason: 'Reload the project host to change the GeoSpec engine.',
+      });
+      // The original launcher still serves its existing channel.
+      await expect(attachUnwritten(first, 'chat-choice-still-served')).resolves.toMatchObject(unwrittenAttach);
+    },
+  );
 
   it('awaits one project release without stopping another launcher', async () => {
     const released = vi.fn();
@@ -1360,8 +1436,8 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     connect(host, otherRoot, 'project-b');
     connect(host, workspaceRoot, 'project-a');
     expect(log.mock.calls.filter(([event]) => event === 'agent-host-served').slice(-2)).toEqual([
-      ['agent-host-served', { workspaceRoot: realpathSync.native(otherRoot), reused: true }],
-      ['agent-host-served', { workspaceRoot: physicalRoot, reused: false }],
+      ['agent-host-served', { workspaceRoot: realpathSync.native(otherRoot), reused: true, geoSpecEngine: 'legacy' }],
+      ['agent-host-served', { workspaceRoot: physicalRoot, reused: false, geoSpecEngine: 'legacy' }],
     ]);
   });
 

@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { GeometrySubject as PublicGeometrySubject } from 'geospec/mesh';
+import type { GeoSpecCollector } from 'geospec/runner';
 import { exposeEngineSubject, releaseEngineSubject } from '#engine/subject-store.js';
 import type { GeometrySubject } from '#mesh/types.js';
 import { clearCollectorGlobals, createCollector, installCollector } from '#runner/collector.js';
@@ -191,7 +192,7 @@ describe('native relationship proofs (SB1 two-cube fixture)', () => {
   }, 120_000);
 
   describe('toHaveSpatialRelationships matcher rewiring', () => {
-    const runOneAssertion = async (callback: (collector: ReturnType<typeof createCollector>) => void) => {
+    const runOneAssertion = async (callback: (collector: GeoSpecCollector) => void) => {
       const collector = createCollector();
       installCollector(collector);
       try {
@@ -207,7 +208,7 @@ describe('native relationship proofs (SB1 two-cube fixture)', () => {
 
     it('should pass in-band relationships end to end through the matcher', async () => {
       const passing = await runOneAssertion((collector) => {
-        collector.expectGeo(exposed).toHaveSpatialRelationships({
+        void collector.expectGeo(exposed).toHaveSpatialRelationships({
           relationships: [
             { id: 'gap band', kind: 'clearance', subject: 'cubeA', target: 'cubeB', min: 19.5, max: 20.5 },
             { id: 'no interference', kind: 'interference', subject: 'cubeA', target: 'cubeB' },
@@ -220,7 +221,7 @@ describe('native relationship proofs (SB1 two-cube fixture)', () => {
 
     it('should emit the audit diagnostic contract on relationship failure', async () => {
       const failing = await runOneAssertion((collector) => {
-        collector.expectGeo(exposed).toHaveSpatialRelationships({
+        void collector.expectGeo(exposed).toHaveSpatialRelationships({
           relationships: [
             { id: 'seated flanges', kind: 'contact', subject: 'cubeA', target: 'cubeB', tolerance: 0.02 },
           ],
@@ -257,7 +258,7 @@ describe('native relationship proofs (SB1 two-cube fixture)', () => {
 
     it('should reject explicit analytic endpoints through the evidence policy', async () => {
       const rejected = await runOneAssertion((collector) => {
-        collector.expectGeo(exposed).toHaveSpatialRelationships({
+        void collector.expectGeo(exposed).toHaveSpatialRelationships({
           relationships: [
             {
               kind: 'coaxial',
@@ -274,7 +275,7 @@ describe('native relationship proofs (SB1 two-cube fixture)', () => {
 
     it('should surface selector resolution failures with relationship context', async () => {
       const unmatched = await runOneAssertion((collector) => {
-        collector.expectGeo(exposed).toHaveSpatialRelationships({
+        void collector.expectGeo(exposed).toHaveSpatialRelationships({
           relationships: [{ kind: 'contact', subject: 'cubeZ', target: 'cubeB' }],
         });
       });

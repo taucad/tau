@@ -1,0 +1,1978 @@
+{
+  "schema": "geospec-legacy-installed-fixture-v1",
+  "source": {
+    "description": "Retained installed comparator: captured engine/SDK outputs plus reconstructed first-party dependency archives. These are immutable regression inputs, not newly built products.",
+    "historicalTauHead": "90d5b8d8539131b81389722461b95ea92cc04dfb",
+    "profile": "reconstructed-installed-frozen-reference-v1",
+    "protocolVersion": 2,
+    "registryVersion": 3,
+    "sourceRebuildQualified": false,
+    "capturedSourceArchiveSha256": "8746f9c4c3d4ed985fbfeef9f3fd48d760eecb7f704f06357083548cecf6ec11",
+    "sourceCaptureDifferences": {
+      "portableReferenceArchive": {
+        "payloads": 972,
+        "logicalBytes": 18581442,
+        "archiveBytes": 5650357,
+        "sha256": "8746f9c4c3d4ed985fbfeef9f3fd48d760eecb7f704f06357083548cecf6ec11"
+      },
+      "trackedFiles": 792,
+      "trackedFilesEqualHistoricalHead": 726,
+      "trackedFilesDifferentFromHistoricalHead": 66,
+      "differentRuntimeFiles": 56,
+      "differentRuntimeBytes": 1393427,
+      "differentAssimpFiles": 10,
+      "differentAssimpBytes": 53011,
+      "ignoredProductOutputs": 180,
+      "ignoredProductOutputBytes": 14039215
+    },
+    "buildNode": "26.7.0",
+    "tsdown": "0.22.14",
+    "pnpm": "11.7.0"
+  },
+  "archives": [
+    {
+      "file": "taucad-geospec-engine.tgz",
+      "package": "@taucad/geospec-engine",
+      "version": "0.1.0-beta.1",
+      "bytes": 4577728,
+      "sha256": "dda3b0f93da019ef30cfdb05ecceb0e1cbccfe85ff96dc36f940940eb3d3912b",
+      "declaredLicense": "Apache-2.0"
+    },
+    {
+      "file": "geospec.tgz",
+      "package": "geospec",
+      "version": "0.1.0-beta.1",
+      "bytes": 68707,
+      "sha256": "2dcddfa5ea84edaf0dff3e080e7bc2178da7b6c1bb8256e0c0defe4adee9ea60",
+      "declaredLicense": "Apache-2.0"
+    },
+    {
+      "file": "taucad-assimp.tgz",
+      "package": "@taucad/assimp",
+      "version": "0.1.0-beta.0",
+      "bytes": 10687,
+      "sha256": "c8e959d6a2b52253432ed486091c4b8e2e59d0b1f1f74d9d9799c08e2e5e38a5",
+      "declaredLicense": "Apache-2.0"
+    },
+    {
+      "file": "taucad-brep.tgz",
+      "package": "@taucad/brep",
+      "version": "0.1.0-beta.0",
+      "bytes": 3100733,
+      "sha256": "e7b5592eb20ac7f0a2d387b74ef6b382461da594287f5a588aabb74df8520e9e",
+      "declaredLicense": "Apache-2.0"
+    },
+    {
+      "file": "taucad-esbuild.tgz",
+      "package": "@taucad/esbuild",
+      "version": "0.1.0-beta.0",
+      "bytes": 3792946,
+      "sha256": "5760eb5af9a53b969ccea08795ad1404c0140b5b3df18d53b49395c630adad6b",
+      "declaredLicense": "Apache-2.0"
+    },
+    {
+      "file": "taucad-gltf.tgz",
+      "package": "@taucad/gltf",
+      "version": "0.1.0-beta.0",
+      "bytes": 10029,
+      "sha256": "dbe758f026297b5b37a8aaf2fb30085476ddc35b42a225302036b8713cbdd579",
+      "declaredLicense": "Apache-2.0"
+    },
+    {
+      "file": "taucad-geometry-core.tgz",
+      "package": "@taucad/geometry-core",
+      "version": "0.1.0-beta.0",
+      "bytes": 27670,
+      "sha256": "84390e2f28cf174af3e4db804ab134b2d58743d3019748d5d6b465d79fec5f73",
+      "declaredLicense": "Apache-2.0"
+    },
+    {
+      "file": "taucad-image.tgz",
+      "package": "@taucad/image",
+      "version": "0.1.0-beta.0",
+      "bytes": 80392,
+      "sha256": "505eddb0b29a8b353e60d0a6de5f27e6571a10d2479e8ea8714480f262ad683b",
+      "declaredLicense": "Apache-2.0"
+    },
+    {
+      "file": "taucad-jscad.tgz",
+      "package": "@taucad/jscad",
+      "version": "0.1.0-beta.0",
+      "bytes": 14402,
+      "sha256": "28c2c26b5f64bb27d7e30d11ca4bd80e9981343f07587e71ee486094243f4657",
+      "declaredLicense": "Apache-2.0"
+    },
+    {
+      "file": "taucad-manifold.tgz",
+      "package": "@taucad/manifold",
+      "version": "0.1.0-beta.0",
+      "bytes": 10216,
+      "sha256": "52860f27ef235b8cd96528b98336621b76e699cd71895e83a6eb066ee2e569fe",
+      "declaredLicense": "Apache-2.0"
+    },
+    {
+      "file": "taucad-middleware.tgz",
+      "package": "@taucad/middleware",
+      "version": "0.1.0-beta.0",
+      "bytes": 12099,
+      "sha256": "e9d3d3226179829af5f4eb11ffe0e230c5e8d6d7d3849d50dbe3b12506b8d58d",
+      "declaredLicense": "Apache-2.0"
+    },
+    {
+      "file": "taucad-occt-core.tgz",
+      "package": "@taucad/occt-core",
+      "version": "0.1.0-beta.0",
+      "bytes": 16357,
+      "sha256": "a8b464abde24f140d292d8e8d3ea693bf0abc9eaab112ec67e6d9a20275f03bc",
+      "declaredLicense": "Apache-2.0"
+    },
+    {
+      "file": "taucad-opencascade.tgz",
+      "package": "@taucad/opencascade",
+      "version": "0.1.0-beta.0",
+      "bytes": 15582,
+      "sha256": "4fb3ce6007288719cc014e1ec0c8e81260dae4a6044e8fbcbfccdc96e67ec92b",
+      "declaredLicense": "Apache-2.0"
+    },
+    {
+      "file": "taucad-replicad.tgz",
+      "package": "@taucad/replicad",
+      "version": "0.1.0-beta.0",
+      "bytes": 353483,
+      "sha256": "edaf124da9b11f13167b60866b775002d5bc5139749c2ed1d8d088daa699c087",
+      "declaredLicense": "Apache-2.0"
+    },
+    {
+      "file": "taucad-rhino.tgz",
+      "package": "@taucad/rhino",
+      "version": "0.1.0-beta.0",
+      "bytes": 1022257,
+      "sha256": "ecb42dd98782e17f8c9fd5fae775546539af66466a4cdad9841cbcf27456485f",
+      "declaredLicense": "Apache-2.0"
+    },
+    {
+      "file": "taucad-runtime.tgz",
+      "package": "@taucad/runtime",
+      "version": "0.1.0-beta.1",
+      "bytes": 851437,
+      "sha256": "68691d4b3731cf98656b6f34adf798324ccf773c7e3812fb2a6b42aeec3c097d",
+      "declaredLicense": "Apache-2.0"
+    },
+    {
+      "file": "taucad-bundler-core.tgz",
+      "package": "@taucad/bundler-core",
+      "version": "0.1.0-beta.0",
+      "bytes": 11618,
+      "sha256": "4010e5f7dd09f7da65a766c955975c6a44d4feada6b0e99942c76230afb187c2",
+      "declaredLicense": "Apache-2.0"
+    },
+    {
+      "file": "taucad-spatial.tgz",
+      "package": "@taucad/spatial",
+      "version": "0.0.1",
+      "bytes": 8126,
+      "sha256": "6e6e4bcdc655aa6fe87dd62912165376854912c1442a313802a53aab250273c6",
+      "declaredLicense": "Apache-2.0"
+    },
+    {
+      "file": "taucad-cache-core.tgz",
+      "package": "@taucad/cache-core",
+      "version": "0.1.0-beta.0",
+      "bytes": 17263,
+      "sha256": "9e4c2d2025473b3b33c3005164379b51b68c7f0a729e5291bce5564e60ac94c8",
+      "declaredLicense": "Apache-2.0"
+    }
+  ],
+  "registryClosure": {
+    "rows": [
+      {
+        "parent": "@taucad/geospec-engine",
+        "dependency": "@gltf-transform/core",
+        "version": "4.4.0",
+        "packageJsonSha256": "32023c68dcad84fc3017c38d942f97e6a1d6781d96e9ca42610590aedda29f72"
+      },
+      {
+        "parent": "@gltf-transform/core",
+        "dependency": "property-graph",
+        "version": "4.1.0",
+        "packageJsonSha256": "6d057483cf1eb2b4e48328a7e469d4c3041fe388b6e86c46f158eb2da5c77c09"
+      },
+      {
+        "parent": "@taucad/geospec-engine",
+        "dependency": "manifold-3d",
+        "version": "3.4.1",
+        "packageJsonSha256": "b459d69dc96e2e630fc3285419d4fc7cd24e52701e55b255bf1ce36a518e27b4"
+      },
+      {
+        "parent": "manifold-3d",
+        "dependency": "@gltf-transform/core",
+        "version": "4.4.0",
+        "packageJsonSha256": "32023c68dcad84fc3017c38d942f97e6a1d6781d96e9ca42610590aedda29f72"
+      },
+      {
+        "parent": "manifold-3d",
+        "dependency": "@gltf-transform/extensions",
+        "version": "4.4.0",
+        "packageJsonSha256": "c599528478cb4aea8286f2122c438e42e87bc50fd7909a36e419c0ca7f8add33"
+      },
+      {
+        "parent": "@gltf-transform/extensions",
+        "dependency": "@gltf-transform/core",
+        "version": "4.4.0",
+        "packageJsonSha256": "32023c68dcad84fc3017c38d942f97e6a1d6781d96e9ca42610590aedda29f72"
+      },
+      {
+        "parent": "@gltf-transform/extensions",
+        "dependency": "ktx-parse",
+        "version": "1.1.0",
+        "packageJsonSha256": "251845f7effebd730a76633b535f71129b26f9d7afabd8d72113a7b358aa2ddb"
+      },
+      {
+        "parent": "manifold-3d",
+        "dependency": "@gltf-transform/functions",
+        "version": "4.4.0",
+        "packageJsonSha256": "aa5b64ac9a8a3608d9f0ff9c00e4f93b04f1db168b8e8a4ec1e6732951ff2285"
+      },
+      {
+        "parent": "@gltf-transform/functions",
+        "dependency": "@gltf-transform/core",
+        "version": "4.4.0",
+        "packageJsonSha256": "32023c68dcad84fc3017c38d942f97e6a1d6781d96e9ca42610590aedda29f72"
+      },
+      {
+        "parent": "@gltf-transform/functions",
+        "dependency": "@gltf-transform/extensions",
+        "version": "4.4.0",
+        "packageJsonSha256": "c599528478cb4aea8286f2122c438e42e87bc50fd7909a36e419c0ca7f8add33"
+      },
+      {
+        "parent": "@gltf-transform/functions",
+        "dependency": "ktx-parse",
+        "version": "1.1.0",
+        "packageJsonSha256": "251845f7effebd730a76633b535f71129b26f9d7afabd8d72113a7b358aa2ddb"
+      },
+      {
+        "parent": "@gltf-transform/functions",
+        "dependency": "ndarray",
+        "version": "1.0.19",
+        "packageJsonSha256": "6d19061808a0fa92197267a586b98f9d68136510d06a336600f48948890561e4"
+      },
+      {
+        "parent": "ndarray",
+        "dependency": "iota-array",
+        "version": "1.0.0",
+        "packageJsonSha256": "cbeeda7a6b5180e762177182032ddf80db17d135c696d9b8423c82d4ff16e803"
+      },
+      {
+        "parent": "ndarray",
+        "dependency": "is-buffer",
+        "version": "1.1.6",
+        "packageJsonSha256": "c3f4ad9709465baf192e2ee4ae1a113addc1843e044eee520c71eb5fd3c9ec85"
+      },
+      {
+        "parent": "@gltf-transform/functions",
+        "dependency": "ndarray-lanczos",
+        "version": "0.3.0",
+        "packageJsonSha256": "ea2f346ecf89357e6eed3df32130ac37bcd099fbb768a8a54c59f2db4b7fd896"
+      },
+      {
+        "parent": "ndarray-lanczos",
+        "dependency": "@types/ndarray",
+        "version": "1.0.14",
+        "packageJsonSha256": "6363872d5be2950f5d198d202526a9d36dbe05947483179bd889eceefd0dad5f"
+      },
+      {
+        "parent": "ndarray-lanczos",
+        "dependency": "ndarray",
+        "version": "1.0.19",
+        "packageJsonSha256": "6d19061808a0fa92197267a586b98f9d68136510d06a336600f48948890561e4"
+      },
+      {
+        "parent": "@gltf-transform/functions",
+        "dependency": "ndarray-pixels",
+        "version": "5.0.1",
+        "packageJsonSha256": "71a2aaabf9dd36140e3cfbfce8341c38623d13636143757e3dad0a93b3146702"
+      },
+      {
+        "parent": "ndarray-pixels",
+        "dependency": "@types/ndarray",
+        "version": "1.0.14",
+        "packageJsonSha256": "6363872d5be2950f5d198d202526a9d36dbe05947483179bd889eceefd0dad5f"
+      },
+      {
+        "parent": "ndarray-pixels",
+        "dependency": "ndarray",
+        "version": "1.0.19",
+        "packageJsonSha256": "6d19061808a0fa92197267a586b98f9d68136510d06a336600f48948890561e4"
+      },
+      {
+        "parent": "ndarray-pixels",
+        "dependency": "ndarray-ops",
+        "version": "1.2.2",
+        "packageJsonSha256": "d3a2a82ecf7061c723e5723172fdc6e528051da51ba9354e634a68e18bcabf55"
+      },
+      {
+        "parent": "ndarray-ops",
+        "dependency": "cwise-compiler",
+        "version": "1.1.3",
+        "packageJsonSha256": "6eeb54f8764092b5c1e1fff7c1d533cd1fe4056b58280a5089d2100dc750e6e1"
+      },
+      {
+        "parent": "cwise-compiler",
+        "dependency": "uniq",
+        "version": "1.0.1",
+        "packageJsonSha256": "a2376d95e1a60e1a07aa6b6351fc296b2304c23c8b04ca4235fdb163cef88204"
+      },
+      {
+        "parent": "ndarray-pixels",
+        "dependency": "sharp",
+        "version": "0.34.5",
+        "packageJsonSha256": "e6be69319929151be3aa240bf1485f25a3477cb6d2286f92510b9fceb3cbef26"
+      },
+      {
+        "parent": "sharp",
+        "dependency": "@img/colour",
+        "version": "1.1.0",
+        "packageJsonSha256": "bc38c5097693ed53b91c32f35fb0a52569736c7854ba2eb6d080f3252071f75c"
+      },
+      {
+        "parent": "sharp",
+        "dependency": "detect-libc",
+        "version": "2.1.2",
+        "packageJsonSha256": "ee88e5b954fdf3a8480b1d01ef767d68d8ca2c6da269f58c5cf1c5550e9aa2a7"
+      },
+      {
+        "parent": "sharp",
+        "dependency": "semver",
+        "version": "7.8.5",
+        "packageJsonSha256": "7c94cb7f2a53c27b20d76386ec144c062894dbcc909cfabd0f728c37874b1776"
+      },
+      {
+        "parent": "manifold-3d",
+        "dependency": "@jridgewell/resolve-uri",
+        "version": "3.1.2",
+        "packageJsonSha256": "0793e722ffe08f3b4f1862c4dc96d920a62d6811a3648b4feb02f06c63227e8b"
+      },
+      {
+        "parent": "manifold-3d",
+        "dependency": "@jridgewell/trace-mapping",
+        "version": "0.3.31",
+        "packageJsonSha256": "7f5eacc669d36013f9b792ab15721a97d48b26b093100122aa6c8691ebe656be"
+      },
+      {
+        "parent": "@jridgewell/trace-mapping",
+        "dependency": "@jridgewell/resolve-uri",
+        "version": "3.1.2",
+        "packageJsonSha256": "0793e722ffe08f3b4f1862c4dc96d920a62d6811a3648b4feb02f06c63227e8b"
+      },
+      {
+        "parent": "@jridgewell/trace-mapping",
+        "dependency": "@jridgewell/sourcemap-codec",
+        "version": "1.5.5",
+        "packageJsonSha256": "398fc774628ec1592c794e8c14ecdc0096206a2521545e527e5a06429dac6006"
+      },
+      {
+        "parent": "manifold-3d",
+        "dependency": "@jscadui/3mf-export",
+        "version": "0.5.0",
+        "packageJsonSha256": "16d7f58d11b7d697de7c8e7144abd240110c0cf74b09af315baeee85fa5d9ec3"
+      },
+      {
+        "parent": "manifold-3d",
+        "dependency": "commander",
+        "version": "13.1.0",
+        "packageJsonSha256": "7c956844374e86a9686f2c6445e868a22f21c0c5cc836c6b5060bcc77a976c9d"
+      },
+      {
+        "parent": "manifold-3d",
+        "dependency": "convert-source-map",
+        "version": "2.0.0",
+        "packageJsonSha256": "e6bf802e6ee220d66321808ce3d619fbb85ff4d5729ea4f649bd65dfe9ee8956"
+      },
+      {
+        "parent": "manifold-3d",
+        "dependency": "fast-xml-parser",
+        "version": "5.7.3",
+        "packageJsonSha256": "a9165d1ed4ad2ad8ebca75206bee95b6916375eb80580c81a40a6da5229db849"
+      },
+      {
+        "parent": "fast-xml-parser",
+        "dependency": "@nodable/entities",
+        "version": "2.2.0",
+        "packageJsonSha256": "6a025503d776124cd4371fcba8383afcc30a640c5783f96093f76f19ecb66241"
+      },
+      {
+        "parent": "fast-xml-parser",
+        "dependency": "fast-xml-builder",
+        "version": "1.3.1",
+        "packageJsonSha256": "304416f412412cd967ee1139f0eadfebaa263e92bfbfa264bedbb37055d5c27e"
+      },
+      {
+        "parent": "fast-xml-builder",
+        "dependency": "path-expression-matcher",
+        "version": "1.6.2",
+        "packageJsonSha256": "625ca3a27a289160508a79773ddfd7bf678a6401bd96321cac0bc43ebebe01f8"
+      },
+      {
+        "parent": "fast-xml-builder",
+        "dependency": "xml-naming",
+        "version": "0.3.0",
+        "packageJsonSha256": "e6ff1758837bca3ca6877308c0d51f9e3e47efd07497fa62c8291fd88ab8216f"
+      },
+      {
+        "parent": "fast-xml-parser",
+        "dependency": "path-expression-matcher",
+        "version": "1.6.2",
+        "packageJsonSha256": "625ca3a27a289160508a79773ddfd7bf678a6401bd96321cac0bc43ebebe01f8"
+      },
+      {
+        "parent": "fast-xml-parser",
+        "dependency": "strnum",
+        "version": "2.4.2",
+        "packageJsonSha256": "38bf3bf508c5f454549308baf2b4c56ed01c14dfa29bb3efd51308cecb8efd70"
+      },
+      {
+        "parent": "strnum",
+        "dependency": "anynum",
+        "version": "1.0.1",
+        "packageJsonSha256": "41c5d60f0aa8b5f4133aeff56573a8c4130d4d1c19dc240398ff806b40a4470e"
+      },
+      {
+        "parent": "manifold-3d",
+        "dependency": "fflate",
+        "version": "0.8.3",
+        "packageJsonSha256": "5922d8150b307bc0e4e441491c779c45379e9913d348848fca8d5cf02db4d134"
+      },
+      {
+        "parent": "manifold-3d",
+        "dependency": "magic-string",
+        "version": "0.30.21",
+        "packageJsonSha256": "86814aaf7dacba9d31fbf361c3285981f1cbbda0a87108caa4131d297bd9eba2"
+      },
+      {
+        "parent": "magic-string",
+        "dependency": "@jridgewell/sourcemap-codec",
+        "version": "1.5.5",
+        "packageJsonSha256": "398fc774628ec1592c794e8c14ecdc0096206a2521545e527e5a06429dac6006"
+      },
+      {
+        "parent": "@taucad/geospec-engine",
+        "dependency": "zod",
+        "version": "4.4.3",
+        "packageJsonSha256": "c630bd10b52dcf71c112a2bf78dbf2734b9db58d62de663b8d86c2ec2c8cda2e"
+      },
+      {
+        "parent": "geospec",
+        "dependency": "zod",
+        "version": "4.4.3",
+        "packageJsonSha256": "c630bd10b52dcf71c112a2bf78dbf2734b9db58d62de663b8d86c2ec2c8cda2e"
+      },
+      {
+        "parent": "@taucad/assimp",
+        "dependency": "libassimp",
+        "version": "0.2.0",
+        "packageJsonSha256": "e220ae687fbd2d7897c4f45aadd16f97f196217ded9f132f86f95ce304740cf1"
+      },
+      {
+        "parent": "@taucad/brep",
+        "dependency": "@gltf-transform/core",
+        "version": "4.4.0",
+        "packageJsonSha256": "32023c68dcad84fc3017c38d942f97e6a1d6781d96e9ca42610590aedda29f72"
+      },
+      {
+        "parent": "@taucad/brep",
+        "dependency": "occt-import-js",
+        "version": "0.0.23",
+        "packageJsonSha256": "1d177284b7fe88c6673b918041a00883df933c3dd88603d4fd62a07b0c9a6eb8"
+      },
+      {
+        "parent": "@taucad/esbuild",
+        "dependency": "esbuild",
+        "version": "0.28.2",
+        "packageJsonSha256": "9d0bc453f4e791553c4cc2298ba023b409241fd9801e494741666eb0f6051490"
+      },
+      {
+        "parent": "@taucad/esbuild",
+        "dependency": "esbuild-wasm",
+        "version": "0.28.2",
+        "packageJsonSha256": "ddb3a2f245759418b942f786b0df09a45825c11ba67b2ac00dd8156e4f345e2b"
+      },
+      {
+        "parent": "@taucad/gltf",
+        "dependency": "@gltf-transform/core",
+        "version": "4.4.0",
+        "packageJsonSha256": "32023c68dcad84fc3017c38d942f97e6a1d6781d96e9ca42610590aedda29f72"
+      },
+      {
+        "parent": "@taucad/gltf",
+        "dependency": "@gltf-transform/functions",
+        "version": "4.4.0",
+        "packageJsonSha256": "aa5b64ac9a8a3608d9f0ff9c00e4f93b04f1db168b8e8a4ec1e6732951ff2285"
+      },
+      {
+        "parent": "@taucad/gltf",
+        "dependency": "draco3dgltf",
+        "version": "1.5.7",
+        "packageJsonSha256": "a0d54ff620c6a018aeecc6cc5b60afb99e1e5bdb34f279870035c3568fec48a6"
+      },
+      {
+        "parent": "@taucad/geometry-core",
+        "dependency": "@gltf-transform/core",
+        "version": "4.4.0",
+        "packageJsonSha256": "32023c68dcad84fc3017c38d942f97e6a1d6781d96e9ca42610590aedda29f72"
+      },
+      {
+        "parent": "@taucad/geometry-core",
+        "dependency": "@gltf-transform/extensions",
+        "version": "4.4.0",
+        "packageJsonSha256": "c599528478cb4aea8286f2122c438e42e87bc50fd7909a36e419c0ca7f8add33"
+      },
+      {
+        "parent": "@taucad/geometry-core",
+        "dependency": "@gltf-transform/functions",
+        "version": "4.4.0",
+        "packageJsonSha256": "aa5b64ac9a8a3608d9f0ff9c00e4f93b04f1db168b8e8a4ec1e6732951ff2285"
+      },
+      {
+        "parent": "@taucad/geometry-core",
+        "dependency": "manifold-3d",
+        "version": "3.4.1",
+        "packageJsonSha256": "b459d69dc96e2e630fc3285419d4fc7cd24e52701e55b255bf1ce36a518e27b4"
+      },
+      {
+        "parent": "@taucad/image",
+        "dependency": "@gltf-transform/core",
+        "version": "4.4.0",
+        "packageJsonSha256": "32023c68dcad84fc3017c38d942f97e6a1d6781d96e9ca42610590aedda29f72"
+      },
+      {
+        "parent": "@taucad/image",
+        "dependency": "@gltf-transform/extensions",
+        "version": "4.4.0",
+        "packageJsonSha256": "c599528478cb4aea8286f2122c438e42e87bc50fd7909a36e419c0ca7f8add33"
+      },
+      {
+        "parent": "@taucad/image",
+        "dependency": "@resvg/resvg-wasm",
+        "version": "2.6.2",
+        "packageJsonSha256": "4a9efcb54b2670726ccf9b91086413676c3de0fae607cce3b8a5a0d25abaff48"
+      },
+      {
+        "parent": "@taucad/image",
+        "dependency": "manifold-3d",
+        "version": "3.4.1",
+        "packageJsonSha256": "b459d69dc96e2e630fc3285419d4fc7cd24e52701e55b255bf1ce36a518e27b4"
+      },
+      {
+        "parent": "@taucad/image",
+        "dependency": "nanoraster",
+        "version": "0.4.1",
+        "packageJsonSha256": "32998b9d0e1061172b1f501d863ca0a98bb45ac1d6a4e7f2e772d6bc302a2db7"
+      },
+      {
+        "parent": "@taucad/jscad",
+        "dependency": "@gltf-transform/core",
+        "version": "4.4.0",
+        "packageJsonSha256": "32023c68dcad84fc3017c38d942f97e6a1d6781d96e9ca42610590aedda29f72"
+      },
+      {
+        "parent": "@taucad/jscad",
+        "dependency": "@gltf-transform/extensions",
+        "version": "4.4.0",
+        "packageJsonSha256": "c599528478cb4aea8286f2122c438e42e87bc50fd7909a36e419c0ca7f8add33"
+      },
+      {
+        "parent": "@taucad/jscad",
+        "dependency": "@jscad/modeling",
+        "version": "2.13.0",
+        "packageJsonSha256": "e581a4c48ee48a0c2682a5939834ddda4fe855aad0387899767c04999449c34c"
+      },
+      {
+        "parent": "@taucad/manifold",
+        "dependency": "@gltf-transform/core",
+        "version": "4.4.0",
+        "packageJsonSha256": "32023c68dcad84fc3017c38d942f97e6a1d6781d96e9ca42610590aedda29f72"
+      },
+      {
+        "parent": "@taucad/manifold",
+        "dependency": "manifold-3d",
+        "version": "3.4.1",
+        "packageJsonSha256": "b459d69dc96e2e630fc3285419d4fc7cd24e52701e55b255bf1ce36a518e27b4"
+      },
+      {
+        "parent": "@taucad/middleware",
+        "dependency": "@gltf-transform/core",
+        "version": "4.4.0",
+        "packageJsonSha256": "32023c68dcad84fc3017c38d942f97e6a1d6781d96e9ca42610590aedda29f72"
+      },
+      {
+        "parent": "@taucad/middleware",
+        "dependency": "@gltf-transform/extensions",
+        "version": "4.4.0",
+        "packageJsonSha256": "c599528478cb4aea8286f2122c438e42e87bc50fd7909a36e419c0ca7f8add33"
+      },
+      {
+        "parent": "@taucad/middleware",
+        "dependency": "@msgpack/msgpack",
+        "version": "3.1.3",
+        "packageJsonSha256": "2c481eb6a64d6ab3e6c7b1cbd73fbb8d3461405699e193665b20e607f503b071"
+      },
+      {
+        "parent": "@taucad/middleware",
+        "dependency": "deepmerge",
+        "version": "4.3.1",
+        "packageJsonSha256": "f56978e7a6da1a3c6edee41abb54f98584a2fa2680458c48db820ae772fef0c9"
+      },
+      {
+        "parent": "@taucad/opencascade",
+        "dependency": "@gltf-transform/core",
+        "version": "4.4.0",
+        "packageJsonSha256": "32023c68dcad84fc3017c38d942f97e6a1d6781d96e9ca42610590aedda29f72"
+      },
+      {
+        "parent": "@taucad/opencascade",
+        "dependency": "libcascade",
+        "version": "3.0.2",
+        "packageJsonSha256": "49fba1b98969334395dd974f8b9b2bd4846203c362c6458fdb9bb75c40cf2fb2"
+      },
+      {
+        "parent": "@taucad/replicad",
+        "dependency": "@gltf-transform/core",
+        "version": "4.4.0",
+        "packageJsonSha256": "32023c68dcad84fc3017c38d942f97e6a1d6781d96e9ca42610590aedda29f72"
+      },
+      {
+        "parent": "@taucad/replicad",
+        "dependency": "@gltf-transform/extensions",
+        "version": "4.4.0",
+        "packageJsonSha256": "c599528478cb4aea8286f2122c438e42e87bc50fd7909a36e419c0ca7f8add33"
+      },
+      {
+        "parent": "@taucad/replicad",
+        "dependency": "culori",
+        "version": "4.0.2",
+        "packageJsonSha256": "1cfe84e326d4aae05edb018d34304a376eacab18b29d591aea39bea34b2fda04"
+      },
+      {
+        "parent": "@taucad/replicad",
+        "dependency": "replicad",
+        "version": "0.23.4-beta.2",
+        "packageJsonSha256": "caa255c485bd31256fe1ddd91a590ebbf6bed3d312248e61e72a3b7f58952c6c"
+      },
+      {
+        "parent": "@taulabs/replicad",
+        "dependency": "@types/opentype.js",
+        "version": "1.3.4",
+        "packageJsonSha256": "48046d274a55663c3035676b651651ab0d1514061876302ec7c940ce8b0f6d6f"
+      },
+      {
+        "parent": "@taulabs/replicad",
+        "dependency": "flatbush",
+        "version": "4.6.2",
+        "packageJsonSha256": "bba765e651b5323964c7368911c047a7c57d7120c59089c5c393db0d782a6d79"
+      },
+      {
+        "parent": "flatbush",
+        "dependency": "flatqueue",
+        "version": "3.1.0",
+        "packageJsonSha256": "1b9a1af82b63e6bd903b4340a0d001deb98dc8fcb585ce39571974e719381588"
+      },
+      {
+        "parent": "@taulabs/replicad",
+        "dependency": "opentype.js",
+        "version": "1.3.4",
+        "packageJsonSha256": "55f5100e9f5bbf19b4193fe90730da32c585b941a486159ac8dbc1d18219d7db"
+      },
+      {
+        "parent": "opentype.js",
+        "dependency": "string.prototype.codepointat",
+        "version": "0.2.1",
+        "packageJsonSha256": "c807618901a6f10c77f191ee7822b4d26423ba3f7e6194799bee0df096ec3a0a"
+      },
+      {
+        "parent": "opentype.js",
+        "dependency": "tiny-inflate",
+        "version": "1.0.3",
+        "packageJsonSha256": "7a97c9567b054c9294036537d42a112f4bd4263892fbfe2714e6acdf25816c6d"
+      },
+      {
+        "parent": "@taulabs/replicad",
+        "dependency": "replicad-opencascadejs",
+        "version": "0.23.0-beta.0",
+        "packageJsonSha256": "8db32a08527ebd6a69bfab4b95b8a65cad44aaf8822d7d563dc5aec9fd8c5d9d"
+      },
+      {
+        "parent": "@taucad/replicad",
+        "dependency": "replicad-opencascadejs",
+        "version": "0.23.0-beta.0",
+        "packageJsonSha256": "8db32a08527ebd6a69bfab4b95b8a65cad44aaf8822d7d563dc5aec9fd8c5d9d"
+      },
+      {
+        "parent": "@taucad/replicad",
+        "dependency": "source-map-js",
+        "version": "1.2.1",
+        "packageJsonSha256": "58f8e94a461a5e461e0cb2bb2be681cbd89b9181989fd26fceb858e67711469a"
+      },
+      {
+        "parent": "@taucad/rhino",
+        "dependency": "@gltf-transform/core",
+        "version": "4.4.0",
+        "packageJsonSha256": "32023c68dcad84fc3017c38d942f97e6a1d6781d96e9ca42610590aedda29f72"
+      },
+      {
+        "parent": "@taucad/rhino",
+        "dependency": "rhino3dm",
+        "version": "8.17.0",
+        "packageJsonSha256": "a0308bab3db925dfdc74fbc39a4c52f03236e57452bf8c1d45677ff73cd70393"
+      },
+      {
+        "parent": "@taucad/runtime",
+        "dependency": "@msgpack/msgpack",
+        "version": "3.1.3",
+        "packageJsonSha256": "2c481eb6a64d6ab3e6c7b1cbd73fbb8d3461405699e193665b20e607f503b071"
+      },
+      {
+        "parent": "@taucad/runtime",
+        "dependency": "@types/json-schema",
+        "version": "7.0.15",
+        "packageJsonSha256": "6bf0cb0808cafc14023ae10d55d6a88228397dc54c16106d121f42ac88d64fc8"
+      },
+      {
+        "parent": "@taucad/runtime",
+        "dependency": "cdn-resolve",
+        "version": "2.1.2",
+        "packageJsonSha256": "9d0052be480606028eb78da933a66f86108a39d5c7aea10df84e51361573e1eb"
+      },
+      {
+        "parent": "@taucad/runtime",
+        "dependency": "deepmerge",
+        "version": "4.3.1",
+        "packageJsonSha256": "f56978e7a6da1a3c6edee41abb54f98584a2fa2680458c48db820ae772fef0c9"
+      },
+      {
+        "parent": "@taucad/runtime",
+        "dependency": "nanoid",
+        "version": "5.1.14",
+        "packageJsonSha256": "4b450a13e5bd3bc5be8b5f81274bc0beee02987b00575ae55d61f3837d75244c"
+      },
+      {
+        "parent": "@taucad/runtime",
+        "dependency": "source-map-js",
+        "version": "1.2.1",
+        "packageJsonSha256": "58f8e94a461a5e461e0cb2bb2be681cbd89b9181989fd26fceb858e67711469a"
+      },
+      {
+        "parent": "@taucad/runtime",
+        "dependency": "strip-literal",
+        "version": "3.1.0",
+        "packageJsonSha256": "449a78d5321c299b0ea753390cc04a31750d1d66b608870ca9829ca524cb7188"
+      },
+      {
+        "parent": "strip-literal",
+        "dependency": "js-tokens",
+        "version": "9.0.1",
+        "packageJsonSha256": "3409fe9f61aebdb37b9ebadea6d47f44a2da768e7bbca200bd66dd81f28777b6"
+      },
+      {
+        "parent": "@taucad/runtime",
+        "dependency": "type-fest",
+        "version": "4.41.0",
+        "packageJsonSha256": "8c10f8a78aa5d18858b15696cd908cafd118286f11e13c4fdab32ea782160666"
+      },
+      {
+        "parent": "@taucad/runtime",
+        "dependency": "ws",
+        "version": "8.21.2",
+        "packageJsonSha256": "22d3cdfb9a67c897d27af008e77f0f17aee5b1d5f7924436154f00691019b28a"
+      },
+      {
+        "parent": "@taucad/bundler-core",
+        "dependency": "cdn-resolve",
+        "version": "2.1.2",
+        "packageJsonSha256": "9d0052be480606028eb78da933a66f86108a39d5c7aea10df84e51361573e1eb"
+      },
+      {
+        "parent": "@taucad/bundler-core",
+        "dependency": "es-module-lexer",
+        "version": "2.3.1",
+        "packageJsonSha256": "bc5f0204fe8e6d52460889a7248f655b025fa314b52f35129b93a4f35923f19f"
+      }
+    ],
+    "missing": [],
+    "overrides": {
+      "@taucad/geospec-engine@0.1.0-beta.1>@gltf-transform/core": "4.4.0",
+      "@gltf-transform/core@4.4.0>property-graph": "4.1.0",
+      "@taucad/geospec-engine@0.1.0-beta.1>manifold-3d": "3.4.1",
+      "manifold-3d@3.4.1>@gltf-transform/core": "4.4.0",
+      "manifold-3d@3.4.1>@gltf-transform/extensions": "4.4.0",
+      "@gltf-transform/extensions@4.4.0>@gltf-transform/core": "4.4.0",
+      "@gltf-transform/extensions@4.4.0>ktx-parse": "1.1.0",
+      "manifold-3d@3.4.1>@gltf-transform/functions": "4.4.0",
+      "@gltf-transform/functions@4.4.0>@gltf-transform/core": "4.4.0",
+      "@gltf-transform/functions@4.4.0>@gltf-transform/extensions": "4.4.0",
+      "@gltf-transform/functions@4.4.0>ktx-parse": "1.1.0",
+      "@gltf-transform/functions@4.4.0>ndarray": "1.0.19",
+      "ndarray@1.0.19>iota-array": "1.0.0",
+      "ndarray@1.0.19>is-buffer": "1.1.6",
+      "@gltf-transform/functions@4.4.0>ndarray-lanczos": "0.3.0",
+      "ndarray-lanczos@0.3.0>@types/ndarray": "1.0.14",
+      "ndarray-lanczos@0.3.0>ndarray": "1.0.19",
+      "@gltf-transform/functions@4.4.0>ndarray-pixels": "5.0.1",
+      "ndarray-pixels@5.0.1>@types/ndarray": "1.0.14",
+      "ndarray-pixels@5.0.1>ndarray": "1.0.19",
+      "ndarray-pixels@5.0.1>ndarray-ops": "1.2.2",
+      "ndarray-ops@1.2.2>cwise-compiler": "1.1.3",
+      "cwise-compiler@1.1.3>uniq": "1.0.1",
+      "ndarray-pixels@5.0.1>sharp": "0.34.5",
+      "sharp@0.34.5>@img/colour": "1.1.0",
+      "sharp@0.34.5>detect-libc": "2.1.2",
+      "sharp@0.34.5>semver": "7.8.5",
+      "manifold-3d@3.4.1>@jridgewell/resolve-uri": "3.1.2",
+      "manifold-3d@3.4.1>@jridgewell/trace-mapping": "0.3.31",
+      "@jridgewell/trace-mapping@0.3.31>@jridgewell/resolve-uri": "3.1.2",
+      "@jridgewell/trace-mapping@0.3.31>@jridgewell/sourcemap-codec": "1.5.5",
+      "manifold-3d@3.4.1>@jscadui/3mf-export": "0.5.0",
+      "manifold-3d@3.4.1>commander": "13.1.0",
+      "manifold-3d@3.4.1>convert-source-map": "2.0.0",
+      "manifold-3d@3.4.1>fast-xml-parser": "5.7.3",
+      "fast-xml-parser@5.7.3>@nodable/entities": "2.2.0",
+      "fast-xml-parser@5.7.3>fast-xml-builder": "1.3.1",
+      "fast-xml-builder@1.3.1>path-expression-matcher": "1.6.2",
+      "fast-xml-builder@1.3.1>xml-naming": "0.3.0",
+      "fast-xml-parser@5.7.3>path-expression-matcher": "1.6.2",
+      "fast-xml-parser@5.7.3>strnum": "2.4.2",
+      "strnum@2.4.2>anynum": "1.0.1",
+      "manifold-3d@3.4.1>fflate": "0.8.3",
+      "manifold-3d@3.4.1>magic-string": "0.30.21",
+      "magic-string@0.30.21>@jridgewell/sourcemap-codec": "1.5.5",
+      "@taucad/geospec-engine@0.1.0-beta.1>zod": "4.4.3",
+      "geospec@0.1.0-beta.1>zod": "4.4.3",
+      "@taucad/assimp@0.1.0-beta.0>libassimp": "0.2.0",
+      "@taucad/brep@0.1.0-beta.0>@gltf-transform/core": "4.4.0",
+      "@taucad/brep@0.1.0-beta.0>occt-import-js": "0.0.23",
+      "@taucad/esbuild@0.1.0-beta.0>esbuild": "0.28.2",
+      "@taucad/esbuild@0.1.0-beta.0>esbuild-wasm": "0.28.2",
+      "@taucad/gltf@0.1.0-beta.0>@gltf-transform/core": "4.4.0",
+      "@taucad/gltf@0.1.0-beta.0>@gltf-transform/functions": "4.4.0",
+      "@taucad/gltf@0.1.0-beta.0>draco3dgltf": "1.5.7",
+      "@taucad/geometry-core@0.1.0-beta.0>@gltf-transform/core": "4.4.0",
+      "@taucad/geometry-core@0.1.0-beta.0>@gltf-transform/extensions": "4.4.0",
+      "@taucad/geometry-core@0.1.0-beta.0>@gltf-transform/functions": "4.4.0",
+      "@taucad/geometry-core@0.1.0-beta.0>manifold-3d": "3.4.1",
+      "@taucad/image@0.1.0-beta.0>@gltf-transform/core": "4.4.0",
+      "@taucad/image@0.1.0-beta.0>@gltf-transform/extensions": "4.4.0",
+      "@taucad/image@0.1.0-beta.0>@resvg/resvg-wasm": "2.6.2",
+      "@taucad/image@0.1.0-beta.0>manifold-3d": "3.4.1",
+      "@taucad/image@0.1.0-beta.0>nanoraster": "0.4.1",
+      "@taucad/jscad@0.1.0-beta.0>@gltf-transform/core": "4.4.0",
+      "@taucad/jscad@0.1.0-beta.0>@gltf-transform/extensions": "4.4.0",
+      "@taucad/jscad@0.1.0-beta.0>@jscad/modeling": "2.13.0",
+      "@taucad/manifold@0.1.0-beta.0>@gltf-transform/core": "4.4.0",
+      "@taucad/manifold@0.1.0-beta.0>manifold-3d": "3.4.1",
+      "@taucad/middleware@0.1.0-beta.0>@gltf-transform/core": "4.4.0",
+      "@taucad/middleware@0.1.0-beta.0>@gltf-transform/extensions": "4.4.0",
+      "@taucad/middleware@0.1.0-beta.0>@msgpack/msgpack": "3.1.3",
+      "@taucad/middleware@0.1.0-beta.0>deepmerge": "4.3.1",
+      "@taucad/opencascade@0.1.0-beta.0>@gltf-transform/core": "4.4.0",
+      "@taucad/opencascade@0.1.0-beta.0>libcascade": "3.0.2",
+      "@taucad/replicad@0.1.0-beta.0>@gltf-transform/core": "4.4.0",
+      "@taucad/replicad@0.1.0-beta.0>@gltf-transform/extensions": "4.4.0",
+      "@taucad/replicad@0.1.0-beta.0>culori": "4.0.2",
+      "@taucad/replicad@0.1.0-beta.0>replicad": "0.23.4-beta.2",
+      "@taulabs/replicad@0.23.4-beta.2>@types/opentype.js": "1.3.4",
+      "@taulabs/replicad@0.23.4-beta.2>flatbush": "4.6.2",
+      "flatbush@4.6.2>flatqueue": "3.1.0",
+      "@taulabs/replicad@0.23.4-beta.2>opentype.js": "1.3.4",
+      "opentype.js@1.3.4>string.prototype.codepointat": "0.2.1",
+      "opentype.js@1.3.4>tiny-inflate": "1.0.3",
+      "@taulabs/replicad@0.23.4-beta.2>replicad-opencascadejs": "0.23.0-beta.0",
+      "@taucad/replicad@0.1.0-beta.0>replicad-opencascadejs": "0.23.0-beta.0",
+      "@taucad/replicad@0.1.0-beta.0>source-map-js": "1.2.1",
+      "@taucad/rhino@0.1.0-beta.0>@gltf-transform/core": "4.4.0",
+      "@taucad/rhino@0.1.0-beta.0>rhino3dm": "8.17.0",
+      "@taucad/runtime@0.1.0-beta.1>@msgpack/msgpack": "3.1.3",
+      "@taucad/runtime@0.1.0-beta.1>@types/json-schema": "7.0.15",
+      "@taucad/runtime@0.1.0-beta.1>cdn-resolve": "2.1.2",
+      "@taucad/runtime@0.1.0-beta.1>deepmerge": "4.3.1",
+      "@taucad/runtime@0.1.0-beta.1>nanoid": "5.1.14",
+      "@taucad/runtime@0.1.0-beta.1>source-map-js": "1.2.1",
+      "@taucad/runtime@0.1.0-beta.1>strip-literal": "3.1.0",
+      "strip-literal@3.1.0>js-tokens": "9.0.1",
+      "@taucad/runtime@0.1.0-beta.1>type-fest": "4.41.0",
+      "@taucad/runtime@0.1.0-beta.1>ws": "8.21.2",
+      "@taucad/bundler-core@0.1.0-beta.0>cdn-resolve": "2.1.2",
+      "@taucad/bundler-core@0.1.0-beta.0>es-module-lexer": "2.3.1"
+    }
+  },
+  "registryAliases": {
+    "@taucad/replicad@0.1.0-beta.0>replicad": "npm:@taulabs/replicad@0.23.4-beta.2",
+    "@taulabs/replicad@0.23.4-beta.2>replicad-opencascadejs": "npm:@taulabs/replicad-opencascadejs@0.23.0-beta.0",
+    "@taucad/replicad@0.1.0-beta.0>replicad-opencascadejs": "npm:@taulabs/replicad-opencascadejs@0.23.0-beta.0"
+  },
+  "installed": [
+    {
+      "path": "node_modules/geospec/dist/index.d.mts",
+      "sha256": "0cf4e1637e0597951bb48ce042def0a9581f79c343ca405dd0fd3061a7338b06",
+      "bytes": 3474
+    },
+    {
+      "path": "node_modules/geospec/dist/geometry-unit.d.mts",
+      "sha256": "68c62711d23bfa50e646d5074da84e2b7314cd32ed9588990c205394cf4029dd",
+      "bytes": 384
+    },
+    {
+      "path": "node_modules/geospec/dist/create-geospec.mjs",
+      "sha256": "ba48a0a3ec5dd40730232b8e18b201565881557e5bc4bd9878617b688410a56d",
+      "bytes": 597
+    },
+    {
+      "path": "node_modules/geospec/dist/create-geospec.d.mts",
+      "sha256": "584ee8bba06e94183696ab6d63e5479aea7556fa7d0a91bb65cecd352fa604de",
+      "bytes": 1987
+    },
+    {
+      "path": "node_modules/geospec/dist/index.mjs",
+      "sha256": "23d651fefad8e5dccfa64d3b5f40668f65505d6e7d0ee05a3af7d69252573445",
+      "bytes": 224
+    },
+    {
+      "path": "node_modules/geospec/dist/mesh/load-mesh.d.mts",
+      "sha256": "c7658ce94ec9faae361f4b9421cc9fc2afffc7a3c0e2e16ba07beec6af50ab1e",
+      "bytes": 3174
+    },
+    {
+      "path": "node_modules/geospec/dist/mesh/analysis-result.mjs",
+      "sha256": "efb66758494b66fbc4c14f58cdcb8c470179308275fe6eadc3ed70df98a5cfce",
+      "bytes": 1605
+    },
+    {
+      "path": "node_modules/geospec/dist/mesh/index.d.mts",
+      "sha256": "761d217c86a62b3e521ca3e796855812a70e9a85cff2cba69568d71b0d16014e",
+      "bytes": 2253
+    },
+    {
+      "path": "node_modules/geospec/dist/mesh/load-mesh.mjs",
+      "sha256": "a64022b0872548d3f5c510e884f0d6df1238fa785c07f241ab4c4ebfe8736955",
+      "bytes": 1718
+    },
+    {
+      "path": "node_modules/geospec/dist/mesh/overlap.d.mts",
+      "sha256": "4cc605549a4560d7962a0d77ea3b3ba9b4e9c526193d20ac2a785b08a2069883",
+      "bytes": 2283
+    },
+    {
+      "path": "node_modules/geospec/dist/mesh/types.d.mts",
+      "sha256": "60d694253b2ef13cb0b5ecb70bee2df92c9b02fe552c0e067e989c4bbf97841a",
+      "bytes": 14321
+    },
+    {
+      "path": "node_modules/geospec/dist/mesh/overlap.mjs",
+      "sha256": "e42c738927a34a2c2c51cc55f22fe4cdd6020354c67e8828b10d0a37d14cdeb5",
+      "bytes": 941
+    },
+    {
+      "path": "node_modules/geospec/dist/mesh/index.mjs",
+      "sha256": "0b0535f17744ae3a56a787deb8c63a5fd4b3ca7baf45802df962bdb7de481e35",
+      "bytes": 174
+    },
+    {
+      "path": "node_modules/geospec/dist/selector/diagnostics.mjs",
+      "sha256": "123ac70322c23e56e79770bd6d3a658f02e284c37c75785d1164e8574c17a75b",
+      "bytes": 569
+    },
+    {
+      "path": "node_modules/geospec/dist/selector/tolerances.d.mts",
+      "sha256": "8e7a22d7c7b402ae7f836c714226af300ac9ab1ab835bbb149885b84d5497f80",
+      "bytes": 1478
+    },
+    {
+      "path": "node_modules/geospec/dist/selector/index.d.mts",
+      "sha256": "69cf442e2be7c09aa804f3a1c2200aec0047e9c6c8768a0ffc326c969cb1963c",
+      "bytes": 2460
+    },
+    {
+      "path": "node_modules/geospec/dist/selector/types.mjs",
+      "sha256": "0ec65f04226e8a6a8a2b3013065549a36b2b4d95a233a5b7047a519a7c99a136",
+      "bytes": 552
+    },
+    {
+      "path": "node_modules/geospec/dist/selector/resolve.mjs",
+      "sha256": "c2c8b6e41e08832115ce25c6b3cc097b2cca0c6e13c4006e9c25269551130d6a",
+      "bytes": 16604
+    },
+    {
+      "path": "node_modules/geospec/dist/selector/resolve.d.mts",
+      "sha256": "3f0abd9198e6872381af60f42d20d9386ac7ca2a0f86d88aa3d7e7844d3ed28c",
+      "bytes": 799
+    },
+    {
+      "path": "node_modules/geospec/dist/selector/types.d.mts",
+      "sha256": "bfbff6c32ef02c5187a98702850370f9e0f44ec09fc38f0711f2f31197a738ab",
+      "bytes": 11340
+    },
+    {
+      "path": "node_modules/geospec/dist/selector/diagnostics.d.mts",
+      "sha256": "44ee39f8244f53eeb4c6f8224421e7341f86fbdac217d1f562cd9e62449b62c7",
+      "bytes": 1910
+    },
+    {
+      "path": "node_modules/geospec/dist/selector/vector-math.mjs",
+      "sha256": "e8bfc4908ec75eb548ec5de958292c252556dbab81400acb4ad517eeb6f691fa",
+      "bytes": 538
+    },
+    {
+      "path": "node_modules/geospec/dist/selector/index.mjs",
+      "sha256": "4f02f40b63885cc77ef82a885fc427534860d2d276d5d314d428ed1a3f4f77de",
+      "bytes": 867
+    },
+    {
+      "path": "node_modules/geospec/dist/selector/grammar.d.mts",
+      "sha256": "65dd0f19388b261f54a2df7582974889b2ac831d808fb22467200e0ae0429a70",
+      "bytes": 2202
+    },
+    {
+      "path": "node_modules/geospec/dist/selector/index-builder.d.mts",
+      "sha256": "0682aae1d29ead05e83f3a6fb31c5ae9520bdea19e2a33c572156ac0082ffd60",
+      "bytes": 3867
+    },
+    {
+      "path": "node_modules/geospec/dist/selector/tolerances.mjs",
+      "sha256": "513788f1b6edd2aa80ec5aa4ffee3588172ba302b16684c60d9596cbd37ec218",
+      "bytes": 131
+    },
+    {
+      "path": "node_modules/geospec/dist/selector/grammar.mjs",
+      "sha256": "e6a0770c600ec7b34d386c66717c5ec0a846147e47c86d63de65c05b301aaae5",
+      "bytes": 485
+    },
+    {
+      "path": "node_modules/geospec/dist/selector/index-builder.mjs",
+      "sha256": "03d910af61f544a84c6625c59021d2f0229cf7a32d64f492c4c25ac976c29399",
+      "bytes": 5786
+    },
+    {
+      "path": "node_modules/geospec/dist/runner/profile.d.mts",
+      "sha256": "3431d060e5a7051b440f37fa8f9599770bc52537cd0c2370f43a4d0ac9a11232",
+      "bytes": 2071
+    },
+    {
+      "path": "node_modules/geospec/dist/runner/discovery.mjs",
+      "sha256": "e72af294dfbb75c292b6214bf9c16e2f9cf54100fbe2e8acad642512f59bdded",
+      "bytes": 2831
+    },
+    {
+      "path": "node_modules/geospec/dist/runner/filter.mjs",
+      "sha256": "934edff1ba8207dc2eef40d3d281d38ab8330bc4fc595a2300c911356edbca89",
+      "bytes": 641
+    },
+    {
+      "path": "node_modules/geospec/dist/runner/collector.d.mts",
+      "sha256": "1dd231c872ac8f49d3ba0c1d0957c298ec988ffe956ef74c9d5203344140a051",
+      "bytes": 1975
+    },
+    {
+      "path": "node_modules/geospec/dist/runner/index.d.mts",
+      "sha256": "5205dcbcce73e71ebc1ac90dab97c9cfda6c33c9dcedee27b8076c2484b8f4ee",
+      "bytes": 3645
+    },
+    {
+      "path": "node_modules/geospec/dist/runner/types.d.mts",
+      "sha256": "a536c8e36eec419f39c2bd9de230be231fdc152b29a74004c1057f4a0191e2c8",
+      "bytes": 22228
+    },
+    {
+      "path": "node_modules/geospec/dist/runner/matcher-budget.d.mts",
+      "sha256": "ea1b0e2014724d21a82957a498f575c5a57bd704e2d824dfb5017912ce23f549",
+      "bytes": 852
+    },
+    {
+      "path": "node_modules/geospec/dist/runner/run-geospec-module.mjs",
+      "sha256": "336ce8e5c7d0150a650339876631f9f9c6a4566237fd31e5b5e9196e5900b6c3",
+      "bytes": 6117
+    },
+    {
+      "path": "node_modules/geospec/dist/runner/index.mjs",
+      "sha256": "03c7dabe244efa22de1bdd6345f3c3216d2668f0a57a57154d2f304aa3e32ea0",
+      "bytes": 874
+    },
+    {
+      "path": "node_modules/geospec/dist/runner/run-geospec-module.d.mts",
+      "sha256": "00e030aa33e509e28282db5bacf3a9fc00452d61dff28829af932304e904ded2",
+      "bytes": 458
+    },
+    {
+      "path": "node_modules/geospec/dist/runner/filter.d.mts",
+      "sha256": "1b5cda3a3d38c42820ccee7320a93de38c37147e793fd68981ca153332843adc",
+      "bytes": 1757
+    },
+    {
+      "path": "node_modules/geospec/dist/runner/collector.mjs",
+      "sha256": "ad877083f40d76bcd03738ab0621fbc6970382430da7360cd2eaf56ec905bca0",
+      "bytes": 6995
+    },
+    {
+      "path": "node_modules/geospec/dist/runner/matcher-budget.mjs",
+      "sha256": "fb034c6a9705c4fb83f5e47ccdec68bb6625478123c733d07ab3746212e69769",
+      "bytes": 1981
+    },
+    {
+      "path": "node_modules/geospec/dist/runner/discovery.d.mts",
+      "sha256": "89f04ca51a46727b9b00de22414478676e12ed8705c11b016c9a96a437d3fa7e",
+      "bytes": 3102
+    },
+    {
+      "path": "node_modules/geospec/dist/proofs/index.d.mts",
+      "sha256": "6dfa960f1237128591049cf317a92ed0c1bc8a667f4393a643d3b2a850690154",
+      "bytes": 289
+    },
+    {
+      "path": "node_modules/geospec/dist/proofs/types.d.mts",
+      "sha256": "88008837af08b0961344e6f5a9e54ab3cb61fa490d8187e1ff89b4cf98f720f9",
+      "bytes": 2327
+    },
+    {
+      "path": "node_modules/geospec/dist/proofs/index.mjs",
+      "sha256": "56e1b0c10087ee6ff7f949b15d1ef63cb11228ff93a159a52f9ad7ef851e4e02",
+      "bytes": 9
+    },
+    {
+      "path": "node_modules/geospec/dist/brep/index.d.mts",
+      "sha256": "cb16e24f5b2dd702affb3c3f982ed266040a80df1ccc39d840a44f6349890c72",
+      "bytes": 230
+    },
+    {
+      "path": "node_modules/geospec/dist/brep/analyze-brep.d.mts",
+      "sha256": "2c9c61c72d8f42376046ae1872cfdb7ccec02901f06cd648e81869f124acbf1d",
+      "bytes": 819
+    },
+    {
+      "path": "node_modules/geospec/dist/brep/analyze-brep.mjs",
+      "sha256": "86000f03716859096495408afca5ef085b797530c39bbf447c81c5374bfc1138",
+      "bytes": 1096
+    },
+    {
+      "path": "node_modules/geospec/dist/brep/index.mjs",
+      "sha256": "e41a969a8c98fc9bba447b68a2db4f7c349b3e01734a23e3bc4fc5461fc3ac4d",
+      "bytes": 74
+    },
+    {
+      "path": "node_modules/geospec/dist/step/index.d.mts",
+      "sha256": "8d3fa0e6152021adc8739a10e7906e6ac8698136fcf8706c7c839a77a2a7dfdb",
+      "bytes": 792
+    },
+    {
+      "path": "node_modules/geospec/dist/step/evidence-ledger.d.mts",
+      "sha256": "581c05b6414c1c411a77249123050ca6538ba23198302e655355f92c5d755a6d",
+      "bytes": 814
+    },
+    {
+      "path": "node_modules/geospec/dist/step/types.d.mts",
+      "sha256": "41b435f5867c93f073b1719618f41a8b26a653598b060c23d6dc130f127d48ef",
+      "bytes": 5251
+    },
+    {
+      "path": "node_modules/geospec/dist/step/load-step.d.mts",
+      "sha256": "345e9b167f741bbb499127fc98bd027e69d0230ffd91345bfbd8d463fa043398",
+      "bytes": 1232
+    },
+    {
+      "path": "node_modules/geospec/dist/step/index.mjs",
+      "sha256": "382c2d974f08d4b3a91382c6e3fbda922822e69983bcbc907bf4ca8191a21dc4",
+      "bytes": 165
+    },
+    {
+      "path": "node_modules/geospec/dist/step/load-step.mjs",
+      "sha256": "ca9267149661735b50cd508e19c8c34676f7c644ccbee03a969ab4211a4bc487",
+      "bytes": 578
+    },
+    {
+      "path": "node_modules/geospec/dist/inspection/index.d.mts",
+      "sha256": "df4fc893b2051e96c28a836d2e4eef83b78f9e75a0462554419189226568f5a1",
+      "bytes": 300
+    },
+    {
+      "path": "node_modules/geospec/dist/inspection/inspect.d.mts",
+      "sha256": "bdf1b99831e6833ebf8f4c98fa60e4d0117329a0f050cfb1cc838dc6aad0a874",
+      "bytes": 1798
+    },
+    {
+      "path": "node_modules/geospec/dist/inspection/index.mjs",
+      "sha256": "3ed704ae16e5e5f9a6ad3899a017645773fcf571055a55c6057d9fb7da7ef537",
+      "bytes": 77
+    },
+    {
+      "path": "node_modules/geospec/dist/inspection/inspect.mjs",
+      "sha256": "202ec0a31a19efe851d5780de96cbe6d0cddbbbe7b1bb98ba3b1a3497ff04a42",
+      "bytes": 993
+    },
+    {
+      "path": "node_modules/geospec/dist/model/load-model.d.mts",
+      "sha256": "2a93f404478df015f2b3193ecc287cb911edef97b1a34bce51e0cf0557569f3f",
+      "bytes": 1140
+    },
+    {
+      "path": "node_modules/geospec/dist/model/export-intent.d.mts",
+      "sha256": "dc9341e0d0a350627757267e047f1adb8f3225c2f06f459023befcedfe228e9f",
+      "bytes": 1937
+    },
+    {
+      "path": "node_modules/geospec/dist/model/index.d.mts",
+      "sha256": "f656842b0e3aac52b518748527fa20b5eed6b1904d02d5df27d2084d39154770",
+      "bytes": 1144
+    },
+    {
+      "path": "node_modules/geospec/dist/model/export-intent.mjs",
+      "sha256": "e6a1c2fa2f4a1cf585064638626bcba428c8c8113039bdf32b048f21e314e3b1",
+      "bytes": 3306
+    },
+    {
+      "path": "node_modules/geospec/dist/model/load-model.mjs",
+      "sha256": "cd1817ba81d4d6eca11491418db3ad55ed3d5c56cdac2ea5dbcf8eeed49bd2a2",
+      "bytes": 427
+    },
+    {
+      "path": "node_modules/geospec/dist/model/types.d.mts",
+      "sha256": "22df8b3e73ea0266417dd955ed00b136d78b32f70a8d7298bdea92debfd071f2",
+      "bytes": 7446
+    },
+    {
+      "path": "node_modules/geospec/dist/model/errors.mjs",
+      "sha256": "bb5ade7b817c3d4a375f3d0616274b0a633d0a223c1b48c91d83936e286ab4d2",
+      "bytes": 1150
+    },
+    {
+      "path": "node_modules/geospec/dist/model/errors.d.mts",
+      "sha256": "5554bd0c54b02ca3386dc93c42b5ead5c8b637eaa2900167b4765de9271a447a",
+      "bytes": 659
+    },
+    {
+      "path": "node_modules/geospec/dist/model/index.mjs",
+      "sha256": "b58033ae20659921fb6ad5de4ef227a61ce1bc63eea50efa8701a7edc5011463",
+      "bytes": 291
+    },
+    {
+      "path": "node_modules/geospec/dist/engine/registry.d.mts",
+      "sha256": "9c5d5fdf0c82ea25c94dd7033ac0509026655d30b443d3e0fee639cd56f91100",
+      "bytes": 644
+    },
+    {
+      "path": "node_modules/geospec/dist/engine/matchers.d.mts",
+      "sha256": "0c9ecb5cb4612e16dce16eca9d856469996f1af1aa9be8e7381546737aa3c9bb",
+      "bytes": 2273
+    },
+    {
+      "path": "node_modules/geospec/dist/engine/index.d.mts",
+      "sha256": "85fb9785b7bbedcb92965201da01ab5b9c0e9e68c42a499467359480e7d18482",
+      "bytes": 2814
+    },
+    {
+      "path": "node_modules/geospec/dist/engine/seam.mjs",
+      "sha256": "6b3a18e25c0b13cc17524d832944a37e725529970d53b5a6e08b5c42059579d8",
+      "bytes": 832
+    },
+    {
+      "path": "node_modules/geospec/dist/engine/matchers.mjs",
+      "sha256": "fd6444d9bedeb59b298219e47bb57945c56f6e0fd3c0d5f91f81089a15ad14ef",
+      "bytes": 2031
+    },
+    {
+      "path": "node_modules/geospec/dist/engine/protocol.d.mts",
+      "sha256": "c684f93b1f2f5b8523e1bb6fe6ef307875408cc399ddae12ccecb29efdd4e1a5",
+      "bytes": 7567
+    },
+    {
+      "path": "node_modules/geospec/dist/engine/client.mjs",
+      "sha256": "d61f915f425eef0465919c5b17fb0a4c56b067bf42067ab8fd75bcacb12031e7",
+      "bytes": 2003
+    },
+    {
+      "path": "node_modules/geospec/dist/engine/seam.d.mts",
+      "sha256": "7e2c27349e09457f90bde44c2456e3926a45508873bceb189120f418730e527d",
+      "bytes": 6469
+    },
+    {
+      "path": "node_modules/geospec/dist/engine/protocol.mjs",
+      "sha256": "7a8e59a50efaefcd9a00e598a18efb0d12ed6a7b7f21ee599fed637acf8eb044",
+      "bytes": 1771
+    },
+    {
+      "path": "node_modules/geospec/dist/engine/index.mjs",
+      "sha256": "a99c76fcfb1b2bcb76406629c77ded2a26deb1696c4f3bb530eca8454f3183c6",
+      "bytes": 1308
+    },
+    {
+      "path": "node_modules/geospec/dist/engine/registry.mjs",
+      "sha256": "d5185f630131f56076a01957d8112538fccb00e10ca89fd713f9d79eb94e6f6d",
+      "bytes": 1747
+    },
+    {
+      "path": "node_modules/geospec/dist/runner/web/web-runner.d.mts",
+      "sha256": "9a7e9b0815b6e02f3abcfc0501e2f9f776e5a9dae36d10e70798be71595c40fa",
+      "bytes": 870
+    },
+    {
+      "path": "node_modules/geospec/dist/runner/web/index.d.mts",
+      "sha256": "05af530fbc8a37518b350e444d8e68420b87e4a245b425a3abf49529295ddb95",
+      "bytes": 307
+    },
+    {
+      "path": "node_modules/geospec/dist/runner/web/web-runner.mjs",
+      "sha256": "4db39672c70a1302c81e458784ad5a177e1cda085667756ac560ff89f6a51269",
+      "bytes": 158
+    },
+    {
+      "path": "node_modules/geospec/dist/runner/web/web-pool-runner.d.mts",
+      "sha256": "9c187b71704589550b645193de7642265cb143b021a179a3a0d6c92017040b73",
+      "bytes": 1407
+    },
+    {
+      "path": "node_modules/geospec/dist/runner/web/web-pool-runner.mjs",
+      "sha256": "b8274224084bc793306200fb2b359ea7f70e8648855f29b16271dbdc8ce0a440",
+      "bytes": 166
+    },
+    {
+      "path": "node_modules/geospec/dist/runner/web/index.mjs",
+      "sha256": "59c6a0f38860a8fd10185818989cafeaa0ea6d449dcd9f94a55cbd9bf8ebc1ee",
+      "bytes": 193
+    },
+    {
+      "path": "node_modules/geospec/dist/runner/node/node-pool-runner.mjs",
+      "sha256": "117e68a71c7d9ac4512437c6d24a881e0d5f66b2db4bc68f7a9ed4441a7297cc",
+      "bytes": 168
+    },
+    {
+      "path": "node_modules/geospec/dist/runner/node/node-vm-filesystem.mjs",
+      "sha256": "273ee56002ff97f8c866b44cecaa4aa2b5d0c7af3e2ccc095154bd510c4dd0c2",
+      "bytes": 158
+    },
+    {
+      "path": "node_modules/geospec/dist/runner/node/node-pool-runner.d.mts",
+      "sha256": "795d5cdfaf7dc1288d7d7dea409172f4a6e4fd2f5e92f03169a4b7f22d123af9",
+      "bytes": 1415
+    },
+    {
+      "path": "node_modules/geospec/dist/runner/node/index.d.mts",
+      "sha256": "5ba4e1c236dbefbe5f8c1f81b43301ff350e27230982a3a6de943dacf848c2b8",
+      "bytes": 408
+    },
+    {
+      "path": "node_modules/geospec/dist/runner/node/node-runner.mjs",
+      "sha256": "84852f770db5cab74033f3b80e542023b486171ebd10650f03826f35cafcea7d",
+      "bytes": 160
+    },
+    {
+      "path": "node_modules/geospec/dist/runner/node/node-runner.d.mts",
+      "sha256": "8b8cd7c3a8d9d47dc91b0380f3bafc620aa5f2c17625f9964f4a8e4f6acb169c",
+      "bytes": 902
+    },
+    {
+      "path": "node_modules/geospec/dist/runner/node/node-vm-filesystem.d.mts",
+      "sha256": "333514a63458138a46fae9ee0671c5f0bc237e2f0749e5af773082c9557ada65",
+      "bytes": 397
+    },
+    {
+      "path": "node_modules/geospec/dist/runner/node/index.mjs",
+      "sha256": "8d639bd0d909188fbe71de1d8a64b3f99352d9670c5857e8c99f7a8ec824d2ba",
+      "bytes": 293
+    },
+    {
+      "path": "node_modules/geospec/dist/runner/worker/index.d.mts",
+      "sha256": "44b9ee12536b1fb964e98a859d3ec97b4575149578cf0d991e6bb14ba55b63e8",
+      "bytes": 912
+    },
+    {
+      "path": "node_modules/geospec/dist/runner/worker/index.mjs",
+      "sha256": "e8b8f7b5a1f02b58c6f4d73509885f06f777f37034b3804e20da0d8ccf1b9efb",
+      "bytes": 229
+    },
+    {
+      "path": "node_modules/geospec/dist/runner/worker/no-matching-tests-issue.d.mts",
+      "sha256": "f88917b232891a463b2330c246cb7f3c4d667574f445af6c028ec253ce5360ca",
+      "bytes": 379
+    },
+    {
+      "path": "node_modules/geospec/dist/runner/worker/runner-types.d.mts",
+      "sha256": "8923f0f3d8124a4442ce3ad5197b41892993fa607b72fa55bb998102552ee5d0",
+      "bytes": 4573
+    },
+    {
+      "path": "node_modules/geospec/dist/runner/worker/pool-worker-host.d.mts",
+      "sha256": "45a36170fcb9f3540db6cfefdfb202c8b83839598b426a9402f192f438e18b9a",
+      "bytes": 1627
+    },
+    {
+      "path": "node_modules/geospec/dist/runner/worker/no-matching-tests-issue.mjs",
+      "sha256": "64410a97bdceb2410e5bd3c80aeb8421dccaf517ebf4cfbb5873752dcb009d3e",
+      "bytes": 203
+    },
+    {
+      "path": "node_modules/geospec/dist/runner/worker/pool-worker-host.mjs",
+      "sha256": "29452b1ef8acb492e8a9d1d76f96f2aebc808c6b75e7f300bd13da2223be9bfe",
+      "bytes": 168
+    },
+    {
+      "path": "node_modules/geospec/dist/runner/pool/pool-messages.d.mts",
+      "sha256": "1dc56f69f7d0c7a2186821c8c2d02713c141b96a6d83585c9a84cd6710e0c6a4",
+      "bytes": 2414
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/register.d.mts",
+      "sha256": "69f4d4555dcfcda89d6f8c66b8d91abc48c6119bea8a073798f1ad122cac27a5",
+      "bytes": 275
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/index.d.mts",
+      "sha256": "972a4529ff406fa6412c4b011c2aa5416ec51cb9ea04bcfd2c077e2c1b7f2cfd",
+      "bytes": 101
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/register-node.d.mts",
+      "sha256": "c137845e5b6ef25a9713388467ad06788b7b45e0ce051ce67d89e63a122b6e56",
+      "bytes": 291
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/package.mjs",
+      "sha256": "47adcd660e3f39d6efaff1f7666aa990b9eaf1e23262427bcdcacf04f685aa98",
+      "bytes": 42
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/index.mjs",
+      "sha256": "0536889be402f9ff74b915ff720eb46acc9ec6350f84f865bb734cab9136a69b",
+      "bytes": 102
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/register-node.mjs",
+      "sha256": "32e254d73d5ec47905683e4b54d8534ae4383e77b0c91dbee8c7c40e63f85d9d",
+      "bytes": 549
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/register.mjs",
+      "sha256": "d6bf3b9da20f48b4452683403ae8a4d8727a7a6d41d7d35c7fa5fbc5b1c27abd",
+      "bytes": 1230
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/mesh/overlap-prefilter.mjs",
+      "sha256": "0edd2e93dd7046e35c50f594c5b58e591a8a83cffe2a3f45927a27a96019154d",
+      "bytes": 4044
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/mesh/load-mesh.mjs",
+      "sha256": "72e8de45c4c8497b14828b66b1fe7ab001e392476801ac768d7e30495d585f58",
+      "bytes": 3403
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/mesh/manifold-module.mjs",
+      "sha256": "e3bbc232b4654e348d6391c9f743d2cdaf1129f29b5ca7f4bf7788a730a42a96",
+      "bytes": 144
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/mesh/soup.mjs",
+      "sha256": "1f1a8d20696d0fb9a21adcd9720405a47bd93f91fa2154cb90a5b231ce2b5ac8",
+      "bytes": 4367
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/mesh/analysis-record.mjs",
+      "sha256": "24e2a430d9fd18f112f30a2a2800f109b8f08b17221b101ba52f1cff2f47e30d",
+      "bytes": 10670
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/mesh/overlap.mjs",
+      "sha256": "e83df830ea63f455ccb23d88481c71eea0bae700e75715950eaa357cd50a3242",
+      "bytes": 9472
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/selector/resolve.mjs",
+      "sha256": "a6295f2538c560159ab1dfaf2ebe862717fe76b68b320e485157bb2d4a2d522a",
+      "bytes": 74
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/cache/section-codec.mjs",
+      "sha256": "a60cb1e174be79c5cdbd56836eedd6312224c6e6195cf79a82396e951f56d77b",
+      "bytes": 1165
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/cache/timings.mjs",
+      "sha256": "8bd2ca813b82608e1f6a74ebcce108e3d3801091e781f256f48f0a4b7df183d2",
+      "bytes": 762
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/cache/node-evidence-store.mjs",
+      "sha256": "48830647f2ba12e79651603e33d679fc1311ab29830963f479b2495d8c9ca51d",
+      "bytes": 2639
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/cache/cache-root.mjs",
+      "sha256": "979117bf7de1c949664f34acb0d0983f844357c87e4b172c4f23023f95972a16",
+      "bytes": 611
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/cache/evidence-cache.mjs",
+      "sha256": "8adbbbd4163b9e190e2c78e67ce5900cd4fdb011e0a42be2e10aacd9e1a80fb2",
+      "bytes": 1236
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/native/opencascade-wasm.d.mts",
+      "sha256": "f62ae8edec11750acf23a63df809a73d0df22fd122f5b6c10a8cee17aa2f0d11",
+      "bytes": 208
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/native/opencascade-wasm.mjs",
+      "sha256": "ccb26835522d4b45eb427d9707c848213167c18d2e0194354a124e8cfde8777b",
+      "bytes": 242
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/native/opencascade-module.mjs",
+      "sha256": "2ca9ad14e563a6001072bddba75c013bee6a4109c53e556937f9eeb664acf47d",
+      "bytes": 536
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/runner/profile.mjs",
+      "sha256": "07be135382ab9fc59ab6aec2dc692c41945870da251f07487192a0f550cdc111",
+      "bytes": 352
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/runner/model-load-cache.mjs",
+      "sha256": "58386af2a043c5ba87989b2c298cdae488e7f7953d915e21a18b1de72bbb4e4e",
+      "bytes": 715
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/runner/forensic.mjs",
+      "sha256": "73131a97dbb64a6d6fad2ca22c2a7bcc8f173cf3ef41541dbd9182f6dd8d8102",
+      "bytes": 2013
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/runner/resource-scope.mjs",
+      "sha256": "d2664ace42ee2f23b83aed563fdf605f674b748b7ae2ddd7133c394d3ccb791a",
+      "bytes": 695
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/runner/serial.mjs",
+      "sha256": "6f6024c13b5fabffc2f717ce4970ddaf2987cd8e519bc089520bdc9a54ffc4f4",
+      "bytes": 4578
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/runner/events.mjs",
+      "sha256": "b0846b596933e0cbb42363201eba1e6280a0e676d0b3a9c715b5b2d80c4feaf4",
+      "bytes": 191
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/proofs/context.mjs",
+      "sha256": "1a749d039991b5104bfcf932ea0df4966b4bb4d7e0128995aa18c03f125a2bd5",
+      "bytes": 77
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/proofs/bore-region.mjs",
+      "sha256": "bd7c774bbe8312f225c575033a7a5677575452a4fe1413f59cdbe8aeef8d0995",
+      "bytes": 1513
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/proofs/occurrence-solids.mjs",
+      "sha256": "4dbeb12fb9fd105b228ddebca05df946b624a961912a7d3afdaa46897aca9f58",
+      "bytes": 73
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/proofs/void-topology.mjs",
+      "sha256": "2628517fd811be0adee62b917ffe129d5c8586cf22e2896d2b5ae5f11eaa60c5",
+      "bytes": 7227
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/proofs/winding-number.mjs",
+      "sha256": "157abbb0ee60c8c0b6e42c6e6c4f86ee2512ebac65f57ca19086c097ce2abd48",
+      "bytes": 724
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/proofs/void-continuity.mjs",
+      "sha256": "73049b4f14728d4ba22a35fbfe810894ffae1f951fd8959427da5ec2ac1c96d9",
+      "bytes": 225
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/proofs/subject-context.mjs",
+      "sha256": "5f25cafc15c7c95743d7abb7cb58ee778d58ecedf642f7339a077f854212a3bc",
+      "bytes": 1059
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/proofs/relationship-proofs.mjs",
+      "sha256": "bd0949605fff9dcf9e4fb909c1ecbe7fe0efd4ed347a090ec5e16d2e2d214c5c",
+      "bytes": 17814
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/proofs/native-evidence.mjs",
+      "sha256": "b8377300facbd274527b9c53ff5bb5103cdaec1a70e14268f6f83fdad42a4bba",
+      "bytes": 1155
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/proofs/void-claim.mjs",
+      "sha256": "8b2749b506d1436b8042d22a0bcb63e9762468066d89e33982fba5158383ad9a",
+      "bytes": 3252
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/step/occurrence-mesh.mjs",
+      "sha256": "f61183268ed49e70bafa88147a4b1d16f61199fa4414710767d35a9a0c890aed",
+      "bytes": 1193
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/step/xde-read-cache.mjs",
+      "sha256": "4cd73b054d1e8b74697333f2f99a1b33deb0651a6ac58d00198ee225c075114d",
+      "bytes": 989
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/step/evidence-ledger.mjs",
+      "sha256": "aaee9205c58ae7567bbeb7a7bf598a14f2d292faa15199425fd6d25ec1203ee6",
+      "bytes": 2911
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/step/features.mjs",
+      "sha256": "e8541d98ccf5a7fe9747698e3bab6ffd406b17a83c96014b15488f110e94f798",
+      "bytes": 1260
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/step/native-xde-facade.mjs",
+      "sha256": "0c1788c73994616cf15d5bc871bd26b164d5ff5412798ee259404a40aa4cdce1",
+      "bytes": 1043
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/step/load-step.mjs",
+      "sha256": "6f288d3423acf2b49254f6fcf44c2da827071afb9adbf040e708f528ab892e41",
+      "bytes": 6818
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/cli/node-host.mjs",
+      "sha256": "05577bbf77ece2772c098779dc6b2b2598ab1cb84dacd9de71cd5adbd564ee72",
+      "bytes": 1130
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/cli/main.d.mts",
+      "sha256": "609ea26c247bee1591a862b708566f4a9ff89b6585448cd93db18d6a17a5757f",
+      "bytes": 30
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/cli/main.mjs",
+      "sha256": "f95118751cb36f1d206edb819e54f585d1fc774b4fe5c798c5849af05cb32c27",
+      "bytes": 182
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/cli/cli.mjs",
+      "sha256": "34b706c1f9d8832a5d03a24f14d11c7209d39a1728029fabd064e97e6534bf19",
+      "bytes": 6368
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/inspection/inspect.mjs",
+      "sha256": "d425f6bfeb707c1a01dbbe8d05396940de7a8ccfc0fa71aa1873bfb17dd02c99",
+      "bytes": 1437
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/model/default-runtime.mjs",
+      "sha256": "02f6f09eef2789a119858a69faa02253feb7933c1cd4ad507c273cfe3d0cef16",
+      "bytes": 618
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/model/load-model.mjs",
+      "sha256": "6addd36ae6b5a3ade9813426b6201374baa70eefdac17c0ba552e14ca7aafeea",
+      "bytes": 6064
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/matchers/diagnostic-matchers.mjs",
+      "sha256": "39a8b48ce151c54b199f971b35849336c635a460d41657d7fe6b86353f45f335",
+      "bytes": 691
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/matchers/mesh-matchers.mjs",
+      "sha256": "46ff6daa1a01f675c943957776aae2101369a739a96f4b0c2d7386e9e64d1c7d",
+      "bytes": 8047
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/matchers/support.mjs",
+      "sha256": "f4d85d9f43180f7c84aa9c2b248405a19ee02c7a8ee93962c373629436d7529c",
+      "bytes": 2354
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/matchers/implementations.mjs",
+      "sha256": "b1abbd712ec3c3d188b02ed5f6cf1345a830b6b4af061183c8b38518c9434a3d",
+      "bytes": 1340
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/matchers/proof-matchers.mjs",
+      "sha256": "3a5ae1bfafaa8358e863eb89715af01cdf21dfb7045fd202a80708bdf132469f",
+      "bytes": 2380
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/matchers/brep-matchers.mjs",
+      "sha256": "6a28ab8e5c3139d170fb7f290ef02892ed8f5ebb74598f71c7466bd86aef0ed2",
+      "bytes": 9931
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/engine/subject-store.mjs",
+      "sha256": "86ac7179a12aabf32aba6304ca7da721b16e52a2aa9fef34a9b8edf7fe194a77",
+      "bytes": 2277
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/engine/protocol.mjs",
+      "sha256": "064684cdabbcf6d2577ca14e65a3fb103e3132ac355e7624984ec654977dc167",
+      "bytes": 8166
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/runner/web/web-runner.mjs",
+      "sha256": "5bd562e73474399b54286531f508a4863064c6b85a68ca87b3a66d9f29c5c967",
+      "bytes": 908
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/runner/node/node-vm-filesystem.mjs",
+      "sha256": "f938e78d4bb4a71515a79838dba3b35144a86955ed13d3689efef3eb257274ed",
+      "bytes": 2394
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/runner/node/node-runner.mjs",
+      "sha256": "0683a8813740c47768b8924e6e68891c920d48531335ca5915949bc59562d6b7",
+      "bytes": 1602
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/runner/node/pool-worker-entry.d.mts",
+      "sha256": "824386a4f223ab62caa1caba595c979d3f29e3339d790c60510265df1124ceb6",
+      "bytes": 986
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/runner/node/pool-worker-entry.mjs",
+      "sha256": "bca0070fa721fea37904f75024d20b22064157b0147d6716a7efea04ed2ac91e",
+      "bytes": 1165
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/runner/pool/transport.mjs",
+      "sha256": "e3c660ac9528ce771fa85683796d519a965b0df091aab7393e59302dade5c523",
+      "bytes": 553
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/runner/pool/shard-planner.mjs",
+      "sha256": "f172903b59b025203f1016c06f73293b0d2e1153ce12c547621320763717d8ef",
+      "bytes": 1330
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/runner/pool/worker-host.mjs",
+      "sha256": "465311eff9c0dcd1d7eacee4d2746459b5035d6dc113916fbe210ef1c59ace1c",
+      "bytes": 2848
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/runner/pool/pool.mjs",
+      "sha256": "69f965b84df635ade603d4c419f878c49b45fa5a812a60e621a2bc4c8ce5a3c7",
+      "bytes": 5885
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/native/opencascade/types.d.ts",
+      "sha256": "77791721d90d1756f1dcadd44b8672cd91fafa5023896e859f0144c5100da571",
+      "bytes": 26047
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/native/opencascade/geospec_opencascade_single.build-manifest.json",
+      "sha256": "ae045b886cc8386809a505aef0810f32d740c482e680b1a5559ba91a80c4230b",
+      "bytes": 478301
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/native/opencascade/geospec_opencascade_single.wasm",
+      "sha256": "09e60d6fde652a3df8831ae524295281ea917227cd75c68f5e083005c410cccf",
+      "bytes": 13044122
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/native/opencascade/geospec_opencascade_single.provenance.json",
+      "sha256": "ba29fcada0eaa04bf11f9cd4f809d5e0df4b381b5932fe2d6fd121a9e68e471b",
+      "bytes": 2837
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/native/opencascade/init.js",
+      "sha256": "28c6fc1512d2375ddcbffc6fd82c8c4ad5fac44d5ee7089166b2016d9325c13d",
+      "bytes": 5069
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/native/opencascade/geospec_opencascade_single.js",
+      "sha256": "1a626c910c573bfff37ce45a58e186ebbfd064b817e26500187a972b045af99d",
+      "bytes": 55497
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/native/opencascade/geospec_opencascade_single.d.ts",
+      "sha256": "659c0394eeac128e9f2052022de3d1e3a736ad22375f88763796d6fa5284d1de",
+      "bytes": 26075
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/native/opencascade/init.d.ts",
+      "sha256": "cae09c97b60a5f36dbc76ab2f8569896316e5e69ff218381630826f277503259",
+      "bytes": 605
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/mesh/_internal/spatial-welding.mjs",
+      "sha256": "43dee8dd3abf8cb8b4bec39fb67b9a625cddde9fbadf76e757a7b312dfb1743a",
+      "bytes": 548
+    },
+    {
+      "path": "node_modules/@taucad/geospec-engine/dist/mesh/_internal/sweep-axis.mjs",
+      "sha256": "adf4afb46fdaef4b05fe7f2f4776ff5205beccd26f94543ca9d5d7859d3d7a37",
+      "bytes": 262
+    },
+    {
+      "path": "node_modules/.pnpm/@taucad+geospec-engine@file+..+tarballs+taucad-geospec-engine.tgz_esbuild-wasm@0.28.2/node_modules/manifold-3d/manifold.wasm",
+      "sha256": "f54feaf85710162ea9f521aa5d6f7ff51a497a6a8f5c353a84fc5179184f0052",
+      "bytes": 493115
+    },
+    {
+      "path": "node_modules/.pnpm/@taucad+replicad@file+..+tarballs+taucad-replicad.tgz_@taucad+runtime@file+..+tarballs+_63b8be267a84849ceb423f0707af83a0/node_modules/replicad-opencascadejs/dist/replicad_single.wasm",
+      "sha256": "ca354769b158aa38479e6fa59bc7511d0fa896059ce755a0cff85261a637ee6a",
+      "bytes": 22992117
+    },
+    {
+      "path": "node_modules/.pnpm/@taucad+replicad@file+..+tarballs+taucad-replicad.tgz_@taucad+runtime@file+..+tarballs+_63b8be267a84849ceb423f0707af83a0/node_modules/replicad-opencascadejs/dist/replicad_multi.wasm",
+      "sha256": "31b1fdd375d8257218bdeb155f7aeaf34e074f8ddb01a815ea7ebfa85d4e6444",
+      "bytes": 22526652
+    }
+  ],
+  "files": [
+    {
+      "path": "LICENSE",
+      "bytes": 11357,
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    },
+    {
+      "path": "README.md",
+      "bytes": 3484,
+      "sha256": "cba010013dab67ff50114dd8bc7f57f2f0f4aa5aab08a83cc6d7ce0d179e363b"
+    },
+    {
+      "path": "THIRD_PARTY_LICENSES.md",
+      "bytes": 14949,
+      "sha256": "bf9c72a0ebc5fb43198b9aebc4dc3f17230a827192951bb441004f01d844e96e"
+    },
+    {
+      "path": "consumer/.npmrc",
+      "bytes": 56,
+      "sha256": "1ded4f26f4851b35dae702edd5719d1be5ff31db6983858d088d5e6593ea7c99"
+    },
+    {
+      "path": "consumer/LICENSE",
+      "bytes": 11357,
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    },
+    {
+      "path": "consumer/package.json",
+      "bytes": 1336,
+      "sha256": "bbb0d298c9a004c6d656a735955b93218210b122f5167156df5e83f1156085ef"
+    },
+    {
+      "path": "consumer/pnpm-lock.yaml",
+      "bytes": 65818,
+      "sha256": "92471617b21d96f4c83c0d85ef6f053decc5693cbdf7c3b1ae4dc0f6746c575b"
+    },
+    {
+      "path": "consumer/pnpm-workspace.yaml",
+      "bytes": 6652,
+      "sha256": "14be3ba3a076fdf91dca9ab1b15190c1a26f7aa98193f0485a2f63e8d5bc95bf"
+    },
+    {
+      "path": "tarballs/geospec.tgz",
+      "bytes": 68707,
+      "sha256": "2dcddfa5ea84edaf0dff3e080e7bc2178da7b6c1bb8256e0c0defe4adee9ea60"
+    },
+    {
+      "path": "tarballs/taucad-assimp.tgz",
+      "bytes": 10687,
+      "sha256": "c8e959d6a2b52253432ed486091c4b8e2e59d0b1f1f74d9d9799c08e2e5e38a5"
+    },
+    {
+      "path": "tarballs/taucad-brep.tgz",
+      "bytes": 3100733,
+      "sha256": "e7b5592eb20ac7f0a2d387b74ef6b382461da594287f5a588aabb74df8520e9e"
+    },
+    {
+      "path": "tarballs/taucad-bundler-core.tgz",
+      "bytes": 11618,
+      "sha256": "4010e5f7dd09f7da65a766c955975c6a44d4feada6b0e99942c76230afb187c2"
+    },
+    {
+      "path": "tarballs/taucad-cache-core.tgz",
+      "bytes": 17263,
+      "sha256": "9e4c2d2025473b3b33c3005164379b51b68c7f0a729e5291bce5564e60ac94c8"
+    },
+    {
+      "path": "tarballs/taucad-esbuild.tgz",
+      "bytes": 3792946,
+      "sha256": "5760eb5af9a53b969ccea08795ad1404c0140b5b3df18d53b49395c630adad6b"
+    },
+    {
+      "path": "tarballs/taucad-geometry-core.tgz",
+      "bytes": 27670,
+      "sha256": "84390e2f28cf174af3e4db804ab134b2d58743d3019748d5d6b465d79fec5f73"
+    },
+    {
+      "path": "tarballs/taucad-geospec-engine.tgz",
+      "bytes": 4577728,
+      "sha256": "dda3b0f93da019ef30cfdb05ecceb0e1cbccfe85ff96dc36f940940eb3d3912b"
+    },
+    {
+      "path": "tarballs/taucad-gltf.tgz",
+      "bytes": 10029,
+      "sha256": "dbe758f026297b5b37a8aaf2fb30085476ddc35b42a225302036b8713cbdd579"
+    },
+    {
+      "path": "tarballs/taucad-image.tgz",
+      "bytes": 80392,
+      "sha256": "505eddb0b29a8b353e60d0a6de5f27e6571a10d2479e8ea8714480f262ad683b"
+    },
+    {
+      "path": "tarballs/taucad-jscad.tgz",
+      "bytes": 14402,
+      "sha256": "28c2c26b5f64bb27d7e30d11ca4bd80e9981343f07587e71ee486094243f4657"
+    },
+    {
+      "path": "tarballs/taucad-manifold.tgz",
+      "bytes": 10216,
+      "sha256": "52860f27ef235b8cd96528b98336621b76e699cd71895e83a6eb066ee2e569fe"
+    },
+    {
+      "path": "tarballs/taucad-middleware.tgz",
+      "bytes": 12099,
+      "sha256": "e9d3d3226179829af5f4eb11ffe0e230c5e8d6d7d3849d50dbe3b12506b8d58d"
+    },
+    {
+      "path": "tarballs/taucad-occt-core.tgz",
+      "bytes": 16357,
+      "sha256": "a8b464abde24f140d292d8e8d3ea693bf0abc9eaab112ec67e6d9a20275f03bc"
+    },
+    {
+      "path": "tarballs/taucad-opencascade.tgz",
+      "bytes": 15582,
+      "sha256": "4fb3ce6007288719cc014e1ec0c8e81260dae4a6044e8fbcbfccdc96e67ec92b"
+    },
+    {
+      "path": "tarballs/taucad-replicad.tgz",
+      "bytes": 353483,
+      "sha256": "edaf124da9b11f13167b60866b775002d5bc5139749c2ed1d8d088daa699c087"
+    },
+    {
+      "path": "tarballs/taucad-rhino.tgz",
+      "bytes": 1022257,
+      "sha256": "ecb42dd98782e17f8c9fd5fae775546539af66466a4cdad9841cbcf27456485f"
+    },
+    {
+      "path": "tarballs/taucad-runtime.tgz",
+      "bytes": 851437,
+      "sha256": "68691d4b3731cf98656b6f34adf798324ccf773c7e3812fb2a6b42aeec3c097d"
+    },
+    {
+      "path": "tarballs/taucad-spatial.tgz",
+      "bytes": 8126,
+      "sha256": "6e6e4bcdc655aa6fe87dd62912165376854912c1442a313802a53aab250273c6"
+    }
+  ],
+  "registryClosureMeaning": "Historical captured source metadata; exact locked versions retained. Installed package metadata differences below already exist in the accepted original comparator.",
+  "installedRegistryMetadataDifferences": [
+    {
+      "parent": "@taucad/assimp",
+      "dependency": "libassimp",
+      "version": "0.2.0",
+      "sourcePackageJsonSha256": "e220ae687fbd2d7897c4f45aadd16f97f196217ded9f132f86f95ce304740cf1",
+      "installedPackageJsonSha256": "f159b4b378bfeae84751d52f9b2a8b07fab84e196a805160ce47352d767d4a2d"
+    },
+    {
+      "parent": "@taucad/image",
+      "dependency": "nanoraster",
+      "version": "0.4.1",
+      "sourcePackageJsonSha256": "32998b9d0e1061172b1f501d863ca0a98bb45ac1d6a4e7f2e772d6bc302a2db7",
+      "installedPackageJsonSha256": "5b3f02afa332f86868d2d2d88e0650b6dd62214a550fa39bb6a374f4424a46a8"
+    }
+  ]
+}

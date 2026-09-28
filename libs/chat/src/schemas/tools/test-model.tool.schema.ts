@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { jsonValueSchema } from '#schemas/message-provider.schema.js';
 import { rootedFilePathSchema } from '#schemas/rooted-path.schema.js';
 import { sourceRevisionSchema } from '#schemas/tools/source-revision.schema.js';
 
@@ -105,6 +106,26 @@ const geometryDiagnosticSchema = z
   .describe('Structured GeoSpec diagnostic preserved from the matcher runner');
 
 /**
+ * JSON-safe projection of one complete native GeoSpec claim report.
+ *
+ * The model reads the claim, result and evidence as JSON. Canonical engine
+ * bytes stay with the engine-side report and never enter the model channel.
+ *
+ * @public
+ */
+export const nativeGeoSpecReportSchema = z.object({
+  claimId: z.string(),
+  status: z.string(),
+  polarity: z.enum(['negative', 'positive']),
+  claim: z.record(z.string(), jsonValueSchema),
+  result: z.record(z.string(), jsonValueSchema),
+  diagnostics: z.array(jsonValueSchema),
+  evidence: jsonValueSchema.optional(),
+});
+/** @public */
+export type NativeGeoSpecReport = z.infer<typeof nativeGeoSpecReportSchema>;
+
+/**
  * Test failure result -- failures include detailed feedback for the LLM and
  * are tagged with the source file whose geometry failed the requirement.
  */
@@ -118,6 +139,10 @@ const testFailureSchema = z.object({
     .array(geometryDiagnosticSchema)
     .optional()
     .describe('Structured GeoSpec matcher diagnostics for UI / programmatic consumers'),
+  reports: z
+    .array(nativeGeoSpecReportSchema)
+    .optional()
+    .describe('Complete native GeoSpec claim reports in assertion order'),
 });
 /**
  * Inferred failed-test row emitted by the GeoSpec runner / agent tooling.
@@ -132,6 +157,10 @@ const testPassSchema = z.object({
   id: z.string().describe('ID of the passed requirement'),
   requirement: z.string().describe('Description of the requirement that passed'),
   targetFile: rootedFilePathSchema.describe('Source file whose geometry satisfied this requirement'),
+  reports: z
+    .array(nativeGeoSpecReportSchema)
+    .optional()
+    .describe('Complete native GeoSpec claim reports in assertion order'),
 });
 /**
  * Inferred passing-test row for summarising satisfied requirements.

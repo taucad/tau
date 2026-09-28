@@ -43,20 +43,10 @@ const configuration = {
   amsMapping: [0],
   bedLeveling: true,
   expectedBedType: 'textured-pei',
-  expectedFilamentDiameter: {
-    value: 1.75,
-    unit: 'mm',
-    kind: 'http://qudt.org/vocab/quantitykind/Diameter',
-    space: 'linear',
-  },
+  expectedFilamentDiameter: 1.75,
   expectedMaterials: [{ slot: 0, materialId: 'pla' }],
   expectedModel: 'X1C',
-  expectedNozzleDiameter: {
-    value: 0.4,
-    unit: 'mm',
-    kind: 'http://qudt.org/vocab/quantitykind/Diameter',
-    space: 'linear',
-  },
+  expectedNozzleDiameter: 0.4,
   flowCalibration: true,
   timelapse: false,
 } as const;

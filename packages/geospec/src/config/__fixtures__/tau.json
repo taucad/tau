@@ -1,0 +1,12 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_aaaaaaaaaaaaaaaaaaaaa",
+  "name": "C1 ordinary fixture",
+  "description": "Config data import control",
+  "tags": [],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts"
+    }
+  }
+}

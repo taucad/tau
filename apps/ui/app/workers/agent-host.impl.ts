@@ -515,9 +515,11 @@ const composeProjectHost = async (
     imageService.dispose();
   });
   const { createFileSystemBridgePort } = await import('@taucad/fs-bridge');
+  const geoSpecEngine = provide.geoSpecEngine ?? 'legacy';
   const geoSpecClient = createGeoSpecWorkerRpcClient({
     openFileSystemBridge: () => createFileSystemBridgePort(agentView),
     runtimeConfig,
+    geoSpecEngine,
   });
   opened(async () => geoSpecClient.close());
   const runtimeRpc = createRuntimeRpcClients({ runtimeClient, imageService });
@@ -575,6 +577,7 @@ const composeProjectHost = async (
       ...runtimeRpc,
       parameters,
       geospec: geoSpecClient,
+      geospecAuthoringMode: geoSpecEngine,
       machines: runtimeClient.machines,
       print: {
         /* The `tau.json` id every print request from this project's agent names (blueprint D5). An attempt reads

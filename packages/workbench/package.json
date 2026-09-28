@@ -56,7 +56,6 @@
   },
   "devDependencies": {
     "@taucad/camera": "workspace:*",
-    "@taucad/utils": "workspace:*",
     "zod": "catalog:"
   }
 }

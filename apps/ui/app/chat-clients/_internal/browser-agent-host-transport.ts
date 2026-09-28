@@ -1484,16 +1484,8 @@ export const resolveBrowserAgentHostInterrupt = async (input: {
   }
 };
 
-/**
- * Routes one AI SDK chat pipeline into the browser agent host.
- *
- * There is no longer an "or": every CAD execution kind is host-placed — `tau`
- * on this worker, `acp` on a daemon — so the API transport this class used to
- * wrap has no turn left to carry and was deleted with it. An admission that cannot be parsed is a refusal naming the
- * real reason, never a delegation that replaces it with someone else's.
- */
+/** Carries an already-open projection watch to the AI SDK; the session actor owns host commands. */
 export class BrowserPlacementChatTransport<Message extends UIMessage> implements ChatTransport<Message> {
-  #watchMode = false;
   #armed: ReadableStream<UIMessageChunk> | undefined;
 
   /** Give the next SDK request only this projection watch; it never issues a host command. */
@@ -1501,7 +1493,6 @@ export class BrowserPlacementChatTransport<Message extends UIMessage> implements
     if (this.#armed !== undefined) {
       throw new Error('A chat watch is already armed.');
     }
-    this.#watchMode = true;
     this.#armed = stream;
   }
 
@@ -1521,104 +1512,19 @@ export class BrowserPlacementChatTransport<Message extends UIMessage> implements
   }
 
   public async sendMessages(
-    options: Parameters<ChatTransport<Message>['sendMessages']>[0],
+    _options: Parameters<ChatTransport<Message>['sendMessages']>[0],
   ): Promise<ReadableStream<UIMessageChunk>> {
-    if (this.#watchMode) {
-      const stream = this.#takeArmed();
-      if (stream === undefined) {
-        throw new Error('The chat transport was not armed with a run watch.');
-      }
-      return stream;
+    const stream = this.#takeArmed();
+    if (stream === undefined) {
+      throw new Error('The chat transport was not armed with a run watch.');
     }
-    const parsed = browserAdmissionBodySchema.safeParse(options.body);
-    if (!parsed.success) {
-      throw new AgentHostWorkerError(
-        'BROWSER_HOST_ADMISSION_INVALID',
-        `This turn cannot run on its agent host (${admissionIssue(parsed.error)}).`,
-      );
-    }
-    const admission = parsed.data;
-    return createHostStream({
-      chatId: options.chatId,
-      messages: options.messages,
-      runId: admission.admission.idempotencyKey,
-      admission: hostAdmission(admission.browserHost, options.trigger),
-      abortSignal: options.abortSignal,
-    });
+    return stream;
   }
 
   public async reconnectToStream(
-    options: Parameters<ChatTransport<Message>['reconnectToStream']>[0],
+    _options: Parameters<ChatTransport<Message>['reconnectToStream']>[0],
   ): ReturnType<ChatTransport<Message>['reconnectToStream']> {
-    if (this.#watchMode) {
-      return this.#takeArmed() ?? null;
-    }
-    const runId = boundRunIds.get(options.chatId) ?? browserRuns.get(options.chatId)?.runId;
-    // A chat's runs live in its durable log, never in the API. A reload drops
-    // the in-memory binding, and resuming through the API then asked for a run
-    // the API never had (`GET /v1/chat/<chat>/runs/<run>/stream` → 503) while
-    // the store kept the chat "reattaching" — after which a retry dispatched
-    // nothing and a fresh submit vanished. Returning null instead left the same
-    // hole from the other side: the log's terminal run was never republished,
-    // so a completed run stayed unpublished and a failed one rendered no
-    // reason. The log is the authority — attach to it, and let the host resolve
-    // which run this chat ends on.
-    const resolved = Promise.withResolvers<{
-      readonly runId: string | undefined;
-      readonly events: readonly AgentLogEvent[];
-      readonly idle: boolean;
-      readonly streamingRunId: string | undefined;
-    }>();
-    const stream = createHostStream({
-      chatId: options.chatId,
-      ...(runId === undefined ? {} : { runId }),
-      onRunResolved: (resolvedRunId, events, { idle, settled }) => {
-        /* A settled run is rebuilt in place with the others, and only when
-         * someone owns the transcript to put it in. */
-        const rebuilt = settled && resolvedRunId !== undefined && runResets.has(options.chatId);
-        resolved.resolve({ runId: resolvedRunId, events, idle, streamingRunId: rebuilt ? undefined : resolvedRunId });
-        return rebuilt;
-      },
-    });
-    // The AI SDK snapshots the transcript *after* this method settles, so the
-    // log's own transcript is handed over here — before the replay that rebuilds
-    // it could be appended to a stale copy instead. A host that resolved no run
-    // hands over nothing, and the transcript stands.
-    const replayed = await resolved.promise;
-    /* The host answered for a log with no run (W0.2, L3 D1). A stream here
-     * made the SDK walk `submitted → ready` and call `onFinish`, which read as
-     * a run finishing and marked the chat unread. `null` is no request at all;
-     * the stream closes itself. A refused registration never answered, so it
-     * still returns its erroring stream. */
-    if (replayed.idle) {
-      return null;
-    }
-    const reset = replayed.runId === undefined ? undefined : runResets.get(options.chatId);
-    if (reset) {
-      const rebuild = await rebuildTranscript(replayed.events, replayed.streamingRunId);
-      /* Read back after `reset`, which applies the rebuild synchronously. */
-      const handover = { streams: true };
-      reset((current) => {
-        const next = rebuild(current);
-        handover.streams = next.streams;
-        return next.messages;
-      });
-      if (!handover.streams) {
-        /* The rebuild above already carries this run; nothing may extend the
-         * tail. Drained rather than cancelled, because cancelling the stream
-         * asks the host to cancel the run. */
-        // async-iife: bootstrap -- nobody reads this stream; it only has to run to its end.
-        void (async () => {
-          try {
-            await stream.pipeTo(new WritableStream());
-          } catch {
-            /* The stream reports its own failure; a drain has nobody to tell. */
-          }
-        })();
-        return null;
-      }
-    }
-    return stream;
+    return null;
   }
 
   #takeArmed(): ReadableStream<UIMessageChunk> | undefined {

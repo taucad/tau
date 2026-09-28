@@ -855,8 +855,8 @@ describe('useProjectManager.createProject', () => {
     expect(mockSetProjectCreationLocation).not.toHaveBeenCalled();
   });
 
-  it('uses fresh discovery for route access after bootstrap completes', async () => {
-    mockListProjectManifests.mockResolvedValueOnce({ roots: [], entries: [] }).mockResolvedValue(validProjectDiscovery);
+  it('reuses bootstrap discovery for route access and refreshes after a manifest change', async () => {
+    mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 
     await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toMatchObject({
@@ -864,9 +864,14 @@ describe('useProjectManager.createProject', () => {
       project: fakeProject,
     });
     await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toMatchObject({ status: 'ready' });
+    expect(mockListProjectManifests).toHaveBeenCalledOnce();
+
+    mockListProjectManifests.mockResolvedValue({ roots: [], entries: [] });
+    emitWorkerChange('fileDeleted', '/test-project/tau.json');
+    await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toEqual({ status: 'missing' });
 
     expect(mockGetPendingProjectOperations).toHaveBeenCalledOnce();
-    expect(mockListProjectManifests).toHaveBeenCalledTimes(3);
+    expect(mockListProjectManifests).toHaveBeenCalledTimes(2);
   });
 
   it('waits for a journaled project route before reading its manifest', async () => {
@@ -1599,6 +1604,17 @@ describe('useProjectManager.createProject', () => {
       status: 'ready',
       project: fakeProject,
     });
+  });
+
+  it('uses an explicit listing refresh to revoke a formerly valid route', async () => {
+    mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toMatchObject({ status: 'ready' });
+
+    mockListProjectManifests.mockResolvedValue({ roots: [], entries: [] });
+    await result.current.getProjectListing();
+    await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toEqual({ status: 'missing' });
+    expect(mockListProjectManifests).toHaveBeenCalledTimes(2);
   });
 
   it('does not replay bootstrap work after project root configuration changes', async () => {

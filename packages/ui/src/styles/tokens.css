@@ -170,7 +170,7 @@
   --menu-ring: color-mix(in oklch, white 25%, var(--popover));
   --menu-highlight: color-mix(in oklch, var(--neutral) 30%, var(--popover));
   --menu-highlight-destructive: color-mix(in oklch, var(--destructive) 20%, var(--popover));
-  --menu-destructive-foreground: color-mix(in oklch, var(--foreground) 25%, var(--destructive));
+  --menu-destructive-foreground: color-mix(in oklch, var(--foreground) 30%, var(--destructive));
   --secondary-foreground: oklch(var(--l-deepest) 0 none);
   --highlighter: oklch(var(--l-highlighter) var(--c-highlighter) var(--hue-highlighter) / 0.5);
   --highlighter-foreground: oklch(var(--l-deepest) 0 none / 0.85);

@@ -33,20 +33,32 @@ export type ModelViewerGraphicsOptions = {
 export type ModelViewerState = 'loading' | 'ready';
 
 export type RuntimeErrorOverlayProps = {
+  /** The runtime's own text. */
   readonly message: string;
+  /** A neutral sentence with the next step; when set, `message` moves behind a disclosure. */
+  readonly summary?: string;
   readonly className?: string;
 };
 
-/** Shared accessible presentation for CAD runtime failures. */
-export function RuntimeErrorOverlay({ message, className }: RuntimeErrorOverlayProps): React.JSX.Element {
+/** What a preview says when it fails; the runtime text stays one disclosure away. */
+const previewFailureSummary = 'Preview could not load. Open the example to see it.';
+
+/** Shared accessible presentation for CAD runtime failures. With a summary, colour marks only the glyph. */
+export function RuntimeErrorOverlay({ message, summary, className }: RuntimeErrorOverlayProps): React.JSX.Element {
   return (
-    <div
-      role='alert'
-      aria-label='CAD runtime error'
-      className={cn('flex items-center gap-2 text-destructive', className)}
-    >
-      <AlertTriangle className='size-5 shrink-0 opacity-60' strokeWidth={1.5} />
-      <span className='max-w-sm text-sm'>{message}</span>
+    <div role='alert' aria-label='CAD runtime error' className={cn('flex items-center gap-2', className)}>
+      <AlertTriangle aria-hidden className='size-5 shrink-0 text-destructive' strokeWidth={1.5} />
+      {summary === undefined ? (
+        <span className='max-w-sm text-sm text-destructive'>{message}</span>
+      ) : (
+        <div className='flex max-w-sm flex-col gap-1'>
+          <p className='text-sm'>{summary}</p>
+          <details className='text-xs text-muted-foreground'>
+            <summary>Details</summary>
+            <code className='font-mono break-words'>{message}</code>
+          </details>
+        </div>
+      )}
     </div>
   );
 }
@@ -108,7 +120,8 @@ const ModelViewerCore = memo(function ModelViewerCore({
     return (
       <RuntimeErrorOverlay
         message={error.message}
-        className={cn('size-full flex-col justify-center gap-3 text-center [&>svg]:size-10', className)}
+        summary={previewFailureSummary}
+        className={cn('size-full flex-col justify-center p-3 text-center', className)}
       />
     );
   }
@@ -148,6 +161,7 @@ const ModelViewerCore = memo(function ModelViewerCore({
       {error ? (
         <RuntimeErrorOverlay
           message={error.message}
+          summary={previewFailureSummary}
           className='absolute top-4 right-4 left-4 z-10 mx-auto w-fit max-w-[calc(100%-2rem)] rounded-md border border-destructive/40 bg-background/90 p-2 shadow-sm backdrop-blur-sm'
         />
       ) : null}

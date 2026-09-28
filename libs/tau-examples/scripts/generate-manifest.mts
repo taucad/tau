@@ -26,6 +26,8 @@ type ManifestEntry = {
   name: string;
   mainFile?: string;
   files: string[];
+  /** Also render `thumbnail-featured.webp`, drawn for a card shown at twice the usual size. */
+  featured?: true;
 };
 
 type ExampleKind = 'model' | 'test-fixture' | 'spec-fixture' | 'reference';
@@ -37,25 +39,29 @@ type BuiltinEntry = {
   readonly manifest: ProjectManifest;
   readonly files: readonly string[];
   readonly textFiles: ReadonlySet<string>;
+  readonly featuredThumbnail?: string;
 };
 
 const candidateMainFiles = ['main.ts', 'main.py', 'main.cs', 'main.scad', 'main.cpp'] as const;
 const excludedDirectories = new Set(['.tau', '__pycache__']);
-const excludedFiles = new Set(['example.json', 'thumbnail.webp']);
+const featuredThumbnailFile = 'thumbnail-featured.webp';
+const excludedFiles = new Set(['example.json', 'thumbnail.webp', featuredThumbnailFile]);
 
-function readExampleConfig(directory: string): Pick<ManifestEntry, 'kind' | 'geometry'> {
+function readExampleConfig(directory: string): Pick<ManifestEntry, 'kind' | 'geometry' | 'featured'> {
   const path = join(directory, 'example.json');
   if (!existsSync(path)) {
     return { kind: 'model', geometry: '3d' };
   }
-  const config = JSON.parse(readFileSync(path, 'utf8')) as { kind?: unknown; geometry?: unknown };
+  const config = JSON.parse(readFileSync(path, 'utf8')) as { kind?: unknown; geometry?: unknown; featured?: unknown };
   const kind = config.kind ?? 'model';
   const geometry = config.geometry ?? '3d';
+  const featured = config.featured ?? false;
   if (
     (kind === 'model' || kind === 'test-fixture' || kind === 'spec-fixture' || kind === 'reference') &&
-    (geometry === '2d' || geometry === '3d')
+    (geometry === '2d' || geometry === '3d') &&
+    typeof featured === 'boolean'
   ) {
-    return { kind, geometry };
+    return { kind, geometry, ...(featured && { featured }) };
   }
   throw new Error(`Invalid example config in ${path}`);
 }
@@ -134,7 +140,8 @@ function scanFixtures(): ManifestEntry[] {
 function scanBuiltinFiles(directory: string, prefix = ''): string[] {
   const files: string[] = [];
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    if (entry.name === '.DS_Store' || entry.name === 'example.json') {
+    // The featured thumbnail is a Community asset, not a project file a Remix should copy.
+    if (entry.name === '.DS_Store' || entry.name === 'example.json' || entry.name === featuredThumbnailFile) {
       continue;
     }
     const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
@@ -202,7 +209,18 @@ function scanBuiltins(entries: readonly ManifestEntry[]): BuiltinEntry[] {
         }
       }),
     );
-    builtins.push({ locator, kernel: entry.kernel, name: entry.name, manifest, files, textFiles });
+    // ponytail: a featured row renders its file after this manifest pass; the next pass links it.
+    const featuredThumbnail =
+      entry.featured && existsSync(join(directory, featuredThumbnailFile)) ? featuredThumbnailFile : undefined;
+    builtins.push({
+      locator,
+      kernel: entry.kernel,
+      name: entry.name,
+      manifest,
+      files,
+      textFiles,
+      ...(featuredThumbnail && { featuredThumbnail }),
+    });
   }
   return builtins.sort((left, right) => left.locator.localeCompare(right.locator, 'en'));
 }
@@ -267,12 +285,13 @@ function generateBuiltinTs(entries: readonly BuiltinEntry[]): string {
       const path = `./kernels/${entry.kernel}/${entry.name}/${file}`;
       (entry.textFiles.has(file) ? textAssetPaths : binaryAssetPaths).push(path);
     }
-    const { thumbnail } = entry.manifest.assets.main;
-    if (thumbnail) {
-      const key = `${entry.kernel}/${entry.name}/${thumbnail}`;
-      const name = `thumbnail${thumbnailName.size}`;
-      thumbnailName.set(key, name);
-      imports.push(`import ${name} from ${JSON.stringify(`./kernels/${key}?url`)};`);
+    for (const thumbnail of [entry.manifest.assets.main.thumbnail, entry.featuredThumbnail]) {
+      if (thumbnail) {
+        const key = `${entry.kernel}/${entry.name}/${thumbnail}`;
+        const name = `thumbnail${thumbnailName.size}`;
+        thumbnailName.set(key, name);
+        imports.push(`import ${name} from ${JSON.stringify(`./kernels/${key}?url`)};`);
+      }
     }
   }
 
@@ -330,6 +349,8 @@ function generateBuiltinTs(entries: readonly BuiltinEntry[]): string {
     '  readonly kernel: string;',
     '  readonly manifest: ProjectManifest;',
     '  readonly thumbnailUrl?: string;',
+    '  /** The thumbnail drawn for a card shown at twice the usual size, with proportionally thinner edges. */',
+    '  readonly featuredThumbnailUrl?: string;',
     '  readonly assets: readonly BuiltinExampleAsset[];',
     '};',
     '',
@@ -345,6 +366,9 @@ function generateBuiltinTs(entries: readonly BuiltinEntry[]): string {
       `    kernel: ${JSON.stringify(entry.kernel)},`,
       `    manifest: ${JSON.stringify(entry.manifest)},`,
       ...(thumbnail ? [`    thumbnailUrl: ${thumbnailName.get(`${prefix}${thumbnail}`)},`] : []),
+      ...(entry.featuredThumbnail
+        ? [`    featuredThumbnailUrl: ${thumbnailName.get(`${prefix}${entry.featuredThumbnail}`)},`]
+        : []),
       '    assets: [',
       ...entry.files.map(
         (file) =>

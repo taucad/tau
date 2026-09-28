@@ -10,7 +10,10 @@ import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
 
 /** Project-relative path for the generated thumbnail. */
 const thumbnailPath = 'thumbnail.webp';
-const thumbnailLineWidth = 3;
+// Twice the largest card slot so 2× displays and share previews stay sharp; edges are output pixels, so they scale with it.
+const thumbnailWidth = 1536;
+const thumbnailHeight = 1152;
+const thumbnailLineWidth = 6;
 
 const validateThumbnailWebp = async (bytes: Uint8Array<ArrayBuffer>): Promise<void> => {
   if (
@@ -28,8 +31,10 @@ const validateThumbnailWebp = async (bytes: Uint8Array<ArrayBuffer>): Promise<vo
   }
   const bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/webp' }));
   try {
-    if (bitmap.width !== 768 || bitmap.height !== 576) {
-      throw new Error(`Thumbnail export expected 768×576 pixels, received ${bitmap.width}×${bitmap.height}`);
+    if (bitmap.width !== thumbnailWidth || bitmap.height !== thumbnailHeight) {
+      throw new Error(
+        `Thumbnail export expected ${thumbnailWidth}×${thumbnailHeight} pixels, received ${bitmap.width}×${bitmap.height}`,
+      );
     }
   } finally {
     bitmap.close();
@@ -97,7 +102,7 @@ export function useThumbnailGenerator(): { regenerate: () => Promise<ThumbnailRe
                 sourcePath: snapshot.context.entryPath,
                 content: geometry.content,
                 format: 'webp',
-                exportOptions: { width: 768, height: 576, quality: 0.9 },
+                exportOptions: { width: thumbnailWidth, height: thumbnailHeight, quality: 0.9 },
               }
             : {
                 kind: request.kind,
@@ -111,8 +116,8 @@ export function useThumbnailGenerator(): { regenerate: () => Promise<ThumbnailRe
                 format: 'webp',
                 exportOptions: {
                   mode: 'single',
-                  width: 768,
-                  height: 576,
+                  width: thumbnailWidth,
+                  height: thumbnailHeight,
                   lineWidth: thumbnailLineWidth,
                   camera: {
                     framing: 'bounds',
@@ -186,7 +191,7 @@ export function useThumbnailGenerator(): { regenerate: () => Promise<ThumbnailRe
     }
     const subscription = mainCadActor.on('geometryEvaluated', (event) => {
       generationRef.current += 1;
-      identityRef.current = `${projectId}:${mainEntryPath}:${event.geometry.hash}:webp:q0.9:768x576:m0.1:lw${thumbnailLineWidth}:camera-bounds-v1:edges:studio-v5`;
+      identityRef.current = `${projectId}:${mainEntryPath}:${event.geometry.hash}:webp:q0.9:${thumbnailWidth}x${thumbnailHeight}:m0.1:lw${thumbnailLineWidth}:camera-bounds-v1:edges:studio-v5`;
       thumbnailActor.send({ type: 'settled', hash: identityRef.current });
     });
     let requestId = mainCadActor.getSnapshot().context.lastRequestedRenderId;

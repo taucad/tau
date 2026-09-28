@@ -16,6 +16,8 @@ export type BuiltinProjectCardModel = {
   readonly tags: readonly string[];
   readonly assets: ProjectManifest['assets'];
   readonly thumbnail: string;
+  /** Drawn for the featured card's doubled size with proportionally thinner edges. */
+  readonly featuredThumbnail?: string;
   readonly fileAssets: BuiltinExample['assets'];
 };
 
@@ -41,7 +43,7 @@ export const loadBuiltinProjectFiles = async ({
 const builtinCatalog: readonly BuiltinExample[] = builtinExamples;
 
 export const sampleProjects: readonly BuiltinProjectCardModel[] = builtinCatalog.flatMap((example) => {
-  const { thumbnailUrl, kernel } = example;
+  const { thumbnailUrl, featuredThumbnailUrl, kernel } = example;
   return thumbnailUrl && isKernelId(kernel)
     ? [
         {
@@ -53,6 +55,7 @@ export const sampleProjects: readonly BuiltinProjectCardModel[] = builtinCatalog
           tags: example.manifest.tags,
           assets: example.manifest.assets,
           thumbnail: thumbnailUrl,
+          ...(featuredThumbnailUrl && { featuredThumbnail: featuredThumbnailUrl }),
           fileAssets: example.assets,
         },
       ]

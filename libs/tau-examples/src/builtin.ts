@@ -49,24 +49,25 @@ import thumbnail43 from "./kernels/replicad/hex-screwdriver/thumbnail.webp?url";
 import thumbnail44 from "./kernels/replicad/hollow-box/thumbnail.webp?url";
 import thumbnail45 from "./kernels/replicad/ibeam/thumbnail.webp?url";
 import thumbnail46 from "./kernels/replicad/kestrel-240-quadcopter/thumbnail.webp?url";
-import thumbnail47 from "./kernels/replicad/lego/thumbnail.webp?url";
-import thumbnail48 from "./kernels/replicad/planetary-gear-system/thumbnail.webp?url";
-import thumbnail49 from "./kernels/replicad/pot-plant/thumbnail.webp?url";
-import thumbnail50 from "./kernels/replicad/simple-tray/thumbnail.webp?url";
-import thumbnail51 from "./kernels/replicad/six-axis-arm/thumbnail.webp?url";
-import thumbnail52 from "./kernels/replicad/spur-gearbox/thumbnail.webp?url";
-import thumbnail53 from "./kernels/replicad/staircase/thumbnail.webp?url";
-import thumbnail54 from "./kernels/replicad/standing-fan/thumbnail.webp?url";
-import thumbnail55 from "./kernels/replicad/t-slot-rail/thumbnail.webp?url";
-import thumbnail56 from "./kernels/replicad/table/thumbnail.webp?url";
-import thumbnail57 from "./kernels/replicad/tray/thumbnail.webp?url";
-import thumbnail58 from "./kernels/replicad/turbofan/thumbnail.webp?url";
-import thumbnail59 from "./kernels/replicad/v8-engine/thumbnail.webp?url";
-import thumbnail60 from "./kernels/replicad/vase/thumbnail.webp?url";
-import thumbnail61 from "./kernels/replicad/wavy-vase/thumbnail.webp?url";
-import thumbnail62 from "./kernels/replicad/wedge-door-stopper/thumbnail.webp?url";
-import thumbnail63 from "./kernels/replicad/wheelbarrow/thumbnail.webp?url";
-import thumbnail64 from "./kernels/replicad/worm-gear-system/thumbnail.webp?url";
+import thumbnail47 from "./kernels/replicad/kestrel-240-quadcopter/thumbnail-featured.webp?url";
+import thumbnail48 from "./kernels/replicad/lego/thumbnail.webp?url";
+import thumbnail49 from "./kernels/replicad/planetary-gear-system/thumbnail.webp?url";
+import thumbnail50 from "./kernels/replicad/pot-plant/thumbnail.webp?url";
+import thumbnail51 from "./kernels/replicad/simple-tray/thumbnail.webp?url";
+import thumbnail52 from "./kernels/replicad/six-axis-arm/thumbnail.webp?url";
+import thumbnail53 from "./kernels/replicad/spur-gearbox/thumbnail.webp?url";
+import thumbnail54 from "./kernels/replicad/staircase/thumbnail.webp?url";
+import thumbnail55 from "./kernels/replicad/standing-fan/thumbnail.webp?url";
+import thumbnail56 from "./kernels/replicad/t-slot-rail/thumbnail.webp?url";
+import thumbnail57 from "./kernels/replicad/table/thumbnail.webp?url";
+import thumbnail58 from "./kernels/replicad/tray/thumbnail.webp?url";
+import thumbnail59 from "./kernels/replicad/turbofan/thumbnail.webp?url";
+import thumbnail60 from "./kernels/replicad/v8-engine/thumbnail.webp?url";
+import thumbnail61 from "./kernels/replicad/vase/thumbnail.webp?url";
+import thumbnail62 from "./kernels/replicad/wavy-vase/thumbnail.webp?url";
+import thumbnail63 from "./kernels/replicad/wedge-door-stopper/thumbnail.webp?url";
+import thumbnail64 from "./kernels/replicad/wheelbarrow/thumbnail.webp?url";
+import thumbnail65 from "./kernels/replicad/worm-gear-system/thumbnail.webp?url";
 
 const textAssetLoaders = import.meta.glob<string>(
   ["./kernels/jscad/cube/main.ts","./kernels/jscad/cube/tau.json","./kernels/jscad/cylinder/main.ts","./kernels/jscad/cylinder/tau.json","./kernels/jscad/gear/main.ts","./kernels/jscad/gear/tau.json","./kernels/jscad/planetary-gear-system/main.geospec.ts","./kernels/jscad/planetary-gear-system/main.ts","./kernels/jscad/planetary-gear-system/tau.json","./kernels/openscad/arq5-racing-quadcopter/lib/assy/airframe-assy.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/assy/airframe_assy.scad","./kernels/openscad/arq5-racing-quadcopter/lib/assy/arm-assy.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/assy/arm_assy.scad","./kernels/openscad/arq5-racing-quadcopter/lib/assy/avionics-assy.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/assy/avionics_assy.scad","./kernels/openscad/arq5-racing-quadcopter/lib/assy/camera-assy.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/assy/camera_assy.scad","./kernels/openscad/arq5-racing-quadcopter/lib/assy/gimbal-assy.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/assy/gimbal_assy.scad","./kernels/openscad/arq5-racing-quadcopter/lib/assy/motor-assy.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/assy/motor_assy.scad","./kernels/openscad/arq5-racing-quadcopter/lib/assy/power-assy.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/assy/power_assy.scad","./kernels/openscad/arq5-racing-quadcopter/lib/assy/propeller-assy.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/assy/propeller_assy.scad","./kernels/openscad/arq5-racing-quadcopter/lib/assy/propulsion-unit.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/assy/propulsion_unit.scad","./kernels/openscad/arq5-racing-quadcopter/lib/naca.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/naca.scad","./kernels/openscad/arq5-racing-quadcopter/lib/params.scad","./kernels/openscad/arq5-racing-quadcopter/lib/parts/antenna-fairing.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/parts/antenna.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/parts/antenna.scad","./kernels/openscad/arq5-racing-quadcopter/lib/parts/antenna_fairing.scad","./kernels/openscad/arq5-racing-quadcopter/lib/parts/arm-spar.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/parts/arm_spar.scad","./kernels/openscad/arq5-racing-quadcopter/lib/parts/battery-latch.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/parts/battery-pack.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/parts/battery_latch.scad","./kernels/openscad/arq5-racing-quadcopter/lib/parts/battery_pack.scad","./kernels/openscad/arq5-racing-quadcopter/lib/parts/camera-body.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/parts/camera-lens.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/parts/camera_body.scad","./kernels/openscad/arq5-racing-quadcopter/lib/parts/camera_lens.scad","./kernels/openscad/arq5-racing-quadcopter/lib/parts/esc-stack.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/parts/esc_stack.scad","./kernels/openscad/arq5-racing-quadcopter/lib/parts/flight-controller.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/parts/flight_controller.scad","./kernels/openscad/arq5-racing-quadcopter/lib/parts/fuselage-canopy.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/parts/fuselage-keel.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/parts/fuselage_canopy.scad","./kernels/openscad/arq5-racing-quadcopter/lib/parts/fuselage_keel.scad","./kernels/openscad/arq5-racing-quadcopter/lib/parts/gimbal-damper.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/parts/gimbal-pitch-cradle.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/parts/gimbal-pitch-motor.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/parts/gimbal-roll-motor.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/parts/gimbal-roll-ring.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/parts/gimbal_damper.scad","./kernels/openscad/arq5-racing-quadcopter/lib/parts/gimbal_pitch_cradle.scad","./kernels/openscad/arq5-racing-quadcopter/lib/parts/gimbal_pitch_motor.scad","./kernels/openscad/arq5-racing-quadcopter/lib/parts/gimbal_roll_motor.scad","./kernels/openscad/arq5-racing-quadcopter/lib/parts/gimbal_roll_ring.scad","./kernels/openscad/arq5-racing-quadcopter/lib/parts/heat-insert.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/parts/heat_insert.scad","./kernels/openscad/arq5-racing-quadcopter/lib/parts/landing-skid.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/parts/landing_skid.scad","./kernels/openscad/arq5-racing-quadcopter/lib/parts/m3-shcs.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/parts/m3_shcs.scad","./kernels/openscad/arq5-racing-quadcopter/lib/parts/motor-base.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/parts/motor-bearing.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/parts/motor-bell.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/parts/motor-magnet-ring.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/parts/motor-pod.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/parts/motor-shaft.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/parts/motor-spinner.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/parts/motor-stator.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/parts/motor_base.scad","./kernels/openscad/arq5-racing-quadcopter/lib/parts/motor_bearing.scad","./kernels/openscad/arq5-racing-quadcopter/lib/parts/motor_bell.scad","./kernels/openscad/arq5-racing-quadcopter/lib/parts/motor_magnet_ring.scad","./kernels/openscad/arq5-racing-quadcopter/lib/parts/motor_pod.scad","./kernels/openscad/arq5-racing-quadcopter/lib/parts/motor_shaft.scad","./kernels/openscad/arq5-racing-quadcopter/lib/parts/motor_spinner.scad","./kernels/openscad/arq5-racing-quadcopter/lib/parts/motor_stator.scad","./kernels/openscad/arq5-racing-quadcopter/lib/parts/naca.scad","./kernels/openscad/arq5-racing-quadcopter/lib/parts/nose-fairing.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/parts/nose_fairing.scad","./kernels/openscad/arq5-racing-quadcopter/lib/parts/optical-window.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/parts/optical_window.scad","./kernels/openscad/arq5-racing-quadcopter/lib/parts/params.scad","./kernels/openscad/arq5-racing-quadcopter/lib/parts/prop-blade.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/parts/prop-hub.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/parts/prop-nut.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/parts/prop_blade.scad","./kernels/openscad/arq5-racing-quadcopter/lib/parts/prop_hub.scad","./kernels/openscad/arq5-racing-quadcopter/lib/parts/prop_nut.scad","./kernels/openscad/arq5-racing-quadcopter/lib/parts/receiver.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/parts/receiver.scad","./kernels/openscad/arq5-racing-quadcopter/lib/parts/vtx-module.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/lib/parts/vtx_module.scad","./kernels/openscad/arq5-racing-quadcopter/main.geospec.ts","./kernels/openscad/arq5-racing-quadcopter/main.scad","./kernels/openscad/arq5-racing-quadcopter/sysml/racing_quad.sysml","./kernels/openscad/arq5-racing-quadcopter/tau.json","./kernels/openscad/cyber-chess-set/main.geospec.ts","./kernels/openscad/cyber-chess-set/main.scad","./kernels/openscad/cyber-chess-set/tau.json","./kernels/openscad/dollhouse/lib/chimney.scad","./kernels/openscad/dollhouse/lib/common.scad","./kernels/openscad/dollhouse/lib/door.scad","./kernels/openscad/dollhouse/lib/foundation.scad","./kernels/openscad/dollhouse/lib/roof.scad","./kernels/openscad/dollhouse/lib/walls.scad","./kernels/openscad/dollhouse/lib/window.scad","./kernels/openscad/dollhouse/main.geospec.ts","./kernels/openscad/dollhouse/main.scad","./kernels/openscad/dollhouse/tau.json","./kernels/openscad/fluted-vase/main.geospec.ts","./kernels/openscad/fluted-vase/main.scad","./kernels/openscad/fluted-vase/tau.json","./kernels/openscad/kitchen-sink/main.scad","./kernels/openscad/kitchen-sink/tau.json","./kernels/picovoxel/base-box/README.md","./kernels/picovoxel/base-box/ex-base-box.ts","./kernels/picovoxel/base-box/example-spline.ts","./kernels/picovoxel/base-box/main.ts","./kernels/picovoxel/base-box/tau.json","./kernels/picovoxel/base-cylinder/README.md","./kernels/picovoxel/base-cylinder/ex-base-cylinder.ts","./kernels/picovoxel/base-cylinder/example-spline.ts","./kernels/picovoxel/base-cylinder/main.ts","./kernels/picovoxel/base-cylinder/tau.json","./kernels/picovoxel/base-lens/README.md","./kernels/picovoxel/base-lens/ex-base-lens.ts","./kernels/picovoxel/base-lens/main.ts","./kernels/picovoxel/base-lens/tau.json","./kernels/picovoxel/base-pipe/README.md","./kernels/picovoxel/base-pipe/ex-base-pipe.ts","./kernels/picovoxel/base-pipe/example-spline.ts","./kernels/picovoxel/base-pipe/main.ts","./kernels/picovoxel/base-pipe/tau.json","./kernels/picovoxel/base-pipe-segment/README.md","./kernels/picovoxel/base-pipe-segment/ex-base-pipe-segment.ts","./kernels/picovoxel/base-pipe-segment/ex-base-pipe.ts","./kernels/picovoxel/base-pipe-segment/example-spline.ts","./kernels/picovoxel/base-pipe-segment/main.ts","./kernels/picovoxel/base-pipe-segment/tau.json","./kernels/picovoxel/base-ring/README.md","./kernels/picovoxel/base-ring/ex-base-ring.ts","./kernels/picovoxel/base-ring/main.ts","./kernels/picovoxel/base-ring/tau.json","./kernels/picovoxel/base-sphere/README.md","./kernels/picovoxel/base-sphere/ex-base-sphere.ts","./kernels/picovoxel/base-sphere/main.ts","./kernels/picovoxel/base-sphere/tau.json","./kernels/picovoxel/basic-lattices/README.md","./kernels/picovoxel/basic-lattices/ex-basic-lattices.ts","./kernels/picovoxel/basic-lattices/main.ts","./kernels/picovoxel/basic-lattices/tau.json","./kernels/picovoxel/boolean-showcase/README.md","./kernels/picovoxel/boolean-showcase/boolean-showcase.ts","./kernels/picovoxel/boolean-showcase/main.ts","./kernels/picovoxel/boolean-showcase/tau.json","./kernels/picovoxel/gear/README.md","./kernels/picovoxel/gear/gear.ts","./kernels/picovoxel/gear/main.ts","./kernels/picovoxel/gear/tau.json","./kernels/picovoxel/gyroid-sdf/README.md","./kernels/picovoxel/gyroid-sdf/main.ts","./kernels/picovoxel/gyroid-sdf/tau.json","./kernels/picovoxel/hello-world/README.md","./kernels/picovoxel/hello-world/hello-world.ts","./kernels/picovoxel/hello-world/main.geospec.ts","./kernels/picovoxel/hello-world/main.ts","./kernels/picovoxel/hello-world/tau.json","./kernels/picovoxel/implicit-gyroid-sphere/README.md","./kernels/picovoxel/implicit-gyroid-sphere/ex-implicit-gyroid-sphere.ts","./kernels/picovoxel/implicit-gyroid-sphere/main.ts","./kernels/picovoxel/implicit-gyroid-sphere/tau.json","./kernels/picovoxel/implicit-regular/README.md","./kernels/picovoxel/implicit-regular/ex-implicit-regular.ts","./kernels/picovoxel/implicit-regular/main.ts","./kernels/picovoxel/implicit-regular/tau.json","./kernels/picovoxel/lattice-conformal/README.md","./kernels/picovoxel/lattice-conformal/ex-lattice-conformal.ts","./kernels/picovoxel/lattice-conformal/main.ts","./kernels/picovoxel/lattice-conformal/tau.json","./kernels/picovoxel/lattice-manifold/README.md","./kernels/picovoxel/lattice-manifold/ex-lattice-manifold.ts","./kernels/picovoxel/lattice-manifold/main.ts","./kernels/picovoxel/lattice-manifold/tau.json","./kernels/picovoxel/lattice-pipe/README.md","./kernels/picovoxel/lattice-pipe/ex-lattice-pipe.ts","./kernels/picovoxel/lattice-pipe/example-spline.ts","./kernels/picovoxel/lattice-pipe/main.ts","./kernels/picovoxel/lattice-pipe/tau.json","./kernels/picovoxel/lattice-regular/README.md","./kernels/picovoxel/lattice-regular/ex-lattice-regular.ts","./kernels/picovoxel/lattice-regular/main.ts","./kernels/picovoxel/lattice-regular/tau.json","./kernels/picovoxel/mesh-painter/README.md","./kernels/picovoxel/mesh-painter/ex-mesh-painter.ts","./kernels/picovoxel/mesh-painter/main.ts","./kernels/picovoxel/mesh-painter/tau.json","./kernels/picovoxel/mesh-trafo/README.md","./kernels/picovoxel/mesh-trafo/ex-mesh-trafo.ts","./kernels/picovoxel/mesh-trafo/main.ts","./kernels/picovoxel/mesh-trafo/tau.json","./kernels/picovoxel/over-offset/README.md","./kernels/picovoxel/over-offset/ex-over-offset.ts","./kernels/picovoxel/over-offset/main.ts","./kernels/picovoxel/over-offset/tau.json","./kernels/picovoxel/sphere-minus-beams/README.md","./kernels/picovoxel/sphere-minus-beams/main.ts","./kernels/picovoxel/sphere-minus-beams/tau.json","./kernels/picovoxel/torus-knot-round-trip/README.md","./kernels/picovoxel/torus-knot-round-trip/main.ts","./kernels/picovoxel/torus-knot-round-trip/tau.json","./kernels/replicad/bench-vise/DESIGN.md","./kernels/replicad/bench-vise/main.geospec.ts","./kernels/replicad/bench-vise/main.ts","./kernels/replicad/bench-vise/tau.json","./kernels/replicad/bench-vise/vice.sysml","./kernels/replicad/birdhouse/main.ts","./kernels/replicad/birdhouse/tau.json","./kernels/replicad/bottle/main.ts","./kernels/replicad/bottle/tau.json","./kernels/replicad/card-holder/main.ts","./kernels/replicad/card-holder/tau.json","./kernels/replicad/chair/main.ts","./kernels/replicad/chair/tau.json","./kernels/replicad/copper-lampshade/main.ts","./kernels/replicad/copper-lampshade/tau.json","./kernels/replicad/cycloidal-gear/main.ts","./kernels/replicad/cycloidal-gear/tau.json","./kernels/replicad/decorated-box/main.ts","./kernels/replicad/decorated-box/tau.json","./kernels/replicad/drinking-glass/main.ts","./kernels/replicad/drinking-glass/tau.json","./kernels/replicad/gridfinity-box/main.ts","./kernels/replicad/gridfinity-box/tau.json","./kernels/replicad/heat-exchanger/main.geospec.ts","./kernels/replicad/heat-exchanger/main.ts","./kernels/replicad/heat-exchanger/tau.json","./kernels/replicad/hex-screwdriver/main.ts","./kernels/replicad/hex-screwdriver/tau.json","./kernels/replicad/hollow-box/main.ts","./kernels/replicad/hollow-box/tau.json","./kernels/replicad/ibeam/main.ts","./kernels/replicad/ibeam/tau.json","./kernels/replicad/kestrel-240-quadcopter/DESIGN.md","./kernels/replicad/kestrel-240-quadcopter/assemblies/airframe.ts","./kernels/replicad/kestrel-240-quadcopter/assemblies/arm-module.ts","./kernels/replicad/kestrel-240-quadcopter/assemblies/avionics.ts","./kernels/replicad/kestrel-240-quadcopter/assemblies/camera-cartridge.ts","./kernels/replicad/kestrel-240-quadcopter/assemblies/gimbal.ts","./kernels/replicad/kestrel-240-quadcopter/assemblies/motor-module.ts","./kernels/replicad/kestrel-240-quadcopter/assemblies/propulsion.ts","./kernels/replicad/kestrel-240-quadcopter/lib/airframe-geometry.ts","./kernels/replicad/kestrel-240-quadcopter/lib/naca-math.ts","./kernels/replicad/kestrel-240-quadcopter/lib/naca.ts","./kernels/replicad/kestrel-240-quadcopter/main.geospec.ts","./kernels/replicad/kestrel-240-quadcopter/main.ts","./kernels/replicad/kestrel-240-quadcopter/parts/airframe/arm.ts","./kernels/replicad/kestrel-240-quadcopter/parts/airframe/battery-saddle.ts","./kernels/replicad/kestrel-240-quadcopter/parts/airframe/battery-strap.ts","./kernels/replicad/kestrel-240-quadcopter/parts/airframe/heat-set-insert.ts","./kernels/replicad/kestrel-240-quadcopter/parts/airframe/lower-shell.ts","./kernels/replicad/kestrel-240-quadcopter/parts/airframe/motor-pad.ts","./kernels/replicad/kestrel-240-quadcopter/parts/airframe/root-clamp.ts","./kernels/replicad/kestrel-240-quadcopter/parts/airframe/shell-screw.ts","./kernels/replicad/kestrel-240-quadcopter/parts/airframe/spar.ts","./kernels/replicad/kestrel-240-quadcopter/parts/airframe/upper-shell.ts","./kernels/replicad/kestrel-240-quadcopter/parts/avionics/antenna.ts","./kernels/replicad/kestrel-240-quadcopter/parts/avionics/battery.ts","./kernels/replicad/kestrel-240-quadcopter/parts/avionics/board-isolator.ts","./kernels/replicad/kestrel-240-quadcopter/parts/avionics/board-screw.ts","./kernels/replicad/kestrel-240-quadcopter/parts/avionics/esc.ts","./kernels/replicad/kestrel-240-quadcopter/parts/avionics/flight-controller.ts","./kernels/replicad/kestrel-240-quadcopter/parts/avionics/power-connector.ts","./kernels/replicad/kestrel-240-quadcopter/parts/avionics/power-wire.ts","./kernels/replicad/kestrel-240-quadcopter/parts/avionics/receiver.ts","./kernels/replicad/kestrel-240-quadcopter/parts/avionics/standoff.ts","./kernels/replicad/kestrel-240-quadcopter/parts/gimbal/actuator-body.ts","./kernels/replicad/kestrel-240-quadcopter/parts/gimbal/actuator-shaft.ts","./kernels/replicad/kestrel-240-quadcopter/parts/gimbal/bearing.ts","./kernels/replicad/kestrel-240-quadcopter/parts/gimbal/camera-front.ts","./kernels/replicad/kestrel-240-quadcopter/parts/gimbal/camera-pcb.ts","./kernels/replicad/kestrel-240-quadcopter/parts/gimbal/camera-rear.ts","./kernels/replicad/kestrel-240-quadcopter/parts/gimbal/fixed-mount.ts","./kernels/replicad/kestrel-240-quadcopter/parts/gimbal/lens-retainer.ts","./kernels/replicad/kestrel-240-quadcopter/parts/gimbal/mount-screw.ts","./kernels/replicad/kestrel-240-quadcopter/parts/gimbal/optical-dome.ts","./kernels/replicad/kestrel-240-quadcopter/parts/gimbal/pitch-yoke.ts","./kernels/replicad/kestrel-240-quadcopter/parts/gimbal/shell-nut.ts","./kernels/replicad/kestrel-240-quadcopter/parts/gimbal/shell-screw.ts","./kernels/replicad/kestrel-240-quadcopter/parts/gimbal/shoulder-axle.ts","./kernels/replicad/kestrel-240-quadcopter/parts/gimbal/threaded-insert.ts","./kernels/replicad/kestrel-240-quadcopter/parts/propulsion/motor-base.ts","./kernels/replicad/kestrel-240-quadcopter/parts/propulsion/motor-bearing.ts","./kernels/replicad/kestrel-240-quadcopter/parts/propulsion/motor-bell.ts","./kernels/replicad/kestrel-240-quadcopter/parts/propulsion/motor-screw.ts","./kernels/replicad/kestrel-240-quadcopter/parts/propulsion/motor-shaft.ts","./kernels/replicad/kestrel-240-quadcopter/parts/propulsion/motor-stator.ts","./kernels/replicad/kestrel-240-quadcopter/parts/propulsion/prop-nut.ts","./kernels/replicad/kestrel-240-quadcopter/parts/propulsion/propeller.ts","./kernels/replicad/kestrel-240-quadcopter/system/quadcopter.sysml","./kernels/replicad/kestrel-240-quadcopter/tau.json","./kernels/replicad/kestrel-240-quadcopter/tests/airframe.geospec.ts","./kernels/replicad/kestrel-240-quadcopter/tests/arm-module.geospec.ts","./kernels/replicad/kestrel-240-quadcopter/tests/avionics.geospec.ts","./kernels/replicad/kestrel-240-quadcopter/tests/gimbal.geospec.ts","./kernels/replicad/kestrel-240-quadcopter/tests/naca.geospec.ts","./kernels/replicad/kestrel-240-quadcopter/tests/propulsion.geospec.ts","./kernels/replicad/lego/main.ts","./kernels/replicad/lego/tau.json","./kernels/replicad/planetary-gear-system/DESIGN.md","./kernels/replicad/planetary-gear-system/main.geospec.ts","./kernels/replicad/planetary-gear-system/main.ts","./kernels/replicad/planetary-gear-system/tau.json","./kernels/replicad/pot-plant/main.ts","./kernels/replicad/pot-plant/tau.json","./kernels/replicad/simple-tray/main.ts","./kernels/replicad/simple-tray/tau.json","./kernels/replicad/six-axis-arm/DESIGN.md","./kernels/replicad/six-axis-arm/main.geospec.ts","./kernels/replicad/six-axis-arm/main.ts","./kernels/replicad/six-axis-arm/tau.json","./kernels/replicad/spur-gearbox/main.geospec.ts","./kernels/replicad/spur-gearbox/main.ts","./kernels/replicad/spur-gearbox/tau.json","./kernels/replicad/staircase/main.ts","./kernels/replicad/staircase/tau.json","./kernels/replicad/standing-fan/DESIGN.md","./kernels/replicad/standing-fan/main.geospec.ts","./kernels/replicad/standing-fan/main.ts","./kernels/replicad/standing-fan/tau.json","./kernels/replicad/t-slot-rail/main.ts","./kernels/replicad/t-slot-rail/tau.json","./kernels/replicad/table/main.ts","./kernels/replicad/table/tau.json","./kernels/replicad/tray/main.ts","./kernels/replicad/tray/tau.json","./kernels/replicad/turbofan/DESIGN.md","./kernels/replicad/turbofan/layout.ts","./kernels/replicad/turbofan/main.geospec.ts","./kernels/replicad/turbofan/main.ts","./kernels/replicad/turbofan/tau.json","./kernels/replicad/v8-engine/DESIGN.md","./kernels/replicad/v8-engine/layout.ts","./kernels/replicad/v8-engine/main.geospec.ts","./kernels/replicad/v8-engine/main.ts","./kernels/replicad/v8-engine/tau.json","./kernels/replicad/vase/main.ts","./kernels/replicad/vase/tau.json","./kernels/replicad/wavy-vase/main.ts","./kernels/replicad/wavy-vase/tau.json","./kernels/replicad/wedge-door-stopper/main.ts","./kernels/replicad/wedge-door-stopper/tau.json","./kernels/replicad/wheelbarrow/main.geospec.ts","./kernels/replicad/wheelbarrow/main.ts","./kernels/replicad/wheelbarrow/tau.json","./kernels/replicad/worm-gear-system/MANUFACTURING.md","./kernels/replicad/worm-gear-system/main.geospec.ts","./kernels/replicad/worm-gear-system/main.ts","./kernels/replicad/worm-gear-system/tau.json","./kernels/replicad/worm-gear-system/tooth-profile.ts"],
@@ -115,6 +116,8 @@ export type BuiltinExample = {
   readonly kernel: string;
   readonly manifest: ProjectManifest;
   readonly thumbnailUrl?: string;
+  /** The thumbnail drawn for a card shown at twice the usual size, with proportionally thinner edges. */
+  readonly featuredThumbnailUrl?: string;
   readonly assets: readonly BuiltinExampleAsset[];
 };
 
@@ -789,6 +792,7 @@ export const builtinExamples = [
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_tSxwrSBEbOKY0qWkD2VgL","name":"Kestrel 240 Racing Quadcopter","description":"A 5-inch racing quadcopter modelled as a product: NACA-section fuselage shells and swept arm fairings over carbon spars, four motor modules with stators, bells, bearings and handed propellers, a flight-controller and power stack, and a two-axis camera gimbal. 43 part types are placed as 123 named parts. Pitch and yaw drive the gimbal, and GeoSpec checks the whole vehicle for collisions across its travel.","tags":["assembly","aerospace","drone","naca","sysml","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
     thumbnailUrl: thumbnail46,
+    featuredThumbnailUrl: thumbnail47,
     assets: [
       { path: "DESIGN.md", load: loadTextAsset.bind(undefined, "./kernels/replicad/kestrel-240-quadcopter/DESIGN.md") },
       { path: "assemblies/airframe.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/kestrel-240-quadcopter/assemblies/airframe.ts") },
@@ -861,7 +865,7 @@ export const builtinExamples = [
     locator: "replicad.lego",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_PwxF7vbT3RmK6AM7xa8mL","name":"Interlocking Brick","description":"A faithful recreation of the classic interlocking brick system. Features accurate stud placement, hollow underside, and optional bottom tubes for authentic connections. Fully parametric dimensions let you create bricks of any size while maintaining the precise geometry needed for reliable interlocking.","tags":["3d-printing","parametric","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail47,
+    thumbnailUrl: thumbnail48,
     assets: [
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/lego/main.ts") },
       { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/replicad/lego/tau.json") },
@@ -872,7 +876,7 @@ export const builtinExamples = [
     locator: "replicad.planetary-gear-system",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_K56O7izOKVeumWMffxb7J","name":"Planetary Gear System","description":"An open, coaxial 4:1 planetary stage: a fixed 72-tooth ring, a 24-tooth sun on a keyed input shaft and three 24-tooth planets on a twin-plate carrier with stepped pins, bronze bushings, thrust hardware and socket screws. The model declares its mechanism, so the sun, carrier and planets turn together at the true gear ratios, and GeoSpec checks cover the envelope, planet positions and tooth clearance across mesh phases.","tags":["assembly","gears","kinematics","parametric","replicad","manufacturing"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail48,
+    thumbnailUrl: thumbnail49,
     assets: [
       { path: "DESIGN.md", load: loadTextAsset.bind(undefined, "./kernels/replicad/planetary-gear-system/DESIGN.md") },
       { path: "main.geospec.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/planetary-gear-system/main.geospec.ts") },
@@ -885,7 +889,7 @@ export const builtinExamples = [
     locator: "replicad.pot-plant",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_dB6KxezSHEFUv8aX4ibub","name":"Pot Plant","description":"A thoughtfully designed plant pot holder that combines form and function. Features an optional integrated saucer, customizable drainage holes, and smooth filleted edges for easy cleaning. Adjust dimensions to perfectly fit your favorite plants while maintaining proper drainage and a clean, modern aesthetic.","tags":["3d-printing","parametric","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail49,
+    thumbnailUrl: thumbnail50,
     assets: [
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/pot-plant/main.ts") },
       { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/replicad/pot-plant/tau.json") },
@@ -896,7 +900,7 @@ export const builtinExamples = [
     locator: "replicad.simple-tray",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_xEaivK3ZY8tYt2Yc6hn4D","name":"Simple Tray","description":"A practical drawer organizer with customizable compartments. Create the perfect grid layout for your needs with adjustable rows and columns. Features rounded corners, clean shelling, and optional edge fillets for a premium feel. Ideal for organizing tools, office supplies, or any small items that need dedicated spaces.","tags":["3d-printing","parametric","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail50,
+    thumbnailUrl: thumbnail51,
     assets: [
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/simple-tray/main.ts") },
       { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/replicad/simple-tray/tau.json") },
@@ -907,7 +911,7 @@ export const builtinExamples = [
     locator: "replicad.six-axis-arm",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_3MEVtmRsZETjASPwp8gM0","name":"Six-Axis Arm","description":"A compact six-revolute industrial arm with a spherical wrist and a parallel gripper: turned pedestal and turntable, clevis shoulder, windowed twin-plate upper arm, rolling forearm and wrist clevis. The joint angles are parameters that pose the as-built model, and the declared mechanism carries realistic joint limits and a wave clip so the arm can be posed, played and dragged by its tool.","tags":["assembly","kinematics","robotics","parametric","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail51,
+    thumbnailUrl: thumbnail52,
     assets: [
       { path: "DESIGN.md", load: loadTextAsset.bind(undefined, "./kernels/replicad/six-axis-arm/DESIGN.md") },
       { path: "main.geospec.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/six-axis-arm/main.geospec.ts") },
@@ -920,7 +924,7 @@ export const builtinExamples = [
     locator: "replicad.spur-gearbox",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_YAVXDkW5nFezQXg3M2Tl7","name":"Spur Gear Reducer","description":"An 18/54 module-2 pinion and gear at 20° pressure angle on 72 mm centres, in a bolted housing with a lifting inspection cover. Turn the input or isolate any part.","tags":["mechanism","gears","gearbox","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail52,
+    thumbnailUrl: thumbnail53,
     assets: [
       { path: "main.geospec.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/spur-gearbox/main.geospec.ts") },
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/spur-gearbox/main.ts") },
@@ -932,7 +936,7 @@ export const builtinExamples = [
     locator: "replicad.staircase",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_4RHier4pc3fPiLbHATqp9","name":"Staircase","description":"A complete staircase system with steps, stringers, handrails, and balusters—all fully parametric. Built to real-world building code proportions with customizable dimensions, optional features, and proper step geometry. Perfect for architectural visualization, furniture design, or educational demonstrations.","tags":["3d-printing","parametric","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail53,
+    thumbnailUrl: thumbnail54,
     assets: [
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/staircase/main.ts") },
       { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/replicad/staircase/tau.json") },
@@ -943,7 +947,7 @@ export const builtinExamples = [
     locator: "replicad.standing-fan",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_mC8Y8nun527gDz9iKINvY","name":"Standing Fan","description":"A pedestal fan built part by part: weighted base, telescopic column, tilt-and-oscillation yoke, vented motor housing, five swept blades and 36-spoke guards. Change the height, tilt it, swing it ±45° or fit 3–7 blades; GeoSpec checks that the rotor clears the guards through a full revolution.","tags":["consumer-product","assembly","appliance","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail54,
+    thumbnailUrl: thumbnail55,
     assets: [
       { path: "DESIGN.md", load: loadTextAsset.bind(undefined, "./kernels/replicad/standing-fan/DESIGN.md") },
       { path: "main.geospec.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/standing-fan/main.geospec.ts") },
@@ -956,7 +960,7 @@ export const builtinExamples = [
     locator: "replicad.t-slot-rail",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_u8iLpUn39XKwwJ00B49J4","name":"T-Slot Rail","description":"A precise T-slot extrusion profile perfect for modular framing systems. Features accurate interior geometry with proper clearances and scoring details. Customizable rail height and length make it ideal for building custom fixtures, jigs, or furniture that requires the versatility of T-slot construction.","tags":["3d-printing","parametric","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail55,
+    thumbnailUrl: thumbnail56,
     assets: [
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/t-slot-rail/main.ts") },
       { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/replicad/t-slot-rail/tau.json") },
@@ -967,7 +971,7 @@ export const builtinExamples = [
     locator: "replicad.table",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_MGaJc46GJ3f2t9COgF4GR","name":"Table","description":"A complete table system with customizable top, legs, apron, and optional shelf. Choose between square or round legs, adjust proportions for any space, and add optional features like rounded corners or a lower shelf. The parametric design ensures perfect alignment and professional results for any furniture project.","tags":["3d-printing","parametric","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail56,
+    thumbnailUrl: thumbnail57,
     assets: [
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/table/main.ts") },
       { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/replicad/table/tau.json") },
@@ -978,7 +982,7 @@ export const builtinExamples = [
     locator: "replicad.tray",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_Puxz0MZamfmSL0LC8YhiO","name":"Tray","description":"A beautifully sculpted tray with elegant curved edges that elevates everyday items. Perfect for serving coffee, displaying jewelry, or organizing your entryway essentials. The sophisticated swept profile creates visual interest while the raised brim keeps everything secure. Fully customizable proportions let you create the perfect size for your space.","tags":["3d-printing","parametric","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail57,
+    thumbnailUrl: thumbnail58,
     assets: [
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/tray/main.ts") },
       { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/replicad/tray/tau.json") },
@@ -989,7 +993,7 @@ export const builtinExamples = [
     locator: "replicad.turbofan",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_CaIAcPYKNjKQ7026Sp7hD","name":"Turbofan Engine","description":"A two-spool, high-bypass turbofan at CFM56 scale: inlet, 22-blade fan, outlet guide vanes, three-stage booster, six-stage HP compressor with variable guide vanes, annular combustor with 20 fuel nozzles, two-stage HP and four-stage LP turbines, plug and nozzles, a radial drive to the accessory gearbox, and a translating-sleeve cascade thrust reverser. Its mechanism turns both spools and the radial drive, schedules the variable vanes from their unison rings, and deploys the reverser, whose blocker doors and drag links follow the exact linkage through sampled curve couplings.","tags":["assembly","kinematics","aerospace","engine","parametric","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail58,
+    thumbnailUrl: thumbnail59,
     assets: [
       { path: "DESIGN.md", load: loadTextAsset.bind(undefined, "./kernels/replicad/turbofan/DESIGN.md") },
       { path: "layout.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/turbofan/layout.ts") },
@@ -1003,7 +1007,7 @@ export const builtinExamples = [
     locator: "replicad.v8-engine",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_4w9wTW4GJbpzweI6qnOwK","name":"V8 Engine","description":"A complete 90° pushrod V8 with a cross-plane crank and the 1-8-4-3-6-5-7-2 firing order: block, crank, pistons and rods, a valley camshaft driving flat-tappet lifters, pushrods, stud rockers and valves, heads, manifolds, timing drive and dress. Every repeated part is modelled once and instanced. Its mechanism drives all 64 moving parts from the crank through sampled curve couplings, so the engine can be turned, played through a full four-stroke cycle or dragged by any piston.","tags":["assembly","kinematics","automotive","engine","parametric","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail59,
+    thumbnailUrl: thumbnail60,
     assets: [
       { path: "DESIGN.md", load: loadTextAsset.bind(undefined, "./kernels/replicad/v8-engine/DESIGN.md") },
       { path: "layout.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/v8-engine/layout.ts") },
@@ -1017,7 +1021,7 @@ export const builtinExamples = [
     locator: "replicad.vase",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_1VjdguUg32d0rHEiZMFto","name":"Vase","description":"A graceful, timeless vase design created through revolution of a carefully crafted profile. Adjustable wall thickness and elegant curves allow you to create everything from delicate bud vases to substantial statement pieces. Optional top fillets add refinement while maintaining the classic silhouette.","tags":["3d-printing","parametric","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail60,
+    thumbnailUrl: thumbnail61,
     assets: [
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/vase/main.ts") },
       { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/replicad/vase/tau.json") },
@@ -1028,7 +1032,7 @@ export const builtinExamples = [
     locator: "replicad.wavy-vase",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_1LAOVYHh7fBvACWzn41Uk","name":"Wavy Vase","description":"A bold, sculptural vase featuring dynamic twisted geometry and rhythmic faceting. The parametric design lets you control the number of sides, twist angle, and wall thickness to create unique light-catching forms. Perfect for making a statement piece that combines mathematical precision with artistic expression.","tags":["3d-printing","parametric","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail61,
+    thumbnailUrl: thumbnail62,
     assets: [
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/wavy-vase/main.ts") },
       { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/replicad/wavy-vase/tau.json") },
@@ -1039,7 +1043,7 @@ export const builtinExamples = [
     locator: "replicad.wedge-door-stopper",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_cDWerB7Efbatf8cJ6eGKu","name":"Wedge Door Stopper","description":"A hollow, printable wedge door stopper with rounded front and back profiles, a solid nose, and concentric underside grip ridges.","tags":["3d-printing","parametric","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail62,
+    thumbnailUrl: thumbnail63,
     assets: [
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/wedge-door-stopper/main.ts") },
       { path: "tau.json", load: loadTextAsset.bind(undefined, "./kernels/replicad/wedge-door-stopper/tau.json") },
@@ -1050,7 +1054,7 @@ export const builtinExamples = [
     locator: "replicad.wheelbarrow",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_ny7BpKTO8XhJjRCYLgDSo","name":"Wheelbarrow","description":"A lofted steel tray, a bent tubular frame and a pneumatic wheel on its axle. Resize the tray or pull out any part.","tags":["consumer-product","assembly","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail63,
+    thumbnailUrl: thumbnail64,
     assets: [
       { path: "main.geospec.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/wheelbarrow/main.geospec.ts") },
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/wheelbarrow/main.ts") },
@@ -1062,7 +1066,7 @@ export const builtinExamples = [
     locator: "replicad.worm-gear-system",
     kernel: "replicad",
     manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_AI8JPdNx5sVGrywnIlDRy","name":"Worm Gear System","description":"A 30:1 single-start worm and bronze wheel on a bolted base with drilled supports and bearings. The worm is cut from a turned blank with a helical groove, the wheel is generated by the matching hob envelope, and the assembly ships with a manufacturing specification and GeoSpec checks for clearance and mesh positions.","tags":["assembly","gears","kinematics","parametric","replicad","manufacturing"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
-    thumbnailUrl: thumbnail64,
+    thumbnailUrl: thumbnail65,
     assets: [
       { path: "MANUFACTURING.md", load: loadTextAsset.bind(undefined, "./kernels/replicad/worm-gear-system/MANUFACTURING.md") },
       { path: "main.geospec.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/worm-gear-system/main.geospec.ts") },

@@ -43,11 +43,17 @@ const editorSend = vi.fn();
 const projectSend = vi.fn();
 const connectRemote = vi.fn(async () => undefined);
 const connectorReleases: Array<ReturnType<typeof vi.fn>> = [];
-const publishProjectHostConnector = vi.fn((_projectId: string, _connector: (chatId: string) => Promise<unknown>) => {
-  const release = vi.fn();
-  connectorReleases.push(release);
-  return release;
-});
+const publishProjectHostConnector = vi.fn(
+  (
+    _projectId: string,
+    _connector: (chatId: string) => Promise<unknown>,
+    _stoppability: (chatId: string) => Promise<unknown>,
+  ) => {
+    const release = vi.fn();
+    connectorReleases.push(release);
+    return release;
+  },
+);
 const browserClientOptions: unknown[] = [];
 const daemonClientTransports: unknown[] = [];
 const cancelProjectedRun = vi.fn(async () => undefined);
@@ -82,6 +88,7 @@ vi.mock('#services/agent-host-client.js', async (importOriginal) => ({
     daemonClientTransports.push(transport);
     return { close: async () => undefined };
   },
+  readBrowserRunStoppability: async () => 'stoppable',
 }));
 vi.mock('#services/daemon-agent-host-client.js', () => ({
   createDaemonAgentHostTransport: (dial: unknown) => ({ dial }),
@@ -455,19 +462,24 @@ describe('project route session identity', () => {
     await screen.findAllByTestId('project-session');
     const session = sessionsActor.getSnapshot().context.refs[projectA];
     expect(session).toBeDefined();
-    session?.send({ type: 'runStarted', chatId: 'chat-unseen' });
+    session?.send({
+      type: 'projectedRunsChanged',
+      runs: ['chat-unseen', 'chat-other-build'],
+      stoppableRuns: ['chat-unseen'],
+    });
     session?.send({ type: 'close', reason: 'user' });
     session?.send({ type: 'confirmClose' });
     await waitFor(() => {
       expect(cancelProjectedRun).toHaveBeenCalledWith('chat-unseen');
     });
+    expect(cancelProjectedRun).not.toHaveBeenCalledWith('chat-other-build');
   });
   it('retains one project connector when focus moves to another live project', async () => {
     fileManagerReady = true;
     getProjectRouteAccess.mockImplementation(async (id) => ready(id));
     const { Provider, view } = renderRouteProvider();
     await screen.findAllByTestId('project-session');
-    expect(publishProjectHostConnector).toHaveBeenCalledWith(projectA, expect.any(Function));
+    expect(publishProjectHostConnector).toHaveBeenCalledWith(projectA, expect.any(Function), expect.any(Function));
 
     currentProjectId = projectB;
     view.rerender(<Provider>content</Provider>);
@@ -490,7 +502,7 @@ describe('project route session identity', () => {
     getProjectRouteAccess.mockImplementation(async (id) => ready(id));
     const { view } = renderRouteProvider();
     await waitFor(() => {
-      expect(publishProjectHostConnector).toHaveBeenCalledWith(projectA, expect.any(Function));
+      expect(publishProjectHostConnector).toHaveBeenCalledWith(projectA, expect.any(Function), expect.any(Function));
     });
     const connector = publishProjectHostConnector.mock.calls[0]?.[1] as (chatId: string) => Promise<unknown>;
 

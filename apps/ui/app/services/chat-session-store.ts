@@ -395,13 +395,25 @@ type ObservedChat = {
   attempts: number;
 };
 
+/** The run IDs a Close prompt can truthfully promise to stop, and the work it cannot. @public */
+export type ProjectClosePlan = Readonly<{
+  stoppableRunCount: number;
+  stoppableChatIds: readonly string[];
+  liveChatIds: readonly string[];
+  continuingRuns: ReadonlyArray<Readonly<{ id: string; label: string; reason: 'other-build' | 'background-window' }>>;
+}>;
+
+type ProjectHostConnector = Readonly<{
+  connect: (chatId: string) => Promise<Pick<AgentHostClient, 'read' | 'subscribe' | 'hostCommand' | 'close'>>;
+  stoppability?: (chatId: string) => Promise<'stoppable' | 'other-build' | 'background-window'>;
+}>;
+
 export class ChatSessionStore {
   readonly #sessions = new Map<string, InternalSession>();
   readonly #observed = new Map<string, ObservedChat>();
-  readonly #projectHostConnectors = new Map<
-    string,
-    (chatId: string) => Promise<Pick<AgentHostClient, 'read' | 'subscribe' | 'hostCommand' | 'close'>>
-  >();
+  readonly #projectHostConnectors = new Map<string, ProjectHostConnector>();
+  readonly #projectRunKeys = new Map<string, string>();
+  readonly #projectRunVersions = new Map<string, number>();
   readonly #chatSessionLogic: typeof chatSessionMachine;
   readonly #rootOptions: Pick<ActorOptions<AnyActorLogic>, 'clock' | 'inspect' | 'onRejectedEvent'>;
   /** The last revision facts each project reported, replayed to a chat root created after them. */
@@ -562,6 +574,7 @@ export class ChatSessionStore {
       this.#stopObservedAttachment(observed);
       this.#observed.delete(chatId);
       this.#notifyMembership();
+      this.#refreshProjectRuns(projectId);
     };
   }
 
@@ -573,9 +586,13 @@ export class ChatSessionStore {
   /** Publish the active project's real W6 connector to every listed chat. @public */
   public publishProjectHostConnector(
     projectId: string,
-    connector: (chatId: string) => Promise<Pick<AgentHostClient, 'read' | 'subscribe' | 'hostCommand' | 'close'>>,
+    connect: ProjectHostConnector['connect'],
+    stoppability?: ProjectHostConnector['stoppability'],
   ): () => void {
+    const connector = { connect, stoppability };
     this.#projectHostConnectors.set(projectId, connector);
+    this.#projectRunKeys.delete(projectId);
+    this.#refreshProjectRuns(projectId);
     for (const [chatId, observed] of this.#observed) {
       if (observed.projectId !== projectId) {
         continue;
@@ -589,6 +606,8 @@ export class ChatSessionStore {
         return;
       }
       this.#projectHostConnectors.delete(projectId);
+      this.#projectRunKeys.delete(projectId);
+      this.#refreshProjectRuns(projectId);
       for (const observed of this.#observed.values()) {
         if (observed.projectId === projectId) {
           this.#stopObservedAttachment(observed);
@@ -634,7 +653,7 @@ export class ChatSessionStore {
       commandId: generatePrefixedId(idPrefix.request),
       payload: { chatId, runId: run.runId },
     };
-    const answer = await sendHostCommand(async () => connector(chatId), command);
+    const answer = await sendHostCommand(async () => connector.connect(chatId), command);
     if (answer.status === 'refused') {
       if (
         answer.code === 'LEADER_VERSION_MISMATCH' ||
@@ -646,6 +665,62 @@ export class ChatSessionStore {
       throw new Error(`Host cancel refused ${answer.code}: ${answer.message}`);
     }
     return 'stopped';
+  }
+
+  /** Classify every observed live run before Close asks, without sending a command or taking a lock. @public */
+  public async getProjectClosePlan(projectId: string): Promise<ProjectClosePlan> {
+    const version = (this.#projectRunVersions.get(projectId) ?? 0) + 1;
+    this.#projectRunVersions.set(projectId, version);
+    const connector = this.#projectHostConnectors.get(projectId);
+    const entries = await Promise.all(
+      this.observedChatIdsOf(projectId).map(async (chatId) => {
+        const projection = this.#projectionContext(chatId);
+        if (projection === undefined || !selectCaughtUp(projection) || !opensRun(selectRunPhase(projection))) {
+          return undefined;
+        }
+        const run = selectCurrentRun(projection);
+        if (run === undefined) {
+          return undefined;
+        }
+        const reason =
+          run.opaque || projection.ledger.newerHistory
+            ? 'other-build'
+            : await connector?.stoppability?.(chatId).catch(() => 'background-window' as const);
+        const current = this.#projectionContext(chatId);
+        if (
+          current === undefined ||
+          !selectCaughtUp(current) ||
+          !opensRun(selectRunPhase(current)) ||
+          selectCurrentRun(current)?.runId !== run.runId
+        ) {
+          return undefined;
+        }
+        if (reason === 'stoppable') {
+          return { chatId, runId: run.runId, reason };
+        }
+        const chat = await this.#deps.getChat(chatId).catch(() => undefined);
+        return {
+          chatId,
+          runId: run.runId,
+          reason: reason ?? 'background-window',
+          label: chat?.name || `Chat ${chatId}`,
+        };
+      }),
+    );
+    const live = entries.filter((entry) => entry !== undefined);
+    const stoppable = live.filter((entry) => entry.reason === 'stoppable');
+    const plan = {
+      stoppableRunCount: stoppable.length,
+      stoppableChatIds: stoppable.map((entry) => entry.chatId),
+      liveChatIds: live.map((entry) => entry.chatId),
+      continuingRuns: live.flatMap((entry) =>
+        entry.reason === 'stoppable' ? [] : [{ id: entry.runId, label: entry.label, reason: entry.reason }],
+      ),
+    };
+    if (this.#projectRunVersions.get(projectId) === version) {
+      this.#publishProjectRunPlan(projectId, plan);
+    }
+    return plan;
   }
 
   /** Replace an idle live transcript with the chat log just projected from Git. */
@@ -1001,14 +1076,8 @@ export class ChatSessionStore {
       this.#settlementUnsubscribe ??= subscribeHostTurnSettlements((event) => {
         this.#observeHostTurnSettlement(event);
       });
-      for (const session of this.#sessions.values()) {
-        if (session.projectId === projectId) {
-          this.#countRun(session);
-        }
-      }
-      for (const chatId of this.observedChatIdsOf(projectId)) {
-        this.#countProjectedRun(chatId, projectId);
-      }
+      this.#projectRunKeys.delete(projectId);
+      this.#refreshProjectRuns(projectId);
     }
     if (this.#projectSessions.size === 0) {
       this.#settlementUnsubscribe?.();
@@ -1298,7 +1367,7 @@ export class ChatSessionStore {
     const attachment = createActor(hostAttachment, {
       input: {
         chatId,
-        connect: async () => connector(chatId),
+        connect: async () => connector.connect(chatId),
         projection: this.#projectionOf(chatId),
         onStatus: (event) => {
           if (observed.attachment !== attachment) {
@@ -1602,7 +1671,7 @@ export class ChatSessionStore {
     const projection = this.#projectionContext(chatId);
     const projectId = session?.projectId ?? this.#observed.get(chatId)?.projectId;
     if (projectId !== undefined) {
-      this.#countProjectedRun(chatId, projectId);
+      this.#refreshProjectRuns(projectId);
     }
     if (session === undefined || projection === undefined) {
       return;
@@ -1636,27 +1705,44 @@ export class ChatSessionStore {
     });
   }
 
-  /**
-   * Keep the chat's project counting its run exactly while the log says the run is open (I24, A35). The project
-   * session's own `runs` is the comparison, so the page keeps no copy of what it told it. It reports to the chat's own
-   * project, wherever the person is now.
-   *
-   * @param session - The chat.
-   */
-  #countRun(session: InternalSession): void {
-    this.#countProjectedRun(session.chatId, session.projectId);
-  }
-
-  #countProjectedRun(chatId: string, projectId: string): void {
+  /** Refresh one project's run snapshot only when its projected run identities or classifications moved. */
+  #refreshProjectRuns(projectId: string): void {
     const owner = this.#projectSessions.get(projectId);
-    const projection = this.#projectionContext(chatId);
-    if (owner === undefined || projection === undefined || !selectCaughtUp(projection)) {
+    if (owner === undefined) {
       return;
     }
-    const open = opensRun(selectRunPhase(projection));
-    if (open !== owner.getSnapshot().context.runs.includes(chatId)) {
-      owner.send({ type: open ? 'runStarted' : 'runSettled', chatId });
+    const key = this.observedChatIdsOf(projectId)
+      .map((chatId) => {
+        const projection = this.#projectionContext(chatId);
+        const run = projection === undefined || !selectCaughtUp(projection) ? undefined : selectCurrentRun(projection);
+        return [chatId, run?.runId, run?.lifecycle, run?.opaque, projection?.ledger.newerHistory].join(':');
+      })
+      .join('|');
+    if (this.#projectRunKeys.get(projectId) === key) {
+      return;
     }
+    this.#projectRunKeys.set(projectId, key);
+    void this.getProjectClosePlan(projectId).catch((error: unknown) => {
+      console.warn('[ChatSessionStore] project run classification failed', projectId, error);
+    });
+  }
+
+  #publishProjectRunPlan(projectId: string, plan: ProjectClosePlan): void {
+    const owner = this.#projectSessions.get(projectId);
+    if (owner === undefined) {
+      return;
+    }
+    const { runs } = owner.getSnapshot().context;
+    const stoppableRuns = owner.getSnapshot().context.stoppableRuns ?? [];
+    if (
+      runs.length === plan.liveChatIds.length &&
+      runs.every((chatId, index) => chatId === plan.liveChatIds[index]) &&
+      stoppableRuns.length === plan.stoppableChatIds.length &&
+      stoppableRuns.every((chatId, index) => chatId === plan.stoppableChatIds[index])
+    ) {
+      return;
+    }
+    owner.send({ type: 'projectedRunsChanged', runs: plan.liveChatIds, stoppableRuns: plan.stoppableChatIds });
   }
 
   /**
@@ -1838,11 +1924,6 @@ export class ChatSessionStore {
         this.#composerDrains.delete(session.chatId);
       }
     }
-  }
-
-  /** The project session that owns this chat's run accounting (R2). */
-  #sessionOwner(session: InternalSession): ProjectSessionActorRef | undefined {
-    return this.#projectSessions.get(session.projectId);
   }
 
   #createSession(chatId: string, projectId: string): InternalSession {
@@ -2728,11 +2809,6 @@ export class ChatSessionStore {
     const drained = Promise.withResolvers<void>();
     this.#composerDrains.set(session.chatId, drained.promise);
     void this.#drainComposer(session, drained);
-    /* The store owns the chat's root. A run it was still counting stops counting with it. */
-    const owner = this.#sessionOwner(session);
-    if (owner?.getSnapshot().context.runs.includes(session.chatId) === true) {
-      owner.send({ type: 'runSettled', chatId: session.chatId });
-    }
     session.chatRoot.stop();
     this.#sessions.delete(session.chatId);
     clearChatTurnServices(session.chatId);

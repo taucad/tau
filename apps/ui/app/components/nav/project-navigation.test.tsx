@@ -118,7 +118,7 @@ vi.mock('#components/inline-text-editor.js', () => ({
     </div>
   ),
 }));
-vi.mock('#components/ui/sonner.js', () => ({ toast: { success: vi.fn() } }));
+vi.mock('#components/ui/sonner.js', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 vi.mock('@taucad/ui/components/alert-dialog', () => ({
   AlertDialog: ({ children, ...properties }: { readonly children: ReactNode } & Record<string, unknown>) =>
     properties['open'] === false ? null : <div role='dialog'>{children}</div>,
@@ -140,6 +140,7 @@ vi.mock('@taucad/ui/components/alert-dialog', () => ({
 const mockRow = vi.fn();
 const mockLiveNow = vi.fn();
 const mockCloseProject = vi.fn();
+const mockGetProjectClosePlan = vi.fn();
 let liveProjectIds: readonly string[] = [];
 vi.mock('#hooks/use-sessions.js', () => ({
   useLiveProjectIds: () => liveProjectIds,
@@ -154,6 +155,9 @@ vi.mock('#hooks/use-sidebar-status.js', async (importOriginal) => {
     useSidebarCommands: () => ({ closeProject: mockCloseProject, closeChat: vi.fn(), openProject: vi.fn() }),
   };
 });
+vi.mock('#hooks/chat-session-store-provider.js', () => ({
+  useChatSessionStore: () => ({ getProjectClosePlan: mockGetProjectClosePlan }),
+}));
 
 const closedRow = (projectId: string): SidebarStatusModule.ProjectSidebarRow => ({
   projectId,
@@ -212,6 +216,12 @@ describe('ProjectNavigation', () => {
     liveProjectIds = [];
     mockRow.mockImplementation((projectId: string) => closedRow(projectId));
     mockLiveNow.mockReturnValue({ projects: 0, idleProjectIds: [] });
+    mockGetProjectClosePlan.mockResolvedValue({
+      stoppableRunCount: 0,
+      stoppableChatIds: [],
+      liveChatIds: [],
+      continuingRuns: [],
+    });
   });
 
   it('renders one Projects group with every project in deterministic activity order', () => {
@@ -443,7 +453,7 @@ describe('ProjectNavigation', () => {
 
   /* Pin (f): the dialog is the question, and it is asked only when there is
    * something to interrupt (I24). */
-  it('closes an idle project outright and asks before closing one with running work', () => {
+  it('closes an idle project outright and asks before closing one with running work', async () => {
     liveProjectIds = ['proj_one', 'proj_two'];
     mockRow.mockImplementation((projectId: string) => ({
       ...closedRow(projectId),
@@ -457,10 +467,35 @@ describe('ProjectNavigation', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Close Two' }));
-    expect(screen.getByRole('heading', { name: 'Close Two?' })).toBeInTheDocument();
-    expect(screen.getByText(/Runs in another version of Tau or a background window may continue/)).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Close Two?' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
     expect(mockCloseProject).toHaveBeenLastCalledWith('proj_two');
+  });
+
+  it('asks with the projected unseen-chat close plan before promising any stop', async () => {
+    liveProjectIds = ['proj_two'];
+    mockRow.mockImplementation((projectId: string) => ({
+      ...closedRow(projectId),
+      glyph: projectId === 'proj_two' ? 'busy' : 'none',
+      runs: projectId === 'proj_two' ? 3 : 0,
+    }));
+    mockGetProjectClosePlan.mockResolvedValue({
+      stoppableRunCount: 1,
+      stoppableChatIds: ['chat-unseen'],
+      liveChatIds: ['chat-unseen', 'chat-foreign', 'chat-background'],
+      continuingRuns: [
+        { id: 'run-foreign', label: 'Foreign chat', reason: 'other-build' },
+        { id: 'run-background', label: 'Background chat', reason: 'background-window' },
+      ],
+    });
+    render(<ProjectNavigation />);
+    fireEvent.click(screen.getByRole('button', { name: 'Close Two' }));
+    expect(await screen.findByRole('heading', { name: 'Stop 1 run and close Two?' })).toBeInTheDocument();
+    expect(screen.getByText(/Foreign chat.*another version of Tau/)).toBeInTheDocument();
+    expect(screen.getByText(/Background chat.*background/)).toBeInTheDocument();
+    expect(mockGetProjectClosePlan).toHaveBeenCalledWith('proj_two');
+    fireEvent.click(screen.getByRole('button', { name: 'Stop and close' }));
+    expect(mockCloseProject).toHaveBeenCalledWith('proj_two');
   });
 
   it('asks before trashing a project with running work', async () => {
@@ -474,7 +509,7 @@ describe('ProjectNavigation', () => {
     fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[0]!);
 
     expect(projectsResult.deleteProject).not.toHaveBeenCalled();
-    expect(screen.getByRole('heading', { name: 'Close Two?' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Close Two?' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
     await waitFor(() => {

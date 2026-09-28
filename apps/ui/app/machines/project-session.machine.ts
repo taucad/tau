@@ -51,6 +51,8 @@ export type ProjectSessionMachineContext = Readonly<{
   closeFlushMilliseconds: number;
   /** Chats with a run in flight. `busy` is `runs.length > 0`. */
   runs: readonly string[];
+  /** Subset this window can stop, from the same projected close plan the dialog reads. */
+  stoppableRuns: readonly string[];
   /** The live checkout has unsaved changes (A25 — a policy never closes it). */
   dirty: boolean;
   /** Everything this device recorded has been acknowledged by the remote. */
@@ -85,8 +87,11 @@ export type ProjectSessionMachineEvent =
   | { readonly type: 'cancelClose' }
   | { readonly type: 'childReady'; readonly region: ProjectSessionRegion }
   | { readonly type: 'childFailed'; readonly region: ProjectSessionRegion; readonly reason: string }
-  | { readonly type: 'runStarted'; readonly chatId: string }
-  | { readonly type: 'runSettled'; readonly chatId: string }
+  | {
+      readonly type: 'projectedRunsChanged';
+      readonly runs: readonly string[];
+      readonly stoppableRuns: readonly string[];
+    }
   | { readonly type: 'activity' }
   | {
       readonly type: 'visibilityChanged';
@@ -272,9 +277,6 @@ const recordCloseFailure = (context: ProjectSessionMachineContext, error: unknow
   failures: { ...context.failures, close: error instanceof Error ? error.message : 'failed' },
 });
 
-const withoutRun = (context: ProjectSessionMachineContext, chatId: string): readonly string[] =>
-  context.runs.filter((id) => id !== chatId);
-
 /* I23: every project-scoped resource dies with the session. */
 const stopChildren = (context: ProjectSessionMachineContext, enq: ProjectSessionEnqueue) => {
   for (const ref of [context.fileManagerRef, context.projectRef, context.agentHostRef, context.computeRef]) {
@@ -408,6 +410,7 @@ export const projectSessionMachine = setup({
     startBoundMilliseconds: input.startBoundMilliseconds ?? projectSessionStartBoundMilliseconds,
     closeFlushMilliseconds: input.closeFlushMilliseconds ?? projectSessionCloseFlushMilliseconds,
     runs: [],
+    stoppableRuns: [],
     dirty: false,
     pushed: true,
     visible: false,
@@ -470,15 +473,9 @@ export const projectSessionMachine = setup({
         : {},
     /* Counted in every state, so a run that starts while the project opens or closes still keeps it busy (I24);
      * `live` also moves between `idle` and `busy`. */
-    runStarted: ({ context, event }, enq) => {
-      const runs = context.runs.includes(event.chatId) ? context.runs : [...context.runs, event.chatId];
-      reportFacts({ ...context, runs }, enq);
-      return { context: { runs } };
-    },
-    runSettled: ({ context, event }, enq) => {
-      const runs = withoutRun(context, event.chatId);
-      reportFacts({ ...context, runs }, enq);
-      return { context: { runs } };
+    projectedRunsChanged: ({ context, event }, enq) => {
+      reportFacts({ ...context, runs: event.runs }, enq);
+      return { context: { runs: event.runs, stoppableRuns: event.stoppableRuns } };
     },
     visibilityChanged: {
       context: ({ context, event }) => ({ visible: event.visible, focused: event.focused ?? context.focused }),
@@ -517,17 +514,15 @@ export const projectSessionMachine = setup({
       entry: ({ context }, enq) => ({ context: reportState(context, enq, 'live') }),
       initial: 'idle',
       on: {
-        runStarted: ({ context, event }, enq) => {
-          const runs = context.runs.includes(event.chatId) ? context.runs : [...context.runs, event.chatId];
+        projectedRunsChanged: ({ context, event }, enq) => {
+          const runs = event.runs;
           reportFacts({ ...context, runs }, enq);
           /* R3: a run needs the kernel back whether or not anyone is looking. */
-          signalRuntime(context, enq, false);
-          return { target: '.busy', context: { runs } };
-        },
-        runSettled: ({ context, event }, enq) => {
-          const runs = withoutRun(context, event.chatId);
-          reportFacts({ ...context, runs }, enq);
-          return runs.length === 0 ? { target: '.idle', context: { runs } } : { context: { runs } };
+          if (runs.length > 0) {
+            signalRuntime(context, enq, false);
+          }
+          const patch = { runs, stoppableRuns: event.stoppableRuns };
+          return runs.length === 0 ? { target: '.idle', context: patch } : { target: '.busy', context: patch };
         },
       },
       states: {
@@ -612,7 +607,7 @@ export const projectSessionMachine = setup({
         cancellingRuns: {
           invoke: {
             src: 'cancelRuns',
-            input: ({ context }) => ({ projectId: context.projectId, runs: context.runs }),
+            input: ({ context }) => ({ projectId: context.projectId, runs: context.stoppableRuns }),
             onDone: { target: 'flushingProducers' },
             onError: closeFailed,
           },

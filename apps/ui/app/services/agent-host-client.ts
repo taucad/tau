@@ -764,6 +764,8 @@ export type ResidentAgentWorker = Readonly<{
    */
   connect: (projectId: string, closed?: () => boolean) => Promise<MessagePort>;
   capabilities: (durability: StorageDurabilityClass) => Promise<BrowserAgentHostCapability>;
+  /** Inspect an already-open project's leadership actor, without booting a worker or taking a lock. */
+  stoppability: (projectId: string, chatId: string) => Promise<'stoppable' | 'other-build' | 'background-window'>;
   /**
    * Count one client of a project and remember its latest bridges and defaults. The returned release, called once,
    * sends `release` for the project's host when it was the last client (T3, RH-R4).
@@ -1117,6 +1119,14 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
       const live = await incarnation();
       return live.channel.call('capabilities', { durability });
     },
+    stoppability: async (projectId, chatId) => {
+      const live = current;
+      if (live === undefined || live.dead) {
+        return 'background-window';
+      }
+      await live.ready;
+      return live.channel.call('runStoppability', { projectId, chatId });
+    },
     reprovide: async () => {
       const live = current;
       if (live === undefined || live.dead) {
@@ -1160,6 +1170,12 @@ export const residentAgentWorker = (createWorker: () => Worker = createBrowserAg
  * @returns Once every open project host was answered.
  */
 export const reprovideAgentHostProjects = async (): Promise<void> => residentAgentWorker().reprovide();
+
+/** Inspect an existing browser host's chat leadership for a truthful pre-close prompt. @public */
+export const readBrowserRunStoppability = async (
+  projectId: string,
+  chatId: string,
+): Promise<'stoppable' | 'other-build' | 'background-window'> => residentAgentWorker().stoppability(projectId, chatId);
 
 /**
  * The resident-worker transport: one stream on the project's host per client, over the agent channel client, whose

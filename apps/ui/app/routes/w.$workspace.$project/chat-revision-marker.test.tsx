@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { act, render, screen, fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 import { ChatRevisionMarker } from '#routes/w.$workspace.$project/chat-revision-marker.js';
@@ -9,6 +9,8 @@ import { useRestoreToPoint } from '#hooks/use-restore-to-point.js';
 import { useChatSidebarStatus } from '#hooks/use-sidebar-status.js';
 import type { ChatSidebarStatus } from '#hooks/use-sidebar-status.js';
 import { requestRevisionReveal } from '#routes/w.$workspace.$project/revision-reveal.js';
+import { initialChatProjection, reduceChatProjection } from '#machines/chat-projection.logic.js';
+import { lifecycleRow, logRow } from '#machines/chat-projection.fixture.js';
 
 const chatState = vi.hoisted(() => ({
   messagesById: new Map<string, { role: string }>([
@@ -23,8 +25,8 @@ const retry = vi.hoisted(() => ({ retryAttempt: 0, retryMaxAttempts: 5 }));
 const continueChat = vi.hoisted(() => vi.fn());
 const openPanel = vi.hoisted(() => vi.fn());
 const restore = vi.hoisted(() => vi.fn());
-/* `run` is the host's live run for the chat, with the placement its `running` row stated (W8 TS-S5). */
-const host = vi.hoisted(() => ({ settlement: undefined as unknown, run: undefined as unknown }));
+/* The chat's projection of its log, as the store serves it (PV-S9). */
+const chatLog = vi.hoisted(() => ({ projection: undefined as unknown, listeners: new Set<() => void>() }));
 
 vi.mock('#hooks/use-chat.js', () => ({
   useChatContext: () => ({ activeChatId: 'chat-1' }),
@@ -46,16 +48,18 @@ vi.mock('#hooks/use-revision-status.js', async () => {
   return harness.revisionStatusMock();
 });
 vi.mock('#hooks/use-sidebar-status.js', () => ({ useChatSidebarStatus: vi.fn() }));
-vi.mock('#routes/w.$workspace.$project/revision-outcomes.js', () => ({ useTurnOutcomes: () => [] }));
+vi.mock('#hooks/chat-session-store-provider.js', () => ({
+  useChatSessionStore: () => ({
+    getProjection: () => chatLog.projection,
+    subscribeProjection: (_chatId: string, listener: () => void) => {
+      chatLog.listeners.add(listener);
+      return () => chatLog.listeners.delete(listener);
+    },
+  }),
+}));
 vi.mock('#routes/w.$workspace.$project/revision-reveal.js', () => ({ requestRevisionReveal: vi.fn() }));
 vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
   useProjectWorkspace: () => ({ openPanel }),
-}));
-vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', () => ({
-  getHostTurnSettlement: () => host.settlement,
-  subscribeHostTurnSettlements: () => () => undefined,
-  getBrowserAgentHostRun: () => host.run,
-  subscribeBrowserAgentHostRuns: () => () => undefined,
 }));
 vi.mock('#components/files/file-link.js', () => ({
   FileLink: ({ children }: { readonly children: React.ReactNode }) => <span>{children}</span>,
@@ -72,6 +76,44 @@ const revision = (over: Partial<RevisionCard> = {}): RevisionCard => ({
   trigger: 'turn',
   ...over,
 });
+
+/** The chat's log, read to its end, as the store's projection holds it. */
+const setLog = (rows: readonly unknown[]): void => {
+  chatLog.projection = reduceChatProjection(initialChatProjection, {
+    type: 'batch',
+    answer: { status: 'batch', cursor: 0, nextCursor: rows.length, endCursor: rows.length, events: rows },
+  }).state;
+  act(() => {
+    for (const listener of chatLog.listeners) {
+      listener();
+    }
+  });
+};
+
+/** Turn `u1`'s run, admitted and running on the base its placement names. */
+const placed = (baseRevisionId = 'rev-4'): unknown[] => [
+  lifecycleRow(0, 'admitted'),
+  logRow(1, { type: 'message.appended', message: { id: 'u1', role: 'user', content: 'Wider holes' } }),
+  logRow(2, {
+    type: 'run.lifecycle',
+    state: 'running',
+    attempt: 1,
+    placement: { checkoutId: 'live', mode: 'direct', baseRevisionId },
+  }),
+];
+
+const settlementRow = (sequence: number, fields: Readonly<Record<string, unknown>>): unknown =>
+  logRow(sequence, {
+    type: 'turn.finalized',
+    turnId: 'u1',
+    chatId: 'chat-1',
+    projectId: 'p',
+    changedPaths: [],
+    trigger: 'turn',
+    runIds: ['run_1'],
+    attempt: 1,
+    ...fields,
+  });
 
 const setRevisions = (view: Partial<RevisionsView>): void => {
   const byTurnId = view.byTurnId ?? new Map<string, RevisionCard>();
@@ -102,8 +144,8 @@ beforeEach(() => {
   chatState.error = undefined;
   chatState.persistedError = undefined;
   retry.retryAttempt = 0;
-  host.settlement = undefined;
-  host.run = undefined;
+  chatLog.projection = undefined;
+  chatLog.listeners.clear();
   setRun(undefined);
   setRevisions({});
   vi.mocked(useRevisionCards).mockReturnValue(new Map());
@@ -127,9 +169,7 @@ describe('ChatRevisionMarker', () => {
   });
 
   it('should render nothing when the host confirms the request changed no files', () => {
-    host.settlement = { type: 'turn.finalized', turnId: 'u1', chatId: 'chat-1', changedPaths: [] };
-    host.run = { placement: { baseRevisionId: 'rev-4' } };
-    setRun('done');
+    setLog([...placed(), lifecycleRow(3, 'completed'), settlementRow(4, {})]);
     const { container } = render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
     expect(container.firstChild).toBeNull();
   });
@@ -182,7 +222,7 @@ describe('ChatRevisionMarker', () => {
     expect(document.querySelector('[data-slot="marker-glyph"]')?.getAttribute('class')).toContain('lucide-history');
     unmount();
 
-    host.run = { placement: { baseRevisionId: 'rev-4' } };
+    setLog(placed());
     setRevisions({ revisions: [revision({ revisionId: 'rev-4', n: 4, turnId: undefined })] });
     chatState.persistedError = { category: 'generic', title: 'Error', message: 'Network error', code: 'ERR' };
     render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
@@ -214,10 +254,8 @@ describe('ChatRevisionMarker', () => {
   });
 
   it('should show the confirmed starting revision while work runs', () => {
-    host.run = { placement: { baseRevisionId: 'rev-4' } };
+    setLog(placed());
     setRevisions({ revisions: [revision({ revisionId: 'rev-4', n: 4, turnId: undefined })] });
-    setRun('working');
-    chatState.status = 'streaming';
     render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
     const status = screen.getByRole('status');
     expect(status.textContent).toBe('Starting from Rev 4');
@@ -226,15 +264,13 @@ describe('ChatRevisionMarker', () => {
 
   /* B2: the base a turn started from can sit below History's loaded page; it is read on its own. */
   it('should name a starting revision older than the loaded page, read by its id', () => {
-    host.run = { placement: { baseRevisionId: 'rev-4' } };
+    setLog(placed());
     setRevisions({ revisions: [revision({ revisionId: 'rev-60', n: 60, turnId: undefined })] });
     vi.mocked(useRevisionCards).mockImplementation((ids) =>
       ids.includes('rev-4')
         ? new Map([['rev-4', revision({ revisionId: 'rev-4', n: 4, turnId: undefined })]])
         : new Map(),
     );
-    setRun('working');
-    chatState.status = 'streaming';
     render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
     expect(screen.getByRole('status').textContent).toBe('Starting from Rev 4');
     expect(vi.mocked(useRevisionCards)).toHaveBeenCalledWith(['rev-4']);
@@ -244,33 +280,79 @@ describe('ChatRevisionMarker', () => {
     /* A turn that starts dirty mints its base under its own turn id (D17), so
        the graph attaches a card to a turn that has saved nothing yet — on a new
        project that card is the scaffold, minted as Rev 1. */
-    host.run = { placement: { baseRevisionId: 'rev-1' } };
+    setLog(placed('rev-1'));
     setRevisions({
       revisions: [revision({ revisionId: 'rev-1', n: 1, turnId: 'u1' })],
       byTurnId: new Map([['u1', revision({ revisionId: 'rev-1', n: 1 })]]),
     });
-    setRun('working');
-    chatState.status = 'streaming';
     render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
     expect(screen.getByRole('status').textContent).toBe('Starting from Rev 1');
   });
 
   it('should hold the last known label while the stream reconnects', () => {
-    host.run = { placement: { baseRevisionId: 'rev-4' } };
+    setLog([
+      ...placed(),
+      logRow(3, { type: 'interrupt.recorded', interruptId: 'i1', phase: 'requested', reason: 'approval' }),
+    ]);
     setRevisions({ revisions: [revision({ revisionId: 'rev-4', n: 4, turnId: undefined })] });
-    setRun('finishing');
     const { rerender } = render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
-    expect(screen.getByRole('status').textContent).toBe('Saving revision');
+    expect(screen.getByRole('status').textContent).toBe('Starting from Rev 4 · Waiting for you');
 
     setRun('reconnecting');
     retry.retryAttempt = 1;
+    /* A replay after the reconnect has not reached the interrupt yet. */
+    setLog(placed());
     rerender(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
-    expect(screen.getByRole('status').textContent).toBe('Saving revision');
+    expect(screen.getByRole('status').textContent).toBe('Starting from Rev 4 · Waiting for you');
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
   });
 
+  /* PV-A7, V5 B1: a finished run whose settlement row is late. */
+  it('should show saving until the settlement row, then the saved revision', () => {
+    setRevisions({ revisions: [revision()] });
+    setLog([...placed(), lifecycleRow(3, 'completed')]);
+    render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
+    expect(screen.getByRole('status').textContent).toBe('Saving revision');
+    expect(screen.queryByText(/Finishing/u)).toBeNull();
+
+    setLog([...placed(), lifecycleRow(3, 'completed'), settlementRow(4, { revisionId: 'rev-5' })]);
+    expect(screen.getByRole('status').textContent).toBe('Rev 5 saved');
+  });
+
+  /* PV-A20, V5 B2: a Stop after the agent changed files settles with its revision. */
+  it('shows an interrupted save for a stopped attempt', () => {
+    setRevisions({ revisions: [revision()] });
+    setLog([...placed(), lifecycleRow(3, 'cancelled'), settlementRow(4, { revisionId: 'rev-5' })]);
+    render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
+    expect(screen.getByRole('status').textContent).toBe('Rev 5 saved · Work interrupted');
+  });
+
+  /* V5 A8: an attempt that never ran shows the base it minted as saved, or nothing. */
+  it('should show a never-run attempt’s minted base as the person’s edits, and hide one that minted nothing', () => {
+    setRevisions({ revisions: [revision()] });
+    const failed = (fields: Readonly<Record<string, unknown>>): unknown =>
+      logRow(4, {
+        type: 'turn.failed',
+        turnId: 'u1',
+        chatId: 'chat-1',
+        attempt: 1,
+        reason: 'Stopped before it started',
+        code: 'TURN_RELEASED',
+        ...fields,
+      });
+    setLog([...placed(), lifecycleRow(3, 'cancelled'), failed({ revisionId: 'rev-5' })]);
+    const { container } = render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
+    expect(screen.getByRole('status').textContent).toBe('Rev 5 saved');
+    fireEvent.click(screen.getByRole('button', { name: /revision details$/u }));
+    expect(screen.getByText('Your unsaved edits, saved before this request.')).not.toBeNull();
+    expect(screen.queryByText(/Revision not saved/u)).toBeNull();
+
+    setLog([...placed(), lifecycleRow(3, 'cancelled'), failed({})]);
+    expect(container.firstChild).toBeNull();
+  });
+
   it('should offer Retry when a placed request errors without a settlement', () => {
-    host.run = { placement: { baseRevisionId: 'rev-4' } };
+    setLog(placed());
     setRevisions({ revisions: [revision({ revisionId: 'rev-4', n: 4, turnId: undefined })] });
     chatState.persistedError = { category: 'generic', title: 'Error', message: 'Network error', code: 'ERR' };
     render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);

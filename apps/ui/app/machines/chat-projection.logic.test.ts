@@ -21,8 +21,10 @@ import {
   selectPosition,
   selectRunPhase,
   selectToolsInFlight,
+  selectTurnRevision,
 } from '#machines/chat-projection.logic.js';
 import type { ChatProjection, ChatProjectionReadAnswer } from '#machines/chat-projection.logic.js';
+import { lifecycleRow, logRow } from '#machines/chat-projection.fixture.js';
 
 /* Three recorded runs, and two seeded logs whose runs pause on an interrupt. */
 const logs = [
@@ -201,6 +203,47 @@ describe('chatProjectionLogic (PV-S7)', () => {
       leaderEpoch: completed[last]!.leaderEpoch,
       sequence: completed[last]!.sequence,
     });
+  });
+
+  it('reads a turn’s revision facts from its newest attempt: terminal row, then settlement (PV-S9)', () => {
+    const rows = readLog('recorded/in-project-ping-pong-turn');
+    const first = rows.find((row) => row.type === 'turn.finalized')!;
+    const settledAt = rows.indexOf(first);
+    expect(selectTurnRevision(project(rows.slice(0, 1), 1), first.turnId)).toBeUndefined();
+    expect(selectTurnRevision(project(rows.slice(0, settledAt - 1), 1), first.turnId)).toEqual({
+      attempt: 1,
+      isWaiting: false,
+    });
+    /* The terminal row is folded and the settlement row is not: the save is on its way. */
+    expect(selectTurnRevision(project(rows.slice(0, settledAt), 1), first.turnId)).toEqual({
+      attempt: 1,
+      terminal: 'completed',
+      isWaiting: false,
+    });
+    expect(selectTurnRevision(project(rows, 7), first.turnId)).toEqual({
+      attempt: 1,
+      terminal: 'completed',
+      isWaiting: false,
+      settlement: { type: 'turn.finalized', revisionId: first.revisionId },
+    });
+    const last = rows.findLast((row) => row.type === 'turn.finalized')!;
+    expect(selectTurnRevision(project(rows, 7), last.turnId)?.settlement).toEqual({ type: 'turn.finalized' });
+    expect(selectTurnRevision(project(rows, 7), 'another-turn')).toBeUndefined();
+  });
+
+  it('keeps a turn waiting while its attempt is paused on an interrupt (PV-S9)', () => {
+    const rows = [
+      lifecycleRow(0, 'admitted'),
+      logRow(1, { type: 'message.appended', message: { id: 'u1', role: 'user', content: 'Add holes' } }),
+      lifecycleRow(2, 'running'),
+    ];
+    expect(selectTurnRevision(project(rows, 1), 'u1')?.isWaiting).toBe(false);
+    const asked = [
+      ...rows,
+      logRow(3, { type: 'interrupt.recorded', interruptId: 'i1', phase: 'requested', reason: 'approval' }),
+    ];
+    expect(selectTurnRevision(project(asked, 1), 'u1')?.isWaiting).toBe(true);
+    expect(selectTurnRevision(project([...asked, lifecycleRow(4, 'paused')], 1), 'u1')?.isWaiting).toBe(true);
   });
 
   it('discards a batch that does not start at its cursor, and asks for it again', () => {

@@ -15,6 +15,7 @@ import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
 import type { RevisionFailureSubject } from '#lib/revision-failure-copy.js';
 import type { BranchOperation } from '@taucad/revisions';
 import { needsDecision, revisionName } from '#routes/w.$workspace.$project/revision-vocabulary.js';
+import { useHeldSaveToast } from '#routes/w.$workspace.$project/held-save-toast.js';
 
 /** What the question above a waiting branch verb asks. Document words only (A18, I12). */
 const branchVerbTitle: Readonly<Record<BranchOperation, string>> = {
@@ -70,6 +71,7 @@ export function RevisionRestore(): React.JSX.Element {
   const commands = useRevisionCommands();
   const client = useRevisionClient();
   const analytics = useAnalytics();
+  const raiseHeldSave = useHeldSaveToast();
   const restore = status?.restore;
 
   useEffect(() => {
@@ -110,8 +112,13 @@ export function RevisionRestore(): React.JSX.Element {
         }
         return;
       }
+      /* A save another run's lease held names that run, never "Nothing to save" (V5 A6). */
       if (entry.type === 'nothingToSave') {
-        toast.info('Nothing to save');
+        if (entry.heldBy === undefined) {
+          toast.info('Nothing to save');
+        } else {
+          raiseHeldSave(entry.heldBy);
+        }
         return;
       }
       /* D10 answers *Switch* with a refusal, in the guard's own document words
@@ -166,7 +173,7 @@ export function RevisionRestore(): React.JSX.Element {
         { action: { label: 'Undo restore', onClick: commands.undo } },
       );
     });
-  }, [analytics, client, commands]);
+  }, [analytics, client, commands, raiseHeldSave]);
 
   const deleteCount = restore?.removedPathCount ?? 0;
   const restoreTarget = revisionName(restore?.revisionNumber);

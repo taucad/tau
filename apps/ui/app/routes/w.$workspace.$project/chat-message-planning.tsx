@@ -63,7 +63,7 @@ export function ChatMessagePlanning({
   const { activeChatId } = useChatContext();
   const run = useChatSidebarStatus(projectId, activeChatId);
   const chatStatus = useChatSelector((state) => state.status);
-  const { retryAttempt, retryMaxAttempts } = useChatRetrySnapshot();
+  const { retryAttempt } = useChatRetrySnapshot();
   const trailing = useChatSelector((state) => {
     const last = state.messages.at(-1);
     if (last?.id !== messageId) {
@@ -77,7 +77,7 @@ export function ChatMessagePlanning({
       isAnswered: last.parts.some((part) => stateOf(part) === 'approval-responded'),
     };
   });
-  const cue = selectChatActivityCue({ runState: run?.state, chatStatus, retryAttempt, retryMaxAttempts });
+  const cue = selectChatActivityCue({ runState: run?.state, chatStatus, retryAttempt });
   const { theme } = useTheme();
   // The cue is suppressed while another surface shows the work (R3), so a live turn is the earliest honest
   // moment to build the spinner's renderer: by the time the parts settle and this row appears, it is warm.

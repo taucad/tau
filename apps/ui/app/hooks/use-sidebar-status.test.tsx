@@ -8,6 +8,7 @@ import { createActor } from 'xstate';
 import type { Chat } from '@taucad/chat';
 import type { RevisionStatusProjection } from '@taucad/revisions';
 import type { ProjectListItem } from '#types/project.types.js';
+import type { ChatSidebarState } from '#types/chat-sidebar.types.js';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
 import type { ChatSessionActorRef, ChatSessionMachineEvent } from '#machines/chat-session.machine.js';
 import type { ProjectSessionActorRef, ProjectSessionCloseReason } from '#machines/project-session.machine.js';
@@ -410,13 +411,14 @@ const agentStateRows: ReadonlyArray<{
     sentence: 'Reconnecting…',
   },
   {
-    signal: 'run.lifecycle: completed, chat not focused',
+    /* PV-A7, V5 B1: Done at the terminal row; the revision card alone waits on the settlement row. */
+    signal: 'run.lifecycle: completed, settlement row late',
     target: 'chat',
     events: [{ type: 'runLifecycle', phase: 'completed' }],
-    state: 'finishing',
-    label: 'Finishing…',
-    mark: 'running',
-    sentence: 'Finishing…',
+    state: 'done',
+    label: 'Done',
+    mark: 'none',
+    sentence: undefined,
   },
   {
     signal: 'turn.finalized, chat not focused',
@@ -577,6 +579,19 @@ describe('use-sidebar-status — pin (a): every agent-state row renders from a d
       expect(link.querySelector('.truncate')).toBeNull();
     },
   );
+
+  it('should have no finishing state', () => {
+    // @ts-expect-error -- PV-A7: "Finishing…" cannot be represented.
+    const finishing: ChatSidebarState = 'finishing';
+    expect(finishing).toBe('finishing');
+    const actor = driveChat('bracket', 'arm', [
+      { type: 'runLifecycle', phase: 'running' },
+      { type: 'runLifecycle', phase: 'completed' },
+    ]);
+    const status = selectChatStatus(actor.getSnapshot(), false);
+    expect(status.state).toBe('done');
+    expect(chatStatusLabel(status)).toBe('Done');
+  });
 
   it('carries a failed run its reason', () => {
     const actor = driveChat('bracket', 'arm', [

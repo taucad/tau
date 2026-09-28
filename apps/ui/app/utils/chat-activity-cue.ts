@@ -9,7 +9,7 @@ import type { ChatSidebarState } from '#types/chat-sidebar.types.js';
  * @public
  */
 export type ChatActivityCue = Readonly<{
-  kind: 'working' | 'waiting' | 'reconnecting' | 'finishing';
+  kind: 'working' | 'waiting' | 'reconnecting';
   sentence: string;
 }>;
 
@@ -19,8 +19,8 @@ export type ChatActivityFacts = Readonly<{
   runState: ChatSidebarState | undefined;
   /** The AI SDK chat status. */
   chatStatus: 'submitted' | 'streaming' | 'ready' | 'error';
+  /** The transport's automatic retry attempt; `0` when none is under way. */
   retryAttempt: number;
-  retryMaxAttempts: number;
 }>;
 
 /**
@@ -36,19 +36,11 @@ export type ChatActivityFacts = Readonly<{
  * @public
  */
 export const selectChatActivityCue = (facts: ChatActivityFacts): ChatActivityCue | undefined => {
-  if (facts.retryAttempt > 0) {
-    return {
-      kind: 'reconnecting',
-      sentence: `Reconnecting… ${String(facts.retryAttempt)}/${String(facts.retryMaxAttempts)}`,
-    };
+  /* A finished run says nothing here: the revision card alone says "Saving revision" (§5.10, V5 B1). */
+  if (facts.retryAttempt > 0 || facts.runState === 'reconnecting') {
+    return { kind: 'reconnecting', sentence: 'Reconnecting…' };
   }
   switch (facts.runState) {
-    case 'reconnecting': {
-      return { kind: 'reconnecting', sentence: 'Reconnecting…' };
-    }
-    case 'finishing': {
-      return { kind: 'finishing', sentence: 'Finishing up…' };
-    }
     case 'approval':
     case 'question': {
       return { kind: 'waiting', sentence: 'Planning next moves…' };

@@ -165,10 +165,8 @@ const chatRunState = (snapshot: ChatSnapshot): ChatSidebarState => {
   if (snapshot.matches({ run: { running: 'generating' } })) {
     return 'working';
   }
-  if (snapshot.matches({ run: 'finishing' })) {
-    return 'finishing';
-  }
-  if (snapshot.matches({ run: 'done' })) {
+  /* A run reads Done at its terminal row; the revision card owns "Saving revision" (§5.10). */
+  if (snapshot.matches({ run: 'finishing' }) || snapshot.matches({ run: 'done' })) {
     return 'done';
   }
   if (snapshot.matches({ run: 'failed' })) {
@@ -227,9 +225,6 @@ export const chatStatusLabel = (status: ChatSidebarStatus): string | undefined =
     case 'reconnecting': {
       return 'Reconnecting…';
     }
-    case 'finishing': {
-      return 'Finishing…';
-    }
     case 'done': {
       return 'Done';
     }
@@ -259,8 +254,7 @@ export const selectChatFacts = (status: ChatSidebarStatus): SidebarFacts => {
     case 'queued':
     case 'working':
     case 'tool':
-    case 'reconnecting':
-    case 'finishing': {
+    case 'reconnecting': {
       return { mark: 'running', sentence };
     }
     case 'approval': {

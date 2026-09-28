@@ -550,3 +550,48 @@ test('resumes the turn a navigation abandoned, then sends another', async () => 
   });
   await expectNoAdmissionRefusal(['RUN_ABANDONED']);
 });
+
+/*
+ * W9 PV-S9 (V5 B1, B2). A turn's first model call writes a file, so its attempt
+ * has something to save; the second is its reply.
+ */
+const writingTurn = (reply2: ReturnType<typeof reply>): Array<ReturnType<typeof reply>> => [
+  reply('Writing the proof.', {
+    toolCalls: [{ name: 'create_file', args: { targetFile: 'turn-proof.txt', content: 'written by the turn\n' } }],
+  }),
+  reply2,
+];
+
+/* PV-A7: the run reads Done at its terminal row; only the revision card waits on the settlement row. */
+test('reads Done, never Finishing, while a finished turn saves its revision', async () => {
+  const [chatId] = await openChat(writingTurn(reply('Reply one.')));
+  await target.evaluate(() => {
+    const seen = { finishing: false };
+    Object.assign(globalThis, { pvS9: seen });
+    new MutationObserver(() => {
+      seen.finishing ||= /Finishing/u.test(document.body.textContent);
+    }).observe(document.body, { subtree: true, childList: true, characterData: true });
+  });
+
+  await sendDraft('First plain message.');
+
+  await target.expectVisible(selectors.getByText('Reply one.', { exact: true }).last(), 120_000);
+  await expectLogInvariant(chatId!, { runs: 1, settlements: ['turn.finalized'] });
+  await target.expectVisible(selectors.getByText(/Rev 1 saved/u).first(), 60_000);
+  expect(await target.evaluate(() => (globalThis as unknown as { pvS9: { finishing: boolean } }).pvS9.finishing)).toBe(
+    false,
+  );
+});
+
+/* PV-A20, TS-R11: W8 cuts every attempt that executed, so a Stop after a change settles with a revision. */
+test('shows the revision of a turn stopped after it changed files', async () => {
+  const [chatId] = await openChat(writingTurn(reply('Reply one.', { gated: true })));
+  await sendDraft('First plain message.');
+  await target.expectVisible(selectors.getByText('Writing the proof.', { exact: true }).last(), 120_000);
+
+  await target.click(selectors.getByRole('button', { name: 'Stop' }).last());
+  await target.releaseAgentHostGatewayFixture();
+
+  await target.expectVisible(selectors.getByText('Rev 1 saved · Work interrupted', { exact: true }).first(), 60_000);
+  await expectLogInvariant(chatId!, { runs: 1, settlements: ['turn.finalized'] });
+});

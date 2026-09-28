@@ -174,14 +174,7 @@ describe('ChatMessagePlanning', () => {
     mockRetrySnapshot = { retryAttempt: 2, retryMaxAttempts: 5 };
     setChat('error', [assistant('a1', [tool('input-streaming')])]);
     render(<ChatMessagePlanning messageId='a1' />);
-    expect(indicator()).toHaveTextContent('Reconnecting… 2/5');
-  });
-
-  it('S18: says Finishing up while the completed run saves', () => {
-    setRun('finishing');
-    setChat('ready', [assistant('a1', [{ type: 'text', text: 'Done', state: 'done' }])]);
-    render(<ChatMessagePlanning messageId='a1' />);
-    expect(indicator()).toHaveTextContent('Finishing up…');
+    expect(indicator()).toHaveTextContent(/^Reconnecting…$/u);
   });
 
   it.each(['done', 'failed', 'stopped', 'idle'] as const)(

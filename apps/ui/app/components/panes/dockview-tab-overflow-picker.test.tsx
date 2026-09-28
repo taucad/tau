@@ -205,7 +205,7 @@ describe('DockviewTabOverflowPicker', () => {
     expect(comboBox).toMatchObject({
       title: 'Open tabs',
       description: 'Search and activate an open tab in this pane.',
-      searchPlaceHolder: 'Search open tabs...',
+      searchPlaceHolder: 'Search open tabs…',
       emptyListMessage: 'No open tabs found.',
       popoverProperties: { align: 'end' },
     });

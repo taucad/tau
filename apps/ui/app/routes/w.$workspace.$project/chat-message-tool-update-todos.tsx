@@ -49,7 +49,7 @@ export function ChatMessageToolUpdateTodos({ part }: { readonly part: UpdateTodo
             <ChatToolCardIcon icon={ListChecks} />
             <ChatToolCardTitle>
               <ChatToolLabel verb='Updating'>
-                <ChatToolDescription>tasks...</ChatToolDescription>
+                <ChatToolDescription>tasks…</ChatToolDescription>
               </ChatToolLabel>
             </ChatToolCardTitle>
           </ChatToolCardHeader>

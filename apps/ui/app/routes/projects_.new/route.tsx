@@ -206,7 +206,7 @@ export default function ProjectsNew(): React.JSX.Element {
                   autoComplete='off'
                   id='project-name'
                   value={projectName}
-                  placeholder='Enter your project name...'
+                  placeholder='Enter your project name…'
                   maxLength={100}
                   onChange={(event) => {
                     setProjectName(event.target.value);
@@ -218,7 +218,7 @@ export default function ProjectsNew(): React.JSX.Element {
                 <Input
                   id='project-description'
                   value={projectDescription}
-                  placeholder="Describe what you're building..."
+                  placeholder="Describe what you're building…"
                   maxLength={500}
                   onChange={(event) => {
                     setProjectDescription(event.target.value);
@@ -367,7 +367,7 @@ export default function ProjectsNew(): React.JSX.Element {
           Cancel
         </Button>
         <Button disabled={isCreateButtonDisabled} className='min-w-[120px]' onClick={handleCreateProject}>
-          {isCreating ? 'Creating...' : `Create Project ${formattedKeyCombination}`}
+          {isCreating ? 'Creating…' : `Create Project ${formattedKeyCombination}`}
         </Button>
       </div>
     </div>

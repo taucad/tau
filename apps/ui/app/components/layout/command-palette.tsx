@@ -165,7 +165,7 @@ function CommandPaletteResults({ items, onRun }: CommandPaletteResultsProperties
     <>
       <CommandInput
         className='h-9 border-0 bg-transparent px-3 text-base shadow-none focus-visible:outline-none dark:bg-transparent'
-        placeholder='Search projects, chats, and actions...'
+        placeholder='Search projects, chats, and actions…'
         value={search}
         onValueChange={(value) => {
           setSearch(value);
@@ -321,7 +321,7 @@ function CommandPaletteMobile({ items }: CommandPaletteMobileProperties): React.
         getValue={getItemValue}
         isDisabled={isItemDisabled}
         withVirtualization
-        searchPlaceHolder='Search projects, chats, and actions...'
+        searchPlaceHolder='Search projects, chats, and actions…'
         placeholder='Actions'
         title='Search projects, chats, and actions'
         description='Navigate to any project or chat, or run an available action.'

@@ -178,7 +178,7 @@ export function UsageTable({
             {description ? <CardDescription className='mt-1'>{description}</CardDescription> : undefined}
           </div>
           <div className='flex items-center gap-2'>
-            <DataTableSearch table={table} placeholder='Search activity...' containerClassName='max-w-sm' />
+            <DataTableSearch table={table} placeholder='Search activity…' containerClassName='max-w-sm' />
             <DataTableSortingDropdown table={table} />
             <DataTableColumnVisibilityDropdown table={table} />
           </div>

@@ -740,7 +740,7 @@ const openRevisionHistory = async (page: Page): Promise<void> => {
     .getByRole('button', { name: /Search/u })
     .first()
     .click();
-  await page.getByPlaceholder('Search projects, chats, and actions...').fill('Open revision history');
+  await page.getByPlaceholder('Search projects, chats, and actions…').fill('Open revision history');
   await page.getByText('Open revision history', { exact: true }).first().click();
 };
 

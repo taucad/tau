@@ -15,7 +15,7 @@ const disclosure = (path: string): Locator => selectors.getByRole('button', { na
 
 const openCommand = async (name: string): Promise<void> => {
   await target.click(selectors.getByRole('button', { name: 'Search', exact: true }));
-  const commandSearch = selectors.getByPlaceholder('Search projects, chats, and actions...');
+  const commandSearch = selectors.getByPlaceholder('Search projects, chats, and actions…');
   await target.fill(commandSearch, name);
   await target.click(selectors.getByText(name, { exact: true }));
 };
@@ -136,7 +136,7 @@ test('modernizes Console as a global-filtered multi-unit bottom-following log su
 
   const filter = selectors.getByRole('searchbox', { name: 'Filter logs' });
   await target.expectVisible(filter);
-  await target.expectAttribute(filter, 'placeholder', 'Filter logs...');
+  await target.expectAttribute(filter, 'placeholder', 'Filter logs…');
   await target.expectCount(selectors.getByRole('searchbox', { name: 'Filter logs' }), 1);
   await target.expectVisible(selectors.getByRole('button', { name: 'Filter by log level' }));
   await target.expectVisible(selectors.getByRole('button', { name: 'Console settings' }));

@@ -36,7 +36,7 @@ export function ImportProcessingView({
 
           <div className='text-center'>
             <h1 className='text-2xl font-semibold'>{title}</h1>
-            <p className='text-sm text-muted-foreground'>Please wait...</p>
+            <p className='text-sm text-muted-foreground'>Please wait…</p>
           </div>
         </div>
 

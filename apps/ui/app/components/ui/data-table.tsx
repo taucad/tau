@@ -246,7 +246,7 @@ type DataTableSearchProps<Data> = {
 
 export function DataTableSearch<Data>({
   table,
-  placeholder = 'Search...',
+  placeholder = 'Search…',
   className,
   containerClassName,
 }: DataTableSearchProps<Data>): ReactNode {

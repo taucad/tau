@@ -212,7 +212,7 @@ function ExportGeometryDownloadSplitButton({
           onSelect={handleFormatSelect}
           popoverProperties={{ align: 'end' }}
           renderLabel={(item, selectedItem) => <ExportFormatComboboxLabel item={item} selectedItem={selectedItem} />}
-          searchPlaceHolder='Filter formats...'
+          searchPlaceHolder='Filter formats…'
           title='Export formats'
           value={selectedFormatEntry}
         >

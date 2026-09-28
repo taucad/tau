@@ -29,7 +29,7 @@ const openSeededProject = async (): Promise<void> => {
 
 const openParameters = async (): Promise<void> => {
   await target.click(selectors.getByRole('button', { name: 'Search', exact: true }));
-  const commandSearch = selectors.getByPlaceholder('Search projects, chats, and actions...');
+  const commandSearch = selectors.getByPlaceholder('Search projects, chats, and actions…');
   await target.fill(commandSearch, 'Open parameters');
   await target.click(selectors.getByText('Open parameters', { exact: true }));
 };

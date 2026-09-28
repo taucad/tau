@@ -15,7 +15,7 @@ const disclosure = (path: string): Locator => selectors.getByRole('button', { na
 
 const openCommand = async (name: string): Promise<void> => {
   await target.click(selectors.getByRole('button', { name: 'Search', exact: true }));
-  const commandSearch = selectors.getByPlaceholder('Search projects, chats, and actions...');
+  const commandSearch = selectors.getByPlaceholder('Search projects, chats, and actions…');
   await target.fill(commandSearch, name);
   await target.click(selectors.getByText(name, { exact: true }));
 };
@@ -137,7 +137,7 @@ test('keeps the Model hierarchy filterable, accessible, and reorderable through 
 
   const filter = selectors.getByRole('searchbox', { name: 'Filter parts' });
   await target.expectVisible(filter);
-  await target.expectAttribute(filter, 'placeholder', 'Filter parts...');
+  await target.expectAttribute(filter, 'placeholder', 'Filter parts…');
   await target.expectCount(selectors.getByRole('searchbox', { name: 'Filter parts' }), 1);
   await target.expectCount(selectors.getByRole('button', { name: /show search|hide search/iu }), 0);
 

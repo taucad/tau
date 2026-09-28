@@ -214,7 +214,7 @@ const expectTriangleGlb = async (path: string, size: number, color?: readonly nu
 
 const openConsole = async (page: Page): Promise<void> => {
   await page.getByRole('button', { name: 'Search', exact: true }).click();
-  const search = page.getByPlaceholder('Search projects, chats, and actions...');
+  const search = page.getByPlaceholder('Search projects, chats, and actions…');
   await search.fill('Open console');
   await page.getByText('Open console', { exact: true }).click();
 };

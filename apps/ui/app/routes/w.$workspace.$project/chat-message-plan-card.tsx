@@ -67,7 +67,7 @@ export function ChatMessagePlanCard({ targetFile, content, status }: ChatMessage
           <ChatToolCardIcon icon={FileText} />
           <ChatToolCardTitle>
             <ChatToolLabel verb='Creating'>
-              <ChatToolDescription>plan...</ChatToolDescription>
+              <ChatToolDescription>plan…</ChatToolDescription>
             </ChatToolLabel>
           </ChatToolCardTitle>
         </ChatToolCardHeader>

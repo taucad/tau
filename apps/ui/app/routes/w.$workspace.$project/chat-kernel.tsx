@@ -164,7 +164,7 @@ export function TelemetryPanelContent(): React.JSX.Element {
       <div data-slot='telemetry-filter' className='shrink-0 bg-sidebar px-2 pt-2'>
         <SearchInput
           aria-label='Filter telemetry'
-          placeholder='Filter telemetry...'
+          placeholder='Filter telemetry…'
           value={query}
           className='h-7 min-w-0 bg-background'
           onChange={(event) => {

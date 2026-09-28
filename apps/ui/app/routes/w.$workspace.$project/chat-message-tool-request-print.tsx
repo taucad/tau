@@ -92,9 +92,7 @@ export function ChatMessageToolRequestPrint({ part }: { readonly part: RequestPr
             <ChatToolCardIcon icon={Printer} />
             <ChatToolCardTitle>
               <ChatToolLabel verb='Requesting'>
-                <ChatToolDescription>
-                  {target === undefined ? 'a print...' : `a print of ${target}`}
-                </ChatToolDescription>
+                <ChatToolDescription>{target === undefined ? 'a print…' : `a print of ${target}`}</ChatToolDescription>
               </ChatToolLabel>
             </ChatToolCardTitle>
           </ChatToolCardHeader>

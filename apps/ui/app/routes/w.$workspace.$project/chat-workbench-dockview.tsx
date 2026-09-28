@@ -1,4 +1,15 @@
-import { createContext, Fragment, memo, useCallback, useContext, useEffect, useId, useRef, useState } from 'react';
+import {
+  createContext,
+  Fragment,
+  memo,
+  useCallback,
+  useContext,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import type { ComponentProps, ReactNode } from 'react';
 import { useSelector } from '@xstate/react';
 import {
@@ -89,6 +100,7 @@ import { WorkbenchToggleSlot } from '#routes/w.$workspace.$project/project-works
 import {
   projectWorkspaceKeyCombinations,
   useProjectWorkspace,
+  WorkspaceLanesContext,
 } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import type {
   WorkbenchPanelId,
@@ -266,8 +278,29 @@ function RevisionsWorkbenchPanel(): React.JSX.Element {
   return <RevisionsPanelBody />;
 }
 
-function AgentsWorkbenchPanel(): React.JSX.Element {
-  return <AgentsPanelBody />;
+/** Dockview retains hidden panels; their transcript queries wait until this panel and lane are shown. */
+function useWorkbenchPanelShown(panelApi: IDockviewPanelProps['api']): boolean {
+  const subscribe = useCallback(
+    (onChange: () => void) => {
+      const subscription = panelApi.onDidVisibilityChange(onChange);
+      return () => {
+        subscription.dispose();
+      };
+    },
+    [panelApi],
+  );
+  const isPanelShown = useSyncExternalStore(
+    subscribe,
+    () => panelApi.isVisible,
+    () => true,
+  );
+  const lanes = useContext(WorkspaceLanesContext);
+  return isPanelShown && (lanes?.workbench ?? true);
+}
+
+function AgentsWorkbenchPanel({ api }: IDockviewPanelProps): React.JSX.Element {
+  const isShown = useWorkbenchPanelShown(api);
+  return <AgentsPanelBody enableHistory={isShown} />;
 }
 
 function JobsWorkbenchPanel(): React.JSX.Element {
@@ -287,9 +320,10 @@ function ShareWorkbenchPanel(): React.JSX.Element {
   return <ProjectShareWorkbenchPanel />;
 }
 
-function DetailsWorkbenchPanel(): React.JSX.Element {
+function DetailsWorkbenchPanel({ api }: IDockviewPanelProps): React.JSX.Element {
   const profile = useContext(WorkbenchProfileContext);
-  return <DetailsPanelBody readOnly={profile === 'shared'} />;
+  const isShown = useWorkbenchPanelShown(api);
+  return <DetailsPanelBody readOnly={profile === 'shared'} enableHistory={isShown} />;
 }
 
 function TelemetryWorkbenchPanel(): React.JSX.Element {

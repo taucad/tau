@@ -3,9 +3,11 @@ import { useChats } from '#hooks/use-chats.js';
 import { useProject } from '#hooks/use-project.js';
 import { formatNumberAbbreviation } from '#utils/number.utils.js';
 
-export function ChatDetailsUsage(): React.JSX.Element | undefined {
+export function ChatDetailsUsage({ enabled = true }: { readonly enabled?: boolean } = {}):
+  | React.JSX.Element
+  | undefined {
   const { projectId } = useProject();
-  const { chats } = useChats(projectId);
+  const { chats } = useChats(projectId, { enabled });
   const tokens = useMemo(() => {
     let total = 0;
     for (const chat of chats) {

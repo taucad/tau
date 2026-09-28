@@ -55,6 +55,7 @@ export type AgentProjection = {
 export type UseAgentProjectionsOptions = {
   readonly workspaceLabel?: string;
   readonly metadataByChatId?: Readonly<Record<string, AgentProjectionMetadata>>;
+  readonly enabled?: boolean;
 };
 
 export type AgentProjectionsView = {
@@ -212,7 +213,7 @@ const liveProjectionSnapshot = (store: ChatSessionStore, chatIds: readonly strin
  */
 export const useAgentProjections = (options?: UseAgentProjectionsOptions): AgentProjectionsView => {
   const { projectId, editorRef } = useProject();
-  const { chats, isLoading, error, retry } = useChats(projectId);
+  const { chats, isLoading, error, retry } = useChats(projectId, { enabled: options?.enabled });
   const store = useChatSessionStore();
   const { selectedModel, resolveModel } = useModels();
   const focusedChatId = useSelector(editorRef, (state) => state.context.focusedChatId);

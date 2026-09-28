@@ -121,6 +121,15 @@ describe('AgentList', () => {
 });
 
 describe('AgentsPanelBody', () => {
+  it('delays the full transcript query for a hidden Agents panel', () => {
+    render(
+      <MemoryRouter>
+        <AgentsPanelBody enableHistory={false} />
+      </MemoryRouter>,
+    );
+    expect(useAgentProjections).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
+  });
+
   it('summarises concurrent and attention-needing agents from the projection hook', () => {
     vi.mocked(useAgentProjections).mockReturnValue({
       agents: [

@@ -1595,6 +1595,8 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     async (projectId: string): Promise<ProjectRouteAccess> => {
       await ensureDiscoveryReady();
       const worker = await getReadiedWorker();
+      // A manifest/root event can supersede a shared pass while it is in flight.
+      /* eslint-disable no-await-in-loop -- A route must retry sequentially until its discovery epoch is current. */
       for (;;) {
         const recovery = [...recoveriesRef.current.values()].find((entry) => entry.projectId === projectId);
         if (recovery?.status === 'recovering') {
@@ -1652,6 +1654,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         }
         return { status: 'missing' };
       }
+      /* eslint-enable no-await-in-loop */
     },
     [discoverProjects, ensureDiscoveryReady, ensureProjectLibraryState, getReadiedWorker],
   );

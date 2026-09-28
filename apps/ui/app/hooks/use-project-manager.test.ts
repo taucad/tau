@@ -1651,9 +1651,13 @@ describe('useProjectManager.createProject', () => {
       .mockResolvedValue(next);
     const listing = result.current.getProjectListing();
     await scanStarted.promise;
-    act(() => emitWorkerChange(change, path));
+    act(() => {
+      emitWorkerChange(change, path);
+    });
     const route = result.current.getProjectRouteAccess(fakeProject.id);
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
     staleScan.resolve();
 
     await listing;

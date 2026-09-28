@@ -649,7 +649,11 @@ export function ProjectProvider({
     };
   }, [actorRef, profile, projectId, projectManager, queryClient]);
 
+  const projectIsReady = useSelector(actorRef, (state) => state.matches('ready'));
   useEffect(() => {
+    if (!projectIsReady) {
+      return;
+    }
     const { contentService } = fileManager;
     if (!contentService) {
       return;
@@ -672,11 +676,13 @@ export function ProjectProvider({
     const unsubscribe = contentService.subscribe('tau.json', () => {
       void observer.check();
     });
+    // Close the gap between loading the project and attaching this listener.
+    void observer.check();
     return () => {
       observer.dispose();
       unsubscribe();
     };
-  }, [actorRef, fileManager, projectId]);
+  }, [actorRef, fileManager, projectId, projectIsReady]);
 
   const reportParameterOperation = useCallback((operation: Promise<unknown>): void => {
     const report = async (): Promise<void> => {

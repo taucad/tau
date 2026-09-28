@@ -37,7 +37,12 @@ const retryError = (error: unknown): boolean => {
   if (typeof error !== 'object' || error === null || !('code' in error)) {
     return false;
   }
-  return error.code === 'PEER_UNRESPONSIVE' || error.code === 'CHANNEL_CLOSED';
+  return (
+    error.code === 'PEER_UNRESPONSIVE' ||
+    error.code === 'PEER_GONE' ||
+    error.code === 'PEER_CLOSED' ||
+    error.code === 'CHANNEL_CLOSED'
+  );
 };
 
 /** The only command leg of a chat gesture; connection churn never mints a new id. @public */
@@ -48,8 +53,7 @@ export const sendHostCommand = async (
 ): Promise<CommandAnswer> => {
   const now = options.now ?? (() => performance.now());
   const deadline = now() + (options.boundMilliseconds ?? 30_000);
-  let backoff = 20;
-  while (true) {
+  const attempt = async (backoff: number): Promise<CommandAnswer> => {
     if (options.signal?.aborted) {
       throw interrupted();
     }
@@ -58,6 +62,9 @@ export const sendHostCommand = async (
     try {
       const client = await connect();
       try {
+        if (options.signal?.aborted) {
+          throw interrupted();
+        }
         answer = await client.hostCommand(command);
       } finally {
         await client.close();
@@ -77,7 +84,8 @@ export const sendHostCommand = async (
       }
       throw failure;
     }
-    await (options.retryDelay ?? ((milliseconds) => delay(milliseconds, options.signal)))(backoff);
-    backoff = Math.min(backoff * 2, 250);
-  }
+    await (options.retryDelay ?? (async (milliseconds) => delay(milliseconds, options.signal)))(backoff);
+    return attempt(Math.min(backoff * 2, 250));
+  };
+  return attempt(20);
 };

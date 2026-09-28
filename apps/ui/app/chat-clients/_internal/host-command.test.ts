@@ -38,6 +38,38 @@ describe('sendHostCommand', () => {
     expect(close).toHaveBeenCalledTimes(2);
   });
 
+  it.each(['PEER_GONE', 'PEER_CLOSED'] as const)('redials after %s with the same command', async (code) => {
+    const hostCommand = vi
+      .fn()
+      .mockRejectedValueOnce(Object.assign(new Error(code), { code }))
+      .mockResolvedValueOnce(answer('replayed'));
+    const connect = vi.fn(async () => ({ hostCommand, close: async () => undefined }) as unknown as AgentHostClient);
+    await expect(sendHostCommand(connect, start, { retryDelay: async () => undefined })).resolves.toEqual(
+      answer('replayed'),
+    );
+    expect(hostCommand.mock.calls).toEqual([[start], [start]]);
+  });
+
+  it('closes an asynchronously opened client without dispatching after abort', async () => {
+    const controller = new AbortController();
+    let open!: (client: Pick<AgentHostClient, 'hostCommand' | 'close'>) => void;
+    const connect = vi.fn(
+      async () =>
+        new Promise<Pick<AgentHostClient, 'hostCommand' | 'close'>>((resolve) => {
+          open = resolve;
+        }),
+    );
+    const sending = sendHostCommand(connect, start, { signal: controller.signal });
+    controller.abort();
+    const hostCommand = vi.fn();
+    const close = vi.fn(async () => undefined);
+    open({ hostCommand, close });
+
+    await expect(sending).rejects.toMatchObject({ name: 'AbortError' });
+    expect(hostCommand).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledOnce();
+  });
+
   it('does not redial after the gesture is aborted', async () => {
     const controller = new AbortController();
     const hostCommand = vi.fn().mockResolvedValue({

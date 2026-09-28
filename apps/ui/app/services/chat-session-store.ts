@@ -39,6 +39,7 @@ import type { CadAgentExecution, Chat as ChatEntity, MyUIMessage } from '@taucad
 import { isAnyToolPart } from '@taucad/chat';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
+import { sendHostCommand } from '#chat-clients/_internal/host-command.js';
 import type { MachineActors } from '#lib/xstate.lib.js';
 import { waitUnlessGone } from '#lib/xstate.lib.js';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
@@ -399,7 +400,7 @@ export class ChatSessionStore {
   readonly #observed = new Map<string, ObservedChat>();
   readonly #projectHostConnectors = new Map<
     string,
-    (chatId: string) => Promise<Pick<AgentHostClient, 'read' | 'subscribe' | 'close'>>
+    (chatId: string) => Promise<Pick<AgentHostClient, 'read' | 'subscribe' | 'hostCommand' | 'close'>>
   >();
   readonly #chatSessionLogic: typeof chatSessionMachine;
   readonly #rootOptions: Pick<ActorOptions<AnyActorLogic>, 'clock' | 'inspect' | 'onRejectedEvent'>;
@@ -572,7 +573,7 @@ export class ChatSessionStore {
   /** Publish the active project's real W6 connector to every listed chat. @public */
   public publishProjectHostConnector(
     projectId: string,
-    connector: (chatId: string) => Promise<Pick<AgentHostClient, 'read' | 'subscribe' | 'close'>>,
+    connector: (chatId: string) => Promise<Pick<AgentHostClient, 'read' | 'subscribe' | 'hostCommand' | 'close'>>,
   ): () => void {
     this.#projectHostConnectors.set(projectId, connector);
     for (const [chatId, observed] of this.#observed) {
@@ -608,6 +609,43 @@ export class ChatSessionStore {
   ): Promise<Pick<ChatEntity, 'activeExecution' | 'activeKernel'> | undefined> {
     const chat = await this.#deps.getChat(chatId);
     return chat === undefined ? undefined : { activeExecution: chat.activeExecution, activeKernel: chat.activeKernel };
+  }
+
+  /** Cancel the log's current run, including an unopened listed chat; no SDK session is acquired. @public */
+  public async cancelProjectedRun(chatId: string): Promise<'stopped' | 'continuing' | 'absent'> {
+    const projection = this.#projectionContext(chatId);
+    if (projection === undefined || !selectCaughtUp(projection)) {
+      return 'absent';
+    }
+    const run = selectCurrentRun(projection);
+    if (run === undefined || !opensRun(selectRunPhase(projection))) {
+      return 'absent';
+    }
+    if (run.opaque || projection.ledger.newerHistory) {
+      return 'continuing';
+    }
+    const projectId = this.#sessions.get(chatId)?.projectId ?? this.#observed.get(chatId)?.projectId;
+    const connector = projectId === undefined ? undefined : this.#projectHostConnectors.get(projectId);
+    if (connector === undefined) {
+      throw new Error(`Chat ${chatId} has no live host connector.`);
+    }
+    const command = {
+      type: 'cancel' as const,
+      commandId: generatePrefixedId(idPrefix.request),
+      payload: { chatId, runId: run.runId },
+    };
+    const answer = await sendHostCommand(async () => connector(chatId), command);
+    if (answer.status === 'refused') {
+      if (
+        answer.code === 'LEADER_VERSION_MISMATCH' ||
+        answer.code === 'WRITER_LOCKED' ||
+        answer.code === 'RUN_UNREADABLE'
+      ) {
+        return 'continuing';
+      }
+      throw new Error(`Host cancel refused ${answer.code}: ${answer.message}`);
+    }
+    return 'stopped';
   }
 
   /** Replace an idle live transcript with the chat log just projected from Git. */

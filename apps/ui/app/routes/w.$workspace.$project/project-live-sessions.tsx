@@ -342,20 +342,7 @@ function ProjectSessionBinding({
         await client?.quiesce();
       },
       cancelRuns: async (chatIds) => {
-        await Promise.all(
-          chatIds.map(async (chatId) => {
-            const chat = chatSessions.get(chatId);
-            if (chat === undefined) {
-              throw new Error(`Chat ${chatId} is no longer attached to this project.`);
-            }
-            chatSessions.stopRun(chatId);
-            await waitFor(
-              chat.persistenceActorRef,
-              (state) => state.matches({ requestLifecycle: 'idle' }) && state.matches({ messagePersistence: 'idle' }),
-              { timeout: editorFlushTimeoutMilliseconds },
-            );
-          }),
-        );
+        await Promise.all(chatIds.map(async (chatId) => chatSessions.cancelProjectedRun(chatId)));
       },
       /* The leases go with the root: `release()` retires every one this
        * session's turns took, inside the flush above. Kept as its own step

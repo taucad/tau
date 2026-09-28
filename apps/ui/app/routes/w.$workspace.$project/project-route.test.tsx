@@ -50,6 +50,7 @@ const publishProjectHostConnector = vi.fn((_projectId: string, _connector: (chat
 });
 const browserClientOptions: unknown[] = [];
 const daemonClientTransports: unknown[] = [];
+const cancelProjectedRun = vi.fn(async () => undefined);
 const storedHostSettings = new Map<
   string,
   { activeExecution?: { kind: 'tau'; model: string; hostId?: string }; activeKernel?: 'openscad' }
@@ -69,6 +70,7 @@ const chatSessionStore = {
   setFocusedProject: () => undefined,
   publishProjectHostConnector,
   getChatHostSettings: async (chatId: string) => storedHostSettings.get(chatId),
+  cancelProjectedRun,
 };
 vi.mock('#services/agent-host-client.js', async (importOriginal) => ({
   ...(await importOriginal<typeof AgentHostClientModule>()),
@@ -395,6 +397,7 @@ beforeEach(() => {
   browserClientOptions.length = 0;
   daemonClientTransports.length = 0;
   storedHostSettings.clear();
+  cancelProjectedRun.mockClear();
   fileManagerReady = false;
   editorObservers.clear();
   editorIsIdle = true;
@@ -446,6 +449,19 @@ afterEach(async () => {
 });
 
 describe('project route session identity', () => {
+  it('closes an unseen live chat by projected host cancel without an SDK session', async () => {
+    getProjectRouteAccess.mockImplementation(async (id) => ready(id));
+    renderRouteProvider();
+    await screen.findAllByTestId('project-session');
+    const session = sessionsActor.getSnapshot().context.refs[projectA];
+    expect(session).toBeDefined();
+    session?.send({ type: 'runStarted', chatId: 'chat-unseen' });
+    session?.send({ type: 'close', reason: 'user' });
+    session?.send({ type: 'confirmClose' });
+    await waitFor(() => {
+      expect(cancelProjectedRun).toHaveBeenCalledWith('chat-unseen');
+    });
+  });
   it('retains one project connector when focus moves to another live project', async () => {
     fileManagerReady = true;
     getProjectRouteAccess.mockImplementation(async (id) => ready(id));

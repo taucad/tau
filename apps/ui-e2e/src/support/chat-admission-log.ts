@@ -16,7 +16,14 @@ import { emptyChatLedger, foldChatLedger } from '@taucad/agent-host';
 import type { ChatLedger } from '@taucad/agent-host';
 
 /** One durable record, as far as these rows read it; the ledger reads the whole row. */
-export type LogRecord = Readonly<{ runId: string; type: string; state?: string; reason?: string }>;
+export type LogRecord = Readonly<{
+  runId: string;
+  type: string;
+  state?: string;
+  reason?: string;
+  revisionId?: string;
+  changedPaths?: readonly string[];
+}>;
 
 /** The three settlement records; an attempt records exactly one of them. */
 export const settlementTypes = new Set(['turn.finalized', 'turn.conflicted', 'turn.failed']);

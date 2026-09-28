@@ -26,7 +26,7 @@
 import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
-import { composerSelector, pdfModelName, selectModel, sendDraft } from '#support/chat-attachments.js';
+import { composerSelector, pdfModelName, readHomeGlobText, selectModel, sendDraft } from '#support/chat-attachments.js';
 import {
   chatLog,
   completeFirstTurn,
@@ -148,6 +148,11 @@ test('shows the revision of a turn stopped after it changed files', async () => 
   await target.click(selectors.getByCss('button:has(svg.lucide-square)').last());
   await target.expectVisible(selectors.getByText(/Rev \d+ saved · Work interrupted/u).first(), 120_000);
   await expectLogInvariant(chatId!, { runs: 1, settlements: ['turn.finalized'] });
+  expect(await readHomeGlobText('/*/interrupted-proof.txt')).toBe('saved before stop\n');
+  const records = await chatLog(chatId!);
+  const finalized = records.find((record) => record.type === 'turn.finalized');
+  expect(finalized?.revisionId).toBeDefined();
+  expect(finalized?.changedPaths).toContain('interrupted-proof.txt');
   await target.releaseAgentHostGatewayFixture('First plain message.');
   await expectAsksByTurn([['First plain message.', 1]]);
 });
@@ -489,7 +494,7 @@ test('resumes a refused turn under its own run, rewinding nothing', async () => 
   await expectNoAdmissionRefusal();
 });
 
-test('keeps a queued turn live across reload and sends again after it settles', async () => {
+test('sends again after reloading while a turn is queued', async () => {
   const [chatId] = await openChat(twoTurnScript);
   /* The turn is parked at the request's *entry* — dispatched, not one byte
    * answered — which is the only way to reload a turn that is still in
@@ -505,8 +510,9 @@ test('keeps a queued turn live across reload and sends again after it settles', 
   await target.expectVisible(selectors.getByCss(composerSelector).first(), 60_000);
   await target.releaseAgentHostGatewayRequest('First plain message.');
 
-  await target.expectVisible(selectors.getByText('Reply one.', { exact: true }).last(), 120_000);
-  await expectLogInvariant(chatId!, { runs: 1, settlements: ['turn.finalized'], timeoutMilliseconds: 120_000 });
+  /* Reload killed the browser Worker. Discovery records the orphan, but the
+   * page neither re-asks the provider nor finishes the run on its own. */
+  await expectLogInvariant(chatId!, { runs: 1, settlements: ['turn.failed'], timeoutMilliseconds: 120_000 });
   await expectAsksByTurn([['First plain message.', 1]]);
 
   await selectModel(pdfModelName);
@@ -517,11 +523,11 @@ test('keeps a queued turn live across reload and sends again after it settles', 
     ['First plain message.', 1],
     ['Second plain message.', 1],
   ]);
-  await expectLogInvariant(chatId!, { runs: 2, settlements: ['turn.finalized', 'turn.finalized'] });
-  await expectNoAdmissionRefusal();
+  await expectLogInvariant(chatId!, { runs: 2, settlements: ['turn.failed', 'turn.finalized'] });
+  await expectNoAdmissionRefusal(['RUN_ABANDONED']);
 });
 
-test('keeps a live turn after navigation, then sends another', async () => {
+test('resumes the turn a navigation abandoned, then sends another', async () => {
   const [chatId] = await openChat([reply('Reply one.', { gated: true }), reply('Reply two.')]);
   await sendDraft('First plain message.');
   await target.expectVisible(selectors.getByText('Reply one.', { exact: true }).last(), 120_000);
@@ -531,24 +537,35 @@ test('keeps a live turn after navigation, then sends another', async () => {
   await target.expectUrl(/\/$|\/\?/u, 60_000);
   await target.navigate(`${projectUrl.pathname}${projectUrl.search}`);
   await target.expectVisible(selectors.getByCss(composerSelector).first(), 60_000);
-  await target.expectVisible(selectors.getByText('Reply one.', { exact: true }).last(), 120_000);
+  await expectLogInvariant(chatId!, { runs: 1, settlements: ['turn.failed'], timeoutMilliseconds: 120_000 });
   await expectAsksByTurn([['First plain message.', 1]]);
+
+  await target.expectVisible(continueAction, 60_000);
+  await target.click(continueAction);
+  await expect.poll(gatewayRequestCount, { timeout: 120_000 }).toBe(2);
+  await expect.poll(gatewayPendingCount, { timeout: 120_000 }).toBe(2);
   await target.releaseAgentHostGatewayFixture('First plain message.');
+  await target.expectVisible(selectors.getByText('Reply one.', { exact: true }).last(), 120_000);
   await target.expectVisible(selectors.getByText(/Rev 1 saved/u).first(), 60_000);
-  await expectLogInvariant(chatId!, { runs: 1, settlements: ['turn.finalized'], timeoutMilliseconds: 120_000 });
+  await expectLogInvariant(chatId!, {
+    runs: 1,
+    attempts: [2],
+    settlements: ['turn.failed', 'turn.finalized'],
+    timeoutMilliseconds: 120_000,
+  });
 
   await selectModel(pdfModelName);
   await sendDraft('Second plain message.');
 
   await target.expectVisible(selectors.getByText('Reply two.', { exact: true }).last(), 120_000);
   await expectAsksByTurn([
-    ['First plain message.', 1],
+    ['First plain message.', 2],
     ['Second plain message.', 1],
   ]);
   await expectLogInvariant(chatId!, {
     runs: 2,
-    attempts: [1, 1],
-    settlements: ['turn.finalized', 'turn.finalized'],
+    attempts: [2, 1],
+    settlements: ['turn.failed', 'turn.finalized', 'turn.finalized'],
   });
-  await expectNoAdmissionRefusal();
+  await expectNoAdmissionRefusal(['RUN_ABANDONED']);
 });

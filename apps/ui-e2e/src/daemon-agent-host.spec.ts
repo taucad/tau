@@ -242,6 +242,37 @@ describe('daemon agent host (AV-4, rung 1)', () => {
     await target.stopTauServeFixture();
   }, 300_000);
 
+  test('stops a daemon run from the composer after reattaching to it', async () => {
+    const { origin, workspace } = await target.startTauServeFixture();
+    try {
+      await target.setViewport({ width: 1440, height: 900 });
+      await createProject(origin);
+      await selectTauHost(workspace);
+      await sendFirstPrompt('Create the Tau Host proof file.');
+      await target.expectVisible(selectors.getByText(partialText, { exact: true }), 120_000);
+      await expect.poll(async () => target.readTauServeFile(proofFile), { timeout: 120_000 }).toBe(proofContent);
+
+      /* The daemon is held on its second gateway request while the page dies.
+       * Only the reattached page's Stop gesture may cancel that host run. */
+      await target.reload();
+      await ensureChatOpen();
+      const stop = selectors.getByCss('button:has(svg.lucide-square)').last();
+      await target.expectVisible(stop, 120_000);
+      await target.click(stop);
+      await expect.poll(durableLog, { timeout: 120_000 }).toContain('"state":"cancelled"');
+      const log = await durableLog();
+      const events = log
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line) as { readonly type: string; readonly state?: string });
+      expect(events.filter(({ type, state }) => type === 'run.lifecycle' && state === 'admitted')).toHaveLength(1);
+      expect(events.filter(({ type, state }) => type === 'run.lifecycle' && state === 'cancelled')).toHaveLength(1);
+      expect(await target.isVisible(selectors.getByText(finalText, { exact: true }))).toBe(false);
+    } finally {
+      await target.stopTauServeFixture();
+    }
+  }, 300_000);
+
   /**
    * The same placement, chosen one step earlier — before the project exists.
    *

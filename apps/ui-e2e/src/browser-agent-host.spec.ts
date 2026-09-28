@@ -10,6 +10,7 @@ import {
 } from '#support/project-storage-state.js';
 import type { StoredProjectConfig } from '#support/project-storage-state.js';
 import { settlementTypes } from '#support/chat-admission-log.js';
+import { continueAction } from '#support/chat-admission.js';
 import type { GatewayScriptTurn } from '#support/agent-host-gateway-script.js';
 import { placeChatOnNewBranch } from '#support/chat-branch.js';
 import { editComposerSelector } from '#support/chat-attachments.js';
@@ -118,6 +119,11 @@ const readGatewayRequestCount = async (): Promise<number> => {
   return requests.length;
 };
 
+const parkedGatewayCount = async (): Promise<number> => {
+  const state = await target.readAgentHostGatewayState();
+  return state.parked.length;
+};
+
 const activeProjectConfig = async (backend: ActiveBackend): Promise<StoredProjectConfig | undefined> => {
   const state = await readProjectStorageState();
   return state.configs.find((config) =>
@@ -216,6 +222,7 @@ type LogEvent = {
   /** `turn.finalized` only: the revision the settlement recorded, and its paths. */
   readonly revisionId?: string;
   readonly changedPaths?: readonly string[];
+  readonly detail?: { readonly message?: string; readonly code?: string; readonly status?: number };
 };
 
 const eventLog = (tree: Readonly<Record<string, string>>): readonly LogEvent[] => {
@@ -224,6 +231,13 @@ const eventLog = (tree: Readonly<Record<string, string>>): readonly LogEvent[] =
   return tree[logPath!]!.trim()
     .split('\n')
     .map((line) => JSON.parse(line) as LogEvent);
+};
+
+/** The durable reason left by the browser Worker that died with its document. */
+const durableFailureReason = async (): Promise<string | undefined> => {
+  const events = eventLog(await readActiveProjectTree('home'));
+  const last = events.findLast((event) => event.type === 'run.lifecycle');
+  return last?.state === 'failed' ? last.detail?.message : undefined;
 };
 
 /**
@@ -562,24 +576,29 @@ describe.each([
     await target.expectVisible(selectors.getByText(finalText, { exact: true }), 60_000);
   });
 
-  runs('settles a live run in the host after its page reloads', async ({ skip }) => {
+  runs('records an orphan after reload and resumes only on the person’s gesture', async ({ skip }) => {
     await prepareBrowserHost(backend);
     await requireOpfsSession(skip, backend);
     await submitAndWaitForPartial();
     await target.reload();
     await ensureChatOpen();
-    await target.expectVisible(selectors.getByText(partialText, { exact: true }), 60_000);
+    await expect
+      .poll(async () => settlementTypesOf(await readActiveProjectTree(backend)), { timeout: 120_000 })
+      .toEqual(['turn.failed']);
     expect(await readGatewayRequestCount()).toBe(1);
+    await target.expectVisible(continueAction, 60_000);
+    await target.click(continueAction);
+    await expect.poll(readGatewayRequestCount, { timeout: 120_000 }).toBe(2);
+    await expect.poll(parkedGatewayCount, { timeout: 120_000 }).toBe(2);
     await target.releaseAgentHostGatewayFixture();
     await target.expectVisible(selectors.getByText(finalText, { exact: true }), 120_000);
     const tree = await waitForLocalPublishedTree(backend);
     assertPublication(tree);
-    expect(settlementTypesOf(tree)).toEqual(['turn.finalized']);
+    expect(settlementTypesOf(tree)).toEqual(['turn.failed', 'turn.finalized']);
     expect(eventLog(tree).filter((event) => event.type === 'run.lifecycle' && event.state === 'admitted')).toHaveLength(
       1,
     );
-    /* One first ask plus its tool-result continuation; reattaching sends no new start. */
-    expect(await readGatewayRequestCount()).toBe(2);
+    expect(new Set(eventLog(tree).map((event) => event.runId)).size).toBe(1);
   });
 
   /*
@@ -731,7 +750,16 @@ describe('seeded first turn', () => {
     await target.expectVisible(selectors.getByText(partialText, { exact: true }), 120_000);
     await target.reload();
     await ensureChatOpen();
+    await expect
+      .poll(async () => settlementTypesOf(await readActiveProjectTree('home')), { timeout: 120_000 })
+      .toEqual(['turn.failed']);
+    const abandoned = eventLog(await readActiveProjectTree('home'));
+    expect(abandoned.filter((event) => event.type === 'run.lifecycle' && event.state === 'admitted')).toHaveLength(1);
     expect(await readGatewayRequestCount()).toBe(1);
+    await target.expectVisible(continueAction, 60_000);
+    await target.click(continueAction);
+    await expect.poll(readGatewayRequestCount, { timeout: 120_000 }).toBe(2);
+    await expect.poll(parkedGatewayCount, { timeout: 120_000 }).toBe(2);
     await target.releaseAgentHostGatewayFixture();
     await target.expectVisible(selectors.getByText(finalText, { exact: true }), 120_000);
 
@@ -742,10 +770,10 @@ describe('seeded first turn', () => {
       eventLog(tree)
         .filter(({ type }) => type === 'run.lifecycle')
         .map(({ state }) => state),
-    ).toEqual(['admitted', 'running', 'completed']);
-    // The host settlement retires the lease; the page's remount cannot admit again.
+    ).toEqual(['admitted', 'running', 'failed', 'running', 'completed']);
+    // The new attempt retires the lease; the page's remount did not admit again.
     await expect.poll(seededLease, { timeout: 60_000, interval: 250 }).toBeUndefined();
-    expect(settlementTypesOf(tree)).toEqual(['turn.finalized']);
+    expect(settlementTypesOf(tree)).toEqual(['turn.failed', 'turn.finalized']);
     expect(eventLog(tree).filter((event) => event.type === 'run.lifecycle' && event.state === 'admitted')).toHaveLength(
       1,
     );
@@ -754,9 +782,9 @@ describe('seeded first turn', () => {
 });
 
 /**
- * The resident host outlives a page. Reattachment observes the same run from
- * its durable log; neither the remount nor detachment may issue another start
- * or cancel command.
+ * A browser Worker dies with its document. Reattachment observes its orphan
+ * from the durable log, records its failure, and never silently spends another
+ * provider ask. A later Resume is a separate person-owned gesture.
  */
 describe('durable log reattach after a reload', () => {
   const assertNoApiRunCalls = async (): Promise<void> => {
@@ -767,52 +795,29 @@ describe('durable log reattach after a reload', () => {
     expect(apiRequests.filter((path) => /^\/v1\/chat\/(?!projects\/)[^/]+\/runs\//u.test(path))).toEqual([]);
   };
 
-  test('stops a reattached turn from the composer', async () => {
+  test('shows the durable abandonment reason and accepts a new turn', async () => {
     await prepareBrowserHost('home');
     await submitAndWaitForPartial();
     await target.reload();
     await ensureChatOpen();
-    await target.expectVisible(selectors.getByText(partialText, { exact: true }), 60_000);
-    await target.expectVisible(selectors.getByCss('button:has(svg.lucide-square)').last(), 60_000);
-    expect(await readGatewayRequestCount()).toBe(1);
-    await assertNoApiRunCalls();
-    await target.click(selectors.getByCss('button:has(svg.lucide-square)').last());
     await expect
-      .poll(async () => settlementTypesOf(await readActiveProjectTree('home')), { timeout: 120_000 })
-      .toEqual(['turn.failed']);
-    await target.releaseAgentHostGatewayFixture();
-    const tree = await readActiveProjectTree('home');
-    expect(eventLog(tree).filter((event) => event.type === 'run.lifecycle' && event.state === 'admitted')).toHaveLength(
-      1,
-    );
-    expect(await readGatewayRequestCount()).toBe(1);
-    await expect.poll(seededLease, { timeout: 60_000, interval: 250 }).toBeUndefined();
-    await assertNoApiRunCalls();
-  });
-
-  test('keeps a reloaded live run and its transcript ready for the next turn', async () => {
-    await prepareBrowserHost('home');
-    await submitAndWaitForPartial();
-    await target.reload();
-    await ensureChatOpen();
-    await target.expectVisible(selectors.getByText(partialText, { exact: true }), 60_000);
+      .poll(durableFailureReason, { timeout: 120_000 })
+      .toBe('The host executing this run is gone. Resume the turn to continue it.');
+    await target.expectVisible(selectors.getByText('The host executing this run is gone', { exact: false }), 60_000);
     expect(await readGatewayRequestCount()).toBe(1);
     await assertNoApiRunCalls();
-    await target.releaseAgentHostGatewayFixture();
-    await target.expectVisible(selectors.getByText(finalText, { exact: true }), 120_000);
-    const firstTree = await waitForLocalPublishedTree('home');
-    expect(settlementTypesOf(firstTree)).toEqual(['turn.finalized']);
-    expect(
-      eventLog(firstTree).filter((event) => event.type === 'run.lifecycle' && event.state === 'admitted'),
-    ).toHaveLength(1);
+    const abandoned = eventLog(await readActiveProjectTree('home'));
+    expect(settlementTypesOf(await readActiveProjectTree('home'))).toEqual(['turn.failed']);
+    expect(abandoned.filter((event) => event.type === 'run.lifecycle' && event.state === 'admitted')).toHaveLength(1);
 
     await target.type(composer, `${seedPrompt} Again.`);
     await target.click(selectors.getByCss('button:has(svg.lucide-arrow-up)').last());
-    await expect.poll(readGatewayRequestCount, { timeout: 120_000 }).toBe(3);
-    await target.releaseAgentHostGatewayFixture();
+    await expect.poll(readGatewayRequestCount, { timeout: 120_000 }).toBe(2);
+    await target.waitForAgentHostGatewayGate({ kind: 'stream', turn: `${seedPrompt} Again.` });
+    await target.releaseAgentHostGatewayFixture(`${seedPrompt} Again.`);
     await expect
       .poll(async () => settlementTypesOf(await readActiveProjectTree('home')), { timeout: 120_000 })
-      .toEqual(['turn.finalized', 'turn.finalized']);
+      .toEqual(['turn.failed', 'turn.finalized']);
   });
 });
 

@@ -272,7 +272,7 @@ type ProjectManagerContextType = {
   getChatsForResource: (resourceId: string, options?: { includeDeleted?: boolean }) => Promise<Chat[]>;
   getAllChatRecords: (options?: { includeDeleted?: boolean }) => Promise<ChatRecord[]>;
   getChatRecordsForResource: (resourceId: string, options?: { includeDeleted?: boolean }) => Promise<ChatRecord[]>;
-  getChat: (chatId: string) => Promise<Chat | undefined>;
+  getChat: (chatId: string, projectId?: string) => Promise<Chat | undefined>;
   invalidateProjectedChats: (resourceId: string, chatIds: readonly string[]) => void;
   deleteChat: (chatId: string) => Promise<void>;
 };
@@ -2430,8 +2430,8 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
   );
 
   const getChat = useCallback(
-    async (chatId: string): Promise<Chat | undefined> => {
-      return chatStore.getChat(chatId);
+    async (chatId: string, projectId?: string): Promise<Chat | undefined> => {
+      return chatStore.getChat(chatId, projectId);
     },
     [chatStore],
   );

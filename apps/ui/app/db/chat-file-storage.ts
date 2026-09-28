@@ -440,8 +440,8 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
       await tombstone(chatId);
     },
 
-    getChat: async (chatId) => {
-      const projectId = await locate(chatId);
+    getChat: async (chatId, knownProjectId) => {
+      const projectId = knownProjectId ?? (await locate(chatId));
       return projectId === undefined ? undefined : readChatDirectory(projectId, chatId);
     },
 

@@ -131,7 +131,7 @@ export const isDocumentActive = (): boolean =>
   typeof document === 'undefined' || (document.visibilityState === 'visible' && document.hasFocus());
 
 export type ChatSessionDeps = {
-  getChat: (chatId: string) => Promise<ChatEntity | undefined>;
+  getChat: (chatId: string, projectId?: string) => Promise<ChatEntity | undefined>;
   patchChat: <K extends keyof ChatEntity>(
     chatId: string,
     key: K,
@@ -211,6 +211,9 @@ type InternalSession = ChatSession & {
   seedMessage: MyUIMessage | undefined;
   /** Only an applied foreign read after hydration may authorize seed dispatch. */
   seedRemoteReadVersion: number | undefined;
+  /** A fresh check found no local log bytes, whose empty host read otherwise parks. */
+  seedLocalLogEmpty: boolean;
+  seedLocalLogCheck: Promise<Uint8Array<ArrayBuffer>> | undefined;
   /** A seeded chat observes its own log even before the sidebar lists it. */
   seedObservationRelease: (() => void) | undefined;
   /** Durable seed waiting for the focused admission and project connector to publish. */
@@ -536,14 +539,6 @@ export class ChatSessionStore {
     }
   }
 
-  async #refreshRemoteSegmentsSafely(chatId: string, projectId: string): Promise<void> {
-    try {
-      await this.refreshRemoteSegments(chatId, projectId);
-    } catch (error) {
-      console.warn('[ChatSessionStore] foreign chat log could not be read', chatId, error);
-    }
-  }
-
   /** Publish the active project's real W6 connector to every listed chat. @public */
   public publishProjectHostConnector(
     projectId: string,
@@ -588,7 +583,8 @@ export class ChatSessionStore {
 
   /** Resolve a listed chat's persisted placement without acquiring its SDK session. @public */
   public async getChatExecution(chatId: string): Promise<CadAgentExecution | undefined> {
-    const chat = await this.#deps.getChat(chatId);
+    const projectId = this.#sessions.get(chatId)?.projectId ?? this.#observed.get(chatId)?.projectId;
+    const chat = await this.#deps.getChat(chatId, projectId);
     return chat?.activeExecution;
   }
 
@@ -596,7 +592,8 @@ export class ChatSessionStore {
   public async getChatHostSettings(
     chatId: string,
   ): Promise<Pick<ChatEntity, 'activeExecution' | 'activeKernel'> | undefined> {
-    const chat = await this.#deps.getChat(chatId);
+    const projectId = this.#sessions.get(chatId)?.projectId ?? this.#observed.get(chatId)?.projectId;
+    const chat = await this.#deps.getChat(chatId, projectId);
     return chat === undefined ? undefined : { activeExecution: chat.activeExecution, activeKernel: chat.activeKernel };
   }
 
@@ -718,7 +715,7 @@ export class ChatSessionStore {
         if (reason === 'stoppable') {
           return { chatId, runId: run.runId, reason };
         }
-        const chat = await this.#deps.getChat(chatId).catch(() => undefined);
+        const chat = await this.#deps.getChat(chatId, projectId).catch(() => undefined);
         return {
           chatId,
           runId: run.runId,
@@ -743,16 +740,19 @@ export class ChatSessionStore {
     return plan;
   }
 
-  /** Replace an idle live transcript with the chat log just projected from Git. */
+  /** Refresh an idle live transcript from the host projection, never from chat-record metadata. */
   public async refreshFromStorage(chatId: string): Promise<void> {
     const session = this.#sessions.get(chatId);
     if (session?.status !== 'ready') {
       return;
     }
-    const chat = await this.#deps.getChat(chatId);
-    const current = this.#sessions.get(chatId);
-    if (chat && current === session && current.status === 'ready') {
-      current.chat.messages = chat.messages;
+    await this.#refreshRemoteSegmentsSafely(chatId, session.projectId);
+    if (this.#sessions.get(chatId) !== session) {
+      return;
+    }
+    const projection = this.#projectionContext(chatId);
+    if (projection !== undefined && selectCaughtUp(projection)) {
+      await this.#applyProjectedTranscript(session, projection, ++session.materializeVersion);
     }
   }
 
@@ -828,8 +828,21 @@ export class ChatSessionStore {
       answer.endCursor >= answer.nextCursor
     ) {
       this.#answeredLogReads.add(chatId);
+      const observed = this.#observed.get(chatId);
+      if (observed !== undefined) {
+        observed.status = 'attached';
+      }
     } else if (answer.status === 'refused') {
       this.#answeredLogReads.delete(chatId);
+      const session = this.#sessions.get(chatId);
+      if (session !== undefined) {
+        session.seedLocalLogEmpty = false;
+        session.seedLocalLogCheck = undefined;
+      }
+      const observed = this.#observed.get(chatId);
+      if (observed !== undefined) {
+        observed.status = answer.reason === 'unreadable' ? 'refused' : 'lost';
+      }
     }
     this.#projectionOf(chatId).send({ type: 'batch', answer });
     this.startPendingSeed(chatId);
@@ -886,9 +899,11 @@ export class ChatSessionStore {
     }
     const projection = this.#projectionContext(chatId);
     if (
-      !this.#answeredLogReads.has(chatId) ||
       session.seedRemoteReadVersion !== this.#remoteReadVersions.get(chatId) ||
       projection === undefined ||
+      projection.fault !== undefined ||
+      this.#observed.get(chatId)?.status === 'refused' ||
+      this.#observed.get(chatId)?.status === 'lost' ||
       !selectCaughtUp(projection)
     ) {
       return;
@@ -907,6 +922,16 @@ export class ChatSessionStore {
       return;
     }
     if (chatTurnAdmit(chatId) === undefined || this.#projectHostConnectors.get(session.projectId) === undefined) {
+      return;
+    }
+    if (!this.#answeredLogReads.has(chatId) && !session.seedLocalLogEmpty) {
+      const attachment = this.#observed.get(chatId)?.attachment;
+      if (attachment !== undefined && session.seedLocalLogCheck === undefined) {
+        const path = `/projects/${session.projectId}/${chatRecordsPath(chatId)}/events.jsonl`;
+        const check = this.#deps.client.readFile(path);
+        session.seedLocalLogCheck = check;
+        void this.#finishSeedLocalLogCheck(session, attachment, check);
+      }
       return;
     }
     const gesture = session.pendingSeedGesture;
@@ -1241,6 +1266,14 @@ export class ChatSessionStore {
     await binding.record.attachments.retainOnly(referencedAttachments(session.draftActorRef.getSnapshot().context));
   }
 
+  async #refreshRemoteSegmentsSafely(chatId: string, projectId: string): Promise<void> {
+    try {
+      await this.refreshRemoteSegments(chatId, projectId);
+    } catch (error) {
+      console.warn('[ChatSessionStore] foreign chat log could not be read', chatId, error);
+    }
+  }
+
   async #cancelSessionRun(session: InternalSession): Promise<void> {
     const projected = this.#projectionContext(session.chatId);
     const runId =
@@ -1266,8 +1299,55 @@ export class ChatSessionStore {
     }
   }
 
+  async #finishSeedLocalLogCheck(
+    session: InternalSession,
+    attachment: Actor<typeof hostAttachment>,
+    check: Promise<Uint8Array<ArrayBuffer>>,
+  ): Promise<void> {
+    let empty = false;
+    let failure: unknown;
+    try {
+      const bytes = await check;
+      empty = bytes.byteLength === 0;
+    } catch (error) {
+      const code = getErrno(error);
+      if (code === 'ENOENT' || code === 'ENOTDIR') {
+        empty = true;
+      } else {
+        failure = error;
+      }
+    }
+    if (
+      session.seedLocalLogCheck !== check ||
+      session.pendingSeedGesture === undefined ||
+      this.#sessions.get(session.chatId) !== session ||
+      this.#observed.get(session.chatId)?.attachment !== attachment
+    ) {
+      return;
+    }
+    session.seedLocalLogCheck = undefined;
+    if (failure !== undefined) {
+      console.warn('[ChatSessionStore] local chat log could not be checked', session.chatId, failure);
+      session.persistenceActorRef.send({
+        type: 'setPersistedError',
+        error: parseErrorForPersistence(
+          failure instanceof Error ? failure : new Error('Local chat log could not be checked.', { cause: failure }),
+        ),
+      });
+    }
+    if (empty) {
+      session.seedLocalLogEmpty = true;
+      this.startPendingSeed(session.chatId);
+    }
+  }
+
   #stopObservedAttachment(chatId: string, observed: ObservedChat): void {
     this.#answeredLogReads.delete(chatId);
+    const session = this.#sessions.get(chatId);
+    if (session !== undefined) {
+      session.seedLocalLogEmpty = false;
+      session.seedLocalLogCheck = undefined;
+    }
     if (observed.retry !== undefined) {
       clearTimeout(observed.retry);
     }
@@ -1351,6 +1431,7 @@ export class ChatSessionStore {
     });
     observed.attachment = attachment;
     attachment.start();
+    this.startPendingSeed(chatId);
   }
 
   /** This project's unread record actor, created and read on first use. */
@@ -2142,7 +2223,7 @@ export class ChatSessionStore {
     const recordStore = deferredRecordStore(composer);
     const composerRecordRef = createComposerRecordActor(recordStore);
 
-    const readChatRow = async (id: string): Promise<ChatEntity | undefined> => depsRef().getChat(id);
+    const readChatRow = async (id: string): Promise<ChatEntity | undefined> => depsRef().getChat(id, projectId);
 
     const persistenceActorRef = createActor(
       chatPersistenceMachine.provide({
@@ -2186,41 +2267,42 @@ export class ChatSessionStore {
 
               const lastMessage = session.chat.messages.at(-1);
               const { startupRequest } = loadedChat;
-              if (startupRequest) {
-                const isEligibleStartupRequest =
-                  lastMessage?.role === 'user' &&
-                  lastMessage.id === startupRequest.messageId &&
-                  lastMessage.metadata?.status === 'pending';
-                if (isEligibleStartupRequest) {
-                  /* A previous session's projection cannot settle this intent:
-                   * only a read from the current host generation can. */
-                  const observed = this.#observed.get(input.chatId);
-                  if (observed !== undefined) {
-                    this.#stopObservedAttachment(input.chatId, observed);
-                  }
-                  this.#answeredLogReads.delete(input.chatId);
-                  session.seedRemoteReadVersion = undefined;
-                  this.#projectionOf(input.chatId).send({ type: 'reset' });
-                  session.seedObservationRelease ??= this.observe(input.chatId, session.projectId);
-                  if (observed !== undefined) {
-                    this.#startObservedAttachment(input.chatId, observed);
-                  }
-                  /* Keep the exact intent until Start is durably accepted. A
-                   * reload between this load and host acknowledgement must
-                   * resend the same command id and prompt. */
-                  session.draftActorRef.send({ type: 'initializeFromChat' });
-                  const seedGesture: ChatTurnGesture = {
-                    kind: 'regenerate',
-                    execution: loadedChat.activeExecution,
-                    requestId: startupRequest.id,
-                  };
-                  session.pendingSeedGesture = seedGesture;
-                  session.seedRequestId = startupRequest.id;
-                  session.seedMessage = lastMessage;
-                  void this.#refreshRemoteSegmentsSafely(input.chatId, session.projectId);
-                  this.startPendingSeed(input.chatId);
-                  return { chat: { ...loadedChat, error: undefined } };
+              const isEligibleStartupRequest =
+                startupRequest !== undefined &&
+                lastMessage?.role === 'user' &&
+                lastMessage.id === startupRequest.messageId &&
+                lastMessage.metadata?.status === 'pending';
+              if (startupRequest && isEligibleStartupRequest) {
+                /* A previous session's projection cannot settle this intent:
+                 * only a read from the current host generation can. */
+                const observed = this.#observed.get(input.chatId);
+                if (observed !== undefined) {
+                  this.#stopObservedAttachment(input.chatId, observed);
                 }
+                this.#answeredLogReads.delete(input.chatId);
+                session.seedRemoteReadVersion = undefined;
+                session.seedLocalLogEmpty = false;
+                session.seedLocalLogCheck = undefined;
+                this.#projectionOf(input.chatId).send({ type: 'reset' });
+                session.seedObservationRelease ??= this.observe(input.chatId, session.projectId);
+                if (observed !== undefined) {
+                  this.#startObservedAttachment(input.chatId, observed);
+                }
+                /* Keep the exact intent until Start is durably accepted. A
+                 * reload between this load and host acknowledgement must
+                 * resend the same command id and prompt. */
+                session.draftActorRef.send({ type: 'initializeFromChat' });
+                const seedGesture: ChatTurnGesture = {
+                  kind: 'regenerate',
+                  execution: loadedChat.activeExecution,
+                  requestId: startupRequest.id,
+                };
+                session.pendingSeedGesture = seedGesture;
+                session.seedRequestId = startupRequest.id;
+                session.seedMessage = lastMessage;
+                void this.#refreshRemoteSegmentsSafely(input.chatId, session.projectId);
+                this.startPendingSeed(input.chatId);
+                return { chat: { ...loadedChat, error: undefined } };
               }
 
               session.draftActorRef.send({ type: 'initializeFromChat' });
@@ -2332,6 +2414,8 @@ export class ChatSessionStore {
       seedRequestId: undefined,
       seedMessage: undefined,
       seedRemoteReadVersion: undefined,
+      seedLocalLogEmpty: false,
+      seedLocalLogCheck: undefined,
       seedObservationRelease: undefined,
       pendingSeedGesture: undefined,
       activeCommand: undefined,

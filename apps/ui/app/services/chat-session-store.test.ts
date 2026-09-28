@@ -477,6 +477,41 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     unpublish();
   });
 
+  it('hydrates a new project seed using the acquired project id before global project discovery', async () => {
+    const chatId = 'chat_cold_project_seed';
+    const projectId = 'project_cold_seed';
+    const seed: MyUIMessage = {
+      id: 'msg_cold_seed',
+      role: 'user',
+      parts: [{ type: 'text', text: 'Make a cube' }],
+      metadata: { status: 'pending' },
+    };
+    const deps = createStubDeps();
+    deps.getChat.mockImplementation(async (_chatId, knownProjectId) =>
+      knownProjectId === projectId
+        ? chatRow(chatId, projectId, {
+            messages: [seed],
+            startupRequest: {
+              id: 'req_cold_seed',
+              kind: 'regenerate-tail',
+              messageId: seed.id,
+              message: seed,
+              source: 'homepage-initial-message',
+              createdAt: 1,
+            },
+          })
+        : undefined,
+    );
+    const store = new ChatSessionStore({ chatSession });
+    store.setDependencies(deps);
+    const session = store.acquire(chatId, projectId);
+    await vi.waitFor(() => {
+      expect(session.chat.messages).toContainEqual(seed);
+    });
+    expect(deps.getChat).toHaveBeenCalledWith(chatId, projectId);
+    store.release(chatId);
+  });
+
   it('does not resend an observed seed before its reset projection refetches the foreign accepted user', async () => {
     const chatId = 'chat_remote_seed';
     const projectId = 'project_remote_seed';
@@ -587,117 +622,205 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     unpublish();
   });
 
-  it('keeps a seed intent and exact user message through reload before durable Start acknowledgement', async () => {
-    const deps = createStubDeps();
-    const seed: MyUIMessage = {
-      id: 'msg_seed_waiting_ack',
-      role: 'user',
-      parts: [{ type: 'text', text: 'Make a cube' }],
-      metadata: { status: 'pending' },
-    };
-    deps.getChat.mockResolvedValue(
-      chatRow('chat_seed_waiting_ack', 'project_seed_waiting_ack', {
-        messages: [seed],
-        startupRequest: {
-          id: 'req_seed_waiting_ack',
-          kind: 'regenerate-tail',
-          messageId: seed.id,
-          message: seed,
-          source: 'homepage-initial-message',
-          createdAt: 1,
-        },
-      }),
-    );
-    const first = new ChatSessionStore({ chatSession });
-    first.setDependencies(deps);
-    first.acquire('chat_seed_waiting_ack', 'project_seed_waiting_ack');
-    await vi.waitFor(() => {
-      expect(first.get('chat_seed_waiting_ack')?.chat.messages).toContainEqual(seed);
-    });
-    expect(deps.consumeChatStartupRequest).not.toHaveBeenCalled();
+  it.each(['missing', 'zero-byte'] as const)(
+    'keeps a seed through reload and starts it when the %s host log long-polls',
+    async (localLogFile) => {
+      const deps = createStubDeps();
+      const seed: MyUIMessage = {
+        id: 'msg_seed_waiting_ack',
+        role: 'user',
+        parts: [{ type: 'text', text: 'Make a cube' }],
+        metadata: { status: 'pending' },
+      };
+      deps.getChat.mockResolvedValue(
+        chatRow('chat_seed_waiting_ack', 'project_seed_waiting_ack', {
+          messages: [seed],
+          startupRequest: {
+            id: 'req_seed_waiting_ack',
+            kind: 'regenerate-tail',
+            messageId: seed.id,
+            message: seed,
+            source: 'homepage-initial-message',
+            createdAt: 1,
+          },
+        }),
+      );
+      const first = new ChatSessionStore({ chatSession });
+      first.setDependencies(deps);
+      first.acquire('chat_seed_waiting_ack', 'project_seed_waiting_ack');
+      await vi.waitFor(() => {
+        expect(first.get('chat_seed_waiting_ack')?.chat.messages).toContainEqual(seed);
+      });
+      expect(deps.consumeChatStartupRequest).not.toHaveBeenCalled();
 
-    const reloaded = new ChatSessionStore({ chatSession });
-    reloaded.setDependencies(deps);
-    // A sidebar read before this session exists is not a fresh seed-admission read.
-    publishLogRows(reloaded, 'chat_seed_waiting_ack', []);
-    expect(reloaded.observedChatIdsOf('project_seed_waiting_ack')).toEqual([]);
-    reloaded.acquire('chat_seed_waiting_ack', 'project_seed_waiting_ack');
-    await vi.waitFor(() => {
-      expect(reloaded.get('chat_seed_waiting_ack')?.chat.messages).toContainEqual(seed);
-    });
-    expect(deps.consumeChatStartupRequest).not.toHaveBeenCalled();
-    expect(
-      reloaded
-        .get('chat_seed_waiting_ack')
-        ?.stateActorRef.getSnapshot()
-        .matches({ run: { queued: 'admitting' } }),
-    ).toBe(false);
+      if (localLogFile === 'zero-byte') {
+        await deps.client.writeFile(
+          '/projects/project_seed_waiting_ack/.tau/chats/chat_seed_waiting_ack/events.jsonl',
+          new Uint8Array(),
+        );
+      }
+      const reloaded = new ChatSessionStore({ chatSession });
+      reloaded.setDependencies(deps);
+      // A sidebar read before this session exists is not a fresh seed-admission read.
+      publishLogRows(reloaded, 'chat_seed_waiting_ack', []);
+      expect(reloaded.observedChatIdsOf('project_seed_waiting_ack')).toEqual([]);
+      reloaded.acquire('chat_seed_waiting_ack', 'project_seed_waiting_ack');
+      await vi.waitFor(() => {
+        expect(reloaded.get('chat_seed_waiting_ack')?.chat.messages).toContainEqual(seed);
+      });
+      expect(deps.consumeChatStartupRequest).not.toHaveBeenCalled();
+      expect(
+        reloaded
+          .get('chat_seed_waiting_ack')
+          ?.stateActorRef.getSnapshot()
+          .matches({ run: { queued: 'admitting' } }),
+      ).toBe(false);
 
-    const hostCommand = vi.fn(
-      async (command: HostCommand): Promise<CommandAnswer> => ({
+      const hostCommand = vi.fn(
+        async (command: HostCommand): Promise<CommandAnswer> => ({
+          commandId: command.commandId,
+          generation: 0,
+          status: 'applied',
+          effect: 'durable',
+          cursor: 1,
+        }),
+      );
+      // The browser launcher parks an empty read; no batch is emitted until a writer wakes it.
+      const subscribe = vi.fn<AgentHostClient['subscribe']>(() => vi.fn());
+      const unpublishConnector = reloaded.publishProjectHostConnector('project_seed_waiting_ack', async () =>
+        mock<AgentHostClient>({ hostCommand, subscribe, close: vi.fn(async () => undefined) }),
+      );
+      expect(hostCommand).not.toHaveBeenCalled();
+      const unpublishAdmission = publishChatTurnAdmission('chat_seed_waiting_ack', async (gesture) => {
+        if (gesture.kind !== 'regenerate' || gesture.requestId === undefined) {
+          throw new Error('Expected the durable seeded regenerate gesture.');
+        }
+        const runId = gesture.requestId;
+        return {
+          runId,
+          leaseTurnId: undefined,
+          request: {
+            kind: 'regenerate',
+            command: {
+              type: 'start',
+              commandId: runId,
+              payload: {
+                chatId: 'chat_seed_waiting_ack',
+                runId,
+                message: { id: seed.id, role: 'user', content: 'Make a cube' },
+                trigger: 'submit',
+              },
+            },
+          },
+        };
+      });
+      await vi.waitFor(() => {
+        expect(subscribe).toHaveBeenCalledOnce();
+      });
+      expect(reloaded.observedChatIdsOf('project_seed_waiting_ack')).toEqual(['chat_seed_waiting_ack']);
+      reloaded.startPendingSeed('chat_seed_waiting_ack');
+      await vi.waitFor(() => {
+        expect(hostCommand).toHaveBeenCalledOnce();
+        expect(deps.consumeChatStartupRequest).toHaveBeenCalledWith('chat_seed_waiting_ack', 'req_seed_waiting_ack');
+      });
+      reloaded.startPendingSeed('chat_seed_waiting_ack');
+      expect(hostCommand).toHaveBeenCalledOnce();
+      unpublishAdmission();
+      unpublishConnector();
+      first.release('chat_seed_waiting_ack');
+      reloaded.release('chat_seed_waiting_ack');
+    },
+  );
+
+  it.each(['unreadable', 'owner-fenced', 'identity-mismatch', 'local-io-error'] as const)(
+    'does not dispatch a seeded Start after %s before an authoritative host read',
+    async (failure) => {
+      const chatId = `chat_seed_${failure}`;
+      const projectId = `project_seed_${failure}`;
+      const seed: MyUIMessage = {
+        id: `msg_seed_${failure}`,
+        role: 'user',
+        parts: [{ type: 'text', text: 'Make a cube' }],
+        metadata: { status: 'pending' },
+      };
+      const deps = createStubDeps();
+      deps.getChat.mockResolvedValue(
+        chatRow(chatId, projectId, {
+          messages: [seed],
+          startupRequest: {
+            id: `req_seed_${failure}`,
+            kind: 'regenerate-tail',
+            messageId: seed.id,
+            message: seed,
+            source: 'homepage-initial-message',
+            createdAt: 1,
+          },
+        }),
+      );
+      const store = new ChatSessionStore({ chatSession });
+      store.setDependencies(deps);
+      const originalRead = deps.client.readFile.bind(deps.client);
+      deps.client.readFile = async (path) => {
+        if (!path.endsWith('/events.jsonl')) {
+          return originalRead(path);
+        }
+        return new Promise<Uint8Array<ArrayBuffer>>((_resolve, reject) => {
+          queueMicrotask(() => {
+            if (failure !== 'local-io-error') {
+              store.receiveHostReadAnswer(chatId, { status: 'refused', reason: failure });
+            }
+            reject(failure === 'local-io-error' ? Object.assign(new Error('EIO'), { code: 'EIO' }) : notFound(path));
+          });
+        });
+      };
+      const hostCommand = vi.fn<AgentHostClient['hostCommand']>(async (command) => ({
         commandId: command.commandId,
         generation: 0,
         status: 'applied',
         effect: 'durable',
         cursor: 1,
-      }),
-    );
-    const subscribe = vi.fn((...args: Parameters<AgentHostClient['subscribe']>) => {
-      queueMicrotask(() =>
-        args[3]?.({
-          status: 'batch',
-          chatId: 'chat_seed_waiting_ack',
-          cursor: args[0].cursor,
-          nextCursor: args[0].cursor,
-          endCursor: args[0].cursor,
-          events: [],
-        }),
+      }));
+      const unpublishConnector = store.publishProjectHostConnector(projectId, async () =>
+        mock<AgentHostClient>({ hostCommand, subscribe: vi.fn(() => vi.fn()), close: vi.fn(async () => undefined) }),
       );
-      return vi.fn();
-    });
-    const unpublishConnector = reloaded.publishProjectHostConnector('project_seed_waiting_ack', async () =>
-      mock<AgentHostClient>({ hostCommand, subscribe, close: vi.fn(async () => undefined) }),
-    );
-    expect(hostCommand).not.toHaveBeenCalled();
-    const unpublishAdmission = publishChatTurnAdmission('chat_seed_waiting_ack', async (gesture) => {
-      if (gesture.kind !== 'regenerate' || gesture.requestId === undefined) {
-        throw new Error('Expected the durable seeded regenerate gesture.');
-      }
-      const runId = gesture.requestId;
-      return {
-        runId,
-        leaseTurnId: undefined,
-        request: {
+      publishAdmission(chatId, (gesture) => {
+        if (gesture.kind !== 'regenerate' || gesture.requestId === undefined) {
+          throw new Error('Expected the durable seeded regenerate gesture.');
+        }
+        return {
           kind: 'regenerate',
           command: {
             type: 'start',
-            commandId: runId,
+            commandId: gesture.requestId,
             payload: {
-              chatId: 'chat_seed_waiting_ack',
-              runId,
+              chatId,
+              runId: gesture.requestId,
               message: { id: seed.id, role: 'user', content: 'Make a cube' },
               trigger: 'submit',
             },
           },
-        },
-      };
-    });
-    await vi.waitFor(() => {
-      expect(subscribe).toHaveBeenCalledOnce();
-    });
-    expect(reloaded.observedChatIdsOf('project_seed_waiting_ack')).toEqual(['chat_seed_waiting_ack']);
-    reloaded.startPendingSeed('chat_seed_waiting_ack');
-    await vi.waitFor(() => {
-      expect(hostCommand).toHaveBeenCalledOnce();
-      expect(deps.consumeChatStartupRequest).toHaveBeenCalledWith('chat_seed_waiting_ack', 'req_seed_waiting_ack');
-    });
-    reloaded.startPendingSeed('chat_seed_waiting_ack');
-    expect(hostCommand).toHaveBeenCalledOnce();
-    unpublishAdmission();
-    unpublishConnector();
-    first.release('chat_seed_waiting_ack');
-    reloaded.release('chat_seed_waiting_ack');
-  });
+        };
+      });
+      const session = store.acquire(chatId, projectId);
+      await vi.waitFor(() => {
+        expect(session.chat.messages).toContainEqual(seed);
+      });
+      await settle();
+      expect(hostCommand).not.toHaveBeenCalled();
+      expect(deps.consumeChatStartupRequest).not.toHaveBeenCalled();
+      if (failure === 'local-io-error') {
+        expect(session.persistenceActorRef.getSnapshot().context.persistedError).toBeDefined();
+      }
+      if (failure === 'identity-mismatch') {
+        publishLogRows(store, chatId, []);
+        await vi.waitFor(() => {
+          expect(hostCommand).toHaveBeenCalledOnce();
+        });
+      }
+      store.release(chatId);
+      unpublishConnector();
+    },
+  );
 
   it('should not consume a seed from a previous session’s cached user before a fresh empty host read', async () => {
     const chatId = 'chat_stale_seed_read';
@@ -811,6 +934,47 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     expect(session.chat.messages.filter((message) => message.id === seed.id)).toHaveLength(1);
     store.release(chatId);
     expect(store.observedChatIdsOf(projectId)).toEqual([]);
+  });
+
+  it('does not overwrite a displayed transcript from a chat-record refresh with no transcript bytes', async () => {
+    const chatId = 'chat_projected_refresh';
+    const projectId = 'project_projected_refresh';
+    const client = createMemoryClient();
+    const rows = readFileSync(
+      new URL(
+        '../../../../packages/agent-host/specs/ChatLog/recorded/in-project-ping-pong-turn.jsonl',
+        pathToFileURL(import.meta.filename),
+      ),
+      'utf8',
+    );
+    const segmentPath = `/projects/${projectId}/.tau/chats/${chatId}/events/other-device.jsonl`;
+    await client.writeFile(segmentPath, new TextEncoder().encode(rows));
+    const deps = createStubDeps(client);
+    deps.getChat.mockResolvedValue(chatRow(chatId, projectId));
+    const store = new ChatSessionStore({ chatSession });
+    store.setDependencies(deps);
+    const session = store.acquire(chatId, projectId);
+    await vi.waitFor(() => {
+      expect(deps.getChat).toHaveBeenCalledOnce();
+    });
+    await settle();
+    await store.refreshRemoteSegments(chatId, projectId);
+    await vi.waitFor(() => {
+      expect(session.chat.messages.some((message) => message.role === 'assistant')).toBe(true);
+    });
+    await store.refreshFromStorage(chatId);
+    expect(session.chat.messages.some((message) => message.role === 'assistant')).toBe(true);
+    await client.writeFile(
+      segmentPath,
+      new TextEncoder().encode(
+        rows.replace('Browser host completed the workspace change.', 'Browser host verified the workspace change.'),
+      ),
+    );
+    await store.refreshFromStorage(chatId);
+    await vi.waitFor(() => {
+      expect(JSON.stringify(session.chat.messages)).toContain('Browser host verified the workspace change.');
+    });
+    store.release(chatId);
   });
 
   it('should not replay a refused seed while a durable manual Start waits for intent clearing and log catch-up', async () => {
@@ -943,6 +1107,11 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     expect(session.chat.messages.some((message) => message.id === seed.id)).toBe(false);
     expect(session.chat.messages.filter((message) => message.id === manual.id)).toHaveLength(1);
 
+    // The durable manual Start has written the local log even though this reloaded reader has not caught up to it.
+    await deps.client.writeFile(
+      `/projects/${projectId}/.tau/chats/${chatId}/events.jsonl`,
+      new TextEncoder().encode(manualRows.map((row) => JSON.stringify(row)).join('\n')),
+    );
     const reloaded = new ChatSessionStore({ chatSession });
     reloaded.setDependencies(deps);
     const reloadedSession = reloaded.acquire(chatId, projectId);
@@ -1411,7 +1580,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     expect(store.chatRootsOf('proj_a').get('chat_a')).toBe(session.stateActorRef);
     expect(session.persistenceActorRef.getSnapshot().value).toMatchObject({ chatLoading: 'loading' });
     await vi.waitFor(() => {
-      expect(deps.getChat).toHaveBeenCalledWith('chat_a');
+      expect(deps.getChat).toHaveBeenCalledWith('chat_a', 'proj_a');
     });
     store.setFocusedProject('proj_a');
     resolveLoadedChat({
@@ -1502,7 +1671,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     try {
       const root = store.acquire('chat_delayed_release', 'proj_b').stateActorRef;
       await vi.waitFor(() => {
-        expect(deps.getChat).toHaveBeenCalledWith('chat_delayed_release');
+        expect(deps.getChat).toHaveBeenCalledWith('chat_delayed_release', 'proj_b');
       });
       store.release('chat_delayed_release');
       resolveLoadedChat({
@@ -1611,7 +1780,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     try {
       const session = store.acquire('chat_early_settlement', 'proj_a');
       await vi.waitFor(() => {
-        expect(deps.getChat).toHaveBeenCalledWith('chat_early_settlement');
+        expect(deps.getChat).toHaveBeenCalledWith('chat_early_settlement', 'proj_a');
       });
       const runId = 'req_early_settlement';
       publishLogRows(store, 'chat_early_settlement', runningRows(runId));
@@ -2515,7 +2684,7 @@ describe('ChatSessionStore', () => {
       await Promise.resolve();
       await Promise.resolve();
 
-      expect(deps.getChat).toHaveBeenCalledWith('chat_a');
+      expect(deps.getChat).toHaveBeenCalledWith('chat_a', 'resource_1');
     });
 
     it('returns a displaced send to the composer whichever requestTurn call observes it', async () => {

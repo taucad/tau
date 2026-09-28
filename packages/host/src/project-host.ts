@@ -590,6 +590,8 @@ export type ProjectHostCommand = Readonly<ProjectHostQueued>;
 export type ProjectHostActor = Pick<Actor<typeof projectHostMachine>, 'getSnapshot' | 'on' | 'subscribe'> &
   Readonly<{
     start: () => void;
+    /** Wait for close retries started by this actor, including one after it completed. */
+    settled: () => Promise<void>;
     /** @throws TypeError for anything but a command. */
     send: (command: ProjectHostCommand) => void;
   }>;
@@ -637,6 +639,21 @@ export const createProjectHostActor = (options: ProjectHostActorOptions): Projec
   const clock: NonNullable<ProjectHostActorOptions['clock']> = actorOptions.clock ?? { setTimeout, clearTimeout };
   /* The resource this actor's effects act on, never in the machine's context (MC-R5). */
   let opened: OpenedProjectHost | undefined;
+  const pendingCloses = new Set<Promise<void>>();
+  const trackClose = (closing: Promise<void>): void => {
+    pendingCloses.add(closing);
+    const forgetSettled = async (): Promise<void> => {
+      try {
+        await closing;
+      } catch {
+        /* Both callers report or deliberately discard close errors themselves. */
+      } finally {
+        pendingCloses.delete(closing);
+      }
+    };
+    // async-iife: bootstrap -- this removes a completed retry; settled() owns the shutdown wait.
+    void forgetSettled();
+  };
   const self: { actor?: Actor<typeof projectHostMachine> } = {};
   const send = (event: Parameters<Actor<typeof projectHostMachine>['send']>[0]): void => {
     self.actor?.send(event);
@@ -656,13 +673,15 @@ export const createProjectHostActor = (options: ProjectHostActorOptions): Projec
         if (left !== undefined) {
           /* A close that failed left this host: it is tried once more as the fresh one replaces it. */
           // async-iife: bootstrap -- the effect is synchronous; the retry's failure is only reported.
-          void (async (): Promise<void> => {
-            try {
-              await left.host.close();
-            } catch (error) {
-              console.error('[project host] a host whose close failed did not close again', error);
-            }
-          })();
+          trackClose(
+            (async (): Promise<void> => {
+              try {
+                await left.host.close();
+              } catch (error) {
+                console.error('[project host] a host whose close failed did not close again', error);
+              }
+            })(),
+          );
         }
         try {
           /* T3: while released and draining, a new run is refused HOST_CLOSED; a remount serves it again. */
@@ -721,13 +740,15 @@ export const createProjectHostActor = (options: ProjectHostActorOptions): Projec
   /* A fault ends the actor without its close effect: the host it left open still closes. */
   const closeLeftOpen = (): void => {
     // async-iife: bootstrap -- the actor has ended, so nothing is left to answer; the host's close is best effort.
-    void (async (): Promise<void> => {
-      try {
-        await closeOpened();
-      } catch {
-        /* Nothing left to report it to. */
-      }
-    })();
+    trackClose(
+      (async (): Promise<void> => {
+        try {
+          await closeOpened();
+        } catch {
+          /* Nothing left to report it to. */
+        }
+      })(),
+    );
   };
   actor.subscribe({ error: closeLeftOpen, complete: closeLeftOpen });
   return {
@@ -736,6 +757,12 @@ export const createProjectHostActor = (options: ProjectHostActorOptions): Projec
     subscribe: actor.subscribe.bind(actor),
     start: () => {
       actor.start();
+    },
+    settled: async () => {
+      while (pendingCloses.size > 0) {
+        // oxlint-disable-next-line no-await-in-loop -- a close can finish while another actor effect starts one.
+        await Promise.allSettled(pendingCloses);
+      }
     },
     send: (command) => {
       if (!projectHostCommands.has(command.type)) {

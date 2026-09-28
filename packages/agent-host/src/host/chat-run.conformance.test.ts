@@ -18,7 +18,7 @@
  */
 
 import path from 'node:path';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
 
 import { describe, expect, it } from 'vitest';
@@ -43,6 +43,7 @@ const specs = path.resolve(import.meta.dirname, '../../specs');
 const graph = readSpecGraph(path.join(specs, 'ChatRunSlotGraph/graph.json'));
 const suite = JSON.parse(readFileSync(path.join(specs, 'ChatRunSlotGraph/suite.json'), 'utf8')) as CoveringSuite;
 const behaviours = suiteBehaviours(graph, suite);
+const simulated = process.env['FORMAL_SIMULATED'];
 
 /** The spec's native run `T`; its start command's id is the run id. */
 const run = 'r1';
@@ -182,6 +183,20 @@ describe('chatRun conforms to ChatRunSlot.tla', () => {
     expect(behaviours).toHaveLength(suite.behaviours.length);
     expect(await replay({ inspect: guard.inspect })).toEqual([]);
   });
+
+  it.runIf(simulated !== undefined && !existsSync(path.join(simulated, '.skipped')))(
+    'should replay the simulated behaviours without divergence',
+    async () => {
+      const traces = readFileSync(path.join(simulated ?? '', 'ChatRunSlotGraph.ndjson'), 'utf8')
+        .split('\n')
+        .filter((line) => line.trim() !== '')
+        .map((line) => JSON.parse(line) as SpecView[]);
+
+      expect(traces.length).toBeGreaterThan(0);
+      expect(await replaySuite(traces, chatRunAdapter(), (state) => [state['act'], state])).toEqual([]);
+    },
+    120_000,
+  );
 
   it('should keep context.ledger equal to the fold of the durable log after every replayed step', async () => {
     const agreement: string[] = [];

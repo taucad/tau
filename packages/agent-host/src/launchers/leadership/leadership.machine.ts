@@ -1018,7 +1018,7 @@ export const leadershipMachine = machineDefinition.createMachine({
             return {
               target: '#ready',
               context:
-                next.writes.length > 0 || next.reconcile
+                next.writes.length > 0 || (next.visible && next.reconcile)
                   ? acquire(next, enq, actions, next.reconcile && next.writes.length === 0 ? 'queued' : 'ifAvailable')
                   : next,
             };

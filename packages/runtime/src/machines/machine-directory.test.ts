@@ -166,6 +166,8 @@ describe('host-owned machine directory', () => {
             materials: [
               { slot: 0, state: 'empty' },
               { slot: 1, state: 'loaded', materialId: 'PETG', profileId: 'GFG00' },
+              // A provider's external spool keeps its own id beside the unit slots (Bambu: 254).
+              { slot: 254, state: 'loaded', materialId: 'PETG', color: '#FFFFFF' },
             ],
           },
           run: {
@@ -177,8 +179,8 @@ describe('host-owned machine directory', () => {
           },
           fans: { part: 100, auxiliary: 40, chamber: 0 },
           materialSystem: {
-            currentSlot: 0,
-            targetSlot: 0,
+            currentSlot: 254,
+            targetSlot: 254,
             units: [{ unit: 0, humidityIndex: 3 }],
           },
           network: { wifiSignalDbm: -47 },

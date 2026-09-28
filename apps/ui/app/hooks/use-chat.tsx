@@ -519,11 +519,8 @@ export type ChatActions = DraftActions & {
   sendMessage: (message: SendMessageInput, options?: { attachments?: readonly StoredAttachmentRef[] }) => Promise<void>;
   regenerate: () => void;
   /**
-   * Re-run the chat's last turn after a failure the person chose to retry.
-   *
-   * A stream the host can still continue is resumed rather than re-run, so
-   * assistant parts that already landed survive; the admission decides which,
-   * because only it knows whether the run is resumable.
+   * Resume a run the host still holds, preserving its already-settled work.
+   * An unavailable resume is refused; replay is the separate regenerate verb.
    */
   continueChat: () => void;
   stop: () => void;

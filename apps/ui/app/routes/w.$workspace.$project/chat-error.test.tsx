@@ -333,7 +333,8 @@ describe('ChatError', () => {
     expect(screen.queryByRole('button', { name: /resume/iu })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Try again' }));
-    expect(continueChat).toHaveBeenCalledTimes(1);
+    expect(regenerate).toHaveBeenCalledTimes(1);
+    expect(continueChat).not.toHaveBeenCalled();
   });
 
   /* T2-D11. A resume the host cannot honour is not a failure: the turn is
@@ -425,7 +426,8 @@ describe('ChatError', () => {
     expect(screen.queryByText('Everything up to here is saved.')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Try again' }));
-    expect(continueChat).toHaveBeenCalledTimes(1);
+    expect(regenerate).toHaveBeenCalledTimes(1);
+    expect(continueChat).not.toHaveBeenCalled();
   });
 
   /* A host whose hello names a wire this page cannot speak: nothing here can fix it, the host's Tau must change. */
@@ -446,7 +448,8 @@ describe('ChatError', () => {
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Try again' }));
-    expect(continueChat).toHaveBeenCalledTimes(1);
+    expect(regenerate).toHaveBeenCalledTimes(1);
+    expect(continueChat).not.toHaveBeenCalled();
   });
 
   it("should route an external agent's usage limit to its stop notice instead of the generic block", () => {
@@ -564,7 +567,7 @@ describe('ChatError', () => {
     expect(screen.getByText('Unable to reach Tau')).toBeInTheDocument();
   });
 
-  it('should continue the server-category fallback when Try again is clicked', async () => {
+  it('should replay the server-category fallback when Try again is clicked', async () => {
     const user = userEvent.setup();
     const serverError: ChatErrorPayload = {
       category: errorCategory.server,
@@ -582,13 +585,13 @@ describe('ChatError', () => {
     render(<ChatErrorBanner />);
     await user.click(screen.getByRole('button', { name: /try again/i }));
 
-    expect(continueChat).toHaveBeenCalledTimes(1);
-    expect(regenerate).not.toHaveBeenCalled();
+    expect(regenerate).toHaveBeenCalledTimes(1);
+    expect(continueChat).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: /resume/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^retry$/i })).not.toBeInTheDocument();
   });
 
-  it('should continue the generic fallback when Try again is clicked', async () => {
+  it('should replay the generic fallback when Try again is clicked', async () => {
     const user = userEvent.setup();
     const genericError: ChatErrorPayload = {
       category: errorCategory.generic,
@@ -607,13 +610,13 @@ describe('ChatError', () => {
 
     await user.click(screen.getByRole('button', { name: /try again/i }));
 
-    expect(continueChat).toHaveBeenCalledTimes(1);
-    expect(regenerate).not.toHaveBeenCalled();
+    expect(regenerate).toHaveBeenCalledTimes(1);
+    expect(continueChat).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: /resume/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^retry$/i })).not.toBeInTheDocument();
   });
 
-  it('should continue unknown fallback categories instead of regenerating', async () => {
+  it('should replay unknown fallback categories from Try again', async () => {
     const user = userEvent.setup();
     const unknownError = {
       category: 'unknown',
@@ -632,8 +635,8 @@ describe('ChatError', () => {
 
     await user.click(screen.getByRole('button', { name: /try again/i }));
 
-    expect(continueChat).toHaveBeenCalledTimes(1);
-    expect(regenerate).not.toHaveBeenCalled();
+    expect(regenerate).toHaveBeenCalledTimes(1);
+    expect(continueChat).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: /resume/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^retry$/i })).not.toBeInTheDocument();
   });

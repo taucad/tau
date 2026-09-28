@@ -6,12 +6,13 @@ import type { ExternalAgentStop } from '@taucad/agent-host/wire';
 import { ChatErrorAgentStop } from '#routes/w.$workspace.$project/chat-error-agent-stop.js';
 
 const continueChat = vi.fn();
+const regenerate = vi.fn();
 const openNewChat = vi.fn(async () => undefined);
 const execution = { kind: 'acp', hostId: 'desktop', agentId: 'codex' } as const;
 const agentSelection = vi.hoisted(() => ({ isOffered: true, label: 'Codex' }));
 
 vi.mock('#hooks/use-chat.js', () => ({
-  useChatActions: () => ({ continueChat }),
+  useChatActions: () => ({ continueChat, regenerate }),
 }));
 vi.mock('#hooks/active-chat-provider.js', () => ({
   useChatComposer: () => ({ execution: { execution } }),
@@ -191,7 +192,8 @@ describe('ChatErrorAgentStop', () => {
 
     expect(screen.getByText(/SYSTEM_ERROR/u)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Try again' }));
-    expect(continueChat).toHaveBeenCalledTimes(1);
+    expect(regenerate).toHaveBeenCalledTimes(1);
+    expect(continueChat).not.toHaveBeenCalled();
   });
 
   it('should offer retry and another agent when the service is busy', () => {

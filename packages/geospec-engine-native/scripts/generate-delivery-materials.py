@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Generate native license/component material and a source-relink asset.
 
-Python 3.12+, Git, Xcode tools, Node/pnpm/NAPI, the prepared CPython/maturin
-environments and the pinned Rust 1.88 toolchain are prerequisites.
+Python 3.12+, Git, Xcode tools, Node/pnpm/NAPI and the pinned Rust 1.88
+toolchain are prerequisites. Python material generation additionally requires
+the prepared CPython/maturin environments.
 Usage: generate-delivery-materials.py --cohort node|python --output PATH
        (--relink-output PATH | --relink-reference PATH)
        --relink-archive PATH
@@ -482,7 +483,8 @@ def python_license_material(output, delivery_cache):
     }
 
 
-def native_producer_recipe(napi_identity):
+def native_producer_recipe(napi_identity, cohort):
+    require(cohort in ('node', 'python'), f'Unsupported native cohort: {cohort}')
     deployment_target = read_json(PACKAGE / 'scripts/selected-delivery.json')['macosDeploymentTarget']
     project = read_json(PACKAGE / 'project.json')
     workspace = (ROOT / 'pnpm-workspace.yaml').read_text()
@@ -513,22 +515,23 @@ def native_producer_recipe(napi_identity):
     sdk_version = run([str(xcrun), '--sdk', 'macosx', '--show-sdk-version']).strip()
     node = selected_executable('node')
     pnpm = selected_executable('pnpm')
-    python_routes = {}
-    for name, cache_name, version in [
-        ('python313', 'python-venv', '3.13'),
-        ('python314', 'python314-venv', '3.14'),
-    ]:
-        environment = ROOT / 'node_modules/.cache/geospec-engine-native' / cache_name / 'bin'
-        interpreter = (environment / 'python').resolve()
-        maturin = (environment / 'maturin').resolve()
-        python_routes[name] = {
-            'requiredPythonSeries': version,
-            'interpreter': executable_identity(interpreter, ['--version']),
-            'maturin': {
-                **executable_identity(maturin, ['--version']),
-                'selectedVersion': maturin_version,
-            },
-        }
+    python_observations = {}
+    if cohort == 'python':
+        for name, cache_name, version in [
+            ('python313', 'python-venv', '3.13'),
+            ('python314', 'python314-venv', '3.14'),
+        ]:
+            environment = ROOT / 'node_modules/.cache/geospec-engine-native' / cache_name / 'bin'
+            interpreter = (environment / 'python').resolve()
+            maturin = (environment / 'maturin').resolve()
+            python_observations[name] = {
+                'requiredPythonSeries': version,
+                'interpreter': executable_identity(interpreter, ['--version']),
+                'maturin': {
+                    **executable_identity(maturin, ['--version']),
+                    'selectedVersion': maturin_version,
+                },
+            }
 
     source_routes = {
         'node': project['targets']['build-node']['options']['commands'],
@@ -641,6 +644,10 @@ cp -R "$GEOSPEC_RELINK_ROOT/materials/python/." \\
             'bash, cmake, ninja, tar, shasum and the tools required by included build-occt.sh',
             'Fresh extracted source, wrapper and build directories; run prepareBeforeBuilds once before either Python route',
         ],
+        'pythonReconstructionRequirements': {
+            'python313': {'requiredPythonSeries': '3.13', 'maturinVersion': maturin_version},
+            'python314': {'requiredPythonSeries': '3.14', 'maturinVersion': maturin_version},
+        },
         'reconstructionSelectionAtMaterialGeneration': {
             'rust': {
                 'toolchain': '1.88.0',
@@ -667,7 +674,7 @@ cp -R "$GEOSPEC_RELINK_ROOT/materials/python/." \\
                 'pnpm': executable_identity(pnpm, ['--version']),
                 'napiCli': napi_identity,
             },
-            **python_routes,
+            **python_observations,
         },
         'materialGeneratorObservation': {
             'python': executable_identity(archive_python, ['--version']),
@@ -708,7 +715,12 @@ def mixed_environment(closure):
         'AR_wasm32_unknown_emscripten': closure['emar'],
         'CXXFLAGS_wasm32_unknown_emscripten':
             ' '.join([*([simd['cxxFlag']] if simd else []), '-frtti', *eh_flags]),
-        **({'CARGO_ENCODED_RUSTFLAGS': '\x1f'.join(simd['rustFlags']),
+        **({'CARGO_ENCODED_RUSTFLAGS': '\x1f'.join([
+            *simd['rustFlags'],
+            f'--remap-path-prefix={closure["sourceRoot"]}=tau',
+            f'--remap-path-prefix={closure["environment"]["CARGO_HOME"]}=cargo',
+            f'--remap-path-prefix={Path(closure["rustPrefix"]) / "lib/rustlib/src/rust"}=rust-src',
+        ]),
             'GEOSPEC_WASM_SIMD_PROFILE': 'simd128-v1'} if simd else {}),
     }
 
@@ -989,7 +1001,7 @@ def copy_prefix_builder(output, prefix_receipt, builder, role):
                                      'sha256': digest(PACKAGE / 'native/occt/build-occt.sh')}}
 
 
-def make_relink_material(output, delivery_cache, mixed=None):
+def make_relink_material(output, delivery_cache, cohort, mixed=None):
     selected_proof = os.environ.get('GEOSPEC_PRODUCER_RECEIPT')
     require(selected_proof, 'Set GEOSPEC_PRODUCER_RECEIPT to the selected producer identity proof')
     producer_proof = Path(selected_proof).resolve()
@@ -1107,7 +1119,7 @@ def make_relink_material(output, delivery_cache, mixed=None):
         output / 'receipts/selected-delivery.json',
     )
     producer_recipe_path = output / 'receipts/native-producer-recipe.json'
-    native_recipe = native_producer_recipe(napi_identity)
+    native_recipe = native_producer_recipe(napi_identity, cohort)
     write_json(producer_recipe_path, native_recipe)
     revision = run([str(selected_executable('git')), 'rev-parse', 'HEAD']).strip()
     manifest = {
@@ -1420,7 +1432,7 @@ def main():
     relink_archive = arguments.relink_archive.resolve()
     if arguments.relink_output:
         relink_directory = arguments.relink_output.resolve()
-        make_relink_material(relink_directory, delivery_cache, mixed)
+        make_relink_material(relink_directory, delivery_cache, arguments.cohort, mixed)
         make_relink_archive(relink_directory, relink_archive)
     else:
         relink_directory = arguments.relink_reference.resolve()

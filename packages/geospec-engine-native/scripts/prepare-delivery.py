@@ -6,6 +6,7 @@ are prerequisites. Native Rust 1.88.0 is selected through rustup.
 Usage: python3 -B packages/geospec-engine-native/scripts/prepare-delivery.py STAGE
 Stages: check (default, read-only), sources, tools, prefixes, inputs, verify.
 Only explicit prefixes builds OCCT; tools may install the pinned SDK/Rust.
+The owned SDK is made read-only; selected Emscripten caches live outside it.
 Optional env: GEOSPEC_DELIVERY_CACHE, GEOSPEC_DELIVERY_RUST_PREFIX,
 GEOSPEC_DELIVERY_EMSDK_PREFIX (existing tools are read-only), GEOSPEC_OCCT_JOBS.
 prefixes --reuse-prefix native|mixed verifies only that existing prefix; never builds it.
@@ -257,7 +258,16 @@ def prepare_tools():
                 run(['sh', extracted / 'install.sh', f'--prefix={staging}', '--disable-ldconfig'])
         staging.rename(RUST)
     paths = tool_paths()
-    metadata = {'rustVersion': validate_tools(paths), 'rustPrefix': str(RUST), 'sdkPrefix': str(SDK),
+    rust_version = validate_tools(paths)
+    if 'GEOSPEC_DELIVERY_EMSDK_PREFIX' not in os.environ:
+        require(SDK.is_relative_to(CACHE), 'Owned SDK must remain inside the delivery cache')
+        # Emscripten launches Python with -E, ignoring PYTHONDONTWRITEBYTECODE.
+        # Keep first-use bytecode writes from changing the recorded SDK inputs.
+        for parent, _, names in os.walk(SDK, topdown=False):
+            for path in [Path(parent), *(Path(parent) / name for name in names)]:
+                if not path.is_symlink():
+                    path.chmod(path.stat().st_mode & ~0o222)
+    metadata = {'rustVersion': rust_version, 'rustPrefix': str(RUST), 'sdkPrefix': str(SDK),
                 'sdkArchiveSha256': RECIPE['emscripten']['sha256'],
                 'selectedToolHashes': 'verified', 'qualification': 'tools only',
                 'tools': {name: {'path': str(path), 'sha256': digest(path)} for name, path in paths.items()},

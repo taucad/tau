@@ -6,7 +6,7 @@ import { dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
 import process from 'node:process';
 // oxlint-disable-next-line no-restricted-imports -- Standalone Node host check consumes its co-located CLI without a public package export.
-import { prepareArtifacts, verifyArtifacts, verifyDelivery } from './ci-artifacts.mjs';
+import { ensureDelivery, prepareArtifacts, verifyArtifacts, verifyDelivery } from './ci-artifacts.mjs';
 
 /** @type {(context: import('node:test').TestContext, reusePrefixes: boolean) => void} */
 const checkTransport = (context, reusePrefixes) => {
@@ -18,6 +18,9 @@ const checkTransport = (context, reusePrefixes) => {
   });
   const producer = join(temporary, 'darwin-checkout');
   const consumer = join(temporary, 'ubuntu-checkout');
+  const mixedCache = join(producer, 'node_modules/.cache/geospec-engine-native/delivery-wasm-eh');
+  const cargoHome = join(mixedCache, 'cargo');
+  const rustPrefix = join(mixedCache, 'rust');
   const packagePath = 'packages/geospec-engine-native';
   const transportPath = 'out/artifacts/geospec-native-engine/ci';
   const snapshotPath = `${packagePath}/bindings/node/types/generated/index.d.ts`;
@@ -32,7 +35,13 @@ const checkTransport = (context, reusePrefixes) => {
     linkFlags: ['-fwasm-exceptions', '-sWASM_LEGACY_EXCEPTIONS=1', '-sSUPPORT_LONGJMP=wasm'],
   };
   const buildEnvironment = {
-    CARGO_ENCODED_RUSTFLAGS: '-C\u001Ftarget-feature=+simd128',
+    CARGO_ENCODED_RUSTFLAGS: [
+      '-C',
+      'target-feature=+simd128',
+      `--remap-path-prefix=${producer}=tau`,
+      `--remap-path-prefix=${cargoHome}=cargo`,
+      `--remap-path-prefix=${join(rustPrefix, 'lib/rustlib/src/rust')}=rust-src`,
+    ].join('\u001F'),
     CXXFLAGS_wasm32_unknown_emscripten:
       '-msimd128 -frtti -fwasm-exceptions -sWASM_LEGACY_EXCEPTIONS=1 -sSUPPORT_LONGJMP=wasm',
     GEOSPEC_WASM_SIMD_PROFILE: 'simd128-v1',
@@ -67,7 +76,6 @@ const checkTransport = (context, reusePrefixes) => {
   );
   /** @type {string[]} */
   const targets = [];
-  const mixedCache = join(producer, 'node_modules/.cache/geospec-engine-native/delivery-wasm-eh');
   const buildCache = join(mixedCache, 'mixed-build-simd128');
   put(join(buildCache, 'attempt-0/commands.json'), 'old attempt must not be selected');
   put(join(mixedCache, 'mixed-inputs.json'), 'historical inputs must not be selected or overwritten');
@@ -199,6 +207,8 @@ const checkTransport = (context, reusePrefixes) => {
               sourceRoot: producer,
               sourceRevision: revision,
               preparationCache: mixedCache,
+              rustPrefix,
+              environment: { CARGO_HOME: cargoHome },
               cache: buildCache,
               occtPrefix: join(mixedCache, 'occt-mixed-simd128/install'),
               output: join(producer, mixedPath),
@@ -305,7 +315,7 @@ const checkTransport = (context, reusePrefixes) => {
     process.env = previousEnvironment;
   });
   assert.throws(() => verifyArtifacts(producer), /Missing GeoSpec artifact inventory/);
-  const inventory = prepareArtifacts(producer);
+  const inventory = ensureDelivery(producer);
   assert.deepEqual(targets, [
     'prepare-delivery:sources',
     'prepare-delivery:tools',
@@ -318,6 +328,9 @@ const checkTransport = (context, reusePrefixes) => {
     'assemble-package',
   ]);
   assert.equal(inventory.artifacts.length, 5);
+  const builtTargets = [...targets];
+  assert.deepEqual(ensureDelivery(producer), inventory);
+  assert.deepEqual(targets, builtTargets, 'an unchanged delivery must not invoke a producer');
   for (const [name, original] of [
     ['mixed-inputs.json', join(mixedCache, 'mixed-inputs-simd128.json')],
     ['mixed-commands.json', join(buildCache, 'attempt-1/commands.json')],
@@ -427,8 +440,26 @@ const checkTransport = (context, reusePrefixes) => {
     { receiptChanges: { wasmSimd: { ...wasmSimd, rustFlags: [] } }, message: /receipt fixed-SIMD flags differ/ },
     { inputChanges: { wasmEh: { ...wasmEh, compileFlags: [] } }, message: /inputs lack selected native WASM EH/ },
     { receiptChanges: { wasmEh: { ...wasmEh, linkFlags: [] } }, message: /receipt native WASM EH flags differ/ },
+    { inputChanges: { environment: null }, message: /lack the producer environment/ },
+    { inputChanges: { environment: { CARGO_HOME: 'relative' } }, message: /lack Cargo source root/ },
+    { inputChanges: { rustPrefix: 'relative' }, message: /lack Rust source root/ },
     {
       receiptChanges: { buildEnvironment: { ...buildEnvironment, CARGO_ENCODED_RUSTFLAGS: '' } },
+      message: /compile environment differs/,
+    },
+    {
+      receiptChanges: {
+        buildEnvironment: { ...buildEnvironment, CARGO_ENCODED_RUSTFLAGS: '-C\u001Ftarget-feature=+simd128' },
+      },
+      message: /compile environment differs/,
+    },
+    {
+      receiptChanges: {
+        buildEnvironment: {
+          ...buildEnvironment,
+          CARGO_ENCODED_RUSTFLAGS: buildEnvironment.CARGO_ENCODED_RUSTFLAGS.replace('=tau', '=wrong-root'),
+        },
+      },
       message: /compile environment differs/,
     },
     {
@@ -476,8 +507,9 @@ const checkTransport = (context, reusePrefixes) => {
   put(inventoryFile, JSON.stringify(inventory));
   put(join(consumer, transportPath, 'mixed-build-receipt.json'), '{}');
   assert.throws(() => verifyArtifacts(consumer), /mixedReceipt changed during transport/);
+  put(join(producer, transportPath, 'assembly/tarballs/root.tgz'), 'corrupt delivery must not be reused');
   failNode = true;
-  assert.throws(() => prepareArtifacts(producer), /build-node failed/);
+  assert.throws(() => ensureDelivery(producer), /build-node failed/);
   assert.equal(existsSync(join(producer, transportPath, 'inventory.json')), false);
   failNode = false;
   omitReceipt = true;

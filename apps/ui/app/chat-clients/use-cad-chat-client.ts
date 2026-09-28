@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react';
 import type { ChatStatus } from 'ai';
-import { isAnyToolPart } from '@taucad/chat';
 import type { CadAgentConfigInput, MyUIMessage } from '@taucad/chat';
 import { toast } from 'sonner';
 import { useCadAgentConfig } from '#hooks/use-cad-agent-config.js';
@@ -10,7 +9,6 @@ import { useActiveChatSession } from '#hooks/active-chat-provider.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { attachmentSendBlockReason, buildUserMessage } from '#utils/chat.utils.js';
 import type { StoredAttachmentRef } from '#utils/attachment.utils.js';
-import { useProject } from '#hooks/use-project.js';
 import {
   getBrowserAgentHostRun,
   resolveBrowserAgentHostInterrupt,
@@ -18,8 +16,7 @@ import {
 } from '#chat-clients/_internal/browser-agent-host-transport.js';
 import { daemonPlacementOf } from '#lib/agent-host-placement.js';
 import { useModels } from '#hooks/use-models.js';
-import { createRunBody } from '#chat-clients/_internal/turn-body.js';
-import { browserHostId, useTurnAdmission } from '#chat-clients/_internal/use-turn-admission.js';
+import { useTurnAdmission } from '#chat-clients/_internal/use-turn-admission.js';
 
 /**
  * Input payload for {@link CadChatClient.submit}. Mirrors the surface the
@@ -127,14 +124,12 @@ export const useCadChatClient = (): CadChatClient => {
   const actions = useChatActions();
   const agent = useCadAgentConfig();
   const status = useChatSelector((state) => state.status);
-  const requestInFlight = status === 'submitted' || status === 'streaming';
   // The CAD chat client is session-required by construction (it composes
   // `useActiveChatInstance` / `useChatActions`), so `activeChatId` is a
   // guaranteed `string` from the strict session context — no optional
   // branching needed.
   const { activeChatId } = useActiveChatSession();
   const store = useChatSessionStore();
-  const { projectId } = useProject();
   const { resolveModel } = useModels();
   /* This hook is a *view*: it composes gestures and reads the live chat. The
    * chat's agent-host binding and its admission belong to `ChatTurnHost`, which
@@ -237,49 +232,14 @@ export const useCadChatClient = (): CadChatClient => {
           reason,
           optionId,
         });
-        actions.setMessages(
-          messages.map((message) => ({
-            ...message,
-            parts: message.parts.map((part) =>
-              isAnyToolPart(part) && part.state === 'approval-requested' && part.approval.id === approvalId
-                ? {
-                    ...part,
-                    state: 'approval-responded',
-                    approval: { ...part.approval, approved, ...(reason ? { reason } : {}) },
-                  }
-                : part,
-            ),
-          })),
-        );
         if (detachedRunId !== undefined) {
           void chat.resumeStream();
         }
-        return;
       }
-      /* The branch below is the browser placement's: it answers the paused run
-         over a new request that continues it. A daemon-placed chat with no run
-         left to answer drops the stale affordance instead (5-review N5). The
-         host places the continuation as its own attempt (W8 TS-S5). */
-      const runId = resumableBrowserAgentHostRunId(activeChatId);
-      if (requestInFlight || runId === undefined || daemonPlacementOf(agent.execution) !== undefined) {
-        return;
-      }
-      const runBody = store.startRun(
-        activeChatId,
-        createRunBody({ agent, projectId, execution: { hostId: browserHostId }, runId }),
-      );
-      try {
-        await chat.addToolApprovalResponse({
-          id: approvalId,
-          approved,
-          ...(reason ? { reason } : {}),
-          options: { body: runBody },
-        });
-      } catch {
-        store.endRun(activeChatId);
-      }
+      /* An approval without a current host run is stale. It cannot create a
+       * run through the SDK: only a host command may answer its interrupt. */
     },
-    [actions, activeChatId, agent, chat, messages, projectId, requestInFlight, store],
+    [activeChatId, agent.execution, chat],
   );
 
   return {

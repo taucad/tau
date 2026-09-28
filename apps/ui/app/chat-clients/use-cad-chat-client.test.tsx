@@ -961,19 +961,24 @@ describe('useCadChatClient', () => {
       approved: true,
       reason: 'Proceed',
     });
-    expect(actions.setMessages).toHaveBeenCalledWith([
-      {
-        ...messages[0],
-        parts: [
-          {
-            ...messages[0]!.parts[0],
-            state: 'approval-responded',
-            approval: { id: 'interrupt-1', approved: true, reason: 'Proceed' },
-          },
-        ],
-      },
-    ]);
+    expect(actions.setMessages).not.toHaveBeenCalled();
     expect(chat.addToolApprovalResponse).not.toHaveBeenCalled();
+  });
+
+  it('does not open an SDK approval request for a run with no current host stream', async () => {
+    browserHostHarness.resumable = true;
+    browserHostHarness.hostRunId = 'run-stale';
+    const chat = mock<Chat<MyUIMessage>>();
+    Object.defineProperty(chat, 'messages', { get: () => [] });
+    useActiveChatInstanceMock.mockReturnValue(chat);
+    useChatSelectorMock.mockReturnValue('ready');
+    installActions(buildActions());
+
+    const { result } = renderClient();
+    await act(async () => result.current.respondToToolApproval('interrupt-stale', true));
+
+    expect(chat.addToolApprovalResponse).not.toHaveBeenCalled();
+    expect(browserHostHarness.resolveInterrupt).not.toHaveBeenCalled();
   });
 
   it("answers a daemon-placed chat's paused run that no stream follows, then follows what it continued (GM.r1 H1)", async () => {

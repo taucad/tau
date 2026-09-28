@@ -305,7 +305,6 @@ const createViewGraphics = ({ context, event }: ProjectArgs<'createViewGraphics'
     id: `graphics-view-${context.projectId}-${event.viewId}`,
     input: {
       ...graphicsSeed,
-      measureSnapDistance: 40,
       modelInteractionRef: context.modelInteractionRef,
     },
   });

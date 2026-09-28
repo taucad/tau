@@ -2609,6 +2609,9 @@ importers:
       '@taucad/middleware':
         specifier: workspace:*
         version: link:../../packages/plugins/middleware
+      '@taucad/occt-core':
+        specifier: workspace:*
+        version: link:../../packages/core/occt
       '@taucad/opencascade':
         specifier: workspace:*
         version: link:../../packages/plugins/opencascade

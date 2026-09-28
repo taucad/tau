@@ -125,7 +125,7 @@ vi.mock('@taucad/ui/components/alert-dialog', () => ({
   AlertDialogContent: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
   AlertDialogHeader: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
   AlertDialogTitle: ({ children }: { readonly children: ReactNode }) => <h3>{children}</h3>,
-  AlertDialogDescription: ({ children }: { readonly children: ReactNode }) => <p>{children}</p>,
+  AlertDialogDescription: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
   AlertDialogFooter: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
   AlertDialogCancel: ({ children }: { readonly children: ReactNode }) => <button type='button'>{children}</button>,
   AlertDialogAction: ({ children, ...properties }: { readonly children: ReactNode } & Record<string, unknown>) => (
@@ -443,7 +443,7 @@ describe('ProjectNavigation', () => {
 
   /* Pin (f): the dialog is the question, and it is asked only when there is
    * something to interrupt (I24). */
-  it('closes an idle project outright and asks before stopping running agents', () => {
+  it('closes an idle project outright and asks before closing one with running work', () => {
     liveProjectIds = ['proj_one', 'proj_two'];
     mockRow.mockImplementation((projectId: string) => ({
       ...closedRow(projectId),
@@ -457,17 +457,13 @@ describe('ProjectNavigation', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Close Two' }));
-    expect(screen.getByRole('heading', { name: 'Stop 2 agents and close Two?' })).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        'Their work so far is saved locally as revisions. If backup is unavailable, it stays queued for the next connection. You can reopen the project any time.',
-      ),
-    ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Stop and close' }));
+    expect(screen.getByRole('heading', { name: 'Close Two?' })).toBeInTheDocument();
+    expect(screen.getByText(/Runs in another version of Tau or a background window may continue/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
     expect(mockCloseProject).toHaveBeenLastCalledWith('proj_two');
   });
 
-  it('asks before trashing a project whose agents are running', async () => {
+  it('asks before trashing a project with running work', async () => {
     mockRow.mockImplementation((projectId: string) => ({
       ...closedRow(projectId),
       glyph: projectId === 'proj_two' ? 'busy' : 'none',
@@ -478,9 +474,9 @@ describe('ProjectNavigation', () => {
     fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[0]!);
 
     expect(projectsResult.deleteProject).not.toHaveBeenCalled();
-    expect(screen.getByRole('heading', { name: 'Stop 2 agents and close Two?' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Close Two?' })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Stop and close' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
     await waitFor(() => {
       expect(mockCloseProject).toHaveBeenLastCalledWith('proj_two');
       expect(projectsResult.deleteProject).toHaveBeenCalledExactlyOnceWith('proj_two');

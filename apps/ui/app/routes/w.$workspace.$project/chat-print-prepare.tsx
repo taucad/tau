@@ -169,10 +169,11 @@ const expectedMaterialsFor = (
 
 /**
  * The slot each filament prints from unless someone chooses: the first loaded tray for one, as the agent's planner
- * maps several ({@link defaultFilamentSlots}), `-1` where no free tray of the print's material is left.
+ * maps several over the trays that can change filament mid-print ({@link defaultFilamentSlots}), `-1` where no free
+ * tray of the print's material is left.
  */
 const defaultMapping = (
-  entry: MachineDirectoryEntry,
+  trays: MachineDirectoryEntry['snapshot']['setup']['materials'],
   loaded: MachineDirectoryEntry['snapshot']['setup']['materials'][number] | undefined,
   filamentColors: readonly string[],
 ): readonly number[] => {
@@ -180,7 +181,7 @@ const defaultMapping = (
     return [];
   }
   return filamentColors.length > 1
-    ? defaultFilamentSlots(filamentColors, entry.snapshot.setup.materials, loaded.materialId).map((slot) => slot ?? -1)
+    ? defaultFilamentSlots(filamentColors, trays, loaded.materialId).map((slot) => slot ?? -1)
     : [loaded.slot];
 };
 
@@ -230,7 +231,11 @@ export const submissionDefaults = (
     (material) => material.state === 'loaded' && material.materialId !== undefined,
   );
   const nozzle = manifest?.toolhead.nozzles[0];
-  const mapping = defaultMapping(entry, loaded, filamentColors);
+  // Only the AMS changes filament mid-print; the external spool feeds one-filament prints.
+  const trays = entry.snapshot.setup.materials.filter(
+    (material) => material.slot !== manifest?.materialSystem.externalSpoolSlot,
+  );
+  const mapping = defaultMapping(trays, loaded, filamentColors);
   // ponytail: named keys are the Bambu submission vocabulary; a second provider gets its own mapping here.
   if ('expectedBedType' in properties) {
     observed['expectedBedType'] = entry.snapshot.setup.bedType ?? manifest?.bed.plates[0]?.id;
@@ -858,8 +863,10 @@ function MaterialChoice({
   if (filamentColors.length < 2) {
     return <MaterialChips entry={entry} manifest={manifest} submission={submission} onSelect={onSelectMaterial} />;
   }
+  const externalSpoolSlot = manifest?.materialSystem.externalSpoolSlot;
+  // Only the AMS changes filament mid-print; the external spool feeds one-filament prints.
   const trays = entry.snapshot.setup.materials.flatMap((material): BambuTray[] =>
-    material.state === 'loaded' && material.materialId !== undefined
+    material.state === 'loaded' && material.materialId !== undefined && material.slot !== externalSpoolSlot
       ? [
           {
             slot: material.slot,
@@ -871,12 +878,17 @@ function MaterialChoice({
       : [],
   );
   return (
-    <FilamentSlots
-      colors={filamentColors}
-      mapping={mappingOf(submission)}
-      trays={trays}
-      onChange={onSelectFilamentSlot}
-    />
+    <div className='flex min-w-0 flex-col gap-1.5'>
+      <FilamentSlots
+        colors={filamentColors}
+        mapping={mappingOf(submission)}
+        trays={trays}
+        onChange={onSelectFilamentSlot}
+      />
+      {entry.snapshot.setup.materials.some((material) => material.slot === externalSpoolSlot) ? (
+        <p className='text-xs text-muted-foreground'>The external spool feeds one-filament prints only.</p>
+      ) : null}
+    </div>
   );
 }
 

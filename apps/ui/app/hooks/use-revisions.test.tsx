@@ -34,10 +34,27 @@ vi.mock('#hooks/use-revision-status.js', async () => {
 });
 
 let settlements: TurnFinalizedEvent[] = [];
-vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', () => ({
-  getHostFinalizedTurns: () => settlements,
-  subscribeHostFinalizedTurns: () => () => undefined,
-}));
+vi.mock('#hooks/chat-session-store-provider.js', () => {
+  const store = {
+    observedChatIdsOf: () => (settlements.length === 0 ? [] : ['chat-1']),
+    subscribeMembership: () => () => undefined,
+    subscribeProjection: () => () => undefined,
+    getProjection: () => ({
+      ledger: {
+        position: { cursor: settlements.length },
+        runs: Object.fromEntries(
+          settlements.map((event) => [
+            event.runId,
+            {
+              settlements: [{ attempt: 1, row: { leaderEpoch: 'test', sequence: 1 }, event }],
+            },
+          ]),
+        ),
+      },
+    }),
+  };
+  return { useChatSessionStore: () => store };
+});
 
 const row = (over: Partial<RevisionRow> & Pick<RevisionRow, 'revisionId'>): RevisionRow => ({
   revisionNumber: undefined,

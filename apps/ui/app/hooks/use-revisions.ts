@@ -24,10 +24,7 @@ import { useRevisionSessionUser } from '#lib/revision-actor.js';
 import type { RevisionSessionUser } from '#lib/revision-actor.js';
 import { useRevisionClient, useRevisionStatus } from '#hooks/use-revision-status.js';
 import type { RevisionClient } from '#hooks/use-revision-status.js';
-import {
-  getHostFinalizedTurns,
-  subscribeHostFinalizedTurns,
-} from '#chat-clients/_internal/browser-agent-host-transport.js';
+import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 
 /** One revision, as every card and history row reads it. @public */
 export type RevisionCard = {
@@ -249,36 +246,81 @@ const attachTurnCard = (
   }
 };
 
-/** Host-attested settlements this tab holds for the project on screen. */
+/** Host-attested settlements selected directly from every observed chat's projection. */
 type FinalizedRevision = Readonly<{ branch: string | undefined; card: RevisionCard }>;
 
 const useHostFinalizedTurns = (projectId: string): readonly FinalizedRevision[] => {
-  const settlements = useSyncExternalStore(subscribeHostFinalizedTurns, getHostFinalizedTurns, getHostFinalizedTurns);
+  const store = useChatSessionStore();
+  const subscribe = useCallback(
+    (listener: () => void) => {
+      let chatSubscriptions: Array<() => void> = [];
+      const bind = (notify = true): void => {
+        for (const unsubscribe of chatSubscriptions) {
+          unsubscribe();
+        }
+        chatSubscriptions = store
+          .observedChatIdsOf(projectId)
+          .map((chatId) => store.subscribeProjection(chatId, listener));
+        if (notify) {
+          listener();
+        }
+      };
+      const unsubscribeMembership = store.subscribeMembership(() => bind());
+      bind(false);
+      return () => {
+        unsubscribeMembership();
+        for (const unsubscribe of chatSubscriptions) {
+          unsubscribe();
+        }
+      };
+    },
+    [projectId, store],
+  );
+  const snapshot = useCallback(
+    () =>
+      store
+        .observedChatIdsOf(projectId)
+        .map((chatId) => {
+          const projection = store.getProjection(chatId);
+          return `${chatId}:${projection?.ledger.position.cursor ?? 0}:${projection?.remote?.digest ?? ''}`;
+        })
+        .join('|'),
+    [projectId, store],
+  );
+  const version = useSyncExternalStore(subscribe, snapshot, () => '');
   return useMemo(
     () =>
-      settlements.flatMap((settlement): FinalizedRevision[] =>
-        settlement.projectId === projectId && settlement.revisionId !== undefined
-          ? [
-              {
-                branch: settlement.branch,
-                card: {
-                  revisionId: settlement.revisionId,
-                  n: undefined,
-                  createdAt: 0,
-                  summary: '',
-                  actor: '',
-                  turnId: settlement.turnId,
-                  conflicted: false,
-                  tags: [],
-                  trigger: 'turn',
-                  changedPaths: settlement.changedPaths,
-                  ...(settlement.treeId === undefined ? {} : { treeId: settlement.treeId }),
-                },
-              },
-            ]
-          : [],
-      ),
-    [projectId, settlements],
+      store.observedChatIdsOf(projectId).flatMap((chatId): FinalizedRevision[] => {
+        const projection = store.getProjection(chatId);
+        if (projection === undefined) {
+          return [];
+        }
+        return Object.values(projection.ledger.runs).flatMap((run) =>
+          run.settlements.flatMap(({ event }): FinalizedRevision[] =>
+            event.type === 'turn.finalized' && event.revisionId !== undefined
+              ? [
+                  {
+                    branch: event.branch,
+                    card: {
+                      revisionId: event.revisionId,
+                      n: undefined,
+                      createdAt: 0,
+                      summary: '',
+                      actor: '',
+                      turnId: event.turnId,
+                      conflicted: false,
+                      tags: [],
+                      trigger: 'turn',
+                      changedPaths: event.changedPaths,
+                      ...(event.treeId === undefined ? {} : { treeId: event.treeId }),
+                    },
+                  },
+                ]
+              : [],
+          ),
+        );
+      }),
+    [projectId, store, version],
   );
 };
 

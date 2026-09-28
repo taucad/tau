@@ -44,6 +44,14 @@ import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ChatSidebarState } from '#types/chat-sidebar.types.js';
 import { actorSessionIdOf } from '#lib/xstate.lib.js';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
+import {
+  selectCaughtUp,
+  selectCurrentRun,
+  selectOpenInterrupts,
+  selectRunFailure,
+  selectToolsInFlight,
+} from '#machines/chat-projection.logic.js';
+import type { ChatProjection } from '#machines/chat-projection.logic.js';
 
 /**
  * Everything a chat row draws, from that chat's own machine.
@@ -193,6 +201,45 @@ export const selectChatStatus = (snapshot: ChatSnapshot, unread: boolean): ChatS
   branch: snapshot.matches({ revision: { line: 'onBranch' } }) ? snapshot.context.branch : undefined,
   dirty: snapshot.matches({ revision: { tree: 'dirty' } }),
 });
+
+/** An unopened listed chat reads the host log, not an SDK session. */
+export const selectProjectedChatStatus = (
+  projection: ChatProjection,
+  unread: boolean,
+  revisions?: RevisionStatusProjection,
+): ChatSidebarStatus => {
+  const run = selectCaughtUp(projection) ? selectCurrentRun(projection) : undefined;
+  const tools = selectToolsInFlight(projection);
+  const approvals = Object.keys(selectOpenInterrupts(projection)).length;
+  const state: ChatSidebarState =
+    run === undefined
+      ? 'idle'
+      : run.lifecycle === 'admitted'
+        ? 'queued'
+        : run.lifecycle === 'running'
+          ? tools.count > 0
+            ? 'tool'
+            : 'working'
+          : run.lifecycle === 'paused'
+            ? approvals > 0
+              ? 'approval'
+              : 'question'
+            : run.lifecycle === 'completed'
+              ? 'done'
+              : run.lifecycle === 'failed'
+                ? 'failed'
+                : 'stopped';
+  const branch = revisions?.line.kind === 'branch' ? revisions.line.name : undefined;
+  return {
+    state,
+    unread,
+    toolName: tools.toolName,
+    pendingApprovalCount: approvals,
+    failureReason: run === undefined ? undefined : selectRunFailure(projection, run.runId),
+    branch: branch === 'main' ? undefined : branch,
+    dirty: revisions?.dirty ?? false,
+  };
+};
 
 /**
  * The row's second line, or `undefined` when the row has nothing to say.
@@ -501,6 +548,26 @@ const chatReferencesOf = (
 ): ReadonlyMap<string, ChatSessionActorRef> =>
   projectSessionOf(sessions, projectId) === undefined ? noChatRoots : chats.chatRootsOf(projectId);
 
+const readChatStatus = ({
+  chats,
+  chatId,
+  ref,
+  projectId,
+}: {
+  chats: ChatSessionStore;
+  chatId: string;
+  ref: ChatSessionActorRef | undefined;
+  projectId: string;
+}): ChatSidebarStatus | undefined => {
+  if (ref !== undefined) {
+    return selectChatStatus(ref.getSnapshot(), chats.isUnread(chatId));
+  }
+  const projection = chats.getProjection(chatId);
+  return projection === undefined
+    ? undefined
+    : selectProjectedChatStatus(projection, chats.isUnread(chatId), peekRevisionClient(projectId)?.status());
+};
+
 /**
  * The one coalesced object, built once per project.
  *
@@ -515,19 +582,20 @@ export const readProjectStatus = (
   chats: ChatSessionStore,
   projectId: string,
 ): ProjectSidebarStatus => {
-  const chatReferences = [...chatReferencesOf(sessions, chats, projectId)];
+  const references = chatReferencesOf(sessions, chats, projectId);
+  const chatIds = new Set([...chats.observedChatIdsOf(projectId), ...references.keys()]);
   return {
     session: selectProjectLiveness(sessions.getSnapshot().context, projectId),
     /* The session's own record of a region that did not come up (R4). */
     runtimeFailure: projectSessionOf(sessions, projectId)?.getSnapshot().context.failures['runtime'],
     chats:
-      chatReferences.length === 0
+      chatIds.size === 0
         ? emptyChats
         : new Map(
-            chatReferences.map(([chatId, ref]) => [
-              chatId,
-              selectChatStatus(ref.getSnapshot(), chats.isUnread(chatId)),
-            ]),
+            [...chatIds].flatMap((chatId) => {
+              const status = readChatStatus({ chats, chatId, ref: references.get(chatId), projectId });
+              return status === undefined ? [] : [[chatId, status] as const];
+            }),
           ),
     revisions: peekRevisionClient(projectId)?.status(),
   };
@@ -587,7 +655,7 @@ const bindProject = ({
   const rebind = (): void => {
     const session = projectSessionOf(sessions, projectId);
     const references = chatReferencesOf(sessions, chats, projectId);
-    const ids = chatIds?.() ?? [...references.keys()];
+    const ids = chatIds?.() ?? [...new Set([...chats.observedChatIdsOf(projectId), ...references.keys()])];
     /* R3: the revision client is created by the project's route subtree, later
      * than this bind, so its presence has to be in the key or a project row
      * never subscribes to the projection it draws its branch and sync from. */
@@ -619,6 +687,7 @@ const bindProject = ({
             chatSubscription.unsubscribe();
           });
         }
+        bound.push(chats.subscribeProjection(id, listener));
       }
     }
     const client = peekRevisionClient(projectId);
@@ -704,7 +773,7 @@ export const useChatSidebarStatus = (projectId: string, chatId: string): ChatSid
   const cache = useRef<{ key: string; value: ChatSidebarStatus | undefined } | undefined>(undefined);
   const getSnapshot = useCallback((): ChatSidebarStatus | undefined => {
     const ref = chatReferencesOf(sessions, chats, projectId).get(chatId);
-    const status = ref === undefined ? undefined : selectChatStatus(ref.getSnapshot(), chats.isUnread(chatId));
+    const status = readChatStatus({ chats, chatId, ref, projectId });
     return keep(cache, `${projectId}${keySeparator}${chatId}${keySeparator}${chatKey(status)}`, status);
   }, [chatId, chats, projectId, sessions]);
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);

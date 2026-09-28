@@ -51,9 +51,13 @@ vi.mock('react-router', () => ({
   useNavigation: () => ({ location: pendingLocation, state: pendingLocation ? 'loading' : 'idle' }),
 }));
 vi.mock('#components/nav/project-chat-list.js', () => ({
-  ProjectChatList: ({ project }: { readonly project: { readonly name: string } }) => (
-    <div data-testid={`chats-${project.name}`} />
-  ),
+  ProjectChatList: ({
+    project,
+    isExpanded,
+  }: {
+    readonly project: { readonly name: string };
+    readonly isExpanded: boolean;
+  }) => (isExpanded ? <div data-testid={`chats-${project.name}`} /> : null),
 }));
 vi.mock('#components/ui/sidebar.js', () => ({
   SidebarGroup: ({ children }: { readonly children: ReactNode }) => <section>{children}</section>,

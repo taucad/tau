@@ -10,14 +10,16 @@ import type * as SidebarStatusModule from '#hooks/use-sidebar-status.js';
 const mockUseChats = vi.fn();
 const mockWarmMonaco = vi.hoisted(() => vi.fn());
 vi.mock('#lib/monaco-warmup.js', () => ({ warmMonaco: mockWarmMonaco }));
-const mockUseChatSession = vi.fn();
+const mockObserve = vi.hoisted(() => vi.fn(() => () => undefined));
 const mockNavigate = vi.fn();
 const mockLinkState = vi.fn();
 let search = '?chat=chat_12';
 let pendingLocation: { readonly pathname: string; readonly search: string } | undefined;
 
 vi.mock('#hooks/use-chats.js', () => ({ useChats: () => mockUseChats() as ReturnType<typeof useChats> }));
-vi.mock('#hooks/use-chat-session.js', () => ({ useChatSession: mockUseChatSession }));
+vi.mock('#hooks/chat-session-store-provider.js', () => ({
+  useChatSessionStore: () => ({ observe: mockObserve }),
+}));
 vi.mock('react-router', () => ({
   Link: ({
     children,
@@ -187,6 +189,12 @@ describe('ProjectChatList', () => {
     expect(screen.queryByRole('button', { name: 'Show more chats' })).not.toBeInTheDocument();
   });
 
+  it('observes all listed chats while collapsed without rendering chat rows', () => {
+    render(<ProjectChatList project={project} isProjectActive={false} isExpanded={false} />);
+    expect(mockObserve).toHaveBeenCalledTimes(12);
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+  });
+
   it('marks only the query-selected chat active', () => {
     render(<ProjectChatList project={project} isProjectActive />);
 
@@ -282,7 +290,7 @@ describe('ProjectChatList', () => {
 
   it('keeps an empty status column and no sentence for a chat with no state at all', () => {
     render(<ProjectChatList project={project} isProjectActive />);
-    expect(mockUseChatSession).toHaveBeenCalledWith('chat_12', 'proj_one');
+    expect(mockObserve).toHaveBeenCalledWith('chat_12', 'proj_one');
     expect(screen.getByRole('link', { name: 'Chat 12' })).not.toHaveAttribute('aria-describedby');
     const slots = document.querySelectorAll<HTMLElement>('[data-slot=chat-status]');
     expect(slots).toHaveLength(5);

@@ -88,7 +88,7 @@ export function ChatTurnHost(): ReactNode {
    * reader are served only behind it (RV9-F1). */
   const revisionsReady = useRevisionClient() !== undefined;
   const computeMode = useComputeReuseMode();
-  const { resolveModel } = useModels();
+  const { defaultExecution, resolveModel } = useModels();
   const { admitExecution, surfaceDispatchFailure } = useTurnAdmission(agent.execution);
   const resolveModelRef = useRef(resolveModel);
   useEffect(() => {
@@ -115,7 +115,11 @@ export function ChatTurnHost(): ReactNode {
    * agent only a daemon can start.
    */
   const composeRegistration = useCallback(
-    (execution: CadAgentExecution): BrowserAgentHostRegistration | undefined => {
+    (
+      execution: CadAgentExecution,
+      chatId = activeChatId,
+      reattach = true,
+    ): BrowserAgentHostRegistration | undefined => {
       const daemonHostId = daemonPlacementOf(execution);
       if (daemonHostId !== undefined) {
         /* A daemon owns its own workspace, its own filesystem and its own tools:
@@ -128,7 +132,9 @@ export function ChatTurnHost(): ReactNode {
          * transport can answer a reconnect for this chat with the daemon rather
          * than the API. Ordering matters; the store defers the resume by a
          * microtask. */
-        store.reattachHostChat({ chatId: activeChatId, hostId: daemonHostId });
+        if (reattach) {
+          store.reattachHostChat({ chatId, hostId: daemonHostId });
+        }
         return {
           projectStorage: async () => {
             throw new Error('A Tau Host turn reads its workspace from the daemon, not from this browser.');
@@ -162,7 +168,9 @@ export function ChatTurnHost(): ReactNode {
        * the person had already paid for (T2-D1). The placement is the trigger
        * here exactly as it is for a daemon; the run identity comes from the
        * log. */
-      store.reattachHostChat({ chatId: activeChatId, hostId: execution.kind });
+      if (reattach) {
+        store.reattachHostChat({ chatId, hostId: execution.kind });
+      }
       let projectStorage: Promise<ProjectFileSystemConfig> | undefined;
       const resolveProjectStorage = async (): Promise<ProjectFileSystemConfig> => {
         const resolved =
@@ -235,11 +243,13 @@ export function ChatTurnHost(): ReactNode {
            * old as the chat's focus; the placement invariant is about `kind` and
            * `hostId`, so a same-kind execution is free to bring its own model. */
           const liveExecution =
-            agentRef.current.execution.kind === execution.kind ? agentRef.current.execution : execution;
+            chatId === activeChatId && agentRef.current.execution.kind === execution.kind
+              ? agentRef.current.execution
+              : execution;
           /* No catalog, no default row: opening a chat offline still attaches and replays it. */
           const config = agentHostClientConfig({
             agent: { ...agentRef.current, execution: liveExecution },
-            chatId: activeChatId,
+            chatId,
             resolvedModel: resolveModelRef.current(liveExecution.model),
           });
           return createBrowserAgentHostClient({
@@ -289,6 +299,22 @@ export function ChatTurnHost(): ReactNode {
       }),
     [activeChatId, composable, placement],
   );
+  useEffect(() => {
+    if (!composable) {
+      return;
+    }
+    return store.publishProjectHostConnector(projectId, async (chatId) => {
+      const execution =
+        chatId === activeChatId
+          ? boundExecutionRef.current
+          : ((await store.getChatExecution(chatId)) ?? defaultExecution);
+      const registration = composeRef.current(execution, chatId, false);
+      if (registration === undefined) {
+        throw new Error(`The host for chat ${chatId} is unavailable.`);
+      }
+      return registration.createClient();
+    });
+  }, [activeChatId, composable, defaultExecution, placement, projectId, store]);
   /* The chat session actor holds the binding; it re-invokes it when — and only
    * when — the placement it was given moves. */
   useEffect(() => {

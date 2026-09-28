@@ -35,7 +35,7 @@ const nextProjectId = (): string => `proj_${String(projectSequence++).padStart(2
  */
 const createStoreWithFiles = (): {
   store: ReturnType<typeof createChatFileStore>;
-  reopen: () => ReturnType<typeof createChatFileStore>;
+  reopen: (projectIds?: () => Promise<string[]>) => ReturnType<typeof createChatFileStore>;
   reads: string[];
   read: (path: string) => Promise<string>;
   write: (path: string, content: string) => Promise<void>;
@@ -106,8 +106,9 @@ const createStoreWithFiles = (): {
       await (options?.recursive === true ? removeTree(rooted(path)) : provided.rmdir(rooted(path)));
     },
   };
-  const reopen = (): ReturnType<typeof createChatFileStore> =>
-    createChatFileStore({ client, projectIds: async () => [...seen] });
+  const reopen = (
+    projectIds: () => Promise<string[]> = async () => [...seen],
+  ): ReturnType<typeof createChatFileStore> => createChatFileStore({ client, projectIds });
   const store = reopen();
   return {
     store,
@@ -298,6 +299,24 @@ describe('chat file store', () => {
       const reloaded = await files.reopen().getChat(created.id);
       expect(reloaded?.startupRequest).toEqual(request);
       expect(reloaded?.messages).toEqual([message]);
+    });
+
+    it('reads a new project seed by its known project id before the projects inventory is cached', async () => {
+      const files = createStoreWithFiles();
+      const message = draftMessage('first turn');
+      const created = await files.store.createChat('project_new_seed', {
+        name: 'Initial design',
+        messages: [message],
+        startupRequest: startupRequest(message),
+      });
+      const cold = files.reopen(async () => []);
+
+      expect(await cold.getChat(created.id)).toBeUndefined();
+      expect(await cold.getChat(created.id, 'project_new_seed')).toMatchObject({
+        id: created.id,
+        messages: [message],
+        startupRequest: startupRequest(message),
+      });
     });
 
     it.each([

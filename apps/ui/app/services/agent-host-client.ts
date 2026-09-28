@@ -1,5 +1,5 @@
 import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
-import type { AgentLogEvent, Channel, StorageDurabilityClass } from '@taucad/agent-host';
+import type { AgentLiveEvent, AgentLogEvent, Channel, StorageDurabilityClass } from '@taucad/agent-host';
 import { isGatewayProviderKind } from '@taucad/agent-host';
 import { connectAgentWorkerChannel, createAgentChannelClient } from '@taucad/agent-host/channel-client';
 import { agentWireLimits } from '@taucad/agent-host/wire';
@@ -195,6 +195,12 @@ export type AgentHostClient = {
     /** The exact read batch or refusal, for a projection that owns the cursor. */
     onAnswer?: (answer: ReadAnswer) => ReadRequest['last'] | void,
   ): () => void;
+  /** Read-only, non-durable preview for one chat; it never admits, retries, or settles a run. */
+  subscribeLive(
+    chatId: string,
+    listener: (chatId: string, event: AgentLiveEvent) => void,
+    onEnded?: () => void,
+  ): () => void;
   close(): Promise<void>;
 };
 
@@ -387,6 +393,12 @@ export const createAgentHostClient = (transport: AgentHostTransport): AgentHostC
     hostCommand: async (command) => guarded(async () => transport.execute(command), 'WORKER_PROTOCOL_FAILED'),
     read: async (input) => read(input),
     subscribe: follow,
+    subscribeLive: (chatId, listener, onEnded) =>
+      consume(async (signal) => {
+        for await (const event of transport.liveEvents(chatId, signal)) {
+          listener(chatId, event);
+        }
+      }, onEnded),
     async close() {
       if (closed) {
         return;

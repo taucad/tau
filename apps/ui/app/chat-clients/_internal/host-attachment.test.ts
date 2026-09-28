@@ -7,6 +7,202 @@ import { lifecycleRow } from '#machines/chat-projection.fixture.js';
 import { hostAttachment } from '#chat-clients/_internal/host-attachment.js';
 
 describe('hostAttachment', () => {
+  it('feeds live preview through the owned read-only connection and fences it after detach', async () => {
+    const projection = createActor(chatProjectionLogic).start();
+    const stopLive = vi.fn();
+    let onLive: Parameters<AgentHostClient['subscribeLive']>[1] | undefined;
+    const subscribeLive = vi.fn((_chatId: string, listener: Parameters<AgentHostClient['subscribeLive']>[1]) => {
+      onLive = listener;
+      return stopLive;
+    });
+    const subscribe = vi.fn((...parameters: Parameters<AgentHostClient['subscribe']>) => {
+      queueMicrotask(() =>
+        parameters[3]?.({
+          status: 'batch',
+          chatId: 'chat_1',
+          cursor: 0,
+          nextCursor: 2,
+          endCursor: 2,
+          events: [lifecycleRow(0, 'admitted'), lifecycleRow(1, 'running')],
+        }),
+      );
+      return vi.fn();
+    });
+    const actor = createActor(hostAttachment, {
+      input: {
+        chatId: 'chat_1',
+        connect: async () => ({
+          read: vi.fn(),
+          subscribe,
+          subscribeLive,
+          close: async () => undefined,
+        }),
+        projection,
+      },
+    }).start();
+    await vi.waitFor(() => {
+      expect(projection.getSnapshot().context.ledger.position.cursor).toBe(2);
+    });
+    const delta = {
+      type: 'text-delta',
+      chatId: 'chat_1',
+      runId: 'run_1',
+      messageId: 'assistant-1',
+      contentIndex: 0,
+      delta: 'Partial',
+    } as const;
+    onLive?.('chat_1', delta);
+    expect(projection.getSnapshot().context.live?.chunks).toContainEqual(
+      expect.objectContaining({
+        type: 'text-delta',
+        delta: 'Partial',
+      }),
+    );
+    actor.stop();
+    expect(stopLive).toHaveBeenCalledOnce();
+    onLive?.('chat_1', { ...delta, delta: ' after stop' });
+    expect(projection.getSnapshot().context.live).toBeUndefined();
+    projection.stop();
+  });
+
+  it('retires live preview after terminal delivery while preserving the durable transcript', async () => {
+    const projection = createActor(chatProjectionLogic).start();
+    let onAnswer: Parameters<AgentHostClient['subscribe']>[3];
+    let onLive: Parameters<AgentHostClient['subscribeLive']>[1] | undefined;
+    const subscribe = vi.fn((...parameters: Parameters<AgentHostClient['subscribe']>) => {
+      onAnswer = parameters[3];
+      queueMicrotask(() =>
+        onAnswer?.({
+          status: 'batch',
+          chatId: 'chat_1',
+          cursor: 0,
+          nextCursor: 2,
+          endCursor: 2,
+          events: [lifecycleRow(0, 'admitted'), lifecycleRow(1, 'running')],
+        }),
+      );
+      return vi.fn();
+    });
+    const actor = createActor(hostAttachment, {
+      input: {
+        chatId: 'chat_1',
+        projection,
+        connect: async () => ({
+          read: vi.fn(),
+          subscribe,
+          subscribeLive: (_chatId: string, listener: Parameters<AgentHostClient['subscribeLive']>[1]) => {
+            onLive = listener;
+            return vi.fn();
+          },
+          close: async () => undefined,
+        }),
+      },
+    }).start();
+    await vi.waitFor(() => {
+      expect(projection.getSnapshot().context.ledger.position.cursor).toBe(2);
+    });
+    onLive?.('chat_1', {
+      type: 'text-delta',
+      chatId: 'chat_1',
+      runId: 'run_1',
+      messageId: 'assistant-1',
+      contentIndex: 0,
+      delta: 'Partial',
+    });
+    expect(projection.getSnapshot().context.live).toBeDefined();
+    onAnswer?.({
+      status: 'batch',
+      chatId: 'chat_1',
+      cursor: 2,
+      nextCursor: 4,
+      endCursor: 4,
+      events: [
+        {
+          version: 1,
+          leaderEpoch: 'g1',
+          sequence: 2,
+          recordedAt: '2026-09-28T00:00:00.000Z',
+          runId: 'run_1',
+          type: 'message.appended',
+          message: {
+            id: 'assistant-1',
+            role: 'assistant',
+            content: [{ type: 'text', text: 'Partial' }],
+          },
+        },
+        lifecycleRow(3, 'completed'),
+      ],
+    });
+    await vi.waitFor(() => {
+      expect(projection.getSnapshot().context.live).toBeUndefined();
+    });
+    expect(projection.getSnapshot().context.views['run_1']?.chunks).toContainEqual(
+      expect.objectContaining({
+        type: 'text-delta',
+        delta: 'Partial',
+      }),
+    );
+    actor.stop();
+    projection.stop();
+  });
+
+  it('drops an overlay when live delivery fails even while durable reads remain open', async () => {
+    const projection = createActor(chatProjectionLogic).start();
+    let onLive: Parameters<AgentHostClient['subscribeLive']>[1] | undefined;
+    let onLiveEnded: (() => void) | undefined;
+    const stopRead = vi.fn();
+    const onStatus = vi.fn();
+    const actor = createActor(hostAttachment, {
+      input: {
+        chatId: 'chat_1',
+        projection,
+        onStatus,
+        connect: async () => ({
+          read: vi.fn(),
+          subscribe: (...parameters: Parameters<AgentHostClient['subscribe']>) => {
+            queueMicrotask(() =>
+              parameters[3]?.({
+                status: 'batch',
+                chatId: 'chat_1',
+                cursor: 0,
+                nextCursor: 2,
+                endCursor: 2,
+                events: [lifecycleRow(0, 'admitted'), lifecycleRow(1, 'running')],
+              }),
+            );
+            return stopRead;
+          },
+          subscribeLive: (
+            _chatId: string,
+            listener: Parameters<AgentHostClient['subscribeLive']>[1],
+            ended?: () => void,
+          ) => {
+            onLive = listener;
+            onLiveEnded = ended;
+            return vi.fn();
+          },
+          close: async () => undefined,
+        }),
+      },
+    }).start();
+    await vi.waitFor(() => {
+      expect(projection.getSnapshot().context.ledger.position.cursor).toBe(2);
+    });
+    onLive?.('chat_1', {
+      type: 'text-delta',
+      chatId: 'chat_1',
+      runId: 'run_1',
+      messageId: 'assistant-1',
+      contentIndex: 0,
+      delta: 'Partial',
+    });
+    onLiveEnded?.();
+    expect(projection.getSnapshot().context.live).toBeUndefined();
+    expect(onStatus).toHaveBeenCalledWith({ type: 'attachment.lost', reason: 'live subscriber ended' });
+    expect(stopRead).not.toHaveBeenCalled();
+    actor.stop();
+    projection.stop();
+  });
   it('reports an unreadable log once without reporting a lost follower', async () => {
     const projection = createActor(chatProjectionLogic).start();
     const onStatus = vi.fn();

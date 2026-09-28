@@ -56,6 +56,7 @@ import { inspect } from '#machines/inspector.js';
 import { useChatSession, useChatSessionSnapshot } from '#hooks/use-chat-session.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ChatSession } from '#services/chat-session-store.js';
+import { selectVisibleChatStatus } from '#services/chat-visible-status.js';
 import type { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
 import { useModels } from '#hooks/use-models.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
@@ -683,12 +684,16 @@ function useSessionKernel(session: ChatSession): ActiveChatKernel {
 }
 
 /**
- * Live `chat.status` snapshot. Returns `'ready'` while the session is
- * mounting (and as a constant under the composer provider, which does
- * not call this helper).
+ * One visible status for both composer controls: host projection takes precedence when a reattached run outlives the
+ * SDK request. Returns `'ready'` while the session is mounting (and under the composer-only provider).
  */
 function useSessionStatus(chatId: string): ChatInstance['status'] {
-  return useChatSessionSnapshot(chatId, (s) => s?.chat.status ?? 'ready');
+  const sdkStatus = useChatSessionSnapshot(chatId, (s) => s?.chat.status ?? 'ready');
+  const store = useChatSessionStore();
+  const subscribe = useCallback((listener: () => void) => store.subscribeProjection(chatId, listener), [chatId, store]);
+  const snapshot = useCallback(() => store.getProjection(chatId), [chatId, store]);
+  const projection = useSyncExternalStore(subscribe, snapshot, snapshot);
+  return selectVisibleChatStatus(sdkStatus, projection);
 }
 
 /**

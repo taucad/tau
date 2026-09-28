@@ -1,4 +1,4 @@
-// Tier-0 smoke example (blueprint R2/D4): PicoGK_Examples BooleanShowCase.cs
+// Smoke example: PicoGK_Examples BooleanShowCase.cs
 // (CC0-1.0) on the explicit-session API. Viewer materials/groups are dropped —
 // headless output is the combined mesh as binary STL bytes. Imports the BUILT
 // package by name (Node self-reference through the exports map), so running

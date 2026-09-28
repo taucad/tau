@@ -13,6 +13,7 @@ import type {
   Pico,
   PicoErrorCode,
   PicoRuntime,
+  PicoWasmOverrides,
   Voxels,
 } from 'picovoxel';
 import type * as PicovoxelModule from 'picovoxel';
@@ -67,10 +68,10 @@ import type { PicovoxelArtifact, PicovoxelLane } from '#picovoxel.schemas.js';
  * facade-only change (lane semantics, defaults) that keeps the version and both binaries.
  */
 const picovoxelBuild = {
-  version: '0.0.0-preview-09a1108',
-  serial: '8da4e9ed5604a20be1e7fb926f5da76775553b18ef5258b3557579d2e9126ee8',
-  multi: '99e4eb5e1298edce6d8555f530ee361f6b3bdb49a9f1caa89c5490ebf488a2a5',
-  scripts: 'bdd3176be18dc34ec792be85796f28c88b27adf571964185328ccac1330d5cb9',
+  version: '0.1.0',
+  serial: 'eb7b254f50a2c7d37e46fb0169fd9890c1a366eeed78272c2ced10cbd1c26b01',
+  multi: '8da3345c22f2d0945aef294151520da5df004ac4dd67114bf1ce07a503f0f444',
+  scripts: 'e19aa9a77efb2c44cb0aa359ba7e3b64d2a022dbf98b2a4abf0126122aac9d7c',
 } as const;
 
 /** Kernel version: the plugin's handle semantics (1.1: zero-area triangles dropped) plus the PicoVoxel build it runs. */
@@ -192,7 +193,7 @@ const compiledModuleFor = async (runtime: KernelRuntime, wasmUrl: string): Promi
  * @param artifact - `'serial'` or `'multi'`.
  * @returns The `wasm` overrides for `createPicoRuntime`.
  */
-const emscriptenOverrides = async (artifact: PicovoxelArtifact): Promise<Record<string, unknown>> => {
+const emscriptenOverrides = async (artifact: PicovoxelArtifact): Promise<PicoWasmOverrides> => {
   const { wasm } = picovoxelAssets[artifact];
   const locateFile = (path: string, scriptDirectory: string): string =>
     path.endsWith('.wasm') ? wasm : `${scriptDirectory}${path}`;

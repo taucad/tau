@@ -1,7 +1,7 @@
-// HelixHeatX headless entry (blueprint R11). The caller supplies the session
+// HelixHeatX headless entry. The caller supplies the session
 // — and with it the voxel size, exactly as upstream's Library.Go(voxelSize,
 // HelixHeatX.Task) does. Returns the final part plus the authoring-time split
-// the benchmark protocol reports (Finding 8 promotion trigger).
+// the benchmark protocol reports.
 
 import type { Pico, Voxels } from 'picovoxel';
 import { HelixHeatX, type HeatXKernelTiming } from './helixHeatX.ts';

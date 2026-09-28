@@ -1,7 +1,7 @@
 // Derived from LEAP71_RoverWheel — RoverWheel/Wheels/RandomWheel.cs
 // Copyright (c) 2023-2026 LEAP 71 — https://leap71.com
 // SPDX-License-Identifier: Apache-2.0
-// Ported to TypeScript for picovoxel (blueprint R10); see NOTICE.
+// Ported to TypeScript for picovoxel; see NOTICE.
 //
 // C# draws from an ambient `Random`; here every draw comes from ONE explicit
 // mulberry32 stream seeded per wheel (`createRandom(seed)`), in the exact C#
@@ -54,7 +54,13 @@ function randomElements(pk: Pico, ctx: WheelContext, layer: WheelLayer, rng: Ran
   const symmetry = Math.trunc(uf.randomLinear(8, 30, rng));
   const wallThickness = uf.randomLinear(1, 3, rng);
   const elementIndex = Math.min(4, Math.trunc(uf.randomLinear(0, 5, rng)));
-  const builders: WheelElementsBuilder[] = [egyptianStruts, rectHoles, rosettaStruts, spiralStruts, tubeStruts];
+  const builders: WheelElementsBuilder[] = [
+    egyptianStruts,
+    rectHoles,
+    rosettaStruts,
+    spiralStruts,
+    tubeStruts,
+  ];
   return builders[elementIndex]!(pk, ctx, layer, symmetry, wallThickness);
 }
 

@@ -1,7 +1,7 @@
 // Derived from LEAP71_RoverWheel — RoverWheel/TreadPatterns/TreadPattern_{01,02,03}.cs
 // Copyright (c) 2023-2026 LEAP 71 — https://leap71.com
 // SPDX-License-Identifier: Apache-2.0
-// Ported to TypeScript for picovoxel (blueprint R10); see NOTICE.
+// Ported to TypeScript for picovoxel; see NOTICE.
 //
 // The C# ITreadPattern interface (one method, per-call state) becomes a plain
 // function type; the patterns' instance fields become closures.

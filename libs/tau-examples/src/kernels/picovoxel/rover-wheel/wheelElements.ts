@@ -2,7 +2,7 @@
 // EgyptianStruts,RosettaStruts,SpiralStruts}.cs
 // Copyright (c) 2023-2026 LEAP 71 — https://leap71.com
 // SPDX-License-Identifier: Apache-2.0
-// Ported to TypeScript for picovoxel (blueprint R10); see NOTICE.
+// Ported to TypeScript for picovoxel; see NOTICE.
 //
 // The C# abstract WheelElements class (three fields + one method) becomes a
 // function type; the C# static RoverWheel reads become the explicit ctx
@@ -32,7 +32,12 @@ function overriddenSymmetry(symmetry: number, refInnerRadius: number, refOuterRa
 }
 
 /** Shared tail: union → flatten between the z planes → per-vertex map into wheel space. */
-function projectIntoWheel(pk: Pico, ctx: WheelContext, voxelList: Voxels[], zList: readonly number[]): Voxels {
+function projectIntoWheel(
+  pk: Pico,
+  ctx: WheelContext,
+  voxelList: Voxels[],
+  zList: readonly number[],
+): Voxels {
   const combined = voxelList[0]!
     .union(...voxelList.slice(1))
     .projectZSlice({ startZ: zList[0]!, endZ: zList[zList.length - 1]! });
@@ -126,7 +131,14 @@ function splineStruts(
   symmetry: number,
   wallThickness: number,
   overrideSymmetry: boolean,
-  controlPointsFor: (n: number, phi: number, z: number, dR: number, refInnerRadius: number, refOuterRadius: number) => Vec3[],
+  controlPointsFor: (
+    n: number,
+    phi: number,
+    z: number,
+    dR: number,
+    refInnerRadius: number,
+    refOuterRadius: number,
+  ) => Vec3[],
 ): Voxels {
   const { refInnerRadius, refOuterRadius } = ctx.layerRadii(layer);
   const n = overrideSymmetry ? overriddenSymmetry(symmetry, refInnerRadius, refOuterRadius) : symmetry;
@@ -168,14 +180,22 @@ export const egyptianStruts: WheelElementsBuilder = (pk, ctx, layer, symmetry, w
 
 /** Petal-shaped struts meeting at the outer radius (C# `RosettaStruts`; symmetry NOT overridden). */
 export const rosettaStruts: WheelElementsBuilder = (pk, ctx, layer, symmetry, wallThickness) =>
-  splineStruts(pk, ctx, layer, symmetry, wallThickness, false, (n, phi, z, dR, refInnerRadius, refOuterRadius) => {
-    const dPhi = TWO_PI / n;
-    const pt1 = vecOps.cylPoint(refInnerRadius, phi - 0.5 * dPhi, z);
-    const pt2 = vecOps.cylPoint(refOuterRadius, phi, z);
-    const pt3 = vecOps.cylPoint(refInnerRadius, phi + 0.5 * dPhi, z);
-    // C# duplicates pt2 to sharpen the petal tip, verbatim.
-    return [pt1, radialOffset(pt1, 0.6, dR), pt2, pt2, radialOffset(pt3, 0.6, dR), pt3];
-  });
+  splineStruts(
+    pk,
+    ctx,
+    layer,
+    symmetry,
+    wallThickness,
+    false,
+    (n, phi, z, dR, refInnerRadius, refOuterRadius) => {
+      const dPhi = TWO_PI / n;
+      const pt1 = vecOps.cylPoint(refInnerRadius, phi - 0.5 * dPhi, z);
+      const pt2 = vecOps.cylPoint(refOuterRadius, phi, z);
+      const pt3 = vecOps.cylPoint(refInnerRadius, phi + 0.5 * dPhi, z);
+      // C# duplicates pt2 to sharpen the petal tip, verbatim.
+      return [pt1, radialOffset(pt1, 0.6, dR), pt2, pt2, radialOffset(pt3, 0.6, dR), pt3];
+    },
+  );
 
 /** Double-pitch spiral struts (C# `SpiralStruts`; symmetry overridden). */
 export const spiralStruts: WheelElementsBuilder = (pk, ctx, layer, symmetry, wallThickness) =>

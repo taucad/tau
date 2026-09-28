@@ -56,7 +56,7 @@ Keep this file limited to verified local entrypoints, invariants and checks. Put
 
 Record durable project-specific facts here after verifying them in current source. Keep task progress in its existing execution record. Route learning candidates through the learning-maintenance owner above, promoting broader rules to their narrowest canonical owner.
 
-- The `picovoxel` dependency is the interim pkg.pr.new preview in the workspace catalog until the npm release. `picovoxelBuild` pins its version, both wasm digests and a script digest; `picovoxel.asset-ownership.test.ts` recomputes them, so a dependency move updates those constants (and with them the kernel version, the cache key).
+- The `picovoxel` dependency is an exact registry pin in the workspace catalog. `picovoxelBuild` pins its version, both wasm digests and a script digest; `picovoxel.asset-ownership.test.ts` recomputes them, so a dependency move updates those constants (and with them the kernel version, the cache key).
 - One warm runtime per build lives in `PicovoxelContext.runtimes`; `cleanup()` disposes them. Facade methods are made abort-checking in place (never proxied): PicoVoxel keys ownership and lane provenance by wrapper identity.
 - Exact always runs on the serial artifact; `wasm` only selects the fast-lane artifact. Node reports cross-origin isolated, so headless hosts that need determinism pin `wasm: 'serial'`.
 - Coverage thresholds are 100% for statements, branches, functions and lines.

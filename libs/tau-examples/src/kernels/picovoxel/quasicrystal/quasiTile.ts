@@ -33,8 +33,8 @@ export abstract class QuasiTile {
   }
 
   /**
-   * Applies the coordinate trafo to each vertex of each face — used to place
-   * sub-tiles during inflation (C# `ApplyTrafo`).
+   * Applies the coordinate trafo to each vertex of each face; inflation places
+   * sub-tiles with it (C# `ApplyTrafo`).
    */
   applyTrafo(trafo: (pt: Vec3) => Vec3): void {
     for (const face of this.aFaces) {
@@ -94,12 +94,23 @@ export abstract class QuasiTile {
    * other face (C# `AttachToOtherQuasiTile`). For LINE connectors the switch
    * toggle changes the reference direction.
    */
-  attachToOtherQuasiTile(thisFaceIndex: number, otherTile: QuasiTile, otherFaceIndex: number, switchToggle = false): void {
+  attachToOtherQuasiTile(
+    thisFaceIndex: number,
+    otherTile: QuasiTile,
+    otherFaceIndex: number,
+    switchToggle = false,
+  ): void {
     if (thisFaceIndex >= this.faceCount) {
-      throw new PicoError('PICO_INVALID_ARGUMENT', 'This face index exceeds number of faces on this quasi tile.');
+      throw new PicoError(
+        'PICO_INVALID_ARGUMENT',
+        'This face index exceeds number of faces on this quasi tile.',
+      );
     }
     if (otherFaceIndex >= otherTile.faceCount) {
-      throw new PicoError('PICO_INVALID_ARGUMENT', 'Other face index exceeds number of faces on other quasi tile.');
+      throw new PicoError(
+        'PICO_INVALID_ARGUMENT',
+        'Other face index exceeds number of faces on other quasi tile.',
+      );
     }
     if (this.aFaces[thisFaceIndex]!.connector !== otherTile.aFaces[otherFaceIndex]!.connector) {
       throw new PicoError('PICO_INVALID_ARGUMENT', 'Connector types do not match.');
@@ -253,7 +264,12 @@ function pentagonTilt(refFace: IcosehedralFace): number {
 }
 
 /** Five tilted faces around a centre frame (the C# lower/upper-centre loops). */
-function centreFaces(frame0: Frame, tiltAngle: number, connector: 'line' | 'triangle', faceSide: number): IcosehedralFace[] {
+function centreFaces(
+  frame0: Frame,
+  tiltAngle: number,
+  connector: 'line' | 'triangle',
+  faceSide: number,
+): IcosehedralFace[] {
   const rotAngle = (360 / 5 / 180) * Math.PI;
   const faces: IcosehedralFace[] = [];
   for (let i = 0; i < 5; i += 1) {
@@ -265,7 +281,11 @@ function centreFaces(frame0: Frame, tiltAngle: number, connector: 'line' | 'tria
 }
 
 /** Five side faces bridging neighbouring centre-face tips (the C# side loops). */
-function sideFaces(centres: IcosehedralFace[], connector: 'line' | 'arrow', faceSide: number): IcosehedralFace[] {
+function sideFaces(
+  centres: IcosehedralFace[],
+  connector: 'line' | 'arrow',
+  faceSide: number,
+): IcosehedralFace[] {
   const faces: IcosehedralFace[] = [];
   for (let i = 0; i < 5; i += 1) {
     const lower = centres[(i + 4) % 5]!;
@@ -355,6 +375,12 @@ export class QuasiTile_04 extends QuasiTile {
       }
     }
 
-    this.aFaces = [...lowerCentreFaces, ...lowerSideFaces, ...upperSideFaces, ...upperCentreFaces, ...middleFaces];
+    this.aFaces = [
+      ...lowerCentreFaces,
+      ...lowerSideFaces,
+      ...upperSideFaces,
+      ...upperCentreFaces,
+      ...middleFaces,
+    ];
   }
 }

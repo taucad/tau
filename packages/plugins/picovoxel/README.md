@@ -8,12 +8,6 @@
 
 PicoVoxel WebAssembly voxel, implicit and lattice geometry kernel
 
-> **Interim dependency.** Until `picovoxel` is published to npm, this package depends on a
-> [pkg.pr.new](https://pkg.pr.new) preview of `taucad/picovoxel` main through the workspace catalog
-> (see [Preview provenance](#preview-provenance)). That is an approved, temporary exception to Tau's
-> registry-only dependency policy; do not publish this package until the dependency is replaced by the
-> matching registry release.
-
 ## Why @taucad/picovoxel?
 
 - **One call composes it** — `picovoxel()` registers this package's capabilities with `defineRuntime`.
@@ -98,21 +92,20 @@ run fails the fast build with a `KERNEL_CAPABILITY_MISSING` issue rather than si
 exact builds still work. GLB is normalized through Tau's geometry pipeline; STL is emitted by
 PicoVoxel's pure serializer.
 
-## Preview provenance
+## Dependency provenance
 
-| Field     | Value                                                                                               |
-| --------- | --------------------------------------------------------------------------------------------------- |
-| Specifier | `https://pkg.pr.new/picovoxel@09a1108` (workspace catalog)                                          |
-| Source    | `taucad/picovoxel` PR #9 head `09a1108`; its tree equals main `dc966e0`, which publishes no preview |
-| Version   | `0.0.0-preview-09a1108`                                                                             |
-| CI run    | [36317025531](https://github.com/taucad/picovoxel/actions/runs/36317025531), every job green        |
-| Size      | 2,762,838 bytes served                                                                              |
-| Integrity | `sha512-/rfBQbpHnXHLD1zIFgETzm4fl2OTcRPQbjm6k9WutDTJvy/hJqX7X+Ups7tjWpnaR4Qg7i8wX++AZCUQDi454g==`   |
+| Field     | Value                                                                                             |
+| --------- | ------------------------------------------------------------------------------------------------- |
+| Specifier | `picovoxel@0.1.0` (exact workspace catalog pin)                                                   |
+| Source    | `taucad/picovoxel` release `v0.1.0`, commit `11c51188a8f4cc754a25bde77e07c107523f7986`            |
+| Version   | `0.1.0`                                                                                           |
+| CI run    | [36368135314](https://github.com/taucad/picovoxel/actions/runs/36368135314), every job green      |
+| Size      | 12,799,269 bytes unpacked                                                                         |
+| Integrity | `sha512-X8Q4YlKfIuNc8HbH8KusVUW1T/nz8xJUFjJ2pvh3KTCB8gev24gf0EQZzdB8IDE6px8aGp5z266vm6tTmJ56PQ==` |
 
 Both WebAssembly binaries are CI-built. The kernel version carries the package version, both binary
 digests and one digest over every shipped script; `picovoxel.asset-ownership.test.ts` recomputes all
-four, so moving the dependency fails that test until the kernel's constants follow it. The registry
-release replaces the preview.
+four, so moving the dependency fails that test until the kernel's constants follow it.
 
 Hand the definition to a client — `createNodeClient`, `createRuntimeWorker`, or your own host. See
 [`@taucad/runtime`](https://www.npmjs.com/package/@taucad/runtime) for the client lifecycle.

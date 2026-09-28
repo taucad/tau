@@ -1,6 +1,6 @@
 // Port of LEAP71_ShapeKernel Examples/Ex_ImplicitGyroidSphere.cs (Apache-2.0, © LEAP 71).
 // The implicit sphere renders through the parallel tape path; the gyroid mask
-// goes through maskedByImplicit's tape variant (R9).
+// goes through maskedByImplicit's tape variant.
 
 import type { Pico, Voxels } from 'picovoxel';
 import { ImplicitGyroid, ImplicitSphere } from 'picovoxel/shapekernel';

@@ -52,10 +52,16 @@ export function createSimpleFlowDevice(pk: Pico): FlowDeviceDomains {
   // fluid domain: gyroid section
   const gyroidUnitSize = 10;
   const gyroidWallThickness = 1;
-  const gyroid = new ImplicitGyroid(gyroidUnitSize, ImplicitGyroid.thicknessRatio(gyroidWallThickness, gyroidUnitSize));
+  const gyroid = new ImplicitGyroid(
+    gyroidUnitSize,
+    ImplicitGyroid.thicknessRatio(gyroidWallThickness, gyroidUnitSize),
+  );
   const gyroidBoundRadius = innerRadius(0, 0.5) + 10;
   const gyroidBoundHeight = 0.5 * pipeLength;
-  const gyroidFrame = localFrame.translated(pipeFrame, vec3.scale(pipeFrame.lz, 0.5 * (pipeLength - gyroidBoundHeight)));
+  const gyroidFrame = localFrame.translated(
+    pipeFrame,
+    vec3.scale(pipeFrame.lz, 0.5 * (pipeLength - gyroidBoundHeight)),
+  );
   const gyroidBound = new BaseCylinder(gyroidFrame, gyroidBoundHeight, gyroidBoundRadius);
   // C# Sh.voxIntersectImplicit — the facade form is maskedByImplicit (tape path).
   const voxGyroid = gyroidBound.voxConstruct(pk).maskedByImplicit({ sdf: gyroid.expression });
@@ -64,7 +70,10 @@ export function createSimpleFlowDevice(pk: Pico): FlowDeviceDomains {
   // oversized inlet patch bounding
   const patchThickness = 4;
   const patchRadius = innerRadius(0, 1) + 5;
-  const patchFrame = localFrame.translated(pipeFrame, vec3.scale(pipeFrame.lz, pipeLength - 0.5 * patchThickness));
+  const patchFrame = localFrame.translated(
+    pipeFrame,
+    vec3.scale(pipeFrame.lz, pipeLength - 0.5 * patchThickness),
+  );
   const inletPatch = new BaseCylinder(patchFrame, patchThickness, patchRadius).voxConstruct(pk);
 
   // solid part domain

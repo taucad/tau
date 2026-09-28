@@ -33,6 +33,7 @@ export function inflatedFace(face: IcosehedralFace): QuasiTile[] {
       ...inflatedBlackLine(face.pt1, face.pt2, oFrame.lz, (0 * Math.PI) / 5),
     ];
   }
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- mirrors the C# if-chain; the throw below guards untyped callers
   if (face.connector === 'arrow') {
     return [
       ...inflatedPurpleLine(face.pt3, face.pt4, oFrame.lz, (1 * Math.PI) / 5),
@@ -71,7 +72,9 @@ function lineTrafo(
   // transform onto target line
   const scale = targetLength / currentLength;
   for (const tile of tiles) {
-    tile.applyTrafo((pt) => frame.ptToWorld(targetFrame, vec3.scale(frame.ptFromWorld(currentFrame, pt), scale)));
+    tile.applyTrafo((pt) =>
+      frame.ptToWorld(targetFrame, vec3.scale(frame.ptFromWorld(currentFrame, pt), scale)),
+    );
   }
   return tiles;
 }

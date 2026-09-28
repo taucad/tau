@@ -1,7 +1,7 @@
 // Derived from LEAP71_RoverWheel — RoverWheel/{RoverWheel,WheelLayer}.cs
 // Copyright (c) 2023-2026 LEAP 71 — https://leap71.com
 // SPDX-License-Identifier: Apache-2.0
-// Ported to TypeScript for picovoxel (blueprint R10); see NOTICE.
+// Ported to TypeScript for picovoxel; see NOTICE.
 //
 // The C# abstract RoverWheel keeps its key dimensions and contour frames as
 // PUBLIC STATIC fields, written by each preset constructor (and read back by
@@ -46,7 +46,12 @@ export class WheelContext {
   readonly innerRadiusFrames: Frames;
   readonly outerRadiusFrames: Frames;
 
-  constructor(hubRadius: number, outerRadius: number, refWidth: number, fullUpperHeightPoints: readonly Vec3[]) {
+  constructor(
+    hubRadius: number,
+    outerRadius: number,
+    refWidth: number,
+    fullUpperHeightPoints: readonly Vec3[],
+  ) {
     this.hubRadius = hubRadius;
     this.outerRadius = outerRadius;
     this.refWidth = refWidth;
@@ -111,9 +116,18 @@ export class WheelContext {
       counter += 1;
     }
 
-    this.lowerHeightFrames = Frames.ofType(splineOps.reparametrizedBySpacing(lowerHeightPoints, 1), 'minRotation');
-    this.upperHeightFrames = Frames.ofType(splineOps.reparametrizedBySpacing(upperHeightPoints, 1), 'minRotation');
-    this.outerRadiusFrames = Frames.ofType(splineOps.reparametrizedBySpacing(outerRadiusPoints, 1), 'minRotation');
+    this.lowerHeightFrames = Frames.ofType(
+      splineOps.reparametrizedBySpacing(lowerHeightPoints, 1),
+      'minRotation',
+    );
+    this.upperHeightFrames = Frames.ofType(
+      splineOps.reparametrizedBySpacing(upperHeightPoints, 1),
+      'minRotation',
+    );
+    this.outerRadiusFrames = Frames.ofType(
+      splineOps.reparametrizedBySpacing(outerRadiusPoints, 1),
+      'minRotation',
+    );
   }
 
   /**

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { assertRootedPath } from '@taucad/utils/path';
+import { assertRootedPath } from '@taucad/runtime/kernel';
 import {
   componentDisplaySchema,
   entrySettingsSchema,

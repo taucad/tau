@@ -50,10 +50,15 @@
         "!{projectRoot}/src/manifest.ts",
         "!{projectRoot}/src/thumbnail.assets.ts",
         "!{projectRoot}/src/kernels/**/thumbnail.webp",
+        "!{projectRoot}/src/kernels/**/thumbnail-featured.webp",
         "sharedGlobals",
         "^default"
       ],
-      "outputs": ["{projectRoot}/src/kernels/**/thumbnail.webp", "{projectRoot}/src/thumbnail.assets.ts"],
+      "outputs": [
+        "{projectRoot}/src/kernels/**/thumbnail.webp",
+        "{projectRoot}/src/kernels/**/thumbnail-featured.webp",
+        "{projectRoot}/src/thumbnail.assets.ts"
+      ],
       "options": {
         "cwd": "{projectRoot}"
       },

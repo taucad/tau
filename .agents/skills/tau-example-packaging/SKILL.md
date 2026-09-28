@@ -31,14 +31,14 @@ Read [references/packaging-checklist.md](references/packaging-checklist.md) when
 
 Every non-`model` class count is pinned in `libs/tau-examples/scripts/generation.test.ts` ("discovers only real entrypoints…"); change the pin with the class. There is no "published but health-excluded" state: a `model` row is health-gated, and demoting it to `reference` unpublishes it.
 
-Thumbnails are independent of class: every row with a main file whose kernel is composed in `exampleRuntime` (`libs/tau-examples/scripts/runtime.ts`) must have a 768×576 `thumbnail.webp`, or `generation.test.ts` fails.
+Thumbnails are independent of class: every row with a main file whose kernel is composed in `exampleRuntime` (`libs/tau-examples/scripts/runtime.ts`) must have a 1536×1152 `thumbnail.webp` (6 px edges), or `generation.test.ts` fails. The example shown as the featured Community card (`featuredCommunityLocator`) also sets `"featured": true` in `example.json`, which renders `thumbnail-featured.webp` with 3 px edges: that card is drawn at twice a card's size, so halving the edge width keeps the same on-screen line weight. The featured thumbnail is not a project file (Remix does not copy it).
 
 **Community is curated, not automatic.** A builtin with a thumbnail becomes a card model in `sampleProjects` (`apps/ui/app/constants/project-examples.ts`), which keeps its share link working. The `/community` page and the marketing landing show only the locators listed in `communityLocators` in that file, in display order; `project-examples.test.ts` requires every listed locator to resolve, in order, to a builtin with a thumbnail. Add a locator only when the operator or the task selects the example as a showcase; toy and starter models stay plain builtins. The Community kernel shelf lists only kernels with a `kernelConfigurations` entry (`libs/types/src/constants/kernel.constants.ts`) and an `SvgIcon` mark.
 
 ## Files in an example
 
 - **Entry**: the first of `main.ts`, `main.py`, `main.cs`, `main.scad`, `main.cpp` at the example root. A row without one is never rendered, and a `model` row without one fails the health suite.
-- **Everything else is shipped**: every file except `example.json`, `.DS_Store` and `.tau/cache/` becomes a lazy builtin asset (the thumbnail included), so multi-file examples work and scratch files leak into the builtin. Symbolic links are rejected.
+- **Everything else is shipped**: every file except `example.json`, `thumbnail-featured.webp`, `.DS_Store` and `.tau/cache/` becomes a lazy builtin asset (the thumbnail included), so multi-file examples work and scratch files leak into the builtin. Symbolic links are rejected.
 - **`tau.json`** follows the strict `projectManifestSchema` (`libs/types/src/schemas/project-manifest.schema.ts`): `$schema`, `id`, `name`, `description`, `tags`, `assets.main.entryPath`, optional `assets.main.thumbnail`; no other keys. Generate a fresh id; never copy one from another example (duplicates throw):
 
   ```bash

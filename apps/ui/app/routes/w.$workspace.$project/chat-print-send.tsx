@@ -21,7 +21,7 @@ import {
   formatDuration,
   formatProducer,
   formatQuantity,
-  materialSlotLabel,
+  materialSlotPlace,
   shortDigest,
 } from '#routes/w.$workspace.$project/chat-print-summary.js';
 
@@ -95,7 +95,7 @@ const expectedMaterials = (configuration: unknown): readonly MaterialMapping[] =
  * plate is clear, the material is loaded, the nozzle matches. Read from the
  * request's submission configuration so an agent's request asks exactly what
  * it will send, falling back to what the machine reports. Every mapped slot
- * is named, by material: "PLA is loaded in A2 and A1".
+ * is named, by material: "PLA is loaded in A2 and A1", or "PETG is loaded on the external spool".
  *
  * @param configuration - The submission configuration the request carries.
  * @param entry - The machine as observed.
@@ -123,12 +123,13 @@ export const describeStartConfirmations = (
   const expected = expectedMaterials(configuration);
   const materials = expected.length > 0 ? expected : fallback === undefined ? [] : [fallback];
   /* Slots by material, in the order the print names them. */
-  const slotsByMaterial = new Map<string, string[]>();
+  const slotsByMaterial = new Map<string, number[]>();
   for (const { slot, materialId } of materials) {
-    slotsByMaterial.set(materialId, [...(slotsByMaterial.get(materialId) ?? []), materialSlotLabel(slot, manifest)]);
+    slotsByMaterial.set(materialId, [...(slotsByMaterial.get(materialId) ?? []), slot]);
   }
   const loaded = [...slotsByMaterial].map(
-    ([materialId, slots], index) => `${materialId}${index === 0 ? ' is loaded' : ''} in ${listFormat.format(slots)}`,
+    ([materialId, slots], index) =>
+      `${materialId}${index === 0 ? ' is loaded' : ''} ${materialSlotPlace(slots, manifest)}`,
   );
   const nozzleValue = record['expectedNozzleDiameter'];
   const nozzle =
@@ -170,7 +171,7 @@ export const materialMismatch = (
     if (observed?.state !== 'loaded' || (observed.materialId !== undefined && observed.materialId !== materialId)) {
       const loaded =
         observed?.state === 'loaded' && observed.materialId !== undefined ? ` (${observed.materialId} is)` : '';
-      return `${materialId} is not loaded in ${materialSlotLabel(slot, manifest)}${loaded}.`;
+      return `${materialId} is not loaded ${materialSlotPlace([slot], manifest)}${loaded}.`;
     }
   }
   return undefined;

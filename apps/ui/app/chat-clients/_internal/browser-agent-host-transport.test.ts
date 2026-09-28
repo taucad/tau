@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Chat } from '@ai-sdk/react';
+import { readUIMessageStream } from 'ai';
 import type { UIMessageChunk } from 'ai';
 import { parseLogEvent } from '@taucad/agent-host';
 import type { MyUIMessage } from '@taucad/chat';
 import { isRecord } from '@taucad/utils/schema';
 import { AgentHostWorkerError } from '#services/agent-host-client.js';
+import { projectAgentHostEvent } from '#services/agent-host-event-projection.js';
 import type { AgentHostClient } from '#services/agent-host-client.js';
 import {
   BrowserPlacementChatTransport,
@@ -167,6 +169,20 @@ const hexagonalNutEvents = (): AgentLogEvent[] =>
     .split('\n')
     .map((line) => parseLogEvent(JSON.parse(line)));
 
+const readWithSdkSnapshots = async (events: readonly AgentLogEvent[]): Promise<MyUIMessage | undefined> => {
+  const streamedBlocks = new Map();
+  const chunks = events.flatMap((event) => [...projectAgentHostEvent(event, streamedBlocks)]);
+  const stream = new ReadableStream<UIMessageChunk>({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(chunk);
+      controller.close();
+    },
+  });
+  let message: MyUIMessage | undefined;
+  for await (const next of readUIMessageStream<MyUIMessage>({ stream })) message = next;
+  return message;
+};
+
 /**
  * The same chat four turns later, verbatim (157 events, 4 runs, 29 assistant
  * texts, all distinct). The chat the operator's live rung-2 reload was taken
@@ -214,6 +230,72 @@ afterEach(() => {
 });
 
 describe('BrowserPlacementChatTransport', () => {
+  it('should rebuild a large run like the SDK reader without cloning each intermediate message', async () => {
+    const runId = 'run-large-replay';
+    const base = {
+      version: 1,
+      leaderEpoch: 'leader-large-replay',
+      recordedAt: '2026-09-01T00:00:01.000Z',
+      runId,
+    } as const;
+    const events: AgentLogEvent[] = [
+      { ...base, sequence: 1, type: 'run.lifecycle', state: 'admitted' },
+      ...Array.from(
+        { length: 64 },
+        (_, index): AgentLogEvent => ({
+          ...base,
+          sequence: index + 2,
+          type: 'message.appended',
+          message: {
+            id: `assistant-${String(index)}`,
+            role: 'assistant',
+            content: [{ type: 'text', text: `${String(index)}:${'x'.repeat(16_384)}` }],
+          },
+        }),
+      ),
+      { ...base, sequence: 66, type: 'run.lifecycle', state: 'completed' },
+    ];
+    const clone = vi.spyOn(globalThis, 'structuredClone');
+    try {
+      const expected = await readWithSdkSnapshots(events);
+      expect(clone.mock.calls.length).toBeGreaterThan(64);
+      clone.mockClear();
+
+      const actual = await deriveChatTranscript(events);
+      expect(actual).toEqual([expected]);
+      expect(clone.mock.calls.length).toBeLessThan(5);
+    } finally {
+      clone.mockRestore();
+    }
+  });
+
+  it('should preserve the SDK final message for tool-rich and partial durable runs', async () => {
+    const full = hexagonalNutEvents();
+    const fullMessage = await readWithSdkSnapshots(full);
+    expect((await deriveChatTranscript(full)).filter((message) => message.role === 'assistant')).toEqual([fullMessage]);
+
+    const base = {
+      version: 1,
+      leaderEpoch: 'leader-partial',
+      recordedAt: '2026-09-01T00:00:01.000Z',
+      runId: 'run-partial',
+    } as const;
+    const admitted = { ...base, sequence: 1, type: 'run.lifecycle', state: 'admitted' } as const;
+    const running = { ...base, sequence: 2, type: 'run.lifecycle', state: 'running' } as const;
+    const failed = {
+      ...base,
+      sequence: 3,
+      type: 'run.lifecycle',
+      state: 'failed',
+      detail: { message: 'Refused' },
+    } as const;
+    for (const events of [[], [running], [failed], [admitted], [admitted, running, failed]]) {
+      const expected = await readWithSdkSnapshots(events);
+      const actual = await deriveChatTranscript(events);
+      expect(actual).toEqual(expected === undefined ? [] : [expected]);
+    }
+  });
+
   it('surfaces a mid-admission host refusal through the visible AI SDK chat error state', async () => {
     installBrowserGlobals();
     const chatId = 'chat-mid-admission-refusal';

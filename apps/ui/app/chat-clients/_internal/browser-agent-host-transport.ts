@@ -1,5 +1,5 @@
-import { readUIMessageStream } from 'ai';
-import type { ChatTransport, UIMessage, UIMessageChunk } from 'ai';
+import { consumeStream, createUIMessageStream, readUIMessageStream } from 'ai';
+import type { ChatTransport, InferUIMessageChunk, UIMessage } from 'ai';
 import { z } from 'zod';
 import { isRecord } from '@taucad/utils/schema';
 import { isAttachmentUrl } from '#utils/attachment.utils.js';
@@ -525,22 +525,45 @@ export const registerAgentHostRunReset = (
 /** Replay one run's durable events into the message the live path built. */
 const readRunMessage = async (events: readonly AgentLogEvent[]): Promise<MyUIMessage | undefined> => {
   const streamedBlocks = new Map();
-  const chunks = events.flatMap((event) => [...projectAgentHostEvent(event, streamedBlocks)]);
+  // The projection emits MyUIMessage chunks, but its shared return type is the broader UIMessageChunk.
+  const chunks = events.flatMap((event) => [
+    ...projectAgentHostEvent(event, streamedBlocks),
+  ]) as InferUIMessageChunk<MyUIMessage>[];
   if (chunks.length === 0) {
     return undefined;
   }
-  const stream = new ReadableStream<UIMessageChunk>({
-    start: (controller) => {
-      for (const chunk of chunks) {
-        controller.enqueue(chunk);
-      }
-      controller.close();
+  const stream = (): ReadableStream<InferUIMessageChunk<MyUIMessage>> =>
+    new ReadableStream<InferUIMessageChunk<MyUIMessage>>({
+      start: (controller) => {
+        for (const chunk of chunks) {
+          controller.enqueue(chunk);
+        }
+        controller.close();
+      },
+    });
+  let message: MyUIMessage | undefined;
+  let failed = false;
+  await consumeStream({
+    stream: createUIMessageStream<MyUIMessage>({
+      execute: ({ writer }) => writer.merge(stream()),
+      generateId: () => '',
+      onError: () => {
+        failed = true;
+        return 'An error occurred.';
+      },
+      onFinish: ({ responseMessage }) => {
+        message = responseMessage;
+      },
+    }),
+    onError: () => {
+      failed = true;
     },
   });
-  let message: MyUIMessage | undefined;
-  for await (const next of readUIMessageStream<MyUIMessage>({ stream })) {
-    message = next;
+  if (failed) {
+    message = undefined;
+    for await (const next of readUIMessageStream<MyUIMessage>({ stream: stream() })) message = next;
   }
+  if (message?.id === '' && message.parts.length === 0 && message.metadata === undefined) return undefined;
   return message;
 };
 

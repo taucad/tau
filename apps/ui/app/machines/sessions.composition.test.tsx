@@ -1258,7 +1258,7 @@ describe('sessions composition — the idle window (S48(6))', () => {
               compute: readyChild('compute'),
               /* An unprovided close effect fails the close (MC-R8); these rows are about the timer, not the close. */
               ...Object.fromEntries(
-                ['cancelRuns', 'flushProducers', 'flushSync', 'releaseLeases', 'releaseAgentHost'].map((name) => [
+                ['cancelRuns', 'flushProducers', 'flushSync', 'releaseAgentHost'].map((name) => [
                   name,
                   createAsyncLogic({ run: async () => undefined }),
                 ]),
@@ -1599,7 +1599,6 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
         });
       },
       cancelRuns: async () => undefined,
-      releaseLeases: async () => undefined,
     });
     await act(async () => {
       freshActor.send({ type: 'open', projectId: 'quit-hold' });

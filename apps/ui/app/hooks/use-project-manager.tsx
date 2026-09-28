@@ -633,6 +633,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
    * current holds a stale snapshot and must not garbage-collect configs.
    */
   const discoveryEpochRef = useRef(0);
+  const discoverySnapshotRef = useRef<{ epoch: number; result: ProjectDiscoveryResult } | undefined>(undefined);
   /*
    * What the provider publishes about pending recoveries. `recoveriesRef` stays
    * the live map — settling is asynchronous, and one loop iteration must see
@@ -647,6 +648,8 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
   const [recoveries, setRecoveries] = useState<readonly PendingProjectRecovery[]>([]);
 
   const invalidateProjectsList = useCallback(() => {
+    discoveryEpochRef.current++;
+    discoverySnapshotRef.current = undefined;
     void queryClient.invalidateQueries({ queryKey: ['projects'] });
   }, [queryClient]);
 
@@ -671,6 +674,8 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
 
   const invalidationTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const scheduleProjectsListInvalidation = useCallback(() => {
+    discoveryEpochRef.current++;
+    discoverySnapshotRef.current = undefined;
     clearTimeout(invalidationTimerRef.current);
     invalidationTimerRef.current = setTimeout(invalidateProjectsList, discoveryInvalidationDebounce);
   }, [invalidateProjectsList]);
@@ -1139,6 +1144,8 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       if (previous) {
         await previous.catch(() => undefined);
       }
+      discoveryEpochRef.current++;
+      discoverySnapshotRef.current = undefined;
       await queryClient.invalidateQueries({ queryKey: ['projects'] });
       try {
         await setProjectCreationLocation(location);
@@ -1302,6 +1309,9 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         await applyProjectFileSystemConfigChanges({ upserts: configUpserts, deletes: configDeletes });
         await fileManager.workspace.syncProjectRoots();
       }
+      if (epoch === discoveryEpochRef.current) {
+        discoverySnapshotRef.current = { epoch, result };
+      }
       return result;
     },
     [fileManager, getReadiedWorker],
@@ -1384,6 +1394,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
   useEffect(() => {
     return subscribeProjectRootConfigurationChanges(async () => {
       discoveryEpochRef.current++;
+      discoverySnapshotRef.current = undefined;
       // The channel invokes this listener with nowhere to put a rejection, so
       // the body owns its own failures (DF10).
       try {
@@ -1588,7 +1599,8 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       if (recovery?.status === 'failed') {
         return { status: 'recovery-failed', recovery };
       }
-      const discovery = await discoverProjects();
+      const snapshot = discoverySnapshotRef.current;
+      const discovery = snapshot?.epoch === discoveryEpochRef.current ? snapshot.result : await discoverProjects();
       const valid = discovery.entries.find(
         (entry): entry is Extract<ProjectDiscoveryEntry, { status: 'valid' }> =>
           entry.status === 'valid' && entry.manifest.id === projectId,

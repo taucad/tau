@@ -205,6 +205,9 @@ const sessionRefFor = (projectId: string): ProjectSessionActorRef =>
 /** The chat store's roots, as the sidebar reads them (PV-S5). */
 const fakeChats = {
   chatRootsOf: (projectId: string) => new Map(Object.entries(fakeRegistry.chatReferences[projectId] ?? {})),
+  observedChatIdsOf: () => [],
+  getProjection: () => undefined,
+  subscribeProjection: () => () => undefined,
   subscribeMembership: () => () => undefined,
   isUnread: (chatId: string) => fakeRegistry.unread.has(chatId),
   subscribeUnread: () => () => undefined,
@@ -309,11 +312,15 @@ beforeEach(() => {
    * the store mock owes the verbs that acquisition and its read use. */
   vi.mocked(useChatSessionStore).mockReturnValue({
     stopRun,
+    observe: () => () => undefined,
     acquire: acquireSession,
     release: releaseSession,
     get: () => undefined,
     subscribeMembership: fakeChats.subscribeMembership,
     chatRootsOf: fakeChats.chatRootsOf,
+    observedChatIdsOf: fakeChats.observedChatIdsOf,
+    getProjection: fakeChats.getProjection,
+    subscribeProjection: fakeChats.subscribeProjection,
     isUnread: fakeChats.isUnread,
     subscribeUnread: fakeChats.subscribeUnread,
   } as unknown as ReturnType<typeof useChatSessionStore>);
@@ -1038,6 +1045,7 @@ const compiledHooks = await (async () => {
     '#hooks/use-sessions.js': await import('#hooks/use-sessions.js'),
     '#hooks/chat-session-store-provider.js': await import('#hooks/chat-session-store-provider.js'),
     '#lib/xstate.lib.js': await import('#lib/xstate.lib.js'),
+    '#machines/chat-projection.logic.js': await import('#machines/chat-projection.logic.js'),
   };
   const linked = compiled.code
     .replaceAll(

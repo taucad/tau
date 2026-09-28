@@ -12,6 +12,10 @@ export type HostAttachmentInput = Readonly<{
     getSnapshot: () => Readonly<{ context: ChatProjection }>;
     send: (event: ChatProjectionEvent) => void;
   }>;
+  onStatus?: (event: {
+    type: 'attachment.attached' | 'attachment.lost' | 'attachment.refused';
+    reason?: string;
+  }) => void;
 }>;
 
 /** Read the log from its cursor; subscriber loss only detaches. @public */
@@ -21,6 +25,16 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
   let pending = false;
   let unsubscribe: (() => void) | undefined;
   let client: Pick<AgentHostClient, 'read' | 'subscribe' | 'close'> | undefined;
+  const report = (event: {
+    type: 'attachment.attached' | 'attachment.lost' | 'attachment.refused';
+    reason?: string;
+  }): void => {
+    if (closed) {
+      return;
+    }
+    sendBack(event);
+    input.onStatus?.(event);
+  };
   const isClosed = (): boolean => closed;
   const hasPending = (): boolean => pending;
 
@@ -40,8 +54,10 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
             return false;
           }
           const position = selectPosition(input.projection.getSnapshot().context);
+          if (client === undefined) {
+            return false;
+          }
           // oxlint-disable-next-line eslint/no-await-in-loop -- log pages must be read in cursor order.
-          if (client === undefined) return false;
           const answer = await client.read({
             chatId: input.chatId,
             cursor: position.cursor,
@@ -58,7 +74,7 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
             continue;
           }
           if (answer.status === 'refused') {
-            sendBack({
+            report({
               type: answer.reason === 'unreadable' ? 'attachment.refused' : 'attachment.lost',
               reason: answer.reason,
             });
@@ -70,12 +86,12 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
             break;
           }
           if (next <= position.cursor) {
-            sendBack({ type: 'attachment.lost', reason: 'read made no progress' });
+            report({ type: 'attachment.lost', reason: 'read made no progress' });
             return false;
           }
         }
         if (!caughtUp) {
-          sendBack({ type: 'attachment.lost', reason: 'read page limit' });
+          report({ type: 'attachment.lost', reason: 'read page limit' });
           return false;
         }
         if (!hasPending()) {
@@ -83,7 +99,7 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
         }
       }
     } catch (error) {
-      sendBack({ type: 'attachment.lost', reason: error instanceof Error ? error.message : String(error) });
+      report({ type: 'attachment.lost', reason: error instanceof Error ? error.message : String(error) });
       return false;
     } finally {
       reading = false;
@@ -94,15 +110,14 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
     try {
       client = await input.connect();
     } catch (error) {
-      if (!closed)
-        sendBack({ type: 'attachment.lost', reason: error instanceof Error ? error.message : String(error) });
+      report({ type: 'attachment.lost', reason: error instanceof Error ? error.message : String(error) });
       return;
     }
     if (closed) {
       void client.close();
       return;
     }
-    if (!(await readAll()) || closed) {
+    if (!(await readAll())) {
       return;
     }
     unsubscribe = client.subscribe(
@@ -111,15 +126,17 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
         void readAll();
       },
       () => {
-        sendBack({ type: 'attachment.lost', reason: 'subscriber ended' });
+        report({ type: 'attachment.lost', reason: 'subscriber ended' });
       },
     );
-    sendBack({ type: 'attachment.attached' });
+    report({ type: 'attachment.attached' });
   };
   void begin();
   return () => {
     closed = true;
     unsubscribe?.();
-    if (client !== undefined) void client.close();
+    if (client !== undefined) {
+      void client.close();
+    }
   };
 });

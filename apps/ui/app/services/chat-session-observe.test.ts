@@ -1,0 +1,96 @@
+import { describe, expect, it, vi } from 'vitest';
+import type { ReadAnswer } from '@taucad/agent-host/wire';
+import { ChatSessionStore } from '#services/chat-session-store.js';
+import { lifecycleRow } from '#machines/chat-projection.fixture.js';
+import type { AgentHostClient } from '#services/agent-host-client.js';
+import type { ProjectSessionActorRef } from '#machines/project-session.machine.js';
+import { publishChatLogAnswer } from '#chat-clients/_internal/browser-agent-host-transport.js';
+
+describe('ChatSessionStore.observe', () => {
+  it('reads every observed chat without acquiring an SDK session and preserves its cursor across connector churn', async () => {
+    const store = new ChatSessionStore();
+    const close = vi.fn(async () => undefined);
+    const read = vi.fn(
+      async ({ chatId, cursor }: { chatId: string; cursor: number }): Promise<ReadAnswer> => ({
+        status: 'batch',
+        chatId,
+        cursor,
+        nextCursor: cursor === 0 ? 1 : cursor,
+        endCursor: 1,
+        events: cursor === 0 ? [lifecycleRow(0, 'admitted')] : [],
+      }),
+    );
+    const connect = vi.fn(
+      async (_chatId: string): Promise<Pick<AgentHostClient, 'read' | 'subscribe' | 'close'>> => ({
+        read,
+        subscribe: () => () => undefined,
+        close,
+      }),
+    );
+    const releaseA = store.observe('chat_a', 'project_1');
+    const releaseB = store.observe('chat_b', 'project_1');
+    expect(store.get('chat_a')).toBeUndefined();
+    expect(store.observedChatIdsOf('project_1')).toEqual(['chat_a', 'chat_b']);
+    const unpublish = store.publishProjectHostConnector('project_1', connect);
+    await vi.waitFor(() => {
+      expect(read).toHaveBeenCalledTimes(2);
+    });
+    expect(store.getProjection('chat_a')?.ledger.position.cursor).toBe(1);
+    expect(store.getProjection('chat_b')?.ledger.position.cursor).toBe(1);
+    publishChatLogAnswer('chat_a', {
+      status: 'batch',
+      cursor: 1,
+      nextCursor: 2,
+      endCursor: 2,
+      events: [lifecycleRow(1, 'completed')],
+    });
+    expect(store.getProjection('chat_a')?.ledger.position.cursor).toBe(1);
+    unpublish();
+    expect(close).toHaveBeenCalledTimes(2);
+    const unpublishAgain = store.publishProjectHostConnector('project_1', connect);
+    await vi.waitFor(() => {
+      expect(read).toHaveBeenCalledTimes(4);
+    });
+    expect(read.mock.calls.slice(2).map(([input]) => input.cursor)).toEqual([1, 1]);
+    unpublishAgain();
+    releaseA();
+    releaseB();
+    expect(store.observedChatIdsOf('project_1')).toEqual([]);
+  });
+
+  it('counts a projected run in an unopened chat before project Close', async () => {
+    const store = new ChatSessionStore();
+    const release = store.observe('chat_unopened', 'project_2');
+    const unpublish = store.publishProjectHostConnector('project_2', async () => ({
+      read: async (): Promise<ReadAnswer> => ({
+        status: 'batch',
+        chatId: 'chat_unopened',
+        cursor: 0,
+        nextCursor: 2,
+        endCursor: 2,
+        events: [lifecycleRow(0, 'admitted'), lifecycleRow(1, 'running')],
+      }),
+      subscribe: () => () => undefined,
+      close: async () => undefined,
+    }));
+    await vi.waitFor(() => {
+      expect(store.getProjection('chat_unopened')?.ledger.position.cursor).toBe(2);
+    });
+    expect(store.get('chat_unopened')).toBeUndefined();
+    const runs: string[] = [];
+    const send = vi.fn((event: { type: string; chatId: string }) => {
+      if (event.type === 'runStarted') {
+        runs.push(event.chatId);
+      }
+    });
+    store.setProjectSession('project_2', {
+      getSnapshot: () => ({ context: { runs } }),
+      send,
+    } as unknown as ProjectSessionActorRef);
+    expect(send).toHaveBeenCalledWith({ type: 'runStarted', chatId: 'chat_unopened' });
+    expect(runs).toEqual(['chat_unopened']);
+    store.setProjectSession('project_2', undefined);
+    unpublish();
+    release();
+  });
+});

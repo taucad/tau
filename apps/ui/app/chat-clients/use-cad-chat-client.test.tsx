@@ -118,6 +118,7 @@ vi.mock('#hooks/chat-session-store-provider.js', () => ({
 }));
 vi.mock('#hooks/use-models.js', () => ({
   useModels: () => ({
+    defaultExecution: { kind: 'tau', model: 'openai-gpt-5.5' },
     resolveModel: (id: string) => {
       /* What the real hook answers while the catalog cannot load: no row, so no provider. */
       if (id === 'openai-gpt-offline') {
@@ -335,13 +336,24 @@ const sessionWithPersistedErrors = ((): ChatSessionStore['get'] =>
     },
   })) as unknown as ChatSessionStore['get'])();
 
+let publishedConnector: Parameters<ChatSessionStore['publishProjectHostConnector']>[1] | undefined;
+let storedExecution: CadAgentExecution | undefined;
 const installSessionStore = (partial: Partial<ChatSessionStore>): void => {
   /* Merged, not replaced: the chat's turn host is mounted beside every view
    * these rows render, and it calls the store's placement and body seams. */
   vi.mocked(useChatSessionStore).mockReturnValue({
     requestTurn: vi.fn(),
     setTurnPlacement: vi.fn(),
+    publishProjectHostConnector: vi.fn(
+      (_projectId: string, connector: Parameters<ChatSessionStore['publishProjectHostConnector']>[1]) => {
+        publishedConnector = connector;
+        return () => {
+          publishedConnector = undefined;
+        };
+      },
+    ),
     reattachHostChat,
+    getChatExecution: vi.fn(async () => storedExecution),
     getProjection: () => {
       const projection = {
         ledger: {
@@ -431,6 +443,8 @@ const expectRunBody = (agent: CadAgentConfigInput = buildAgent()): Record<string
 });
 
 beforeEach(() => {
+  publishedConnector = undefined;
+  storedExecution = undefined;
   placementHarness.localHostId = undefined;
   creditPreflightHarness.calls.length = 0;
   creditPreflightHarness.refuse = undefined;
@@ -466,6 +480,26 @@ beforeEach(() => {
 });
 
 describe('useCadChatClient', () => {
+  it('connects each observed chat to its own persisted host placement', async () => {
+    storedExecution = { kind: 'acp', hostId: 'origin', agentId: 'codex' };
+    const chat = mock<Chat<MyUIMessage>>();
+    Object.defineProperty(chat, 'messages', { get: () => [] });
+    useActiveChatInstanceMock.mockReturnValue(chat);
+    installActions(buildActions());
+    renderClient();
+    expect(publishedConnector).toBeDefined();
+
+    await publishedConnector!('chat_other');
+    expect(browserHostHarness.createDaemonClient).toHaveBeenCalledOnce();
+    const [transport] = browserHostHarness.createDaemonClient.mock.calls[0] as [{ dial: () => Promise<unknown> }];
+    await expect(transport.dial()).resolves.toEqual({ hostId: 'origin' });
+    expect(browserHostHarness.createClient).not.toHaveBeenCalled();
+
+    await publishedConnector!('chat_test');
+    expect(browserHostHarness.createClient).toHaveBeenCalledOnce();
+    expect(browserHostHarness.createClient.mock.calls[0]?.[0]?.systemPrompt).toBeDefined();
+  });
+
   it('should register no agent host, however many views mount it', async () => {
     /* The hook is mounted by the history, the examples, the stack trace, the
      * approval banner and once *per transcript message*. Every instance used

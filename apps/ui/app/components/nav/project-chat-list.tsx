@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import type { Chat } from '@taucad/chat';
 import { Pencil, Square, Trash2 } from 'lucide-react';
 import { useLocation, useNavigate, useNavigation } from 'react-router';
@@ -23,7 +23,7 @@ import {
 import type { SidebarRowMenuItems } from '#components/nav/sidebar-row.js';
 import { selectChatFacts, useChatSidebarStatus, useSidebarCommands } from '#hooks/use-sidebar-status.js';
 import type { SidebarFacts } from '#hooks/use-sidebar-status.js';
-import { useChatSession } from '#hooks/use-chat-session.js';
+import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 
 const chatsPerPage = 5;
 
@@ -38,11 +38,22 @@ export const sortProjectChats = (chats: readonly Chat[]): Chat[] => [...chats].s
 export function ProjectChatList({
   project,
   isProjectActive,
+  isExpanded = true,
 }: {
   readonly project: ProjectListItem;
   readonly isProjectActive: boolean;
-}): React.JSX.Element {
+  readonly isExpanded?: boolean;
+}): React.ReactNode {
   const { chats, isLoading, error, updateChatName, deleteChat } = useChats(project.id);
+  const store = useChatSessionStore();
+  useEffect(() => {
+    const releases = chats.map((chat) => store.observe(chat.id, project.id));
+    return () => {
+      for (const release of releases) {
+        release();
+      }
+    };
+  }, [chats, project.id, store]);
   const location = useLocation();
   const navigate = useNavigate();
   const navigation = useNavigation();
@@ -62,6 +73,10 @@ export function ProjectChatList({
   const activeChatId = isProjectActive ? projectChatIdFromSearch(location.search) : undefined;
   const listId = `project-chats-${project.id}`;
   const pendingUrl = navigation.location ? `${navigation.location.pathname}${navigation.location.search}` : undefined;
+
+  if (!isExpanded) {
+    return null;
+  }
 
   const handleDelete = async (chatId: string): Promise<void> => {
     await deleteChat(chatId);
@@ -169,7 +184,6 @@ function ProjectChatItem({
   readonly onDelete: () => Promise<void>;
 }): React.JSX.Element {
   const { closeChat } = useSidebarCommands();
-  useChatSession(chat.id, project.id);
   const status = useChatSidebarStatus(project.id, chat.id);
   const facts: SidebarFacts = status === undefined ? { mark: 'none', sentence: undefined } : selectChatFacts(status);
   /* D7: *Stop* only while there is something to stop. */

@@ -421,7 +421,7 @@ function ProjectNavigationItem({
           void onDelete();
         }}
       />
-      {isExpanded ? <ProjectChatList project={project} isProjectActive={isActive} /> : null}
+      <ProjectChatList project={project} isProjectActive={isActive} isExpanded={isExpanded} />
     </SidebarMenuItem>
   );
 }

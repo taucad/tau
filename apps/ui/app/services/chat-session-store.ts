@@ -35,7 +35,7 @@ import { Topic } from '@taucad/events';
 import { z } from 'zod';
 import { createActor, createAsyncLogic } from 'xstate';
 import type { Actor, ActorOptions, AnyActorLogic } from 'xstate';
-import type { Chat as ChatEntity, MyUIMessage } from '@taucad/chat';
+import type { CadAgentExecution, Chat as ChatEntity, MyUIMessage } from '@taucad/chat';
 import { isAnyToolPart } from '@taucad/chat';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
@@ -87,6 +87,8 @@ import {
   subscribeHostTurnSettlements,
 } from '#chat-clients/_internal/browser-agent-host-transport.js';
 import type { HostTurnSettlement } from '#chat-clients/_internal/browser-agent-host-transport.js';
+import { hostAttachment } from '#chat-clients/_internal/host-attachment.js';
+import type { AgentHostClient } from '#services/agent-host-client.js';
 import {
   chatHostBinding,
   chatTurnAdmission,
@@ -384,8 +386,21 @@ export type ChatSessionStoreOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' 
 /** The revision facts one project's chats show (the project's route reports them). @public */
 export type ChatRevisionFacts = Readonly<{ dirty: boolean; sync: ChatSyncState; branch?: string }>;
 
+type ObservedChat = {
+  projectId: string;
+  refs: number;
+  attachment?: Actor<typeof hostAttachment>;
+  retry?: ReturnType<typeof setTimeout>;
+  attempts: number;
+};
+
 export class ChatSessionStore {
   readonly #sessions = new Map<string, InternalSession>();
+  readonly #observed = new Map<string, ObservedChat>();
+  readonly #projectHostConnectors = new Map<
+    string,
+    (chatId: string) => Promise<Pick<AgentHostClient, 'read' | 'subscribe' | 'close'>>
+  >();
   readonly #chatSessionLogic: typeof chatSessionMachine;
   readonly #rootOptions: Pick<ActorOptions<AnyActorLogic>, 'clock' | 'inspect' | 'onRejectedEvent'>;
   /** The last revision facts each project reported, replayed to a chat root created after them. */
@@ -473,6 +488,12 @@ export class ChatSessionStore {
     this.#rootOptions = rootOptions;
     // ponytail: the store lives as long as the document, so this subscription does too.
     subscribeChatLogAnswers(({ chatId, answer }) => {
+      const observed = this.#observed.get(chatId);
+      /* An attached chat has exactly one log reader. The old SDK transport's
+       * replay tap must not race the projection's owned cursor. */
+      if (observed !== undefined && this.#projectHostConnectors.has(observed.projectId)) {
+        return;
+      }
       this.#projectionOf(chatId).send({ type: 'batch', answer });
     });
     // E2E reads the same owner that drives the sidebar. Keeping this bridge
@@ -516,6 +537,69 @@ export class ChatSessionStore {
    */
   public setDependencies(deps: ChatSessionDeps): void {
     this.#deps = deps;
+  }
+
+  /** Observe a listed chat's log without acquiring its SDK transcript or composer. @public */
+  public observe(chatId: string, projectId: string): () => void {
+    const existing = this.#observed.get(chatId);
+    if (existing !== undefined && existing.projectId !== projectId) {
+      throw new Error(`Chat ${chatId} is already observed in project ${existing.projectId}.`);
+    }
+    const observed = existing ?? { projectId, refs: 0, attempts: 0 };
+    observed.refs += 1;
+    if (existing === undefined) {
+      this.#observed.set(chatId, observed);
+      this.#projectionOf(chatId);
+      this.#startObservedAttachment(chatId, observed);
+      this.#notifyMembership();
+    }
+    return () => {
+      observed.refs -= 1;
+      if (observed.refs > 0 || this.#observed.get(chatId) !== observed) {
+        return;
+      }
+      this.#stopObservedAttachment(observed);
+      this.#observed.delete(chatId);
+      this.#notifyMembership();
+    };
+  }
+
+  /** IDs whose projection is observed for this project, including unopened chats. @public */
+  public observedChatIdsOf(projectId: string): readonly string[] {
+    return [...this.#observed].filter(([, chat]) => chat.projectId === projectId).map(([chatId]) => chatId);
+  }
+
+  /** Publish the active project's real W6 connector to every listed chat. @public */
+  public publishProjectHostConnector(
+    projectId: string,
+    connector: (chatId: string) => Promise<Pick<AgentHostClient, 'read' | 'subscribe' | 'close'>>,
+  ): () => void {
+    this.#projectHostConnectors.set(projectId, connector);
+    for (const [chatId, observed] of this.#observed) {
+      if (observed.projectId !== projectId) {
+        continue;
+      }
+      this.#stopObservedAttachment(observed);
+      observed.attempts = 0;
+      this.#startObservedAttachment(chatId, observed);
+    }
+    return () => {
+      if (this.#projectHostConnectors.get(projectId) !== connector) {
+        return;
+      }
+      this.#projectHostConnectors.delete(projectId);
+      for (const observed of this.#observed.values()) {
+        if (observed.projectId === projectId) {
+          this.#stopObservedAttachment(observed);
+        }
+      }
+    };
+  }
+
+  /** Resolve a listed chat's persisted placement without acquiring its SDK session. @public */
+  public async getChatExecution(chatId: string): Promise<CadAgentExecution | undefined> {
+    const chat = await this.#deps.getChat(chatId);
+    return chat?.activeExecution;
   }
 
   /** Replace an idle live transcript with the chat log just projected from Git. */
@@ -876,6 +960,9 @@ export class ChatSessionStore {
           this.#countRun(session);
         }
       }
+      for (const chatId of this.observedChatIdsOf(projectId)) {
+        this.#countProjectedRun(chatId, projectId);
+      }
     }
     if (this.#projectSessions.size === 0) {
       this.#settlementUnsubscribe?.();
@@ -1148,6 +1235,56 @@ export class ChatSessionStore {
     await binding.record.attachments.retainOnly(referencedAttachments(session.draftActorRef.getSnapshot().context));
   }
 
+  #stopObservedAttachment(observed: ObservedChat): void {
+    if (observed.retry !== undefined) {
+      clearTimeout(observed.retry);
+    }
+    observed.retry = undefined;
+    observed.attachment?.stop();
+    observed.attachment = undefined;
+  }
+
+  #startObservedAttachment(chatId: string, observed: ObservedChat): void {
+    const connector = this.#projectHostConnectors.get(observed.projectId);
+    if (connector === undefined) {
+      return;
+    }
+    const attachment = createActor(hostAttachment, {
+      input: {
+        chatId,
+        connect: async () => connector(chatId),
+        projection: this.#projectionOf(chatId),
+        onStatus: (event) => {
+          if (observed.attachment !== attachment) {
+            return;
+          }
+          if (event.type === 'attachment.attached') {
+            observed.attempts = 0;
+          } else if (event.type === 'attachment.lost') {
+            const retryDelayMilliseconds = Math.min(250 * 2 ** observed.attempts, 30_000);
+            observed.attempts += 1;
+            queueMicrotask(() => {
+              if (observed.attachment !== attachment) {
+                return;
+              }
+              attachment.stop();
+              observed.attachment = undefined;
+              observed.retry = setTimeout(() => {
+                observed.retry = undefined;
+                if (this.#observed.get(chatId) === observed) {
+                  this.#startObservedAttachment(chatId, observed);
+                }
+              }, retryDelayMilliseconds);
+            });
+          }
+        },
+      },
+      ...this.#rootOptions,
+    });
+    observed.attachment = attachment;
+    attachment.start();
+  }
+
   /** This project's unread record actor, created and read on first use. */
   /**
    * The body of {@link ChatSessionStore.requestTurn}, by session.
@@ -1408,11 +1545,14 @@ export class ChatSessionStore {
   #syncProjection(chatId: string, present: 'moved' | 'open' | 'none'): void {
     const session = this.#sessions.get(chatId);
     const projection = this.#projectionContext(chatId);
+    const projectId = session?.projectId ?? this.#observed.get(chatId)?.projectId;
+    if (projectId !== undefined) {
+      this.#countProjectedRun(chatId, projectId);
+    }
     if (session === undefined || projection === undefined) {
       return;
     }
     this.#syncTools(session, projection);
-    this.#countRun(session);
     const run = selectCaughtUp(projection) ? selectCurrentRun(projection) : undefined;
     const phase = selectRunPhase(projection);
     if (run === undefined || present === 'none' || (present === 'open' && !opensRun(phase) && phase !== 'paused')) {
@@ -1449,14 +1589,18 @@ export class ChatSessionStore {
    * @param session - The chat.
    */
   #countRun(session: InternalSession): void {
-    const owner = this.#sessionOwner(session);
-    const projection = this.#projectionContext(session.chatId);
+    this.#countProjectedRun(session.chatId, session.projectId);
+  }
+
+  #countProjectedRun(chatId: string, projectId: string): void {
+    const owner = this.#projectSessions.get(projectId);
+    const projection = this.#projectionContext(chatId);
     if (owner === undefined || projection === undefined || !selectCaughtUp(projection)) {
       return;
     }
     const open = opensRun(selectRunPhase(projection));
-    if (open !== owner.getSnapshot().context.runs.includes(session.chatId)) {
-      owner.send({ type: open ? 'runStarted' : 'runSettled', chatId: session.chatId });
+    if (open !== owner.getSnapshot().context.runs.includes(chatId)) {
+      owner.send({ type: open ? 'runStarted' : 'runSettled', chatId });
     }
   }
 

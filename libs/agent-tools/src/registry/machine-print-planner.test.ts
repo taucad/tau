@@ -6,7 +6,6 @@ import type { MachineDirectoryEntry, MachineProvider } from '@taucad/runtime/mac
 import { printIntentPath } from '@taucad/slicer';
 import type { PrintIntent } from '@taucad/slicer';
 import { writeBambuContainer } from '@taucad/slicer/container';
-import { quantityKinds } from '@taucad/units/quantity';
 import { sha256Bytes } from '@taucad/utils/hash';
 import {
   createMachinePrintPlanner,
@@ -207,14 +206,13 @@ describe('machine print planner', () => {
       contract,
       selectedMember: 'Metadata/plate_1.gcode',
     });
-    const diameter = (value: number) => ({ value, unit: 'mm', kind: quantityKinds.diameter, space: 'linear' });
     expect(result.configuration).toEqual({
       expectedModel: 'X1C',
       expectedBedType: 'textured-pei',
       expectedMaterials: [{ slot: 2, materialId: 'PETG' }],
       amsMapping: [2],
-      expectedNozzleDiameter: diameter(0.4),
-      expectedFilamentDiameter: diameter(1.75),
+      expectedNozzleDiameter: 0.4,
+      expectedFilamentDiameter: 1.75,
     });
     expect(result.summary).toMatchObject({ layers: 3, filamentLength: 5 });
     expect(result.summary?.estimatedDuration).toBeGreaterThan(0);

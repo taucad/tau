@@ -16,7 +16,6 @@ import type { BambuStudioInstallation } from '@taucad/slicer/bambu-studio';
 import { bambuPlateMember, readBambuContainer, readBambuContainerProducer } from '@taucad/slicer/container';
 import type { BambuContainer } from '@taucad/slicer/container';
 import { parseGcode } from '@taucad/slicer/toolpath';
-import { quantityKinds } from '@taucad/units/quantity';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { z } from 'zod';
 
@@ -237,11 +236,6 @@ const expectedSetup = (
   const loaded = { slot: tray.slot, materialId: tray.materialId };
   const plate = resolvePlate(provider.manifest, machine, requestedPlate);
   const { toolhead } = provider.manifest;
-  const diameter = (quantity: Readonly<{ value: number; unit: string }>) => ({
-    ...quantity,
-    kind: quantityKinds.diameter,
-    space: 'linear',
-  });
   // ponytail: named keys are the Bambu submission vocabulary; a second provider gets its own mapping here.
   /* One material per filament, in filament order; the mapping names each one's slot. */
   const configure = (materials: ReadonlyArray<Readonly<{ slot: number; materialId: string }>>) => ({
@@ -250,8 +244,8 @@ const expectedSetup = (
     ...(plate.observed ? {} : { operatorConfirmedBedType: plate.id }),
     expectedMaterials: materials,
     amsMapping: materials.map(({ slot }) => slot),
-    expectedNozzleDiameter: diameter(toolhead.nozzles[0]!.diameter),
-    expectedFilamentDiameter: diameter(toolhead.filamentDiameter),
+    expectedNozzleDiameter: toolhead.nozzles[0]!.diameter.value,
+    expectedFilamentDiameter: toolhead.filamentDiameter.value,
   });
   return { configuration: configure([loaded]), configure, plate: plate.id, loaded };
 };

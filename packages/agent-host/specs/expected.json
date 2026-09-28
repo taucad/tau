@@ -1114,6 +1114,17 @@
         "kind": "witness",
         "ref": "SettledOnce: one seeded log per rule (FM-A6); a legacy settlement without attempt belongs to the current attempt"
       },
+      "ChatLog/seeded/interrupt-resolved-twice.jsonl": {
+        "tier": "pr",
+        "expect": {
+          "rejected": {
+            "row": 4,
+            "rules": ["InterruptResolvedOnce"]
+          }
+        },
+        "kind": "witness",
+        "ref": "W3-F1: a second resolved row for one requested interrupt"
+      },
       "ChatLog/seeded/row-without-run.jsonl": {
         "tier": "pr",
         "expect": {

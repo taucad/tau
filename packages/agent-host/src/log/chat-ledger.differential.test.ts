@@ -14,7 +14,7 @@
  * - Kinds: `L` lifecycle, `S` settlement, `H` turn commit, `O`/`R` interrupt requested/resolved, `P` invocation
  *   prepared, `V` invocation settled, `M` assistant reply, `U` opaque (only written raw).
  * - Commands: `E` append through the appender, `W` another writer's row, `WJ` a junk line, `TEAR` a torn tail,
- *   `RELOAD`, `LEDGER`, `SETTLE`, `LIFE`, `PREP`, `BATCH`, `READER`, `READ`, `DELIVER`, `DELIVER1`, `RLEDGER`, `SEG`,
+ *   `RELOAD`, `LEDGER`, `SETTLE`, `LIFE`, `RESOLVE`, `PREP`, `BATCH`, `READER`, `READ`, `DELIVER`, `DELIVER1`, `RLEDGER`, `SEG`,
  *   `ROW`, `MERGE`, `TABLES`.
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -681,6 +681,29 @@ const tablesTrace = (): Trace => {
   return { text: ['T tables', 'TABLES', 'X'], expected };
 };
 
+const interruptResolutionTrace = (): Trace => {
+  const rows: Row[] = [
+    { term: 0, seq: 0, run: 1, kind: 'L', argument: 0, ms: 0, epoch: 1, attempt: 0 },
+    { term: 0, seq: 1, run: 1, kind: 'O', argument: 1, ms: 1, epoch: 1, attempt: 0 },
+    { term: 0, seq: 2, run: 1, kind: 'R', argument: 1, ms: 2, epoch: 1, attempt: 0 },
+  ];
+  const ledger = foldChatLedger(
+    emptyChatLedger,
+    rows.map((row) => eventOf(row)),
+  );
+  return {
+    text: ['T interrupt-resolved-twice', ...rows.map((row) => `E ${rowLine(row)}`), 'RESOLVE 1 1', 'X'],
+    expected: [
+      'T interrupt-resolved-twice',
+      'A 0 appended',
+      'A 1 appended',
+      'A 2 appended',
+      `QR ${gateOne(ledger, 1, bodyOf(rows[2]!) as LogRowBody)}`,
+      'X',
+    ],
+  };
+};
+
 const historyKinds: readonly Kind[] = ['L', 'L', 'L', 'L', 'S', 'S', 'S', 'H', 'O'];
 const baseProfile: Profile = {
   appendKinds: historyKinds,
@@ -714,6 +737,9 @@ const generate = async (corpus: Corpus, seed = corpus.seed): Promise<Trace[]> =>
         : // oxlint-disable-next-line no-await-in-loop -- one trace at a time keeps the seeded stream reproducible.
           await logTrace(random, `log-${index}`, corpus.profile ?? baseProfile),
     );
+  }
+  if (corpus.name === 'invocations') {
+    traces.push(interruptResolutionTrace());
   }
   return traces;
 };

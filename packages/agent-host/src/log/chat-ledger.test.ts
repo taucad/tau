@@ -243,6 +243,18 @@ describe('foldChatLedger', () => {
     expect(ledger.runs['run-1']?.lastResolution).toBeUndefined();
   });
 
+  it('should refuse a second resolution of one interrupt', () => {
+    const rows = term([
+      life('admitted'),
+      { type: 'interrupt.recorded', interruptId: 'interrupt-1', phase: 'requested', reason: 'ask' },
+      { type: 'interrupt.recorded', interruptId: 'interrupt-1', phase: 'resolved', reason: 'approved' },
+      { type: 'interrupt.recorded', interruptId: 'interrupt-2', phase: 'requested', reason: 'ask' },
+      { type: 'interrupt.recorded', interruptId: 'interrupt-2', phase: 'resolved', reason: 'approved' },
+      { type: 'interrupt.recorded', interruptId: 'interrupt-1', phase: 'resolved', reason: 'denied' },
+    ]);
+    expect(gateRows(emptyChatLedger, rows)).toMatchObject({ ok: false, code: 'INTERRUPT_ALREADY_RESOLVED', row: 5 });
+  });
+
   // CL-A23
   it('should take the placement of record from the running row of attempt 1', () => {
     const placement = (checkoutId: string) => ({ placement: { checkoutId, mode: 'candidate' } });

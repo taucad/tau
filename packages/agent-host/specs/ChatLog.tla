@@ -53,11 +53,12 @@ VARIABLES
   settled,   \* <<run id, attempt>> pairs with a settlement row
   current,   \* the chat's run: the last one with a lifecycle row; "" before any
   pending,   \* <<run id, interrupt id>> requested and not resolved
+  resolved,  \* <<run id, interrupt id>> with a recorded resolution
   inv,       \* model attempt id -> [run, attempt, purpose, settled, shown]
   open,      \* run id -> its last prepared attempt id until shown or settled ("" when none): `openInvocation`
   opened     \* command ids that opened an effect
 
-vars == <<i, epoch, seq, closed, maxEpoch, termEpoch, lifecycle, att, code, settled, current, pending, inv, open, opened>>
+vars == <<i, epoch, seq, closed, maxEpoch, termEpoch, lifecycle, att, code, settled, current, pending, resolved, inv, open, opened>>
 
 Has(r, f) == f \in DOMAIN r
 Known(e) ==
@@ -131,6 +132,8 @@ Holds(rule, e) ==
                                         LifecycleLegality.table[LegalityState(e.runId)][e.state] = "ok"
     [] rule = "SettlementNeedsRun" -> IsSettlement(e) => HasRun(e.runId)                                  \* SETTLEMENT_WITHOUT_RUN
     [] rule = "SettledOnce"        -> IsSettlement(e) => <<e.runId, SettlementAttempt(e)>> \notin settled \* SETTLEMENT_CONFLICT
+    [] rule = "InterruptResolvedOnce" -> Known(e) /\ e.type = "interrupt.recorded" /\ e.phase = "resolved" =>
+                                        <<e.runId, e.interruptId>> \notin resolved \* INTERRUPT_ALREADY_RESOLVED
     [] rule = "RowsNeedRun"        -> Known(e) /\ ~HasRun(e.runId) => IsLifecycle(e) \/ IsSettlement(e)   \* stricter than the host
     [] rule = "InvocationSettledOnce" -> Known(e) /\ e.type = "model.invocation-settled" =>               \* CL-R17 (W11)
                                         e.attemptId \in DOMAIN inv /\ ~inv[e.attemptId].settled
@@ -141,7 +144,7 @@ Holds(rule, e) ==
                                                                      /\ inv[id].purpose = "generation"   \* not the last
 
 Rules == {"SequenceContiguous", "EpochNotReopened", "EpochStartsAtZero", "EpochsIncrease", "AdmittedOnce",
-          "OneRunAtATime", "ReopenOnlyByRunning", "SettlementNeedsRun", "SettledOnce", "RowsNeedRun",
+          "OneRunAtATime", "ReopenOnlyByRunning", "SettlementNeedsRun", "SettledOnce", "InterruptResolvedOnce", "RowsNeedRun",
           "InvocationSettledOnce", "CommandOpensOnce", "PrepareOnlyWhenResolved"}
 
 \* Evaluated as a value: in an action TLC branches on both sides of a disjunction, and some rules
@@ -154,7 +157,7 @@ Broken(e) == {rule \in Rules \ Waived : ~Holds(rule, e)}
 Init ==
   /\ i = 0 /\ epoch = "" /\ seq = -1 /\ closed = {} /\ maxEpoch = 0 /\ termEpoch = 0
   /\ lifecycle = [r \in {} |-> "none"] /\ att = [r \in {} |-> 0] /\ code = [r \in {} |-> ""]
-  /\ settled = {} /\ current = "" /\ pending = {} /\ inv = [a \in {} |-> {}] /\ open = [r \in {} |-> ""]
+  /\ settled = {} /\ current = "" /\ pending = {} /\ resolved = {} /\ inv = [a \in {} |-> {}] /\ open = [r \in {} |-> ""]
   /\ opened = {}
 
 NextInv(e) ==
@@ -202,6 +205,8 @@ Write(e) ==
                   [] Known(e) /\ e.type = "interrupt.recorded" ->
                        {p \in pending : p[2] # e.interruptId}   \* resolved, whatever its payload (CL-R16)
                   [] OTHER -> pending
+  /\ resolved' = IF Known(e) /\ e.type = "interrupt.recorded" /\ e.phase = "resolved"
+                  THEN resolved \cup {<<e.runId, e.interruptId>>} ELSE resolved
   /\ inv' = NextInv(e)
   /\ open' = NextOpen(e)
   /\ opened' = IF OpensEffect(e) /\ Has(e, "commandId") THEN opened \cup {e.commandId} ELSE opened

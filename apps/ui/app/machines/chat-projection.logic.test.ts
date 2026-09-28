@@ -107,6 +107,50 @@ const pageScan = () => {
 };
 
 describe('chatProjectionLogic (PV-S7)', () => {
+  it('keeps the admitted Tau user until canonical history replaces it once', async () => {
+    const message = { id: 'u-seed', role: 'user', content: 'Make a cube' } as const;
+    const admitted = {
+      ...lifecycleRow(0, 'admitted'),
+      admission: { kind: 'tau', trigger: 'submit', turnId: message.id, message },
+    };
+    const pending = project([admitted], 1);
+    const pendingMessages = await materializeTranscript(pending);
+    expect(pendingMessages.filter((entry) => entry.role === 'user').map((entry) => entry.id)).toEqual([message.id]);
+
+    const appended = project(
+      [admitted, logRow(1, { type: 'message.appended', message: { ...message, content: 'Make a cylinder' } })],
+      1,
+    );
+    const appendedMessages = await materializeTranscript(appended);
+    expect(appendedMessages.filter((entry) => entry.role === 'user')).toEqual([
+      expect.objectContaining({ id: message.id, parts: [{ type: 'text', text: 'Make a cylinder' }] }),
+    ]);
+
+    const committed = project(
+      [
+        admitted,
+        logRow(1, {
+          type: 'turn.history-projection-committed',
+          retainedMessageIds: [],
+          message: { ...message, content: 'Make a sphere' },
+          context: { version: 1, systemPrompt: 'system', initialMessages: [], postCompactionMessages: [] },
+        }),
+      ],
+      1,
+    );
+    const committedMessages = await materializeTranscript(committed);
+    expect(committedMessages.filter((entry) => entry.role === 'user')).toEqual([
+      expect.objectContaining({ id: message.id, parts: [{ type: 'text', text: 'Make a sphere' }] }),
+    ]);
+    expect(
+      project([{ ...admitted, admission: { ...admitted.admission, message: { ...message, role: 'assistant' } } }], 1)
+        .views['run_1']?.user,
+    ).toBeUndefined();
+    expect(
+      project([{ ...admitted, admission: { ...admitted.admission, kind: 'other' } }], 1).views['run_1']?.user,
+    ).toBeUndefined();
+  });
+
   it('keeps live text in an ephemeral watched overlay and reconciles durable output without doubling it', () => {
     const running = project([lifecycleRow(0, 'admitted'), lifecycleRow(1, 'running')], 2);
     const preview = reduceChatProjection(running, {

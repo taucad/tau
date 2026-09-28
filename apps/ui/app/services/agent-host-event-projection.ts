@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { ProviderMetadata, UIMessageChunk } from 'ai';
 import type { AgentLiveEvent, AgentLogEvent, ProviderMessageMetadata } from '@taucad/agent-host';
+import { userProviderMessageSchema } from '@taucad/agent-host';
 import { externalAgentStopSchema } from '@taucad/agent-host/wire';
 import type { AcpSessionData, BillingInvocationStatus, MyUIMessage } from '@taucad/chat';
 import { acpSessionDataSchema, billingInvocationStatusSchema } from '@taucad/chat';
@@ -640,8 +641,15 @@ export const projectTurnFinalized = (event: AgentLogEvent): TurnFinalizedEvent |
   return settlement?.type === 'turn.finalized' ? settlement : undefined;
 };
 
-/** Extract the durable user turn carried by either canonical commit event. */
+/** Extract an admitted Tau user provisionally, or its later canonical committed row. */
 export const projectAgentHostUserTurn = (event: AgentLogEvent): MyUIMessage | undefined => {
+  if (event.type === 'run.lifecycle' && event.state === 'admitted' && 'admission' in event) {
+    const admission = isRecord(event.admission) ? event.admission : undefined;
+    const message = userProviderMessageSchema.safeParse(admission?.['message']);
+    if (admission?.['kind'] === 'tau' && message.success && admission['turnId'] === message.data.id) {
+      return projectAgentHostUserMessage(message.data, event.recordedAt);
+    }
+  }
   if (event.type === 'message.appended' && event.message.role === 'user') {
     return projectAgentHostUserMessage(event.message, event.recordedAt);
   }

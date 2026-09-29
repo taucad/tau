@@ -211,12 +211,11 @@ export const ChatTextarea = memo(function ({
       if (!currentProjectContext) {
         return undefined;
       }
-      const { viewGraphics, editorRef, mainEntryPath: mainEntry } = currentProjectContext;
-      const { viewSettings } = editorRef.getSnapshot().context;
+      const { viewGraphics, viewRecords, mainEntryPath: mainEntry } = currentProjectContext;
       const target = entryPath ?? mainEntry;
 
       for (const [viewId, gRef] of viewGraphics) {
-        if (viewSettings[viewId]?.entryPath === target) {
+        if (viewRecords.get(viewId)?.entryPath === target) {
           return gRef;
         }
       }

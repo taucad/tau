@@ -118,36 +118,10 @@ const metadataMiddleware = defineMiddleware({
 
 Dependency scope is not inferred from wrap hooks. The available operation names are `getParameters`, `createGeometry`, `meshGeometry`, and `exportGeometry`.
 
-### 5. Wrap multiple operations
-
-Implement `wrapGetParameters` and `wrapExportGeometry` beside `wrapCreateGeometry` when the middleware spans operations:
-
-```typescript
-import { defineMiddleware } from '@taucad/runtime/middleware';
-
-const fullMiddleware = defineMiddleware({
-  id: 'full-middleware',
-  name: 'FullMiddleware',
-  async wrapGetParameters(input, handler, { logger }) {
-    logger.debug('Getting parameters');
-    return handler(input);
-  },
-  async wrapCreateGeometry(input, handler, { logger }) {
-    logger.debug('Creating geometry');
-    return handler(input);
-  },
-  async wrapExportGeometry(input, handler, { logger }) {
-    logger.debug('Exporting geometry');
-    return handler(input);
-  },
-});
-```
-
 ## Variations
 
-- **Version**: Set `version` for cache-key computation. Changing it invalidates caches that include middleware signatures.
 - **Cancellation**: Destructure the fresh operation `signal`, pass it to cancellable APIs, and never retain it after the hook settles — see [Cooperate with Cancellation](./cooperate-with-cancellation).
-- **Parameters**: Treat `input.parameters` as caller overrides plus any values composed by outer middleware. Lay stored values underneath caller values. Leave unit conversion and default filling to the runtime's kernel boundary; a unit-bound numeric field may arrive as a declared-unit number or unit-bearing text such as `"20 in"`.
+- **Other hooks**: Implement `wrapGetParameters` or `wrapExportGeometry` when the concern spans those operations.
 
 ## Related
 

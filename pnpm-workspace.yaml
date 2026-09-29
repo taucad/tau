@@ -286,9 +286,6 @@ catalog:
   '@streamdown/math': ^1.0.2
   '@streamdown/cjk': ^1.0.3
   '@streamdown/mermaid': ^1.0.2
-  '@getpaseo/protocol': 0.7.0-beta.1
-  '@getpaseo/client': 0.7.0-beta.1
-  '@getpaseo/relay': 0.7.0-beta.1
   '@fastify/multipart': ^10.0.0
   '@typescript/vfs': ^1.6.4
   '@napi-rs/cli': 3.8.6

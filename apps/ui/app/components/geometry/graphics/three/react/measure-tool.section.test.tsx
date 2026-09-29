@@ -140,6 +140,10 @@ describe('MeasureTool with section cuts', () => {
 
   beforeEach(async () => {
     measureCommits = 0;
+    camera.position.set(0, -10, 0);
+    camera.up.set(0, 0, 1);
+    camera.lookAt(0, 0, 0);
+    camera.updateMatrixWorld();
     planePicker = mock<SectionPlanePicker>();
     actor = createActor(
       graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
@@ -283,6 +287,87 @@ describe('MeasureTool with section cuts', () => {
     frames.run();
     expect(measureCommits).toBe(settled);
     expect(measurementMarkHeights()).toEqual(marks);
+  });
+
+  it('should retain chosen catalog targets across unchanged frames and invalidate them when the camera changes', () => {
+    act(() => {
+      actor.send({ type: 'requestMeasureCatalog' });
+    });
+    const { measureCandidates, measureCatalogRequest } = actor.getSnapshot().context;
+    expect(measureCandidates.length).toBeGreaterThan(0);
+    const chosenId = measureCandidates[0]!.id;
+    act(() => {
+      actor.send({ type: 'chooseMeasureCandidate', id: chosenId });
+      actor.send({ type: 'setMeasureLockedTarget', id: chosenId });
+      getState().advance(0);
+    });
+    expect(actor.getSnapshot().context.measureCandidates).toEqual(measureCandidates);
+    expect(actor.getSnapshot().context.measureChosenCandidateId).toBe(chosenId);
+    expect(actor.getSnapshot().context.measureLockedTargetId).toBe(chosenId);
+
+    // A new camera matrix invalidates the retained world targets without another catalog request.
+    act(() => {
+      camera.position.set(10, 0, 0);
+      camera.lookAt(0, 0, 0);
+      camera.updateMatrixWorld();
+      getState().advance(0);
+    });
+    const afterMove = actor.getSnapshot().context;
+    expect(afterMove.measureCandidates).toEqual([]);
+    expect(afterMove.measureChosenCandidateId).toBeUndefined();
+    expect(afterMove.measureLockedTargetId).toBeUndefined();
+    expect(afterMove.measureCatalogRequest).toBe(measureCatalogRequest);
+  });
+
+  it('should clear a surviving actor selection as soon as active Measure remounts', async () => {
+    act(() => {
+      actor.send({ type: 'requestMeasureCatalog' });
+    });
+    const { measureCandidates, measureCatalogRequest } = actor.getSnapshot().context;
+    expect(measureCandidates.length).toBeGreaterThan(0);
+    const chosenId = measureCandidates[0]!.id;
+    act(() => {
+      actor.send({ type: 'chooseMeasureCandidate', id: chosenId });
+      actor.send({ type: 'setMeasureLockedTarget', id: chosenId });
+    });
+    expect(actor.getSnapshot().context.measureChosenCandidateId).toBe(chosenId);
+    expect(actor.getSnapshot().context.measureLockedTargetId).toBe(chosenId);
+
+    // The R3F canvas can remount below GraphicsProvider while its actor survives. No frame advances here.
+    await act(async () => {
+      root.render(
+        <GraphicsProvider graphicsRef={actor}>
+          <primitive object={new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshBasicMaterial())} />
+          <MeasureTool key='remounted' />
+        </GraphicsProvider>,
+      );
+    });
+    const afterRemount = actor.getSnapshot().context;
+    expect(afterRemount.measureCandidates).toEqual([]);
+    expect(afterRemount.measureChosenCandidateId).toBeUndefined();
+    expect(afterRemount.measureLockedTargetId).toBeUndefined();
+    expect(afterRemount.measureCatalogRequest).toBe(measureCatalogRequest);
+  });
+
+  it('should refresh a resting pointer after camera motion, then stay settled on an unchanged frame', () => {
+    const frames = holdFrames();
+    dispatch('pointermove', pixelOf(0.8, -1, -0.6));
+    frames.run();
+    expect(measurementMarkHeights().length).toBeGreaterThan(0);
+
+    act(() => {
+      camera.lookAt(0, -20, 0);
+      camera.updateMatrixWorld();
+      getState().advance(0);
+    });
+    expect(measurementMarkHeights()).toEqual([]);
+
+    const settled = measureCommits;
+    act(() => {
+      getState().advance(0);
+    });
+    expect(measureCommits).toBe(settled);
+    expect(measurementMarkHeights()).toEqual([]);
   });
 
   it('should leave a press on a dimmed plane picker tile to the picker while Measure is on', () => {

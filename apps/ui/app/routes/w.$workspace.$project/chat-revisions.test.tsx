@@ -74,6 +74,9 @@ const chats = [
   { id: 'chat-2', name: 'Sketch lid', checkoutId: undefined },
 ];
 vi.mock('#hooks/use-chats.js', () => ({ useChats: () => ({ chats }) }));
+vi.mock('#hooks/use-chat-records.js', () => ({
+  useChatRecords: () => ({ chats, isLoading: false, error: undefined }),
+}));
 /* Whether the creation toast is still carrying the backup offer. */
 let backupAnnouncing = false;
 /* D19: the backup-by-default line asks about the account; these rows are signed in and entitled. */

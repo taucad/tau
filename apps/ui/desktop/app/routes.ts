@@ -47,6 +47,7 @@ const routes: RouteConfigEntry[] = await flatRoutes({
     '../../app/routes/i.$/**',
     '../../app/routes/legal/**',
     '../../app/routes/legal.*/**',
+    '../../app/routes/vision/**',
     '../../app/routes/manifest[[].webmanifest[]].ts',
     '../../app/routes/robots[[].[]]txt/**',
     '../../app/routes/sitemap[[].[]]xml/**',

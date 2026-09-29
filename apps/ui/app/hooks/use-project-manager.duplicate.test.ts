@@ -188,6 +188,19 @@ const createWrapper = () => {
 describe('useProjectManager.duplicateProject', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    const storage = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        storage.set(key, value);
+      },
+      removeItem: (key: string) => {
+        storage.delete(key);
+      },
+      clear: () => {
+        storage.clear();
+      },
+    });
     phases.length = 0;
     lastManifest = serializeProjectManifest(projectToManifest(sourceProject));
     mockGetProjectFileSystemConfig.mockResolvedValue({
@@ -222,7 +235,7 @@ describe('useProjectManager.duplicateProject', () => {
 
   /* D19 (W11 a2): a copy has no remote of its own, so it backs up by default. */
   it('should mark the duplicate for backup by default', async () => {
-    localStorage.clear();
+    globalThis.localStorage.clear();
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
     await act(async () => result.current.duplicateProject(sourceProject.id));
 

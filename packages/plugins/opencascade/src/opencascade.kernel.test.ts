@@ -8,10 +8,12 @@ import type { FileExtension, GeometryResponse, GetParametersResult, HashedGeomet
 import type { ExportResult } from '@taucad/runtime';
 import { opencascadeKernel } from '#opencascade.kernel.js';
 import { getModuleRegistry } from '@taucad/runtime/kernel';
+import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import type { OpenCascadeInstance } from 'libcascade/init';
 import {
   assertFailure,
   assertSuccess,
+  createMockKernelRuntime,
   createGeometryFile,
   createGeometryTestHelpers,
   createTestRuntimeClient,
@@ -466,34 +468,82 @@ export default function main() {
     });
 
     it('should serialize native handles as versioned geometry-only BRep snapshots', async () => {
+      const geometryFile = createGeometryFile('named-pbr.ts');
+      const result = await renderGeometry({ file: geometryFile, parameters: {} });
+      assertSuccess(result, 'named PBR shape createGeometry for native-handle snapshot');
+      expect(result).not.toHaveProperty('serializedNativeHandle');
+
       const oc = getModuleRegistry().get('libcascade') as unknown as OpenCascadeInstance | undefined;
       expect(oc, 'expected worker to have registered libcascade module').toBeDefined();
       const cascade = oc!;
       const writeSpy = vi.spyOn(cascade.BRepTools, 'Write');
 
-      const geometryFile = createGeometryFile('named-pbr.ts');
-      const result = await renderGeometry({ file: geometryFile, parameters: {} });
-      assertSuccess(result, 'named PBR shape createGeometry for native-handle snapshot');
+      const definition = await resolveRuntimePluginDefinition('kernel', opencascadeKernel());
+      const kernelRuntime = createMockKernelRuntime();
+      let snapshotNumber = 0;
+      const context = {
+        oc: cascade,
+        isParallelMeshing: false,
+        tracingSummary: undefined,
+        nextSnapshotPath: (index: number) => `/tmp/tau_opencascade_test_snapshot_${++snapshotNumber}_${index}.brep`,
+      };
+      const box = new cascade.BRepPrimAPI_MakeBox(10, 10, 10);
+      const shape = box.Shape();
+      try {
+        const nativeHandle = [
+          {
+            shape,
+            name: 'PbrBox',
+            color: '#ff0000',
+            metalness: 0.2,
+            roughness: 0.7,
+            density: 1.25,
+          },
+        ];
+        const snapshot = expectOpenCascadeSnapshot(
+          definition.serializeNativeHandle!({ nativeHandle }, kernelRuntime, context),
+        );
+        expect(snapshot.entries).toHaveLength(1);
+        expect(snapshot.entries[0]!.metadata).toEqual(
+          expect.objectContaining({
+            name: 'PbrBox',
+            color: '#ff0000',
+            metalness: 0.2,
+            roughness: 0.7,
+            density: 1.25,
+          }),
+        );
+        expect(writeSpy).toHaveBeenCalledWith(
+          expect.any(Object),
+          expect.any(String),
+          false,
+          false,
+          cascade.TopTools_FormatVersion.TopTools_FormatVersion_CURRENT,
+          expect.any(Object),
+        );
 
-      const snapshot = expectOpenCascadeSnapshot(result.serializedNativeHandle);
-      expect(snapshot.entries).toHaveLength(1);
-      expect(snapshot.entries[0]!.metadata).toEqual(
-        expect.objectContaining({
-          name: 'PbrBox',
-          color: '#ff0000',
-          metalness: 0.2,
-          roughness: 0.7,
-          density: 1.25,
-        }),
-      );
-      expect(writeSpy).toHaveBeenCalledWith(
-        expect.any(Object),
-        expect.any(String),
-        false,
-        false,
-        cascade.TopTools_FormatVersion.TopTools_FormatVersion_CURRENT,
-        expect.any(Object),
-      );
+        const restored = definition.deserializeNativeHandle!(
+          { serializedNativeHandle: structuredClone(snapshot) },
+          kernelRuntime,
+          context,
+        );
+        try {
+          expect(restored).toHaveLength(1);
+          expect(restored[0]!.name).toBe('PbrBox');
+          const properties = new cascade.GProp_GProps();
+          try {
+            cascade.BRepGProp.VolumeProperties(restored[0]!.shape, properties, true, false, false);
+            expect(properties.Mass()).toBeCloseTo(1000, 0);
+          } finally {
+            properties.delete();
+          }
+        } finally {
+          definition.disposeNativeHandle!({ nativeHandle: restored }, kernelRuntime, context);
+        }
+      } finally {
+        shape.delete();
+        box.delete();
+      }
     });
 
     it('should render an empty GLB when main returns undefined (empty body)', async () => {

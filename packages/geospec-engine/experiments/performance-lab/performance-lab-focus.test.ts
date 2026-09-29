@@ -8,10 +8,10 @@ import {
   planFocusCells,
   renderFocusSummary,
   summarizeFocusRows,
-} from '#bench/performance-lab-focus';
-import type { FocusCall, FocusRow } from '#bench/performance-lab-focus';
+} from '#experiments/performance-lab/performance-lab-focus.js';
+import type { FocusCall, FocusRow } from '#experiments/performance-lab/performance-lab-focus.js';
 
-const packageRoot = resolve(import.meta.dirname, '..');
+const packageRoot = resolve(import.meta.dirname, '../../../geospec-engine-native');
 const sample = (at: number, user: number, system = 0) => ({ at, cpu: { user, system } });
 const call = (method: string, start: number, end?: number): FocusCall => ({
   method,

@@ -22,7 +22,13 @@ const rig = {
   },
 };
 const unsubscribe = vi.fn();
-let framing = { identity: 'file-a' as string | undefined, pendingView: undefined as unknown, initialized: false };
+let framing = {
+  identity: 'file-a' as string | undefined,
+  pendingView: undefined as unknown,
+  preserveOrientationOnFirstFrame: false,
+  firstFrameView: undefined as unknown,
+  initialized: false,
+};
 const graphicsActor = {
   on: vi.fn((_type: string, listener: () => void) => {
     fitListener = listener;
@@ -42,7 +48,13 @@ describe('useCameraFraming portable camera events', () => {
     send.mockClear();
     unsubscribe.mockClear();
     graphicsActor.on.mockClear();
-    framing = { identity: 'file-a', pendingView: undefined, initialized: false };
+    framing = {
+      identity: 'file-a',
+      pendingView: undefined,
+      preserveOrientationOnFirstFrame: false,
+      firstFrameView: undefined,
+      initialized: false,
+    };
     fitListener = undefined;
     size.width = 800;
     size.height = 600;
@@ -62,6 +74,7 @@ describe('useCameraFraming portable camera events', () => {
     expect(new Vector3(...setView.direction).cross(new Vector3(...setView.up)).lengthSq()).toBeGreaterThan(1e-8);
     expect(send).toHaveBeenCalledWith({ type: 'setBounds', bounds: { min: [-10, -5, -2], max: [10, 5, 2] } });
     expect(send).toHaveBeenLastCalledWith({ type: 'frame', margin: 0.1 });
+    expect(framing.firstFrameView).toEqual(rig.actorRef.getSnapshot().context.view);
   });
 
   it('restores the saved canonical view after the configured framing', () => {

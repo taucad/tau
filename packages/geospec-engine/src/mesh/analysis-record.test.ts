@@ -15,6 +15,8 @@ import {
   decodeMeshAnalysisRecord,
   encodeMeshAnalysisRecord,
   isWatertight,
+  recordMeshQuality,
+  recordTriangles,
 } from '#mesh/analysis-record.js';
 import { encodeSections } from '#cache/section-codec.js';
 
@@ -217,6 +219,46 @@ describe('mesh-record codec', () => {
 });
 
 describe('analyzeMeshQuality', () => {
+  it('keeps scalar and duplicate-face evidence available before materializing memoized triangles', () => {
+    const record = buildMeshAnalysisRecord(
+      documentOf([{ name: 'repeated', positions: [0, 0, 0, 1, 0, 0, 0, 1, 0], indices: [0, 1, 2, 2, 1, 0] }]),
+    );
+    const quality = recordMeshQuality(record);
+
+    expect(quality.triangleCount).toBe(2);
+    expect(quality.surfaceArea).toBe(1);
+    expect(quality.signedVolume).toBe(0);
+    expect(quality.duplicateFaces).toEqual([{ primitive: 'repeated#0', triangleIndex: 1, firstTriangleIndex: 0 }]);
+    expect(quality.duplicateFaces).toBe(quality.duplicateFaces);
+
+    const { triangles } = quality;
+    expect(triangles).toEqual(recordTriangles(record));
+    expect(quality.triangles).toBe(triangles);
+    expect(quality.duplicateFaces).toEqual([{ primitive: 'repeated#0', triangleIndex: 1, firstTriangleIndex: 0 }]);
+  });
+
+  it('preserves non-finite and degenerate witnesses when triangles are read first', () => {
+    const record = buildMeshAnalysisRecord(
+      documentOf([
+        {
+          name: 'bad',
+          positions: [0, 0, 0, 0, 0, 0, 0, 0, 0, Number.NaN, 0, 0, 1, 0, 0, 0, 1, 0],
+          indices: [0, 1, 2, 3, 4, 5],
+        },
+      ]),
+    );
+    const quality = recordMeshQuality(record);
+    const { triangles } = quality;
+
+    expect(quality.triangles).toBe(triangles);
+    expect(quality.degenerateTriangles).toEqual([{ primitive: 'bad#0', triangleIndex: 0, area: 0, center: [0, 0, 0] }]);
+    expect(quality.nonFiniteVertices).toEqual([
+      { primitive: 'bad#0', vertexIndex: 3, position: [Number.NaN, Number.NaN, Number.NaN] },
+    ]);
+    expect(quality.centerOfMass).toBeUndefined();
+    expect(triangles).toEqual(recordTriangles(record));
+  });
+
   it('should report scalars and a centre of mass without treating part contacts as duplicate faces', () => {
     const quality = analyzeMeshQuality(documentOf([{ ...boxSpec('part'), primitives: 2 }]));
 

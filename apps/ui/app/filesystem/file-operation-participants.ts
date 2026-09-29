@@ -56,8 +56,29 @@ export function mountFileOperationParticipants(init: {
   readonly parameterFiles?: Readonly<{
     prepareFileOperation: Parameters<FileContentService['addFileOperationParticipant']>[0];
   }>;
+  /** Current workbench record owners update view and entry paths before layout closure. */
+  readonly onWorkbenchPathChange?: (
+    change: Readonly<{ type: 'rename'; oldPath: string; newPath: string } | { type: 'delete'; path: string }>,
+  ) => Promise<void>;
 }): () => void {
-  const { contentService, editorRef, projectRef, parameterFiles } = init;
+  const { contentService, editorRef, projectRef, parameterFiles, onWorkbenchPathChange } = init;
+  let pathChangeTail: Promise<void> = Promise.resolve();
+  const runWorkbenchPathChange = async (
+    change: Parameters<NonNullable<typeof onWorkbenchPathChange>>[0],
+  ): Promise<void> => {
+    await pathChangeTail;
+    try {
+      await onWorkbenchPathChange?.(change);
+    } catch {
+      /* The record owner reports its own write failure. Keep later changes ordered. */
+    }
+  };
+  const changeWorkbenchPaths = (change: Parameters<NonNullable<typeof onWorkbenchPathChange>>[0]): void => {
+    if (!onWorkbenchPathChange) {
+      return;
+    }
+    pathChangeTail = runWorkbenchPathChange(change);
+  };
   const disposePreparedParticipant =
     parameterFiles === undefined
       ? undefined
@@ -102,6 +123,7 @@ export function mountFileOperationParticipants(init: {
           oldPath: event.oldPath,
           newPath: event.newPath,
         });
+        changeWorkbenchPaths({ type: 'rename', oldPath: event.oldPath, newPath: event.newPath });
         sendProjectFileActivity(projectRef, event.type, [event.oldPath, event.newPath]);
         return;
       }
@@ -109,11 +131,8 @@ export function mountFileOperationParticipants(init: {
         // Editor: close the matching tab if any. Path is exact, no
         // prefix scan needed for single-file deletes.
         editorRef.send({ type: 'closeFile', path: event.path });
-        editorRef.send({
-          type: 'pruneComponentDisplayForDeletedPath',
-          path: event.path,
-        });
         projectRef.send({ type: 'fileDeleted', path: event.path });
+        changeWorkbenchPaths({ type: 'delete', path: event.path });
         sendProjectFileActivity(projectRef, 'deleted', [event.path]);
         return;
       }
@@ -129,11 +148,8 @@ export function mountFileOperationParticipants(init: {
             editorRef.send({ type: 'closeFile', path: file.path });
           }
         }
-        editorRef.send({
-          type: 'pruneComponentDisplayForDeletedPath',
-          path: event.path,
-        });
         projectRef.send({ type: 'directoryDeleted', path: event.path });
+        changeWorkbenchPaths({ type: 'delete', path: event.path });
         sendProjectFileActivity(projectRef, 'directoryDeleted', [event.path]);
         break;
       }

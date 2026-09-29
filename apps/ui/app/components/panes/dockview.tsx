@@ -438,6 +438,7 @@ export function Dockview({
       <DockviewReact
         {...properties}
         className={className}
+        disableFloatingGroups
         disableTabsOverflowList
         rightHeaderActionsComponent={RightHeaderActions}
         scrollbars='custom'

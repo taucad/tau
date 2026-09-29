@@ -242,7 +242,7 @@ export function MeasureOptions(): React.JSX.Element {
             <label className='text-xs'>
               Mode
               <select
-                className='mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none'
+                className='mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground focus-visible:focus-outline'
                 aria-label='Measurement mode'
                 value={mode}
                 onChange={(event) => {
@@ -270,7 +270,7 @@ export function MeasureOptions(): React.JSX.Element {
             <label className='text-xs'>
               Filter
               <select
-                className='mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none'
+                className='mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground focus-visible:focus-outline'
                 aria-label='Feature filter'
                 value={filter}
                 onChange={(event) => {
@@ -291,7 +291,7 @@ export function MeasureOptions(): React.JSX.Element {
             <label className='text-xs'>
               Operation
               <select
-                className='mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none'
+                className='mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground focus-visible:focus-outline'
                 aria-label='Measurement operation'
                 value={operation}
                 onChange={(event) => {
@@ -314,7 +314,7 @@ export function MeasureOptions(): React.JSX.Element {
             <label className='text-xs'>
               Frame
               <select
-                className='mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none'
+                className='mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground focus-visible:focus-outline'
                 aria-label='Measurement frame'
                 value={frame}
                 onChange={(event) => {
@@ -328,7 +328,7 @@ export function MeasureOptions(): React.JSX.Element {
             <label className='text-xs'>
               Choose target
               <select
-                className='mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none'
+                className='mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground focus-visible:focus-outline'
                 aria-label='Choose target'
                 value={activeCandidateId ?? ''}
                 onFocus={() => {

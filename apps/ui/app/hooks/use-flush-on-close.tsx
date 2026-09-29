@@ -36,11 +36,18 @@ type UnloadContextValue = {
 
 /** Run one stage's callbacks in the phase that can still await, and wait for every one to settle. */
 const flushStage = async (registrations: readonly FlushRegistration[], stage: FlushStage): Promise<void> => {
-  await Promise.allSettled(
+  const outcomes = await Promise.allSettled(
     registrations
       .filter((registration) => registration.stage === stage)
       .map(async (registration) => registration.callbackRef.current('hidden')),
   );
+  const failures = outcomes.filter((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected');
+  if (failures.length > 0) {
+    throw new AggregateError(
+      failures.map((failure) => failure.reason as unknown),
+      `${stage} flush failed`,
+    );
+  }
 };
 
 // ---------------------------------------------------------------------------
@@ -92,6 +99,13 @@ export function UnloadProvider({ children }: { readonly children: ReactNode }): 
       await flushStage(registrations, 'producer');
       await flushStage(registrations, 'session');
     };
+    const flushHiddenSafely = async (): Promise<void> => {
+      try {
+        await flushHidden();
+      } catch (error) {
+        console.error('Pending changes could not be saved before the page was hidden.', error);
+      }
+    };
     const flushPageHide = (): void => {
       for (const registration of registryRef.current) {
         if (registration.stage === 'session') {
@@ -104,7 +118,8 @@ export function UnloadProvider({ children }: { readonly children: ReactNode }): 
 
     const handleVisibilityChange = (): void => {
       if (document.visibilityState === 'hidden') {
-        void flushHidden();
+        // async-iife: bootstrap -- visibility events have no caller to await the producer stage.
+        void flushHiddenSafely();
       }
     };
     const handlePageHide = (): void => {

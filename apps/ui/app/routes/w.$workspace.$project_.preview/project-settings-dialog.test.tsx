@@ -3,6 +3,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
+import type * as ReactRouterModule from 'react-router';
 import { ProjectSettingsDialog } from '#routes/w.$workspace.$project_.preview/project-settings-dialog.js';
 
 const { deleteProject, navigate, toastSuccess } = vi.hoisted(() => ({
@@ -27,7 +28,7 @@ vi.mock('#routes/w.$workspace.$project_.preview/preview-project-context.js', () 
 vi.mock('#hooks/use-projects.js', () => ({ useProjects: () => ({ deleteProject }) }));
 vi.mock('#components/ui/sonner.js', () => ({ toast: { success: toastSuccess, error: vi.fn() } }));
 vi.mock('react-router', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('react-router')>()),
+  ...(await importOriginal<typeof ReactRouterModule>()),
   useNavigate: () => navigate,
 }));
 

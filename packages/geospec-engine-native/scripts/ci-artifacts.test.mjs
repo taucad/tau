@@ -15,6 +15,7 @@ import fs, {
 import { syncBuiltinESMExports } from 'node:module';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { test } from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 import process from 'node:process';
 /* oxlint-disable no-restricted-imports -- Standalone Node host check consumes its co-located CLI without a public package export. */
 import {
@@ -460,6 +461,18 @@ const checkTransport = (context, reusePrefixes) => {
     'assemble-package',
   ]);
   assert.equal(inventory.artifacts.length, 5);
+  assert.ok(inventory.source.files.some((file) => file.path === trackedPath));
+  assert.ok(!inventory.source.files.some((file) => file.path === missingTrackedPath));
+  rmSync(join(producer, trackedPath));
+  assert.throws(() => verifyArtifacts(producer), /source revision\/inputs differ/);
+  put(join(producer, trackedPath), 'tracked fixture\n');
+  put(join(producer, addedPath), 'new source\n');
+  assert.throws(() => verifyArtifacts(producer), /source revision\/inputs differ/);
+  rmSync(join(producer, addedPath));
+  put(join(producer, trackedPath), 'changed source\n');
+  assert.throws(() => verifyArtifacts(producer), /source revision\/inputs differ/);
+  put(join(producer, trackedPath), 'tracked fixture\n');
+  assert.deepEqual(verifyArtifacts(producer), inventory);
   const builtTargets = [...targets];
   assert.deepEqual(ensureDelivery(producer), inventory);
   assert.deepEqual(targets, builtTargets, 'an unchanged delivery must not invoke a producer');

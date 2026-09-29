@@ -21,6 +21,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { toPiToolContent } from '@taucad/agent-host';
 import type { JsonValue } from '@taucad/agent-host';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
+import workbenchBundles from '@taucad/workbench/agent/resources.js';
 import type { GeoSpecRunner } from 'geospec/runner/worker';
 import type { MachineClient, MachineDirectoryEntry, MachineProvider } from '@taucad/runtime/machine';
 import type { HashedGeometryResult } from '@taucad/runtime/types';
@@ -117,6 +118,8 @@ const glb = (): Uint8Array<ArrayBuffer> => {
 const fakeRuntime = (overrides: Partial<HostRuntimeClient> = {}): HostRuntimeClient => {
   const content = glb();
   const base: HostRuntimeClient = {
+    connect: vi.fn(async () => undefined),
+    capabilities: undefined,
     evaluate: vi.fn(
       async (): Promise<HashedGeometryResult> => ({
         success: true,
@@ -396,6 +399,17 @@ describe('createHostToolRegistry', () => {
     });
     expect(refused.isError).toBe(true);
     expect(JSON.stringify(refused.content)).toContain('PERMISSION_DENIED');
+  });
+
+  it('activates and reads the published workbench skill', async () => {
+    const workspaceRoot = await makeWorkspace();
+    const registry = createHostToolRegistry({ workspaceRoot, systemSkillBundles: workbenchBundles });
+    const activated = await invoke(registry, 'use_skill', { skillName: 'workbench' });
+    expect(activated.isError).toBe(false);
+    expect(JSON.stringify(activated.content)).toContain('Read before you rearrange');
+    const read = await invoke(registry, 'read_file', { targetFile: '.agents/skills/workbench/SKILL.md' });
+    expect(read.isError).toBe(false);
+    expect(JSON.stringify(read.content)).toContain('arrange_workbench');
   });
 
   it('activates an installed Tau Store skill named by the plugin manifest', async () => {
@@ -685,6 +699,39 @@ describe('createHostToolRegistry', () => {
       checkouts.set('run-3', { cwd: first });
       await readIn('run-3');
       expect(built.mock.calls.length).toBe(live + 3);
+    } finally {
+      built.mockRestore();
+    }
+  });
+
+  it('binds candidate arrangement records to the live root and keeps other record writes in the checkout', async () => {
+    const workspaceRoot = await makeWorkspace();
+    const candidateRoot = await makeWorkspace();
+    const checkouts = new Map([['run-1', { cwd: candidateRoot }]]);
+    const built = vi.spyOn(agentToolsRegistry, 'createChatToolRegistry');
+    try {
+      const registry = createHostToolRegistry({ workspaceRoot, checkouts });
+      await registry.invoke({
+        toolCallId: 'candidate-read',
+        toolName: 'read_file',
+        input: { targetFile: 'main.ts' },
+        runId: 'run-1',
+        signal: new AbortController().signal,
+      });
+      const { 0: candidateOptions } = built.mock.calls.at(-1) ?? [];
+      expect(candidateOptions?.workbenchFileSystemFor).toBeDefined();
+      const { signal } = new AbortController();
+      await candidateOptions!.workbenchFileSystemFor!(signal).writeFileChecked({
+        path: '.tau/workbench/layout.json',
+        data: '{}',
+        preconditions: [{ path: '.tau/workbench/layout.json', expected: null }],
+      });
+      await candidateOptions!.recordFileSystemFor!(signal).writeFile('.tau/chats/chat-test/todo.yaml', 'tasks: []\n');
+      expect(await readFile(join(workspaceRoot, '.tau/workbench/layout.json'), 'utf8')).toBe('{}');
+      expect(await readFile(join(candidateRoot, '.tau/chats/chat-test/todo.yaml'), 'utf8')).toBe('tasks: []\n');
+      await expect(readFile(join(candidateRoot, '.tau/workbench/layout.json'), 'utf8')).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
     } finally {
       built.mockRestore();
     }

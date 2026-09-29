@@ -96,6 +96,8 @@ import {
   screenshotMcpOutputSchema,
   testModelInputSchema,
   testModelOutputSchema,
+  arrangeWorkbenchInputSchema,
+  arrangeWorkbenchOutputSchema,
 } from '@taucad/chat';
 import { toolName } from '@taucad/chat/constants';
 import { rpcClientErrorCodeSchema } from '@taucad/chat/schemas/rpc';
@@ -568,6 +570,7 @@ type JsonSchema = {
 };
 
 const tauMcpSchemas = {
+  [toolName.arrangeWorkbench]: { input: arrangeWorkbenchInputSchema, output: arrangeWorkbenchOutputSchema },
   [toolName.getKernelResult]: { input: getKernelResultInputSchema, output: getKernelResultOutputSchema },
   [toolName.testModel]: { input: testModelInputSchema, output: testModelOutputSchema },
   [toolName.screenshot]: { input: screenshotInputSchema, output: screenshotMcpOutputSchema },

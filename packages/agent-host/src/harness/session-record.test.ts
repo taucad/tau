@@ -6,6 +6,7 @@ import {
   createSessionRecord,
   documentSentinel,
   materializeAttachments,
+  toolInputToProvider,
 } from '#harness/session-record.js';
 import { createMemoryLogFile } from '#host/tau-agent-host.fixture.js';
 

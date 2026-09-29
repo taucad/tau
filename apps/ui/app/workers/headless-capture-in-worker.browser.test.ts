@@ -2,6 +2,10 @@ import { expect, it } from 'vitest';
 import { writeGlb } from '@taucad/geometry-core';
 import type { HeadlessCaptureProbeOutcome } from '#workers/headless-capture.probe.worker.js';
 import { runEncodeProbe, runHeadlessCaptureProbe } from '#workers/headless-capture.probe.worker.js';
+import { canonicalCaptureViews } from '@taucad/agent-tools/capture';
+import { workbenchRecords } from '@taucad/workbench';
+import { HeadlessImageService } from '#services/headless-image.service.js';
+import { viewCameraOrientation } from '#workbench-records/projection.js';
 
 /**
  * Four bytes of `glTF` magic and no chunks: enough for the raster backend to
@@ -17,17 +21,16 @@ const truncatedGlb = (): Uint8Array<ArrayBuffer> => new Uint8Array([0x67, 0x6c, 
 const captureSizedBytes = (): Uint8Array<ArrayBuffer> => new Uint8Array(1_048_576).fill(0x42);
 
 /** A 20 mm cube — the geometry the recorded transcript's capture turn shoots. */
-const cubeGlb = (): Uint8Array<ArrayBuffer> => {
-  const half = 10;
+const cubeGlb = (halfX = 10, halfY = 10, halfZ = 10): Uint8Array<ArrayBuffer> => {
   const corners: Array<readonly [number, number, number]> = [
-    [-half, -half, -half],
-    [half, -half, -half],
-    [half, half, -half],
-    [-half, half, -half],
-    [-half, -half, half],
-    [half, -half, half],
-    [half, half, half],
-    [-half, half, half],
+    [-halfX, -halfY, -halfZ],
+    [halfX, -halfY, -halfZ],
+    [halfX, halfY, -halfZ],
+    [-halfX, halfY, -halfZ],
+    [-halfX, -halfY, halfZ],
+    [halfX, -halfY, halfZ],
+    [halfX, halfY, halfZ],
+    [-halfX, halfY, halfZ],
   ];
   const faces: Array<{
     readonly corners: readonly [number, number, number, number];
@@ -144,3 +147,68 @@ it('captures the six canonical views at full size inside a worker', async () => 
   expect(onPage).toStrictEqual({ ok: true, mimeTypes: Array.from({ length: 6 }, () => 'image/webp') });
   expect(inside).toStrictEqual(onPage);
 }, 300_000);
+
+it('renders a workbench look along -Y as the same frame as the canonical front capture', async () => {
+  const content = cubeGlb(15, 5, 8);
+  const front = canonicalCaptureViews.find((view) => view.id === 'front')!;
+  const right = canonicalCaptureViews.find((view) => view.id === 'right')!;
+  const look = viewCameraOrientation(
+    workbenchRecords.view.schema.parse({
+      version: 1,
+      entryPath: 'main.scad',
+      camera: { kind: 'look', direction: [0, -1, 0] },
+    }),
+  )!;
+  const service = new HeadlessImageService();
+  const render = async (
+    id: string,
+    orientation: { direction: readonly [number, number, number]; up: readonly [number, number, number] },
+  ) => {
+    const files = await service.export({
+      kind: 'capture',
+      identity: `workbench-look-parity:${id}`,
+      sourceFormat: 'glb',
+      sourcePath: 'main.scad',
+      geometryHash: 'asymmetric-face',
+      content,
+      format: 'webp',
+      exportOptions: {
+        mode: 'single',
+        width: 256,
+        height: 256,
+        world: { up: '+z', forward: '-y', unit: 'meter' },
+        background: '#242424',
+        lines: false,
+        axes: false,
+        scaleBar: false,
+        quality: 1,
+        camera: {
+          framing: 'bounds',
+          direction: orientation.direction,
+          up: orientation.up,
+          margin: 0.1,
+          projection: { kind: 'orthographic' },
+        },
+      },
+    });
+    const image = files?.[0];
+    expect(image?.mimeType).toBe('image/webp');
+    const bitmap = await createImageBitmap(new Blob([image!.bytes], { type: 'image/webp' }));
+    const canvas = new OffscreenCanvas(256, 256);
+    const context = canvas.getContext('2d')!;
+    context.drawImage(bitmap, 0, 0);
+    bitmap.close();
+    return new Uint8Array(await crypto.subtle.digest('SHA-256', context.getImageData(0, 0, 256, 256).data));
+  };
+  try {
+    const [frontPixels, lookPixels, rightPixels] = await Promise.all([
+      render('front', front),
+      render('look', look),
+      render('right', right),
+    ]);
+    expect(lookPixels).toEqual(frontPixels);
+    expect(rightPixels).not.toEqual(frontPixels);
+  } finally {
+    service.dispose();
+  }
+}, 180_000);

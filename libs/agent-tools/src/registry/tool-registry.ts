@@ -24,6 +24,7 @@ import type {
   RpcRevisionsClient,
   RpcParameterClient,
   RpcRuntimeClient,
+  RpcWorkbenchClient,
   RpcSkillResolver,
 } from '@taucad/chat/rpc';
 import { getProviderFacingToolInputSchemas, toProviderToolJsonSchema } from '@taucad/chat/schemas';
@@ -43,9 +44,18 @@ import type {
 import { createMachinePrintPlanner } from '#registry/machine-print-planner.js';
 import type { MachinePrintPlannerDependencies } from '#registry/machine-print-planner.js';
 import { createMachineToolRegistry, isMachineToolName } from '#registry/machine-tool-registry.js';
+import { createRuntimeWorkbenchClient } from '#registry/workbench-client.js';
 
 /** The optional dispatcher client one tool needs beyond the filesystem. */
-type ToolClientKey = 'kernelClient' | 'graphics' | 'images' | 'geospec' | 'skillResolver' | 'revisions' | 'parameters';
+type ToolClientKey =
+  | 'kernelClient'
+  | 'graphics'
+  | 'images'
+  | 'geospec'
+  | 'skillResolver'
+  | 'revisions'
+  | 'parameters'
+  | 'workbench';
 
 /**
  * Every servable tool, its RPC, and the client that must be present for it.
@@ -81,6 +91,7 @@ const rpcForTool: Readonly<
     sequential: true,
   },
   [toolName.updateTodos]: { rpc: rpcName.writeTodos },
+  [toolName.arrangeWorkbench]: { rpc: rpcName.arrangeWorkbench, needs: 'workbench' },
 };
 
 const geospecAuthoringRecipes = {
@@ -95,7 +106,7 @@ const geospecAuthoringRecipes = {
  * `.tau/artifacts` and `.tau/chats` read-only, so these writes go through the
  * host's record filesystem; each handler fences its own target path.
  */
-const recordRpcNames = new Set<RpcName>([rpcName.exportGeometry, rpcName.writeTodos]);
+const recordRpcNames = new Set<RpcName>([rpcName.exportGeometry, rpcName.writeTodos, rpcName.arrangeWorkbench]);
 
 /**
  * The verdict tools whose answers the gate checks.
@@ -159,6 +170,38 @@ const revisionMismatches = (result: unknown, written: ReadonlyMap<string, string
 const codedErrorSchema = z.object({ code: z.string() });
 const errorCode = (error: unknown): string => codedErrorSchema.safeParse(error).data?.code ?? 'AGENT_HOST_ERROR';
 
+/** Give an arrange schema refusal the field location and correction the agent needs. */
+const arrangeValidationMessage = (error: z.ZodError, input: unknown): string => {
+  const issue = error.issues[0];
+  if (issue === undefined) {
+    return 'Invalid workbench arrangement. Nothing was written.';
+  }
+  let path = '';
+  for (const part of issue.path) {
+    path = typeof part === 'number' ? `${path}[${part}]` : path === '' ? String(part) : `${path}.${String(part)}`;
+  }
+  let value: unknown = input;
+  for (const part of issue.path) {
+    if (Array.isArray(value) && typeof part === 'number') {
+      value = value[part];
+    } else if (value !== null && typeof value === 'object' && typeof part === 'string' && part in value) {
+      value = Reflect.get(value, part) as unknown;
+    } else {
+      value = undefined;
+      break;
+    }
+  }
+  const detail =
+    (issue.code === 'too_small' || issue.code === 'too_big') &&
+    issue.origin === 'array' &&
+    (issue.code === 'too_small' ? issue.minimum : issue.maximum) === 3 &&
+    Array.isArray(value) &&
+    value.every((item) => typeof item === 'number')
+      ? `expected ${issue.code === 'too_small' ? issue.minimum : issue.maximum} numbers, received ${value.length}`
+      : issue.message;
+  return `${path || 'input'}: ${detail.replace(/\.$/u, '')}. Nothing was written.`;
+};
+
 const abortError = (signal: AbortSignal): Error =>
   signal.reason instanceof Error ? signal.reason : new DOMException('The operation was aborted.', 'AbortError');
 
@@ -197,6 +240,8 @@ export type ChatToolRegistryOptions = {
    * the agent's own view. Without it those writes go through `fileSystemFor`.
    */
   readonly recordFileSystemFor?: ((signal: AbortSignal) => RpcFileSystem) | undefined;
+  /** Live project root for workbench records, including candidate runs. */
+  readonly workbenchFileSystemFor?: ((signal: AbortSignal) => RpcFileSystem) | undefined;
   /** Backs `get_kernel_result`. */
   readonly kernelClient?: RpcRuntimeClient | undefined;
   /** Backs `export_geometry`. */
@@ -225,6 +270,8 @@ export type ChatToolRegistryOptions = {
   readonly print?: Pick<MachinePrintPlannerDependencies, 'projectId' | 'readArtifact'> | undefined;
   /** Backs checked semantic parameter reads and operations. */
   readonly parameters?: RpcParameterClient | undefined;
+  /** Connected runtime model-file check; filesystem-only hosts can omit it. */
+  readonly workbench?: RpcWorkbenchClient | undefined;
   /** `test_model`'s independent policy gate in `@taucad/chat`. */
   readonly testingEnabled: boolean;
 };
@@ -250,8 +297,10 @@ export type ChatToolRegistryOptions = {
  * ```
  */
 export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRegistry => {
+  const workbench = options.workbench ?? createRuntimeWorkbenchClient();
   const servable = (entry: { readonly needs?: ToolClientKey } | undefined): boolean =>
-    entry !== undefined && (entry.needs === undefined || options[entry.needs] !== undefined);
+    entry !== undefined &&
+    (entry.needs === undefined || entry.needs === 'workbench' || options[entry.needs] !== undefined);
 
   const schemas = getProviderFacingToolInputSchemas({
     toolChoice: toolMode.auto,
@@ -304,10 +353,12 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
     }
     const parsed = entry.schema.safeParse(invocation.input);
     if (!parsed.success) {
+      const arrange = invocation.toolName === toolName.arrangeWorkbench;
       return {
         content: {
-          errorCode: 'TOOL_INPUT_VALIDATION_FAILED',
-          message: z.prettifyError(parsed.error),
+          ...(arrange ? { success: false } : {}),
+          errorCode: arrange ? 'VALIDATION_ERROR' : 'TOOL_INPUT_VALIDATION_FAILED',
+          message: arrange ? arrangeValidationMessage(parsed.error, invocation.input) : z.prettifyError(parsed.error),
         },
         isError: true,
       };
@@ -315,9 +366,11 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
     const preserveMutatingOutcome = mutatingRpcNames.has(mapped.rpc);
     try {
       const fileSystemFor =
-        recordRpcNames.has(mapped.rpc) && options.recordFileSystemFor !== undefined
-          ? options.recordFileSystemFor
-          : options.fileSystemFor;
+        mapped.rpc === rpcName.arrangeWorkbench && options.workbenchFileSystemFor !== undefined
+          ? options.workbenchFileSystemFor
+          : recordRpcNames.has(mapped.rpc) && options.recordFileSystemFor !== undefined
+            ? options.recordFileSystemFor
+            : options.fileSystemFor;
       const fileSystem = fileSystemFor(invocation.signal);
       const dispatcher = createRpcDispatcher({
         fileSystem,
@@ -328,6 +381,7 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
         ...(options.skillResolver === undefined ? {} : { skillResolver: options.skillResolver }),
         ...(options.revisions === undefined ? {} : { revisions: options.revisions }),
         ...(options.parameters === undefined ? {} : { parameters: options.parameters }),
+        workbench,
       });
       const dispatchOnce = async (): Promise<Awaited<ReturnType<typeof dispatcher.dispatch>>> => {
         const aborted = Promise.withResolvers<never>();

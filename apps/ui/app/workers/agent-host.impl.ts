@@ -8,7 +8,11 @@ import { ResourceQueue } from '@taucad/filesystem';
 import type { FileSystemProvider } from '@taucad/filesystem';
 import type { FileSystemBridgeProxy } from '@taucad/fs-bridge';
 import { toRpcError } from '@taucad/chat/rpc';
-import { createChatToolRegistry, createProviderRpcFileSystem } from '@taucad/agent-tools/registry';
+import {
+  createChatToolRegistry,
+  createProviderRpcFileSystem,
+  createRuntimeWorkbenchClient,
+} from '@taucad/agent-tools/registry';
 import { composeView } from '@taucad/filesystem/composed-view';
 import type { ComposedView } from '@taucad/filesystem/composed-view';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
@@ -51,6 +55,7 @@ type ProjectFileSystemBridge = Pick<
   | 'readFile'
   | 'writeFile'
   | 'writeFileChecked'
+  | 'deleteFileChecked'
   | 'appendFile'
   | 'readdir'
   | 'stat'

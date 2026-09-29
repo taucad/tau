@@ -1,3 +1,4 @@
+import type { ArrangeWorkbenchInput, ArrangeWorkbenchOutput } from '#schemas/tools/arrange-workbench.tool.schema.js';
 import type { InferUITools, Tool as AiTool, UIToolInvocation } from 'ai';
 import type { toolName, toolMode } from '#constants/tool.constants.js';
 import type { EditFileInput, EditFileOutput } from '#schemas/tools/edit-file.tool.schema.js';
@@ -211,6 +212,7 @@ export type ToolSelection = ToolMode | ToolName[];
 /** @public */
 export type MyTools = InferUITools<{
   [toolName.editFile]: AiTool<EditFileInput, EditFileOutput>;
+  [toolName.arrangeWorkbench]: AiTool<ArrangeWorkbenchInput, ArrangeWorkbenchOutput>;
   [toolName.testModel]: AiTool<TestModelInput, TestModelOutput>;
   [toolName.webBrowser]: AiTool<WebBrowserInput, WebBrowserOutput>;
   [toolName.webSearch]: AiTool<WebSearchInput, WebSearchOutput>;

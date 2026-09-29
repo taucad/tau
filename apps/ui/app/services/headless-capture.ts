@@ -27,7 +27,7 @@ import type { SectionCut, SectionVector } from '#components/geometry/graphics/se
 export { canonicalCaptureViews };
 
 export type HeadlessCaptureRecipe =
-  | { readonly purpose: 'chat'; readonly mode: 'current' | 'orthographic' }
+  | { readonly purpose: 'chat'; readonly mode: 'current' | 'isometric' | 'orthographic' }
   | { readonly purpose: 'agent'; readonly mode: 'isometric' | 'orthographic'; readonly includeEdges: boolean }
   | { readonly purpose: 'utility'; readonly mode: 'current' };
 

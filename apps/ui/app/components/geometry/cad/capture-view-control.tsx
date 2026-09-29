@@ -2,8 +2,10 @@ import { useCallback } from 'react';
 import { Camera, Check } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
+import { randomUuid } from '@taucad/utils/id';
 import { useGraphics } from '#hooks/use-graphics.js';
 import { useCad } from '#hooks/use-cad.js';
+import { useProject } from '#hooks/use-project.js';
 import { useChatActions } from '#hooks/use-chat.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useTickAnimation } from '#hooks/use-tick-animation.js';
@@ -16,6 +18,7 @@ import { attachmentModelForExecution } from '#utils/chat.utils.js';
 const useCaptureCurrentViewToChat = (onSuccess?: () => void): (() => Promise<void>) => {
   const graphicsRef = useGraphics();
   const cadRef = useCad();
+  const { projectRef } = useProject();
   const { addDraftAttachment } = useChatActions();
   const {
     model: { model: selectedModel },
@@ -28,6 +31,11 @@ const useCaptureCurrentViewToChat = (onSuccess?: () => void): (() => Promise<voi
     if (!cadRef) {
       toast.error('No CAD view available for image capture');
       return;
+    }
+    const { entryPath } = cadRef.getSnapshot().context;
+    const claimId = entryPath ? randomUuid() : undefined;
+    if (entryPath && claimId) {
+      projectRef.send({ type: 'claimGeometryUnit', claimId, entryPath });
     }
     try {
       const { files, omittedSectionCutIds } = await captureCadImages({
@@ -49,8 +57,12 @@ const useCaptureCurrentViewToChat = (onSuccess?: () => void): (() => Promise<voi
       recordHeadlessImageTiming('capture.click-to-draft', clickStartedAt);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to capture view');
+    } finally {
+      if (claimId) {
+        projectRef.send({ type: 'releaseGeometryUnit', claimId });
+      }
     }
-  }, [addDraftAttachment, cadRef, execution, graphicsRef, imageService, onSuccess, selectedModel]);
+  }, [addDraftAttachment, cadRef, execution, graphicsRef, imageService, onSuccess, projectRef, selectedModel]);
 };
 
 /**

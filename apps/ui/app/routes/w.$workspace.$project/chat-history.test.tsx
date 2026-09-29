@@ -199,10 +199,16 @@ vi.mock('#hooks/use-file-manager.js', () => ({
 vi.mock('#hooks/use-chats.js', () => ({
   useChats: () => ({ chats: [] }),
 }));
+vi.mock('#hooks/use-chat-records.js', () => ({
+  useChatRecords: () => ({ chats: [] }),
+}));
 
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ projectId: 'project_test' }),
 }));
+
+const skillsCatalogReads = vi.hoisted(() => vi.fn(() => []));
+vi.mock('#hooks/use-skills-catalog.js', () => ({ useSkillsCatalog: skillsCatalogReads }));
 
 // Capture the Virtuoso props so tests can both inspect counts and render
 // the produced items by walking `itemContent` over `totalCount`.
@@ -255,6 +261,24 @@ describe('ChatHistory — submit routes through useCadChatClient', () => {
     capturedTextarea.onSubmit = undefined;
     capturedTextarea.className = undefined;
     setMockMessages([]);
+  });
+
+  it('skips hidden transcript and skill projections, then reveals current messages', () => {
+    setMockMessages([message('u1', 'user')]);
+    const view = render(<ChatHistory isExpanded={false} setIsExpanded={vi.fn()} />);
+
+    expect(skillsCatalogReads).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('virtuoso')).toBeNull();
+    expect(screen.queryByTestId('chat-textarea')).toBeNull();
+
+    setMockMessages([message('u1', 'user'), message('a1', 'assistant')]);
+    view.rerender(<ChatHistory isExpanded={false} setIsExpanded={vi.fn()} />);
+    expect(skillsCatalogReads).not.toHaveBeenCalled();
+
+    view.rerender(<ChatHistory isExpanded setIsExpanded={vi.fn()} />);
+    expect(skillsCatalogReads).toHaveBeenCalledOnce();
+    expect(screen.getAllByTestId('chat-message')).toHaveLength(2);
+    expect(screen.getByTestId('chat-textarea')).toBeInTheDocument();
   });
 
   it('opens with one header row that holds the title bar, and no status row under it', () => {

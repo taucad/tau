@@ -84,6 +84,41 @@ describe('thumbnailMachine', () => {
     }
   });
 
+  it('should expose an active automatic render overlapping the next edit', async () => {
+    vi.useFakeTimers();
+    const pending = deferred<{
+      bytes: Uint8Array<ArrayBuffer>;
+      identity: string;
+      generation: number;
+      locatorIdentity: string;
+    }>();
+    const render = vi.fn(async (_request: ThumbnailRenderRequest) => pending.promise);
+    const deps = createDeps({ render, debounceDelay: 10 });
+    const actor = createActor(thumbnailMachine, { input: deps }).start();
+    try {
+      actor.send({ type: 'settled', hash: 'h1' });
+      await vi.advanceTimersByTimeAsync(10);
+      expect(render).toHaveBeenCalledOnce();
+      expect(actor.getSnapshot().value).toBe('rendering');
+
+      actor.send({ type: 'renderRequested' });
+      expect(render.mock.calls[0]![0].signal.aborted).toBe(false);
+      expect(actor.getSnapshot().value).toBe('rendering');
+
+      pending.resolve({
+        bytes: new Uint8Array([1]),
+        identity: 'h1',
+        generation: 1,
+        locatorIdentity: 'locator-1',
+      });
+      await vi.waitFor(() => {
+        expect(deps.store).toHaveBeenCalledOnce();
+      });
+    } finally {
+      actor.stop();
+    }
+  });
+
   it('should skip regeneration when the hash matches the last rendered thumbnail', async () => {
     vi.useFakeTimers();
     const deps = createDeps();

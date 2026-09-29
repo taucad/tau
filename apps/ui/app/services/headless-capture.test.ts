@@ -96,6 +96,30 @@ const cameraState = {
 } as const;
 
 describe('headless capture adapter', () => {
+  it('captures a chat image from settled GLTF without a viewer camera using bounds framing', async () => {
+    vi.mocked(awaitFreshRender).mockResolvedValue(snapshot(gltf, 'other.ts'));
+    const exportImage = vi.fn<ExportImage>(async () => [webp(2400, 1350)]);
+
+    const capture = await captureCadImages({
+      cadRef: {} as Parameters<typeof captureCadImages>[0]['cadRef'],
+      imageService: { export: exportImage },
+      recipe: { purpose: 'chat', mode: 'isometric' },
+    });
+
+    expect(capture.files).toHaveLength(1);
+    const job = exportImage.mock.calls[0]?.[0];
+    if (job?.sourceFormat !== 'glb' || job.format !== 'webp') {
+      throw new Error('Expected a GLB WebP job');
+    }
+    expect(job.sourcePath).toBe('other.ts');
+    expect(job.exportOptions).toMatchObject({
+      width: 2400,
+      height: 1350,
+      label: 'other.ts',
+      camera: { framing: 'bounds', projection: { kind: 'perspective', verticalFieldOfView: 45 } },
+    });
+  });
+
   it('maps frozen current GLTF camera state into the canonical annotated metre recipe', async () => {
     const exportImage = vi.fn<ExportImage>(async (_job) => [webp(2400, 1350)]);
 

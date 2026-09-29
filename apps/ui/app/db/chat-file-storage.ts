@@ -234,7 +234,9 @@ export function createChatFileStore(
     /* Derived without caching first: `locate` asks every known project about a
      * chat, and caching the empty answer from the wrong one would hide the
      * chat's real transcript for the rest of the session. */
-    const state = client.get(chatId) ?? { messages: await deriveMessages(projectId, chatId) };
+    const state = (located.get(chatId) === projectId ? client.get(chatId) : undefined) ?? {
+      messages: await deriveMessages(projectId, chatId),
+    };
     if (state.messages.length === 0) {
       return undefined;
     }
@@ -474,7 +476,13 @@ export function createChatFileStore(
       await tombstone(chatId);
     },
 
-    getChat: async (chatId) => {
+    getChat: async (chatId, projectHint) => {
+      if (projectHint !== undefined) {
+        const hintedChat = await readChatDirectory(projectHint, chatId);
+        if (hintedChat !== undefined) {
+          return hintedChat;
+        }
+      }
       const projectId = await locate(chatId);
       return projectId === undefined ? undefined : readChatDirectory(projectId, chatId);
     },

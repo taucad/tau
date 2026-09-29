@@ -326,9 +326,11 @@ function PrintFooter({ entry }: { readonly entry: MachineDirectoryEntry | undefi
 function ConnectedPrintPanel({
   client,
   bridge,
+  isShown,
 }: {
   readonly client: MachineClient;
   readonly bridge: PrintApprovalBridge;
+  readonly isShown: boolean;
 }): React.JSX.Element {
   const { projectId } = useProject();
   const { snapshot, providers, error, refresh } = useMachineDirectory(client);
@@ -360,7 +362,7 @@ function ConnectedPrintPanel({
     sendRef.current?.scrollIntoView({ block: 'nearest' });
     sendRef.current?.focus();
   }, []);
-  const prepare = usePrintPrepare({ client, entry: selected, provider, manifest });
+  const prepare = usePrintPrepare({ client, entry: selected, provider, manifest, isShown });
   const latestReceipt = ledger.find((entry) => entry.kind === 'receipt');
 
   return (
@@ -458,9 +460,11 @@ function ConnectedPrintPanel({
 export const PrintPanel = ({
   machines,
   bridge,
+  isShown = true,
 }: {
   readonly machines: RuntimeTransportFacet<MachineClient>;
   readonly bridge: PrintApprovalBridge;
+  readonly isShown?: boolean;
 }): React.JSX.Element => {
   if (!machines.available) {
     return (
@@ -476,7 +480,7 @@ export const PrintPanel = ({
       />
     );
   }
-  return <ConnectedPrintPanel client={machines} bridge={bridge} />;
+  return <ConnectedPrintPanel client={machines} bridge={bridge} isShown={isShown} />;
 };
 
 /**
@@ -485,8 +489,8 @@ export const PrintPanel = ({
  * @returns The Print pane.
  * @public
  */
-export const PrintPanelBody = (): React.JSX.Element => {
+export const PrintPanelBody = ({ isShown = true }: { readonly isShown?: boolean }): React.JSX.Element => {
   const machines = useMachinesFacet();
   const bridge = usePrintApprovalBridge();
-  return <PrintPanel machines={machines} bridge={bridge} />;
+  return <PrintPanel machines={machines} bridge={bridge} isShown={isShown} />;
 };

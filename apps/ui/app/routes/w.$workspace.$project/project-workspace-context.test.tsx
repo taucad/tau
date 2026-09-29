@@ -7,9 +7,11 @@ import type { WorkbenchLayoutController } from '#routes/w.$workspace.$project/wo
 const state = vi.hoisted(() => ({ isMobile: false, isEditorReady: true }));
 const route = vi.hoisted<{
   key: string;
+  search: string;
   state: { openChat?: boolean; focusChatComposer?: boolean } | undefined;
 }>(() => ({
   key: 'initial',
+  search: '',
   state: undefined,
 }));
 const send = vi.fn();
@@ -66,6 +68,7 @@ describe('ProjectWorkspaceProvider', () => {
     state.isMobile = false;
     state.isEditorReady = true;
     route.key = 'initial';
+    route.search = '';
     route.state = undefined;
     send.mockClear();
     listeners.clear();
@@ -97,6 +100,40 @@ describe('ProjectWorkspaceProvider', () => {
       workspace.connectWorkbench(opener);
     });
     expect(opener).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])('opens an archive deep link after editor readiness (mobile=%s)', (isMobile) => {
+    state.isMobile = isMobile;
+    state.isEditorReady = false;
+    route.search = '?chat=original&archivedChats=1';
+    const view = render(
+      <ProjectWorkspaceProvider>
+        <Probe />
+      </ProjectWorkspaceProvider>,
+    );
+    expect(send).not.toHaveBeenCalled();
+    state.isEditorReady = true;
+    view.rerender(
+      <ProjectWorkspaceProvider>
+        <Probe />
+      </ProjectWorkspaceProvider>,
+    );
+    expect(send).toHaveBeenCalledWith({
+      type: 'setPanelState',
+      panelState: { desktopLayout: { chatOpen: true, compactAuxiliary: 'chat' } },
+    });
+    if (isMobile) {
+      expect(send).toHaveBeenCalledWith({ type: 'setPanelState', panelState: { mobileActiveTab: 'chat' } });
+    }
+    send.mockClear();
+    route.search += '&q=bracket';
+    route.key = 'search-edit';
+    view.rerender(
+      <ProjectWorkspaceProvider>
+        <Probe />
+      </ProjectWorkspaceProvider>,
+    );
+    expect(send).not.toHaveBeenCalled();
   });
 
   it('opens Files immediately when the Workbench opener is connected', () => {

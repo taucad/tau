@@ -32,6 +32,10 @@ import { useFileManager } from '#hooks/use-file-manager.js';
 import { useChatRecords } from '#hooks/use-chat-records.js';
 import { useProject } from '#hooks/use-project.js';
 import { useSkillsCatalog } from '#hooks/use-skills-catalog.js';
+import { useSearchParameter } from '#hooks/use-search-parameter.js';
+import { searchParameterName } from '#constants/search-parameter.constants.js';
+import { flagParameter } from '#utils/search-parameter.codecs.js';
+import { ArchivedChats } from '#routes/w.$workspace.$project/archived-chats.js';
 
 // Component-local CSS variable. Declared here (rather than in global.css)
 // to keep the chat-history pinning system self-contained — the only
@@ -134,8 +138,16 @@ export const ChatHistory = memo(function ({ isExpanded = true, setIsExpanded, ..
     setIsExpanded?.((current) => !current);
   }, [setIsExpanded]);
   const { formattedKeyCombination } = useKeybinding(toggleChatKeyCombination, toggleChatHistory);
+  const [isArchiveOpen] = useSearchParameter(searchParameterName.archivedChats, flagParameter);
+  const { projectId } = useProject();
 
-  return isExpanded ? (
+  return isExpanded && isArchiveOpen ? (
+    <FloatingPanel isOpen side='right' className={props.className} onOpenChange={setIsExpanded}>
+      <FloatingPanelContent className='ph-no-capture min-h-0 overflow-hidden'>
+        <ArchivedChats key={projectId} />
+      </FloatingPanelContent>
+    </FloatingPanel>
+  ) : isExpanded ? (
     <ExpandedChatHistory
       {...props}
       isExpanded={isExpanded}

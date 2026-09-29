@@ -24,6 +24,11 @@ const continueChat = vi.fn();
 const regenerate = vi.fn();
 const resumableFailureOverrides = vi.hoisted(() => new Set<string>());
 const retainedRun = vi.hoisted((): { runId: string | undefined } => ({ runId: undefined }));
+const debug = vi.hoisted(() => ({ enabled: false }));
+
+vi.mock('#flags/use-feature.js', () => ({
+  useFeature: () => debug.enabled,
+}));
 
 let mockRetryAttempt = 0;
 
@@ -105,6 +110,7 @@ describe('ChatError', () => {
   beforeEach(() => {
     mockRetryAttempt = 0;
     retainedRun.runId = undefined;
+    debug.enabled = false;
     resumableFailureOverrides.clear();
     vi.clearAllMocks();
   });
@@ -169,7 +175,8 @@ describe('ChatError', () => {
 
   /* The masked in-stream failure arrives on an HTTP 200, so its category reads
    * `generic`; only the code says the turn survived it (S1, S2, S7, S10). */
-  it('should present a coded model-call failure as a paused turn with the provider words', async () => {
+  it('should keep a lost connection concise and disclose the provider words only in Tau Debug', async () => {
+    debug.enabled = true;
     const user = userEvent.setup();
     persisted({
       category: errorCategory.generic,
@@ -182,16 +189,17 @@ describe('ChatError', () => {
 
     render(<ChatErrorBanner />);
 
-    expect(screen.getByText('Tau paused this turn')).toBeInTheDocument();
+    expect(screen.getByText('Connection lost')).toBeInTheDocument();
     expect(
-      screen.getByText('server_error: The server had an error while processing your request.'),
-    ).toBeInTheDocument();
+      screen.queryByText('server_error: The server had an error while processing your request.'),
+    ).not.toBeInTheDocument();
     expect(screen.getByText('Everything up to here is saved.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /try again/iu })).not.toBeInTheDocument();
     expect(screen.queryByTestId('code-viewer')).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Details' }));
+    await user.click(screen.getByRole('button', { name: 'Debug details' }));
     expect(screen.getByTestId('code-viewer')).toHaveTextContent('NETWORK_ERROR');
+    expect(screen.getByTestId('code-viewer')).toHaveTextContent('server_error: The server had an error');
 
     await user.click(screen.getByRole('button', { name: 'Resume' }));
     expect(continueChat).toHaveBeenCalledTimes(1);
@@ -292,7 +300,8 @@ describe('ChatError', () => {
     expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual(['New chat']);
   });
 
-  it('should keep the host compaction sentence reachable in Details', async () => {
+  it('should keep the host compaction sentence reachable in Tau Debug', async () => {
+    debug.enabled = true;
     const user = userEvent.setup();
     const hostSentence = 'Model invocation attempt-overflow has no durable result; it will not be sent again.';
     resumableFailureOverrides.add('SUMMARY_REQUIRED');
@@ -306,7 +315,7 @@ describe('ChatError', () => {
 
     render(<ChatErrorBanner />);
 
-    await user.click(screen.getByRole('button', { name: 'Details' }));
+    await user.click(screen.getByRole('button', { name: 'Debug details' }));
     expect(screen.getByTestId('code-viewer')).toHaveTextContent(hostSentence);
   });
 
@@ -386,7 +395,12 @@ describe('ChatError', () => {
 
     render(<ChatErrorBanner />);
 
-    expect(screen.getByText('Tau paused this turn')).toBeInTheDocument();
+    expect(screen.getByText('Chat paused')).toBeInTheDocument();
+    expect(screen.getByText('Everything up to here is saved.')).toBeInTheDocument();
+    expect(
+      screen.queryByText('The host executing this run is gone. Resume the turn to continue it.'),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /details/iu })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /try again/iu })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Resume' }));
@@ -453,6 +467,40 @@ describe('ChatError', () => {
 
     expect(screen.queryByRole('region', { name: 'External agent stop' })).not.toBeInTheDocument();
     expect(screen.getByText('codex stopped unexpectedly: Internal error')).toBeInTheDocument();
+  });
+
+  it('should use the shared recovery card for generic failures without exposing a diagnostic action', () => {
+    persisted({
+      category: errorCategory.generic,
+      title: 'Error',
+      message: 'The model could not finish this turn.',
+      raw: '{"internal":"generic-trace"}',
+    });
+
+    const { container } = render(<ChatErrorBanner />);
+
+    expect(container.querySelector('[data-slot="chat-error-card"]')).toHaveTextContent(
+      'The model could not finish this turn.',
+    );
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+    expect(screen.getAllByRole('button')).toHaveLength(1);
+    expect(screen.queryByTestId('code-viewer')).not.toBeInTheDocument();
+  });
+
+  it('should disclose generic diagnostics only after Tau Debug is enabled and opened', async () => {
+    debug.enabled = true;
+    persisted({
+      category: errorCategory.generic,
+      title: 'Error',
+      message: 'The model could not finish this turn.',
+      raw: '{"internal":"generic-trace"}',
+    });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.queryByTestId('code-viewer')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Debug details' }));
+    expect(screen.getByTestId('code-viewer')).toHaveTextContent('generic-trace');
   });
 
   it('T23: renders null when retryAttempt > 0 even with a persisted resumable error', () => {

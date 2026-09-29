@@ -48,7 +48,7 @@ export const ChatErrorTool = memo(function ({
         </>
       }
       actions={
-        <Button variant='outline' size='sm' onClick={regenerate}>
+        <Button variant='outline' size='xs' onClick={regenerate}>
           <RefreshCcw className='size-3.5' />
           Try again
         </Button>

@@ -8,6 +8,11 @@ import { ChatErrorProviderAccount as ChatErrorProviderAccountCloud } from '#rout
 const continueChat = vi.fn();
 const regenerate = vi.fn();
 const modelSelectorMock = vi.hoisted(() => vi.fn());
+const debug = vi.hoisted(() => ({ enabled: false }));
+
+vi.mock('#flags/use-feature.js', () => ({
+  useFeature: () => debug.enabled,
+}));
 
 vi.mock('#hooks/use-chat.js', () => ({
   useChatActions: () => ({ continueChat, regenerate }),
@@ -33,6 +38,7 @@ const actionLabels = (notice: HTMLElement): string[] =>
 describe('ChatErrorProviderAccount (self-host)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    debug.enabled = false;
   });
 
   it('should name the provider and lead with its billing page', () => {
@@ -55,20 +61,30 @@ describe('ChatErrorProviderAccount (self-host)', () => {
     expect(link).toHaveAttribute('rel', 'noreferrer noopener');
   });
 
-  it('should keep the provider sentence and code behind Details', async () => {
+  it('should hide diagnostics when Tau Debug is off while keeping billing guidance', () => {
+    render(<ChatErrorProviderAccountSelfHost description={openAiMessage} details={openAiDetails} />);
+
+    expect(screen.getByRole('link', { name: 'Open OpenAI billing' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /details/iu })).not.toBeInTheDocument();
+    expect(screen.queryByText(openAiMessage)).not.toBeInTheDocument();
+    expect(screen.queryByText('credit_balance_exhausted')).not.toBeInTheDocument();
+  });
+
+  it('should disclose the provider sentence and code only when Tau Debug is enabled', async () => {
+    debug.enabled = true;
     const user = userEvent.setup();
     render(<ChatErrorProviderAccountSelfHost description={openAiMessage} details={openAiDetails} />);
 
     expect(screen.queryByText(openAiMessage)).not.toBeInTheDocument();
     expect(screen.queryByText('credit_balance_exhausted')).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Details' }));
+    await user.click(screen.getByRole('button', { name: 'Debug details' }));
 
     expect(screen.getByText(openAiMessage)).toBeInTheDocument();
     expect(screen.getByText('credit_balance_exhausted')).toBeInTheDocument();
     expect(screen.getByText('openai')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Details' }));
+    await user.click(screen.getByRole('button', { name: 'Debug details' }));
 
     expect(screen.queryByText('credit_balance_exhausted')).not.toBeInTheDocument();
   });
@@ -103,6 +119,7 @@ describe('ChatErrorProviderAccount (self-host)', () => {
 describe('ChatErrorProviderAccount (Tau Cloud)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    debug.enabled = false;
   });
 
   it('should report a supplier outage without the supplier sentence, code or link', () => {
@@ -112,7 +129,7 @@ describe('ChatErrorProviderAccount (Tau Cloud)', () => {
     expect(notice).toHaveTextContent('Tau could not run this turn on OpenAI. You were not charged for it.');
     expect(actionLabels(notice)).toEqual(['Switch model', 'Try again']);
     expect(within(notice).queryByRole('link')).not.toBeInTheDocument();
-    expect(within(notice).queryByRole('button', { name: 'Details' })).not.toBeInTheDocument();
+    expect(within(notice).queryByRole('button', { name: /details/iu })).not.toBeInTheDocument();
     expect(notice).not.toHaveTextContent('credit_balance_exhausted');
     expect(notice).not.toHaveTextContent('You have no credits remaining');
     expect(notice).not.toHaveClass('bg-destructive/10');

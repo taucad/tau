@@ -56,7 +56,7 @@ export const ChatErrorRateLimit = memo(function ({
         </>
       }
       actions={
-        <Button variant='outline' size='sm' onClick={resumable ? continueChat : regenerate}>
+        <Button variant='outline' size='xs' onClick={resumable ? continueChat : regenerate}>
           {resumable ? <Play className='size-3.5' /> : <RefreshCcw className='size-3.5' />}
           {resumable ? 'Resume' : 'Try again'}
         </Button>

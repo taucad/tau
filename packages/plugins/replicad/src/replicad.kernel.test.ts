@@ -34,6 +34,7 @@ import {
   createTestGeometry,
   createTestRuntimeClient,
   extractGltfFromResult,
+  expectKernelProjectionOrder,
   getTestParameters,
   mapZupMillimetersToYupMeters,
   readCoordinateEvidence,
@@ -265,6 +266,47 @@ describe('ReplicadWorker', () => {
   beforeAll(async () => {
     replicadDefinition = await resolveReplicadDefinition();
   });
+
+  it('keeps fine and coarse projections and STEP export independent', async () => {
+    const { importSTEP, measureVolume, measureArea, isShape3D } = await import('replicad');
+    const file = createGeometryFile('box.ts');
+    const files = {
+      'box.ts': `import { makeCylinder } from 'replicad'; export default () => makeCylinder(10, 20);`,
+    };
+    const client = createClient(files);
+    const freshClient = createClient(files);
+    const render = async (target: TestClient, tolerance: number) => {
+      const result = await renderGeometry(target, {
+        file,
+        parameters: {},
+        options: {
+          tessellation: { linearTolerance: tolerance, angularTolerance: 10 },
+        },
+      });
+      assertSuccess(result);
+      return extractGltfFromResult(result)!;
+    };
+    const ordered = await expectKernelProjectionOrder({
+      renderA: async () => render(client, 0.001),
+      renderB: async () => render(client, 1),
+      freshB: async () => render(freshClient, 1),
+      write: async () => {
+        const result = await exportLastRender(client, 'step');
+        assertSuccess(result);
+        const { bytes } = result.data[0]!;
+        const imported = await importSTEP(new Blob([bytes], { type: 'application/step' }));
+        expect(isShape3D(imported)).toBe(true);
+        if (!isShape3D(imported)) {
+          throw new Error('Expected a 3D STEP shape');
+        }
+        const volume = measureVolume(imported);
+        const area = measureArea(imported);
+        expect(volume).toBeGreaterThan(0);
+        return { volume, area, byteLength: bytes.byteLength };
+      },
+    });
+    expect(ordered.first).not.toEqual(ordered.intervening);
+  }, 60_000);
 
   // ===========================================================================
   // Tests: Parameter Extraction

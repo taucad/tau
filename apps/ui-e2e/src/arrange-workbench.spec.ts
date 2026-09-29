@@ -11,7 +11,11 @@ const usage = { inputTokens: 12, outputTokens: 6 };
 const model = 'public/models/honeycomb.js';
 const layoutPath = '/.tau/workbench/layout.json';
 const tab = (name: string) => selectors.getByCss(`.dv-tab[aria-label="${name}"]`);
-const viewTab = (title: string) => selectors.getByCss('.dv-tab').filter({ hasText: title });
+const viewTab = (id: string) => selectors.getByCss(`.dv-tab[data-tab-panel-id="${id}"]`);
+const expectViewTab = async (id: string, surface: 'primary' | 'secondary' = 'primary'): Promise<void> => {
+  await target.expectVisible(viewTab(id), 60_000, surface);
+  expect(await target.textContent(viewTab(id).getByCss('.dockview-tab-title'), surface)).toBe('honeycomb.js');
+};
 const readFile = async (path: string): Promise<string | undefined> => {
   const files = await readWorkbenchTree();
   return files[path];
@@ -106,9 +110,9 @@ test('arranges review views and a report from the live root, then restores', asy
       { kind: 'view', view: 'joint' },
     ],
   });
-  await target.expectVisible(viewTab('Front · honeycomb.js'), 60_000);
-  await target.expectVisible(viewTab('Left · honeycomb.js'), 60_000);
-  await target.expectVisible(viewTab('Joint · honeycomb.js'), 60_000);
+  await expectViewTab('front');
+  await expectViewTab('left');
+  await expectViewTab('joint');
   await expect
     .poll(
       async () =>
@@ -175,9 +179,9 @@ test('arranges review views and a report from the live root, then restores', asy
   files = await readWorkbenchTree();
   expect(beforeClose['/.tau/workbench/views/left.json']).toBeDefined();
   expect(files['/.tau/workbench/views/left.json']).toBeUndefined();
-  await target.expectCount(viewTab('Left · honeycomb.js'), 0, 60_000);
+  await target.expectCount(viewTab('left'), 0, 60_000);
   await target.click(selectors.getByRole('button', { name: 'Restore' }).last());
-  await target.expectVisible(viewTab('Left · honeycomb.js'), 60_000);
+  await expectViewTab('left');
   expect(await readFile('/.tau/workbench/views/left.json')).toBeDefined();
 });
 
@@ -222,8 +226,8 @@ export default function main() {
     'Inspect the joint.',
   );
   expect(result.isError, result.text).toBe(false);
-  await target.expectVisible(viewTab('Inspect · honeycomb.js'), 60_000);
-  await target.click(viewTab('Inspect · honeycomb.js'));
+  await expectViewTab('inspect');
+  await target.click(viewTab('inspect'));
   const before = await readWorkbenchTree();
   expect(JSON.parse(before['/.tau/workbench/entries.json']!)).toMatchObject({
     entries: { [model]: { renderTimeout: 0, components: { hidden } } },
@@ -277,14 +281,14 @@ test('accepts a current basedOn digest and exposes refused debug intent to the n
     'Establish an arrangement digest.',
   );
   expect(first.isError, first.text).toBe(false);
-  await target.expectVisible(viewTab('Digest source · honeycomb.js'), 60_000);
+  await expectViewTab('digest-source');
   const written = JSON.parse(first.text) as { revisions: Array<{ path: string; digest: string }> };
   const digest = written.revisions.find(({ path }) => path.endsWith('/layout.json'))?.digest;
   expect(digest).toMatch(/^sha256:/u);
   const next = await call({ basedOn: digest, open: [{ kind: 'pane', pane: 'kernel' }] }, 'Show kernel diagnostics.');
   expect(next.isError, next.text).toBe(false);
   await target.expectVisible(selectors.getByText('Shown partly', { exact: true }), 60_000);
-  await target.expectVisible(tab('kernel'), 60_000);
+  await target.expectVisible(tab('Telemetry'), 60_000);
   await target.expectVisible(selectors.getByText('Kernel diagnostics require debug mode.'), 60_000);
   const subsequent = await call({ open: [{ kind: 'pane', pane: 'details' }] }, 'Inspect adopted state.');
   expect(subsequent.isError, subsequent.text).toBe(false);
@@ -337,21 +341,21 @@ test('adopts another window’s arrangement at a different width without rewriti
       'Arrange both windows.',
     );
     expect(arranged.isError, arranged.text).toBe(false);
-    await target.expectVisible(viewTab('Cross front · honeycomb.js'), 60_000);
-    await target.expectVisible(viewTab('Cross left · honeycomb.js'), 60_000);
-    await target.expectVisible(viewTab('Cross front · honeycomb.js'), 60_000, 'secondary');
-    await target.expectVisible(viewTab('Cross left · honeycomb.js'), 60_000, 'secondary');
+    await expectViewTab('cross-front');
+    await expectViewTab('cross-left');
+    await expectViewTab('cross-front', 'secondary');
+    await expectViewTab('cross-left', 'secondary');
     const ratioIn = async (surface: 'primary' | 'secondary'): Promise<number> =>
       target.evaluate(
         () => {
-          const widthFor = (title: string): number => {
+          const widthFor = (id: string): number => {
             const group = [...document.querySelectorAll<HTMLElement>('.dv-groupview')].find((candidate) =>
-              [...candidate.querySelectorAll('.dv-tab')].some((tab) => tab.textContent.includes(title)),
+              candidate.querySelector(`.dv-tab[data-tab-panel-id="${id}"]`),
             );
             return group?.getBoundingClientRect().width ?? 0;
           };
-          const front = widthFor('Cross front · honeycomb.js');
-          const left = widthFor('Cross left · honeycomb.js');
+          const front = widthFor('cross-front');
+          const left = widthFor('cross-left');
           return front > 0 && left > 0 ? front / (front + left) : Number.NaN;
         },
         undefined,
@@ -402,7 +406,7 @@ test('writes an arrangement to the live project root from a candidate chat', asy
     'Arrange from my branch.',
   );
   expect(result.isError, result.text).toBe(false);
-  await target.expectVisible(viewTab('Candidate front · honeycomb.js'), 60_000);
+  await expectViewTab('candidate-front');
   expect(await readFile('/.tau/workbench/views/candidate-front.json')).toBeDefined();
   const live = JSON.parse((await readFile(layoutPath))!) as { viewer: { tabs: Array<{ view: string }> } };
   expect(live.viewer.tabs.some(({ view }) => view === 'candidate-front')).toBe(true);
@@ -436,9 +440,9 @@ test('adopts a workbench edit when an inactive project page is reopened', async 
       { surface: 'secondary' },
     );
     expect(result.isError, result.text).toBe(false);
-    await target.expectVisible(viewTab('Returned front · honeycomb.js'), 60_000, 'secondary');
+    await expectViewTab('returned-front', 'secondary');
     await target.navigate(projectUrl);
-    await target.expectVisible(viewTab('Returned front · honeycomb.js'), 60_000);
+    await expectViewTab('returned-front');
     expect(await readFile('/.tau/workbench/views/returned-front.json')).toBeDefined();
   } finally {
     await target.closeSecondary();

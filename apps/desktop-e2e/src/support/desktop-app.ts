@@ -78,6 +78,8 @@ export type DesktopSession = {
   readonly pickedDirectory: string;
   /** Every PostHog-shaped request any renderer made since launch (D13: zero on desktop). */
   readonly analyticsRequests: readonly string[];
+  /** Chromium net log begun before the first renderer navigation. */
+  readonly startupNetworkLogPath: string | undefined;
   /** Write trace, screenshot, process output and `desktop.log` under `out/`. */
   readonly capture: (label: string) => Promise<string>;
   readonly close: () => Promise<void>;
@@ -155,6 +157,12 @@ export const launchDesktopApp = async (options: {
   readonly env?: Readonly<Record<string, string>> | undefined;
   readonly packaged?: boolean | undefined;
   readonly useProductionEndpointDefaults?: boolean | undefined;
+  /** Reuse a prior throwaway profile for returning-user smoke checks. */
+  readonly profileRoot?: string | undefined;
+  /** The caller will relaunch this profile and dispose it after the final run. */
+  readonly preserveProfile?: boolean | undefined;
+  /** Capture startup traffic before Playwright can attach its request listener. */
+  readonly captureStartupNetwork?: boolean | undefined;
 }): Promise<DesktopSession> => {
   if (desktopE2ECompletedArtifact && options.packaged === false) {
     throw new Error('A completed-artifact run cannot launch the workspace desktop app.');
@@ -165,7 +173,8 @@ export const launchDesktopApp = async (options: {
   ) {
     throw new Error('A completed-artifact run cannot override Node or packaged runtime resource paths.');
   }
-  const userData = await mkdtemp(join(tmpdir(), 'tau-desktop-e2e-user-'));
+  const userData = options.profileRoot ?? (await mkdtemp(join(tmpdir(), 'tau-desktop-e2e-user-')));
+  const startupNetworkLogPath = options.captureStartupNetwork ? join(userData, 'startup-network.json') : undefined;
   /* A fixed, already-lowercase leaf inside the random parent: the workspace
    * slug the UI mints is the folder name slugified, so a `mkdtemp` name with
    * capitals would make the routed URL differ from the directory on disk for
@@ -192,7 +201,12 @@ export const launchDesktopApp = async (options: {
 
   const application = await electron.launch({
     ...(packaged ? { executablePath: packagedExecutable } : {}),
-    args: [...(packaged ? [] : [desktopRoot]), `--user-data-dir=${userData}`, ...webGpuArguments()],
+    args: [
+      ...(packaged ? [] : [desktopRoot]),
+      `--user-data-dir=${userData}`,
+      ...(startupNetworkLogPath ? [`--log-net-log=${startupNetworkLogPath}`] : []),
+      ...webGpuArguments(),
+    ],
     cwd: packaged ? userData : desktopRoot,
     env: {
       ...inheritedEnvironment,
@@ -372,12 +386,15 @@ export const launchDesktopApp = async (options: {
       /* Keep the evidence a failing run just produced. */
       return;
     }
-    await rm(userData, { force: true, recursive: true });
+    if (!options.preserveProfile) {
+      await rm(userData, { force: true, recursive: true });
+    }
     await rm(pickedParent, { force: true, recursive: true });
   };
 
   return {
     analyticsRequests,
+    startupNetworkLogPath,
     application,
     capture,
     close,

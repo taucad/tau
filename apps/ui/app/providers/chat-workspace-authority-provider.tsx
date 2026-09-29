@@ -932,7 +932,7 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
          * context value — a new identity on every chats refetch, and every
          * message persist invalidates that query: effects documented as
          * mount-only re-ran mid-dispatch. */
-        const chat = await getChat(chatId);
+        const chat = await getChat(chatId, projectId);
         const checkoutId = placed ?? conflict?.checkoutId ?? chat?.checkoutId;
         const placement = await revisions.admitTurn({
           turnId: leaseTurnId,
@@ -968,7 +968,7 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
         state.pending.delete(chatId);
       }
     },
-    [composeWorkspace, getChat, notify, revisions, state],
+    [composeWorkspace, getChat, notify, projectId, revisions, state],
   );
 
   const attachment = useCallback(
@@ -986,7 +986,7 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
         return inFlight;
       }
       const placed = await state.placements.get(chatId);
-      const chat = await getChat(chatId);
+      const chat = await getChat(chatId, projectId);
       /* The checkout this chat's turns land on, in the order `prepare` itself
        * resolves it — minus the `admitTurn` that would lease it. The root's own
        * checkout is the last resort: a chat with no turn yet has no checkout of

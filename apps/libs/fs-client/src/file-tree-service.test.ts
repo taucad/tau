@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { FileTreeService } from '#file-tree-service.js';
 import type { ExternalPollTelemetry } from '#file-tree-service.js';
-import type { FileTreeNode } from '@taucad/filesystem';
+import type { FileTreeNode, HeadFileStat } from '@taucad/filesystem';
 import type { ChangeEvent, FileEntry, FileProvenance, FileStat } from '@taucad/types';
 import { WorkerChangeChannel } from '#worker-change-channel.js';
 import { DirectoryListingErrorCode, DirectoryListingFailedError } from '#directory-listing.js';
@@ -249,11 +249,28 @@ const dependencyMountView = (): ComposedViewProxy => {
     ['', [{ name: 'three', type: 'dir', size: 0, mtimeMs: 0 }]],
     ['three', [{ name: 'index.d.ts', ...textStat() }]],
   ]);
-  return mock<ComposedViewProxy>({
-    readdirWithStats: vi.fn(async (path: string) => rows.get(path) ?? []),
+  function readdirWithStats(path: string): Promise<Array<{ name: string } & FileStat>>;
+  function readdirWithStats(
+    path: string,
+    options: { readonly content: 'head' },
+  ): Promise<Array<{ name: string } & HeadFileStat>>;
+  async function readdirWithStats(path: string, options?: { readonly content: 'head' }) {
+    const entries = rows.get(path) ?? [];
+    return options === undefined
+      ? entries
+      : entries.map((row) =>
+          row.type === 'file' && row.contentKind === 'text'
+            ? { name: row.name, type: row.type, size: row.size, mtimeMs: row.mtimeMs, contentKind: row.contentKind }
+            : row,
+        );
+  }
+  const view = mock<ComposedViewProxy>({
+    readdirWithStats,
     readdir: vi.fn().mockResolvedValue([]),
     stat: vi.fn().mockResolvedValue({ type: 'dir', size: 0, mtimeMs: 0 }),
   });
+  vi.spyOn(view, 'readdirWithStats');
+  return view;
 };
 
 /*
@@ -299,7 +316,7 @@ describe('FileTreeService dependency mount row (close-out W3)', () => {
       /* The resync walks resolved directories root-first, so the mount's own arm
        * runs only while the row survived the root's merge. */
       await vi.waitFor(() => {
-        expect(dependencies.readdirWithStats).toHaveBeenCalledWith('');
+        expect(dependencies.readdirWithStats).toHaveBeenCalledWith('', { content: 'head' });
       });
 
       expect(tree.getTreeSnapshot().has('node_modules')).toBe(true);
@@ -643,6 +660,41 @@ describe('FileTreeService rooted search and external polling', () => {
 describe('FileTreeService mergeChildren / isDirectoryResolved', () => {
   afterEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('keeps agent exact listings independent of resolved UI tree rows', async () => {
+    const { tree, proxy, disposeChannel } = createTreeHarness();
+    vi.mocked(proxy.readDirectory).mockResolvedValueOnce([textNode('deleted.ts')]);
+    await tree.listDirectory('');
+    vi.mocked(proxy.readDirectoryExact).mockResolvedValueOnce([
+      { name: 'added.ts', type: 'file', size: 5, mtimeMs: 100, contentKind: 'text', lineCount: 2 },
+    ]);
+
+    await expect(tree.listDirectoryExact('')).resolves.toEqual([
+      { name: 'added.ts', type: 'file', size: 5, mtimeMs: 100, contentKind: 'text', lineCount: 2 },
+    ]);
+    expect(tree.getTreeSnapshot().has('deleted.ts')).toBe(true);
+    expect(proxy.readDirectoryExact).toHaveBeenCalledWith(workspaceRoot);
+    tree.dispose();
+    disposeChannel();
+  });
+
+  it('clears an exact count when a shallow refresh cannot prove it is still current', async () => {
+    vi.useFakeTimers();
+    const { tree, proxy, disposeChannel } = createTreeHarness();
+    vi.mocked(proxy.readDirectory).mockResolvedValueOnce([textNode('a.ts', { size: 5, mtimeMs: 100, lineCount: 2 })]);
+    await tree.listDirectory('');
+    vi.mocked(proxy.readDirectory).mockResolvedValueOnce([
+      { id: 'a.ts', name: 'a.ts', size: 5, mtimeMs: 100, contentKind: 'text' },
+    ]);
+
+    tree.scheduleRefresh('');
+    await vi.advanceTimersByTimeAsync(200);
+
+    expect('lineCount' in (tree.getTreeSnapshot().get('a.ts') ?? {})).toBe(false);
+    tree.dispose();
+    disposeChannel();
+    vi.useRealTimers();
   });
 
   it('should preserve FileEntry object identity when disk listing is unchanged', async () => {

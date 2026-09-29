@@ -13,11 +13,12 @@ import type {
   ExternalChangeFact,
   FileReadStreamOptions,
   FileStat,
+  HeadFileStat,
   ProviderCapabilities,
 } from '#types.js';
 import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
 import { mapConcurrent, statConcurrency } from '#concurrency.js';
-import { fileStatFromFile } from '#content-metadata.js';
+import { fileStatFromFile, headFileStatFromFile } from '#content-metadata.js';
 import { validateFileReadStreamOptions } from '#backend/stream-utils.js';
 
 const handleCacheMaxEntries = 10_000;
@@ -101,6 +102,10 @@ const hasDomName = (error: unknown, name: string): boolean =>
  * @public
  */
 export class FileSystemAccessProvider extends AbstractFileSystemProvider {
+  /** @returns `true` for the supported head listing mode. */
+  public get supportsHeadListing(): true {
+    return true;
+  }
   /**
    * Backend identifier; always `'webaccess'`.
    * @returns The literal string `'webaccess'`.
@@ -202,7 +207,15 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
    * @param path - Absolute directory path to enumerate.
    * @returns Each entry's name paired with its stat metadata.
    */
-  public async readdirWithStats(path: string): Promise<Array<{ name: string } & FileStat>> {
+  public readdirWithStats(path: string): Promise<Array<{ name: string } & FileStat>>;
+  public readdirWithStats(
+    path: string,
+    options: { readonly content: 'head' },
+  ): Promise<Array<{ name: string } & HeadFileStat>>;
+  public async readdirWithStats(
+    path: string,
+    options?: { readonly content: 'head' },
+  ): Promise<Array<{ name: string } & (FileStat | HeadFileStat)>> {
     this._assertReady();
     this._assertRootedPath(path);
     const directoryHandle = await this._resolveDirectoryHandle(path);
@@ -214,7 +227,12 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     return mapConcurrent(handles, statConcurrency, async ([name, handle]) =>
       handle.kind === 'directory'
         ? ({ name, type: 'dir', size: 0, mtimeMs: 0 } satisfies { name: string } & FileStat)
-        : { name, ...(await fileStatFromFile(await handle.getFile())) },
+        : {
+            name,
+            ...(await (options?.content === 'head'
+              ? headFileStatFromFile(await handle.getFile())
+              : fileStatFromFile(await handle.getFile()))),
+          },
     );
   }
 

@@ -1,5 +1,5 @@
 import { expectTypeOf, it, describe } from 'vitest';
-import type { FileContentMetadata, FileStat, FileStatEntry, FileTreeEntry } from '#types/file.types.js';
+import type { FileStat, FileStatEntry, FileTreeContentMetadata, FileTreeEntry } from '#types/file.types.js';
 
 describe('FileStat', () => {
   it('is a readonly object type for stat results', () => {
@@ -28,7 +28,7 @@ describe('FileStatEntry', () => {
 });
 
 describe('FileTreeEntry', () => {
-  it('requires content metadata for file entries', () => {
-    expectTypeOf<Extract<FileTreeEntry, { type: 'file' }>>().toExtend<FileContentMetadata>();
+  it('keeps classification while allowing unknown text line counts in file entries', () => {
+    expectTypeOf<Extract<FileTreeEntry, { type: 'file' }>>().toExtend<FileTreeContentMetadata>();
   });
 });

@@ -48,6 +48,37 @@ function fsBridgePort(port: MessagePort, label: string): Port<unknown> {
   return wrapped;
 }
 
+it('rejects shallow metadata from an exact bridge listing', async () => {
+  const channel = new MessageChannel();
+  const row = { name: 'large.txt', type: 'file', size: 2048, mtimeMs: 1, contentKind: 'text' };
+  const server = createBridgeServer(
+    { readdirWithStats: async () => [row] },
+    fsBridgePort(channel.port1, 'listing-server'),
+    {
+      hello: createFileSystemBridgeHello({
+        state: 'ready',
+        capabilities: { persistent: false, writable: true, quotaBased: false },
+        watchable: false,
+      }),
+      protocolSchemas: fileSystemBridgeSchemas,
+    },
+  );
+  const proxy = createFileSystemBridgeProxy({
+    port: fsBridgePort(channel.port2, 'listing-client'),
+    dispose: () => {
+      channel.port2.close();
+    },
+  });
+  try {
+    await expect(proxy.readdirWithStats('')).rejects.toThrow('missing required metadata');
+    await expect(proxy.readdirWithStats('', { content: 'head' })).resolves.toEqual([row]);
+  } finally {
+    proxy.dispose();
+    server.dispose();
+    channel.port1.close();
+  }
+});
+
 /** A proxy over a bridge server that answers only `commitPendingProjectDirectory`. */
 function pendingCommitBridge(
   label: string,

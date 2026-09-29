@@ -26,6 +26,7 @@ const fileTreeEntrySchema = z.union([
   baseFileTreeEntrySchema.extend({ type: z.literal('dir') }).strict(),
   baseFileTreeEntrySchema.extend({ type: z.literal('file'), ...textFileContentMetadataSchema.shape }).strict(),
   baseFileTreeEntrySchema.extend({ type: z.literal('file'), ...binaryFileContentMetadataSchema.shape }).strict(),
+  baseFileTreeEntrySchema.extend({ type: z.literal('file') }).strict(),
 ]);
 
 const baseFileReferenceSchema = z

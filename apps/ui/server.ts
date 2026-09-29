@@ -240,9 +240,10 @@ const compressibleExtensions = new Set(['.css', '.js', '.json', '.map', '.mjs', 
  * @param cacheControl - The `Cache-Control` the identity route sends.
  * @returns Middleware to mount before the matching `express.static`.
  */
-// ponytail: on-the-fly Brotli q5 (16.7 MB WASM → 5.0 MB in ~0.3 s); q11 reaches 4.1 MB but takes ~45 s, so precompress at build if local serve cold start ever matters.
+// The measured large KCL WASM is precompressed at build; other files retain this streaming fallback.
 const compressedStatic =
   (root: string, cacheControl: string): RequestHandler =>
+  // oxlint-disable-next-line complexity -- Negotiation, validators, ranges, and streaming fallbacks share this route.
   async (request, response, next) => {
     const extension = path.extname(request.path);
     if ((request.method !== 'GET' && request.method !== 'HEAD') || !compressibleExtensions.has(extension)) {
@@ -280,8 +281,27 @@ const compressedStatic =
       response.status(304).end();
       return;
     }
+    const sidecar = `${file}.${encoding === 'br' ? 'br' : 'gz'}`;
+    const sidecarStat = /^kcl_wasm_lib_bg-[A-Za-z0-9_-]{8,}\.wasm$/u.test(path.basename(file))
+      ? await stat(sidecar).catch(() => undefined)
+      : undefined;
+    const precompressedStat =
+      sidecarStat?.isFile() && sidecarStat.mtimeMs >= fileStat.mtimeMs ? sidecarStat : undefined;
+    if (precompressedStat) {
+      response.setHeader('Content-Length', precompressedStat.size);
+    }
     if (request.method === 'HEAD') {
       response.end();
+      return;
+    }
+    if (precompressedStat) {
+      try {
+        await pipeline(createReadStream(sidecar), response);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ERR_STREAM_PREMATURE_CLOSE') {
+          throw error;
+        }
+      }
       return;
     }
     const encoder =

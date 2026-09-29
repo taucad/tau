@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { existsSync, readdirSync, readFileSync, utimesSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync, utimesSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -29,6 +29,17 @@ function findFirstWasmAsset(): string | undefined {
   return readdirSync(buildClientAssets).find((name) => name.endsWith('.wasm'));
 }
 
+function findLargeKclWasmAsset(): string | undefined {
+  if (!existsSync(buildClientAssets)) {
+    return undefined;
+  }
+  return readdirSync(buildClientAssets).find(
+    (name) =>
+      /^kcl_wasm_lib_bg-[A-Za-z0-9_-]{8,}\.wasm$/u.test(name) &&
+      statSync(resolve(buildClientAssets, name)).size >= 8 * 1024 * 1024,
+  );
+}
+
 const buildExists = existsSync(buildServerEntry);
 const describeIfBuilt = buildExists ? describe : describe.skip;
 
@@ -41,6 +52,15 @@ if (!buildExists) {
 
 const workerAsset = buildExists ? findFirstWorkerAsset() : undefined;
 const wasmAsset = buildExists ? findFirstWasmAsset() : undefined;
+const largeKclWasmAsset = buildExists ? findLargeKclWasmAsset() : undefined;
+
+describeIfBuilt('apps/ui build asset compression', () => {
+  it.runIf(largeKclWasmAsset !== undefined)('emits both sidecars for large hashed KCL WASM', () => {
+    const asset = largeKclWasmAsset!;
+    expect(existsSync(resolve(buildClientAssets, `${asset}.br`)), `Missing Brotli sidecar for ${asset}`).toBe(true);
+    expect(existsSync(resolve(buildClientAssets, `${asset}.gz`)), `Missing gzip sidecar for ${asset}`).toBe(true);
+  });
+});
 
 describeIfBuilt('apps/ui server (cross-origin isolation parity)', () => {
   let server: Server;
@@ -128,6 +148,46 @@ describeIfBuilt('apps/ui server (cross-origin isolation parity)', () => {
       expect(
         Buffer.from(await response.arrayBuffer()).equals(readFileSync(resolve(buildClientAssets, wasmAsset!))),
       ).toBe(true);
+    },
+  );
+
+  it.runIf(largeKclWasmAsset !== undefined)(
+    'serves a precompressed asset with validators and range fallback',
+    async () => {
+      const asset = largeKclWasmAsset!;
+      const url = `${baseUrl}/assets/${asset}`;
+      const original = readFileSync(resolve(buildClientAssets, asset));
+      const sidecar = resolve(buildClientAssets, `${asset}.br`);
+      const brotli = await fetch(url, { headers: { 'accept-encoding': 'br' } });
+      expect(brotli.status).toBe(200);
+      expect(brotli.headers.get('content-encoding')).toBe('br');
+      expect(brotli.headers.get('content-length')).toBe(String(statSync(sidecar).size));
+      expect(brotli.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+      expect(Buffer.from(await brotli.arrayBuffer()).equals(original)).toBe(true);
+
+      const etag = brotli.headers.get('etag')!;
+      const head = await fetch(url, { method: 'HEAD', headers: { 'accept-encoding': 'br' } });
+      expect(head.status).toBe(200);
+      expect(head.headers.get('etag')).toBe(etag);
+      expect(head.headers.get('content-length')).toBe(String(statSync(sidecar).size));
+
+      const fresh = await fetch(url, { headers: { 'accept-encoding': 'br', 'if-none-match': etag } });
+      expect(fresh.status).toBe(304);
+      expect(fresh.headers.get('etag')).toBe(etag);
+
+      const gzip = await fetch(url, { headers: { 'accept-encoding': 'gzip' } });
+      expect(gzip.headers.get('content-encoding')).toBe('gzip');
+      expect(gzip.headers.get('etag')).not.toBe(etag);
+      expect(Buffer.from(await gzip.arrayBuffer()).equals(original)).toBe(true);
+
+      const range = await fetch(url, { headers: { 'accept-encoding': 'br', range: 'bytes=0-31' } });
+      expect(range.status).toBe(206);
+      expect(range.headers.get('content-encoding')).toBeNull();
+      expect(Buffer.from(await range.arrayBuffer()).equals(original.subarray(0, 32))).toBe(true);
+
+      const identity = await fetch(url, { headers: { 'accept-encoding': 'identity' } });
+      expect(identity.headers.get('content-encoding')).toBeNull();
+      expect(Buffer.from(await identity.arrayBuffer()).equals(original)).toBe(true);
     },
   );
 });

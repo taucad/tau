@@ -1008,12 +1008,7 @@ function BulkActions({ table, deleteProject }: BulkActionsProps) {
     <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
       <div className='flex items-center gap-2'>
         <AlertDialogTrigger asChild>
-          <Button
-            variant='outline'
-            size='sm'
-            className='gap-1 border-destructive text-destructive hover:bg-destructive/10'
-            disabled={isDeleting}
-          >
+          <Button variant='destructive' size='sm' disabled={isDeleting}>
             <Trash className='h-4 w-4' />
             Move to Trash
             <span className='ml-1 rounded-full bg-muted px-1.5 py-0.5 text-xs'>{selectedCount}</span>

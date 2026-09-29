@@ -781,12 +781,7 @@ export function ControlsSection({
                 key={command}
                 type='button'
                 size='sm'
-                variant='outline'
-                className={
-                  command === 'urgent-stop'
-                    ? 'border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive'
-                    : undefined
-                }
+                variant={command === 'urgent-stop' ? 'destructive' : 'outline'}
                 disabled={!isCurrent || isBusy || confirming !== undefined}
                 onClick={() => {
                   setConfirming(command);

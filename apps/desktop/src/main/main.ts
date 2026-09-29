@@ -546,6 +546,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
   const geometry = createGeometryBroker({
     utilityEntry: geometryUtilityEntry,
     env: utilityEnvironment(environment, {
+      ...esbuildEnvironment,
       ...compileCacheEnvironment(app.getPath('userData')),
       TAU_DESKTOP_LOG_DIR: logDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
     }),

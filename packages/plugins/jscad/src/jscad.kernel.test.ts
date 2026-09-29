@@ -23,6 +23,7 @@ import {
   createTestRuntimeClient,
   extractGltfFromExportResult,
   extractGltfFromResult,
+  expectKernelProjectionOrder,
   getTestParameters,
   mapZupMillimetersToYupMeters,
   readCoordinateEvidence,
@@ -194,6 +195,42 @@ const buildJscadCubeCutout = (): unknown => {
 describe('JscadWorker', () => {
   beforeAll(async () => {
     jscadDefinition = await resolveJscadDefinition();
+  });
+
+  it('keeps edge projections and exports independent on one evaluated shape', async () => {
+    const runtime = createMockKernelRuntime();
+    const context = { modulesRegistered: true, modeling: testModeling };
+    const handle = normalizeJscadParts(testJscadApi.primitives.cuboid({ size: [10, 10, 10] }), testModeling);
+    const serialized = jscadDefinition.serializeHandle!({ handle }, runtime, context);
+    const fresh = jscadDefinition.deserializeHandle!({ serialized }, runtime, context);
+    const render = async (shape: typeof handle, includeEdges: boolean) => {
+      const projected = await jscadDefinition.render!(
+        { handle: shape, view: 'model', options: {}, content: { includeEdges } },
+        runtime,
+        context,
+      );
+      return projected.content;
+    };
+    const ordered = await expectKernelProjectionOrder({
+      renderA: async () => render(handle, true),
+      renderB: async () => render(handle, false),
+      freshB: async () => render(fresh, false),
+      write: async () => {
+        const projected = await jscadDefinition.write!(
+          { exportId: 'glb', handle, options: jscadGlbExportOptions, content: { includeEdges: true } },
+          runtime,
+          context,
+        );
+        return projected.files[0].bytes;
+      },
+    });
+    expect(ordered.first).not.toEqual(ordered.intervening);
+
+    await expectKernelProjectionOrder({
+      renderA: async () => render([], true),
+      renderB: async () => render([], false),
+      freshB: async () => render([], false),
+    });
   });
 
   describe('modeling import resolution', () => {

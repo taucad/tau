@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { NodeIO } from '@gltf-transform/core';
 import { beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
-import { createMockKernelRuntime, validateGlbData } from '@taucad/runtime-testing';
+import { createMockKernelRuntime, expectKernelProjectionOrder, validateGlbData } from '@taucad/runtime-testing';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 
 import { gltfKernel } from '#gltf.kernel.js';
@@ -44,6 +44,33 @@ describe('gltfKernel', () => {
     const result = await definition.evaluate({ entryPath: name, parameters: {}, options: {} }, runtime, context);
     const artifact = await definition.render!({ handle: result.handle, view: 'model', options: {} }, runtime, context);
     validateGlbData(artifact.content as Uint8Array<ArrayBuffer>);
+    const freshSnapshot = definition.serializeHandle!({ handle: result.handle }, runtime, context);
+    const render = async (handle: typeof result.handle) => {
+      const projected = await definition.render!({ handle, view: 'model', options: {} }, runtime, context);
+      return projected.content;
+    };
+    const write = async (
+      handle: typeof result.handle,
+      coordinateSystem: 'y-up' | 'z-up',
+      length: 'meter' | 'millimeter',
+    ) => {
+      const projected = await definition.write!(
+        { exportId: 'glb', handle, options: { coordinateSystem, unit: { length } } },
+        runtime,
+        context,
+      );
+      return projected.files[0].bytes;
+    };
+    const ordered = await expectKernelProjectionOrder({
+      renderA: async () => render(result.handle),
+      renderB: async () => write(result.handle, 'y-up', 'meter'),
+      write: async () => write(result.handle, 'z-up', 'millimeter'),
+      freshB: async () => {
+        const fresh = definition.deserializeHandle!({ serialized: freshSnapshot }, runtime, context);
+        return write(fresh, 'y-up', 'meter');
+      },
+    });
+    expect(ordered.first).toEqual(artifact.content);
     const { json } = await new NodeIO().binaryToJSON(artifact.content as Uint8Array<ArrayBuffer>);
     expect(json.extensionsUsed?.includes(dracoExtensionName)).not.toBe(true);
   });

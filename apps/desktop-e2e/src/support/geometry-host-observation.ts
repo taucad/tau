@@ -9,6 +9,7 @@ export type GeometryHostEvent = Readonly<{
   kind: 'spawn' | 'run' | 'cancel' | 'event' | 'native-entry' | 'native-return' | 'result' | 'exit';
   pid: number;
   at: number;
+  root?: string;
   eventType?: string;
   capability?: string;
   count?: number;
@@ -31,7 +32,7 @@ Module._load = function(request, parent, isMain) {
     try {
       const request = JSON.parse(Buffer.from(bytes).toString('utf8'));
       const claim = request?.plan?.claims?.[0];
-      if (request?.method === 'submitClaims' && claim?.capability === 'toHaveConnectedComponents') {
+      if (request?.method === 'submitClaims' && typeof claim?.capability === 'string') {
         observed = true;
         const expected = claim.payload?.arguments?.[0];
         process.parentPort?.postMessage({
@@ -78,6 +79,7 @@ export const observeGeometryHost = async (session: DesktopSession): Promise<void
         kind: 'spawn' | 'run' | 'cancel' | 'event' | 'native-entry' | 'native-return' | 'result' | 'exit';
         pid: number;
         at: number;
+        root?: string;
         eventType?: string;
         capability?: string;
         count?: number;
@@ -117,9 +119,9 @@ export const observeGeometryHost = async (session: DesktopSession): Promise<void
         }
         const originalPost = child.postMessage.bind(child);
         child.postMessage = ((message: unknown, transfer?: Parameters<typeof originalPost>[1]) => {
-          const frame = message as { type?: string } | undefined;
+          const frame = message as { type?: string; root?: string } | undefined;
           if (frame?.type === 'geometry-run') {
-            record('run');
+            record('run', { root: frame.root });
           }
           if (frame?.type === 'geometry-cancel') {
             record('cancel');
@@ -163,7 +165,10 @@ export const observeGeometryHost = async (session: DesktopSession): Promise<void
 export const geometryHostEvents = async (session: DesktopSession): Promise<readonly GeometryHostEvent[]> =>
   session.application.evaluate(() => {
     const state = globalThis as typeof globalThis & { tauE2eGeometryEvents?: GeometryHostEvent[] };
-    return [...(state.tauE2eGeometryEvents ?? [])];
+    if (!state.tauE2eGeometryEvents) {
+      throw new Error('Geometry utility observation was not installed.');
+    }
+    return [...state.tauE2eGeometryEvents];
   });
 
 /** Undo the test-only observer before Electron teardown. */

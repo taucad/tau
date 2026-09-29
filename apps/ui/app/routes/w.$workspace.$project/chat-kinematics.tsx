@@ -1140,8 +1140,8 @@ type KinematicsPanelParams = {
 function KinematicsPanel({ params }: { readonly params: KinematicsPanelParams }): React.JSX.Element {
   if (params.graphicsRef === undefined) {
     return (
-      <div className={cn('min-h-full', paneviewAttachedBodyClassName)}>
-        <PanelEmptyState icon={Rotate3d} title='Open renderer to pose this model' className='min-h-16 break-all' />
+      <div className={cn('h-full', paneviewAttachedBodyClassName)}>
+        <PanelEmptyState icon={Rotate3d} title='Open renderer to pose this model' />
       </div>
     );
   }

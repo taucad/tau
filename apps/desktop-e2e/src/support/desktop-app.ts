@@ -365,7 +365,14 @@ export const launchDesktopApp = async (options: {
           })
         : Promise.resolve();
     /* Routine fixture disposal bypasses quit holds exercised by their own specs. */
-    await Promise.race([application.evaluate(({ app }) => app.exit(0)).catch(() => undefined), wait(5_000)]);
+    await Promise.race([
+      application
+        .evaluate(({ app }) => {
+          app.exit(0);
+        })
+        .catch(() => undefined),
+      wait(5000),
+    ]);
     if (child.exitCode === null && child.signalCode === null) {
       child.kill('SIGKILL');
     }

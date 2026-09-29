@@ -58,10 +58,10 @@ describe('record-driven viewer adoption', () => {
     });
     const api = {
       panels: [{ id: viewId, params: { viewId, entryPath: 'models/other.ts' } }],
-      // oxlint-disable-next-line eslint/no-useless-computed-key -- Dockview's method name has capitals in its public API.
       width: 800,
       height: 600,
-      ['fromJSON']: vi.fn(),
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Dockview defines this method name.
+      fromJSON: vi.fn(),
     } as unknown as DockviewApi;
     const removed = adoptViewerRecordNode(api, { kind: 'group', tabs: [] });
     expect(removed).toEqual([viewId]);

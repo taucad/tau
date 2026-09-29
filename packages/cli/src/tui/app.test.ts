@@ -673,7 +673,15 @@ describe('tau tui', () => {
           reset: false,
         };
       }
-      await new Promise<void>((resolve) => signal?.addEventListener('abort', () => resolve(), { once: true }));
+      await new Promise<void>((resolve) => {
+        signal?.addEventListener(
+          'abort',
+          () => {
+            resolve();
+          },
+          { once: true },
+        );
+      });
       return { ledger, events: [], endCursor: events.length, reset: false };
     });
     try {
@@ -765,7 +773,15 @@ describe('tau tui', () => {
           reset: false,
         };
       }
-      await new Promise<void>((resolve) => signal?.addEventListener('abort', () => resolve(), { once: true }));
+      await new Promise<void>((resolve) => {
+        signal?.addEventListener(
+          'abort',
+          () => {
+            resolve();
+          },
+          { once: true },
+        );
+      });
       return { ledger, events: [], endCursor: events.length, reset: false };
     });
     try {

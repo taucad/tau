@@ -106,7 +106,7 @@ import quickLookManifest from '#macos/quick-look-formats.json' with { type: 'jso
 protocol.registerSchemesAsPrivileged([...appSchemePrivileges]);
 
 const isDevelopment = process.env.ELECTRON_RENDERER_URL !== undefined;
-const hideE2eWindow = process.env['TAU_E2E_HIDE_WINDOW'] === '1';
+const hideTestWindow = process.env['TAU_E2E_HIDE_WINDOW'] === '1';
 /* The built SPA, relative to `dist/main/`. Packaging (ruling C7) will relocate
  * this; an env override keeps the e2e lane free to point elsewhere meanwhile. */
 const clientRoot =
@@ -147,7 +147,7 @@ enqueueOpenFiles(process.argv.slice(1));
 
 /** Bring the app forward, whatever asked it to (a second launch, a deep link). */
 const focusMainWindow = (): void => {
-  if (hideE2eWindow) {
+  if (hideTestWindow) {
     return;
   }
   const window = BrowserWindow.getAllWindows()[0];
@@ -1118,7 +1118,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
     window.webContents.on('will-redirect', guardNavigation('will-redirect'));
 
     await window.loadURL(rendererUrl(openFiles.hasPending() ? '/import?desktop-open=1' : '/'));
-    if (!hideE2eWindow) {
+    if (!hideTestWindow) {
       if (saved?.maximized) {
         window.maximize();
       }
@@ -1138,7 +1138,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
     }
     const navigate = async (): Promise<void> => {
       await window.loadURL(rendererUrl('/import?desktop-open=1'));
-      if (!hideE2eWindow) {
+      if (!hideTestWindow) {
         window.show();
         window.focus();
       }

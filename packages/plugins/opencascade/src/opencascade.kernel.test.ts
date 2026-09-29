@@ -17,11 +17,13 @@ import {
   createGeometryFile,
   createGeometryTestHelpers,
   createTestRuntimeClient,
+  expectKernelProjectionOrder,
   mapZupMillimetersToYupMeters,
   readCoordinateEvidence,
 } from '@taucad/runtime-testing';
 import { esbuildBundler } from '@taucad/esbuild';
 import { defineRuntime } from '@taucad/runtime/worker';
+import { opencascadeExportSchemas, opencascadeRenderSchema } from '#opencascade.schemas.js';
 
 // =============================================================================
 // Test Utilities
@@ -534,6 +536,49 @@ export default function main() {
         try {
           expect(restored).toHaveLength(1);
           expect(restored[0]!.name).toBe('PbrBox');
+          const fine = opencascadeRenderSchema.parse({
+            tessellation: { linearTolerance: 0.001, angularTolerance: 5 },
+          });
+          const coarse = opencascadeRenderSchema.parse({
+            tessellation: { linearTolerance: 1, angularTolerance: 60 },
+          });
+          const render = async (handle: typeof restored, options: typeof fine) => {
+            const projected = await definition.render!({ handle, view: 'model', options }, kernelRuntime, context);
+            return projected.content;
+          };
+          const cylinder = new cascade.BRepPrimAPI_MakeCylinder(5, 20);
+          const cylinderShape = cylinder.Shape();
+          const curvedHandle = [{ ...nativeHandle[0]!, shape: cylinderShape }];
+          const freshCylinder = new cascade.BRepPrimAPI_MakeCylinder(5, 20);
+          const freshCylinderShape = freshCylinder.Shape();
+          const curvedFresh = [{ ...nativeHandle[0]!, shape: freshCylinderShape }];
+          try {
+            expect(await render(curvedHandle, coarse)).toEqual(await render(curvedFresh, coarse));
+            const ordered = await expectKernelProjectionOrder({
+              renderA: async () => render(curvedHandle, fine),
+              renderB: async () => render(curvedHandle, coarse),
+              freshB: async () => render(curvedFresh, coarse),
+              write: async () => {
+                const projected = await definition.write!(
+                  { exportId: 'step', handle: curvedHandle, options: opencascadeExportSchemas.step.parse({}) },
+                  kernelRuntime,
+                  context,
+                );
+                const step = projected.files[0].bytes;
+                if (!(step instanceof Uint8Array)) {
+                  throw new Error('Expected STEP bytes');
+                }
+                assertStepRoundTripVolumeMm3(step, Math.PI * 5 * 5 * 20);
+                return step.byteLength;
+              },
+            });
+            expect(ordered.first).not.toEqual(ordered.intervening);
+          } finally {
+            freshCylinderShape.delete();
+            freshCylinder.delete();
+            cylinderShape.delete();
+            cylinder.delete();
+          }
           const properties = new cascade.GProp_GProps();
           try {
             cascade.BRepGProp.VolumeProperties(restored[0]!.shape, properties, true, false, false);

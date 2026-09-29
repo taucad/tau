@@ -392,6 +392,21 @@ pub extern "C" fn geospec_engine_native_process_request(
     invoke_engine(engine, request, request_length, Engine::process_request)
 }
 
+/// Reserved ST binding control; never routed through the public GeoSpec parser.
+#[no_mangle]
+pub extern "C" fn geospec_engine_native_exact_cluster_candidate_control(
+    engine: u32,
+    request: u32,
+    request_length: u32,
+) -> u32 {
+    invoke_engine(
+        engine,
+        request,
+        request_length,
+        Engine::process_exact_cluster_candidate_control,
+    )
+}
+
 /// Normalize one borrowed request through a retained engine.
 #[no_mangle]
 pub extern "C" fn geospec_engine_native_canonical_plan(

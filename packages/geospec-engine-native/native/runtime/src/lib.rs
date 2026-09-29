@@ -110,11 +110,11 @@ fn admitted_connector(permits: u32) -> Result<Box<dyn BrepConnector>, &'static s
 /// Constructs the real OCCT + repaired Rust Manifold engine with named bounds.
 pub fn create_engine(config: EngineConfig) -> Result<Engine, &'static str> {
     let brep = admitted_connector(config.execution_permits)?;
-    Ok(Engine::with_backends(
-        config,
-        brep,
-        Box::new(ManifoldCsgConnector::new()),
-    ))
+    let csg = Box::new(ManifoldCsgConnector::new());
+    Ok(match producer_identity() {
+        Ok(producer) => Engine::with_backends_and_producer_identity(config, brep, csg, producer),
+        Err(_) => Engine::with_backends(config, brep, csg),
+    })
 }
 
 /// Returns the common native producer identity generated from the pinned core

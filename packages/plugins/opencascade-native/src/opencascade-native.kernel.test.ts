@@ -111,6 +111,42 @@ describe('native OpenCascade backend', () => {
 });
 
 describe('OpenCascadeNativeKernel', () => {
+  it('should preserve real native fine and coarse projections and STEP geometry on one handle', async () => {
+    const binding = loadNativeBackend();
+    expect(binding.version().occt).toBe('8.0.1');
+    const definition = await resolveRuntimePluginDefinition('kernel', opencascadeNativeKernel());
+    const runtime = createMockKernelRuntime();
+    const handle = [binding.Solid.createCylinder(5, [0, 0, 15])];
+    const brep = binding.writeBrep(handle);
+    const freshHandle = binding.readBrep(brep);
+    const context = {
+      binding,
+      version: binding.version(),
+      brepByHandle: new WeakMap([
+        [handle, brep],
+        [freshHandle, brep],
+      ]),
+    };
+    const fine = opencascadeNativeRenderSchema.parse({ tessellation: { linearTolerance: 0.02 } });
+    const coarse = opencascadeNativeRenderSchema.parse({ tessellation: { linearTolerance: 0.5 } });
+    const project = async (solids: NativeSolid[], options: typeof fine) => {
+      const rendered = await definition.render!({ handle: solids, view: 'model', options }, runtime, context);
+      return rendered.content;
+    };
+    const write = async () => {
+      const step = await definition.write!({ exportId: 'step', handle, options: {} }, runtime, context);
+      return binding.readStep(step.files[0].bytes).map((solid) => solid.metrics());
+    };
+
+    await expectKernelProjectionOrder({
+      renderA: async () => project(handle, fine),
+      renderB: async () => project(handle, coarse),
+      freshB: async () => project(freshHandle, coarse),
+      write,
+    });
+    expect(binding.writeBrep(handle)).toEqual(brep);
+  });
+
   it('renders each option from a pristine captured BRep', async () => {
     const definition = await resolveRuntimePluginDefinition('kernel', opencascadeNativeKernel());
     const runtime = createMockKernelRuntime();

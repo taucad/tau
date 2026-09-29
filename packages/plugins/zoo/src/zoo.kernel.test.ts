@@ -1022,7 +1022,7 @@ cone = startSketchOn(XZ)
         context,
       );
 
-      expect(result.handle).toEqual({ kind: 'zoo-live-engine-session', hasGeometry: false });
+      expect(result.handle).toEqual({ kind: 'zoo-live-engine-session', hasGeometry: false, generation: 1 });
       const rendered = await zooDefinition.render!(
         { view: 'model', handle: result.handle, options: {} },
         createMockKernelRuntime(),
@@ -1044,8 +1044,8 @@ cone = startSketchOn(XZ)
 
       type ZooValidityContext = Parameters<typeof isHandleValid>[2];
       const runtime = createMockKernelRuntime();
-      const liveHandle = { kind: 'zoo-live-engine-session', hasGeometry: true } as const;
-      const emptyHandle = { kind: 'zoo-live-engine-session', hasGeometry: false } as const;
+      const liveHandle = { kind: 'zoo-live-engine-session', hasGeometry: true, generation: 0 } as const;
+      const emptyHandle = { kind: 'zoo-live-engine-session', hasGeometry: false, generation: 0 } as const;
 
       await expect(
         Promise.resolve(
@@ -1067,6 +1067,18 @@ cone = startSketchOn(XZ)
         ),
       ).resolves.toBe(true);
 
+      // A later evaluation may leave the engine exportable while replacing its program.
+      await expect(
+        Promise.resolve(
+          isHandleValid({ handle: liveHandle }, runtime, {
+            baseUrl: 'ws://fake.example/modeling-commands',
+            fileSystemManager: undefined,
+            generation: 1,
+            kclUtils: { canExportFromMemory: true },
+          } as ZooValidityContext),
+        ),
+      ).resolves.toBe(false);
+
       await expect(
         Promise.resolve(
           isHandleValid({ handle: emptyHandle }, runtime, {
@@ -1078,6 +1090,41 @@ cone = startSketchOn(XZ)
       ).resolves.toBe(true);
     });
 
+    it('fails stale render and write after a later engine generation, including empty output', async () => {
+      const context: Parameters<typeof zooDefinition.evaluate>[2] = {
+        baseUrl: 'ws://fake.example/modeling-commands',
+        closeErrors: undefined,
+        token: undefined,
+        fileSystemManager: undefined,
+        kclUtils: undefined,
+      };
+      const runtime = createMockKernelRuntime({ filesystemOverrides: { readFileResult: '' } });
+      const input = { entryPath: 'main.kcl', parameters: {}, options: {} };
+      const first = await zooDefinition.evaluate(input, runtime, context);
+      const firstRender = await zooDefinition.render!(
+        { view: 'model', handle: first.handle, options: {} },
+        runtime,
+        context,
+      );
+      const next = await zooDefinition.evaluate(input, runtime, context);
+      const nextRender = await zooDefinition.render!(
+        { view: 'model', handle: next.handle, options: {} },
+        runtime,
+        context,
+      );
+      expect(nextRender.content).toEqual(firstRender.content);
+      await expect(
+        zooDefinition.render!({ view: 'model', handle: first.handle, options: {} }, runtime, context),
+      ).rejects.toThrow(/no longer the current engine program/);
+      await expect(
+        zooDefinition.write!(
+          { exportId: 'glb', handle: first.handle, options: { coordinateSystem: 'y-up', unit: { length: 'meter' } } },
+          runtime,
+          context,
+        ),
+      ).rejects.toThrow(/no longer the current engine program/);
+    });
+
     it('should export empty GLB and glTF files for empty handles but reject STEP and STL', async () => {
       const context: Parameters<NonNullable<typeof zooDefinition.write>>[2] = {
         baseUrl: 'ws://fake.example/modeling-commands',
@@ -1087,7 +1134,7 @@ cone = startSketchOn(XZ)
         kclUtils: undefined,
       };
       const runtime = createMockKernelRuntime();
-      const nativeHandle = { kind: 'zoo-live-engine-session', hasGeometry: false } as const;
+      const nativeHandle = { kind: 'zoo-live-engine-session', hasGeometry: false, generation: 0 } as const;
 
       const glbResult = await zooDefinition.write!(
         {
@@ -1156,7 +1203,7 @@ cone = startSketchOn(XZ)
       const result = await zooDefinition.write!(
         {
           exportId: 'glb',
-          handle: { kind: 'zoo-live-engine-session', hasGeometry: true },
+          handle: { kind: 'zoo-live-engine-session', hasGeometry: true, generation: 0 },
           options: { coordinateSystem: 'y-up', unit: { length: 'meter' } },
         },
         runtime,
@@ -1184,7 +1231,7 @@ cone = startSketchOn(XZ)
           exportFromMemory,
         } as unknown as KclUtilities,
       };
-      const nativeHandle = { kind: 'zoo-live-engine-session', hasGeometry: true } as const;
+      const nativeHandle = { kind: 'zoo-live-engine-session', hasGeometry: true, generation: 0 } as const;
       const yUp = await zooDefinition.write!(
         {
           exportId: 'glb',
@@ -1229,7 +1276,7 @@ cone = startSketchOn(XZ)
       const result = await zooDefinition.write!(
         {
           exportId: 'gltf',
-          handle: { kind: 'zoo-live-engine-session', hasGeometry: true },
+          handle: { kind: 'zoo-live-engine-session', hasGeometry: true, generation: 0 },
           options: { coordinateSystem: 'y-up', unit: { length: 'meter' } },
         },
         createMockKernelRuntime(),

@@ -50,19 +50,33 @@ type ZooContext = {
   token: string | undefined;
   kclUtils: KclUtilities | undefined;
   fileSystemManager: FileSystemManager | undefined;
+  /** Changes whenever this kernel replaces the engine's current program. */
+  generation?: number;
 };
 
 type ZooNativeHandle = {
   kind: 'zoo-live-engine-session';
   hasGeometry: boolean;
+  generation: number;
 };
 
 type ZooExportFormat = keyof typeof zooExportSchemas;
 
-const createZooNativeHandle = (hasGeometry: boolean): ZooNativeHandle => ({
+const createZooNativeHandle = (hasGeometry: boolean, generation: number): ZooNativeHandle => ({
   kind: 'zoo-live-engine-session',
   hasGeometry,
+  generation,
 });
+
+const isCurrentZooHandle = (handle: ZooNativeHandle, context: ZooContext): boolean =>
+  handle.generation === (context.generation ?? 0) &&
+  (!handle.hasGeometry || context.kclUtils?.canExportFromMemory === true);
+
+const assertCurrentZooHandle = (handle: ZooNativeHandle, context: ZooContext): void => {
+  if (handle.generation !== (context.generation ?? 0)) {
+    throw new Error('Zoo evaluation is no longer the current engine program; re-evaluate the captured source.');
+  }
+};
 
 const createNoGeometryZooExportResult = (format: ZooExportFormat) => {
   switch (format) {
@@ -298,12 +312,14 @@ export const zooKernel = defineKernel({
 
   async evaluate({ entryPath, parameters }, { filesystem, logger, signal }, context) {
     ensureFileSystemManager(context, filesystem);
+    const generation = (context.generation ?? 0) + 1;
+    context.generation = generation;
     const relativeFilePath = toKclEnginePath(entryPath);
     const code = await filesystem.readFile(entryPath, 'utf8');
     try {
       const trimmedCode = code.trim();
       if (trimmedCode === '') {
-        return { handle: createZooNativeHandle(false) };
+        return { handle: createZooNativeHandle(false, generation) };
       }
 
       const utilities = await getKclUtilitiesWithEngine(context);
@@ -328,7 +344,7 @@ export const zooKernel = defineKernel({
       // Display GLTF fetch is deferred to render so a BRep-only export
       // skips the engine round-trip. An executed-but-empty scene is discovered
       // at fetch/export time; write's per-format empty guards cover it.
-      return { handle: createZooNativeHandle(true) };
+      return { handle: createZooNativeHandle(true, generation) };
     } catch (error) {
       if (error instanceof KclBuildError) {
         throw error;
@@ -341,6 +357,7 @@ export const zooKernel = defineKernel({
   },
 
   async render({ handle, content }, { logger, signal }, context) {
+    assertCurrentZooHandle(handle, context);
     if (!handle.hasGeometry) {
       return { content: asBuffer(createEmptyGlb()) };
     }
@@ -381,6 +398,7 @@ export const zooKernel = defineKernel({
   // oxlint-disable-next-line complexity -- self-contained, refactor later.
   async write(input, { logger, signal }, context) {
     const { exportId, handle } = input;
+    assertCurrentZooHandle(handle, context);
 
     if (!handle.hasGeometry) {
       return createNoGeometryZooExportResult(exportId);
@@ -525,11 +543,7 @@ export const zooKernel = defineKernel({
   },
 
   isHandleValid({ handle }, _runtime, context) {
-    if (!handle.hasGeometry) {
-      return true;
-    }
-
-    return context.kclUtils?.canExportFromMemory === true;
+    return isCurrentZooHandle(handle, context);
   },
 
   async onDispose(context) {

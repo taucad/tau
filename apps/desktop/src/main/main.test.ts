@@ -294,7 +294,7 @@ vi.mock('#main/geometry-broker.js', () => ({
 }));
 vi.mock('#main/utility-environment.js', () => ({
   loginShellEnvironment: vi.fn(async () => state.shellApplied),
-  packagedEsbuildEnvironment: vi.fn(() => ({})),
+  packagedEsbuildEnvironment: vi.fn(() => ({ ESBUILD_BINARY_PATH: '/staged/esbuild' })),
   bundledGitEnvironment: vi.fn(() => ({})),
   compileCacheEnvironment: vi.fn((userDataPath: string) => ({
     TAU_COMPILE_CACHE_DIR: join(userDataPath, 'compile-cache'),
@@ -1035,6 +1035,21 @@ describe('desktop main machine store', () => {
       expect(postMessage).toHaveBeenCalledWith(servicesPortRelayTag, { requestId: 'diagnostic' }, [
         { id: 'geometry-performance-port' },
       ]);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'passes the staged esbuild binary to the geometry utility that bundles GeoSpec files',
+    async () => {
+      await boot();
+      const geometryEnvironment = state.utilityEnvironmentAdditions.find(
+        (additions) =>
+          'TAU_DESKTOP_LOG_DIR' in additions &&
+          !('TAU_DESKTOP_MACHINES_DIR' in additions) &&
+          !('TAU_BUILD123D_RESOURCE_ROOT' in additions),
+      );
+      expect(geometryEnvironment?.['ESBUILD_BINARY_PATH']).toBe('/staged/esbuild');
     },
     bootMilliseconds,
   );

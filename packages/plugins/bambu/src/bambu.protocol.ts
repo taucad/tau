@@ -24,6 +24,17 @@ export type BambuRunState =
   | 'succeeded'
   | 'unknown';
 
+/** One tray's material, by the flat tray id Bambu reports. @internal */
+export type BambuMaterial = Readonly<{
+  slot: number;
+  state: 'empty' | 'loaded' | 'unknown';
+  materialId?: string;
+  profileId?: string;
+  brand?: string;
+  color?: string;
+  remainingPercent?: number;
+}>;
+
 /** Redacted status facts retained after one provider report is discarded. @internal */
 export type BambuStatus = Readonly<{
   sequence?: string;
@@ -36,17 +47,9 @@ export type BambuStatus = Readonly<{
   nozzleTargetTemperature?: Quantity;
   bedTargetTemperature?: Quantity;
   bedType?: string;
-  materials?: ReadonlyArray<
-    Readonly<{
-      slot: number;
-      state: 'empty' | 'loaded' | 'unknown';
-      materialId?: string;
-      profileId?: string;
-      brand?: string;
-      color?: string;
-      remainingPercent?: number;
-    }>
-  >;
+  materials?: readonly BambuMaterial[];
+  /** The external spool, kept apart from the AMS trays because reports carry them separately. */
+  externalMaterial?: BambuMaterial;
   materialUnits?: ReadonlyArray<Readonly<{ unit: number; humidityIndex?: number; temperature?: Quantity }>>;
   currentMaterialSlot?: number;
   targetMaterialSlot?: number;
@@ -529,8 +532,54 @@ const runState = (value: unknown): BambuRunState => {
   }
 };
 
+/** The flat tray id Bambu reports for the external spool (`vt_tray.id`, `tray_now`). @internal */
+export const bambuExternalSpoolSlot = 254;
+
 /**
- * The loaded materials and tray routing: AMS trays when the report has an AMS, else its flat `materials` list.
+ * One tray's material as a snapshot slot.
+ *
+ * @param row - The report's tray object.
+ * @param slot - The tray's flat id.
+ * @param missing - What a tray without a material type is.
+ * @returns The slot's material.
+ */
+const trayMaterial = (row: unknown, slot: number, missing: 'empty' | 'unknown'): BambuMaterial => {
+  if (row === null || typeof row !== 'object' || Array.isArray(row)) {
+    return Object.freeze({ slot, state: missing });
+  }
+  const candidate = row as Readonly<Record<string, unknown>>;
+  const materialId = boundedString(candidate['tray_type'], 128) ?? boundedString(candidate['material_id'], 128);
+  if (materialId === undefined) {
+    // An unset tray still reports a placeholder colour ("00000000"); it describes nothing.
+    return Object.freeze({ slot, state: missing });
+  }
+  const profileId = boundedString(candidate['tray_info_idx'], 128);
+  const brand = boundedString(candidate['tray_sub_brands'], 128);
+  const color = materialColor(candidate['tray_color']);
+  // The external holder has no filament reader, so its `remain` is never a measurement.
+  const remainingPercent =
+    slot === bambuExternalSpoolSlot ? undefined : finite({ value: candidate['remain'], minimum: 0, maximum: 100 });
+  return Object.freeze({
+    slot,
+    state: 'loaded',
+    ...definedFields({ materialId, profileId, brand, color, remainingPercent }),
+  });
+};
+
+/**
+ * A tray id Bambu reports in `tray_now`/`tray_tar`: an AMS tray or the external spool.
+ *
+ * @param value - The reported id, a number or a decimal string.
+ * @returns The slot, or nothing for 255 (no tray) and ids no printer reports.
+ */
+const traySlot = (value: unknown): number | undefined => {
+  const slot = integer(value, bambuExternalSpoolSlot);
+  return slot !== undefined && (slot <= 15 || slot === bambuExternalSpoolSlot) ? slot : undefined;
+};
+
+/**
+ * The loaded materials and tray routing: AMS trays when the report has an AMS, else its flat `materials` list,
+ * and the external spool from `vt_tray` (or the first `vir_slot` entry newer firmware sends instead).
  *
  * @param print - The report's `print` object.
  * @returns The material fields the report carries.
@@ -558,26 +607,9 @@ const materialSetup = (print: Readonly<Record<string, unknown>>) => {
         row,
         slot,
       }));
-  const materials = materialRows.map(({ row, slot }) => {
-    if (row === null || typeof row !== 'object' || Array.isArray(row)) {
-      return Object.freeze({
-        slot,
-        state: amsRecord ? 'empty' : 'unknown',
-      } as const);
-    }
-    const candidate = row as Readonly<Record<string, unknown>>;
-    const materialId = boundedString(candidate['tray_type'], 128) ?? boundedString(candidate['material_id'], 128);
-    const profileId = boundedString(candidate['tray_info_idx'], 128);
-    const brand = boundedString(candidate['tray_sub_brands'], 128);
-    const color = materialColor(candidate['tray_color']);
-    const remainingPercent = finite({
-      value: candidate['remain'],
-      minimum: 0,
-      maximum: 100,
-    });
-    const state = materialId ? 'loaded' : amsRecord ? 'empty' : 'unknown';
-    return Object.freeze({ slot, state, ...definedFields({ materialId, profileId, brand, color, remainingPercent }) });
-  });
+  const materials = materialRows.map(({ row, slot }) => trayMaterial(row, slot, amsRecord ? 'empty' : 'unknown'));
+  // ponytail: one external holder (single nozzle); dual-nozzle printers report a second one, add it when supported.
+  const externalRow = print['vt_tray'] ?? boundedArray(print['vir_slot'], 1)[0];
   const materialUnits = Array.isArray(amsUnits)
     ? boundedArray(amsUnits, 4).flatMap((unit, index) => {
         if (unit === null || typeof unit !== 'object' || Array.isArray(unit)) {
@@ -597,9 +629,11 @@ const materialSetup = (print: Readonly<Record<string, unknown>>) => {
     : undefined;
   return definedFields({
     materials: amsRecord !== undefined || Array.isArray(print['materials']) ? Object.freeze(materials) : undefined,
+    externalMaterial:
+      externalRow === undefined ? undefined : trayMaterial(externalRow, bambuExternalSpoolSlot, 'empty'),
     materialUnits: materialUnits ? Object.freeze(materialUnits) : undefined,
-    currentMaterialSlot: integer(amsRecord?.['tray_now'], 15),
-    targetMaterialSlot: integer(amsRecord?.['tray_tar'], 15),
+    currentMaterialSlot: traySlot(amsRecord?.['tray_now']),
+    targetMaterialSlot: traySlot(amsRecord?.['tray_tar']),
   });
 };
 

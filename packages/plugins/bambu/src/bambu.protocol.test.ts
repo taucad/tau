@@ -217,6 +217,59 @@ describe('Bambu protocol admission', () => {
     expect(merged.nozzleTemperature).toMatchObject({ value: 26 });
   });
 
+  /* eslint-disable @typescript-eslint/naming-convention -- Bambu wire field names are fixed. */
+  it('should read the external spool from vt_tray as tray 254, apart from the AMS trays', () => {
+    const status = report({
+      ams: { tray_now: '254', tray_tar: '254', ams: [{ tray: [{ tray_type: 'PLA', tray_color: '000000FF' }] }] },
+      vt_tray: {
+        id: '254',
+        tray_type: 'PETG',
+        tray_color: 'FFFFFFFF',
+        tray_info_idx: 'GFG99',
+        tray_sub_brands: '',
+        remain: 0,
+      },
+    });
+
+    expect(status.externalMaterial).toEqual({
+      slot: 254,
+      state: 'loaded',
+      materialId: 'PETG',
+      profileId: 'GFG99',
+      color: '#FFFFFF',
+    });
+    expect(status.materials?.map(({ slot }) => slot)).toEqual([0, 1, 2, 3]);
+    expect(status).toMatchObject({ currentMaterialSlot: 254, targetMaterialSlot: 254 });
+  });
+
+  it('should read an unset external holder as empty and the P2S vir_slot list as the external spool', () => {
+    expect(report({ vt_tray: { id: '254', tray_type: '', tray_color: '00000000' } }).externalMaterial).toEqual({
+      slot: 254,
+      state: 'empty',
+    });
+    expect(
+      report({ vir_slot: [{ id: '254', tray_type: 'PETG', tray_color: 'FFFFFFFF' }] }).externalMaterial,
+    ).toMatchObject({ slot: 254, state: 'loaded', materialId: 'PETG', color: '#FFFFFF' });
+    expect(report({ nozzle_temper: 20 }).externalMaterial).toBeUndefined();
+  });
+
+  it('should read tray 255 as nothing feeding and drop tray ids no printer reports', () => {
+    expect(report({ ams: { tray_now: '255', tray_tar: 255 } })).not.toHaveProperty('currentMaterialSlot');
+    expect(report({ ams: { tray_now: '255', tray_tar: 255 } })).not.toHaveProperty('targetMaterialSlot');
+    expect(report({ ams: { tray_now: '16' } })).not.toHaveProperty('currentMaterialSlot');
+    expect(report({ ams: { tray_now: '15' } })).toMatchObject({ currentMaterialSlot: 15 });
+  });
+
+  it('should keep the external spool when a later report carries only the AMS, and the AMS when it carries only vt_tray', () => {
+    const external = report({ vt_tray: { id: '254', tray_type: 'PETG', tray_color: 'FFFFFFFF' } });
+    const both = mergeBambuStatus(external, report({ ams: { ams: [{ tray: [{ tray_type: 'PLA' }] }] } }));
+    const again = mergeBambuStatus(both, report({ vt_tray: { id: '254', tray_type: 'PETG', tray_color: 'FFFFFFFF' } }));
+
+    expect(again.externalMaterial).toMatchObject({ slot: 254, materialId: 'PETG' });
+    expect(again.materials?.[0]).toMatchObject({ slot: 0, materialId: 'PLA' });
+  });
+  /* eslint-enable @typescript-eslint/naming-convention -- Bambu wire field section ends. */
+
   it('should correlate exact OTA firmware with the physical serial', () => {
     const version = parseBambuVersionPayload(
       bytes(

@@ -26,10 +26,11 @@ import { dirname, join, resolve as resolvePath } from 'node:path';
 import { promisify } from 'node:util';
 import type { SessionConfigOption } from '@agentclientprotocol/sdk';
 
-import { modelChoice, openAcpSession } from '#acp/session.js';
+import { modelChoice } from '#acp/session.js';
+import { openAcpSession } from '#acp/acp-session.js';
 import type { AcpSession } from '#acp/session.js';
-import { externalAgentDescriptorSchema } from '@taucad/agent-host';
-import type { ExternalAgentDescriptor, ExternalAgentRefusalCode } from '@taucad/agent-host';
+import { externalAgentDescriptorSchema } from '@taucad/agent-host/wire';
+import type { ExternalAgentDescriptor, ExternalAgentRefusalCode } from '@taucad/agent-host/wire';
 
 const execFileAsync = promisify(execFile);
 

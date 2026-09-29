@@ -12,7 +12,7 @@ import {
   Repeat,
   Timer,
 } from 'lucide-react';
-import type { ExternalAgentStop } from '@taucad/agent-host';
+import type { ExternalAgentStop } from '@taucad/agent-host/wire';
 import { Button } from '@taucad/ui/components/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { cn } from '@taucad/ui/utils/cn';
@@ -197,7 +197,7 @@ export const ChatErrorAgentStop = memo(function ({
   /** Whether the host will continue this run rather than replay it. */
   readonly resumable: boolean;
 }): React.JSX.Element {
-  const { continueChat } = useChatActions();
+  const { continueChat, regenerate } = useChatActions();
   const {
     execution: { execution },
   } = useChatComposer();
@@ -236,7 +236,7 @@ export const ChatErrorAgentStop = memo(function ({
         variant='outline'
         size='sm'
         onClick={() => {
-          continueChat();
+          regenerate();
         }}
       >
         <RefreshCcw className='size-3.5' />

@@ -1,0 +1,59 @@
+/**
+ * CL-A12: every consumer that folds a chat log calls the package's ledger export instead of keeping a fold of its own
+ * (W3 §7, consumer table). The files are read as text: the check is that the export is the route, not what it does.
+ */
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { describe, expect, it } from 'vitest';
+
+const root = fileURLToPath(new URL('../../../../', import.meta.url));
+const source = (path: string) => readFileSync(`${root}${path}`, 'utf8');
+/* The fold, its read helpers (`readFolded`, `followChat` over `foldReadAnswer`), or the host's own ledger (W4.r1: the
+ * browser worker keeps no fold and no start replay; it asks the host). */
+const ledgerExport =
+  /\b(?:foldChatLedger|foldReadAnswer|readFolded|followChat|replayedStartOutcome|unsettledAttempts|mergeLogSegments)\b|\bhost\.ledger\(/u;
+const lifecycleCheck = /type [!=]== 'run\.lifecycle'/u;
+/** A scan: searching or filtering rows for lifecycle state, the shape of a private fold. */
+const lifecycleScan = /\.(?:findLast|filter|findIndex|find|some)\([^\n]*'run\.lifecycle'/u;
+
+/**
+ * Consumers that read a log and now fold it through the export. The node launcher left the list with W4: it keeps no
+ * fold, and answers from the host's ledger through the command owner (SC-R7). The browser worker left with W6 RH-S8:
+ * it serves `createAgentLauncher` and reads no log itself.
+ */
+const folding = [
+  'packages/host/src/revisions.ts',
+  'packages/cli/src/commands/agent/client.ts',
+  'apps/ui-e2e/src/support/chat-admission-log.ts',
+  'apps/desktop-e2e/src/support/acp-evidence.ts',
+] as const;
+
+/*
+ * Files that still test `run.lifecycle` on a pushed row, each for a reason the ledger does not serve; the list is
+ * closed, so a new scan fails this test until it is justified here.
+ */
+const pushedRowChecks: Readonly<Record<string, string>> = {
+  'packages/cli/src/tui/app.ts': 'view reducer over pushed rows (W9)',
+  // Relays each pushed transition to the run directory; it keeps no fold and must read nothing but lifecycle (PH19).
+  'packages/host/src/run-reporter.ts': 'directory relay (PH19)',
+  // The attempt an external resume continues from; W7's attempt rows replace it.
+  'packages/host/src/acp/run.ts': 'external resume attempt (W7)',
+  // The suite's own per-attempt oracle clauses, over attempts the ledger places.
+  'apps/ui-e2e/src/support/chat-admission-log.ts': 'e2e oracle clauses over ledger attempts',
+};
+
+describe('fold consumers (CL-A12)', () => {
+  it.each(folding)('should fold %s through the ledger export', (path) => {
+    expect(source(path)).toMatch(ledgerExport);
+  });
+
+  it.each(Object.keys(pushedRowChecks))('should justify the lifecycle check left in %s', (path) => {
+    expect(source(path)).toMatch(lifecycleCheck);
+  });
+
+  it('should keep no lifecycle scan in a folding consumer that is not justified', () => {
+    const unjustified = folding.filter((path) => lifecycleScan.test(source(path)) && !(path in pushedRowChecks));
+
+    expect(unjustified).toEqual([]);
+  });
+});

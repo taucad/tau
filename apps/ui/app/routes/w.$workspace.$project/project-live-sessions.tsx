@@ -6,23 +6,45 @@
  * the chunk a page that only lists projects evaluates. `project-route.tsx` loads it lazily the moment
  * a project is live, and the project route imports its own entry point from here directly.
  */
-import { useCallback, useEffect, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
 import { useSelector } from '@xstate/react';
 import { waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import { ChatInterface } from '#routes/w.$workspace.$project/chat-interface.js';
 import { ProjectProvider, useProject } from '#hooks/use-project.js';
-import { ProjectChatRunSettlement } from '#routes/w.$workspace.$project/project-chat-run-settlement.js';
 import { ProjectWorkspaceProvider } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { ProjectShareRouteIntent } from '#routes/w.$workspace.$project/project-share-action.js';
 import { ViewSettingsSyncHost } from '#routes/w.$workspace.$project/view-settings-sync-host.js';
 import { HomeFileManagerProvider, useFileManager } from '#hooks/use-file-manager.js';
+import { useModels } from '#hooks/use-models.js';
+import { useKernel } from '#hooks/use-kernel.js';
+import { useCookie } from '#hooks/use-cookie.js';
+import { cookieName } from '#constants/cookie.constants.js';
+import { isKernelAvailable } from '#constants/available-kernel-configurations.js';
+import { isKernelId } from '@taucad/types/constants';
 import { MonacoModelServiceProvider } from '#hooks/use-monaco-model-service.js';
 import { RevisionConflictChat } from '#routes/w.$workspace.$project/revision-conflict-chat.js';
 import { RevisionRestore } from '#routes/w.$workspace.$project/revision-restore.js';
 import { WorkbenchCheckoutRoot } from '#routes/w.$workspace.$project/workbench-checkout-root.js';
 import { RevisionOutcomes } from '#routes/w.$workspace.$project/revision-outcomes.js';
-import { ChatWorkspaceAuthorityProvider } from '#providers/chat-workspace-authority-provider.js';
+import {
+  ChatWorkspaceAuthorityProvider,
+  readRootedBridgeCapabilities,
+} from '#providers/chat-workspace-authority-provider.js';
+import {
+  createBrowserAgentHostClient,
+  createAgentHostClient,
+  readBrowserRunStoppability,
+  retainBrowserAgentHostProject,
+} from '#services/agent-host-client.js';
+import { createDaemonAgentHostTransport } from '#services/daemon-agent-host-client.js';
+import { daemonPlacementOf } from '#lib/agent-host-placement.js';
+import { dialAgentHost, agentHostClientConfig } from '#chat-clients/_internal/turn-body.js';
+import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
+import { useComputeReuseMode } from '#lib/compute-reuse-preference.js';
+import { useFeature } from '#flags/use-feature.js';
+import { ENV } from '#environment.config.js';
+import { createUiRuntimeConfig } from '#runtime/ui-runtime.config.js';
 import { useFlushOnClose } from '#hooks/use-flush-on-close.js';
 import { RevisionSaveShortcut } from '#routes/w.$workspace.$project/revision-save-shortcut.js';
 // Chat persistence + draft flush is handled centrally by `<GlobalChatFlushGuard>`
@@ -135,7 +157,17 @@ function ProjectSessionBinding({
   readonly isFocused: boolean;
   readonly shouldOpenFromTauCloud?: boolean;
 }): React.JSX.Element {
-  const { fileManagerRef } = useFileManager();
+  const { fileManagerRef, workerChangeChannel, workspace } = useFileManager();
+  const { defaultExecution, resolveModel } = useModels();
+  const { kernel: defaultKernel } = useKernel();
+  const [testingEnabled] = useCookie(cookieName.chatTestingEnabled, true);
+  const computeMode = useComputeReuseMode();
+  const nativeGeoSpec = useFeature('nativeGeoSpec');
+  const browserHostRelease = useRef<(() => void) | undefined>(undefined);
+  const choices = useRef({ defaultExecution, defaultKernel, testingEnabled, computeMode, nativeGeoSpec, resolveModel });
+  useEffect(() => {
+    choices.current = { defaultExecution, defaultKernel, testingEnabled, computeMode, nativeGeoSpec, resolveModel };
+  }, [defaultExecution, defaultKernel, testingEnabled, computeMode, nativeGeoSpec, resolveModel]);
   const { parameterService, projectRef, editorRef } = useProject();
   const client = useRevisionClientLifecycle();
   const revisionCommands = useRevisionCommands();
@@ -148,6 +180,155 @@ function ProjectSessionBinding({
   /* R4: why this project has no kernel, from the machine that owns its units. */
   const kernelRefusal = useSelector(projectRef, selectProjectKernelRefusal);
   const status = useRevisionClientStatus(client);
+  /* Every live project publishes one read connector, even without a focused chat. Each chat's persisted placement
+   * decides which owner log to read; opening an observer never issues Start or acquires an SDK session. */
+  useEffect(() => {
+    if (client === undefined || !viewsReady) {
+      return;
+    }
+    let connectorActive = true;
+    const connect = async (chatId: string) => {
+      const stored = await chatSessions.getChatHostSettings(chatId);
+      const {
+        defaultExecution: fallback,
+        defaultKernel: kernelFallback,
+        testingEnabled: tests,
+        computeMode: reuse,
+        nativeGeoSpec: nativeGeoSpecChoice,
+        resolveModel: resolve,
+      } = choices.current;
+      const execution = stored?.activeExecution ?? fallback;
+      const daemonHostId = daemonPlacementOf(execution);
+      if (daemonHostId !== undefined) {
+        return createAgentHostClient(
+          createDaemonAgentHostTransport(async () => dialAgentHost(daemonHostId, projectId)),
+        );
+      }
+      if (execution.kind !== 'tau') {
+        throw new Error(`Chat ${chatId} has no readable host placement.`);
+      }
+      const kernel =
+        stored?.activeKernel !== undefined && isKernelId(stored.activeKernel) && isKernelAvailable(stored.activeKernel)
+          ? stored.activeKernel
+          : kernelFallback;
+      const config = await getProjectFileSystemConfig(projectId);
+      if (config === undefined) {
+        throw new Error(`Project ${projectId} has no filesystem configuration.`);
+      }
+      const projectStorage =
+        config.backend === 'memory'
+          ? {
+              projectId: config.projectId,
+              backend: config.backend,
+              storageRootKey: config.storageRootKey,
+              providerBasePath: config.providerBasePath,
+            }
+          : config.backend === 'webaccess'
+            ? {
+                projectId: config.projectId,
+                backend: config.backend,
+                workspaceId: config.workspaceId,
+                providerBasePath: config.providerBasePath,
+              }
+            : { projectId: config.projectId, backend: config.backend, providerBasePath: config.providerBasePath };
+      await workspace.syncProjectRoots();
+      const openProjectRootBridge = () => {
+        const { openFileSystemBridge, rootDirectory } = fileManagerRef.getSnapshot().context;
+        if (openFileSystemBridge === undefined) {
+          throw new Error('The project filesystem bridge is unavailable.');
+        }
+        return openFileSystemBridge(rootDirectory, 'working-copy');
+      };
+      const capabilities = await readRootedBridgeCapabilities(openProjectRootBridge);
+      if (!capabilities.writable || !capabilities.durability) {
+        throw new Error('The project filesystem cannot hold a readable host log.');
+      }
+      const openRevisionSession = (kind: 'placement' | 'reader') => () =>
+        fileManagerRef.getSnapshot().context.openRevisionSessionPort?.(kind, projectId);
+      if (!connectorActive) {
+        throw new Error(`Project ${projectId}'s host connector closed before chat ${chatId} attached.`);
+      }
+      const options = {
+        openFileSystemBridge: openProjectRootBridge,
+        openProjectRootBridge,
+        openRevisionsPort: openRevisionSession('reader'),
+        openPlacementPort: openRevisionSession('placement'),
+        computeMode: reuse,
+        openComputeStorePort: () => {
+          const opener = fileManagerRef.getSnapshot().context.openComputeStorePort;
+          if (opener === undefined) {
+            throw new Error('The project compute authority is unavailable.');
+          }
+          return opener(projectId);
+        },
+        projectStorage,
+        durability: capabilities.durability,
+        authority: { projectId, workspaceId: 'live' },
+        gatewayBaseUrl: ENV.TAU_API_URL,
+        ...agentHostClientConfig({
+          agent: { profile: 'cad', execution, kernel, mode: 'agent', toolChoice: 'auto', testingEnabled: tests },
+          chatId,
+          resolvedModel: resolve(execution.model),
+        }),
+        runtimeConfig: createUiRuntimeConfig(ENV),
+        geoSpecEngine: nativeGeoSpecChoice ? 'native' : 'legacy',
+      } as const;
+      const hostClient = createBrowserAgentHostClient(options);
+      browserHostRelease.current ??= retainBrowserAgentHostProject(options);
+      return hostClient;
+    };
+    const unpublish = chatSessions.publishProjectHostConnector(projectId, connect, async (chatId) => {
+      const stored = await chatSessions.getChatHostSettings(chatId);
+      const execution = stored?.activeExecution ?? choices.current.defaultExecution;
+      const daemonHostId = daemonPlacementOf(execution);
+      if (daemonHostId !== undefined) {
+        try {
+          const channel = await dialAgentHost(daemonHostId, projectId);
+          channel.close();
+          return 'stoppable';
+        } catch {
+          return 'background-window';
+        }
+      }
+      return readBrowserRunStoppability(projectId, chatId);
+    });
+    return () => {
+      connectorActive = false;
+      unpublish();
+    };
+  }, [chatSessions, client, fileManagerRef, projectId, viewsReady, workspace]);
+  useEffect(
+    () => () => {
+      browserHostRelease.current?.();
+      browserHostRelease.current = undefined;
+    },
+    [projectId],
+  );
+  /* Fetch writes name only a foreign segment path. The projection owns the bytes and transcript; a local host
+   * log is still followed exclusively through its cursor. */
+  useEffect(() => {
+    if (workerChangeChannel === undefined) {
+      return;
+    }
+    const prefix = `/projects/${projectId}/.tau/chats/`;
+    const refresh = async (chatId: string): Promise<void> => {
+      try {
+        await chatSessions.refreshRemoteSegments(chatId, projectId);
+      } catch (error) {
+        console.warn('[ProjectSessionBinding] foreign chat log could not be read', chatId, error);
+      }
+    };
+    return workerChangeChannel.onFileWritten({
+      interestedIn: (path) => path.startsWith(prefix) && /\/events\/[^/]+\.jsonl$/.test(path),
+      handler: ({ path }) => {
+        const chatId = path.slice(prefix.length).split('/')[0];
+        if (chatId === undefined || !chatSessions.observedChatIdsOf(projectId).includes(chatId)) {
+          return;
+        }
+        void refresh(chatId);
+      },
+    });
+  }, [chatSessions, projectId, workerChangeChannel]);
   /* RV-W5b2 R2-1: an editor's conflict still being recorded keeps the project open, like a dirty tree. */
   const recording = useSyncExternalStore(
     subscribeEditorConflictRecords,
@@ -202,13 +383,16 @@ function ProjectSessionBinding({
       dirty: status.projectDirty,
       recording,
       pushed: sync.state === 'noRemote' || sync.state === 'backedUp',
-      sync: syncState,
-      /* R11: the branch the checkout is on gives `revision.line` its producer,
-       * so the `⎇ <branch>` chip has data instead of a permanent `onMain`. */
       pendingCount: sync.pendingCount,
+    });
+    /* The chats' `revision` region. R11: the branch the checkout is on gives `revision.line` its producer, so the
+     * `⎇ <branch>` chip has data instead of a permanent `onMain`. */
+    chatSessions.setRevisionFacts(projectId, {
+      dirty: status.projectDirty,
+      sync: syncState,
       ...(status.line.kind === 'unknown' ? {} : { branch: status.line.name }),
     });
-  }, [recording, session, status]);
+  }, [chatSessions, projectId, recording, session, status]);
 
   useEffect(() => {
     return registerProjectSessionServices(projectId, {
@@ -226,25 +410,11 @@ function ProjectSessionBinding({
         await client?.quiesce();
       },
       cancelRuns: async (chatIds) => {
-        await Promise.all(
-          chatIds.map(async (chatId) => {
-            const chat = chatSessions.get(chatId);
-            if (chat === undefined) {
-              throw new Error(`Chat ${chatId} is no longer attached to this project.`);
-            }
-            chatSessions.stopRun(chatId);
-            await waitFor(
-              chat.persistenceActorRef,
-              (state) => state.matches({ requestLifecycle: 'idle' }) && state.matches({ messagePersistence: 'idle' }),
-              { timeout: editorFlushTimeoutMilliseconds },
-            );
-          }),
-        );
+        const outcomes = await Promise.all(chatIds.map(async (chatId) => chatSessions.cancelProjectedRun(chatId)));
+        if (outcomes.includes('continuing')) {
+          throw new Error('A run changed holder and could not be stopped. Review the current Close plan.');
+        }
       },
-      /* The leases go with the root: `release()` retires every one this
-       * session's turns took, inside the flush above. Kept as its own step
-       * because a host whose leases outlive its tree has one to implement. */
-      releaseLeases: async () => undefined,
     });
   }, [chatSessions, client, editorRef, parameterService, projectId, projectRef]);
 
@@ -487,10 +657,8 @@ export function LiveProjectSessions({
   );
 }
 
-// Chat component - handles keyboard shortcuts. Terminal-run settlement is
-// wired up by `<ProjectChatRunSettlement>` once per chatId from the app-shell
-// `ChatSessionStore` (settlement is per-session, not per-route — see
-// `apps/ui/app/routes/w.$workspace.$project/project-chat-run-settlement.tsx`).
+// Chat component - handles keyboard shortcuts. A turn is settled by the host
+// that ran it, which appends the settlement row to the chat's log (W8 TS-S6).
 function Chat(): React.JSX.Element {
   return <ChatInterface />;
 }
@@ -503,10 +671,6 @@ function Chat(): React.JSX.Element {
  *   `<ActiveChatProvider>` boundary so both the chat history and its
  *   composer share the focused chat. `<ChatHistoryGate>` remains the
  *   focused-chat skeleton/error boundary inside that session.
- * - `<ProjectChatRunSettlement>` reads chat ids from the app-shell
- *   `ChatSessionStore` directly (no `<ActiveChatProvider>` dependency),
- *   so settlement persists across `focusedChatId` changes and across
- *   `ensureFocusedChatActor` retries.
  *
  * Persistence + draft `flushNow` is dispatched centrally by
  * `<GlobalChatFlushGuard>` (mounted in `apps/ui/app/root.tsx`) — every
@@ -524,7 +688,6 @@ function ChatWithProvider(): React.JSX.Element {
     <>
       {name ? <title>{name}</title> : null}
       {description ? <meta name='description' content={description} /> : null}
-      <ProjectChatRunSettlement />
       <Chat />
     </>
   );

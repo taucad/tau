@@ -679,6 +679,8 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
      * names, descriptions and schemas, and the list is read before any run
      * exists. */
     list: () => live.list(),
+    /* An answer names no checkout: every root's registry settles it through the same machine client (D5). */
+    answerApproval: async (answer) => live.answerApproval?.(answer),
     invoke: async (invocation) =>
       rootedRegistry(
         (invocation.runId === undefined ? undefined : options.checkouts?.get(invocation.runId)?.cwd) ??

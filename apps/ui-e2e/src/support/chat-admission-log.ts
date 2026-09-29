@@ -7,25 +7,29 @@
  * `expectLogInvariant` on it.
  *
  * The unit is the **attempt**, not the run (blueprint I1: one attempt, one
- * lease, one settlement; a run has one or more attempts). A resumable failure
- * is reopened by a `running` row, runs again under the same run id and settles
- * again, so a fold keyed on the run read the second attempt's rows as a
- * duplicate writer and a write into a settled ledger. The split and the
- * per-attempt clauses mirror the host's own legality fold — `runLedgerOf` and
- * `isHostLifecycleLegal` in `packages/agent-host/src/host/tau-agent-host.ts` —
- * rather than restating it differently.
+ * lease, one settlement; a run has one or more attempts). Which attempt a row
+ * belongs to is the chat ledger's answer (`foldChatLedger`, W3 CL-S9): this
+ * file keeps no copy of the reopen rule. The per-attempt clauses below are the
+ * suite's own, stricter oracle over what the host wrote.
  */
+import { emptyChatLedger, foldChatLedger } from '@taucad/agent-host';
+import type { ChatLedger } from '@taucad/agent-host';
 
-/** One durable record, as far as these rows read it. */
-export type LogRecord = Readonly<{ runId: string; type: string; state?: string; reason?: string }>;
+/** One durable record, as far as these rows read it; the ledger reads the whole row. */
+export type LogRecord = Readonly<{
+  runId: string;
+  type: string;
+  state?: string;
+  reason?: string;
+  revisionId?: string;
+  changedPaths?: readonly string[];
+}>;
 
 /** The three settlement records; an attempt records exactly one of them. */
 export const settlementTypes = new Set(['turn.finalized', 'turn.conflicted', 'turn.failed']);
 
-/*
- * `hostRunStateOfLifecycle`: `admitted`, `running` and `paused` are the states
- * an attempt passes through; every other lifecycle state ends it.
- */
+/* `admitted`, `running` and `paused` are the states an attempt passes through;
+ * every other lifecycle state ends it. */
 const endingStates = new Set(['completed', 'failed', 'cancelled']);
 
 /*
@@ -36,29 +40,21 @@ const endingStates = new Set(['completed', 'failed', 'cancelled']);
 const repeatableStates = new Set(['running', 'paused']);
 
 /**
- * Split one run's records into its attempts, oldest first.
- *
- * Mirrors `runLedgerOf`: a `running` row arriving when the attempt already
- * holds a settlement reopens the run and starts the next attempt. A settlement
- * that lands while the attempt is still executing closed its *lease*, not its
- * execution — the run still owes the log the record of how it ended, so that
- * record stays in the same attempt.
+ * Split one run's records into its attempts, oldest first, by the attempt the chat ledger places each row in.
  *
  * @param records - One run's records, in log order.
  * @returns Its attempts, each in log order.
  */
 export const attemptsOf = (records: readonly LogRecord[]): ReadonlyArray<readonly LogRecord[]> => {
   const attempts: LogRecord[][] = [[]];
-  let settled = false;
+  let ledger: ChatLedger = emptyChatLedger;
   for (const record of records) {
-    if (record.type === 'run.lifecycle' && record.state === 'running' && settled) {
+    ledger = foldChatLedger(ledger, [record]);
+    const attempt = ledger.runs[record.runId]?.attempt ?? 1;
+    while (attempts.length < attempt) {
       attempts.push([]);
-      settled = false;
     }
-    attempts.at(-1)!.push(record);
-    if (settlementTypes.has(record.type)) {
-      settled = true;
-    }
+    attempts[attempt - 1]!.push(record);
   }
   return attempts;
 };
@@ -125,9 +121,9 @@ const violationsOfAttempt = (records: readonly LogRecord[]): readonly string[] =
     reasons.push(`duplicate lifecycle rows: ${duplicates.join(', ')}`);
   }
 
-  /* Closed = ended AND settled (`isHostLifecycleLegal`). The only row legal
-   * after that is the `running` that reopens the run, and that row has already
-   * been split into the next attempt. */
+  /* Closed = ended AND settled (`run-lifecycle.legality.json`). The only row
+   * legal after that is the `running` that reopens the run, and the ledger has
+   * already placed that row in the next attempt. */
   let ended = false;
   let settled = false;
   for (const record of records) {

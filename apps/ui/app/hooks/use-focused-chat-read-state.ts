@@ -9,11 +9,10 @@ import { isDocumentActive } from '#services/chat-session-store.js';
 /**
  * Clears unread state only while the focused chat is actually visible to the user.
  *
- * The store is the one writer of unread (D9): `markViewed` clears the chat's
- * machine and the project's unread record together. The trigger is the chat's
- * `read` region, which the store restores from that record, or the record
- * itself before the machine has heard. A failure to read or write that
- * record is toasted here, once per project route.
+ * The store is the one writer of read receipts (D9, PV-S8): `markViewed` reads
+ * the chat through its newest attention row. The trigger is the store's own
+ * unread answer. A failure to read or write the project's record is toasted
+ * here, once per project route.
  */
 export function useFocusedChatReadState(): void {
   const { projectId, editorRef } = useProject();

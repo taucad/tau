@@ -3,14 +3,13 @@
  * draft machine must reach the record as a patch, and nothing else.
  */
 
-import { createActor } from 'xstate';
+import { createActor, createAsyncLogic } from 'xstate';
 import type { MyUIMessage } from '@taucad/chat';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { ComposerRecordPatch, ComposerRecordReadResult } from '#db/composer-record-store.js';
 import { composerRecordPaths, createComposerRecordStore } from '#db/composer-record-store.js';
 import { createComposerRecordActor, draftPersistenceFor } from '#hooks/composer-record.js';
-import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { composerRecordMachine } from '#machines/composer-record.machine.js';
 import { spyOnSend } from '#lib/xstate-test.utils.js';
 
@@ -35,12 +34,16 @@ describe('draftPersistenceFor', () => {
     const record = createActor(
       composerRecordMachine.provide({
         actors: {
-          readRecordActor: fromSafeAsync(async () => recordRead),
-          writePatchActor: fromSafeAsync(async ({ input }: { input: ComposerRecordPatch }) => {
-            writes.push(input);
+          readRecordActor: createAsyncLogic({ run: async () => recordRead }),
+          writePatchActor: createAsyncLogic({
+            run: async ({ input }: { input: ComposerRecordPatch }) => {
+              writes.push(input);
+            },
           }),
-          removeRecordActor: fromSafeAsync(async () => {
-            await unused().catch(() => undefined);
+          removeRecordActor: createAsyncLogic({
+            run: async () => {
+              await unused().catch(() => undefined);
+            },
           }),
         },
       }),

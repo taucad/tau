@@ -29,7 +29,7 @@ export const ChatErrorRateLimit = memo(function ({
   /** Seconds the gateway asked the client to wait, from its Retry-After header. */
   readonly retryAfterSeconds?: number;
 }): React.JSX.Element {
-  const { continueChat } = useChatActions();
+  const { continueChat, regenerate } = useChatActions();
   const heading = title ?? (resumable ? 'Rate limit reached' : 'Rate limit exceeded');
   const reason =
     description ??
@@ -63,7 +63,11 @@ export const ChatErrorRateLimit = memo(function ({
             // A resumable wait interrupted a turn the host still holds whole, so
             // this re-issues the one refused call; anything else dispatches the
             // turn afresh, which is what the label says.
-            continueChat();
+            if (resumable) {
+              continueChat();
+            } else {
+              regenerate();
+            }
           }}
         >
           {resumable ? <Play className='size-3.5' /> : <RefreshCcw className='size-3.5' />}

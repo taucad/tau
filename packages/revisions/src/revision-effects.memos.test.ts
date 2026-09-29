@@ -64,7 +64,6 @@ const fixture = async (files: Readonly<Record<string, string>>, completeChanges:
   const actors = createRevisionActors({
     port,
     projectId: 'project-1',
-    authorityEpoch: 'epoch-1',
     filesystem: async () => counted,
     completeChanges,
   });

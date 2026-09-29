@@ -2,11 +2,19 @@ import { mkdir, open, readFile, realpath, stat, unlink } from 'node:fs/promises'
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { FileHandle } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
+import { isMainThread } from 'node:worker_threads';
+import { acquireNodeAuthorityWriter, NodeAuthorityWriterError } from '@taucad/filesystem/backend/node';
+import type { NodeAuthorityWriter } from '@taucad/filesystem/backend/node';
 import { EventLogError } from '#log/event-log-error.js';
 import { createEventLogAppender } from '#log/event-log-appender.js';
 import type { EventLogAppender, EventLogStorage } from '#log/event-log-appender.js';
+import { parseEventLogBytes } from '#log/serialization.js';
+import type { AgentLogEvent } from '#log/event-types.js';
 import { chatAttachmentPath } from '#harness/session-record.js';
 import type { AttachmentReader } from '#harness/session-record.js';
+import { createChatStore, requireChatPathSegment } from '#launchers/chat-store.js';
+import type { ChatStore } from '#launchers/chat-store.js';
+import { createNodeLeadership } from '#launchers/node/node-leadership.js';
 
 /**
  * Read chat attachments from a workspace on the Node filesystem (D15).
@@ -33,7 +41,18 @@ export const createNodeAttachmentReader = (workspaceRoot: string): AttachmentRea
 export type NodeEventLogOptions = {
   /** Exact filesystem path for `.tau/chats/<chatId>/events.jsonl`. */
   readonly filePath: string;
+  /**
+   * `read` never creates the file or its directory and takes no lock: each read reads the file as it is (W6 RH-A18).
+   * `write` creates the file, syncs its directory once, and holds the chat's writer lock for the log's life.
+   */
+  readonly access: 'read' | 'write';
 };
+
+/** A read-only open: no handle, lock or writer is kept between reads. @public */
+export type EventLogReader = Pick<EventLogAppender, 'read' | 'close'>;
+
+/** A write open: the appender, whose `append` answers the end cursor. @public */
+export type EventLogWriter = EventLogAppender;
 
 // The log a lock was taken on, resolved through symlinks so two spellings of one log compare equal.
 const resolveLogPath = async (filePath: string): Promise<string> =>
@@ -74,6 +93,9 @@ const openLock = async (path: string): Promise<FileHandle | undefined> => {
   }
 };
 
+/* The legacy pid marker, kept as a courtesy for builds that honour only it until the desktop support window ends
+ * (CL-S11). Every takeover of a stale marker is verified after a settle window: a writer holding the kernel lock can
+ * still race one that holds none (a Darwin worker thread, an unsupported platform, an older build). */
 const acquireWriterLock = async (filePath: string): Promise<{ readonly handle: FileHandle; readonly path: string }> => {
   const path = `${filePath}.lock`;
   const logPath = await resolveLogPath(filePath);
@@ -100,10 +122,10 @@ const acquireWriterLock = async (filePath: string): Promise<{ readonly handle: F
     throw error;
   }
   if (tookOver) {
-    // Two takers can both unlink one stale lock, so both `wx` creates succeed and the earlier file is
-    // gone. Only the handle whose inode the path still names holds the lock; the other must stand
-    // down without unlinking (the path is the winner's now).
-    // ponytail: verify-after-settle narrows the race to sub-millisecond straggling (0/40 measured), not a proof — an OS advisory lock (flock) is the sound upgrade.
+    // Two takers can both unlink one stale lock, so both `wx` creates succeed and the earlier file is gone. Only the
+    // handle whose inode the path still names holds the lock; the other stands down without unlinking.
+    // ponytail: verify-after-settle narrows the race to sub-millisecond straggling (0/40 measured), not a proof; the
+    // kernel lock is the sound fence wherever the helper holds one.
     await sleep(200);
     const [mine, onDisk] = await Promise.all([handle.stat(), stat(path).catch(() => undefined)]);
     if (onDisk?.ino !== mine.ino) {
@@ -112,6 +134,33 @@ const acquireWriterLock = async (filePath: string): Promise<{ readonly handle: F
     }
   }
   return { handle, path };
+};
+
+/**
+ * The chat's kernel writer lock (EQ2): `lockf` on Darwin and `flock` on Linux on `authority.writer.lock` in the chat's
+ * directory, held for the log's life. It is per open file description, so a second writer in this process is refused,
+ * and the kernel releases it when the holder dies. Taken from a worker thread it does not hold on Darwin (the helper's
+ * child locks a description the worker does not keep), so a Darwin worker takes none. There, and on platforms the
+ * helper refuses, the pid marker is the only fence: advisory (CL-Q5), with each takeover verified after a settle window.
+ */
+const acquireKernelLock = async (filePath: string): Promise<NodeAuthorityWriter | undefined> => {
+  if (process.platform === 'darwin' && !isMainThread) {
+    // Owed to the filesystem owners (RV8-F3): until the helper holds from a worker, the pid marker fences alone.
+    return undefined;
+  }
+  try {
+    return await acquireNodeAuthorityWriter({ authorityRoot: dirname(filePath) });
+  } catch (error) {
+    if (error instanceof NodeAuthorityWriterError && error.code === 'AUTHORITY_ALREADY_OWNED') {
+      throw new EventLogError('WRITER_LOCKED', `Event log "${filePath}" already has an active Node writer.`, {
+        cause: error,
+      });
+    }
+    if (error instanceof NodeAuthorityWriterError && error.code === 'AUTHORITY_LOCK_UNSUPPORTED') {
+      return undefined;
+    }
+    throw error;
+  }
 };
 
 const releaseWriterLock = async (lock: { readonly handle: FileHandle; readonly path: string }): Promise<void> => {
@@ -127,24 +176,65 @@ const releaseWriterLock = async (lock: { readonly handle: FileHandle; readonly p
   }
 };
 
-/**
- * Open a Node filesystem event log using append mode and an fsync per line.
- *
- * Parent directories are created when absent. A torn final line is truncated
- * before the first new append so later records cannot attach to corrupt bytes.
- *
- * @param options - Exact event-log file path owned by the host.
- * @returns An initialized, leader-epoch-idempotent event-log appender.
- * @public
- */
-export const createNodeEventLog = async (options: NodeEventLogOptions): Promise<EventLogAppender> => {
-  await mkdir(dirname(options.filePath), { recursive: true });
-  const lock = await acquireWriterLock(options.filePath);
+const readIfPresent = async (filePath: string): Promise<Uint8Array<ArrayBuffer>> => {
+  try {
+    return new Uint8Array(await readFile(filePath));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return new Uint8Array(new ArrayBuffer(0));
+    }
+    throw error;
+  }
+};
+
+/** Sync a directory so a file created in it survives power loss (L4 D-107). */
+const syncDirectory = async (directory: string): Promise<void> => {
+  const handle = await open(directory, 'r');
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+};
+
+const openWriter = async (filePath: string): Promise<EventLogAppender> => {
+  await mkdir(dirname(filePath), { recursive: true });
+  const kernelLock = await acquireKernelLock(filePath);
+  const releaseKernelLock = async (): Promise<void> => kernelLock?.release();
+  let lock: { readonly handle: FileHandle; readonly path: string };
+  try {
+    lock = await acquireWriterLock(filePath);
+  } catch (error) {
+    await releaseKernelLock();
+    throw error;
+  }
+  const releaseLocks = async (): Promise<void> => {
+    try {
+      await releaseWriterLock(lock);
+    } finally {
+      await releaseKernelLock();
+    }
+  };
   let file: FileHandle;
   try {
-    file = await open(options.filePath, 'a+');
+    const created = await open(filePath, 'wx').then(
+      async (handle) => {
+        await handle.close();
+        return true;
+      },
+      (error: unknown) => {
+        if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+          return false;
+        }
+        throw error;
+      },
+    );
+    if (created) {
+      await syncDirectory(dirname(filePath));
+    }
+    file = await open(filePath, 'a+');
   } catch (error) {
-    await releaseWriterLock(lock);
+    await releaseLocks();
     throw error;
   }
   const storage: EventLogStorage = {
@@ -170,11 +260,17 @@ export const createNodeEventLog = async (options: NodeEventLogOptions): Promise<
       await file.truncate(size);
       await file.sync();
     },
+    size: async () => {
+      const stats = await file.stat();
+      return stats.size;
+    },
+    // The kernel lock is held for the log's life, so every section is already exclusive.
+    exclusive: async (section) => section(),
     close: async () => {
       try {
         await file.close();
       } finally {
-        await releaseWriterLock(lock);
+        await releaseLocks();
       }
     },
   };
@@ -185,8 +281,78 @@ export const createNodeEventLog = async (options: NodeEventLogOptions): Promise<
     try {
       await file.close();
     } finally {
-      await releaseWriterLock(lock);
+      await releaseLocks();
     }
     throw error;
   }
+};
+
+/**
+ * Open a Node filesystem event log.
+ *
+ * A write open holds the chat's kernel writer lock for the log's life (a writer that finds it held is refused
+ * `WRITER_LOCKED`), appends with an fsync per line, and syncs the directory once after creating the file. A torn final
+ * line is repaired by the first append, never at open. Every append is fenced: it lands only if the log is still the
+ * log this writer read (`LOG_FENCED`, D5). A read open creates nothing, takes no lock and keeps no handle.
+ *
+ * @param options - Exact event-log file path and access mode.
+ * @returns A reader or an initialized, leader-epoch-idempotent writer.
+ * @public
+ */
+export function createNodeEventLog(options: NodeEventLogOptions & { readonly access: 'read' }): Promise<EventLogReader>;
+export function createNodeEventLog(
+  options: NodeEventLogOptions & { readonly access: 'write' },
+): Promise<EventLogWriter>;
+/** Implements both access overloads of {@link createNodeEventLog}. @public */
+export async function createNodeEventLog(options: NodeEventLogOptions): Promise<EventLogReader | EventLogWriter> {
+  if (options.access === 'write') {
+    return openWriter(options.filePath);
+  }
+  let closed = false;
+  return {
+    read: async (): Promise<readonly AgentLogEvent[]> => {
+      if (closed) {
+        throw new EventLogError('LOG_CLOSED', 'The event log reader is closed.');
+      }
+      return parseEventLogBytes(await readIfPresent(options.filePath)).events;
+    },
+    close: async () => {
+      closed = true;
+    },
+  };
+}
+
+/** Options for {@link createNodeChatStore}. @public */
+export type NodeChatStoreOptions = Readonly<{
+  /** Absolute workspace root; each chat's log lives at `.tau/chats/<chatId>/events.jsonl` under it. */
+  workspaceRoot: string;
+}>;
+
+/**
+ * The Node half of a launcher (W6 RH-S2): chat logs under a workspace directory, written under the chat's kernel lock,
+ * with one process leading every chat it opens. A read never creates the chat's directory, file or lock (RH-R1).
+ *
+ * @param options - The workspace root.
+ * @returns The opaque store `createAgentLauncher` takes.
+ * @public
+ *
+ * @example <caption>One launcher over a workspace</caption>
+ * ```typescript
+ * import { createNodeChatStore } from '@taucad/agent-host/node';
+ *
+ * const chats = createNodeChatStore({ workspaceRoot: process.cwd() });
+ * ```
+ */
+export const createNodeChatStore = (options: NodeChatStoreOptions): ChatStore => {
+  const filePath = (chatId: string): string =>
+    join(options.workspaceRoot, '.tau', 'chats', requireChatPathSegment(chatId), 'events.jsonl');
+  return createChatStore({
+    platform: 'node',
+    /* `appendFile` then `sync()` per append, and the directory synced once at creation (W3 §11). */
+    durability: 'exclusive-append',
+    attachments: createNodeAttachmentReader(options.workspaceRoot),
+    readBytes: async (chatId) => readIfPresent(filePath(chatId)),
+    openWriter: async (chatId) => createNodeEventLog({ filePath: filePath(chatId), access: 'write' }),
+    leadership: createNodeLeadership,
+  });
 };

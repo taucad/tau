@@ -10,6 +10,7 @@ const baseConfig: UserConfig = {
     'src/revision-projection.ts',
     'src/project-revisions.machine.ts',
     'src/turn.machine.ts',
+    'src/turn-placement.ts',
     'src/checkout.machine.ts',
     'src/restore.machine.ts',
     'src/checkouts.machine.ts',

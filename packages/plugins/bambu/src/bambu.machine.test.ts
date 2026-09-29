@@ -13,7 +13,7 @@ vi.mock('#bambu.host.js', () => {
 });
 
 // Importing the provider module is not the behavior under test; keep it outside the per-test budget.
-const { bambuMachine } = await import('#bambu.machine.js');
+const { bambuMachine, bambuSubmissionConfiguration } = await import('#bambu.machine.js');
 
 describe('bambuMachine', () => {
   it('declares diameters as positive millimetre quantities rather than editable metadata objects', async () => {
@@ -28,6 +28,15 @@ describe('bambuMachine', () => {
         'x-tau-space': 'linear',
       });
     }
+  });
+  it('should map filaments to AMS trays 0–15 or the external spool 254, and nothing between', () => {
+    const { amsMapping, expectedMaterials } = bambuSubmissionConfiguration.schema.shape;
+    expect(amsMapping.safeParse([254]).success).toBe(true);
+    expect(amsMapping.safeParse([15, -1]).success).toBe(true);
+    expect(amsMapping.safeParse([16]).success).toBe(false);
+    expect(amsMapping.safeParse([255]).success).toBe(false);
+    expect(expectedMaterials.safeParse([{ slot: 254, materialId: 'PETG' }]).success).toBe(true);
+    expect(expectedMaterials.safeParse([{ slot: -1, materialId: 'PETG' }]).success).toBe(false);
   });
   it('should keep host dependencies lazy until an explicit operation', async () => {
     expect(loaded.count).toBe(0);

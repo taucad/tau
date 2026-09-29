@@ -8,8 +8,7 @@
  * Finding 10; T5 defect 4).
  */
 import { expect } from 'vitest';
-import { agentHostRefusalCodes } from '@taucad/agent-host';
-import type { AgentHostRefusalCode } from '@taucad/agent-host';
+import type { RefusalCode } from '@taucad/agent-host/wire';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 import type { GatewayScriptTurn } from '#support/agent-host-gateway-script.js';
@@ -80,11 +79,24 @@ export const expectLogInvariant = async (chatId: string, expected: number | Chat
     });
 };
 
-/* The host owns the union, so a new code is excluded here by construction. */
-export const admissionRefusalCodes = agentHostRefusalCodes;
+/* The admission refusals, named from the one registry, so a renamed or dropped code fails typecheck here (D11). */
+export const admissionRefusalCodes = [
+  'CHAT_RUN_LIVE',
+  'RUN_ID_TAKEN',
+  'RESUME_UNAVAILABLE',
+  'RUN_ABANDONED',
+  'NO_RUN_ADMITTED',
+  'HISTORY_PREFIX_INVALID',
+  'SETTLEMENT_CONFLICT',
+  'SETTLEMENT_WITHOUT_RUN',
+  'TURN_ALREADY_LEASED',
+  'LEADERSHIP_LOST',
+  'RUN_UNREADABLE',
+  'HISTORY_INVALID',
+] as const satisfies readonly RefusalCode[];
 
 /** One way an admission is refused. */
-export type AdmissionRefusalCode = AgentHostRefusalCode;
+export type AdmissionRefusalCode = (typeof admissionRefusalCodes)[number];
 
 /*
  * W1/W5: refusals that still travel as prose only. Each ended a turn as *Work

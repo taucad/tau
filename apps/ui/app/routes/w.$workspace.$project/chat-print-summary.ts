@@ -313,14 +313,17 @@ export const shortDigest = (digest: string): string => {
 };
 
 /**
- * The material slot as the printer labels it: unit letter plus slot number ("A1").
+ * The material slot as the printer labels it: unit letter plus slot number ("A1"), or "Ext" for the external spool.
  *
  * @param slot - The zero-based protocol slot.
  * @param manifest - The machine's material system, when known.
- * @returns "A1" for a multi-unit system, "Slot 1" otherwise.
+ * @returns "A1" for a multi-unit system, "Ext" for its external spool, "Slot 1" otherwise.
  * @public
  */
 export const materialSlotLabel = (slot: number, manifest: MachineManifest | undefined): string => {
+  if (slot === manifest?.materialSystem.externalSpoolSlot) {
+    return 'Ext';
+  }
   const slotsPerUnit = manifest?.materialSystem.slotsPerUnit ?? 0;
   if (slotsPerUnit <= 0) {
     return `Slot ${String(slot + 1)}`;
@@ -328,3 +331,18 @@ export const materialSlotLabel = (slot: number, manifest: MachineManifest | unde
   const unit = Math.floor(slot / slotsPerUnit);
   return `${String.fromCodePoint(65 + unit)}${String((slot % slotsPerUnit) + 1)}`;
 };
+
+/**
+ * Where a material sits, for a sentence: "in A2 and A1", or "on the external spool".
+ *
+ * @param slots - The protocol slots, in the order the print names them.
+ * @param manifest - The machine's material system, when known.
+ * @returns The phrase that follows "PLA is loaded".
+ * @public
+ */
+export const materialSlotPlace = (slots: readonly number[], manifest: MachineManifest | undefined): string =>
+  slots.length === 1 && slots[0] === manifest?.materialSystem.externalSpoolSlot
+    ? 'on the external spool'
+    : `in ${new Intl.ListFormat('en', { type: 'conjunction' }).format(
+        slots.map((slot) => materialSlotLabel(slot, manifest)),
+      )}`;

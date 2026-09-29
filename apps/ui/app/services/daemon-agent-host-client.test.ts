@@ -1,23 +1,16 @@
 // @vitest-environment node
-import { describe, expect, it, vi } from 'vitest';
-import type {
-  AgentChannelClient,
-  AgentChannelCommand,
-  AgentChannelEvent,
-  AgentChannelLiveEvent,
-  AgentChannelRevisionEvent,
-  AgentChannelResponse,
-  HostRunSnapshot,
-} from '@taucad/agent-host';
+import { describe, expect, it } from 'vitest';
+import type { AgentChannelClient, AgentLogEvent, HostRunSnapshot } from '@taucad/agent-host';
+import type { CommandAnswer, HostCommand, ReadRequest } from '@taucad/agent-host/wire';
 import { createAgentHostClient } from '#services/agent-host-client.js';
 import { createDaemonAgentHostTransport } from '#services/daemon-agent-host-client.js';
 
 type FakeChannel = AgentChannelClient & {
-  readonly seen: AgentChannelCommand[];
-  emit(event: AgentChannelEvent): void;
-  /** Durable-event listeners currently attached; `emit` before one reaches nobody. */
-  listeners(): number;
-  kill(): void;
+  readonly commands: HostCommand[];
+  readonly reads: ReadRequest[];
+  append(row: AgentLogEvent): void;
+  /** Reads parked on the log's end right now. */
+  parked(): number;
 };
 
 const snapshotFor = (chatId: string, runId: string, state: HostRunSnapshot['state']): HostRunSnapshot => ({
@@ -28,137 +21,114 @@ const snapshotFor = (chatId: string, runId: string, state: HostRunSnapshot['stat
   messages: [],
 });
 
-const fakeChannel = (options: { readonly hold?: Promise<void> } = {}): FakeChannel => {
-  const seen: AgentChannelCommand[] = [];
-  const closeHandlers = new Set<(reason: { origin: 'local' | 'remote' | 'timeout'; message: string }) => void>();
-  const eventSinks = new Set<(event: AgentChannelEvent) => void>();
-  const wakers = new Set<() => void>();
-  let dead = false;
-  const refuseIfDead = (): void => {
-    if (dead) {
-      throw Object.assign(new Error('closed'), { code: 'CHANNEL_CLOSED' });
-    }
+const fakeChannel = (answer?: (command: HostCommand) => CommandAnswer | undefined): FakeChannel => {
+  const commands: HostCommand[] = [];
+  const reads: ReadRequest[] = [];
+  const rows: AgentLogEvent[] = [];
+  const waiters = new Set<() => void>();
+  const empty = async function* (): AsyncGenerator<never> {
+    yield* [];
   };
-  const waitForHold = async (signal?: AbortSignal): Promise<void> => {
-    if (!options.hold) {
-      return;
-    }
-    await Promise.race([
-      options.hold,
-      new Promise<never>((_resolve, reject) => {
-        signal?.addEventListener(
-          'abort',
-          () => {
-            reject(new Error('Read aborted.'));
-          },
-          { once: true },
-        );
-      }),
-    ]);
-  };
-
-  const stream = <Event>(sinks: Set<(event: Event) => void>, signal?: AbortSignal): AsyncIterable<Event> => {
-    const pending: Event[] = [];
-    let wake = Promise.withResolvers<void>();
-    const sink = (event: Event): void => {
-      pending.push(event);
-      wake.resolve();
-    };
-    sinks.add(sink);
-    /* A dead channel ends its listens, exactly as `@taucad/rpc` does: a *remote*
-     * close pushes the end sentinel into every sink rather than failing it. */
-    const waker = (): void => {
-      wake.resolve();
-    };
-    wakers.add(waker);
-    signal?.addEventListener(
-      'abort',
-      () => {
-        sinks.delete(sink);
-        wakers.delete(waker);
-        wake.resolve();
-      },
-      { once: true },
-    );
-    return {
-      async *[Symbol.asyncIterator]() {
-        // oxlint-disable-next-line no-unmodified-loop-condition -- the abort listener and `kill` above flip these.
-        while ((signal === undefined || !signal.aborted) && !dead) {
-          // oxlint-disable-next-line no-await-in-loop -- one wake per delivered batch.
-          await wake.promise;
-          wake = Promise.withResolvers<void>();
-          yield* pending.splice(0);
-        }
-      },
-    };
-  };
-
   return {
-    seen,
-    emit: (event) => {
-      for (const sink of eventSinks) {
-        sink(event);
+    commands,
+    reads,
+    append: (row) => {
+      rows.push(row);
+      for (const wake of waiters) {
+        wake();
       }
     },
-    listeners: () => eventSinks.size,
-    kill: () => {
-      dead = true;
-      for (const waker of wakers) {
-        waker();
+    parked: () => waiters.size,
+    execute: async ({ signal: _signal, ...command }) => {
+      commands.push(command);
+      const scripted = answer?.(command);
+      if (scripted) {
+        return scripted;
       }
-      wakers.clear();
-      for (const handler of closeHandlers) {
-        handler({ origin: 'remote', message: 'The agent host closed this connection.' });
+      if (command.type === 'attach') {
+        return {
+          commandId: command.commandId,
+          generation: 1,
+          status: 'applied',
+          effect: 'not-applied',
+          details: {
+            snapshot: snapshotFor(command.payload.chatId, 'run-1', 'completed'),
+            takeover: false,
+            endCursor: 0,
+          },
+        };
       }
-      closeHandlers.clear();
+      return { commandId: command.commandId, generation: 1, status: 'applied', effect: 'durable', cursor: 0 };
     },
-    execute: async (command: AgentChannelCommand, signal?: AbortSignal): Promise<AgentChannelResponse> => {
-      seen.push(command);
-      /* Checked on both sides of the hold: a wire that dies with a command in
-       * flight is the window a re-dial has to cover. */
-      refuseIfDead();
-      await waitForHold(signal);
-      refuseIfDead();
-      if (command.type === 'tail' || command.type === 'attach') {
-        const batch = { cursor: command.cursor, nextCursor: command.cursor, endCursor: command.cursor, events: [] };
-        return command.type === 'attach'
-          ? {
-              type: 'attach',
-              chatId: command.chatId,
-              batch,
-              leadership: { role: 'leader', generation: 'daemon-1' },
-              snapshot: snapshotFor(command.chatId, 'run-1', 'completed'),
-              takeover: false,
-            }
-          : { type: 'tail', chatId: command.chatId, batch };
+    read: async ({ signal, ...request }) => {
+      reads.push(request);
+      // A long poll: parked until a row exists past the cursor, or the reader lets go (SC-R14).
+      const released = (): boolean => signal?.aborted === true;
+      while (rows.length <= request.cursor && !released()) {
+        // oxlint-disable-next-line no-await-in-loop -- one park per append.
+        await new Promise<void>((resolve) => {
+          const wake = (): void => {
+            waiters.delete(wake);
+            resolve();
+          };
+          waiters.add(wake);
+          signal?.addEventListener('abort', wake, { once: true });
+        });
       }
-      const runId = command.type === 'resume' ? 'resumed-run' : command.runId;
-      return { type: 'result', operation: command.type, snapshot: snapshotFor(command.chatId, runId, 'completed') };
+      const events = rows.slice(request.cursor, request.cursor + request.limit);
+      return {
+        status: 'batch',
+        chatId: request.chatId,
+        cursor: request.cursor,
+        nextCursor: request.cursor + events.length,
+        endCursor: rows.length,
+        events,
+      };
     },
-    events: (signal) => stream<AgentChannelEvent>(eventSinks, signal),
-    liveEvents: (signal) => stream<AgentChannelLiveEvent>(new Set(), signal),
-    revisionEvents: (signal) => stream<AgentChannelRevisionEvent>(new Set(), signal),
-    onClose: (handler) => {
-      closeHandlers.add(handler);
-      return () => closeHandlers.delete(handler);
-    },
-    close: () => {
-      dead = true;
-    },
+    liveEvents: () => empty(),
+    revision: async () => ({ result: null, status: null }),
+    revisionEvents: () => empty(),
+    onClose: () => () => undefined,
+    close: () => undefined,
   };
 };
 
 describe('createDaemonAgentHostTransport', () => {
-  it('projects a browser admission onto the T0 vocabulary without the daemon-owned fields', async () => {
+  it('should send a browser admission as one keyed start without the daemon-owned fields', async () => {
     const channel = fakeChannel();
     const client = createAgentHostClient(createDaemonAgentHostTransport(channel));
 
     await expect(
-      client.start({
+      client.hostCommand({
+        type: 'start',
+        commandId: 'gesture-start-1',
+        payload: {
+          chatId: 'chat-1',
+          runId: 'run-1',
+          trigger: 'submit',
+          message: { id: 'user-1', role: 'user', content: 'Build it.' },
+          config: {
+            systemPrompt: 'admission prompt',
+            systemPromptBlocks: [
+              { type: 'text', text: 'static' },
+              { type: 'text', text: 'dynamic' },
+            ],
+            model: { id: 'fixture-model', providerKind: 'anthropic', contextWindow: 200_000 },
+            toolChoice: 'auto',
+            allowedTools: ['create_file'],
+          },
+        },
+      }),
+    ).resolves.toMatchObject({ commandId: 'gesture-start-1', status: 'applied' });
+
+    expect(channel.commands.at(0)).toEqual({
+      type: 'start',
+      commandId: 'gesture-start-1',
+      payload: {
+        trigger: 'submit',
         chatId: 'chat-1',
         runId: 'run-1',
-        trigger: 'submit',
-        message: 'Build it.',
+        message: { id: 'user-1', role: 'user', content: 'Build it.' },
         config: {
           systemPrompt: 'admission prompt',
           systemPromptBlocks: [
@@ -168,272 +138,177 @@ describe('createDaemonAgentHostTransport', () => {
           model: { id: 'fixture-model', providerKind: 'anthropic', contextWindow: 200_000 },
           toolChoice: 'auto',
           allowedTools: ['create_file'],
-          // The daemon assembles its own tool registry; this must not travel.
-          testingEnabled: true,
         },
-      }),
-    ).resolves.toMatchObject({ runId: 'run-1', state: 'completed' });
-
-    const start = channel.seen.at(0);
-    expect(start).toEqual({
-      type: 'start',
-      trigger: 'submit',
-      chatId: 'chat-1',
-      runId: 'run-1',
-      /* oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- `expect.any` is typed `any` by vitest. */
-      message: { id: expect.any(String), role: 'user', content: 'Build it.' },
-      config: {
-        systemPrompt: 'admission prompt',
-        systemPromptBlocks: [
-          { type: 'text', text: 'static' },
-          { type: 'text', text: 'dynamic' },
-        ],
-        model: { id: 'fixture-model', providerKind: 'anthropic', contextWindow: 200_000 },
-        toolChoice: 'auto',
-        allowedTools: ['create_file'],
       },
     });
+    expect(channel.commands.map((command) => command.type)).toEqual(['start']);
     await client.close();
-    // Teardown is local: a daemon outlives every page that attached to it.
-    expect(channel.seen.some((command) => (command as { type: string }).type === 'close')).toBe(false);
   });
 
-  it('carries the approval round trip and the durable stream unchanged', async () => {
+  it('should carry the external agent selector in config.agent (drift 2)', async () => {
     const channel = fakeChannel();
     const client = createAgentHostClient(createDaemonAgentHostTransport(channel));
-    const events: unknown[] = [];
-    const unsubscribe = client.subscribe((chatId, event) => {
-      events.push({ chatId, type: event.type });
+
+    await client.hostCommand({
+      type: 'start',
+      commandId: 'gesture-agent-1',
+      payload: {
+        chatId: 'chat-1',
+        runId: 'run-1',
+        trigger: 'submit',
+        message: { id: 'user-1', role: 'user', content: 'Build it.' },
+        config: { agent: { kind: 'acp', id: 'claude-code' }, systemPrompt: 'CAD prompt', toolChoice: 'auto' },
+      },
     });
 
-    await client.resolveInterrupt('chat-1', 'run-1', { interruptId: 'approval-1', outcome: 'approved' });
-    expect(channel.seen.at(-1)).toEqual({
+    expect(channel.commands.at(0)?.payload).toMatchObject({
+      config: { agent: { kind: 'acp', id: 'claude-code' }, systemPrompt: 'CAD prompt', toolChoice: 'auto' },
+    });
+    expect(channel.commands.at(0)?.payload).not.toHaveProperty('agent');
+    await client.close();
+  });
+
+  /* W0.3 (L3 D3). A reattached page knows its run only from `attach`, and
+   * `cancel` found no chat for it: `RUN_NOT_FOUND`, which the transport
+   * swallowed, so Stop never reached the host. */
+  it('should cancel a run it only attached to', async () => {
+    const channel = fakeChannel();
+    const client = createAgentHostClient(createDaemonAgentHostTransport(channel));
+
+    await client.hostCommand({
+      type: 'attach',
+      commandId: 'attach-1',
+      payload: { chatId: 'chat-attached' },
+    });
+    await expect(
+      client.hostCommand({
+        type: 'cancel',
+        commandId: 'stop-1',
+        payload: { chatId: 'chat-attached', runId: 'run-1' },
+      }),
+    ).resolves.toMatchObject({ status: 'applied' });
+
+    expect(channel.commands.find((command) => command.type === 'cancel')).toEqual({
+      type: 'cancel',
+      commandId: 'stop-1',
+      payload: { chatId: 'chat-attached', runId: 'run-1' },
+    });
+    await client.close();
+  });
+
+  it('should mint a new key for every gesture', async () => {
+    const channel = fakeChannel();
+    const client = createAgentHostClient(createDaemonAgentHostTransport(channel));
+
+    await client.hostCommand({
       type: 'resolve-interrupt',
-      chatId: 'chat-1',
-      runId: 'run-1',
-      interruptId: 'approval-1',
-      outcome: 'approved',
-    });
-
-    channel.emit({
-      chatId: 'chat-1',
-      event: {
-        version: 1,
-        type: 'interrupt.recorded',
-        leaderEpoch: 'daemon-1',
-        sequence: 3,
-        recordedAt: '2026-09-02T00:00:00.000Z',
+      commandId: 'approval-click-1',
+      payload: {
+        chatId: 'chat-1',
         runId: 'run-1',
         interruptId: 'approval-1',
-        phase: 'requested',
-        reason: 'Write main.scad?',
+        outcome: 'approved',
       },
     });
-    await expect.poll(() => events).toEqual([{ chatId: 'chat-1', type: 'interrupt.recorded' }]);
+    await client.hostCommand({
+      type: 'resolve-interrupt',
+      commandId: 'approval-click-2',
+      payload: {
+        chatId: 'chat-1',
+        runId: 'run-1',
+        interruptId: 'approval-2',
+        outcome: 'denied',
+      },
+    });
 
-    unsubscribe();
+    const resolutions = channel.commands.filter((command) => command.type === 'resolve-interrupt');
+    expect(resolutions.map((command) => command.payload)).toEqual([
+      { chatId: 'chat-1', runId: 'run-1', interruptId: 'approval-1', outcome: 'approved' },
+      { chatId: 'chat-1', runId: 'run-1', interruptId: 'approval-2', outcome: 'denied' },
+    ]);
+    expect(new Set(resolutions.map((command) => command.commandId)).size).toBe(2);
     await client.close();
   });
 
-  it('refuses a command on a dead channel with a typed reason instead of hanging', async () => {
+  it('should pull durable rows with one outstanding bounded read per chat', async () => {
     const channel = fakeChannel();
     const client = createAgentHostClient(createDaemonAgentHostTransport(channel));
-    channel.kill();
-
-    await expect(client.resume('chat-1')).rejects.toMatchObject({ code: 'HOST_DISCONNECTED' });
-    await client.close();
-  });
-});
-
-const logEvent = (sequence: number): AgentChannelEvent => ({
-  chatId: 'chat-1',
-  event: {
-    version: 1,
-    type: 'run.lifecycle',
-    leaderEpoch: 'daemon-1',
-    sequence,
-    recordedAt: '2026-09-03T00:00:00.000Z',
-    runId: 'run-1',
-    state: sequence === 1 ? 'running' : 'completed',
-  },
-});
-
-/**
- * A relayed channel does not outlive its relay session, and the run does not
- * end when it dies: the daemon keeps going (always-on semantics) and the page
- * must rejoin rather than render a card. The transport owns the wire, so the
- * transport heals it — one client, N channels (W4 ruling 6), and no consumer
- * above here learns that the socket was replaced.
- */
-describe('createDaemonAgentHostTransport re-dial', () => {
-  it('re-dials a dead channel and keeps the one projection running', async () => {
-    const channels: FakeChannel[] = [];
-    const client = createAgentHostClient(
-      createDaemonAgentHostTransport(
-        async () => {
-          const next = fakeChannel();
-          channels.push(next);
-          return next;
-        },
-        { redialBackoff: 0 },
-      ),
-    );
     const seen: number[] = [];
-    const unsubscribe = client.subscribe((_chatId, event) => {
+    const unsubscribe = client.subscribe({ chatId: 'chat-1', cursor: 0 }, (_chatId, event) => {
       seen.push(event.sequence);
     });
 
-    await expect.poll(() => channels[0]?.listeners()).toBe(1);
-    channels[0]?.emit(logEvent(1));
-    await expect.poll(() => seen).toEqual([1]);
-
-    channels[0]?.kill();
-
-    // The live stream is the eager trigger: the dead wire is replaced under it.
-    await expect.poll(() => channels[1]?.listeners()).toBe(1);
-    channels[1]?.emit(logEvent(2));
+    await expect.poll(() => channel.parked()).toBe(1);
+    const row = (sequence: number): AgentLogEvent => ({
+      version: 1,
+      type: 'run.lifecycle',
+      leaderEpoch: 'daemon-1',
+      sequence,
+      recordedAt: '2026-09-03T00:00:00.000Z',
+      runId: 'run-1',
+      state: 'running',
+    });
+    channel.append(row(1));
+    channel.append(row(2));
     await expect.poll(() => seen).toEqual([1, 2]);
+    await expect.poll(() => channel.parked()).toBe(1);
 
-    // And the projection's own cursor read runs on the healed wire, once.
-    await expect(client.attach({ chatId: 'chat-1', cursor: 7, limit: 16 })).resolves.toMatchObject({ cursor: 7 });
-    expect(channels[1]?.seen.filter((command) => command.type === 'attach')).toHaveLength(1);
-
+    expect(channel.reads.map((read) => read.cursor)).toEqual([0, 2]);
+    expect(channel.reads.every((read) => read.limit === 16 && read.maxBytes === 1_048_576)).toBe(true);
     unsubscribe();
     await client.close();
   });
 
-  it('replays a read that the wire died under, on the channel that replaced it', async () => {
-    const hold = Promise.withResolvers<void>();
-    const channels: FakeChannel[] = [];
-    const client = createAgentHostClient(
-      createDaemonAgentHostTransport(
-        async () => {
-          const next = fakeChannel(channels.length === 0 ? { hold: hold.promise } : {});
-          channels.push(next);
-          return next;
-        },
-        { redialBackoff: 0 },
-      ),
-    );
-
-    const attached = client.attach({ chatId: 'chat-1', cursor: 4, limit: 16 });
-    await expect.poll(() => channels[0]?.seen.length).toBe(1);
-    channels[0]?.kill();
-    hold.resolve();
-
-    await expect(attached).resolves.toMatchObject({ cursor: 4 });
-    expect(channels).toHaveLength(2);
-    expect(channels[1]?.seen).toEqual([{ type: 'attach', chatId: 'chat-1', cursor: 4, limit: 16 }]);
-    await client.close();
-  });
-
-  it('should re-dial a silent channel after a read deadline', async () => {
-    const channels: FakeChannel[] = [];
-    const client = createAgentHostClient(
-      createDaemonAgentHostTransport(
-        async () => {
-          const channel = fakeChannel(channels.length === 0 ? { hold: Promise.withResolvers<void>().promise } : {});
-          channels.push(channel);
-          return channel;
-        },
-        { redialBackoff: 0 },
-      ),
-      { commandTimeout: 10 },
-    );
-
-    await expect(client.attach({ chatId: 'chat-1', cursor: 4, limit: 16 })).rejects.toMatchObject({
-      code: 'COMMAND_TIMEOUT',
-    });
-    await expect(client.attach({ chatId: 'chat-1', cursor: 4, limit: 16 })).resolves.toMatchObject({ cursor: 4 });
-    expect(channels).toHaveLength(2);
-    expect(channels[1]?.seen).toEqual([{ type: 'attach', chatId: 'chat-1', cursor: 4, limit: 16 }]);
-    await client.close();
-  });
-
-  it('reports the death once the bounded re-dials are spent', async () => {
-    let dials = 0;
-    const first = fakeChannel();
-    const client = createAgentHostClient(
-      createDaemonAgentHostTransport(
-        async () => {
-          dials += 1;
-          if (dials === 1) {
-            return first;
+  it('should throw a refusal with its code and details', async () => {
+    const channel = fakeChannel((command) =>
+      command.type === 'resume'
+        ? {
+            commandId: command.commandId,
+            generation: 1,
+            status: 'refused',
+            effect: 'not-applied',
+            code: 'RESUME_UNAVAILABLE',
+            message: 'Run run-9 is not this chat’s current run.',
+            details: { currentRunId: 'run-1' },
           }
-          throw new Error('The relay refused a new session.');
-        },
-        { redialAttempts: 2, redialBackoff: 0 },
-      ),
+        : undefined,
     );
+    const client = createAgentHostClient(createDaemonAgentHostTransport(channel));
 
-    await expect(client.attach({ chatId: 'chat-1', cursor: 0, limit: 16 })).resolves.toMatchObject({ cursor: 0 });
-    first.kill();
-
-    await expect(client.resume('chat-1')).rejects.toMatchObject({ code: 'HOST_DISCONNECTED' });
-    // One dial for the placement, then exactly the bounded re-dials — no more.
-    expect(dials).toBe(3);
-    await expect(client.resume('chat-1')).rejects.toMatchObject({ code: 'HOST_DISCONNECTED' });
-    expect(dials).toBe(3);
+    await expect(
+      client.hostCommand({
+        type: 'resume',
+        commandId: 'resume-9',
+        payload: { chatId: 'chat-1', runId: 'run-9' },
+      }),
+    ).resolves.toMatchObject({
+      status: 'refused',
+      code: 'RESUME_UNAVAILABLE',
+      details: { currentRunId: 'run-1' },
+    });
     await client.close();
   });
 
-  /**
-   * Every other test here passes `redialBackoff: 0`, so the ladder the page
-   * actually ships with was never exercised. On the shipped defaults a page
-   * whose relay session expired must rejoin inside the DS-3 budget, and one
-   * backoff step (250 ms) is larger than the whole budget — so the first
-   * re-dial waits for nothing, and only a re-dial that already failed backs off.
-   */
-  it('re-dials immediately on the shipped defaults, and only then backs off', async () => {
-    vi.useFakeTimers();
-    try {
-      const first = fakeChannel();
-      let dials = 0;
-      // No options: the ladder every page gets.
-      const transport = createDaemonAgentHostTransport(async () => {
-        dials += 1;
-        if (dials === 1) {
-          return first;
-        }
-        throw new Error('The relay refused a new session.');
-      });
+  it('should hand the placement’s first-dial refusal to the caller verbatim', async () => {
+    const refusal = Object.assign(new Error('This computer is no longer paired with your account.'), {
+      code: 'HOST_NOT_PAIRED',
+    });
+    const client = createAgentHostClient(
+      createDaemonAgentHostTransport(async () => {
+        throw refusal;
+      }),
+    );
 
-      await transport.ready;
-      expect(dials).toBe(1);
-      first.kill();
-
-      const failed = expect(
-        transport.call({ type: 'attach', chatId: 'chat-1', cursor: 0, limit: 16 }),
-      ).rejects.toMatchObject({ code: 'HOST_DISCONNECTED' });
-
-      // The first re-dial is immediate: no clock advance buys it.
-      await vi.advanceTimersByTimeAsync(0);
-      expect(dials).toBe(2);
-
-      // The second waits one backoff...
-      await vi.advanceTimersByTimeAsync(249);
-      expect(dials).toBe(2);
-      await vi.advanceTimersByTimeAsync(1);
-      expect(dials).toBe(3);
-
-      // ...and each one after it waits double the last.
-      await vi.advanceTimersByTimeAsync(499);
-      expect(dials).toBe(3);
-      await vi.advanceTimersByTimeAsync(1);
-      expect(dials).toBe(4);
-      await vi.advanceTimersByTimeAsync(1000);
-      expect(dials).toBe(5);
-      // The last lands 3.75 s after the death: past a daemon's 1 to 1.25 s reconnect to another API Machine.
-      await vi.advanceTimersByTimeAsync(1999);
-      expect(dials).toBe(5);
-      await vi.advanceTimersByTimeAsync(1);
-      expect(dials).toBe(6);
-
-      // Five re-dials, then the same typed death.
-      await failed;
-      transport.close();
-    } finally {
-      vi.useRealTimers();
-    }
+    await expect(
+      client.hostCommand({
+        type: 'attach',
+        commandId: 'attach-rejected',
+        payload: { chatId: 'chat-1' },
+      }),
+    ).rejects.toMatchObject({
+      code: 'HOST_NOT_PAIRED',
+      message: 'This computer is no longer paired with your account.',
+    });
+    await client.close();
   });
 });

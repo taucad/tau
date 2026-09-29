@@ -49,6 +49,20 @@ import { saveChatAttachment } from '#acp/media.js';
  */
 export const hostMcpCapabilityLifetime = 12 * 60 * 60 * 1000;
 
+/**
+ * Milliseconds past its expiry that a capability still admits a turn that holds its binding (E20).
+ *
+ * The binding lease (W10 EA-R6): a prompt that outlives its capability keeps
+ * Tau's tools until the turn releases the binding, because the server list a
+ * session was opened with cannot change (V7). The release is the lease's
+ * releaser and this ceiling its bound (I30), so a vendor prompt that never
+ * ends loses the tools one more lifetime after expiry. A new turn never binds
+ * an expired token: `activate` still requires an unexpired one.
+ *
+ * @public
+ */
+export const hostMcpLeaseCeiling = hostMcpCapabilityLifetime;
+
 /** The prefix every host capability carries; distinct from the API's `tau-mcp-v1`. @public */
 export const hostMcpCapabilityPrefix = 'tau-mcp-host-v1';
 
@@ -279,7 +293,8 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
       createHmac('sha256', options.secret).update(`${hostMcpCapabilityPrefix}.${encodedClaims}`).digest(),
     );
 
-  const verify = (token: string): HostMcpCapabilityClaims => {
+  /** Signature, schema and issue time; expiry is the caller's (the binding lease reads it differently). */
+  const verifySigned = (token: string): HostMcpCapabilityClaims => {
     const [prefix, encodedClaims, supplied, extra] = token.split('.');
     if (prefix !== hostMcpCapabilityPrefix || !encodedClaims || !supplied || extra !== undefined) {
       throw new HostMcpCapabilityError();
@@ -295,14 +310,35 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
     } catch {
       throw new HostMcpCapabilityError();
     }
-    if (
-      claims.expiresAt <= now() ||
-      claims.issuedAt > now() ||
-      claims.expiresAt - claims.issuedAt > hostMcpCapabilityLifetime
-    ) {
+    if (claims.issuedAt > now() || claims.expiresAt - claims.issuedAt > hostMcpCapabilityLifetime) {
       throw new HostMcpCapabilityError();
     }
     return claims;
+  };
+
+  const verify = (token: string): HostMcpCapabilityClaims => {
+    const claims = verifySigned(token);
+    if (claims.expiresAt <= now()) {
+      throw new HostMcpCapabilityError();
+    }
+    return claims;
+  };
+
+  /**
+   * A request's claims under the binding lease (E20): an expired token is still
+   * admitted while its session holds a binding, up to the ceiling past expiry.
+   *
+   * @param token - The bearer the request carried.
+   * @returns The verified claims.
+   * @throws {@link HostMcpCapabilityError} for a bad token, or an expired one with no binding or past the ceiling.
+   */
+  const verifyLeased = (token: string): HostMcpCapabilityClaims => {
+    const claims = verifySigned(token);
+    const at = now();
+    if (claims.expiresAt > at || (active.has(claims.sessionKey) && at < claims.expiresAt + hostMcpLeaseCeiling)) {
+      return claims;
+    }
+    throw new HostMcpCapabilityError();
   };
 
   /* The chat *session*, not the run: one session spans every turn of a chat, so
@@ -540,7 +576,7 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
     handle: async (request, response) => {
       let claims: HostMcpCapabilityClaims;
       try {
-        claims = verify(bearerOf(request.headers.authorization));
+        claims = verifyLeased(bearerOf(request.headers.authorization));
       } catch {
         refuse(response, 401, 'A Tau Host MCP capability is required.');
         return;

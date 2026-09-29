@@ -29,11 +29,12 @@ import type { Duplex } from 'node:stream';
 import { WebSocketServer } from 'ws';
 import type { WebSocket } from 'ws';
 
+import { packageVersion } from '@taucad/runtime/metadata';
 import { isOriginAllowed } from '@taucad/runtime/transport/websocket-host';
-import { serveAgentChannel } from '@taucad/agent-host/node-launcher';
-import type { NodeAgentLauncher, ServeAgentChannelOptions } from '@taucad/agent-host/node-launcher';
+import { serveAgentChannel } from '@taucad/agent-host/launcher';
+import type { AgentLauncher, ServeAgentChannelOptions } from '@taucad/agent-host/launcher';
 
-import type { ExternalAgentDescriptor } from '@taucad/agent-host';
+import type { ExternalAgentDescriptor } from '@taucad/agent-host/wire';
 import type { HostSessionHandle } from '@taucad/runtime/host';
 import type { NodeMachineChannelHandle, NodeMachineHost } from '@taucad/runtime/host/node';
 import type { ComputeStoreControl } from '@taucad/runtime/types';
@@ -86,7 +87,7 @@ const cookieOf = (cookieHeader: string | undefined, name: string): string => {
 /** Options for {@link startAgentServer}. @public */
 export type AgentServerOptions = {
   /** The always-on host answering the T0 vocabulary. */
-  readonly launcher: NodeAgentLauncher;
+  readonly launcher: AgentLauncher;
   /** Optional authenticated machines route owned by this host process. */
   readonly machines?:
     | Readonly<{
@@ -175,9 +176,9 @@ const routeOfPath = (pathname: string, pathPrefix: string): string | undefined =
  * ```typescript
  * import { randomBytes } from 'node:crypto';
  * import { startAgentServer } from '@taucad/host';
- * import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
+ * import type { AgentLauncher } from '@taucad/agent-host/launcher';
  *
- * declare const launcher: NodeAgentLauncher;
+ * declare const launcher: AgentLauncher;
  * const server = startAgentServer({
  *   launcher,
  *   token: randomBytes(32).toString('base64url'),
@@ -225,7 +226,10 @@ export const startAgentServer = (options: AgentServerOptions): AgentServerHandle
     /* The binding lives in the launcher, not here: the Electron services
      * utility hands the same launcher a `MessagePortMain` and gets the same
      * channel, so launcher 2 consumes this host rather than forking it. */
-    const channel = serveAgentChannel(socket, options.launcher, { revisions: options.revisions });
+    const channel = serveAgentChannel(socket, options.launcher, {
+      build: packageVersion,
+      revisions: options.revisions,
+    });
     channels.add(channel);
     socket.on('close', () => {
       sockets.delete(socket);

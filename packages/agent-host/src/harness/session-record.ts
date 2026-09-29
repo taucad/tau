@@ -3,7 +3,7 @@ import type { Api, AssistantMessage, AssistantMessageDiagnostic, Model } from '@
 import { uint8ArrayToBase64 } from 'uint8array-extras';
 import { util as zodUtility } from 'zod';
 import type { DurableEventLog, HostRunFailure, MaterializedDocument } from '#waist/ports.js';
-import { reduceEventLog } from '#log/reducer.js';
+import { EventLogError } from '#log/event-log-error.js';
 import { attachmentPathPattern, fileRefBlockSchema } from '#log/event-schema.js';
 import type {
   AgentLogEvent,
@@ -299,9 +299,17 @@ export const createSessionRecord = async (options: CreateSessionRecordOptions): 
       await pending;
       return options.log.read();
     },
+    /* RA-S10: the appender's incremental reduction, not a re-read of the file. It reads tolerantly; a run executes
+     * strictly, so a history the open flagged broken is refused (D16). */
     history: async () => {
       await pending;
-      return reduceEventLog(await options.log.read());
+      if (!(await options.log.historyIntact())) {
+        throw new EventLogError(
+          'HISTORY_INVALID',
+          'This chat has a history row Tau cannot apply; it can be read, not run.',
+        );
+      }
+      return options.log.messages();
     },
   };
 };
@@ -561,6 +569,8 @@ export const piMessageToProvider = (message: AgentMessage, identities: MessageId
     metadata: {
       timestamp: message.timestamp,
       ...(details ? { substituted: details.substituted } : {}),
+      /* The recalled approval this call used: recorded with its output, so it is spent once (D5). */
+      ...(details?.approval ? { approval: { interruptId: details.approval.interruptId } } : {}),
     },
   };
 };

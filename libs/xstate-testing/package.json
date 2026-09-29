@@ -1,0 +1,78 @@
+{
+  "name": "@taucad/xstate-testing",
+  "version": "0.0.1",
+  "description": "Private XState v6 test harness: actor guards, a step clock, path enumeration and shared fakes",
+  "type": "module",
+  "sideEffects": false,
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "libs/xstate-testing"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/libs/xstate-testing#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "keywords": [
+    "xstate",
+    "testing",
+    "typescript"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    "./inspect": "./src/inspect.ts",
+    "./clock": "./src/clock.ts",
+    "./paths": "./src/paths.ts",
+    "./fakes": "./src/fakes.ts",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      "./inspect": {
+        "types": "./dist/inspect.d.mts",
+        "import": "./dist/inspect.mjs",
+        "default": "./dist/inspect.mjs"
+      },
+      "./clock": {
+        "types": "./dist/clock.d.mts",
+        "import": "./dist/clock.mjs",
+        "default": "./dist/clock.mjs"
+      },
+      "./paths": {
+        "types": "./dist/paths.d.mts",
+        "import": "./dist/paths.mjs",
+        "default": "./dist/paths.mjs"
+      },
+      "./fakes": {
+        "types": "./dist/fakes.d.mts",
+        "import": "./dist/fakes.mjs",
+        "default": "./dist/fakes.mjs"
+      },
+      "./package.json": "./package.json"
+    }
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "peerDependencies": {
+    "vitest": ">=4.0.0",
+    "xstate": "^6.0.0-alpha.59"
+  },
+  "devDependencies": {
+    "vitest": "catalog:",
+    "xstate": "catalog:",
+    "zod": "catalog:"
+  }
+}

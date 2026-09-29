@@ -38,12 +38,16 @@ export type AgentWorkerChannelOptions<Protocol extends RpcProtocol> = {
  */
 export const connectAgentWorkerChannel = <Protocol extends RpcProtocol>(
   port: MessagePortLike,
-  options: AgentWorkerChannelOptions<Protocol>,
+  options: AgentWorkerChannelOptions<Protocol> & {
+    /** Close with `PEER_UNRESPONSIVE` after this much silence from a worker that keeps alive (T9 E4). Milliseconds. */
+    readonly livenessTimeout?: number | undefined;
+  },
 ): Channel<Protocol> =>
   createChannelClient<Protocol>({
     port: wrapMessagePort(port, { label: options.label ?? 'agent-worker-main' }),
     sessionKey: options.sessionKey,
     protocolSchemas: options.protocolSchemas,
+    ...(options.livenessTimeout === undefined ? {} : { livenessTimeout: options.livenessTimeout }),
   });
 
 /**
@@ -56,11 +60,19 @@ export const connectAgentWorkerChannel = <Protocol extends RpcProtocol>(
  */
 export const serveAgentWorkerChannel = <Protocol extends RpcProtocol>(
   port: MessagePortLike,
-  options: AgentWorkerChannelOptions<Protocol> & { readonly impl: ChannelServer<Protocol> },
+  options: AgentWorkerChannelOptions<Protocol> & {
+    readonly impl: ChannelServer<Protocol>;
+    /** The worker's hello payload, such as `{ wire: 2, build }` (I32). */
+    readonly hello?: unknown;
+    /** Send `lk` at this interval so the page's liveness bound can tell slow from dead (T9 E3). Milliseconds. */
+    readonly keepaliveInterval?: number | undefined;
+  },
 ): ChannelServerHandle<Protocol> =>
   createChannelServer<Protocol>({
     port: wrapMessagePort(port, { label: options.label ?? 'agent-worker' }),
     sessionKey: options.sessionKey,
     protocolSchemas: options.protocolSchemas,
     impl: options.impl,
+    ...(options.hello === undefined ? {} : { hello: options.hello }),
+    ...(options.keepaliveInterval === undefined ? {} : { keepaliveInterval: options.keepaliveInterval }),
   } as Parameters<typeof createChannelServer<Protocol>>[0]);

@@ -1,5 +1,6 @@
+import { canonicalJson } from '#log/canonical-json.js';
 import { parseEventLogBytes } from '#log/serialization.js';
-import type { AgentLogEvent } from '#log/event-types.js';
+import type { AgentLogEvent, RowKey } from '#log/event-types.js';
 
 /**
  * Reading one chat's log when more than one device has written it.
@@ -14,11 +15,10 @@ import type { AgentLogEvent } from '#log/event-types.js';
  * writer is untouched (it still appends to one file) and the reducer stays the
  * single message deriver; this is the step between them.
  *
- * **The epoch does not order anything.** S39 says "the reader concatenates
- * segments in epoch order (the epoch is in every record)"; the epoch *is* in
- * every record, but it is a random UUID minted per leadership lease
- * (`createGeneration: randomUuid`), so it identifies a term and carries no
- * order at all. What every record does carry is `recordedAt`. So the order here
+ * **The epoch does not order anything across devices.** S39 says "the reader
+ * concatenates segments in epoch order"; `leaderEpoch` is a random id minted
+ * per leadership lease, and the integer `epoch` (D5) is monotone only within
+ * one device's log, so neither orders two devices' terms. What every record does carry is `recordedAt`. So the order here
  * is: a leadership term's records stay contiguous and in `sequence` order —
  * a term is a run one writer owned, and splitting it would invent an interleave
  * that never happened — and the terms themselves are ordered by when they
@@ -42,15 +42,21 @@ export type ChatLogSegment = {
   readonly bytes: Uint8Array<ArrayBuffer>;
 };
 
+/** @public */
+export type MergeLogSegmentsOptions = Readonly<{
+  /** Two segments hold different rows under one key; the copy from the term's device is kept. */
+  onConflict?: (conflict: Readonly<{ key: RowKey; keptDeviceId: string; droppedDeviceId: string }>) => void;
+}>;
+
+type Copy = { readonly event: AgentLogEvent; readonly deviceId: string; readonly canonical: string };
+
 type Term = {
-  readonly deviceId: string;
   readonly leaderEpoch: string;
-  /** Where this term sits in its own device's segment, in file order. */
-  readonly order: number;
+  /** Each device id → where the term first appears among that device's segments, in file order. */
+  readonly orderByDevice: Map<string, number>;
+  /** Each sequence → every copy read, from every segment. */
+  readonly copies: Map<number, Copy[]>;
   startedAt: number;
-  readonly events: AgentLogEvent[];
-  /** Sequences already taken, so a twice-projected segment contributes once. */
-  readonly seen: Set<number>;
 };
 
 const startedAtOf = (event: AgentLogEvent): number => {
@@ -58,32 +64,26 @@ const startedAtOf = (event: AgentLogEvent): number => {
   return Number.isNaN(parsed) ? 0 : parsed;
 };
 
-/**
- * Make one device's terms non-decreasing in the order its own file holds them.
- *
- * Within a segment the append order is authoritative and free; a backwards
- * clock step on that device (an NTP correction, a sleep/resume) would otherwise
- * reorder its history against its own file.
- *
- * @param terms - That device's terms, in the order the segment introduced them.
- */
-const holdFileOrder = (terms: readonly Term[]): void => {
-  let floor = Number.NEGATIVE_INFINITY;
-  for (const term of terms) {
-    term.startedAt = Math.max(term.startedAt, floor);
-    floor = term.startedAt;
-  }
-};
+// Code-unit order, not `localeCompare`: the merge must agree on every machine.
+const compare = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0);
+
+/** The term's device: the smallest deviceId among the segments holding it (CL-R14). */
+const deviceOf = (term: Term): string => [...term.orderByDevice.keys()].toSorted(compare)[0]!;
 
 /**
- * Every record of one chat, across every device that wrote it, in one order.
+ * Every record of one chat, across every device that wrote it, in one order (I6, CL-R14).
+ *
+ * The result is the exact union of the segments' rows by key, `(leaderEpoch, sequence)`, and it depends only on the
+ * set of rows: neither segment order nor a segment read twice changes it. A term's start is the earliest record any
+ * copy holds; each device's terms are then clamped once, in the order its own file holds them, so a backwards clock
+ * step on one device never reorders its own history; terms are ordered by that clamped start, then device, then file
+ * order; and each term's records stay contiguous in `sequence` order. Two different rows under one key keep the copy
+ * from the term's device (the smallest canonical form among its copies), and the other is reported through
+ * `onConflict`.
  *
  * @param segments - One entry per segment file in the chat's directory.
- * @returns The merged records: leadership terms ordered by start time, each
- *   term's own records in `sequence` order, and one device's terms never out of
- *   the order its own file holds them in. No record is dropped and none is
- *   duplicated — a record is identified by its epoch and sequence, which is the
- *   same identity the appender's own duplicate check uses.
+ * @param options - `onConflict` hears about each conflicting copy dropped.
+ * @returns The merged records.
  * @public
  *
  * @example <caption>Reading a chat two devices have written</caption>
@@ -92,52 +92,93 @@ const holdFileOrder = (terms: readonly Term[]): void => {
  *
  * declare const read: (path: string) => Promise<Uint8Array<ArrayBuffer>>;
  *
- * const events = mergeLogSegments([
- *   { deviceId: 'device-a', bytes: await read('.tau/chats/c1/events.jsonl') },
- *   { deviceId: 'device-b', bytes: await read('.tau/chats/c1/events/device-b.jsonl') },
- * ]);
+ * const events = mergeLogSegments(
+ *   [
+ *     { deviceId: 'device-a', bytes: await read('.tau/chats/c1/events.jsonl') },
+ *     { deviceId: 'device-b', bytes: await read('.tau/chats/c1/events/device-b.jsonl') },
+ *   ],
+ *   { onConflict: ({ key }) => console.warn('conflicting copies of', key) },
+ * );
  * ```
  */
-export const mergeLogSegments = (segments: readonly ChatLogSegment[]): readonly AgentLogEvent[] => {
+export const mergeLogSegments = (
+  segments: readonly ChatLogSegment[],
+  options: MergeLogSegmentsOptions = {},
+): readonly AgentLogEvent[] => {
   const terms = new Map<string, Term>();
   for (const segment of segments) {
-    const introduced: Term[] = [];
+    const introduced = new Set<string>();
     for (const event of parseEventLogBytes(segment.bytes).events) {
-      const existing = terms.get(event.leaderEpoch);
-      if (existing === undefined) {
-        const term: Term = {
-          deviceId: segment.deviceId,
+      let term = terms.get(event.leaderEpoch);
+      if (term === undefined) {
+        term = {
           leaderEpoch: event.leaderEpoch,
-          order: introduced.length,
+          orderByDevice: new Map(),
+          copies: new Map(),
           startedAt: startedAtOf(event),
-          events: [event],
-          seen: new Set([event.sequence]),
         };
         terms.set(event.leaderEpoch, term);
-        introduced.push(term);
-        continue;
       }
-      /* The same epoch in two segments is one term the projection copied twice,
-       * not two terms: a record is its epoch and its sequence, so the second
-       * copy of a sequence is dropped exactly as the appender drops it. */
-      if (!existing.seen.has(event.sequence)) {
-        existing.seen.add(event.sequence);
-        existing.events.push(event);
+      if (!introduced.has(event.leaderEpoch)) {
+        introduced.add(event.leaderEpoch);
+        const order = introduced.size - 1;
+        term.orderByDevice.set(segment.deviceId, Math.min(order, term.orderByDevice.get(segment.deviceId) ?? order));
       }
-      /* Segments arrive in directory order, not time order, so a term's start
-       * is the earliest record it holds rather than the first one read. */
-      existing.startedAt = Math.min(existing.startedAt, startedAtOf(event));
+      term.startedAt = Math.min(term.startedAt, startedAtOf(event));
+      const copies = term.copies.get(event.sequence) ?? [];
+      copies.push({ event, deviceId: segment.deviceId, canonical: canonicalJson(event) });
+      term.copies.set(event.sequence, copies);
     }
-    holdFileOrder(introduced);
   }
-  return [...terms.values()]
-    .map((term) => ({ ...term, events: term.events.toSorted((left, right) => left.sequence - right.sequence) }))
+
+  const placed = [...terms.values()].map((term) => {
+    const deviceId = deviceOf(term);
+    return { term, deviceId, order: term.orderByDevice.get(deviceId)! };
+  });
+  // One clamp per device, in its own file order: a term never starts before an earlier term of its device.
+  const clamped = new Map<Term, number>();
+  const byDevice = Map.groupBy(placed, (entry) => entry.deviceId);
+  for (const entries of byDevice.values()) {
+    let floor = Number.NEGATIVE_INFINITY;
+    for (const { term } of entries.toSorted(
+      (left, right) => left.order - right.order || compare(left.term.leaderEpoch, right.term.leaderEpoch),
+    )) {
+      floor = Math.max(floor, term.startedAt);
+      clamped.set(term, floor);
+    }
+  }
+
+  return placed
     .toSorted(
       (left, right) =>
-        left.startedAt - right.startedAt ||
-        left.deviceId.localeCompare(right.deviceId) ||
+        clamped.get(left.term)! - clamped.get(right.term)! ||
+        compare(left.deviceId, right.deviceId) ||
         left.order - right.order ||
-        left.leaderEpoch.localeCompare(right.leaderEpoch),
+        compare(left.term.leaderEpoch, right.term.leaderEpoch),
     )
-    .flatMap((term) => term.events);
+    .flatMap(({ term, deviceId }) =>
+      [...term.copies.entries()]
+        .toSorted(([left], [right]) => left - right)
+        .map(([sequence, copies]) => {
+          const own = copies.filter((copy) => copy.deviceId === deviceId);
+          // The device id breaks a tie between equal copies, so `keptDeviceId` does not depend on segment order.
+          const kept = (own.length > 0 ? own : copies).toSorted(
+            (left, right) => compare(left.canonical, right.canonical) || compare(left.deviceId, right.deviceId),
+          )[0]!;
+          const dropped = new Map<string, string>();
+          for (const copy of copies.toSorted((left, right) => compare(left.deviceId, right.deviceId))) {
+            if (copy.canonical !== kept.canonical && !dropped.has(copy.canonical)) {
+              dropped.set(copy.canonical, copy.deviceId);
+            }
+          }
+          for (const droppedDeviceId of dropped.values()) {
+            options.onConflict?.({
+              key: { leaderEpoch: term.leaderEpoch, sequence },
+              keptDeviceId: kept.deviceId,
+              droppedDeviceId,
+            });
+          }
+          return kept.event;
+        }),
+    );
 };

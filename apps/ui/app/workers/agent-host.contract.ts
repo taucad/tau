@@ -1,36 +1,29 @@
 import type {
-  AgentLiveEvent,
-  AgentLogEvent,
   AgentSessionModel,
   ClientContext,
-  EventLogBatch,
-  HostRunSnapshot,
   JsonValue,
   ModelProviderKind,
   ModelSystemPromptBlock,
-  RunTrigger,
   StorageDurabilityClass,
   TauAgentAdmissionConfig,
-  UserProviderMessage,
   WireProtocolSchemas,
 } from '@taucad/agent-host';
+import { jsonValueSchema, userProviderMessageSchema } from '@taucad/agent-host';
 import {
   agentChannelModelSchema,
   agentChannelSystemPromptBlockSchema,
   agentChannelToolChoiceSchema,
-  agentLogEventSchema,
-  jsonValueSchema,
-  providerMessageSchema,
-  userProviderMessageSchema,
-} from '@taucad/agent-host';
+  agentWireHelloSchema,
+} from '@taucad/agent-host/wire';
+import type { AgentWireHello } from '@taucad/agent-host/wire';
+import type { AgentLauncher } from '@taucad/agent-host/launcher';
 import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';
 import { z } from 'zod';
 import { skillMetadataSchema } from '@taucad/chat/schemas';
-import type { TurnConflictedEvent, TurnFailedEvent, TurnFinalizedEvent } from '@taucad/revisions/revision-effects';
 
-/** Maximum durable events transferred in one follower replay window. */
-export const agentHostTailBatchLimit = 16;
+/** The page's build, the worker's hello `build` (I32); the timestamp `vite.config.ts` injects, as `build-skew.ts` reads it. */
+export const agentHostWorkerBuild = String(typeof tauBuildId === 'number' ? tauBuildId : 0);
 
 type AgentHostCapabilityChecks = {
   readonly worker: boolean;
@@ -92,12 +85,22 @@ export type AgentHostAdmissionConfig = Omit<
   readonly contextPayload?: ClientContext | undefined;
 };
 
-export type AgentHostWorkerInitializeRequest = {
-  readonly type: 'initialize';
+/**
+ * One project host's ports and defaults, which the page provides to the resident worker (RH-S8). `hostId` names this
+ * incarnation: a later `provide` for the project replaces it, and the page disposes only the replaced host's bridges
+ * (RH-R4, I31).
+ */
+export type AgentHostProjectProvide = {
+  readonly projectId: string;
+  readonly hostId: string;
   readonly fileSystemPort: MessagePort;
   readonly projectRootPort: MessagePort;
   readonly computeMode?: 'off' | 'memory' | 'durable' | undefined;
   readonly computeStorePort?: MessagePort | undefined;
+  /** A port into the file-manager worker's revision root for this project; the `revisions` tool is offered with it. */
+  readonly revisionsPort?: MessagePort | undefined;
+  /** The project's placement session in the file-manager worker (W8 TS-S5); required, so no turn runs unplaced (D13). */
+  readonly placementPort: MessagePort;
   readonly projectStorage: ProjectFileSystemConfig;
   readonly authority: { readonly projectId: string; readonly workspaceId: string };
   readonly gatewayBaseUrl: string;
@@ -119,6 +122,20 @@ export type AgentHostWorkerInitializeRequest = {
   readonly runtimeConfig: UiRuntimeConfigInput;
   readonly geoSpecEngine?: 'legacy' | 'native' | undefined;
   readonly testingEnabled?: boolean | undefined;
+  /** The signed-in account the session cookie funds, which the host checks an attempt against (W11 GI-Q6). */
+  readonly principal?: string | undefined;
+};
+
+/**
+ * Fresh bridges for a project host that stays open (RV1-F1), as after a file-manager restart: the host named by
+ * `hostId` swaps them in and keeps its launcher and runs; the page then disposes the ones it replaced.
+ */
+export type AgentHostProjectRebridge = {
+  readonly projectId: string;
+  readonly hostId: string;
+  readonly fileSystemPort: MessagePort;
+  readonly projectRootPort: MessagePort;
+  readonly computeStorePort?: MessagePort | undefined;
 };
 
 /**
@@ -159,139 +176,72 @@ export type AgentHostExternalContext = {
   readonly snapshot?: JsonValue | undefined;
 };
 
-type AgentHostWorkerStartRequestBase = {
-  readonly type: 'start';
-  readonly chatId: string;
-  readonly runId: string;
-  readonly message: UserProviderMessage;
-  readonly config?: AgentHostAdmissionConfig | undefined;
-  readonly agent?: AgentHostExternalAgent | undefined;
-  /** Present only beside {@link AgentHostWorkerStartRequestBase.agent}. */
-  readonly context?: AgentHostExternalContext | undefined;
-  /**
-   * How the host that runs this turn records what it writes (V19).
-   *
-   * Carried here because one client object is sent to *both* transports: this
-   * is a `strictObject`, so a browser-placed turn would be rejected whole the
-   * moment the client started attaching the mode a daemon-placed turn needs.
-   * The browser worker records its own revisions in the page's authority and
-   * ignores both fields.
-   */
-  readonly mode?: 'direct' | 'candidate' | undefined;
-  /** Revision the turn's base is recorded under; minted by the host when absent. */
-  readonly baseRevisionId?: string | undefined;
+/** One project in the worker: the host incarnation that serves it, if any, and the worker's capability (LT14). */
+export type AgentHostProjectStatus = {
+  readonly hostId?: string | undefined;
+  readonly capability: AgentHostCapabilityReport;
 };
 
-export type AgentHostWorkerStartRequest = AgentHostWorkerStartRequestBase &
-  (
-    | { readonly trigger: 'submit'; readonly retainedMessageIds?: never }
-    | { readonly trigger: Exclude<RunTrigger, 'submit'>; readonly retainedMessageIds: readonly string[] }
-  );
+/** A close prompt's read-only answer from this worker's leadership actor. @public */
+export type AgentHostRunStoppability = ReturnType<AgentLauncher['stoppability']>;
 
-type AgentHostWorkerSettlement =
-  | (Omit<TurnFinalizedEvent, 'checkoutId'> & { readonly checkoutId?: string | undefined })
-  | (Omit<TurnConflictedEvent, 'checkoutId'> & { readonly checkoutId?: string | undefined })
-  | (Omit<TurnFailedEvent, 'checkoutId'> & { readonly checkoutId?: string | undefined });
-
-export type AgentHostWorkerCommandInput =
-  | AgentHostWorkerStartRequest
-  | { readonly type: 'steer'; readonly chatId: string; readonly runId: string; readonly message: string }
-  | { readonly type: 'cancel'; readonly chatId: string; readonly runId: string }
-  | { readonly type: 'resume'; readonly chatId: string }
-  | {
-      readonly type: 'record-settlement';
-      readonly chatId: string;
-      readonly event: AgentHostWorkerSettlement;
-    }
-  | {
-      readonly type: 'resolve-interrupt';
-      readonly chatId: string;
-      readonly runId: string;
-      readonly interruptId: string;
-      readonly outcome: 'approved' | 'denied' | 'cancelled';
-      /** The option the human actually chose, when the request offered a list. */
-      readonly optionId?: string | undefined;
-      readonly payload?: JsonValue | undefined;
-    }
-  | { readonly type: 'tail'; readonly chatId: string; readonly cursor: number; readonly limit: number }
-  | { readonly type: 'attach'; readonly chatId: string; readonly cursor: number; readonly limit: number };
-
-type WithBroadcastEnvelope<Command> = Command extends AgentHostWorkerCommandInput
-  ? Command & { readonly requestId: string; readonly sessionId: string }
-  : never;
-
-/** Generation-addressed BroadcastChannel command; this fan-out protocol deliberately remains enveloped. */
-export type AgentHostWorkerCommand = WithBroadcastEnvelope<AgentHostWorkerCommandInput>;
-
-export type AgentHostWorkerCallRequest =
-  | { readonly type: 'capabilities'; readonly durability: StorageDurabilityClass }
-  | AgentHostWorkerInitializeRequest
-  | AgentHostWorkerCommandInput
-  | { readonly type: 'close' };
-
-export type AgentHostWorkerResultResponse = {
-  readonly type: 'result';
-  readonly requestId: string;
-  readonly operation: Exclude<AgentHostWorkerCommand['type'], 'tail' | 'attach'>;
-  readonly snapshot: HostRunSnapshot;
-};
-
-export type AgentHostWorkerTailResponse = {
-  readonly type: 'tail';
-  readonly requestId: string;
-  readonly chatId: string;
-  readonly batch: EventLogBatch;
-};
-
-export type AgentHostWorkerAttachResponse = {
-  readonly type: 'attach';
-  readonly requestId: string;
-  readonly chatId: string;
-  readonly batch: EventLogBatch;
-  readonly leadership:
-    | { readonly role: 'leader'; readonly generation: string }
-    | { readonly role: 'follower'; readonly generation?: string | undefined };
-  readonly snapshot?: HostRunSnapshot | undefined;
-  readonly takeover: boolean;
-};
-
-export type AgentHostWorkerErrorResponse = {
-  readonly type: 'error';
-  readonly requestId: string;
-  readonly code: string;
-  readonly message: string;
-};
-
-export type ForwardedAgentHostResponse =
-  | AgentHostWorkerResultResponse
-  | AgentHostWorkerTailResponse
-  | AgentHostWorkerAttachResponse
-  | AgentHostWorkerErrorResponse;
-
-export type AgentHostWorkerCallResponse =
-  | { readonly type: 'capabilities'; readonly report: AgentHostCapabilityReport }
-  | { readonly type: 'initialized' }
-  | Omit<AgentHostWorkerResultResponse, 'requestId'>
-  | Omit<AgentHostWorkerTailResponse, 'requestId'>
-  | Omit<AgentHostWorkerAttachResponse, 'requestId'>
-  | { readonly type: 'closed' };
-
-export type AgentHostWorkerEvent = { readonly chatId: string; readonly event: AgentLogEvent };
-export type AgentHostWorkerLiveEvent = { readonly chatId: string; readonly event: AgentLiveEvent };
-
+/**
+ * The page↔resident-worker control channel (RH-S8). One worker per document serves every project and chat of the
+ * tab: `provide` opens a project host, `connect` hands it one `MessagePort` per stream, served with the agent wire
+ * (`serveAgentChannel`), `rebridge` gives it fresh bridges and `release` closes it once the project's last client
+ * closed. Closing a stream only detaches it (D17). The host appends every settlement row itself (W8 TS-S6).
+ */
 export type AgentHostWorkerProtocol = {
+  readonly hello: AgentWireHello;
   readonly calls: {
-    readonly request: { readonly args: AgentHostWorkerCallRequest; readonly result: AgentHostWorkerCallResponse };
-  };
-  readonly notifies: Record<never, never>;
-  readonly listens: {
-    readonly events: { readonly args: undefined; readonly wireArgs: unknown; readonly event: AgentHostWorkerEvent };
-    readonly liveEvents: {
-      readonly args: undefined;
-      readonly wireArgs: unknown;
-      readonly event: AgentHostWorkerLiveEvent;
+    /** This tab's identity among the origin's tabs (RH-R5); sent once per worker incarnation. */
+    readonly init: {
+      readonly args: { readonly tabId: string };
+      readonly result: undefined;
+      readonly wireResult: unknown;
+    };
+    readonly capabilities: {
+      readonly args: { readonly durability: StorageDurabilityClass };
+      readonly result: AgentHostCapabilityReport;
+    };
+    /** Open a project host; answers the incarnation it replaced, whose bridges the page disposes. */
+    readonly provide: {
+      readonly args: AgentHostProjectProvide;
+      readonly result: { readonly replaced?: string | undefined };
+    };
+    /** Swap fresh bridges into an open host; `needs` when no open host has that id, and the worker closes the ports. */
+    readonly rebridge: {
+      readonly args: AgentHostProjectRebridge;
+      readonly result: { readonly status: 'rebridged' | 'needs' };
+    };
+    /** The project's last client closed: close its host if it is still the one named (RH-R4, I31). */
+    readonly release: {
+      readonly args: { readonly projectId: string; readonly hostId: string };
+      readonly result: undefined;
+      readonly wireResult: unknown;
+    };
+    /** Serve one stream on a project host; `needs` when this worker has no host with that id (a new incarnation). */
+    readonly connect: {
+      readonly args: { readonly projectId: string; readonly hostId: string; readonly port: MessagePort };
+      readonly result: { readonly status: 'connected' | 'needs' };
+    };
+    readonly status: {
+      readonly args: { readonly projectId: string };
+      readonly result: AgentHostProjectStatus;
+    };
+    readonly runStoppability: {
+      readonly args: { readonly projectId: string; readonly chatId: string };
+      readonly result: AgentHostRunStoppability;
+    };
+    /** The page's visibility: a hidden page never queues for a chat's lock (RH-R16). */
+    readonly visibility: {
+      readonly args: { readonly visible: boolean };
+      readonly result: undefined;
+      readonly wireResult: unknown;
     };
   };
+  readonly notifies: Record<never, never>;
+  readonly listens: Record<never, never>;
 };
 
 export type AgentHostWorkerConnect = {
@@ -358,7 +308,6 @@ export const agentHostAdmissionConfigSchema = z.strictObject({
   contextMessages: z.array(userProviderMessageSchema).optional(),
 });
 
-const commandBase = { chatId: nonEmptyString };
 /**
  * Wire validator for {@link AgentHostExternalAgent}.
  *
@@ -385,121 +334,6 @@ export const agentHostExternalContextSchema = z.strictObject({
   snapshot: jsonValueSchema.optional(),
 });
 
-const startBase = {
-  ...commandBase,
-  type: z.literal('start'),
-  runId: nonEmptyString,
-  message: userProviderMessageSchema,
-  config: agentHostAdmissionConfigSchema.optional(),
-  agent: agentHostExternalAgentSchema.optional(),
-  context: agentHostExternalContextSchema.optional(),
-  /* Mirrors `agent-wire.ts`'s `startBase`: the client sends one start object to
-   * both transports, and this one is strict. */
-  mode: z.enum(['direct', 'candidate']).optional(),
-  baseRevisionId: nonEmptyString.optional(),
-};
-const startRequestSchema = z.union([
-  z.strictObject({ ...startBase, trigger: z.literal('submit') }),
-  z.strictObject({
-    ...startBase,
-    trigger: z.enum(['edit', 'regenerate']),
-    retainedMessageIds: z.array(nonEmptyString),
-  }),
-]);
-const tailWindow = {
-  cursor: z.number().int().nonnegative(),
-  limit: z.number().int().positive().max(agentHostTailBatchLimit),
-};
-const commandSchemas = [
-  ...startRequestSchema.options,
-  z.strictObject({ ...commandBase, type: z.literal('steer'), runId: nonEmptyString, message: z.string() }),
-  z.strictObject({ ...commandBase, type: z.literal('cancel'), runId: nonEmptyString }),
-  z.strictObject({ ...commandBase, type: z.literal('resume') }),
-  z.strictObject({
-    ...commandBase,
-    type: z.literal('record-settlement'),
-    event: z.discriminatedUnion('type', [
-      z.strictObject({
-        type: z.literal('turn.finalized'),
-        turnId: nonEmptyString,
-        runId: nonEmptyString,
-        chatId: nonEmptyString,
-        projectId: nonEmptyString,
-        checkoutId: nonEmptyString.optional(),
-        revisionId: nonEmptyString.optional(),
-        branch: nonEmptyString.optional(),
-        changedPaths: z.array(z.string()),
-        treeId: nonEmptyString.optional(),
-        trigger: z.literal('turn'),
-        runIds: z.array(nonEmptyString),
-      }),
-      z.strictObject({
-        type: z.literal('turn.conflicted'),
-        turnId: nonEmptyString,
-        runId: nonEmptyString,
-        chatId: nonEmptyString,
-        checkoutId: nonEmptyString.optional(),
-      }),
-      z.strictObject({
-        type: z.literal('turn.failed'),
-        turnId: nonEmptyString,
-        runId: nonEmptyString,
-        chatId: nonEmptyString,
-        checkoutId: nonEmptyString.optional(),
-        reason: z.string(),
-        /* Why, as the page phrases it (P4); `reason` stays the diagnostic. */
-        code: nonEmptyString.optional(),
-      }),
-    ]),
-  }),
-  z.strictObject({
-    ...commandBase,
-    type: z.literal('resolve-interrupt'),
-    runId: nonEmptyString,
-    interruptId: nonEmptyString,
-    outcome: z.enum(['approved', 'denied', 'cancelled']),
-    /* Mirrors `agent-wire.ts`: this is a `strictObject`, so a resolution
-     * carrying the field would otherwise be rejected whole by the browser
-     * worker's leader broadcast (4-review S1). */
-    optionId: nonEmptyString.optional(),
-    payload: jsonValueSchema.optional(),
-  }),
-  z.strictObject({ ...commandBase, type: z.literal('attach'), ...tailWindow }),
-  z.strictObject({ ...commandBase, type: z.literal('tail'), ...tailWindow }),
-] as const;
-const broadcastEnvelope = { requestId: nonEmptyString, sessionId: nonEmptyString };
-export const agentHostWorkerCommandSchema = z.union(
-  commandSchemas.map((schema) => schema.extend(broadcastEnvelope)) as unknown as typeof commandSchemas,
-);
-
-/** Deliberately not strict: the frame around this envelope is the unreadable part. */
-const commandReturnAddressSchema = z.object({
-  type: z.literal('command'),
-  senderId: nonEmptyString,
-  command: z.object({ requestId: nonEmptyString }),
-});
-
-/**
- * Read who to answer from a broadcast `command` frame this build cannot parse.
- *
- * A follower's forwarding wait is bounded by the leader's heartbeat alone, so a
- * live leader that drops a command in silence leaves that request pending for
- * the life of the tab — no response, no timeout, no banner. Every command a
- * leader receives is therefore answered, and a frame that fails the strict
- * broadcast schema is answered through this envelope. When the sender or the
- * request id is itself unreadable there is nobody to answer, and the leader's
- * console record is all that survives.
- *
- * @param value - The raw broadcast frame.
- * @returns The tab and request to refuse, or `undefined` when neither survives.
- */
-export const readCommandReturnAddress = (
-  value: unknown,
-): { readonly senderId: string; readonly requestId: string } | undefined => {
-  const parsed = commandReturnAddressSchema.safeParse(value).data;
-  return parsed && { senderId: parsed.senderId, requestId: parsed.command.requestId };
-};
-
 const capabilityChecksSchema = z.strictObject({
   worker: z.boolean(),
   webLocks: z.boolean(),
@@ -521,12 +355,15 @@ const capabilityReportSchema = z.union([
     checks: capabilityChecksSchema,
   }),
 ]);
-const initializeRequestSchema = z.strictObject({
-  type: z.literal('initialize'),
+const provideSchema = z.strictObject({
+  projectId: nonEmptyString,
+  hostId: nonEmptyString,
   fileSystemPort: messagePortSchema,
   projectRootPort: messagePortSchema,
   computeMode: z.enum(['off', 'memory', 'durable']).optional(),
   computeStorePort: messagePortSchema.optional(),
+  revisionsPort: messagePortSchema.optional(),
+  placementPort: messagePortSchema,
   projectStorage: projectStorageSchema,
   authority: z.strictObject({ projectId: nonEmptyString, workspaceId: nonEmptyString }),
   gatewayBaseUrl: z.url(),
@@ -543,149 +380,44 @@ const initializeRequestSchema = z.strictObject({
   runtimeConfig: z.strictObject({ tauApiUrl: z.url(), tauWebSocketUrl: z.url() }),
   geoSpecEngine: z.enum(['legacy', 'native']).optional(),
   testingEnabled: z.boolean().optional(),
+  principal: nonEmptyString.optional(),
 });
-const agentHostWorkerCallRequestSchema = z.union([
-  z.strictObject({
-    type: z.literal('capabilities'),
-    durability: z.enum(['exclusive-append', 'stream-append', 'transactional-rewrite', 'ephemeral']),
-  }),
-  initializeRequestSchema,
-  ...commandSchemas,
-  z.strictObject({ type: z.literal('close') }),
-]);
+const durabilitySchema = z.enum(['exclusive-append', 'stream-append', 'transactional-rewrite', 'ephemeral']);
 
-export const hostRunSnapshotSchema = z.strictObject({
-  chatId: nonEmptyString,
-  runId: nonEmptyString,
-  turnId: nonEmptyString,
-  state: z.enum(['admitted', 'running', 'paused', 'completed', 'failed', 'cancelled']),
-  messages: z.array(providerMessageSchema),
-  failure: z
-    .strictObject({
-      code: nonEmptyString,
-      message: z.string(),
-      status: z.number().int().optional(),
-      /* The refusal's own fields (an `INSUFFICIENT_CREDIT` denial's required
-       * and available atoms). Opaque here: the code owns the shape and the
-       * surface that renders it owns the schema. Without this key the strict
-       * object rejected every snapshot of a credit-refused run, so `attach`
-       * failed on exactly the chats whose banner needed the numbers. */
-      details: z.record(z.string(), z.unknown()).optional(),
-    })
-    .optional(),
-});
-
-export const eventLogBatchSchema = z
-  .strictObject({
-    cursor: z.number().int().nonnegative(),
-    nextCursor: z.number().int().nonnegative(),
-    endCursor: z.number().int().nonnegative(),
-    events: z.array(agentLogEventSchema).max(agentHostTailBatchLimit),
-  })
-  .refine(({ cursor, events, nextCursor }) => nextCursor === cursor + events.length, {
-    path: ['nextCursor'],
-    message: 'must equal cursor plus event count',
-  })
-  .refine(({ nextCursor, endCursor }) => endCursor >= nextCursor, {
-    path: ['endCursor'],
-    message: 'before nextCursor',
-  });
-
-const agentLiveEventBase = {
-  chatId: nonEmptyString,
-  runId: nonEmptyString,
-  messageId: nonEmptyString,
-  contentIndex: z.number().int().nonnegative(),
-};
-const agentLiveToolEventBase = {
-  ...agentLiveEventBase,
-  toolCallId: nonEmptyString,
-  toolName: nonEmptyString,
-};
-export const agentLiveEventSchema = z.discriminatedUnion('type', [
-  z.strictObject({ type: z.literal('text-start'), ...agentLiveEventBase }),
-  z.strictObject({
-    type: z.literal('thinking-start'),
-    ...agentLiveEventBase,
-    timestamp: z.number().int().nonnegative().optional(),
-  }),
-  z.strictObject({ type: z.enum(['text-delta', 'thinking-delta']), ...agentLiveEventBase, delta: z.string() }),
-  z.strictObject({ type: z.literal('text-end'), ...agentLiveEventBase, content: z.string() }),
-  z.strictObject({
-    type: z.literal('thinking-end'),
-    ...agentLiveEventBase,
-    content: z.string(),
-    timestamp: z.number().int().nonnegative().optional(),
-  }),
-  z.strictObject({ type: z.literal('tool-input-start'), ...agentLiveToolEventBase }),
-  z.strictObject({ type: z.literal('tool-input-delta'), ...agentLiveToolEventBase, delta: z.string() }),
-  z.strictObject({ type: z.literal('tool-input-end'), ...agentLiveToolEventBase, input: jsonValueSchema }),
-  z.strictObject({
-    type: z.literal('tool-output-update'),
-    ...agentLiveToolEventBase,
-    output: jsonValueSchema,
-    isError: z.boolean(),
-  }),
-]);
-const leadershipSchema = z.union([
-  z.strictObject({ role: z.literal('leader'), generation: nonEmptyString }),
-  z.strictObject({ role: z.literal('follower'), generation: z.string().optional() }),
-]);
-
-export const forwardedAgentHostResponseSchema = z.union([
-  z.strictObject({ type: z.literal('error'), requestId: nonEmptyString, code: nonEmptyString, message: z.string() }),
-  z.strictObject({
-    type: z.literal('result'),
-    requestId: nonEmptyString,
-    operation: z.enum(['start', 'steer', 'cancel', 'resume', 'record-settlement', 'resolve-interrupt']),
-    snapshot: hostRunSnapshotSchema,
-  }),
-  z.strictObject({
-    type: z.literal('tail'),
-    requestId: nonEmptyString,
-    chatId: nonEmptyString,
-    batch: eventLogBatchSchema,
-  }),
-  z.strictObject({
-    type: z.literal('attach'),
-    requestId: nonEmptyString,
-    chatId: nonEmptyString,
-    batch: eventLogBatchSchema,
-    leadership: leadershipSchema,
-    snapshot: hostRunSnapshotSchema.optional(),
-    takeover: z.boolean(),
-  }),
-]);
-
-const agentHostWorkerCallResponseSchema = z.union([
-  z.strictObject({ type: z.literal('capabilities'), report: capabilityReportSchema }),
-  z.strictObject({ type: z.literal('initialized') }),
-  z.strictObject({
-    type: z.literal('result'),
-    operation: z.enum(['start', 'steer', 'cancel', 'resume', 'record-settlement', 'resolve-interrupt']),
-    snapshot: hostRunSnapshotSchema,
-  }),
-  z.strictObject({ type: z.literal('tail'), chatId: nonEmptyString, batch: eventLogBatchSchema }),
-  z.strictObject({
-    type: z.literal('attach'),
-    chatId: nonEmptyString,
-    batch: eventLogBatchSchema,
-    leadership: leadershipSchema,
-    snapshot: hostRunSnapshotSchema.optional(),
-    takeover: z.boolean(),
-  }),
-  z.strictObject({ type: z.literal('closed') }),
-]);
-const workerEventSchema = z.strictObject({ chatId: nonEmptyString, event: agentLogEventSchema });
-const workerLiveEventSchema = z.strictObject({ chatId: nonEmptyString, event: agentLiveEventSchema });
-
+/** Wire validators for {@link AgentHostWorkerProtocol}. The rpc carries an absent argument or result as `null`. */
 export const agentHostWorkerProtocolSchemas = {
-  calls: { request: { args: agentHostWorkerCallRequestSchema, result: agentHostWorkerCallResponseSchema } },
-  notifies: {},
-  listens: {
-    events: { args: z.null(), event: workerEventSchema },
-    liveEvents: { args: z.null(), event: workerLiveEventSchema },
+  hello: agentWireHelloSchema,
+  calls: {
+    init: { args: z.strictObject({ tabId: nonEmptyString }), result: z.unknown() },
+    capabilities: { args: z.strictObject({ durability: durabilitySchema }), result: capabilityReportSchema },
+    provide: { args: provideSchema, result: z.strictObject({ replaced: nonEmptyString.optional() }) },
+    rebridge: {
+      args: z.strictObject({
+        projectId: nonEmptyString,
+        hostId: nonEmptyString,
+        fileSystemPort: messagePortSchema,
+        projectRootPort: messagePortSchema,
+        computeStorePort: messagePortSchema.optional(),
+      }),
+      result: z.strictObject({ status: z.enum(['rebridged', 'needs']) }),
+    },
+    release: { args: z.strictObject({ projectId: nonEmptyString, hostId: nonEmptyString }), result: z.unknown() },
+    connect: {
+      args: z.strictObject({ projectId: nonEmptyString, hostId: nonEmptyString, port: messagePortSchema }),
+      result: z.strictObject({ status: z.enum(['connected', 'needs']) }),
+    },
+    status: {
+      args: z.strictObject({ projectId: nonEmptyString }),
+      result: z.strictObject({ hostId: nonEmptyString.optional(), capability: capabilityReportSchema }),
+    },
+    runStoppability: {
+      args: z.strictObject({ projectId: nonEmptyString, chatId: nonEmptyString }),
+      result: z.enum(['stoppable', 'other-build', 'background-window']),
+    },
+    visibility: { args: z.strictObject({ visible: z.boolean() }), result: z.unknown() },
   },
+  notifies: {},
+  listens: {},
 } satisfies WireProtocolSchemas<AgentHostWorkerProtocol>;
 
 const agentHostWorkerConnectSchema = z.strictObject({

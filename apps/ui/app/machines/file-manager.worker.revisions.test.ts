@@ -14,8 +14,8 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createIsomorphicGitRevisionPort } from '@taucad/revisions';
+import type { RevisionPort } from '@taucad/revisions';
 import { revisionId } from '@taucad/revisions/algorithms';
-import { admissionMilliseconds } from '@taucad/revisions/revision-effects';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import {
@@ -25,9 +25,13 @@ import {
 } from '#machines/file-manager.worker.revisions.js';
 import type {
   WorkerProjectRevisions,
+  WorkerRevisionRegistryOptions,
   WorkerRevisionRequest,
   WorkerRevisionResponse,
 } from '#machines/file-manager.worker.revisions.js';
+import type { TurnPlacementAdapter } from '@taucad/revisions/turn-placement';
+import { createFileSystemBridgeProxy } from '@taucad/fs-bridge';
+import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
 
 type Harness = {
   readonly service: WorkspaceFileService;
@@ -45,7 +49,6 @@ type Client = {
   readonly port: MessagePort;
   readonly frames: WorkerRevisionResponse[];
   readonly send: (request: WorkerRevisionRequest) => void;
-  readonly admit: (input: { turnId: string; chatId: string; runId: string }) => Promise<WorkerRevisionResponse>;
   readonly settle: () => Promise<void>;
 };
 
@@ -67,12 +70,43 @@ const settle = async (turns = 12): Promise<void> => {
   }
 };
 
-type RevisionPort = ReturnType<typeof createIsomorphicGitRevisionPort>;
+/** A turn key for a first attempt: the agent host's own shape. */
+const turnKey = (index: number) => ({
+  chatId: `chat-${index}`,
+  turnId: `turn-${index}`,
+  runId: `run-${index}`,
+  attempt: 1,
+});
+
+/** Place one attempt through the root's placement session, the way the agent host does (TS-S5). */
+const place = async (
+  session: TurnPlacementAdapter<FileSystemBridgeConnection>,
+  key: ReturnType<typeof turnKey>,
+): Promise<{ checkoutId: string; root: string }> => {
+  const answer = await session.admit({ requestId: `admit:${key.runId}:1`, key });
+  if (answer.status === 'refused') {
+    throw new Error(answer.message);
+  }
+  return answer.placement;
+};
+
+/** Settle a placed attempt with a cut, then acknowledge it once the host would have its row (RM-R10). */
+const finish = async (
+  session: TurnPlacementAdapter<FileSystemBridgeConnection>,
+  key: ReturnType<typeof turnKey>,
+): Promise<void> => {
+  await expect(session.complete({ requestId: `complete:${key.runId}:1`, key, cut: true })).resolves.toMatchObject({
+    status: 'applied',
+  });
+  await expect(session.acknowledge({ requestId: `acknowledge:${key.runId}:1`, key })).resolves.toMatchObject({
+    status: 'applied',
+  });
+};
 
 const harness = (
   projectIds: readonly string[],
-  /* Wraps each project's port, so a row can hold one of its calls. */
-  wrapPort: (port: RevisionPort) => RevisionPort = (port) => port,
+  wrapPort = (port: RevisionPort): RevisionPort => port,
+  extra: Pick<WorkerRevisionRegistryOptions, 'servePlacement' | 'clock'> & { onCreatePort?: () => void } = {},
 ): Harness => {
   const providers = projectIds.map(() => new MemoryProvider());
   const mountTable = new MountTable();
@@ -94,21 +128,24 @@ const harness = (
   const checkoutRoutes = createCheckoutRoutes({ mountTable, fileService: service });
   const observers = new Map<string, (paths: readonly string[]) => void>();
   const registry = createWorkerRevisionRegistry({
-    createPort: (projectId) =>
-      wrapPort(
+    ...(extra.servePlacement === undefined ? {} : { servePlacement: extra.servePlacement }),
+    ...(extra.clock === undefined ? {} : { clock: extra.clock }),
+    createPort: (projectId) => {
+      extra.onCreatePort?.();
+      return wrapPort(
         createIsomorphicGitRevisionPort({
           filesystem: service.createRootedFileSystem(`/projects/${projectId}`),
           /* Exactly what `file-manager.worker.ts` gives the real port, so a branch
            * created here is created the way the browser creates one (P24). */
           checkouts: checkoutRoutes(projectId),
         }),
-      ),
+      );
+    },
     filesystem: (root) => service.createRootedFileSystem(root),
     observe: (root, onChanged) => {
       observers.set(root, onChanged);
       return () => observers.delete(root);
     },
-    authorityEpoch: 'epoch-w3d',
   });
   const entry: Harness = {
     service,
@@ -126,7 +163,6 @@ const harness = (
       const channel = new MessageChannel();
       registry.connect(channel.port1, projectId);
       const frames: WorkerRevisionResponse[] = [];
-      let nextId = 0;
       channel.port2.addEventListener('message', ({ data }: MessageEvent<WorkerRevisionResponse>) => {
         frames.push(data);
       });
@@ -136,22 +172,6 @@ const harness = (
         frames,
         send: (request) => {
           channel.port2.postMessage(request);
-        },
-        admit: async (input) => {
-          nextId += 1;
-          const id = nextId;
-          channel.port2.postMessage({ command: 'admitTurn', id, ...input } satisfies WorkerRevisionRequest);
-          for (let attempt = 0; attempt < 60; attempt += 1) {
-            // oxlint-disable-next-line no-await-in-loop -- polling the port's own answer.
-            await settle(4);
-            const answer = frames.find(
-              (frame) => (frame.type === 'result' || frame.type === 'error') && frame.id === id,
-            );
-            if (answer !== undefined) {
-              return answer;
-            }
-          }
-          throw new Error(`admitTurn ${id} was never answered`);
         },
         settle: async () => settle(),
       };
@@ -328,23 +348,15 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     const fixture = harness(['alpha']);
     const project = fixture.service.createRootedFileSystem('/projects/alpha');
     await project.writeFile('main.scad', 'cube(10);');
-    const alpha = await fixture.open('alpha');
+    await fixture.open('alpha');
+    const root = await fixture.root('alpha');
+    const session = await root.placementSession();
 
-    const first = await alpha.admit({ turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' });
-    const second = await alpha.admit({ turnId: 'turn-2', chatId: 'chat-2', runId: 'run-2' });
+    const first = await place(session, turnKey(1));
+    const second = await place(session, turnKey(2));
 
-    expect(first.type).toBe('result');
-    expect(second.type).toBe('result');
-    if (
-      first.type !== 'result' ||
-      second.type !== 'result' ||
-      first.result.kind !== 'placement' ||
-      second.result.kind !== 'placement'
-    ) {
-      throw new Error('both turns must be placed');
-    }
-    expect(first.result.placement.checkoutId).toBe(second.result.placement.checkoutId);
-    expect(first.result.placement.root).toBe('/projects/alpha');
+    expect(first.checkoutId).toBe(second.checkoutId);
+    expect(first.root).toBe('/projects/alpha');
 
     const branches = await project.readdir('.git/refs/heads');
     expect(branches).toEqual(['main']);
@@ -436,6 +448,45 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     expect(root.status().headRevisionId).not.toBe(recorded);
   });
 
+  /* B7 (W8 TS-S5): the branch child answers every `create` by its id, so no clock may refuse one that is still
+   * working. The branch's ref write is held while the clock runs well past the deleted bound. */
+  it('should answer a createBranch that outlasts the old bound, never refusing it on the clock', async () => {
+    const gate = { held: undefined as PromiseWithResolvers<void> | undefined };
+    const fixture = harness(['alpha'], (port) => ({
+      ...port,
+      updateRef: async (input) => {
+        await gate.held?.promise;
+        return port.updateRef(input);
+      },
+    }));
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('main.scad', 'cube(10);');
+    await fixture.open('alpha');
+    const root = await fixture.root('alpha');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'], shouldAdvanceTime: true });
+    try {
+      gate.held = Promise.withResolvers<void>();
+      let outcome: unknown;
+      const creating = (async (): Promise<void> => {
+        try {
+          outcome = await root.createBranch('isolated-run');
+        } catch (error) {
+          outcome = error;
+        }
+      })();
+      await vi.advanceTimersByTimeAsync(180_000);
+      expect(outcome).toBeUndefined();
+
+      gate.held.resolve();
+      gate.held = undefined;
+      await creating;
+      expect(outcome).toMatchObject({ branch: 'isolated-run', checkoutId: expect.any(String) as unknown });
+    } finally {
+      gate.held?.resolve();
+      vi.useRealTimers();
+    }
+  });
+
   it('should answer a createBranch with the checkout it made once the branch exists', async () => {
     const fixture = harness(['alpha']);
     const project = fixture.service.createRootedFileSystem('/projects/alpha');
@@ -497,180 +548,63 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
   });
 
   /*
-   * The `branch` child takes `create` in `idle` only, so a second one while the
-   * first is in flight is dropped — and the correlated wait had no bound, so
-   * the chat's send path waited on a promise nothing would ever settle (review
-   * finding 1).
+   * A second `create` while the first is in flight used to be dropped, and the
+   * correlated wait had no bound (review finding 1). A busy verb is now refused
+   * at once with `REVISIONS_BUSY`, under its own request id (RM-R11, RM-S5).
    */
-  it('should refuse a createBranch the tree never answers, on the bound', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    try {
-      const fixture = harness(['alpha']);
-      await fixture.service.createRootedFileSystem('/projects/alpha').writeFile('main.scad', 'cube(10);');
-      const alpha = await fixture.open('alpha');
+  it('should refuse a createBranch that arrives while another runs, at once and by its own id', async () => {
+    const fixture = harness(['alpha']);
+    await fixture.service.createRootedFileSystem('/projects/alpha').writeFile('main.scad', 'cube(10);');
+    const alpha = await fixture.open('alpha');
 
-      alpha.send({ command: 'createBranch', name: 'main' });
-      alpha.send({ command: 'createBranch', name: 'isolated-run', id: 93 });
-      await settle(20);
-      await vi.advanceTimersByTimeAsync(60_000);
-      await settle(8);
+    alpha.send({ command: 'createBranch', name: 'main' });
+    alpha.send({ command: 'createBranch', name: 'isolated-run', id: 93 });
+    await settle(20);
 
-      expect(alpha.frames.find((frame) => 'id' in frame && frame.id === 93)).toMatchObject({
-        type: 'error',
-        id: 93,
-        code: 'BRANCH_UNANSWERED',
-      });
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(alpha.frames.find((frame) => 'id' in frame && frame.id === 93)).toMatchObject({
+      type: 'error',
+      id: 93,
+      code: 'REVISIONS_BUSY',
+    });
   });
 
   it('should not attribute another verb’s refusal to a pending createBranch', async () => {
-    /* The dropped verb's own bound is a real 60 s timer, and a case that left
-       it pending kept this suite's teardown waiting on it. */
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    try {
-      /* The first verb's cut finds its checkout through `listCheckouts`; held
-         there, it is still running when the second arrives, however fast the
-         capture behind it is. */
-      let hold: Promise<void> | undefined;
-      let held = 0;
-      const fixture = harness(['alpha'], (port) => ({
-        ...port,
-        listCheckouts: async () => {
-          if (hold !== undefined) {
-            held += 1;
-            await hold;
-          }
-          return port.listCheckouts!();
-        },
-      }));
-      const project = fixture.service.createRootedFileSystem('/projects/alpha');
-      await project.writeFile('main.scad', 'cube(10);');
-      const alpha = await fixture.open('alpha');
-      alpha.send({ command: 'saveRevision' });
-      await alpha.settle();
-
-      /* `main` is refused; `isolated-run` is dropped while that one runs. The
-         refusal the person sees belongs to the branch they already have. */
-      const gate = Promise.withResolvers<void>();
-      hold = gate.promise;
-      alpha.send({ command: 'createBranch', name: 'main' });
-      alpha.send({ command: 'createBranch', name: 'isolated-run', id: 94 });
-      await settle(40);
-
-      expect(held).toBeGreaterThan(0);
-      expect(alpha.frames.find((frame) => 'id' in frame && frame.id === 94)).toBeUndefined();
-      hold = undefined;
-      gate.resolve();
-      /* And the drop is still what the bound answers, once it comes due. */
-      await vi.advanceTimersByTimeAsync(60_000);
-      await settle(8);
-      expect(alpha.frames.find((frame) => 'id' in frame && frame.id === 94)).toMatchObject({
-        type: 'error',
-        code: 'BRANCH_UNANSWERED',
-      });
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  /** Save once and answer the head that save recorded, once it is not `previous`. */
-  const savedHead = async (client: Client, previous?: string): Promise<string> => {
-    client.send({ command: 'saveRevision' });
-    let head: string | undefined;
-    await vi.waitFor(
-      () => {
-        head = client.frames.findLast((frame) => frame.type === 'status')?.status.headRevisionId;
-        expect(head).toBeDefined();
-        expect(head).not.toBe(previous);
+    /* The first verb's cut finds its checkout through `listCheckouts`; held
+       there, it is still running when the second arrives, however fast the
+       capture behind it is. */
+    let hold: Promise<void> | undefined;
+    let held = 0;
+    const fixture = harness(['alpha'], (port) => ({
+      ...port,
+      listCheckouts: async () => {
+        if (hold !== undefined) {
+          held += 1;
+          await hold;
+        }
+        return port.listCheckouts!();
       },
-      { timeout: 10_000 },
-    );
-    return head!;
-  };
-
-  it('should adopt a revision a daemon on this store recorded, and never an older one again', async () => {
-    let port: RevisionPort | undefined;
-    const fixture = harness(['alpha'], (inner) => {
-      port = inner;
-      return inner;
-    });
+    }));
     const project = fixture.service.createRootedFileSystem('/projects/alpha');
     await project.writeFile('main.scad', 'cube(10);');
     const alpha = await fixture.open('alpha');
-    const base = revisionId(await savedHead(alpha));
-
-    /* The daemon shares this Git: it records on the line and moves its ref. */
-    const record = (await port!.readRevision(base))!;
-    const daemon = await port!.writeRevision({
-      parents: [base],
-      tree: (await port!.readTree(base))!,
-      provenance: record.provenance,
-      summary: record.summary,
-    });
-    await port!.updateRef({ name: 'main', expectedHead: base, head: revisionId(daemon.commitId) });
-    const adopt = {
-      command: 'adoptHostFinalized',
-      checkoutId: 'live',
-      revisionId: daemon.commitId,
-      treeId: record.treeId,
-      branch: 'main',
-    } as const;
-    alpha.send(adopt);
-
-    const root = await fixture.root('alpha');
-    await vi.waitFor(() => {
-      expect(root.status()).toMatchObject({
-        checkoutId: 'live',
-        headRevisionId: daemon.commitId,
-        line: { kind: 'branch', name: 'main' },
-      });
-    });
-
-    /* A replay of that settlement after a later save must not move the head back. */
-    await project.writeFile('main.scad', 'cube(20);');
-    const later = await savedHead(alpha, daemon.commitId);
-    alpha.send(adopt);
-    await settle(20);
-    expect(root.status().headRevisionId).toBe(later);
-  });
-
-  /*
-   * A cloud host records in its own clone. Its `turn.finalized` reaches the
-   * page before its push, so the revision it names is not in this store yet:
-   * adopting it left the head on an object nothing could read ("Nothing saved
-   * yet" until a reload) and a save in that window minted on it (W10-L D1).
-   */
-  it('should not adopt a revision this store does not hold, so a save mints on the head it holds', async () => {
-    const fixture = harness(['alpha']);
-    const project = fixture.service.createRootedFileSystem('/projects/alpha');
-    await project.writeFile('main.scad', 'cube(10);');
-    const alpha = await fixture.open('alpha');
-    const base = await savedHead(alpha);
-
-    alpha.send({
-      command: 'adoptHostFinalized',
-      checkoutId: 'live',
-      revisionId: '3ff0c6c0000000000000000000000000000000aa',
-      treeId: '4ee0c6c0000000000000000000000000000000bb',
-      branch: 'main',
-    });
-    await settle(20);
-
-    const root = await fixture.root('alpha');
-    expect(root.status().headRevisionId).toBe(base);
-
-    await project.writeFile('main.scad', 'cube(20);');
     alpha.send({ command: 'saveRevision' });
-    await vi.waitFor(
-      async () => {
-        const [top] = await root.log();
-        expect(top?.revisionId).not.toBe(base);
-        expect(top?.parent).toBe(base);
-      },
-      { timeout: 10_000 },
-    );
+    await alpha.settle();
+
+    /* `main` is refused as a conflict; `isolated-run` arrives while that one runs.
+       The answer id 94 hears is its own, never the branch the person already has. */
+    const gate = Promise.withResolvers<void>();
+    hold = gate.promise;
+    alpha.send({ command: 'createBranch', name: 'main' });
+    alpha.send({ command: 'createBranch', name: 'isolated-run', id: 94 });
+    await settle(40);
+
+    expect(held).toBeGreaterThan(0);
+    expect(alpha.frames.find((frame) => 'id' in frame && frame.id === 94)).toMatchObject({
+      type: 'error',
+      code: 'REVISIONS_BUSY',
+    });
+    hold = undefined;
+    gate.resolve();
   });
 
   it('should restore a recorded revision through the port commands', async () => {
@@ -680,10 +614,11 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     const alpha = await fixture.open('alpha');
 
     /* One settled turn, so the checkout has a head to come back to. */
-    const placed = await alpha.admit({ turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' });
-    expect(placed.type).toBe('result');
+    const root = await fixture.root('alpha');
+    const session = await root.placementSession();
+    await place(session, turnKey(1));
     await project.writeFile('main.scad', 'cube(20);');
-    alpha.send({ command: 'turnCompleted', turnId: 'turn-1' });
+    await finish(session, turnKey(1));
     await turnFinalized(alpha, 'turn-1');
 
     const head = alpha.frames.findLast((frame) => frame.type === 'status')?.status.headRevisionId;
@@ -694,7 +629,6 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
      * then the restore, both on `main` (D1): nothing is discarded, nothing
      * detaches, and the dirty bytes are one row back. */
     await project.writeFile('main.scad', 'cube(30);');
-    const root = await fixture.root('alpha');
     const before = await root.log();
     alpha.send({ command: 'restore', revisionId: head! });
     /* Two cuts and a plan through a real store: the default 1 s bound flaked under load. */
@@ -851,12 +785,12 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     const project = fixture.service.createRootedFileSystem('/projects/alpha');
     await project.writeFile('main.scad', 'cube(10);');
     const alpha = await fixture.open('alpha');
-    const placed = await alpha.admit({ turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' });
-    expect(placed.type).toBe('result');
-    await project.writeFile('main.scad', 'cube(20);');
-    alpha.send({ command: 'turnCompleted', turnId: 'turn-1' });
-    await turnFinalized(alpha, 'turn-1');
     const root = await fixture.root('alpha');
+    const session = await root.placementSession();
+    await place(session, turnKey(1));
+    await project.writeFile('main.scad', 'cube(20);');
+    await finish(session, turnKey(1));
+    await turnFinalized(alpha, 'turn-1');
     const head = root.status().headRevisionId;
     expect(head).toBeDefined();
     /* The older revision, named while the checkout's head is a newer one: the
@@ -896,18 +830,18 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     const project = fixture.service.createRootedFileSystem('/projects/alpha');
     await project.writeFile('main.scad', 'cube(10);');
     const alpha = await fixture.open('alpha');
-    const placed = await alpha.admit({ turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' });
-    expect(placed.type).toBe('result');
+    const root = await fixture.root('alpha');
+    const session = await root.placementSession();
+    await place(session, turnKey(1));
 
     /* The agent's write, then the person switching tab before it settles. */
     await project.writeFile('main.scad', 'cube(20);');
     alpha.send({ command: 'saveRevision', trigger: 'hidden' });
     await settle(20);
 
-    alpha.send({ command: 'turnCompleted', turnId: 'turn-1' });
+    await finish(session, turnKey(1));
     await turnFinalized(alpha, 'turn-1');
 
-    const root = await fixture.root('alpha');
     const rows = await root.log();
     expect(rows.map((row) => row.source)).not.toContain('user');
     expect(rows[0]?.turnId).toBe('turn-1');
@@ -919,6 +853,51 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
    * `pagehide` could offer a pack before the cut existed. The frame the page
    * waits on has to arrive *after* the revision is in the log, not before.
    */
+  /* B8 (W8 TS-S5): a `save` or `close` cut is answered by its request id; only `hidden` keeps a bound. A save whose
+   * revision write outlasts the old 5 s bound is answered when it is recorded, not when a clock gives up on it. */
+  it('should answer a close save only once its revision is recorded, however long the write takes', async () => {
+    const gate = { held: undefined as PromiseWithResolvers<void> | undefined };
+    const fixture = harness(['alpha'], (port) => ({
+      ...port,
+      writeRevision: async (input) => {
+        await gate.held?.promise;
+        return port.writeRevision(input);
+      },
+    }));
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('main.scad', 'cube(10);');
+    const alpha = await fixture.open('alpha');
+    await settle(20);
+    const root = await fixture.root('alpha');
+    const beforeRows = await root.log();
+    const before = beforeRows.length;
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'], shouldAdvanceTime: true });
+    try {
+      gate.held = Promise.withResolvers<void>();
+      await project.writeFile('main.scad', 'cube(20);');
+      fixture.announce('alpha', ['main.scad']);
+      alpha.send({ command: 'saveRevision', id: 78, trigger: 'close' });
+      await vi.advanceTimersByTimeAsync(60_000);
+      await settle(20);
+      expect(alpha.frames.find((frame) => 'id' in frame && frame.id === 78)).toBeUndefined();
+
+      gate.held.resolve();
+      gate.held = undefined;
+      let answer: WorkerRevisionResponse | undefined;
+      for (let attempt = 0; attempt < 60 && answer === undefined; attempt += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- polling the port's own answer.
+        await settle(4);
+        answer = alpha.frames.find((frame) => 'id' in frame && frame.id === 78);
+      }
+      expect(answer).toEqual({ type: 'result', id: 78, result: { kind: 'saved' } });
+      const after = await root.log();
+      expect(after.length).toBeGreaterThan(before);
+    } finally {
+      gate.held?.resolve();
+      vi.useRealTimers();
+    }
+  });
+
   it('should answer a saveRevision only once its cut has settled (C16)', async () => {
     const fixture = harness(['alpha']);
     const project = fixture.service.createRootedFileSystem('/projects/alpha');
@@ -948,6 +927,46 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
 
     expect(answer).toEqual({ type: 'result', id: 77, result: { kind: 'saved' } });
     expect(rowsWhenAnswered).toBeGreaterThan(before);
+  });
+
+  /* A save whose compare-and-swap lost is settled, not left to the deadline: the next open mints the same bytes. */
+  it('should answer a saveRevision whose cut lost its compare-and-swap without waiting out the deadline', async () => {
+    let conflictNext = false;
+    const fixture = harness(['alpha'], (port) => ({
+      ...port,
+      updateRef: async (input) => {
+        if (!conflictNext) {
+          return port.updateRef(input);
+        }
+        conflictNext = false;
+        return {
+          status: 'conflicted',
+          name: input.name,
+          expectedHead: input.expectedHead,
+          actualHead: input.expectedHead,
+          proposedHead: input.head,
+        };
+      },
+    }));
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('main.scad', 'cube(10);');
+    const alpha = await fixture.open('alpha');
+    await settle(20);
+
+    await project.writeFile('main.scad', 'cube(20);');
+    fixture.announce('alpha', ['main.scad']);
+    conflictNext = true;
+    alpha.send({ command: 'saveRevision', id: 78, trigger: 'save' });
+
+    let answer: WorkerRevisionResponse | undefined;
+    for (let attempt = 0; attempt < 60 && answer === undefined; attempt += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- polling the port's own answer.
+      await settle(4);
+      answer = alpha.frames.find((frame) => (frame.type === 'result' || frame.type === 'error') && frame.id === 78);
+    }
+
+    expect(conflictNext).toBe(false);
+    expect(answer).toEqual({ type: 'result', id: 78, result: { kind: 'saved' } });
   });
 
   it('should mint one strictly increasing generation per content-change event (F9, F4)', async () => {
@@ -1022,75 +1041,6 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     expect(after[0]).toMatchObject({ trigger: 'close' });
   });
 
-  it('should hold a completion that lands while its turn is still being placed (W3c 7.2)', async () => {
-    const fixture = harness(['alpha']);
-    const project = fixture.service.createRootedFileSystem('/projects/alpha');
-    await project.writeFile('main.scad', 'cube(10);');
-    const alpha = await fixture.open('alpha');
-
-    /* The page sends the completion without waiting for its admission — the
-     * order a fast turn produces. Dropped, the turn would wait out the cut
-     * bound; held behind `leased`, it settles like any other. */
-    alpha.send({ command: 'admitTurn', id: 1, turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' });
-    alpha.send({ command: 'turnCompleted', turnId: 'turn-1' });
-    await turnFinalized(alpha, 'turn-1');
-
-    const answer = alpha.frames.find((frame) => frame.type === 'result' || frame.type === 'error');
-    expect(answer?.type).toBe('result');
-    /* The lease is retired by the completion the root held, so nothing is left
-     * holding the checkout open. */
-    await expect(project.readdir('.tau/runs')).resolves.toEqual([]);
-  });
-
-  /*
-   * T4-02: the admission wait is bounded, the root's queue was not.
-   *
-   * An edit behind a running turn queues on the turn id that turn holds (V8).
-   * When the caller's wait expired it refused only its own promise, so the
-   * entry stayed in the root and was raised the moment the running turn
-   * retired: a turn spawned, took the checkout's lease, and nothing was left to
-   * send it `turnCompleted`. The checkout then read as held for the rest of the
-   * session — every manual save on it answered `nothingToSave` and recorded
-   * nothing.
-   */
-  it('should abandon an admission whose wait expired, leaving the checkout free to record a save', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    try {
-      const fixture = harness(['alpha']);
-      const project = fixture.service.createRootedFileSystem('/projects/alpha');
-      await project.writeFile('main.scad', 'cube(10);');
-      const alpha = await fixture.open('alpha');
-      const placed = await alpha.admit({ turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' });
-      expect(placed.type).toBe('result');
-
-      /* The person edits that same message while the first run is still
-       * recording, and gives up waiting before it retires. */
-      alpha.send({ command: 'admitTurn', id: 77, turnId: 'turn-1', chatId: 'chat-1', runId: 'run-2' });
-      await settle(8);
-      await vi.advanceTimersByTimeAsync(admissionMilliseconds);
-      await settle(8);
-      expect(alpha.frames.find((frame) => frame.type === 'error' && frame.id === 77)).toBeDefined();
-
-      alpha.send({ command: 'turnCompleted', turnId: 'turn-1' });
-      await turnFinalized(alpha, 'turn-1');
-
-      /* The abandoned run never takes a lease, so nothing holds the checkout. */
-      await expect(project.readdir('.tau/runs')).resolves.toEqual([]);
-
-      const root = await fixture.root('alpha');
-      const before = await root.log();
-      await project.writeFile('main.scad', 'cube(30);');
-      alpha.send({ command: 'saveRevision', trigger: 'save' });
-      await settle(40);
-      const after = await root.log();
-
-      expect(after.length).toBe(before.length + 1);
-      expect(after[0]?.source).toBe('user');
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
   it('should register the project on Tau Cloud before it asks the remote for anything (P54, W18 DEF-1)', async () => {
     const fixture = harness(['alpha']);
     await fixture.service
@@ -1145,11 +1095,12 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     const project = fixture.service.createRootedFileSystem('/projects/alpha');
     await project.writeFile('main.scad', 'cube(10);');
     const alpha = await fixture.open('alpha');
-    await alpha.admit({ turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' });
-    await project.writeFile('main.scad', 'cube(20);');
-    alpha.send({ command: 'turnCompleted', turnId: 'turn-1' });
-    await turnFinalized(alpha, 'turn-1');
     const root = await fixture.root('alpha');
+    const session = await root.placementSession();
+    await place(session, turnKey(1));
+    await project.writeFile('main.scad', 'cube(20);');
+    await finish(session, turnKey(1));
+    await turnFinalized(alpha, 'turn-1');
     const [head, older] = await root.log();
 
     alpha.send({ command: 'log', id: 31, from: older!.revisionId, limit: 1 });
@@ -1175,11 +1126,12 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     const project = fixture.service.createRootedFileSystem('/projects/alpha');
     await project.writeFile('main.scad', 'cube(10);');
     const alpha = await fixture.open('alpha');
-    await alpha.admit({ turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' });
-    await project.writeFile('main.scad', 'cube(20);');
-    alpha.send({ command: 'turnCompleted', turnId: 'turn-1' });
-    await turnFinalized(alpha, 'turn-1');
     const root = await fixture.root('alpha');
+    const session = await root.placementSession();
+    await place(session, turnKey(1));
+    await project.writeFile('main.scad', 'cube(20);');
+    await finish(session, turnKey(1));
+    await turnFinalized(alpha, 'turn-1');
     const [, older] = await root.log();
     const original = globalThis.fetch;
     /* No cloud here: the push is refused, after the name is already on the revision. */
@@ -1207,39 +1159,191 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
       globalThis.fetch = original;
     }
   }, 20_000);
+});
 
-  it('should answer an admission whose turn ended before its lease, with the turn’s own reason (W19-b)', async () => {
+describe('the placement session (W8 TS-S5)', () => {
+  type Served = { session: TurnPlacementAdapter<FileSystemBridgeConnection>; close: () => void };
+  const placementHarness = (extra: { onCreatePort?: () => void } = {}) => {
+    const served: Served[] = [];
+    const fixture = harness(['alpha'], (port) => port, {
+      ...extra,
+      servePlacement: ({ session }) => {
+        let closed = (): void => undefined;
+        served.push({
+          session,
+          close: () => {
+            closed();
+          },
+        });
+        return {
+          onClose: (handler) => {
+            closed = handler;
+          },
+        };
+      },
+    });
+    return { fixture, served };
+  };
+  const key = { chatId: 'chat-1', turnId: 'turn-1', runId: 'run-1', attempt: 1 };
+
+  it('should keep a project root open while a placement session is live with no page port', async () => {
+    const { fixture, served } = placementHarness();
+    const page = await fixture.open('alpha');
+    fixture.registry.connectPlacement(new MessageChannel().port1, 'alpha');
+    await settle();
+    const root = await fixture.root('alpha');
+
+    page.send({ command: 'close' });
+    await settle();
+
+    expect(served).toHaveLength(1);
+    expect(root.inspect().status).toBe('active');
+
+    served[0]!.close();
+    /* The release records a close cut and waits for the operation log's last append, so the registry lets go
+     * after the root stops: waited on, not counted in event-loop turns (W2c a1b). */
+    await vi.waitFor(() => {
+      expect(root.inspect()).toMatchObject({ status: 'stopped', children: [] });
+    });
+    await vi.waitFor(() => {
+      expect(fixture.registry.openProjectIds()).toEqual([]);
+    });
+  });
+
+  it('should answer admit with the clock frozen', async () => {
+    const { fixture, served } = placementHarness();
+    await fixture.open('alpha');
+    fixture.registry.connectPlacement(new MessageChannel().port1, 'alpha');
+    await settle();
+    /* No timer fires from here on: an answer that only a bound could give never comes (B1). */
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+
+    const answer = await served[0]!.session.admit({ requestId: 'admit:run-1:1', key }).finally(() => {
+      vi.useRealTimers();
+    });
+
+    expect(answer).toMatchObject({ requestId: 'admit:run-1:1', status: 'applied', placement: { mode: 'direct' } });
+  });
+
+  it('should revoke the tool port when complete is answered', async () => {
+    const { fixture, served } = placementHarness();
+    await fixture.open('alpha');
+    fixture.registry.connectPlacement(new MessageChannel().port1, 'alpha');
+    await settle();
+    const { session } = served[0]!;
+    const admitted = await session.admit({ requestId: 'admit:run-1:1', key });
+    if (admitted.status === 'refused') {
+      throw new Error(admitted.message);
+    }
+    const tools = createFileSystemBridgeProxy(admitted.placement.tools);
+    await tools.writeFile('main.ts', 'export const size = 2;\n');
+
+    const completed = await session.complete({ requestId: 'complete:run-1:1', key, cut: true });
+
+    expect(completed).toEqual({ requestId: 'complete:run-1:1', status: 'applied' });
+    await expect(tools.writeFile('late.ts', 'export const late = true;\n')).rejects.toThrow(/no longer be changed/u);
+  });
+
+  it("should not start the root's opening pull before the page's credential frame when the placement session is brokered first", async () => {
+    let ports = 0;
+    const { fixture, served } = placementHarness({
+      onCreatePort: () => {
+        ports += 1;
+      },
+    });
+
+    fixture.registry.connectPlacement(new MessageChannel().port1, 'alpha');
+    await settle();
+
+    expect(ports).toBe(0);
+    expect(fixture.registry.openProjectIds()).toEqual([]);
+
+    await fixture.open('alpha');
+    await settle();
+
+    expect(ports).toBe(1);
+    expect(served).toHaveLength(1);
+  });
+});
+
+describe('the revisions reader port (W6.r1 finding 9)', () => {
+  /** The resident agent host's revisions port, as the worker hands it to `connectReader`. */
+  const reader = (fixture: Harness, projectId: string) => {
+    const channel = new MessageChannel();
+    let closed = false;
+    const frames: WorkerRevisionResponse[] = [];
+    channel.port2.addEventListener('message', ({ data }: MessageEvent<WorkerRevisionResponse>) => {
+      frames.push(data);
+    });
+    channel.port2.addEventListener('close', () => {
+      closed = true;
+    });
+    channel.port2.start();
+    fixture.registry.connectReader(channel.port1, projectId);
+    return {
+      frames,
+      closed: () => closed,
+      send: (request: WorkerRevisionRequest) => {
+        channel.port2.postMessage(request);
+      },
+    };
+  };
+
+  it("should close the root and take the close cut when the page's port closes with a reader connected", async () => {
     const fixture = harness(['alpha']);
     const project = fixture.service.createRootedFileSystem('/projects/alpha');
     await project.writeFile('main.scad', 'cube(10);');
-    const alpha = await fixture.open('alpha');
+    const page = await fixture.open('alpha');
+    await settle(20);
+    const agent = reader(fixture, 'alpha');
+    await settle();
+    const root = await fixture.root('alpha');
+    const before = await root.log();
+    await project.writeFile('main.scad', 'cube(20);');
+    fixture.announce('alpha', ['main.scad']);
 
-    /*
-     * Only `prepare` used to refuse an admission, so a turn that ended any
-     * other way before its lease — a base cut the checkout could not settle
-     * (the browser's `Buffer is not defined`), a lease it could not write, or
-     * this abandonment — left the caller waiting out the whole 30 s bound and
-     * then hearing "it was never leased", which names nothing (I12).
-     */
-    const placed = new Promise<WorkerRevisionResponse>((resolve) => {
-      alpha.port.addEventListener('message', ({ data }: MessageEvent<WorkerRevisionResponse>) => {
-        if ((data.type === 'result' || data.type === 'error') && data.id === 99) {
-          resolve(data);
-        }
-      });
+    page.send({ command: 'close', id: 9 });
+    await settle(60);
+
+    expect(page.frames).toContainEqual({ type: 'result', id: 9, result: { kind: 'closed' } });
+    expect(root.inspect()).toMatchObject({ status: 'stopped', children: [] });
+    expect(fixture.registry.openProjectIds()).toEqual([]);
+    const after = await root.log();
+    expect(after.length).toBeGreaterThan(before.length);
+    expect(agent.closed()).toBe(true);
+  });
+
+  it('should refuse a reader for a project that is not open, and open no root for it', async () => {
+    let ports = 0;
+    const fixture = harness(['alpha'], (port) => port, {
+      onCreatePort: () => {
+        ports += 1;
+      },
     });
-    alpha.send({ command: 'admitTurn', id: 99, turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' });
-    alpha.send({ command: 'turnAbandoned', turnId: 'turn-1' });
 
-    const answer = await placed;
-    expect(answer.type).toBe('error');
-    if (answer.type !== 'error') {
-      throw new Error('the admission must be refused, not placed');
-    }
-    expect(answer.code).toBe('REVISION_PREPARE_FAILED');
-    expect(answer.message).toBe(
-      'This project could not open a revision for the turn: The turn ended before it recorded a revision.',
-    );
+    const agent = reader(fixture, 'alpha');
+    await settle();
+
+    expect(agent.closed()).toBe(true);
+    expect(ports).toBe(0);
+    expect(fixture.registry.openProjectIds()).toEqual([]);
+  });
+
+  it("should keep the root open when a reader closes, and never take the page's credential from it", async () => {
+    const fixture = harness(['alpha']);
+    const page = await fixture.open('alpha');
+    const agent = reader(fixture, 'alpha');
+    await settle();
+    const root = await fixture.root('alpha');
+
+    agent.send({ command: 'remoteCredential', id: 3, apiBaseUrl: 'https://elsewhere.test' });
+    agent.send({ command: 'close', id: 4 });
+    await settle();
+
+    expect(agent.frames.find((frame) => frame.type === 'error')).toMatchObject({ id: 3 });
+    expect(agent.frames).toContainEqual({ type: 'result', id: 4, result: { kind: 'closed' } });
+    expect(root.inspect().status).toBe('active');
+    expect(page.frames.some((frame) => frame.type === 'status')).toBe(true);
   });
 });
 

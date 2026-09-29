@@ -31,7 +31,7 @@ export const ChatErrorProviderAccount = memo(function ({
   readonly description?: string;
   readonly details?: Record<string, unknown>;
 }): React.JSX.Element {
-  const { continueChat } = useChatActions();
+  const { regenerate } = useChatActions();
   const { name } = providerEntryFrom(details);
   const title = `${name} models are unavailable right now`;
 
@@ -64,7 +64,7 @@ export const ChatErrorProviderAccount = memo(function ({
             variant='outline'
             size='sm'
             onClick={() => {
-              continueChat();
+              regenerate();
             }}
           >
             <RefreshCcw className='size-3.5' />

@@ -198,7 +198,10 @@ describe('runGeoSpecModule', () => {
 
   it('should rebundle when a new file now wins an import resolution', async () => {
     const filesystem = filesystemWith([
-      ['spec.geospec.ts', `import { it } from 'geospec'; import { variant } from './helper.js'; it(variant, () => {});`],
+      [
+        'spec.geospec.ts',
+        `import { it } from 'geospec'; import { variant } from './helper.js'; it(variant, () => {});`,
+      ],
       ['helper.ts', `export const variant = 'helper.ts';`],
     ]);
     const bundleCache = new Map();

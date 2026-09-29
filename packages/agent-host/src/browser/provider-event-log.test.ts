@@ -56,40 +56,64 @@ describe('createProviderEventLog', () => {
   it('creates a missing provider-backed log and replays ordered appends after close', async () => {
     const { fileSystem, files } = createFileSystem();
     const filePath = '/.tau/chats/chat-1/events.jsonl';
-    const log = await createProviderEventLog({ fileSystem, filePath });
+    const log = await createProviderEventLog({ fileSystem, filePath, access: 'write' });
 
     await log.append(event(0));
     await log.append(event(1));
     await log.close();
 
     expect(new TextDecoder().decode(files.get(filePath))).toContain('"state":"admitted"');
-    const reopened = await createProviderEventLog({ fileSystem, filePath });
+    const reopened = await createProviderEventLog({ fileSystem, filePath, access: 'write' });
     await expect(reopened.read()).resolves.toEqual([event(0), event(1)]);
     await reopened.close();
   });
 
-  it('repairs a torn tail through the provider rewrite primitive', async () => {
+  it('repairs a torn tail inside its first append, not at open', async () => {
     const filePath = '/.tau/chats/chat-1/events.jsonl';
     const valid = `${JSON.stringify(event(0))}\n`;
     const { fileSystem, files } = createFileSystem({
       [filePath]: new TextEncoder().encode(`${valid}{"version":`),
     });
 
-    const log = await createProviderEventLog({ fileSystem, filePath });
+    const log = await createProviderEventLog({ fileSystem, filePath, access: 'write' });
+    // Opening writes nothing: the repair is a write, so it happens inside the fence (CL-R11).
+    expect(new TextDecoder().decode(files.get(filePath))).toBe(`${valid}{"version":`);
+    await log.append(event(1));
     await log.close();
 
-    expect(new TextDecoder().decode(files.get(filePath))).toBe(valid);
+    expect(new TextDecoder().decode(files.get(filePath))).toBe(`${valid}${JSON.stringify(event(1))}\n`);
   });
 
   it('uses an advisory lock marker and rejects a second writer', async () => {
     const { fileSystem } = createFileSystem();
     const filePath = '/.tau/chats/chat-1/events.jsonl';
-    const first = await createProviderEventLog({ fileSystem, filePath });
+    const first = await createProviderEventLog({ fileSystem, filePath, access: 'write' });
 
-    await expect(createProviderEventLog({ fileSystem, filePath })).rejects.toMatchObject({ code: 'WRITER_LOCKED' });
+    await expect(createProviderEventLog({ fileSystem, filePath, access: 'write' })).rejects.toMatchObject({
+      code: 'WRITER_LOCKED',
+    });
     await first.close();
-    const next = await createProviderEventLog({ fileSystem, filePath });
+    const next = await createProviderEventLog({ fileSystem, filePath, access: 'write' });
     await next.close();
+  });
+
+  // CL-A8 (provider leg), S4's steal trace: a second writer takes the lock over; the first writer's local fence refuses
+  // its next append, which writes nothing, and the log stays readable.
+  it('should fence a writer whose lock was stolen', async () => {
+    const { fileSystem, files } = createFileSystem();
+    const filePath = '/.tau/chats/chat-1/events.jsonl';
+    const first = await createProviderEventLog({ fileSystem, filePath, access: 'write' });
+    await first.append(event(0));
+    files.delete(`${filePath}.lock`);
+    const thief = await createProviderEventLog({ fileSystem, filePath, access: 'write' });
+    await thief.append({ ...event(1), leaderEpoch: 'leader-2', sequence: 0 });
+    const stolen = files.get(filePath);
+
+    await expect(first.append(event(1))).rejects.toMatchObject({ code: 'LOG_FENCED' });
+    expect(files.get(filePath)).toEqual(stolen);
+    const reader = await createProviderEventLog({ fileSystem, filePath, access: 'read' });
+    await expect(reader.read()).resolves.toHaveLength(2);
+    await thief.close();
   });
 
   it('reports a backend-neutral refusal when append is unavailable', async () => {
@@ -97,18 +121,18 @@ describe('createProviderEventLog', () => {
     const { appendFile: _appendFile, ...readOnly } = fileSystem;
 
     await expect(
-      createProviderEventLog({ fileSystem: readOnly, filePath: '/.tau/chats/chat-1/events.jsonl' }),
+      createProviderEventLog({ fileSystem: readOnly, filePath: '/.tau/chats/chat-1/events.jsonl', access: 'write' }),
     ).rejects.toMatchObject({ code: 'STORAGE_NOT_WRITABLE' });
   });
 
   it('remains usable when the first provider append fails before creating the file', async () => {
     const fixture = createFileSystem();
     const filePath = '/.tau/chats/chat-1/events.jsonl';
-    const log = await createProviderEventLog({ fileSystem: fixture.fileSystem, filePath });
+    const log = await createProviderEventLog({ fileSystem: fixture.fileSystem, filePath, access: 'write' });
     fixture.failNextAppend(new Error('injected append refusal'));
 
     await expect(log.append(event(0))).rejects.toThrow('injected append refusal');
-    await expect(log.append(event(0))).resolves.toEqual({ appended: true });
+    await expect(log.append(event(0))).resolves.toMatchObject({ appended: true });
     await log.close();
   });
 });

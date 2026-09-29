@@ -52,6 +52,17 @@ describe('parseErrorForPersistence', () => {
     expect(parsed.message).toBe('boom');
   });
 
+  /* A refusal thrown by the host or the channel (not a run's terminal record) names its card by its own code. */
+  it('should keep the code a thrown refusal carries', () => {
+    const parsed = parseErrorForPersistence(
+      Object.assign(new Error('The agent owner speaks another wire version; update Tau on that host.'), {
+        code: 'WIRE_VERSION_UNSUPPORTED',
+      }),
+    );
+
+    expect(parsed).toMatchObject({ category: errorCategory.generic, code: 'WIRE_VERSION_UNSUPPORTED' });
+  });
+
   it('decodes Google byte-list provider errors before persistence', () => {
     const parsed = parseErrorForPersistence(
       new Error(`Google request failed with status code 400: ${googleInvalidArgumentByteList}`),
@@ -101,6 +112,14 @@ describe('parseAdmissionFailureForPersistence', () => {
     expect(parsed.message).toBe(
       'This chat is still holding a workspace from an earlier run. Reload the page to release it.',
     );
+  });
+
+  it('should keep a thrown refusal at admission on the turn-not-started card', () => {
+    const parsed = parseAdmissionFailureForPersistence(
+      Object.assign(new Error('The composer did not bind in time.'), { code: 'COMPOSER_BINDING_TIMEOUT' }),
+    );
+
+    expect(parsed.code).toBe(chatTurnNotStartedCode);
   });
 
   it('should leave a coded refusal on its own card', () => {

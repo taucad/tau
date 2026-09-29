@@ -254,7 +254,7 @@ const runLeg = async (options: LegOptions): Promise<HostRunSnapshot> => {
     systemPrompt: liveCadSystemPrompt({ chatId: thread.chatId, modelId: options.modelId }),
     model: legModel(options.modelId, options.contextWindow, options.maxTokens),
     toolRegistry: createLiveToolRegistry({ results: scriptedResults }),
-    eventLog: await createNodeEventLog({ filePath: thread.filePath }),
+    eventLog: await createNodeEventLog({ filePath: thread.filePath, access: 'write' }),
     ...(options.onCompaction === undefined ? {} : { onCompaction: options.onCompaction }),
     ...(options.stopAfterToolResult === true ? { onLiveEvent: stopAfterToolResult } : {}),
   });

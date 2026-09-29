@@ -89,12 +89,14 @@ export type ServicesBrokerOptions = {
     dispose(): void;
   };
   /** Open one separately supervised geometry-runner port for an admitted root. */
-  readonly connectGeometry?: (input: Readonly<{
-    root: string;
-    context: Readonly<Record<string, string>>;
-    engine: 'native' | 'legacy';
-    stillAuthorized: () => boolean;
-  }>) => MessagePortMain;
+  readonly connectGeometry?: (
+    input: Readonly<{
+      root: string;
+      context: Readonly<Record<string, string>>;
+      engine: 'native' | 'legacy';
+      stillAuthorized: () => boolean;
+    }>,
+  ) => MessagePortMain;
   /** Recheck queued/active geometry suites whenever a main-owned root grant changes. */
   readonly revokeGeometry?: () => void;
   /** Called once for each freshly forked utility, for diagnostics attachment. */
@@ -173,6 +175,10 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
   const runtimeLeases = new Map<string, ReturnType<ServicesBrokerOptions['connectRuntime']>>();
   const runtimeLeaseClosures = new Map<string, Promise<void>>();
   const projectAttachments = new Map<string, Set<string>>();
+  /* Monotone per root for the broker's life, never deleted on release (L6 N3):
+   * a release that outlived its deadline may still be closing in the utility,
+   * and a restarted count would hand the next adoption that release's number,
+   * letting the stale release delete the new session's launcher. */
   const attachmentGenerations = new Map<string, number>();
   const releaseWaiters = new Map<string, ReturnType<typeof Promise.withResolvers<void>>>();
   const bindingWaiters = new Map<string, ReturnType<typeof Promise.withResolvers<MachineBindingOutcome>>>();
@@ -341,12 +347,27 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
       runtimeLeases.delete(requestId);
       return;
     }
-    if (type === 'geometry-port-request' && typeof requestId === 'string' && requestId.length > 0 && requestId.length <= 128) {
+    if (
+      type === 'geometry-port-request' &&
+      typeof requestId === 'string' &&
+      requestId.length > 0 &&
+      requestId.length <= 128
+    ) {
       const { engine } = frame as Record<string, unknown>;
       const context = typeof workspaceRoot === 'string' ? runtimeContexts.get(canonicalRoot(workspaceRoot)) : undefined;
-      if (utility !== spawned || !acceptingConnections || context === undefined || typeof workspaceRoot !== 'string' ||
-        (engine !== 'native' && engine !== 'legacy') || options.connectGeometry === undefined) {
-        spawned.postMessage({ type: 'geometry-port-refused', requestId, message: 'Main refused an unadmitted GeoSpec runner root or engine.' });
+      if (
+        utility !== spawned ||
+        !acceptingConnections ||
+        context === undefined ||
+        typeof workspaceRoot !== 'string' ||
+        (engine !== 'native' && engine !== 'legacy') ||
+        options.connectGeometry === undefined
+      ) {
+        spawned.postMessage({
+          type: 'geometry-port-refused',
+          requestId,
+          message: 'Main refused an unadmitted GeoSpec runner root or engine.',
+        });
         return;
       }
       try {
@@ -355,11 +376,16 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
           root: workspaceRoot,
           context,
           engine,
-          stillAuthorized: () => acceptingConnections && utility === spawned && runtimeContexts.get(rootKey) === context,
+          stillAuthorized: () =>
+            acceptingConnections && utility === spawned && runtimeContexts.get(rootKey) === context,
         });
         spawned.postMessage({ type: 'geometry-port', requestId }, [port]);
       } catch (error) {
-        spawned.postMessage({ type: 'geometry-port-refused', requestId, message: error instanceof Error ? error.message : String(error) });
+        spawned.postMessage({
+          type: 'geometry-port-refused',
+          requestId,
+          message: error instanceof Error ? error.message : String(error),
+        });
       }
       return;
     }
@@ -548,7 +574,6 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
       const spawned = utility;
       if (spawned === undefined) {
         projectAttachments.delete(root);
-        attachmentGenerations.delete(root);
         runtimeContexts.delete(root);
         options.revokeGeometry?.();
         projectIds.delete(root);
@@ -587,7 +612,6 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
          * would strand the launcher that re-adoption is already using. */
         if (attachmentGenerations.get(root) === generation) {
           projectAttachments.delete(root);
-          attachmentGenerations.delete(root);
           runtimeContexts.delete(root);
           options.revokeGeometry?.();
           projectIds.delete(root);

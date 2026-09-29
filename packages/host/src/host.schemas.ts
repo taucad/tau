@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import type { ExternalAgentDescriptor } from '@taucad/agent-host';
+import type { ExternalAgentDescriptor } from '@taucad/agent-host/wire';
 
 export const pairingResponseSchema = z.object({
   deviceCode: z.string().min(16),
@@ -13,6 +13,9 @@ export const pairingResponseSchema = z.object({
 export const pairingTokenResponseSchema = z.object({
   deviceId: z.string().min(1),
   credential: z.string().min(32),
+  /* The account the device was paired to, which the funded gateway names as its principal (RH-S6). Optional: an API
+   * that does not send it yet still pairs. */
+  accountId: z.string().min(1).optional(),
 });
 
 const offerSchema = z.object({

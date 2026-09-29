@@ -11,7 +11,7 @@ import {
   CreditLedgerService,
 } from '#api/billing/credit-ledger.service.js';
 import { and, eq, inArray } from 'drizzle-orm';
-import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
+import { billingAccountClosedError, isBillingAccountClosed, LlmGatewayError } from '#api/llm/llm-gateway.error.js';
 import { cloudProviderAccountMessage, recognizeProviderAccountRefusal } from '#api/llm/provider-account-refusal.js';
 import type { ProviderAccountRefusal } from '#api/llm/provider-account-refusal.js';
 import {
@@ -135,6 +135,17 @@ export class BillableModelInvocationService {
   ) {}
 
   public async invoke(suppliedIntent: BillableInvocationIntent): Promise<BillableInvocationResult> {
+    try {
+      return await this.invokeBound(suppliedIntent);
+    } catch (error) {
+      if (isBillingAccountClosed(error)) {
+        throw billingAccountClosedError();
+      }
+      throw error;
+    }
+  }
+
+  private async invokeBound(suppliedIntent: BillableInvocationIntent): Promise<BillableInvocationResult> {
     assertRequestBound(suppliedIntent.body);
     const intent = {
       ...suppliedIntent,
@@ -952,6 +963,14 @@ export class BillableModelInvocationService {
           availableCreditAtoms: (denied.availableCreditAtoms ?? 0n).toString(),
           routeId,
         },
+      );
+    }
+    if (reason === 'attempt_voided') {
+      this.metrics?.billingVoidedAdmissions.add(1, { 'deployment.environment': intent.environment });
+      return new LlmGatewayError(
+        HttpStatus.CONFLICT,
+        'ATTEMPT_VOIDED',
+        'This model request was abandoned by its client and will not run.',
       );
     }
     if (reason === 'concurrency_unavailable') {

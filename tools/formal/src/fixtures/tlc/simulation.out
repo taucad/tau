@@ -1,0 +1,7 @@
+Starting... (2026-09-25 23:51:11)
+Computed 1 initial states...
+Finished computing initial states: 1 distinct state generated at 2026-09-25 23:51:12.
+Progress: 119 states checked, 50 traces generated (trace length: mean=3, var(x)=3, sd=2)
+The number of states generated: 119
+Simulation using seed 6 and aril 0
+Finished in 02s at (2026-09-25 23:51:12)

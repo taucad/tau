@@ -20,7 +20,7 @@ import {
   isAttachmentUrl,
   isSupportedAttachmentMediaType,
 } from '#utils/attachment.utils.js';
-import type { Attachment, AttachmentReference } from '#utils/attachment.utils.js';
+import type { AttachmentReference, StoredAttachment } from '#utils/attachment.utils.js';
 
 /** The filesystem surface an attachment or composer record store needs, so tests and hosts can supply anything shaped like it. */
 export type AttachmentClient = {
@@ -37,7 +37,8 @@ export type AttachmentRef = AttachmentReference | string;
 
 /** The attachment store rooted at one directory. */
 export type AttachmentStore = {
-  put: (bytes: Uint8Array<ArrayBuffer>, mediaType: string, filename?: string) => Promise<Attachment>;
+  /** Store the bytes; the only minter of a {@link StoredAttachment} (I37). */
+  put: (bytes: Uint8Array<ArrayBuffer>, mediaType: string, filename?: string) => Promise<StoredAttachment>;
   read: (ref: AttachmentRef) => Promise<Uint8Array<ArrayBuffer> | undefined>;
   has: (ref: AttachmentRef) => Promise<boolean>;
   copyTo: (target: AttachmentStore, attachment: AttachmentReference) => Promise<void>;
@@ -94,7 +95,11 @@ export function createAttachmentStore(client: AttachmentClient, directory: strin
     return path === undefined ? false : client.exists(path);
   };
 
-  const put = async (bytes: Uint8Array<ArrayBuffer>, mediaType: string, filename?: string): Promise<Attachment> => {
+  const put = async (
+    bytes: Uint8Array<ArrayBuffer>,
+    mediaType: string,
+    filename?: string,
+  ): Promise<StoredAttachment> => {
     if (!isSupportedAttachmentMediaType(mediaType)) {
       throw new Error(`Unsupported attachment type: ${mediaType}`);
     }
@@ -105,12 +110,13 @@ export function createAttachmentStore(client: AttachmentClient, directory: strin
       throw new Error(`Attachment exceeds the ${cap / 1024 / 1024} MB limit for ${kind}s.`);
     }
 
-    const attachment: Attachment = {
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the brand is minted here and nowhere else (I37).
+    const attachment = {
       hash: await sha256Bytes(bytes),
       mediaType,
       byteLength: bytes.byteLength,
       ...(filename === undefined ? {} : { filename }),
-    };
+    } as StoredAttachment;
     const path = `${directory}/${attachmentFileName(attachment)}`;
     await mutex.run(path, async () => {
       if (!(await client.exists(path))) {

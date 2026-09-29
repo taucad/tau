@@ -1,0 +1,18 @@
+{
+  "alphabet": [
+    "acknowledge",
+    "casLost",
+    "cutCancelled",
+    "cutFailed",
+    "leaseGranted",
+    "leaseRefused",
+    "nothingToSave",
+    "revisionMinted",
+    "turnAbandoned",
+    "turnCompleted"
+  ],
+  "specs": {
+    "TurnProtocol.tla": "94e21620702de0c16ca8818fe281ac759218bf9a08df5a7ddd049b15251a9e77"
+  },
+  "tables": {}
+}

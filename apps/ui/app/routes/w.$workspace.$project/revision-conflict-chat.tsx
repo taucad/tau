@@ -71,6 +71,7 @@ export function RevisionConflictChat(): undefined {
           id: generatePrefixedId(idPrefix.request),
           kind: 'regenerate-tail',
           messageId: message.id,
+          message,
           source: 'resolve-conflict-new-chat',
           createdAt: Date.now(),
         },

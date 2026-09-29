@@ -41,6 +41,7 @@
     "./project-revisions-machine": "./src/project-revisions.machine.ts",
     "./revision-projection": "./src/revision-projection.ts",
     "./turn-machine": "./src/turn.machine.ts",
+    "./turn-placement": "./src/turn-placement.ts",
     "./checkout-machine": "./src/checkout.machine.ts",
     "./restore-machine": "./src/restore.machine.ts",
     "./checkouts-machine": "./src/checkouts.machine.ts",
@@ -88,6 +89,11 @@
         "types": "./dist/turn.machine.d.mts",
         "import": "./dist/turn.machine.mjs",
         "default": "./dist/turn.machine.mjs"
+      },
+      "./turn-placement": {
+        "types": "./dist/turn-placement.d.mts",
+        "import": "./dist/turn-placement.mjs",
+        "default": "./dist/turn-placement.mjs"
       },
       "./checkout-machine": {
         "types": "./dist/checkout.machine.d.mts",
@@ -147,7 +153,9 @@
     "xstate": "^6.0.0-alpha.59"
   },
   "devDependencies": {
+    "@taucad/formal": "workspace:*",
     "@taucad/utils": "workspace:*",
+    "@taucad/xstate-testing": "workspace:*",
     "xstate": "catalog:"
   },
   "peerDependenciesMeta": {

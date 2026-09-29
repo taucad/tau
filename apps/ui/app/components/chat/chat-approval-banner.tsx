@@ -17,6 +17,8 @@ export type PendingAgentHostApproval = AgentHostApproval & {
   readonly messageId: string;
   /** Id the chat client resolves — the SDK approval id, which is the interrupt id for a host-projected part. */
   readonly approvalId: string;
+  /** An ordinary Tau tool approval is not an external-agent interrupt. */
+  readonly tauTool?: true;
 };
 
 /**
@@ -66,6 +68,7 @@ export const pendingAgentHostApprovals = (messages: readonly MyUIMessage[]): rea
       options: projected?.options ?? [],
       ...(projected?.agentId === undefined ? {} : { agentId: projected.agentId }),
       ...(projected?.login === undefined ? {} : { login: projected.login }),
+      ...(projected === undefined ? { tauTool: true } : {}),
     });
   }
   return pending;
@@ -183,7 +186,7 @@ export function ChatApprovalBanner(): React.JSX.Element | undefined {
     return undefined;
   }
 
-  const name = requesterName(approval.agentId, activeExecution);
+  const name = approval.tauTool ? 'Tau' : requesterName(approval.agentId, activeExecution);
   const focused = defaultOption(approval.options);
   const respond = (approved: boolean, optionId?: string): void => {
     const resolve = async (): Promise<void> => {
@@ -207,7 +210,9 @@ export function ChatApprovalBanner(): React.JSX.Element | undefined {
         <p className='min-w-0 truncate font-medium'>{`${name} is waiting for approval`}</p>
       </div>
       <p className='min-w-0 break-words text-foreground/90'>{approval.prompt}</p>
-      <p className='text-xs text-muted-foreground'>{continuationNote(activeExecution, name)}</p>
+      <p className='text-xs text-muted-foreground'>
+        {continuationNote(approval.tauTool ? undefined : activeExecution, name)}
+      </p>
       {approval.options.some((option) => option.kind === 'allow_always') ? (
         <p className='text-xs text-muted-foreground'>
           Standing-grant persistence is controlled by the connected agent or MCP server; Tau only forwards this exact

@@ -25,6 +25,9 @@ import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
 import { BillingPolicyReadiness } from '#api/billing/billing-policy.readiness.js';
 import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
 import { BillingUsageService } from '#api/billing/billing-usage.service.js';
+import { BillingAttemptController } from '#api/billing/billing-attempt.controller.js';
+import { HostsModule } from '#api/hosts/hosts.module.js';
+import { LlmGatewayAuthGuard } from '#api/llm/llm-gateway.guard.js';
 import { BillingEstimatesService } from '#api/billing/billing-estimates.service.js';
 import { BillableModelInvocationService } from '#api/billing/billable-model-invocation.service.js';
 import { billableModelQualificationResolverKey } from '#api/billing/billable-model-invocation.types.js';
@@ -65,9 +68,10 @@ const providerUpstreamFetch =
 
 /** PostgreSQL financial authority; unqualified legacy collection and hosted callers remain closed. */
 @Module({
-  imports: [DatabaseModule, EmailModule, ModelModule],
-  controllers: [BillingController],
+  imports: [DatabaseModule, EmailModule, HostsModule, ModelModule],
+  controllers: [BillingController, BillingAttemptController],
   providers: [
+    LlmGatewayAuthGuard,
     {
       provide: stripeClientKey,
       useFactory(configService: ConfigService<Environment, true>): Stripe {

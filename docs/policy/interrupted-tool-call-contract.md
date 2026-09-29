@@ -3,7 +3,7 @@ title: 'Interrupted Tool-Call Contract Policy'
 description: 'Durable rules for partial, interrupted, denied, and disconnected tool calls across UI messages and portable agent events'
 status: active
 created: '2026-04-23'
-updated: '2026-09-05'
+updated: '2026-09-28'
 related:
   - docs/research/interrupted-tool-call-validation-failure.md
   - docs/research/google-cancel-followup-stale-tool-part-validation.md
@@ -42,9 +42,9 @@ Do not turn a partial call into a new call merely to make validation pass.
 
 ### 4. Finalize only the interrupted UI tail
 
-`finalizeInterruptedToolParts` in `apps/ui/app/utils/chat.utils.ts` may settle in-progress parts only on the interrupted assistant tail. It must consult `RpcLedger` before assigning an error: if execution already produced an output, preserve that settled outcome.
+`finalizeInterruptedToolParts` in `apps/ui/app/utils/chat.utils.ts` may settle in-progress parts only on the interrupted assistant tail. For a live UI tail, consult `RpcLedger` before assigning an error; for a transcript rebuilt from a terminal host log, use that log's input and output rows as authority. Preserve an output already recorded by either source.
 
-Map stop, preemption, disconnect, and failure causes to their explicit structured termination code. Persist the finalized tail through `ChatSessionStore` before accepting a follow-up that depends on it.
+Map stop, preemption, disconnect, and failure causes to their explicit structured termination code. Derive the finalized display tail from the host log; never persist a second UI-message transcript. A follow-up that depends on a tool outcome waits for the host's durable recovery or settlement.
 
 ### 5. Treat the host event log as durable authority
 
@@ -72,12 +72,23 @@ Tests must cover active-tail acceptance, historical canonicalization, invalid st
 
 Assert typed structures and stable IDs. Do not rely only on display strings or snapshots.
 
+### 10. Recall a native approval by its key (D5)
+
+A Tau host's tool that asks for approval pauses the run on a native `interrupt.recorded` request. The asking call's output records the pause, not the answer, and the continued attempt's model issues a new call. Rule 7 applies with these bounds:
+
+- The request's context carries the tool's approval key, its tool name and the asking call ID. The continued call recalls the answer by that key through `HostToolApproval.recall` in `packages/agent-host/src/host/tau-agent-host.ts`. The output row that uses an answer records `metadata.approval.interruptId`, which spends it, so a later call under the same key asks again.
+- The continued attempt receives an approval-answer reminder (`tauInternal.kind: 'approval-answer'`). It names each answer given since the attempt last ran, with its prompt, the asking call ID and the tool.
+- A denial or a Stop ends the run with no attempt left to tell. The chat's next run receives the same reminder for the ended run's untold answers, before the person's new message, and says that its calls ask again. An answer is therefore never conveyed only through the aborted call's error text.
+- The host hands each answer to the tool registry's idempotent `answerApproval`, so what the tool guards follows the answer whether or not the run continues. An answer or a Stop hands over only the requests its own command resolved. An applied resume reconciles every answer of its run.
+- Recall is at-least-once for a generic tool. A call that recalled an answer and then threw releases it, and a crash before the output row lets the next call recall it again. A tool that guards a side effect keys that effect idempotently, as `request_print` keys its ledger request by the asking call.
+
 ## Ownership
 
 - UI-message normalization: `libs/chat/src/schemas/message.schema.ts`
 - UI lifecycle helpers: `libs/chat/src/utils/tool-part.utils.ts`
 - Tail finalization: `apps/ui/app/utils/chat.utils.ts`
 - Settled-call ledger: `apps/ui/app/services/rpc-ledger.ts`
-- UI persistence: `apps/ui/app/services/chat-session-store.ts`
+- UI transcript projection: `apps/ui/app/machines/chat-projection.logic.ts`
+- Refused-command persistence: `apps/ui/app/services/chat-session-store.ts`
 - Portable recovery: `packages/agent-host/src/harness/interrupt-recovery.ts`
 - Resume orchestration: `packages/agent-host/src/host/tau-agent-host.ts`

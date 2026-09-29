@@ -1,45 +1,21 @@
 import { z } from 'zod';
 import type { ProviderMetadata, UIMessageChunk } from 'ai';
 import type { AgentLiveEvent, AgentLogEvent, ProviderMessageMetadata } from '@taucad/agent-host';
-import { externalAgentStopSchema } from '@taucad/agent-host';
+import { userProviderMessageSchema } from '@taucad/agent-host';
+import { externalAgentStopSchema } from '@taucad/agent-host/wire';
 import type { AcpSessionData, BillingInvocationStatus, MyUIMessage } from '@taucad/chat';
 import { acpSessionDataSchema, billingInvocationStatusSchema } from '@taucad/chat';
 import { errorCategoryTitles, httpStatusToCategory } from '@taucad/chat/utils';
 import { errorCategory } from '@taucad/types/constants';
-import type { ErrorCategory } from '@taucad/types';
 import type { TurnConflictedEvent, TurnFailedEvent, TurnFinalizedEvent } from '@taucad/revisions/revision-effects';
 import { isRecord } from '@taucad/utils/schema';
 import { isAttachmentUrl } from '#utils/attachment.utils.js';
+import { normalizedErrorCategoryOf } from '#utils/chat-error-card.js';
 
 type ProviderMessage = Extract<AgentLogEvent, { readonly type: 'message.appended' }>['message'];
 type AssistantProviderMessage = Extract<ProviderMessage, { readonly role: 'assistant' }>;
 type UserProviderMessage = Extract<ProviderMessage, { readonly role: 'user' }>;
 type JsonValue = ProviderMessage['content'];
-
-/**
- * The category a gateway code names, whatever status carried it.
- *
- * The gateway rewrites a classified provider failure into a Tau frame once the
- * stream is already open, so a mid-stream failure rides the relayed response's
- * own 200: `httpStatusToCategory(200)` answers the generic card, and a quota
- * cut mid-turn reads as an unexplained error instead of a rate limit. Each code
- * here answers exactly one pre-stream status too — `RATE_LIMITED` 429,
- * `UPSTREAM_REJECTED` 502, the other two 503 — so naming the card from the code
- * leaves every pre-stream failure rendering exactly as it did.
- *
- * `PROVIDER_UNAVAILABLE` is the one code the gateway answers with two statuses:
- * 503 on every classified path, but 502 for a body-less provider response. The
- * code names the overloaded card for both, which is what a customer whose
- * provider is unavailable is told either way — and it is the only way a
- * mid-stream 499 or 5xx cut reaches that card instead of the generic one.
- */
-const gatewayCodeCategories = new Map<string, ErrorCategory>([
-  ['INSUFFICIENT_CREDIT', errorCategory.credits],
-  ['PROVIDER_ACCOUNT_EXHAUSTED', errorCategory.overloaded],
-  ['PROVIDER_UNAVAILABLE', errorCategory.overloaded],
-  ['RATE_LIMITED', errorCategory.rateLimit],
-  ['UPSTREAM_REJECTED', errorCategory.server],
-]);
 
 /**
  * What a failed external call printed, as the person would read it: a shell
@@ -84,7 +60,7 @@ const errorText = (value: unknown, fallback: string): string => {
       // The gateway code is authoritative; the status is only the fallback for
       // codes that name no category of their own.
       const category =
-        gatewayCodeCategories.get(code) ??
+        normalizedErrorCategoryOf(code) ??
         (typeof status === 'number'
           ? httpStatusToCategory(status)
           : /* `rateLimit` is the external agent's *stop* card, and that card is
@@ -110,6 +86,15 @@ const errorText = (value: unknown, fallback: string): string => {
   }
   return failedOutputText(value) ?? (value === undefined ? fallback : JSON.stringify(value));
 };
+
+/**
+ * What a failed run's terminal row says, as the chat's error and its row's reason read it.
+ *
+ * @param detail - The `failed` row's detail.
+ * @returns The failure's text.
+ * @public
+ */
+export const runFailureText = (detail: unknown): string => errorText(detail, 'Browser agent host failed.');
 
 const blockKey = (runId: string, messageId: string, contentIndex: number): string =>
   JSON.stringify([runId, messageId, contentIndex]);
@@ -656,8 +641,15 @@ export const projectTurnFinalized = (event: AgentLogEvent): TurnFinalizedEvent |
   return settlement?.type === 'turn.finalized' ? settlement : undefined;
 };
 
-/** Extract the durable user turn carried by either canonical commit event. */
+/** Extract an admitted Tau user provisionally, or its later canonical committed row. */
 export const projectAgentHostUserTurn = (event: AgentLogEvent): MyUIMessage | undefined => {
+  if (event.type === 'run.lifecycle' && event.state === 'admitted' && 'admission' in event) {
+    const admission = isRecord(event.admission) ? event.admission : undefined;
+    const message = userProviderMessageSchema.safeParse(admission?.['message']);
+    if (admission?.['kind'] === 'tau' && message.success && admission['turnId'] === message.data.id) {
+      return projectAgentHostUserMessage(message.data, event.recordedAt);
+    }
+  }
   if (event.type === 'message.appended' && event.message.role === 'user') {
     return projectAgentHostUserMessage(event.message, event.recordedAt);
   }
@@ -827,7 +819,7 @@ const lifecycleChunks = (
       return [{ type: 'finish', finishReason: 'stop', messageMetadata: { status: 'success' } }];
     }
     case 'failed': {
-      return [{ type: 'error', errorText: errorText(event.detail, 'Browser agent host failed.') }];
+      return [{ type: 'error', errorText: runFailureText(event.detail) }];
     }
     case 'cancelled': {
       return [{ type: 'abort', reason: errorText(event.detail, 'cancelled') }];
@@ -1112,6 +1104,7 @@ export const projectAgentHostEvent = (
     case 'safeguard.recorded':
     case 'model.invocation-prepared':
     case 'model.invocation-bound':
+    case 'model.invocation-settled':
     case 'turn.finalized':
     case 'turn.conflicted':
     case 'turn.failed':

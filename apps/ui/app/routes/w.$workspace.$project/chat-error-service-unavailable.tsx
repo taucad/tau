@@ -24,7 +24,7 @@ export const ChatErrorServiceUnavailable = memo(function ({
   readonly title?: string;
   readonly description?: string;
 }): React.JSX.Element {
-  const { continueChat } = useChatActions();
+  const { continueChat, regenerate } = useChatActions();
   const reason =
     description ??
     (resumable
@@ -48,9 +48,11 @@ export const ChatErrorServiceUnavailable = memo(function ({
           variant='outline'
           size='sm'
           onClick={() => {
-            // Recover the interrupted stream without slicing the trailing
-            // assistant tail that the user already saw.
-            continueChat();
+            if (resumable) {
+              continueChat();
+            } else {
+              regenerate();
+            }
           }}
         >
           {resumable ? <Play className='size-3.5' /> : <RefreshCcw className='size-3.5' />}

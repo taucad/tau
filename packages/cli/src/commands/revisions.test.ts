@@ -227,54 +227,6 @@ describe.runIf(gitToolchainOnPath)('revisionsCommand', () => {
     }
   }, 60_000);
 
-  it.each([
-    {
-      name: 'a cut that did not answer in time',
-      outcome: { status: 'timedOut', reason: 'This project did not answer in time; the save may still be recorded.' },
-      code: 'SAVE_TIMED_OUT',
-      message: 'This project did not answer in time; the save may still be recorded.',
-    },
-    {
-      name: 'a push that did not answer in time',
-      outcome: {
-        status: 'saved',
-        revisionId: 'r3',
-        line: 'main · Rev 3',
-        backup: 'timedOut',
-        reason: 'The backup did not answer in time; whether it reached the remote is unknown.',
-      },
-      code: 'BACKUP_TIMED_OUT',
-      message: 'Saved main · Rev 3. The backup did not answer in time; whether it reached the remote is unknown.',
-    },
-  ] as const)(
-    'exits unknown, not refused or failed, for $name (RV-W15)',
-    async ({ outcome, code, message }) => {
-      await seed();
-      vi.resetModules();
-      vi.doMock('@taucad/host', async (importOriginal) => {
-        const host = await importOriginal<typeof HostModule>();
-        return {
-          ...host,
-          openProjectRevisions: (options: Parameters<typeof host.openProjectRevisions>[0]) => ({
-            ...host.openProjectRevisions(options),
-            save: async () => outcome,
-          }),
-        };
-      });
-      try {
-        const failure = await runCommand(await importCommand(), { rawArgs: ['save', '--project', project] }).then(
-          () => undefined,
-          (error: unknown) => error as { readonly code?: string; readonly exit?: number; readonly message?: string },
-        );
-        expect(failure).toMatchObject({ code, exit: exitCodes.unknown, message });
-      } finally {
-        vi.doUnmock('@taucad/host');
-        vi.resetModules();
-      }
-    },
-    60_000,
-  );
-
   it('names the current revision and can remove that name', async () => {
     await seed();
     const command = await importCommand();

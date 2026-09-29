@@ -65,7 +65,14 @@ export type RevisionActor = RevisionUserActor | RevisionAgentActor;
 export type RevisionProvenance = Readonly<{
   source: 'user' | 'agent' | 'merge' | 'restore' | 'import';
   actorId: string;
+  /** The admitting run; absent for `save`, `idle` and `close` (RM-R9). */
   runId?: string;
+  /** That run's attempt (D10). */
+  attempt?: number;
+  /** Whether a turn revision is the dirty base its placement found, or its result (RM-R9). */
+  turnCut?: 'base' | 'result';
+  /** The checkout's other leases at the cut, sorted (AC9). */
+  heldRunIds?: readonly string[];
   /**
    * Stable user-message id of the turn this revision recorded, when a turn did.
    *

@@ -12,7 +12,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import type { RevisionPort } from '@taucad/revisions';
 import { ImmutableRevisionTree, revisionId } from '@taucad/revisions/algorithms';
@@ -267,23 +267,8 @@ describe.runIf(gitToolchainOnPath)('save on a disk host', () => {
     }
   };
 
-  it('says a cut that did not answer in time is unknown, not refused (RV-W15)', async () => {
-    const workspaceRoot = await directory('cut-timeout');
-    process.env['TAU_CONFIG_DIR'] = await directory('config');
-    execFileSync('git', ['init', '--quiet', '--initial-branch=main', workspaceRoot]);
-    await writeFile(join(workspaceRoot, 'part.ts'), 'export const part = 1;\n');
-
-    const outcome = await saveStalled(
-      { workspaceRoot, projectId: 'project-cut-timeout' },
-      { method: 'writeRevision', boundMilliseconds: 30_000 },
-    );
-
-    expect(outcome).toEqual({
-      status: 'timedOut',
-      reason: 'This project did not answer in time; the save may still be recorded.',
-    });
-  }, 120_000);
-
+  /* Geospec's RV-W15 "a cut that did not answer in time is unknown" has no counterpart here: a save's cut is answered
+   * by its request id with no host bound (B3, B8), so a slow write is answered when it is recorded. */
   it('says a push that did not answer in time is unknown, not failed (RV-W15)', async () => {
     const { bare, projectId } = await remoteWithOneRevision();
     const second = await directory('push-timeout');
@@ -295,16 +280,18 @@ describe.runIf(gitToolchainOnPath)('save on a disk host', () => {
     }
     await writeFile(join(second, 'bracket.ts'), 'export const bracket = 2;\n');
 
+    /* The scheduler's own push deadline answers a hung push (A12, RM-R11); the save has no bound of its own. */
     const outcome = await saveStalled(
       { workspaceRoot: second, projectId },
-      { method: 'push', boundMilliseconds: 90_000 },
+      { method: 'push', boundMilliseconds: 60_000 },
     );
 
-    expect(outcome).toMatchObject({
-      status: 'saved',
-      backup: 'timedOut',
-      reason: 'The backup did not answer in time; whether it reached the remote is unknown.',
-    });
+    expect(outcome).toMatchObject({ status: 'saved' });
+    expect(outcome.status === 'saved' && outcome.backup).not.toBe('backedUp');
+    expect(outcome).toHaveProperty('reason');
+    /* No outcome says "timed out": the cut and the push are each answered (B3, A12; GM.r1 L2). */
+    expectTypeOf<RevisionSaveOutcome['status']>().toEqualTypeOf<'saved' | 'unchanged' | 'refused'>();
+    expectTypeOf<'timedOut'>().not.toExtend<Extract<RevisionSaveOutcome, { status: 'saved' }>['backup']>();
   }, 120_000);
 
   it('says a project with no remote is saved on this device, not that its backup failed', async () => {

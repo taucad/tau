@@ -68,6 +68,7 @@ export function ChatErrorCard({
 }: ChatErrorCardProps): React.JSX.Element {
   return (
     <section
+      role='alert'
       data-slot='chat-error-card'
       className={cn(
         '@container flex min-w-0 flex-col gap-3 rounded-md border p-3 text-sm',

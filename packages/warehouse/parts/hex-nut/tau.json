@@ -1,0 +1,18 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_JoeeDW1pgjUhdXtwHipc0",
+  "name": "Hex nut",
+  "description": "Hex nut; one M3/M4/M5/M6/M8/M10 diameter selects all admitted head, socket or washer dimensions.",
+  "tags": [
+    "Fasteners",
+    "parametric",
+    "replicad",
+    "warehouse"
+  ],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

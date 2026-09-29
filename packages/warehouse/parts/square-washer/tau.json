@@ -1,0 +1,18 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_zdz2wDv6pIq4uQWOPMbJN",
+  "name": "Square washer",
+  "description": "Square washer with a modeled opening and editable section dimensions.",
+  "tags": [
+    "Washers and spacers",
+    "parametric",
+    "replicad",
+    "warehouse"
+  ],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

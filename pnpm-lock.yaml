@@ -4766,6 +4766,40 @@ importers:
         specifier: 'catalog:'
         version: 7.1.9
 
+  packages/warehouse:
+    dependencies:
+      '@taucad/project-core':
+        specifier: workspace:*
+        version: link:../core/project
+    devDependencies:
+      '@taucad/esbuild':
+        specifier: workspace:*
+        version: link:../plugins/esbuild
+      '@taucad/geospec-engine':
+        specifier: workspace:*
+        version: link:../geospec-engine
+      '@taucad/image':
+        specifier: workspace:*
+        version: link:../plugins/image
+      '@taucad/middleware':
+        specifier: workspace:*
+        version: link:../plugins/middleware
+      '@taucad/replicad':
+        specifier: workspace:*
+        version: link:../plugins/replicad
+      '@taucad/runtime':
+        specifier: workspace:*
+        version: link:../runtime
+      '@taucad/types':
+        specifier: workspace:*
+        version: link:../../libs/types
+      geospec:
+        specifier: workspace:*
+        version: link:../geospec
+      replicad:
+        specifier: npm:@taulabs/replicad@0.23.4-beta.2
+        version: '@taulabs/replicad@0.23.4-beta.2(patch_hash=4d55bfdc8696f36ff5efc30607071d0337d46d49c57920c275b9dd15aa4ef07b)'
+
   packages/workbench:
     devDependencies:
       '@taucad/camera':

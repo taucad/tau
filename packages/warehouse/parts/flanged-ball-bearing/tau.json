@@ -1,0 +1,18 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_al8ByPQXcqR7M3H9bi5Bv",
+  "name": "Flanged ball bearing",
+  "description": "Two separate races and eight separately named rolling balls, with a through shaft opening and explicit outer envelope.",
+  "tags": [
+    "Bearings",
+    "parametric",
+    "replicad",
+    "warehouse"
+  ],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_46W7BMf0H-CHd7KiK8ryP",
+  "name": "Cable clip",
+  "description": "Open cable-retention clip with a flat mounting foot.",
+  "tags": [
+    "Cable hardware",
+    "parametric",
+    "replicad",
+    "warehouse"
+  ],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

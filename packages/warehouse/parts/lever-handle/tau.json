@@ -1,0 +1,18 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_r07Cji_N5ttKEernMt9Er",
+  "name": "Flat lever handle",
+  "description": "Editable hand-operated component with shaped gripping surfaces and an actual hub opening where applicable.",
+  "tags": [
+    "Handles and controls",
+    "parametric",
+    "replicad",
+    "warehouse"
+  ],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

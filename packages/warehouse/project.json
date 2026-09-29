@@ -1,0 +1,49 @@
+{
+  "name": "warehouse",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/warehouse",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:package"],
+  "targets": {
+    "generate": {
+      "command": "tsx scripts/generate.mts",
+      "options": {
+        "cwd": "{projectRoot}"
+      },
+      "cache": false,
+      "inputs": ["default", "^default"]
+    },
+    "check-generated": {
+      "command": "tsx scripts/generate.mts --check",
+      "options": {
+        "cwd": "{projectRoot}"
+      },
+      "cache": true,
+      "inputs": ["default", "^default"]
+    },
+    "generate-thumbnails": {
+      "command": "tsx scripts/thumbnails.mts",
+      "options": {
+        "cwd": "{projectRoot}"
+      },
+      "cache": false,
+      "inputs": ["default", "^default"]
+    },
+    "check-thumbnails": {
+      "command": "tsx scripts/thumbnails.mts --check",
+      "options": {
+        "cwd": "{projectRoot}"
+      },
+      "cache": true,
+      "inputs": ["default", "^default"]
+    },
+    "geospec": {
+      "command": "tsx scripts/geospec.mts",
+      "options": {
+        "cwd": "{projectRoot}"
+      },
+      "cache": false,
+      "inputs": ["default", "^default"]
+    }
+  }
+}

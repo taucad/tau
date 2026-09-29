@@ -1,0 +1,18 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_I7ti9jCKyNTMtEx9sOYrz",
+  "name": "Split lock washer",
+  "description": "Split lock washer with a modeled opening and editable section dimensions.",
+  "tags": [
+    "Washers and spacers",
+    "parametric",
+    "replicad",
+    "warehouse"
+  ],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

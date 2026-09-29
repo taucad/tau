@@ -1,10 +1,11 @@
 import { useCallback } from 'react';
-import { Download, EllipsisVertical, Pencil } from 'lucide-react';
+import { Archive, Download, EllipsisVertical, Pencil } from 'lucide-react';
 import { FloatingPanelMenuButton } from '#components/ui/floating-panel.js';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
 import { useChatContext } from '#hooks/use-chat.js';
@@ -14,6 +15,9 @@ import { ChatOptionsMeta } from '#routes/w.$workspace.$project/chat-options-meta
 import { downloadBlob } from '@taucad/utils/file';
 import { serializeTranscript } from '#utils/chat.utils.js';
 import { toSnakeCase } from '#utils/string.utils.js';
+import { useSearchParameter } from '#hooks/use-search-parameter.js';
+import { searchParameterName } from '#constants/search-parameter.constants.js';
+import { flagParameter } from '#utils/search-parameter.codecs.js';
 
 /**
  * The chat menu: rename, export, then the chat's activity, model and credits as
@@ -25,6 +29,9 @@ import { toSnakeCase } from '#utils/string.utils.js';
 export function ChatHistorySettings({ onRename }: { readonly onRename: () => void }): React.ReactNode {
   const { chat, activeChatId } = useChatContext();
   const { projectId } = useProject();
+  const [, setArchivedChats] = useSearchParameter(searchParameterName.archivedChats, flagParameter, {
+    history: 'push',
+  });
   const { chats } = useChatRecords(projectId);
   const chatName = chats.find((c) => c.id === activeChatId)?.name ?? 'Chat Transcript';
 
@@ -63,6 +70,15 @@ export function ChatHistorySettings({ onRename }: { readonly onRename: () => voi
         <DropdownMenuItem disabled={!chat || chat.messages.length === 0} onSelect={handleExport}>
           <Download />
           Export transcript
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          onSelect={() => {
+            setArchivedChats(true);
+          }}
+        >
+          <Archive />
+          Archived chats
         </DropdownMenuItem>
         <ChatOptionsMeta />
       </DropdownMenuContent>

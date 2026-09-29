@@ -9,7 +9,7 @@ const ap242Bytes = new TextEncoder().encode('AP242 fixture bytes');
 
 type Stub = GeoSpecNativeModelEngine & { closed: number; released: number; submitted: number; frame?: unknown; close(): void };
 
-const backend = (options: { duplicate?: boolean; malformed?: boolean; badUnit?: boolean; handleFailure?: boolean; releaseFailure?: boolean; supported?: boolean } = {}): Stub => ({
+const backend = (options: { duplicate?: boolean; malformed?: boolean; badUnit?: boolean; handleFailure?: boolean; releaseFailure?: boolean; supported?: boolean; wrongProfile?: boolean; duplicateCapability?: boolean } = {}): Stub => ({
   closed: 0,
   released: 0,
   submitted: 0,
@@ -19,9 +19,10 @@ const backend = (options: { duplicate?: boolean; malformed?: boolean; badUnit?: 
     return encode({ requestId: 'configuration', result: {
       canonicalProfile: 'geospec-jcs-v1', protocolVersion: 3, registryVersion: 5,
       configuration: { configurationProfile: 'geospec-entry-config-v1', defaultWorkUnitBudget: 100 },
-      capabilities: options.supported === false ? [] : [
-        { name: 'minimumDistance', profile: 'geospec-minimum-distance-v1', implementation: 'implemented', registryVersion: 5 },
-      ],
+      capabilities: options.supported === false ? [] : Array.from({ length: options.duplicateCapability ? 2 : 1 }, () => ({
+        name: 'minimumDistance', profile: options.wrongProfile ? 'wrong-profile' : 'geospec-minimum-distance-v1',
+        implementation: 'implemented', registryVersion: 5,
+      })),
     } });
   },
   ingestSubject(request) {
@@ -74,6 +75,16 @@ it('refuses old engines before admission or query', async () => {
   expect(await query(engine)).toMatchObject({ status: 'refused', code: 'unsupported-evidence' });
   expect(engine.frame).toBeUndefined();
   expect(engine.submitted).toBe(0);
+});
+
+it('refuses wrong-profile or duplicate advertisements before admission or query', async () => {
+  for (const options of [{ wrongProfile: true }, { duplicateCapability: true }]) {
+    const engine = backend(options);
+    // oxlint-disable-next-line no-await-in-loop -- Each independent handshake must finish before checking its own counters.
+    expect(await query(engine)).toMatchObject({ status: 'refused', code: 'unsupported-evidence' });
+    expect(engine.frame).toBeUndefined();
+    expect(engine.submitted).toBe(0);
+  }
 });
 
 it('refuses ambiguous names and releases the subject', async () => {

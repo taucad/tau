@@ -10,6 +10,7 @@ import type { GeometryResponse, HashedGeometryResult } from '@taucad/runtime/typ
 import {
   createMockKernelRuntime,
   createTestRuntimeClient,
+  expectKernelProjectionOrder,
   getTestParameters,
   readCoordinateEvidence,
   validateGlbData,
@@ -438,6 +439,33 @@ describe('TscircuitKernel', () => {
       expect(second.hash).toBe(first.hash);
       const schematic = await renderSvgView(client, 'schematic');
       expect(schematic).toContain('class="tscircuit-schematic"');
+    });
+
+    it('keeps board, schematic, and circuit export projections stable on one settled handle', async () => {
+      const client = createClient({ 'main.tsx': fixtureBoard });
+      expectGlb(await render(client, 'main.tsx'));
+      const handle = { circuitJson: await readSettledCircuitJson(client) };
+      const runtime = createMockKernelRuntime();
+      const context = await definition.initialize({}, runtime);
+      const fresh = definition.deserializeHandle!(
+        { serialized: definition.serializeHandle!({ handle }, runtime, context) },
+        runtime,
+        context,
+      );
+      const project = async (view: 'board' | 'schematic', source = handle) => {
+        const result = await definition.render!({ view, handle: source, options: {} }, runtime, context);
+        return result.content;
+      };
+      const write = async () => {
+        const result = await definition.write!({ exportId: 'circuit', handle, options: {} }, runtime, context);
+        return result.files[0].bytes;
+      };
+      await expectKernelProjectionOrder({
+        renderA: async () => project('board'),
+        renderB: async () => project('schematic'),
+        freshB: async () => project('schematic', fresh),
+        write,
+      });
     });
   });
 

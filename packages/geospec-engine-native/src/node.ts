@@ -162,8 +162,9 @@ export class Engine implements HostEngine, HostSubjectLifecycle, HostCacheLifecy
   }
 
   /**
-   * Evict this cache family's records while the cache remains open.
-   * @returns Whether the cache was open and eviction succeeded.
+   * Remove authenticated overlap (B48) actions from the managed cache generation.
+   * Exact-cluster and legacy-root records remain available.
+   * @returns Whether the optional cache accepted and completed the clear.
    */
   public clearOverlapCache(): boolean {
     return this.inner().clearOverlapCache();

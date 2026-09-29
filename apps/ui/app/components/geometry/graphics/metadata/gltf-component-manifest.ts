@@ -50,6 +50,10 @@ type GltfNode = {
   mesh?: number;
   name?: string;
   children?: number[];
+  matrix?: number[];
+  translation?: number[];
+  rotation?: number[];
+  scale?: number[];
   extras?: JsonObject;
 };
 

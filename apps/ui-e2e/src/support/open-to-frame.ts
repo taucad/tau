@@ -39,8 +39,8 @@
  *                                statement instead of the load-average derivation.
  *   TAU_MEASUREMENT_BUILD        `production` (default) or `development`.
  *   TAU_OPEN_TO_FRAME_OUT        Output directory (default `out/test-results/open-to-frame`).
- *   TAU_MEASUREMENT_OBSERVE_SPANS `1` enables selected-producer action-window diagnostics;
- *                                these do not qualify wall attribution or join a PID.
+ *   TAU_MEASUREMENT_OBSERVE_SPANS `1` includes selected-producer action-window diagnostics;
+ *                                these do not qualify critical-path attribution.
  */
 /* eslint-disable @nx/enforce-module-boundaries -- executable driver imports source projects before package install. */
 import { createHash, randomInt } from 'node:crypto';
@@ -412,6 +412,10 @@ const observedEngine = async (
   if (kernel === undefined) {
     return undefined;
   }
+  /* JSCAD's selected kernel executes @jscad/modeling as JavaScript and has no WASM variant. */
+  if (kernel === 'jscad') {
+    return 'jscad:none';
+  }
   /* The host log names whichever engine the fork loaded — a desktop fork loads its resident native
    * engine whatever the render then selects — so it may only qualify the kernel the trace names. */
   const engineLine = mainProcessLog?.findLast((entry) => entry.includes(`"kernelId":"${kernel}"`));
@@ -443,7 +447,7 @@ const tagsFor = (
     }),
   },
   ...(observed.trace === undefined ? {} : { runtimeTraceJsonl: observed.trace.file }),
-  /* The utility records its own PID in kernel.engine; the desktop main PID is not a substitute. */
+  /* The selected utility's trace origin supplies its PID; the desktop main PID is not a substitute. */
   kernelProcess:
     host === 'desktop'
       ? { kind: 'utility', role: 'electron kernel fork', pid: kernelPid }
@@ -860,20 +864,16 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
     ),
   }).catch(() => undefined);
   const engine = await observedEngine(trace?.file, mainProcessLog);
-  const kernelRecord = mainProcessLog?.findLast(
-    (line) => line.includes('kernel.engine') && line.includes(`"kernelId":"${kernelId}"`),
-  );
-  const observedPid = /"pid":(?<pid>\d+)/u.exec(kernelRecord ?? '')?.groups?.['pid'];
-  const kernelPid = observedPid === undefined ? undefined : Number(observedPid);
   const spanObservation =
-    process.env['TAU_MEASUREMENT_OBSERVE_SPANS'] === '1' && scenario !== 'home'
-      ? await observedRuntimeWindow({
+    scenario === 'home'
+      ? undefined
+      : await observedRuntimeWindow({
           traceFile: trace?.file,
           kernelId,
           fromEpoch: marksEpochMilliseconds + (marks['openIntent'] ?? Number.NaN),
           toEpoch: marksEpochMilliseconds + (marks['pixelCaptureUpperBound'] ?? Number.NaN),
-        })
-      : undefined;
+        });
+  const kernelPid = host === 'desktop' ? spanObservation?.pid : undefined;
   const invalidReason = sampleVerdict({
     marks,
     projectUrl,
@@ -974,7 +974,9 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
     homeWitness,
     /** Total milliseconds per span name for this sample's ten heaviest spans. */
     runtimeSpans: trace?.totals,
-    ...(spanObservation === undefined ? {} : { spanObservation }),
+    ...(process.env['TAU_MEASUREMENT_OBSERVE_SPANS'] !== '1' || spanObservation === undefined
+      ? {}
+      : { spanObservation }),
     measurement:
       scenario === 'home'
         ? {

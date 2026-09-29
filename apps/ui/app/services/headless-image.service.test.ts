@@ -164,6 +164,37 @@ describe('HeadlessImageService', () => {
     expect(imageClient.transcode).toHaveBeenCalledTimes(17);
   });
 
+  it('should bound automatic queued source bytes while allowing same-project replacement', async () => {
+    const { imageClient, service } = createFixture();
+    const gate = Promise.withResolvers<void>();
+    vi.mocked(imageClient.transcode).mockImplementationOnce(async () => {
+      await gate.promise;
+      return { success: true, data: files(), issues: [] };
+    });
+    const active = service.export(captureJob('active'));
+    await vi.waitFor(() => {
+      expect(imageClient.transcode).toHaveBeenCalledOnce();
+    });
+    const first = service.export({
+      ...thumbnailJob('first'),
+      content: new Uint8Array(33 * 1024 * 1024),
+    });
+    const overflow = service.export({
+      ...thumbnailJob('overflow'),
+      projectId: 'other-project',
+      content: new Uint8Array(33 * 1024 * 1024),
+    });
+    await expect(overflow).resolves.toBeUndefined();
+    const replacement = service.export({
+      ...thumbnailJob('replacement'),
+      content: new Uint8Array(32 * 1024 * 1024),
+    });
+    await expect(first).resolves.toBeUndefined();
+    gate.resolve();
+    await expect(Promise.all([active, replacement])).resolves.toHaveLength(2);
+    expect(imageClient.transcode).toHaveBeenCalledTimes(2);
+  });
+
   it('rejects pre-aborted and queued work without starting or poisoning sibling jobs', async () => {
     const { imageClient, service } = createFixture();
     const preAborted = new AbortController();

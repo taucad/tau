@@ -1,5 +1,5 @@
 import { XIcon, Box, Eye, EyeOff, Target } from 'lucide-react';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
 import type { PaneviewApi, PaneviewPanelApi } from 'dockview-react';
@@ -29,8 +29,10 @@ import { MaterialSwatch } from '#components/geometry/cad/material-swatch.js';
 import { PartPropertiesPanel } from '#components/geometry/cad/part-properties-panel.js';
 import { PartPreviewImage } from '#components/geometry/cad/part-preview-image.js';
 import { useOptionalHeadlessImageService } from '#providers/headless-image-provider.js';
+import { useOptionalPartThumbnailService } from '#providers/part-thumbnail-provider.js';
 import { PartThumbnailService } from '#services/part-thumbnail.service.js';
-import type { PartThumbnailRequest } from '#services/part-thumbnail.service.js';
+import type { PartThumbnailRequest, PartThumbnailState } from '#services/part-thumbnail.service.js';
+import { canonicalPartPreviews, sourceGlbDigest } from '#services/part-thumbnail-visual.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
 import { useProject } from '#hooks/use-project.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
@@ -55,6 +57,7 @@ import { PaneVirtualList } from '#components/panes/pane-virtual-list.js';
 import { projectWorkspaceKeyCombinations } from '#routes/w.$workspace.$project/project-workspace-context.js';
 
 const keyCombinationEditor = projectWorkspaceKeyCombinations.model;
+const emptyPreviewSnapshot: ReadonlyMap<string, PartThumbnailState> = new Map();
 
 type GraphicsActorRef = ActorRefFrom<typeof graphicsMachine>;
 type ModelInteractionRef = ActorRefFrom<typeof modelInteractionMachine>;
@@ -262,12 +265,22 @@ type ModelPaneviewPanelParams = {
   query: string;
   revealTarget?: ModelComponentRevealTarget;
   onSelectionChange?: (unitId: string, node: GeometryComponentNode | undefined, entryPath: string) => void;
-  onPreviewChange?: (unitId: string, componentId: string, bytes: Uint8Array<ArrayBuffer> | undefined) => void;
+  onPreviewChange?: (change: {
+    readonly unitId: string;
+    readonly componentId: string;
+    readonly preview: PartThumbnailState | undefined;
+    readonly retry: () => void;
+    readonly decodeError: () => void;
+    readonly decoded: () => void;
+  }) => void;
 };
 
 type ModelPropertiesPanelParams = {
   selected?: { readonly node: GeometryComponentNode; readonly entryPath: string };
-  previewBytes?: Uint8Array<ArrayBuffer>;
+  preview?: PartThumbnailState;
+  onRetryPreview?: () => void;
+  onPreviewDecodeError?: () => void;
+  onPreviewDecoded?: () => void;
 };
 
 function ModelPaneview({
@@ -286,7 +299,10 @@ function ModelPaneview({
   const [preview, setPreview] = useState<{
     readonly unitId: string;
     readonly componentId: string;
-    readonly bytes: Uint8Array<ArrayBuffer>;
+    readonly state: PartThumbnailState | undefined;
+    readonly retry: () => void;
+    readonly decodeError: () => void;
+    readonly decoded: () => void;
   }>();
   const visibleSelection =
     selected && entries.some(([entryPath]) => entryPath === selected.entryPath) ? selected : undefined;
@@ -297,20 +313,24 @@ function ModelPaneview({
     [],
   );
   const onPreviewChange = useCallback(
-    (unitId: string, componentId: string, bytes: Uint8Array<ArrayBuffer> | undefined) => {
+    ({
+      unitId,
+      componentId,
+      preview: state,
+      retry,
+      decodeError,
+      decoded,
+    }: Parameters<NonNullable<ModelPaneviewPanelParams['onPreviewChange']>>[0]) => {
       if (selected?.unitId !== unitId || selected.node.id !== componentId) {
         return;
       }
-      setPreview(bytes ? { unitId, componentId, bytes } : undefined);
+      setPreview({ unitId, componentId, state, retry, decodeError, decoded });
     },
     [selected],
   );
-  const previewBytes =
-    preview &&
-    visibleSelection &&
-    preview.unitId === visibleSelection.unitId &&
-    preview.componentId === visibleSelection.node.id
-      ? preview.bytes
+  const selectedPreview =
+    preview?.unitId === visibleSelection?.unitId && preview?.componentId === visibleSelection?.node.id
+      ? preview
       : undefined;
 
   const handleReady = useCallback(
@@ -349,7 +369,13 @@ function ModelPaneview({
         isExpanded: initial.isExpanded,
         minimumBodySize: 160,
         size: initial.size,
-        params: { selected: visibleSelection, previewBytes } satisfies ModelPropertiesPanelParams,
+        params: {
+          selected: visibleSelection,
+          preview: selectedPreview?.state,
+          onRetryPreview: selectedPreview?.retry,
+          onPreviewDecodeError: selectedPreview?.decodeError,
+          onPreviewDecoded: selectedPreview?.decoded,
+        } satisfies ModelPropertiesPanelParams,
       });
     },
     [
@@ -357,7 +383,7 @@ function ModelPaneview({
       entries,
       onPreviewChange,
       onSelectionChange,
-      previewBytes,
+      selectedPreview,
       query,
       revealTarget,
       savedState,
@@ -384,8 +410,14 @@ function ModelPaneview({
   }, [entries, onPreviewChange, onSelectionChange, query, revealTarget]);
 
   useEffect(() => {
-    paneviewApiRef.current?.getPanel('properties')?.api.updateParameters({ selected: visibleSelection, previewBytes });
-  }, [previewBytes, visibleSelection]);
+    paneviewApiRef.current?.getPanel('properties')?.api.updateParameters({
+      selected: visibleSelection,
+      preview: selectedPreview?.state,
+      onRetryPreview: selectedPreview?.retry,
+      onPreviewDecodeError: selectedPreview?.decodeError,
+      onPreviewDecoded: selectedPreview?.decoded,
+    });
+  }, [selectedPreview, visibleSelection]);
 
   useEffect(() => {
     if (!revealTarget) {
@@ -475,29 +507,45 @@ function LiveComponentTree({
   const project = useProject({ enableNoContext: true });
   const currentSelection = selectedComponentIds.at(-1);
   const imageService = useOptionalHeadlessImageService();
-  const [thumbnails, setThumbnails] = useState<PartThumbnailService>();
-  const [, setThumbnailRevision] = useState(0);
-  const selectedPreview = currentSelection ? thumbnails?.get(currentSelection)?.bytes : undefined;
+  const sharedThumbnails = useOptionalPartThumbnailService(unitId);
+  const [localThumbnails, setLocalThumbnails] = useState<PartThumbnailService>();
+  const thumbnails = sharedThumbnails ?? localThumbnails;
+  const sourceDigests = useRef(new WeakMap<Uint8Array<ArrayBuffer>, Promise<string>>());
+  const subscribePreviews = useCallback(
+    (listener: () => void) => thumbnails?.subscribe(listener) ?? (() => undefined),
+    [thumbnails],
+  );
+  const getPreviewSnapshot = useCallback(() => thumbnails?.snapshot() ?? emptyPreviewSnapshot, [thumbnails]);
+  const previews = useSyncExternalStore(subscribePreviews, getPreviewSnapshot, getPreviewSnapshot);
+  const selectedPreview = currentSelection ? previews.get(currentSelection) : undefined;
+  const [previewRetryRevision, setPreviewRetryRevision] = useState(0);
+  const manualPreviewRetry = useRef<string | undefined>(undefined);
+  const retryPreview = useCallback(
+    (id?: string) => {
+      manualPreviewRetry.current = id ?? currentSelection;
+      setPreviewRetryRevision((value) => value + 1);
+    },
+    [currentSelection],
+  );
   const [visiblePreviewIds, setVisiblePreviewIds] = useState<readonly string[]>([]);
   const geometry = useSelector(graphicsRef, (state) => state.context.geometry);
   // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Legacy embedded test actors omit presentation state.
   const presentedKey = useSelector(graphicsRef, (state) => state.context.gltfPresentation?.presentedKey);
 
   useEffect(() => {
-    if (!imageService) {
+    if (!imageService || sharedThumbnails) {
       return undefined;
     }
     const service = new PartThumbnailService(imageService);
-    setThumbnails(service);
-    const unsubscribe = service.subscribe(() => {
-      setThumbnailRevision((value) => value + 1);
-    });
+    // oxlint-disable-next-line react/set-state-in-effect -- This effect owns the service's StrictMode replay lifecycle.
+    setLocalThumbnails(service);
     return () => {
-      unsubscribe();
       service.dispose();
-      setThumbnails((current) => (current === service ? undefined : current));
+      setLocalThumbnails((current) => (current === service ? undefined : current));
     };
-  }, [imageService]);
+  }, [imageService, sharedThumbnails]);
+
+  useEffect(() => () => thumbnails?.releaseOwner('explorer'), [thumbnails]);
 
   useEffect(() => {
     const scroller = contentRef.current;
@@ -530,20 +578,18 @@ function LiveComponentTree({
     for (const row of rows) {
       observer.observe(row);
     }
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+    };
   }, [manifest, normalizedQuery]);
 
   useEffect(() => {
     if (!thumbnails) {
       return;
     }
-    if (
-      geometry?.format !== 'gltf' ||
-      geometry.hash !== presentedKey ||
-      !manifest ||
-      geometry.content.byteLength > 64 * 1024 * 1024
-    ) {
-      thumbnails.invalidate();
+    thumbnails.announcePresentedSource(presentedKey);
+    if (geometry?.format !== 'gltf' || geometry.hash !== presentedKey || !manifest) {
+      thumbnails.releaseOwner('explorer');
       return;
     }
     const selected = selectedComponentIds.at(-1);
@@ -552,11 +598,67 @@ function LiveComponentTree({
       const node = manifest.nodesById[id];
       return node?.kind === 'part' && node.primitiveRefs?.length ? [{ id, primitives: node.primitiveRefs }] : [];
     });
-    thumbnails.request(
-      { sourcePath: params.entryPath, geometryHash: geometry.hash, content: geometry.content },
-      parts.slice(0, 128),
-    );
-  }, [geometry, manifest, params.entryPath, presentedKey, selectedComponentIds, thumbnails, visiblePreviewIds]);
+    let active = true;
+    const { content } = geometry;
+    const requestedParts = parts.slice(0, 128);
+    const manualPartId = manualPreviewRetry.current;
+    manualPreviewRetry.current = undefined;
+    if (content.buffer.byteLength > 64 * 1024 * 1024) {
+      thumbnails.failPreparationForOwner(
+        'explorer',
+        requestedParts,
+        new RangeError('Part thumbnail source exceeds 64 MiB'),
+      );
+      return;
+    }
+    let sourceDigest = sourceDigests.current.get(content);
+    if (!sourceDigest) {
+      sourceDigest = sourceGlbDigest(content);
+      sourceDigests.current.set(content, sourceDigest);
+    }
+    const prepare = async (): Promise<void> => {
+      try {
+        const [hash, prepared] = await Promise.all([
+          sourceDigest,
+          canonicalPartPreviews(
+            content,
+            requestedParts.map((part) => part.primitives),
+          ),
+        ]);
+        if (active) {
+          thumbnails.requestForOwner(
+            'explorer',
+            { sourcePath: params.entryPath, geometryHash: hash, content, renderContent: prepared.renderContent },
+            requestedParts.map((part, index) => ({
+              ...part,
+              visualKey: prepared.previews[index]?.key ?? prepared.visualKey,
+            })),
+            manualPartId ? { manualPartId } : undefined,
+          );
+        }
+      } catch (error) {
+        if (active) {
+          if (sourceDigests.current.get(content) === sourceDigest) {
+            sourceDigests.current.delete(content);
+          }
+          thumbnails.failPreparationForOwner('explorer', requestedParts, error);
+        }
+      }
+    };
+    void prepare();
+    return () => {
+      active = false;
+    };
+  }, [
+    geometry,
+    manifest,
+    params.entryPath,
+    presentedKey,
+    previewRetryRevision,
+    selectedComponentIds,
+    thumbnails,
+    visiblePreviewIds,
+  ]);
 
   useEffect(() => {
     const selectedId = selectedComponentIds.at(-1);
@@ -565,9 +667,24 @@ function LiveComponentTree({
 
   useEffect(() => {
     if (currentSelection) {
-      params.onPreviewChange?.(unitId, currentSelection, selectedPreview);
+      params.onPreviewChange?.({
+        unitId,
+        componentId: currentSelection,
+        preview: selectedPreview,
+        retry: retryPreview,
+        decodeError: () => {
+          if (selectedPreview?.bytes) {
+            thumbnails?.failDecode(currentSelection, selectedPreview.bytes);
+          }
+        },
+        decoded: () => {
+          if (selectedPreview?.bytes) {
+            thumbnails?.markDecoded(currentSelection, selectedPreview.bytes);
+          }
+        },
+      });
     }
-  }, [currentSelection, params.onPreviewChange, selectedPreview, unitId]);
+  }, [currentSelection, params.onPreviewChange, retryPreview, selectedPreview, unitId]);
 
   if (!manifest || !root || childCount === 0) {
     return <ModelPaneviewPanelSurface />;
@@ -618,7 +735,10 @@ function LiveComponentTree({
           opacityByComponentId={opacityByComponentId}
           rootDepth={root.depth}
           revealTarget={params.revealTarget?.unitId === unitId ? params.revealTarget : undefined}
-          thumbnails={thumbnails}
+          previews={previews}
+          onRetryPreview={retryPreview}
+          onPreviewDecodeError={(id, bytes) => thumbnails?.failDecode(id, bytes)}
+          onPreviewDecoded={(id, bytes) => thumbnails?.markDecoded(id, bytes)}
         />
       )}
     </ModelPaneviewPanelSurface>
@@ -744,7 +864,10 @@ function ModelPropertiesPaneviewPanel({ params }: { readonly params: ModelProper
       <PartPropertiesPanel
         node={params.selected?.node}
         entryPath={params.selected?.entryPath}
-        previewBytes={params.previewBytes}
+        preview={params.preview}
+        onRetryPreview={params.onRetryPreview}
+        onPreviewDecodeError={params.onPreviewDecodeError}
+        onPreviewDecoded={params.onPreviewDecoded}
       />
     </div>
   );
@@ -855,7 +978,10 @@ function ComponentRows({
   opacityByComponentId,
   rootDepth,
   revealTarget,
-  thumbnails,
+  previews,
+  onRetryPreview,
+  onPreviewDecodeError,
+  onPreviewDecoded,
 }: {
   readonly ariaLabel: string;
   readonly manifest: GeometryComponentManifest;
@@ -871,7 +997,10 @@ function ComponentRows({
   readonly opacityByComponentId: Readonly<Record<string, number>>;
   readonly rootDepth: number;
   readonly revealTarget: ModelComponentRevealTarget | undefined;
-  readonly thumbnails?: PartThumbnailService;
+  readonly previews: ReadonlyMap<string, PartThumbnailState>;
+  readonly onRetryPreview?: (id: string) => void;
+  readonly onPreviewDecodeError?: (id: string, bytes: Uint8Array<ArrayBuffer>) => void;
+  readonly onPreviewDecoded?: (id: string, bytes: Uint8Array<ArrayBuffer>) => void;
 }): React.JSX.Element {
   const selected = useMemo(() => new Set(selectedComponentIds), [selectedComponentIds]);
   const hidden = useMemo(() => new Set(hiddenComponentIds), [hiddenComponentIds]);
@@ -899,7 +1028,10 @@ function ComponentRows({
           hasHiddenComponents={hidden.size > 0}
           hasOpacityOverrides={hasOpacityOverrides}
           opacity={opacityByComponentId[node.id] ?? 1}
-          previewBytes={thumbnails?.get(node.id)?.bytes}
+          preview={previews.get(node.id)}
+          onRetryPreview={onRetryPreview}
+          onPreviewDecodeError={onPreviewDecodeError}
+          onPreviewDecoded={onPreviewDecoded}
         />
       </div>
     ),
@@ -915,7 +1047,10 @@ function ComponentRows({
       query,
       rootDepth,
       selected,
-      thumbnails,
+      previews,
+      onRetryPreview,
+      onPreviewDecodeError,
+      onPreviewDecoded,
       unitId,
     ],
   );
@@ -950,7 +1085,10 @@ export const ComponentRow = memo(function ComponentRow({
   opacity,
   activeRowId,
   onRowFocus,
-  previewBytes,
+  preview,
+  onRetryPreview,
+  onPreviewDecodeError,
+  onPreviewDecoded,
 }: {
   readonly manifest: GeometryComponentManifest;
   readonly node: GeometryComponentNode;
@@ -968,7 +1106,10 @@ export const ComponentRow = memo(function ComponentRow({
   readonly opacity: number;
   readonly activeRowId?: string;
   readonly onRowFocus?: (id: string) => void;
-  readonly previewBytes?: Uint8Array<ArrayBuffer>;
+  readonly preview?: PartThumbnailState;
+  readonly onRetryPreview?: (id: string) => void;
+  readonly onPreviewDecodeError?: (id: string, bytes: Uint8Array<ArrayBuffer>) => void;
+  readonly onPreviewDecoded?: (id: string, bytes: Uint8Array<ArrayBuffer>) => void;
 }): React.JSX.Element {
   const isHovered = hoveredComponentId === node.id;
   const normalizedQuery = query.trim().toLowerCase();
@@ -1052,6 +1193,7 @@ export const ComponentRow = memo(function ComponentRow({
             className='flex h-full min-w-0 flex-1 items-center gap-2 rounded-sm text-left outline-none focus-visible:focus-outline'
             aria-label={node.name}
             aria-pressed={isSelected}
+            aria-busy={preview?.status === 'pending' || undefined}
             onClick={toggleSelection}
             onFocus={() => {
               onRowFocus?.(node.id);
@@ -1074,8 +1216,16 @@ export const ComponentRow = memo(function ComponentRow({
               }
             }}
           >
-            {previewBytes ? (
-              <PartPreviewImage bytes={previewBytes} className='size-5 shrink-0 rounded-sm bg-muted object-contain' />
+            {preview?.bytes ? (
+              <PartPreviewImage
+                bytes={preview.bytes}
+                className={cn(
+                  'size-5 shrink-0 rounded-sm bg-muted object-contain ring-1 ring-border',
+                  preview.status === 'pending' && 'opacity-50',
+                )}
+                onError={() => onPreviewDecodeError?.(node.id, preview.bytes!)}
+                onLoad={() => onPreviewDecoded?.(node.id, preview.bytes!)}
+              />
             ) : node.appearance?.materials?.length ? (
               <MaterialSwatch materials={node.appearance.materials} />
             ) : (
@@ -1089,6 +1239,9 @@ export const ComponentRow = memo(function ComponentRow({
             <span className='truncate'>
               <HighlightText text={node.name} searchTerm={query} />
             </span>
+            {preview?.status === 'pending' || preview?.status === 'failed' ? (
+              <span className='sr-only'>Preview {preview.status === 'pending' ? 'loading' : 'unavailable'}</span>
+            ) : undefined}
             {materialMatchName ? (
               <span className='truncate text-xs text-muted-foreground'>· {materialMatchName}</span>
             ) : undefined}
@@ -1138,6 +1291,10 @@ export const ComponentRow = memo(function ComponentRow({
             hasOpacityOverrides={hasOpacityOverrides}
             actionButtonClassName={actionButtonClassName}
             opacity={opacity}
+            preview={preview}
+            onRetryPreview={onRetryPreview ? () => onRetryPreview(node.id) : undefined}
+            onPreviewDecodeError={preview?.bytes ? () => onPreviewDecodeError?.(node.id, preview.bytes!) : undefined}
+            onPreviewDecoded={preview?.bytes ? () => onPreviewDecoded?.(node.id, preview.bytes!) : undefined}
           />
         </div>
       </ContextMenuTrigger>
@@ -1152,6 +1309,10 @@ export const ComponentRow = memo(function ComponentRow({
         hasHiddenComponents={hasHiddenComponents}
         hasOpacityOverrides={hasOpacityOverrides}
         opacity={opacity}
+        preview={preview}
+        onRetryPreview={onRetryPreview ? () => onRetryPreview(node.id) : undefined}
+        onPreviewDecodeError={preview?.bytes ? () => onPreviewDecodeError?.(node.id, preview.bytes!) : undefined}
+        onPreviewDecoded={preview?.bytes ? () => onPreviewDecoded?.(node.id, preview.bytes!) : undefined}
       />
     </ContextMenu>
   );

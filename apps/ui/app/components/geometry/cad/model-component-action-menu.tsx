@@ -43,6 +43,8 @@ import {
   weightLabel,
 } from '#components/geometry/cad/part-quantities.js';
 import type { PartQuantity } from '#components/geometry/cad/part-quantities.js';
+import { PartPreviewImage } from '#components/geometry/cad/part-preview-image.js';
+import type { PartThumbnailState } from '#services/part-thumbnail.service.js';
 
 type GraphicsActorRef = ActorRefFrom<typeof graphicsMachine>;
 
@@ -60,6 +62,10 @@ export type ModelComponentActionMenuData = {
   readonly hasOpacityOverrides: boolean;
   readonly opacity: number;
   readonly quantity?: PartQuantity;
+  readonly preview?: PartThumbnailState;
+  readonly onRetryPreview?: () => void;
+  readonly onPreviewDecodeError?: () => void;
+  readonly onPreviewDecoded?: () => void;
 };
 
 type ModelComponentActionDropdownProperties = ModelComponentActionMenuData & {
@@ -93,7 +99,8 @@ type ModelComponentActionDescriptor =
         | 'hide'
         | 'isolate'
         | 'showAll'
-        | 'resetOpacity';
+        | 'resetOpacity'
+        | 'retryPreview';
       readonly label: string;
       readonly icon: React.ReactNode;
       readonly isDisabled?: boolean;
@@ -207,7 +214,14 @@ function ModelComponentDropdownItems(data: ModelComponentActionMenuData): React.
 
   return (
     <>
-      <ModelComponentMenuHeader node={data.node} quantity={data.quantity} Row={DropdownMenuDisclosureItem} />
+      <ModelComponentMenuHeader
+        node={data.node}
+        quantity={data.quantity}
+        preview={data.preview}
+        onPreviewDecodeError={data.onPreviewDecodeError}
+        onPreviewDecoded={data.onPreviewDecoded}
+        Row={DropdownMenuDisclosureItem}
+      />
       {descriptors.map((descriptor) => renderDropdownActionDescriptor(descriptor))}
     </>
   );
@@ -218,7 +232,14 @@ function ModelComponentContextMenuItems(data: ModelComponentActionMenuData): Rea
 
   return (
     <>
-      <ModelComponentMenuHeader node={data.node} quantity={data.quantity} Row={ContextMenuDisclosureItem} />
+      <ModelComponentMenuHeader
+        node={data.node}
+        quantity={data.quantity}
+        preview={data.preview}
+        onPreviewDecodeError={data.onPreviewDecodeError}
+        onPreviewDecoded={data.onPreviewDecoded}
+        Row={ContextMenuDisclosureItem}
+      />
       {descriptors.map((descriptor) => renderContextActionDescriptor(descriptor))}
     </>
   );
@@ -232,7 +253,14 @@ export function ModelComponentViewerMenuItems({
 
   return (
     <>
-      <ModelComponentMenuHeader node={data.node} quantity={data.quantity} Row={MenuDisclosureItem} />
+      <ModelComponentMenuHeader
+        node={data.node}
+        quantity={data.quantity}
+        preview={data.preview}
+        onPreviewDecodeError={data.onPreviewDecodeError}
+        onPreviewDecoded={data.onPreviewDecoded}
+        Row={MenuDisclosureItem}
+      />
       {descriptors.map((descriptor) => renderViewerActionDescriptor(descriptor, onRequestClose))}
     </>
   );
@@ -275,10 +303,16 @@ function formatMaterialValues(materials: SurfaceMaterials, factor: 'color' | 'me
 function ModelComponentMenuHeader({
   node,
   quantity,
+  preview,
+  onPreviewDecodeError,
+  onPreviewDecoded,
   Row,
 }: {
   readonly node: GeometryComponentNode;
   readonly quantity?: PartQuantity;
+  readonly preview?: PartThumbnailState;
+  readonly onPreviewDecodeError?: () => void;
+  readonly onPreviewDecoded?: () => void;
   readonly Row: React.ComponentType<MenuDisclosureItemProperties>;
 }): React.JSX.Element {
   const materials = node.appearance?.materials;
@@ -292,10 +326,34 @@ function ModelComponentMenuHeader({
             <span className='truncate text-xs font-normal text-muted-foreground'>{summaryLabel(node, facts)}</span>
           </span>
         }
-        trailing={materials?.length ? <MaterialSwatch materials={materials} /> : undefined}
+        trailing={
+          (preview?.bytes ?? materials?.length) ? (
+            <span className='flex shrink-0 items-center gap-1.5'>
+              {preview?.bytes ? (
+                <PartPreviewImage
+                  bytes={preview.bytes}
+                  className='size-6 rounded-sm bg-muted object-contain'
+                  onError={onPreviewDecodeError}
+                  onLoad={onPreviewDecoded}
+                />
+              ) : undefined}
+              {!preview?.bytes && materials?.length ? <MaterialSwatch materials={materials} /> : undefined}
+            </span>
+          ) : undefined
+        }
       >
         <ModelComponentMaterialSummary node={node} quantity={facts} Row={Row} />
       </Row>
+      {preview?.status === 'pending' || preview?.status === 'failed' ? (
+        <p
+          role={preview.status === 'failed' ? 'alert' : 'status'}
+          aria-label='Preview status'
+          aria-busy={preview.status === 'pending' || undefined}
+          className='px-3 pb-1 text-xs text-muted-foreground'
+        >
+          {preview.status === 'pending' ? 'Preview loading' : 'Preview unavailable'}
+        </p>
+      ) : undefined}
       <div role='separator' className={menuSeparatorVariants()} />
     </>
   );
@@ -385,6 +443,18 @@ function useModelComponentActionDescriptors(
           },
         ]
       : [];
+  const retryPreviewDescriptor: readonly ModelComponentActionDescriptor[] =
+    data.preview?.status === 'failed' && data.onRetryPreview
+      ? [
+          {
+            type: 'item',
+            id: 'retryPreview',
+            label: 'Retry preview',
+            icon: <RotateCcw className='size-3.5' />,
+            onSelect: data.onRetryPreview,
+          },
+        ]
+      : [];
 
   return [
     {
@@ -403,6 +473,7 @@ function useModelComponentActionDescriptors(
       onSelect: actions.addToChat,
     },
     ...revealInExplorerDescriptor,
+    ...retryPreviewDescriptor,
     {
       type: 'item',
       id: 'showKinematics',

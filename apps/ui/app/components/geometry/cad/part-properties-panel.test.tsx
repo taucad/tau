@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { VirtuosoMockContext } from 'react-virtuoso';
@@ -60,5 +60,17 @@ describe('PartPropertiesPanel', () => {
     await screen.findByRole('button', { name: 'Finish 1' });
     expect(screen.getAllByRole('listitem').length).toBeLessThan(30);
     expect(screen.queryByRole('button', { name: 'Finish 1709' })).toBeNull();
+  });
+
+  it('shows preview loading and lets a failed preview retry without losing part facts', async () => {
+    const node: GeometryComponentNode = { ...mock<GeometryComponentNode>(), name: 'Housing', kind: 'part' };
+    const retry = vi.fn();
+    const { rerender } = render(<PartPropertiesPanel node={node} preview={{ status: 'pending' }} />);
+    expect(screen.getByText('Preview loading')).toBeVisible();
+    rerender(<PartPropertiesPanel node={node} preview={{ status: 'failed' }} onRetryPreview={retry} />);
+    expect(screen.getByText('Preview unavailable')).toBeVisible();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Retry preview' }));
+    expect(retry).toHaveBeenCalledOnce();
+    expect(screen.getByText('Housing')).toBeVisible();
   });
 });

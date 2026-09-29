@@ -51,6 +51,7 @@ MIXED = CACHE / MIXED_PREFIX / 'install'
 MIXED_INPUTS = CACHE / 'mixed-inputs-simd128.json'
 PACKAGE_SKIP = {'target', 'node_modules', '.git', '__pycache__', 'out-tsc'}
 PREFIX_RECEIPT_SCHEMA = 'geospec-occt-prefix-receipt-v2'
+PORTABLE_PREFIX_RECEIPT_SCHEMA = 'geospec-occt-prefix-receipt-v3'
 PREFIX_CACHE_OUTPUTS = ('build/CMakeCache.txt', 'static-toolkit-closure.txt')
 # rust-src library lock of the selected nightly; MT `-Zbuild-std` resolves it offline from CARGO_HOME.
 RUST_SRC_LOCK_SHA256 = '34656569ab979fdf259efffc99d2b68e253e73e0e6fba6762dc51e83df71aa76'
@@ -216,13 +217,19 @@ def prepare_sources():
                       'sources': {name: len(files(CACHE / 'sources' / name)) for name in ['occt', *RECIPE['headers']]}}))
 
 
-def tool_paths():
-    paths = {'rustc': RUST / 'bin/rustc', 'cargo': RUST / 'bin/cargo',
-             'emcc': SDK / 'emscripten/emcc', 'emxx': SDK / 'emscripten/em++', 'emar': SDK / 'emscripten/emar'}
+def host_tool_paths():
+    paths = {}
     for name in ['node', 'python3', 'cmake', 'ninja', 'xcrun', 'bash', 'git', 'rustup']:
         found = shutil.which(os.environ.get('GEOSPEC_GIT', 'git') if name == 'git' else name)
         require(found is not None, f'Missing prerequisite: {name}')
         paths[name] = Path(found).resolve()
+    return paths
+
+
+def tool_paths():
+    paths = {'rustc': RUST / 'bin/rustc', 'cargo': RUST / 'bin/cargo',
+             'emcc': SDK / 'emscripten/emcc', 'emxx': SDK / 'emscripten/em++', 'emar': SDK / 'emscripten/emar',
+             **host_tool_paths()}
     for name in ['llvm-readobj', 'llvm-objdump', 'wasm-ld', 'wasm-opt']:
         candidate = SDK / 'bin' / name
         if candidate.is_file():
@@ -291,7 +298,9 @@ def environment(paths, write_config=True):
         'LLVM_ROOT': SDK / 'bin', 'BINARYEN_ROOT': SDK, 'EMSCRIPTEN_ROOT': SDK / 'emscripten',
         'NODE_JS': paths['node'], 'PYTHON': paths['python3'],
     }.items()) + '\n'
-    if write_config:
+    if write_config is None:
+        pass
+    elif write_config:
         config.write_text(text)
     else:
         require(config.read_text() == text, 'Emscripten configuration changed')
@@ -319,7 +328,7 @@ def libraries(prefix):
     return result
 
 
-def prefix_context(paths, env):
+def prefix_context(paths, env, kinds=('native', 'mixed')):
     native_rust = Path(run([paths['rustup'], 'which', '--toolchain', RECIPE['nativeRust'], 'rustc'], env).strip()).resolve()
     require('rustc 1.88.0' in run([native_rust, '--version'], env), 'Native Rust 1.88.0 prerequisite is missing')
     compiler = {
@@ -339,17 +348,18 @@ def prefix_context(paths, env):
             for name, path in sorted(executables.items())
         },
     }
-    support_payloads = {
-        'mixed': support_payload({
+    support_payloads = {}
+    if 'mixed' in kinds:
+        support_payloads['mixed'] = support_payload({
             'sdk/bin': SDK / 'bin',
             'sdk/emscripten': SDK / 'emscripten',
             'sdk/lib': SDK / 'lib',
-        }, excluded=unused_sdk_cache(env)),
-        'native': support_payload({
+        }, excluded=unused_sdk_cache(env))
+    if 'native' in kinds:
+        support_payloads['native'] = support_payload({
             'apple-sdk': sdk_path,
             'clang-resource': compiler_resource,
-        }),
-    }
+        })
     return {
         'compiler': compiler,
         'sdkPath': sdk_path,
@@ -374,6 +384,117 @@ def prefix_sources(recipe, kind):
     return {'occt': recipe['occt']['sha256'],
             'headers': {name: item['sha256'] for name, item in recipe['headers'].items()}
             if kind == 'mixed' else {}}
+
+
+def builder_sources(builder):
+    """Exact source files read by the OCCT producer, including its patch pins."""
+    directory = builder.parent
+    selected = [builder, *directory.glob('*.patch')]
+    manifest = directory / 'source-manifest.json'
+    if manifest.is_file():
+        selected.append(manifest)
+    return {path.name: digest(path) for path in selected}
+
+
+def generation_environment(env):
+    """Normalize only paths allocated beneath the selected delivery cache."""
+    owned = {'TMPDIR': (CACHE / 'tmp', '<cache>/tmp'),
+             'CARGO_HOME': (CACHE / 'cargo', '<cache>/cargo'),
+             'EM_CONFIG': (CACHE / 'emscripten.config', '<cache>/emscripten.config'),
+             'EM_CACHE': (CACHE / 'em-cache', '<cache>/em-cache')}
+    path_dirs = {}
+    if 'GEOSPEC_DELIVERY_RUST_PREFIX' not in os.environ:
+        owned['RUSTC'] = (RUST / 'bin/rustc', '<cache>/rust/bin/rustc')
+        path_dirs[str(RUST / 'bin')] = '<cache>/rust/bin'
+    if 'GEOSPEC_DELIVERY_EMSDK_PREFIX' not in os.environ:
+        path_dirs[str(SDK / 'emscripten')] = '<cache>/sdk/install/emscripten'
+        path_dirs[str(SDK / 'bin')] = '<cache>/sdk/install/bin'
+    result = {}
+    for key, value in env.items():
+        if key in SCHEDULING_VARIABLES:
+            continue
+        if key == 'PATH':
+            result[key] = os.pathsep.join(path_dirs.get(part, part) for part in value.split(os.pathsep))
+        elif key in owned and value == str(owned[key][0]):
+            result[key] = owned[key][1]
+        else:
+            result[key] = value
+    return result
+
+
+def delivery_generation(paths=None, env=None):
+    """Hash the selected OCCT producers before choosing a writable cache."""
+    builder = PACKAGE / 'native/occt/build-occt.sh'
+    projected = paths is None
+    if projected:
+        # No read of the legacy cache: these owned paths are symbolic until
+        # the generation is chosen and the pinned archives are extracted.
+        paths = {'rustc': RUST / 'bin/rustc', 'cargo': RUST / 'bin/cargo',
+                 'emcc': SDK / 'emscripten/emcc', 'emxx': SDK / 'emscripten/em++',
+                 'emar': SDK / 'emscripten/emar', **host_tool_paths(),
+                 'wasm-ld': SDK / 'bin/wasm-ld'}
+        env = environment(paths, write_config=None)
+    # Before extraction, an old default cache may contain shadow commands.
+    # The host-only probe is checked against the installed producer PATH below.
+    host_path = os.pathsep.join(dict.fromkeys(
+        [str(path.parent) for name, path in paths.items()
+         if name in ('node', 'python3', 'cmake', 'ninja', 'xcrun', 'bash', 'git', 'rustup')]
+        + ['/usr/bin', '/bin', '/usr/sbin', '/sbin']))
+    probe_env = {**env, 'PATH': host_path} if projected else env
+    tools = {name: {'path': str(path), 'sha256': digest(path)}
+             for name, path in paths.items()
+             if name not in ('rustc', 'cargo', 'emcc', 'emxx', 'emar',
+                             'llvm-readobj', 'llvm-objdump', 'wasm-ld', 'wasm-opt')}
+    for name in ['diff', 'find', 'patch', 'shasum', 'tar']:
+        found = shutil.which(name, path=probe_env['PATH'])
+        require(found is not None, f'Missing prerequisite: {name}')
+        path = Path(found).resolve()
+        tools[name] = {'path': str(path), 'sha256': digest(path)}
+    xcrun = tools['xcrun']['path']
+    compilers = {}
+    for name in ['clang', 'clang++']:
+        path = Path(run([xcrun, '--find', name], probe_env).strip()).resolve()
+        compilers[name] = {'path': str(path), 'sha256': digest(path)}
+    sdk = Path(run([xcrun, '--sdk', 'macosx', '--show-sdk-path'], probe_env).strip()).resolve()
+    resource = Path(run([compilers['clang++']['path'], '-print-resource-dir'], probe_env).strip()).resolve()
+    native_rust = Path(run([tools['rustup']['path'], 'which', '--toolchain',
+                            RECIPE['nativeRust'], 'rustc'], probe_env).strip()).resolve()
+    identity = {
+        'schema': 'geospec-occt-delivery-generation-v1',
+        'sources': builder_sources(builder),
+        'pins': {
+            'native': prefix_sources(RECIPE, 'native'),
+            'mixed': prefix_sources(RECIPE, 'mixed'),
+            'deploymentTarget': RECIPE['macosDeploymentTarget'],
+            'mixedOptions': RECIPE['mixedOcctOptions'],
+            'wasmSimd': RECIPE['wasmSimd'], 'wasmEh': RECIPE['wasmEh'],
+            'emscripten': {'archive': RECIPE['emscripten']['sha256'],
+                           'executables': RECIPE['emscripten']['executables']},
+            'rust': {'commit': RECIPE['rust']['commit'],
+                     'archives': [item['sha256'] for item in RECIPE['rust']['archives']],
+                     'executables': RECIPE['rust']['executables']},
+            'nativeRust': RECIPE['nativeRust'],
+        },
+        'environment': generation_environment(env),
+        'tools': tools,
+        'compilers': compilers,
+        'versions': {name: run([tools[name]['path'], '--version'], probe_env)
+                     for name in ['cmake', 'ninja']}
+                    | {'nativeCompiler': run([compilers['clang++']['path'], '--version'], probe_env)},
+        'nativeRustc': {'path': str(native_rust), 'sha256': digest(native_rust),
+                        'version': run([native_rust, '-vV'], probe_env)},
+        'sdkVersion': run([xcrun, '--sdk', 'macosx', '--show-sdk-version'], probe_env).strip(),
+        'support': support_payload({'apple-sdk': sdk, 'clang-resource': resource}),
+    }
+    if 'GEOSPEC_DELIVERY_EMSDK_PREFIX' in os.environ:
+        identity['externalEmsdkSupport'] = support_payload({
+            'sdk/bin': SDK / 'bin', 'sdk/emscripten': SDK / 'emscripten',
+            'sdk/lib': SDK / 'lib',
+        }, excluded=SDK / 'emscripten/cache')
+    if 'GEOSPEC_DELIVERY_RUST_PREFIX' in os.environ:
+        identity['externalRustSupport'] = support_payload({'rust': RUST})
+    return hashlib.sha256(json.dumps(identity, sort_keys=True,
+                                     separators=(',', ':')).encode()).hexdigest()
 
 
 def prefix_contract(kind, paths, env, context, producing_builder=None):
@@ -431,6 +552,8 @@ def create_prefix_receipt(prefix, contract):
     outputs = sorted(files(install))
     return {
         **contract,
+        'schema': PORTABLE_PREFIX_RECEIPT_SCHEMA,
+        'producerSources': builder_sources(Path(contract['command'][1])),
         'cacheOutputs': {relative: digest(prefix / relative) for relative in PREFIX_CACHE_OUTPUTS},
         'outputs': [
             {'path': path.relative_to(install).as_posix(), 'sha256': digest(path)}
@@ -506,6 +629,9 @@ def verify_prefix(prefix, contract, recipe_path=None, support_inputs=None):
     receipt_path = prefix / 'prefix-receipt.json'
     require(receipt_path.is_file(), f'Missing prefix receipt: {receipt_path}')
     receipt = json.loads(receipt_path.read_text())
+    schema = receipt.get('schema')
+    require(schema in (PREFIX_RECEIPT_SCHEMA, PORTABLE_PREFIX_RECEIPT_SCHEMA),
+            f'Unsupported prefix receipt: {prefix}')
     recipe_path = recipe_path or producer_recipe(prefix)
     require(recipe_path.is_file() and digest(recipe_path) == receipt.get('recipeSha256'),
             f'Original prefix recipe bytes required: {recipe_path}')
@@ -515,6 +641,8 @@ def verify_prefix(prefix, contract, recipe_path=None, support_inputs=None):
     migration = None
     relocated = None
     for name, expected in contract.items():
+        if name == 'schema':
+            continue
         if name == 'recipeSha256':
             # Historical provenance is checked above. Compatibility uses every
             # effective field, including source selections absent from old receipts.
@@ -527,27 +655,19 @@ def verify_prefix(prefix, contract, recipe_path=None, support_inputs=None):
                     len(actual) == len(expected) and len(actual) >= 2 and
                     actual[0] == expected[0] and actual[2:] == expected[2:] and
                     Path(actual[1]).is_absolute() and Path(expected[1]).is_absolute() and
-                    Path(actual[1]).resolve() == producer_builder(),
+                    (schema == PORTABLE_PREFIX_RECEIPT_SCHEMA or
+                     Path(actual[1]).resolve() == producer_builder()),
                     f'Prefix receipt command changed: {prefix}')
             original_builder = Path(actual[1])
             current_builder = Path(expected[1])
-            require(original_builder.is_file() and current_builder.is_file() and
-                    digest(original_builder) == digest(current_builder) == receipt.get('builderSha256'),
+            require(current_builder.is_file() and digest(current_builder) == receipt.get('builderSha256'),
                     f'Prefix producer builder bytes changed: {prefix}')
-            # build-occt.sh reads sibling patches; source-manifest selects the
-            # archive before this prefix. Bridge/Rust/test files are downstream
-            # consumers, not OCCT static-library build inputs.
-            def builder_sources(builder):
-                directory = builder.parent
-                selected = [builder, *directory.glob('*.patch')]
-                manifest = directory / 'source-manifest.json'
-                if manifest.is_file():
-                    selected.append(manifest)
-                return {path.name: digest(path) for path in selected}
-
-            original_sources = builder_sources(original_builder)
             current_sources = builder_sources(current_builder)
-            require(original_sources == current_sources, f'Prefix OCCT source closure changed: {prefix}')
+            if schema == PREFIX_RECEIPT_SCHEMA:
+                require(original_builder.is_file() and digest(original_builder) ==
+                        receipt.get('builderSha256'), f'Prefix producer builder bytes changed: {prefix}')
+                require(builder_sources(original_builder) == current_sources,
+                        f'Prefix OCCT source closure changed: {prefix}')
             relocated = {
                 'schema': 'geospec-prefix-relocation-v1',
                 'originalReceiptSha256': digest(receipt_path),
@@ -575,6 +695,9 @@ def verify_prefix(prefix, contract, recipe_path=None, support_inputs=None):
             actual = {key: value for key, value in actual.items() if key not in SCHEDULING_VARIABLES}
             expected = {key: value for key, value in expected.items() if key not in SCHEDULING_VARIABLES}
         require(actual == expected, f'Prefix receipt {name} changed: {prefix}')
+    if schema == PORTABLE_PREFIX_RECEIPT_SCHEMA:
+        require(receipt.get('producerSources') == builder_sources(Path(contract['command'][1])),
+                f'Prefix OCCT source closure changed: {prefix}')
     cache_outputs = receipt.get('cacheOutputs')
     require(isinstance(cache_outputs, dict) and set(cache_outputs) == set(PREFIX_CACHE_OUTPUTS),
             f'Prefix receipt cache outputs changed: {prefix}')
@@ -633,8 +756,12 @@ def prepare_prefix(kind, paths, env, context):
 
 def prepare_prefixes(paths, env, reuse_prefix=None, build_prefix=None):
     room('reuse-prefix' if reuse_prefix is not None else 'prefixes')
+    selected_generation = os.environ.get('GEOSPEC_DELIVERY_GENERATION')
+    if selected_generation is not None:
+        require(delivery_generation(paths, env) == selected_generation,
+                'Installed OCCT tools differ from selected delivery generation')
     prepare_sources()
-    context = prefix_context(paths, env)
+    context = prefix_context(paths, env, (reuse_prefix or build_prefix,) if reuse_prefix or build_prefix else ('native', 'mixed'))
     if reuse_prefix is not None:
         prefix = CACHE / (MIXED_PREFIX if reuse_prefix == 'mixed' else 'occt-native')
         verify_prefix(prefix, prefix_contract(reuse_prefix, paths, env, context, producer_builder()))
@@ -682,7 +809,7 @@ def input_roots():
 
 def prepare_inputs(paths, env):
     prepare_sources()
-    context = prefix_context(paths, env)
+    context = prefix_context(paths, env, ('mixed',))
     producing_builder = producer_builder()
     recipe_path = producer_recipe(CACHE / MIXED_PREFIX)
     receipt = verify_prefix(CACHE / MIXED_PREFIX,
@@ -763,7 +890,7 @@ def verify_manifest(path):
         require(digest(file) == sha, f'Build input changed: {file}')
     producing_builder = Path(manifest['prefixProducerBuilder'])
     require(producing_builder.is_absolute(), 'Prefix producer evidence path must be absolute')
-    context = prefix_context(paths, selected_environment)
+    context = prefix_context(paths, selected_environment, ('mixed',))
     recipe_path = Path(manifest['prefixProducerRecipe'])
     require(recipe_path.is_absolute(), 'Prefix recipe evidence path must be absolute')
     receipt = verify_prefix(CACHE / MIXED_PREFIX,
@@ -778,7 +905,7 @@ def verify_manifest(path):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('stage', nargs='?', default='check', choices=['check', 'sources', 'tools', 'prefixes', 'inputs', 'verify'])
+    parser.add_argument('stage', nargs='?', default='check', choices=['check', 'sources', 'tools', 'prefixes', 'inputs', 'verify', 'generation'])
     parser.add_argument('--manifest', type=Path)
     prefix_selection = parser.add_mutually_exclusive_group()
     prefix_selection.add_argument('--reuse-prefix', choices=['native', 'mixed'])
@@ -788,6 +915,9 @@ def main():
     require(args.build_prefix is None or args.stage == 'prefixes', '--build-prefix requires the prefixes stage')
     require(sys.version_info >= (3, 12), 'Python 3.12+ required for safe archive extraction')
     require(platform.system() == 'Darwin' and platform.machine() == 'arm64', 'Selected recipe is Darwin ARM64 only')
+    if args.stage == 'generation':
+        print(delivery_generation())
+        return 0
     if args.stage == 'check':
         required = [SOURCE / 'CMakeLists.txt', RUST / 'bin/rustc', SDK / 'emscripten/emcc',
                     MIXED / 'lib/libTKDESTEP.a', MIXED_INPUTS]

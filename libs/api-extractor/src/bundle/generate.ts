@@ -301,11 +301,12 @@ export const bundleOwners: readonly BundleOwner[] = [
     name: 'PicoGK C# authoring',
     title: 'PicoGK C# authoring',
     description:
-      'Guides trusted, upstream-compatible PicoGK C# voxel authoring in main.cs. Use when creating or editing PicoGK projects in Tau Desktop.',
-    whenToUse: 'Use when creating or editing PicoGK projects in Tau Desktop.',
+      'Guides PicoGK C# geometry, named parts and animated mechanisms. Use for PicoGK models, part identification or moving-part requests in Tau Desktop.',
+    whenToUse: 'Use for PicoGK C# models, named parts and moving mechanisms in Tau Desktop.',
     corpus: committedCorpus('picogk/picogk.corpus.json'),
     // C# namespaces: `PicoGK`, `PicoGK.Shapes`, `System.Numerics`.
     groupBy: (entry) => entry.path ?? 'other',
+    authoredReferences: ['kinematics-reference.md'],
   },
   {
     slug: 'cad-picovoxel',

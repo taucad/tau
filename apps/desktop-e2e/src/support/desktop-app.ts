@@ -234,6 +234,7 @@ export const launchDesktopApp = async (options: {
        * throwaway profile too, never the person's own. */
       TAU_CONFIG_DIR: join(userData, 'config'),
       ...options.env,
+      TAU_E2E_HIDE_WINDOW: '1',
     },
   });
   const child = application.process();
@@ -257,6 +258,14 @@ export const launchDesktopApp = async (options: {
   const consoleErrors: string[] = [];
   let page: Page;
   try {
+    await application.evaluate(({ dialog, shell }, selectedDirectory) => {
+      const testState = globalThis as typeof globalThis & { __TAU_E2E_EXTERNAL_URL__?: string };
+      shell.openExternal = async (url): Promise<void> => {
+        testState.__TAU_E2E_EXTERNAL_URL__ = url;
+      };
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [selectedDirectory] });
+      dialog.showMessageBox = async () => ({ checkboxChecked: false, response: 1 });
+    }, pickedDirectory);
     page = await application.firstWindow();
     await page.waitForLoadState('domcontentloaded');
     page.setDefaultTimeout(60_000);
@@ -267,16 +276,6 @@ export const launchDesktopApp = async (options: {
     });
     page.on('pageerror', (error) => consoleErrors.push(`pageerror: ${error.message}`));
     await page.context().tracing.start({ screenshots: true, snapshots: true });
-    if (packaged) {
-      await application.evaluate(({ dialog, shell }, selectedDirectory) => {
-        const testState = globalThis as typeof globalThis & { __TAU_E2E_EXTERNAL_URL__?: string };
-        shell.openExternal = async (url): Promise<void> => {
-          testState.__TAU_E2E_EXTERNAL_URL__ = url;
-        };
-        dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [selectedDirectory] });
-        dialog.showMessageBox = async () => ({ checkboxChecked: false, response: 1 });
-      }, pickedDirectory);
-    }
   } catch (error) {
     child.kill('SIGKILL');
     /* The shell's own output is the only account of why it went away, and the
@@ -365,14 +364,8 @@ export const launchDesktopApp = async (options: {
             });
           })
         : Promise.resolve();
-    /* `close()` asks the app to quit, and a shell holding a stalled chat run
-     * does not always finish quitting. Left alive they accumulate, and the
-     * next `electron.launch` in the same vitest process comes back with a
-     * window that is already closed — three tests died that way before this
-     * existed. The quit is also bounded: a shell still syncing after a failed
-     * row once held `close()` for 17 minutes, so the row reported the 900 s
-     * test timeout instead of its own assertion (lane H4). */
-    await Promise.race([application.close().catch(() => undefined), wait(30_000)]);
+    /* Routine fixture disposal bypasses quit holds exercised by their own specs. */
+    await Promise.race([application.evaluate(({ app }) => app.exit(0)).catch(() => undefined), wait(5_000)]);
     if (child.exitCode === null && child.signalCode === null) {
       child.kill('SIGKILL');
     }

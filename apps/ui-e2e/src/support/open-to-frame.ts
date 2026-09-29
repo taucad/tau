@@ -168,6 +168,7 @@ const launchDesktop = async (userData: string, picked: string) => {
       TAU_DEBUG: 'true',
       ...(desktopExecutable === undefined ? { TAU_DESKTOP_CLIENT_ROOT: clientRoot! } : {}),
       TAU_E2E_PICK_DIRECTORY: picked,
+      TAU_E2E_HIDE_WINDOW: '1',
       TAU_CONFIG_DIR: join(userData, 'config'),
       TAU_SECRET_VAULT: 'file',
     },

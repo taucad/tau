@@ -164,6 +164,8 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
    * accumulates. */
   const controlFrames = new Map<string, unknown>();
   const runtimeContexts = new Map<string, Readonly<Record<string, string>>>();
+  /* Project owner attached to the context actually admitted after port transfer. */
+  const admittedProjectIds = new WeakMap<Readonly<Record<string, string>>, string | undefined>();
   const projectIds = new Map<string, string>();
   /* Turn checkouts the utility registered, kept apart from the project contexts
    * `connect()` owns: a candidate turn's kernel and GeoSpec tools must reach the
@@ -515,14 +517,18 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
         concern === 'agentHost' && context?.['workspaceRoot']
           ? (() => {
               const projectRoot = canonicalRoot(context['workspaceRoot']);
+              const prior = runtimeContexts.get(projectRoot);
+              const computeMode = context['computeMode'] ?? 'off';
               return {
                 key: projectRoot,
-                value: {
-                  projectRoot,
-                  computeProjectRoot: projectRoot,
-                  computeMode: context['computeMode'] ?? 'off',
-                  definition: 'default',
-                },
+                value:
+                  prior?.['projectRoot'] === projectRoot &&
+                  prior['computeProjectRoot'] === projectRoot &&
+                  prior['computeMode'] === computeMode &&
+                  prior['definition'] === 'default' &&
+                  admittedProjectIds.get(prior) === projectIds.get(projectRoot)
+                    ? prior
+                    : { projectRoot, computeProjectRoot: projectRoot, computeMode, definition: 'default' },
               } as const;
             })()
           : undefined;
@@ -538,8 +544,11 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
         throw error;
       }
       if (projectContext) {
-        runtimeContexts.set(projectContext.key, projectContext.value);
-        options.revokeGeometry?.();
+        admittedProjectIds.set(projectContext.value, projectIds.get(projectContext.key));
+        if (runtimeContexts.get(projectContext.key) !== projectContext.value) {
+          runtimeContexts.set(projectContext.key, projectContext.value);
+          options.revokeGeometry?.();
+        }
       }
       log('info', 'services.concern-connected', { concern });
       return channel.port1;

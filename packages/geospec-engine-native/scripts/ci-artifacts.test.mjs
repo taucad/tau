@@ -702,6 +702,18 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
     assert.deepEqual(delivery.assemblyRun, delivery.run);
     const inventoryFile = join(producer, transportPath, 'inventory.json');
     assert.equal(inventory.schema, 'geospec-ci-artifacts-v3');
+    for (const field of ['run', 'assemblyRun']) {
+      put(
+        inventoryFile,
+        JSON.stringify({ ...inventory, delivery: { ...delivery, [field]: { id: 'producer-A', attempt: 1 } } }),
+      );
+      assert.throws(
+        () => verifyDelivery(producer),
+        /Delivery lacks producer workflow provenance/,
+        `malformed ${field} must not be accepted as a recorded workflow`,
+      );
+      put(inventoryFile, JSON.stringify(inventory));
+    }
     const relinkRecord = delivery.archives[2];
     assert.ok(relinkRecord);
     const relinkPath = join(producer, relinkRecord.path);

@@ -27,6 +27,7 @@ import {
 } from '@taucad/ui/components/dropdown-menu';
 import { InlineTextEditor } from '#components/inline-text-editor.js';
 import { ProjectChatList } from '#components/nav/project-chat-list.js';
+import { sidebarDisclosureButtonClass } from '#components/nav/sidebar-disclosure.styles.js';
 import { toast } from '#components/ui/sonner.js';
 import { StatusMark } from '#components/nav/status-mark.js';
 import {
@@ -205,7 +206,7 @@ export function ProjectNavigation(): React.JSX.Element {
             <SidebarMenuItem>
               <SidebarMenuButton
                 type='button'
-                className='pr-1.5 pl-[30px] text-muted-foreground/55 hover:bg-transparent hover:text-muted-foreground/90 active:bg-transparent active:text-muted-foreground/90 dark:hover:bg-transparent'
+                className={sidebarDisclosureButtonClass}
                 aria-label='Show more projects'
                 onClick={() => {
                   setVisibleCount((count) => count + projectsPerPage);

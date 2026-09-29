@@ -1138,18 +1138,59 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
   const boundBy = (
     client: RevisionHttpClient,
     signal?: AbortSignal,
+    maximumTransferBytes?: number,
   ): RevisionHttpClient & Readonly<{ refused: (error: unknown, remote: string) => RevisionPortError }> => {
     let retryAfter: string | undefined;
+    let remaining = maximumTransferBytes;
+    let limitExceeded = false;
+    const exceeded = (): RevisionPortError => {
+      limitExceeded = true;
+      return new RevisionPortError('FETCH_LIMIT_EXCEEDED', 'The Git fetch exceeded its transfer byte limit.');
+    };
     return {
       request: async (request) => {
         const response = await client.request(signal === undefined ? request : { ...request, signal });
         if (response.statusCode === 429) {
           retryAfter = response.headers['retry-after'];
         }
-        return response;
+        const { 'content-length': declared } = response.headers;
+        if (
+          remaining !== undefined &&
+          declared !== undefined &&
+          Number.isFinite(Number(declared)) &&
+          Number(declared) > remaining
+        ) {
+          const limitError = exceeded();
+          await response.body.return?.().catch(() => undefined);
+          throw limitError;
+        }
+        if (remaining === undefined) {
+          return response;
+        }
+        const { body } = response;
+        const bounded: typeof body = {
+          next: async () => {
+            const chunk = await body.next();
+            if (chunk.done) {
+              return chunk;
+            }
+            if (chunk.value.byteLength > remaining!) {
+              const limitError = exceeded();
+              await body.return?.().catch(() => undefined);
+              throw limitError;
+            }
+            remaining! -= chunk.value.byteLength;
+            return chunk;
+          },
+          return: async () => body.return?.() ?? { done: true, value: undefined },
+          [Symbol.asyncIterator]: () => bounded,
+        };
+        return { ...response, body: bounded };
       },
       refused: (error, remote) =>
-        remoteTransportError(error, { remote, ...(retryAfter === undefined ? {} : { retryAfter }) }),
+        limitExceeded
+          ? exceeded()
+          : remoteTransportError(error, { remote, ...(retryAfter === undefined ? {} : { retryAfter }) }),
     };
   };
 
@@ -1625,9 +1666,15 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
      * @returns The remote-tracking refs this store now holds.
      */
     fetch: async (input: RevisionFetchInput): Promise<RevisionFetchResult> => {
+      if (
+        input.maximumTransferBytes !== undefined &&
+        (!Number.isSafeInteger(input.maximumTransferBytes) || input.maximumTransferBytes <= 0)
+      ) {
+        throw new RangeError('maximumTransferBytes must be a positive safe integer.');
+      }
       /* Every request this fetch makes carries the caller's deadline, so the
        * abort ends the socket and not only the caller's wait (P36). */
-      const http = boundBy(requireHttp(), input.signal);
+      const http = boundBy(requireHttp(), input.signal, input.maximumTransferBytes);
       const url = await remoteUrl(input.remote);
       /* Seam 2 of 3 (N1): every negotiation this fetch makes answers in the
        * refusal vocabulary, so a pull that the remote refused never reads as a

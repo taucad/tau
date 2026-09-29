@@ -249,6 +249,91 @@ describe('geometry broker', () => {
     await disposed;
   });
 
+  it('retires an idle native slot when its prior root is revoked after a legacy suite', async () => {
+    const { broker, channels, utilities, fork } = harness();
+    let aAuthorized = true;
+    broker.connectSuite({
+      root: '/project/A', context: { projectRoot: '/project/A' }, engine: 'native',
+      stillAuthorized: () => aAuthorized,
+    });
+    channels[0]!.broker.send({ type: 'run', options: { files: ['a.test.ts'] } });
+    utilities[0]!.message({ type: 'geometry-result', generation: 1, requestId: 1, value: { type: 'result', result: { success: true } } });
+    broker.connectSuite({
+      root: '/project/B', context: { projectRoot: '/project/B' }, engine: 'legacy',
+      stillAuthorized: () => true,
+    });
+    channels[1]!.broker.send({ type: 'run', options: { files: ['b.test.ts'] } });
+    expect(fork).toHaveBeenCalledOnce();
+    utilities[0]!.message({ type: 'geometry-result', generation: 1, requestId: 2, value: { type: 'result', result: { success: true } } });
+    aAuthorized = false;
+    broker.revokeUnauthorized();
+    expect(utilities[0]!.kill).toHaveBeenCalledOnce();
+    utilities[0]!.exit();
+    await broker.dispose();
+  });
+
+  it('keeps the prior native grant after a failed second-root suite', async () => {
+    const { broker, channels, utilities } = harness();
+    let aAuthorized = true;
+    broker.connectSuite({ root: '/project/A', context: { projectRoot: '/project/A' }, engine: 'native', stillAuthorized: () => aAuthorized });
+    channels[0]!.broker.send({ type: 'run', options: { files: ['a.test.ts'] } });
+    utilities[0]!.message({ type: 'geometry-result', generation: 1, requestId: 1, value: { type: 'result', result: { success: true } } });
+    broker.connectSuite({ root: '/project/B', context: { projectRoot: '/project/B' }, engine: 'native', stillAuthorized: () => true });
+    channels[1]!.broker.send({ type: 'run', options: { files: ['b.test.ts'] } });
+    utilities[0]!.message({ type: 'geometry-result', generation: 1, requestId: 2, value: { type: 'error', message: 'realpath failed before native session switch' } });
+    expect(channels[1]!.broker.posted).toEqual([{ type: 'error', message: 'realpath failed before native session switch' }]);
+    aAuthorized = false;
+    broker.revokeUnauthorized();
+    expect(utilities[0]!.kill).toHaveBeenCalledOnce();
+    utilities[0]!.exit();
+    await broker.dispose();
+  });
+
+  it('reuses an authorized root but retires before dispatch when an older grant expires', async () => {
+    const { broker, channels, utilities, fork } = harness();
+    let aAuthorized = true;
+    const grantA = (): boolean => aAuthorized;
+    for (let index = 0; index < 2; index += 1) {
+      broker.connectSuite({ root: '/project/A', context: { projectRoot: '/project/A' }, engine: 'native', stillAuthorized: grantA });
+      channels[index]!.broker.send({ type: 'run', options: { files: ['a.test.ts'] } });
+      utilities[0]!.message({ type: 'geometry-result', generation: 1, requestId: index + 1, value: { type: 'result', result: { success: true } } });
+    }
+    expect(fork).toHaveBeenCalledOnce();
+    expect(utilities[0]!.kill).not.toHaveBeenCalled();
+    aAuthorized = false;
+    broker.connectSuite({ root: '/project/B', context: { projectRoot: '/project/B' }, engine: 'legacy', stillAuthorized: () => true });
+    channels[2]!.broker.send({ type: 'run', options: { files: ['b.test.ts'] } });
+    expect(utilities[0]!.kill).toHaveBeenCalledOnce();
+    expect(utilities[0]!.posted).toHaveLength(2);
+    expect(fork).toHaveBeenCalledOnce();
+    utilities[0]!.exit();
+    expect(fork).toHaveBeenCalledTimes(2);
+    expect(utilities[1]!.posted[0]).toMatchObject({ generation: 2, kind: 'suite', root: '/project/B' });
+    const disposed = broker.dispose();
+    utilities[1]!.exit();
+    await disposed;
+  });
+
+  it('rotates a long-lived slot before grant tracking can grow without bound', async () => {
+    const { broker, channels, utilities, fork } = harness();
+    for (let index = 0; index < 65; index += 1) {
+      broker.connectSuite({ root: '/project/A', context: { projectRoot: '/project/A' }, engine: 'native', stillAuthorized: () => true });
+      channels[index]!.broker.send({ type: 'run', options: { files: ['a.test.ts'] } });
+      if (index < 64) {
+        utilities[0]!.message({ type: 'geometry-result', generation: 1, requestId: index + 1, value: { type: 'result', result: { success: true } } });
+      }
+    }
+    expect(utilities[0]!.posted).toHaveLength(64);
+    expect(utilities[0]!.kill).toHaveBeenCalledOnce();
+    expect(fork).toHaveBeenCalledOnce();
+    utilities[0]!.exit();
+    expect(fork).toHaveBeenCalledTimes(2);
+    expect(utilities[1]!.posted[0]).toMatchObject({ generation: 2, requestId: 65 });
+    const disposed = broker.dispose();
+    utilities[1]!.exit();
+    await disposed;
+  });
+
   it('fails closed when a retained root grant predicate throws', async () => {
     const { broker, channels, utilities } = harness();
     let predicateThrows = false;
@@ -262,7 +347,7 @@ describe('geometry broker', () => {
     channels[0]!.broker.send({ type: 'run', options: { files: ['model.test.ts'] } });
     utilities[0]!.message({ type: 'geometry-result', generation: 1, requestId: 1, value: { type: 'result', result: { success: true } } });
     predicateThrows = true;
-    expect(() => broker.revokeUnauthorized()).not.toThrow();
+    expect(() => { broker.revokeUnauthorized(); }).not.toThrow();
     expect(utilities[0]!.kill).toHaveBeenCalledOnce();
     utilities[0]!.exit();
     await broker.dispose();

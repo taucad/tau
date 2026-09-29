@@ -616,6 +616,10 @@ prefix = 'geospec-engine-native-source-relink/'
 with tarfile.open(archive, 'r:gz') as bundle:
     members = {member.name: member for member in bundle.getmembers()}
     assert len(members) == len(bundle.getmembers())
+    for name, member in members.items():
+        path = pathlib.PurePosixPath(name)
+        assert name.startswith(prefix) and not path.is_absolute() and '..' not in path.parts and path.as_posix() == name
+        assert member.isfile(), f'Unexpected non-file archive member: {name}'
     assert members[prefix + 'manifest.json'].isfile()
     manifest = json.load(bundle.extractfile(members[prefix + 'manifest.json']))
     entries = manifest['sourceTree']['entries']
@@ -626,7 +630,7 @@ with tarfile.open(archive, 'r:gz') as bundle:
     paths = [entry['path'] for entry in entries]
     assert len(paths) == len(set(paths)) and set(json.loads(expected_json)) <= set(paths)
     expected_members = {prefix + 'source/' + path for path in paths}
-    actual_members = {name for name, member in members.items() if name.startswith(prefix + 'source/') and member.isfile()}
+    actual_members = {name for name in members if name.startswith(prefix + 'source/')}
     assert expected_members == actual_members, (sorted(expected_members - actual_members), sorted(actual_members - expected_members))
     for entry in entries:
         path = pathlib.PurePosixPath(entry['path'])
@@ -699,6 +703,8 @@ export const verifyDelivery = (root) => {
     'Wrong delivery archive names.',
   );
   const run = recordedWorkflowRun(inventory.delivery?.run);
+  const assemblyRun =
+    inventory.schema === 'geospec-ci-artifacts-v3' ? recordedWorkflowRun(inventory.delivery?.assemblyRun) : undefined;
   assert.ok(
     archives.every((file) => file.bytes > 0),
     'Empty delivery archive.',
@@ -707,6 +713,7 @@ export const verifyDelivery = (root) => {
     isDeepStrictEqual(inventory.delivery, {
       platform: 'darwin-arm64',
       run,
+      ...(inventory.schema === 'geospec-ci-artifacts-v3' ? { assemblyRun } : {}),
       archives,
       nativeProof: fileRecord(root, proofPath),
     }),
@@ -958,6 +965,7 @@ export const prepareArtifacts = (root) => {
     delivery: {
       platform: 'darwin-arm64',
       run: workflowRun(),
+      assemblyRun: workflowRun(),
       archives: archivePaths.map((path) => fileRecord(root, path)),
       nativeProof: fileRecord(root, proofPath),
     },
@@ -1054,7 +1062,8 @@ const reassembleDelivery = (root, inventory) => {
         : producerIdentity(inventory.source),
     delivery: {
       platform: 'darwin-arm64',
-      run: workflowRun(),
+      run: recordedWorkflowRun(inventory.delivery?.run),
+      assemblyRun: workflowRun(),
       archives: selectedArchives,
       nativeProof: fileRecord(root, proofPath),
     },
@@ -1078,13 +1087,15 @@ export const ensureDelivery = (root) => {
     let compatible;
     try {
       compatible = verifyArtifacts(root);
-      const { archives, nativeProof, platform, run } =
-        /** @type {{archives: ReturnType<typeof fileRecord>[], nativeProof: ReturnType<typeof fileRecord>, platform: string, run: ReturnType<typeof workflowRun>}} */ (
+      const { archives, nativeProof, platform, run, assemblyRun } =
+        /** @type {{archives: ReturnType<typeof fileRecord>[], nativeProof: ReturnType<typeof fileRecord>, platform: string, run: ReturnType<typeof workflowRun>, assemblyRun?: ReturnType<typeof workflowRun>}} */ (
           compatible.delivery
         );
       assert.ok(
         platform === 'darwin-arm64' &&
           isDeepStrictEqual(run, recordedWorkflowRun(run)) &&
+          (compatible.schema === 'geospec-ci-artifacts-v2' ||
+            isDeepStrictEqual(assemblyRun, recordedWorkflowRun(assemblyRun))) &&
           isDeepStrictEqual(nativeProof, fileRecord(root, proofPath)) &&
           isDeepStrictEqual(
             archives,

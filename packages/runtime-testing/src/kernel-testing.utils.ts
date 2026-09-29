@@ -101,6 +101,39 @@ export const createTestGeometry = async <const Runtime extends RuntimeDefinition
   }
 };
 
+/**
+ * Verify that two render projections and an optional write read one retained
+ * evaluation without changing the first projection or export evidence.
+ * Callers close over the same native handle and choose semantically different
+ * views, options or content for A and B.
+ *
+ * @public
+ */
+export const expectKernelProjectionOrder = async <First, Intervening, Written = never>({
+  renderA,
+  renderB,
+  write,
+  freshB,
+}: {
+  readonly renderA: () => First | Promise<First>;
+  readonly renderB: () => Intervening | Promise<Intervening>;
+  readonly write?: () => Written | Promise<Written>;
+  readonly freshB?: () => Intervening | Promise<Intervening>;
+}): Promise<{ first: First; intervening: Intervening; repeated: First }> => {
+  const first = await renderA();
+  const writtenBefore = write ? await write() : undefined;
+  const intervening = await renderB();
+  if (freshB) {
+    expect(intervening).toEqual(await freshB());
+  }
+  const repeated = await renderA();
+  expect(repeated).toEqual(first);
+  if (write) {
+    expect(await write()).toEqual(writtenBefore);
+  }
+  return { first, intervening, repeated };
+};
+
 /** Resolves a fixture's parameter schema and releases its client. @public */
 export const getTestParameters = async <const Runtime extends RuntimeDefinition>({
   runtime,

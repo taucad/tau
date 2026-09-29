@@ -72,6 +72,13 @@ const brokerHarness = () => {
     }),
     dispose: vi.fn(),
   }));
+  const connectGeometry = vi.fn((_input: Readonly<{
+    root: string;
+    context: Readonly<Record<string, string>>;
+    engine: 'native' | 'legacy';
+    stillAuthorized: () => boolean;
+  }>) => ({ id: 'geometry' }));
+  const revokeGeometry = vi.fn();
   const options = {
     utilityEntry: '/dist/main/chunks/services-host.js',
     env: { PATH: '/usr/bin' },
@@ -85,15 +92,52 @@ const brokerHarness = () => {
       return channel;
     },
     connectRuntime,
+    connectGeometry,
+    revokeGeometry,
     log,
   } as unknown as ServicesBrokerOptions;
-  return { broker: createServicesBroker(options), channels, connectRuntime, fork, log, runtimeExits, spawns };
+  return { broker: createServicesBroker(options), channels, connectRuntime, connectGeometry, revokeGeometry, fork, log, runtimeExits, spawns };
 };
 
 describe('createServicesBroker', () => {
   it('keeps the rooted runtime filesystem concern main-only', () => {
     expect(servicesConcerns).toContain('runtimeFileSystem');
-    expect(rendererServicesConcerns).toEqual(['nodeFs', 'agentHost', 'geospecPerformance', 'machines']);
+    expect(servicesConcerns).not.toContain('exactMeasurement');
+    expect(servicesConcerns).not.toContain('geospecPerformance');
+    expect(rendererServicesConcerns).toEqual(['nodeFs', 'agentHost', 'geospecPerformance', 'exactMeasurement', 'machines']);
+  });
+
+  it('grants geometry runner ports only for registered project roots', () => {
+    const { broker, connectGeometry, spawns } = brokerHarness();
+    broker.connect('agentHost', { workspaceRoot: '/projects/widget', projectId: 'widget', computeMode: 'memory' });
+    const utility = spawns[0]!;
+    utility.message({ type: 'geometry-port-request', requestId: 'wrong', workspaceRoot: '/projects/other', engine: 'native' });
+    expect(connectGeometry).not.toHaveBeenCalled();
+    expect(utility.posted.at(-1)).toEqual({
+      type: 'geometry-port-refused', requestId: 'wrong', message: 'Main refused an unadmitted GeoSpec runner root or engine.',
+    });
+    utility.message({ type: 'geometry-port-request', requestId: 'allowed', workspaceRoot: '/projects/widget', engine: 'native' });
+    expect(connectGeometry.mock.calls[0]?.[0]).toMatchObject({
+      root: '/projects/widget', context: { projectRoot: '/projects/widget' }, engine: 'native',
+    });
+    expect(utility.postMessage).toHaveBeenLastCalledWith(
+      { type: 'geometry-port', requestId: 'allowed' },
+      [expect.objectContaining({ id: 'geometry' })],
+    );
+  });
+
+  it('signals geometry to abort an admitted suite when its candidate grant is released', () => {
+    const { broker, connectGeometry, revokeGeometry, spawns } = brokerHarness();
+    broker.connect('agentHost', { workspaceRoot: '/home/widget', projectId: 'project-widget', computeMode: 'durable' });
+    const checkout = '/home/.tau/checkouts/project-widget/trun-1';
+    spawns[0]!.message({ type: 'runtime-context-register', workspaceRoot: checkout, projectRoot: '/home/widget' });
+    spawns[0]!.message({ type: 'geometry-port-request', requestId: 'suite', workspaceRoot: checkout, engine: 'native' });
+    const grant = connectGeometry.mock.calls[0]?.[0];
+    expect(grant?.stillAuthorized()).toBe(true);
+    revokeGeometry.mockClear();
+    spawns[0]!.message({ type: 'runtime-context-release', workspaceRoot: checkout, projectRoot: '/home/widget' });
+    expect(grant?.stillAuthorized()).toBe(false);
+    expect(revokeGeometry).toHaveBeenCalledOnce();
   });
 
   it('forks nothing until the first concern is connected', () => {

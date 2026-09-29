@@ -103,6 +103,7 @@ const desktopSourceOverrides = new Map([
   ['#services/headless-image-backend.js', '#services/headless-image-backend.desktop.js'],
   ['#services/browser-agent-worker.js', '#services/browser-agent-worker.desktop.js'],
   ['#services/browser-geospec-worker.js', '#services/browser-geospec-worker.desktop.js'],
+  ['#workers/measurement-exact.transport.js', '#workers/measurement-exact.transport.desktop.js'],
   ['#components/layout/route-footer.js', '#components/layout/route-footer.desktop.js'],
 ]);
 

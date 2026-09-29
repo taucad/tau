@@ -63,25 +63,21 @@ import type {
   ProjectRevisions,
   TurnCheckout,
 } from '@taucad/host';
-import {
-  createHostGeoSpecRunner,
-  createHostNativeGeoSpecRunner,
-  createHostToolRegistry,
-} from '@taucad/host/agent-tools';
+import { createHostToolRegistry } from '@taucad/host/agent-tools';
 import { createChannelServer, wrapMessagePortMain } from '@taucad/rpc';
 import { createHostAdmissionAuthority } from '@taucad/runtime/host';
 import type { HostAdmissionAuthority } from '@taucad/runtime/host';
 import { createNodeMachineHost } from '@taucad/runtime/host/node';
 import type { NodeMachineHost } from '@taucad/runtime/host/node';
 import type { MachineArtifactReference, MachineBindingOutcome } from '@taucad/runtime/machine';
-import type { HostGeoSpecRuntimeClient, HostToolFileSystem } from '@taucad/host/agent-tools';
+import type { HostToolFileSystem } from '@taucad/host/agent-tools';
 import { createRuntimeClient } from '@taucad/runtime/client';
 import { electronUtilityMainTransport } from '@taucad/runtime/electron/renderer';
 import { serveElectronFileSystemBridgePort } from '@taucad/runtime/electron/utility';
 import { systemSkillBundles } from '@taucad/skills/resources';
 
 import { canonicalPath } from '#main/project-roots.js';
-import { serveGeoSpecPerformance } from '#tau/geospec-performance.js';
+import { createGeometryRunnerClient } from '#tau/geometry-runner-client.js';
 import type { createDesktopRuntime } from '#tau/desktop-runtime.factory.js';
 
 /**
@@ -252,6 +248,8 @@ export type ServicesHostOptions = {
     readonly port: UtilityPort;
     release(reason: 'requested' | 'render-timeout'): void;
   }>;
+  /** Ask main for one runner channel into the separately supervised geometry slot. */
+  readonly requestGeometryPort?: (workspaceRoot: string, engine: 'native' | 'legacy') => Promise<UtilityPort>;
   /**
    * Tell main a candidate turn's checkout is (or is no longer) a runtime root.
    *
@@ -345,6 +343,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     onRevisionsUnavailable,
     quiesced,
     requestRuntimePort,
+    requestGeometryPort,
     runtimeContext,
   } = options;
   const serve = options.serve ?? serveNodeFsProvider;
@@ -363,7 +362,6 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
   const trustedRoots = new Set<string>();
   const candidateRoots = new Map<string, number>();
   const nodeFileSystemDisposers = new Set<() => Promise<void>>();
-  const performanceDisposers = new Set<() => Promise<void>>();
   const runtimeFileSystemDisposers = new Set<RuntimeFileSystemDisposer>();
   /* One always-on launcher per workspace root, outliving every connection to
    * it: a run keeps executing with zero clients attached, which is the whole
@@ -1268,13 +1266,11 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
           runtimeClient: async (root) => runtimeClient(root),
           geospecAuthoringMode: geoSpecEngine,
           geospecRunner: async (root) => {
-            const client = await runtimeClient(root);
-            /* GeoSpec's deliberately wide export-format carrier accepts every
-             * plugin format, while this concrete desktop recipe exposes the
-             * actual narrower set. Its loader requests only formats supported
-             * by that recipe; bridge the generic variance at this boundary. */
-            const createRunner = geoSpecEngine === 'native' ? createHostNativeGeoSpecRunner : createHostGeoSpecRunner;
-            return createRunner(root, client as unknown as HostGeoSpecRuntimeClient);
+            if (!requestGeometryPort) {
+              throw new Error('The desktop services host has no isolated geometry runner broker.');
+            }
+            const port = await requestGeometryPort(root, geoSpecEngine);
+            return createGeometryRunnerClient(port);
           },
         });
         const transportOptions = {
@@ -1365,7 +1361,6 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     runtimeFileSystemDisposers.clear();
     await settleAll(
       [
-        ...[...performanceDisposers].map(async (close) => close()),
         ...runtimeDisposers.map(async (disposeFileSystem) => disposeFileSystem.drain()),
         ...fileSystemDisposers.map(async (disposeFileSystem) => disposeFileSystem()),
       ],
@@ -1427,7 +1422,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       const gracefulSettlement = quiescence;
       const runtimeDisposers = [...runtimeFileSystemDisposers];
       runtimeFileSystemDisposers.clear();
-      const closingFileSystems: Array<Promise<void>> = [...performanceDisposers].map(async (close) => close());
+      const closingFileSystems: Array<Promise<void>> = [];
       for (const disposeFileSystem of runtimeDisposers) {
         try {
           disposeFileSystem.force();
@@ -1506,34 +1501,6 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       }
       const context = record['context'] as Record<string, unknown> | undefined;
       switch (record['concern']) {
-        case 'geospecPerformance': {
-          if (!/^(1|true)$/iu.test(process.env['TAU_DEBUG'] ?? '')) {
-            log('geospec-performance-disabled');
-            port.close();
-            return;
-          }
-          const disposePerformance = serveGeoSpecPerformance(port);
-          const close = async (): Promise<void> => {
-            try {
-              await disposePerformance();
-            } finally {
-              performanceDisposers.delete(close);
-            }
-          };
-          performanceDisposers.add(close);
-          const disposeDisconnectedPerformance = async (): Promise<void> => {
-            try {
-              await close();
-            } catch (error) {
-              log('geospec-performance-close-failed', error instanceof Error ? error.message : String(error));
-            }
-          };
-          port.on('close', () => {
-            // async-iife: bootstrap -- the retained disposer lets quiesce await this remote-close cleanup.
-            void disposeDisconnectedPerformance();
-          });
-          return;
-        }
         case 'nodeFs': {
           const stop = serve(toNodeFsPort(port), {
             allowRoot: isTrustedRoot,

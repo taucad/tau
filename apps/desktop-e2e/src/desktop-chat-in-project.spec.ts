@@ -218,6 +218,8 @@ test('builds an openrscad model on disk from the project chat', async () => {
       thisTurn.lastIndexOf('Saving revision'),
       `Saving revision outlived this turn's save: ${JSON.stringify(labels)}`,
     ).toBeLessThan(thisTurn.length - 1);
+    const desktopLog = readFileSync(session.logPath, 'utf8');
+    expect(desktopLog.includes('[revisions] save undefined Channel closed')).toBe(false);
     console.info(`[desktop-e2e] in-project prompt-to-framed-geometry: ${String(Date.now() - promptStart)} ms`);
     console.info(`[desktop-e2e] in-project API chat calls: ${JSON.stringify(fixture.apiChatRequests)}`);
     expectNoDesktopAnalytics(session);

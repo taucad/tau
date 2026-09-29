@@ -28,7 +28,12 @@ const setMockMessages = (messages: readonly MyUIMessage[]): void => {
   chatStateRef.current = { messages };
 };
 let locationState: { readonly focusChatComposer?: boolean } | undefined;
+let archiveOpen = false;
 vi.mock('react-router', () => ({ useLocation: () => ({ state: locationState }) }));
+vi.mock('#hooks/use-search-parameter.js', () => ({ useSearchParameter: () => [archiveOpen, vi.fn()] }));
+vi.mock('#routes/w.$workspace.$project/archived-chats.js', () => ({
+  ArchivedChats: () => <section aria-label='Archived chats' />,
+}));
 // Fake persistence actor — `chat-history.tsx` subscribes to
 // `restoreCancelledDraft` emits to refocus the composer after the
 // persistence machine lifts a cancelled user message back into the draft.
@@ -265,6 +270,20 @@ describe('ChatHistory — submit routes through useCadChatClient', () => {
     capturedTextarea.onSubmit = undefined;
     capturedTextarea.className = undefined;
     setMockMessages([]);
+    archiveOpen = false;
+  });
+
+  it('replaces the transcript and composer with the archive without reading transcript projections', () => {
+    archiveOpen = true;
+    const view = render(<ChatHistory />);
+    expect(screen.getByRole('region', { name: 'Archived chats' })).toBeInTheDocument();
+    expect(screen.queryByTestId('chat-textarea')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('virtuoso')).not.toBeInTheDocument();
+    expect(skillsCatalogReads).not.toHaveBeenCalled();
+    archiveOpen = false;
+    view.rerender(<ChatHistory className='returned' />);
+    expect(screen.queryByRole('region', { name: 'Archived chats' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('chat-textarea')).toBeInTheDocument();
   });
 
   it('skips hidden transcript and skill projections, then reveals current messages', () => {

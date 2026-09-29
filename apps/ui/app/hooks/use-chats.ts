@@ -165,6 +165,7 @@ export function useChats(resourceId: string, options?: { includeDeleted?: boolea
     patchChat: patchChatInManager,
     softDeleteChat: softDeleteChatInManager,
     deleteChat: deleteChatInManager,
+    purgeChat: purgeChatInManager,
     isLoading: isWorkerLoading,
   } = useProjectManager();
   const chatSessions = useChatSessionStore();
@@ -215,6 +216,17 @@ export function useChats(resourceId: string, options?: { includeDeleted?: boolea
       void queryClient.invalidateQueries({ queryKey: ['chat', chatId] });
     },
     [chatSessions, deleteChatInManager, resourceId, queryClient],
+  );
+
+  const purgeChat = useCallback(
+    async (chatId: string): Promise<void> => {
+      await chatSessions.removeChat(chatId);
+      await purgeChatInManager(chatId);
+      void queryClient.invalidateQueries({ queryKey: ['chats', resourceId] });
+      void queryClient.invalidateQueries({ queryKey: ['all-chats'] });
+      void queryClient.invalidateQueries({ queryKey: ['chat', chatId] });
+    },
+    [chatSessions, purgeChatInManager, resourceId, queryClient],
   );
 
   const updateChatName = useCallback(
@@ -285,6 +297,7 @@ export function useChats(resourceId: string, options?: { includeDeleted?: boolea
     applyGeneratedChatName,
     softDeleteChat,
     deleteChat,
+    purgeChat,
     restoreChat,
     updateChatName,
   };

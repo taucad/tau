@@ -42,6 +42,7 @@ export const chatRecordSchema = z
     checkoutId: z.string().min(1).optional(),
     recencyAt: timestamp.optional(),
     deletedAt: timestamp.optional(),
+    purgedAt: timestamp.optional(),
   })
   .loose();
 

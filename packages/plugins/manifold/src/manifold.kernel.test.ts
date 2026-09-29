@@ -7,7 +7,9 @@ import type { GeometryResponse } from '@taucad/runtime/types';
 import { manifoldKernel } from '#manifold.kernel.js';
 import { esbuildBundler } from '@taucad/esbuild';
 import {
+  assertSuccess,
   createMockKernelRuntime,
+  expectKernelProjectionOrder,
   createGeometryTestHelpers,
   createTestGeometry,
   createTestRuntimeClient,
@@ -89,6 +91,56 @@ const readGlbJson = (
 };
 
 describe('ManifoldWorker', () => {
+  it.each([false, true])('keeps %s geometry render and GLB write independent', async (empty) => {
+    const result = await createGeometry(
+      {
+        'model.ts': empty
+          ? `import { Manifold } from 'manifold-3d/manifoldCAD'; export default () => [];`
+          : `import { Manifold } from 'manifold-3d/manifoldCAD'; export default () => Manifold.cube([10, 10, 10]);`,
+      },
+      'model.ts',
+    );
+    assertSuccess(result);
+    const glb = extractGltfBytes(result);
+    const definition = await resolveRuntimePluginDefinition('kernel', manifoldKernel());
+    const runtime = createMockKernelRuntime();
+    const context = { manifoldCadModule: {} };
+    const handle = { glb };
+    const fresh = definition.deserializeHandle!(
+      {
+        serialized: definition.serializeHandle!({ handle }, runtime, context),
+      },
+      runtime,
+      context,
+    );
+    const render = async (value: typeof handle) => {
+      const projected = await definition.render!({ handle: value, view: 'model', options: {} }, runtime, context);
+      return projected.content;
+    };
+    const write = async (value: typeof handle, coordinateSystem: 'y-up' | 'z-up') => {
+      const projected = await definition.write!(
+        {
+          exportId: 'glb',
+          handle: value,
+          options: {
+            coordinateSystem,
+            unit: { length: coordinateSystem === 'y-up' ? 'meter' : 'millimeter' },
+          },
+        },
+        runtime,
+        context,
+      );
+      return projected.files[0].bytes;
+    };
+    const ordered = await expectKernelProjectionOrder({
+      renderA: async () => render(handle),
+      renderB: async () => write(handle, 'y-up'),
+      freshB: async () => write(fresh, 'y-up'),
+      write: async () => write(handle, 'z-up'),
+    });
+    expect(ordered.first).toEqual(glb);
+  });
+
   describe('getParameters', () => {
     it('should extract defaultParams from ESM module', async () => {
       const { defaults, schema } = await getParameters(

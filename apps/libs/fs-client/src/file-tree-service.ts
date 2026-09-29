@@ -1,5 +1,12 @@
-import type { FileContentMetadata, FileEntry, FileProvenance, FileStatEntry, FileStat } from '@taucad/types';
-import type { FileTreeNode } from '@taucad/filesystem';
+import type {
+  FileContentMetadata,
+  FileEntry,
+  FileProvenance,
+  FileStatEntry,
+  FileStat,
+  FileTreeContentMetadata,
+} from '@taucad/types';
+import type { DirectoryStatRow, FileTreeNode } from '@taucad/filesystem';
 import { getFileContentMetadata } from '@taucad/filesystem';
 import { Topic } from '@taucad/events';
 import type { FileContentService, ContentChangeEvent } from '#file-content-service.js';
@@ -81,8 +88,10 @@ type PollingTelemetryState = {
 
 const isFileTreeFileNode = (entry: FileTreeNode): entry is FileTreeFileNode => entry.children === undefined;
 
-const fileMetadataFields = (metadata: FileContentMetadata): FileContentMetadata =>
-  metadata.contentKind === 'text' ? { contentKind: 'text', lineCount: metadata.lineCount } : { contentKind: 'binary' };
+const fileMetadataFields = (metadata: FileTreeContentMetadata): FileTreeContentMetadata =>
+  metadata.contentKind === 'text'
+    ? { contentKind: 'text', ...(metadata.lineCount === undefined ? {} : { lineCount: metadata.lineCount }) }
+    : { contentKind: 'binary' };
 
 /**
  * Lightweight file listing entry for search / complete-tree snapshots.
@@ -92,7 +101,7 @@ const fileMetadataFields = (metadata: FileContentMetadata): FileContentMetadata 
 export type FileItem = {
   path: string;
   size: number;
-} & FileContentMetadata;
+} & FileTreeContentMetadata;
 
 type FileTreeServiceInit = {
   proxy: ComposedViewClient;
@@ -351,6 +360,15 @@ export class FileTreeService {
   public async stat(path: string): Promise<FileStat> {
     const absolutePath = this.paths.toAbsoluteWorkspacePath(path);
     return this.proxy.stat(absolutePath);
+  }
+
+  /** Exact current children for agent RPCs, independent of the cached UI tree. */
+  public async listDirectoryExact(path: string): Promise<DirectoryStatRow[]> {
+    try {
+      return await this.proxy.readDirectoryExact(this.paths.toAbsoluteWorkspacePath(path));
+    } catch (error) {
+      throw new DirectoryListingFailedError(classifyDirectoryListingError(error, path));
+    }
   }
 
   /**

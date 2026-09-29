@@ -25,7 +25,7 @@ import { tauPathPolicy } from '#path-registry.js';
 import { acquireNodeAuthorityWriter } from '#backend/node/authority-writer-lock.js';
 import { NodeFsProvider } from '#backend/node/provider.js';
 import type { NodeFsPort } from '#backend/node/port.js';
-import { nodeFsProtocolVersion } from '#backend/node/protocol.js';
+import { nodeFsProtocolVersion, nodeFsResultSchemas } from '#backend/node/protocol.js';
 import type { NodeFsWatchEvent } from '#backend/node/protocol.js';
 
 const cleanups: Array<() => void | Promise<void>> = [];
@@ -144,6 +144,22 @@ const aliasesEntry = (root: string, probe: string, alias: string): boolean => {
 };
 
 describe('node filesystem client/host round trip', () => {
+  it('keeps exact and head wire validators distinct', () => {
+    const row = [{ name: 'file.txt', type: 'file', size: 1, mtimeMs: 0, contentKind: 'text' }];
+    expect(nodeFsResultSchemas.readdirWithStats.safeParse(row).success).toBe(false);
+    expect(nodeFsResultSchemas.readdirHeadWithStats.safeParse(row).success).toBe(true);
+  });
+
+  it('transports head-only metadata without weakening exact listing', async () => {
+    const { root, provider } = connect();
+    writeFileSync(join(root, 'large.txt'), `${'x'.repeat(1024)}\nend`);
+    const head = await provider.readdirWithStats('', { content: 'head' });
+    const exact = await provider.readdirWithStats('');
+    expect(head).toMatchObject([{ name: 'large.txt', type: 'file', size: 1028, contentKind: 'text' }]);
+    expect(head[0]).not.toHaveProperty('lineCount');
+    expect(exact).toMatchObject([{ name: 'large.txt', type: 'file', size: 1028, contentKind: 'text', lineCount: 2 }]);
+  });
+
   it('fences checked deletion across ports and reports conflict and unchanged accurately', async () => {
     const sandbox = mkdtempSync(join(tmpdir(), 'tau-node-delete-'));
     const root = join(sandbox, 'root');
@@ -184,6 +200,7 @@ describe('node filesystem client/host round trip', () => {
     const results = await Promise.all([first.deleteFileChecked(input), second.deleteFileChecked(input)]);
     expect(results.map(({ status }) => status).sort()).toEqual(['applied', 'conflict']);
     expect(existsSync(join(root, 'target.txt'))).toBe(false);
+    expect(await first.readdirWithStats('', { content: 'head' })).toEqual([]);
     expect(
       await first.deleteFileChecked({ path: 'target.txt', preconditions: [{ path: 'target.txt', expected: null }] }),
     ).toMatchObject({ status: 'unchanged' });
@@ -940,7 +957,7 @@ describe('node filesystem client/host round trip', () => {
         resolve(event.data);
       };
       port.addEventListener('message', listener);
-      port.postMessage({ v: 999, id: 9003, root, op: 'readdir', path: '' });
+      port.postMessage({ v: 3, id: 9003, root, op: 'readdir', path: '' });
     });
 
     expect(response).toMatchObject({ type: 'error', code: 'NODE_FS_PROTOCOL_VERSION' });

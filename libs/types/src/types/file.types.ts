@@ -34,6 +34,11 @@ export type BinaryFileContentMetadata = {
  */
 export type FileContentMetadata = TextFileContentMetadata | BinaryFileContentMetadata;
 
+/** Content metadata in a shallow UI tree. An absent count has not been measured. @public */
+export type FileTreeContentMetadata =
+  | { readonly contentKind: 'text'; readonly lineCount?: number }
+  | BinaryFileContentMetadata;
+
 /**
  * Base file tree entry for API transfer and serialization.
  * Represents files and directories in a file tree snapshot.
@@ -52,7 +57,7 @@ export type FileTreeEntry =
       name: string;
       type: 'file';
       size: number;
-    } & FileContentMetadata);
+    } & FileTreeContentMetadata);
 
 /**
  * File or directory entry in the filesystem with client-side loading state.

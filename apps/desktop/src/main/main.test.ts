@@ -873,6 +873,9 @@ describe('desktop main deep links', () => {
       process.env['TAU_E2E_HIDE_WINDOW'] = '1';
       try {
         await bootAndWait();
+        const { BrowserWindow } = await import('electron');
+        const options = vi.mocked(BrowserWindow).mock.calls[0]?.[0];
+        expect(options?.webPreferences?.focusOnNavigation).toBe(false);
         expect(fakeWindow.show).not.toHaveBeenCalled();
         listener('open-url')({ preventDefault: vi.fn() }, 'tau://i/github.com/taucad/tau-examples');
         await vi.waitFor(() => {

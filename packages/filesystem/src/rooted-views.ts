@@ -50,6 +50,7 @@ import type { WatchRegistry } from '#watch-registry.js';
 import { RootedFileSystemError, WorkspaceMutationError } from '#workspace-errors.js';
 import { bufferToStream, validateFileReadStreamOptions } from '#backend/stream-utils.js';
 import { getEventOrigin } from '#event-origin-registry.js';
+import { headFileStatFromStat } from '#content-metadata.js';
 
 /**
  * The mutating porcelain a rooted view serves (charter D4).
@@ -262,6 +263,19 @@ export class RootedViews {
       const { resolution } = resolveLocal(path);
       return resolution.provider.readdir(resolution.path);
     };
+    const readdirWithStats = captured.provider.readdirWithStats
+      ? ((async (path: string, options?: { readonly content: 'head' }) => {
+          const { resolution } = resolveLocal(path);
+          if (options !== undefined) {
+            if (resolution.provider.supportsHeadListing !== true) {
+              throw Object.assign(new Error('Head-only directory metadata is unavailable.'), { code: 'ENOTSUP' });
+            }
+            const rows = await resolution.provider.readdirWithStats!(resolution.path, options);
+            return rows.map(({ name, ...stat }) => ({ name, ...headFileStatFromStat(stat) }));
+          }
+          return resolution.provider.readdirWithStats!(resolution.path);
+        }) as NonNullable<FileSystemProvider['readdirWithStats']>)
+      : undefined;
     const stat = async (path: string): Promise<FileStat> => {
       const { resolution } = resolveLocal(path);
       return resolution.provider.stat(resolution.path);
@@ -561,6 +575,7 @@ export class RootedViews {
     return {
       id: 'workspace-root',
       capabilities: captured.provider.capabilities,
+      supportsHeadListing: captured.provider.supportsHeadListing,
       dispose() {
         // The provider and rooted view lifetime remain owned by WorkspaceFileService.
       },
@@ -571,6 +586,7 @@ export class RootedViews {
       deleteFileChecked,
       appendFile,
       readdir,
+      readdirWithStats,
       readdirEntries,
       stat,
       getFileMode,

@@ -1,4 +1,4 @@
-import type { FileContentMetadata } from '@taucad/types';
+import type { FileTreeContentMetadata } from '@taucad/types';
 
 /**
  * Typed directory listing surface for {@link FileTreeService.listDirectory}.
@@ -23,7 +23,7 @@ export type ListedDirectoryEntry =
       size: number;
       /** Last-modified timestamp in milliseconds since the Unix epoch. */
       mtimeMs: number;
-    } & FileContentMetadata);
+    } & FileTreeContentMetadata);
 
 /**
  * Discriminated snapshot for reactive directory listing consumers (see {@link useDirectoryListing}).

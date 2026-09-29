@@ -76,6 +76,7 @@ type FileWriteSource = 'editor' | 'user' | 'machine';
 type RpcHandlerTreeService = {
   exists(path: string): Promise<boolean>;
   listDirectory(path: string): ReturnType<FileTreeService['listDirectory']>;
+  listDirectoryExact(path: string): ReturnType<FileTreeService['listDirectoryExact']>;
 };
 
 /**
@@ -251,26 +252,27 @@ function createBrowserRpcFileSystem(fileManager: RpcHandlerDependencies['fileMan
     async readdir(path: string): Promise<RpcDirectoryEntry[]> {
       const { treeService } = await fileManager.whenServicesReady();
       try {
-        const entries = await treeService.listDirectory(path);
-        return entries.map((entry) => {
+        const entries = await treeService.listDirectoryExact(path);
+        return entries.map((entry): RpcDirectoryEntry => {
           const modifiedAt = entry.mtimeMs > 0 ? new Date(entry.mtimeMs).toISOString() : undefined;
-          if (entry.isFolder) {
+          const common = {
+            name: entry.name,
+            size: entry.size,
+            ...(modifiedAt ? { modifiedAt } : {}),
+            ...(entry.provenance === undefined ? {} : { provenance: entry.provenance }),
+          };
+          if (entry.type === 'dir') {
             return {
-              name: entry.name,
+              ...common,
               type: 'dir',
-              size: entry.size,
-              ...(modifiedAt ? { modifiedAt } : {}),
+              ...(entry.provenance !== undefined && entry.provenance.source !== 'project'
+                ? { traverseOnImplicitSearch: false }
+                : {}),
             };
           }
-          return {
-            name: entry.name,
-            type: 'file',
-            size: entry.size,
-            ...(entry.contentKind === 'text'
-              ? { contentKind: 'text', lineCount: entry.lineCount }
-              : { contentKind: 'binary' }),
-            ...(modifiedAt ? { modifiedAt } : {}),
-          };
+          return entry.contentKind === 'text'
+            ? { ...common, type: 'file', contentKind: 'text', lineCount: entry.lineCount }
+            : { ...common, type: 'file', contentKind: 'binary' };
         });
       } catch (error) {
         if (error instanceof DirectoryListingFailedError) {

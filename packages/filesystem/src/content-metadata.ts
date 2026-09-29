@@ -1,4 +1,5 @@
 import type { FileContentMetadata, FileStat } from '@taucad/types';
+import type { HeadFileStat } from '#types.js';
 
 /**
  * Number of leading bytes inspected by `seemsBinary`. Mirrors VS Code's
@@ -130,6 +131,25 @@ export function fileStatFromBytes(bytes: Uint8Array<ArrayBuffer>, mtimeMs: numbe
   };
 }
 
+/** Classify only the first 512 bytes; text line counts remain unknown. @public */
+export function headFileStatFromBytes(bytes: Uint8Array<ArrayBuffer>, mtimeMs: number): HeadFileStat {
+  return {
+    type: 'file',
+    size: bytes.byteLength,
+    mtimeMs,
+    contentKind: seemsBinary(bytes.subarray(0, headSniffByteLength)) ? 'binary' : 'text',
+  };
+}
+
+/** Drop an exact count when a provider already holds exact metadata. @public */
+export function headFileStatFromStat(stat: FileStat | HeadFileStat): HeadFileStat {
+  if (stat.type === 'dir') {
+    return stat;
+  }
+  const { type, size, mtimeMs, contentKind, provenance } = stat;
+  return { type, size, mtimeMs, contentKind, ...(provenance === undefined ? {} : { provenance }) };
+}
+
 /**
  * Build a file stat from a `File` handle without reading more content than the
  * classification needs: size and mtime come from the handle, the binary/text
@@ -153,4 +173,15 @@ export async function fileStatFromFile(file: File): Promise<FileStat> {
 
   const bytes = file.size <= headSniffByteLength ? head : new Uint8Array(await file.arrayBuffer());
   return { ...base, contentKind: 'text', lineCount: countLineBytes(bytes) };
+}
+
+/** Classify a browser File with a single bounded content read. @public */
+export async function headFileStatFromFile(file: File): Promise<HeadFileStat> {
+  const head = new Uint8Array(await file.slice(0, headSniffByteLength).arrayBuffer());
+  return {
+    type: 'file',
+    size: file.size,
+    mtimeMs: file.lastModified,
+    contentKind: seemsBinary(head) ? 'binary' : 'text',
+  };
 }

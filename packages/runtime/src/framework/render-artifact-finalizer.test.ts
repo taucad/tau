@@ -52,7 +52,11 @@ describe('finalizeRenderOutput', () => {
   });
 
   it('still rejects kernels that produce no public artifact', () => {
-    expect(() => finalizeRenderOutput({ artifacts: [], nativeHandle: null })).toThrow(RenderArtifactFinalizationError);
+    expectFinalizationError({
+      operation: () => finalizeRenderOutput({ artifacts: [], nativeHandle: null }),
+      code: 'RENDER_ARTIFACT_MISSING',
+      message: 'Kernel render produced no public geometry artifact.',
+    });
   });
 
   it('should still reject multiple public artifacts with the same format', () => {
@@ -60,7 +64,7 @@ describe('finalizeRenderOutput', () => {
 
     expectFinalizationError({
       operation: () => finalizeRenderOutput({ artifacts: [svg, svg], nativeHandle: null }),
-      code: 'MULTI_RENDER_ARTIFACT_UNSUPPORTED',
+      code: 'GEOMETRY_INVALID',
       message: 'Kernel render produced multiple public geometry artifacts.',
     });
   });
@@ -70,7 +74,7 @@ describe('finalizeRenderOutput', () => {
 
     expectFinalizationError({
       operation: () => finalizeRenderOutput({ artifacts: [createGltfArtifact(), svg], nativeHandle: null }),
-      code: 'MIXED_RENDER_OUTPUT_UNSUPPORTED',
+      code: 'GEOMETRY_INVALID',
       message: 'Kernel render produced mixed public geometry formats.',
     });
   });

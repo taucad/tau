@@ -793,7 +793,7 @@ describe('RuntimeClient render timeout control plane', () => {
 
     handlers.errorEvent?.({
       renderId: firstRenderId,
-      issues: [{ message: 'render timed out', code: 'RENDER_TIMEOUT', severity: 'error' }],
+      issues: [{ message: 'render timed out', code: 'OPERATION_TIMEOUT', severity: 'error' }],
     });
     await firstTimeout;
     handlers.stateChanged?.({ renderId: firstRenderId, abortGeneration: 1, state: 'error' });
@@ -920,7 +920,7 @@ describe('RuntimeClient render timeout control plane', () => {
     expect(errors).toEqual([
       {
         message: 'Render timed out after 75 ms.',
-        code: 'RENDER_TIMEOUT',
+        code: 'OPERATION_TIMEOUT',
         type: 'runtime',
         severity: 'error',
       },
@@ -1569,18 +1569,18 @@ describe('RuntimeClient render timeout control plane', () => {
 
     abort.mockClear();
     await vi.advanceTimersByTimeAsync(100);
-    expect(errors).toEqual(['RENDER_TIMEOUT']);
+    expect(errors).toEqual(['OPERATION_TIMEOUT']);
     expect(abort).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ renderId: watcherRenderId }));
     expect(client.renderStatus).toBe('error');
 
     handlers.errorEvent?.({
       renderId: watcherRenderId,
-      issues: [{ message: 'render timed out', code: 'RENDER_TIMEOUT', severity: 'error' }],
+      issues: [{ message: 'render timed out', code: 'OPERATION_TIMEOUT', severity: 'error' }],
     });
     handlers.stateChanged?.({ renderId: watcherRenderId, abortGeneration: 2, state: 'error' });
     await vi.advanceTimersByTimeAsync(1000);
 
-    expect(errors).toEqual(['RENDER_TIMEOUT']);
+    expect(errors).toEqual(['OPERATION_TIMEOUT']);
     expect(terminateHost).not.toHaveBeenCalled();
     client.terminate();
   });

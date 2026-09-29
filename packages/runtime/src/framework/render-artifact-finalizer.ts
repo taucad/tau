@@ -72,13 +72,13 @@ const normalizeGeometry = (geometry: GeometryResponse): GeometryResponse => {
 
 const selectSingleArtifact = (artifacts: readonly GeometryResponse[]): GeometryResponse => {
   if (artifacts.length === 0) {
-    fail(createIssue('NO_RENDER_GEOMETRY', 'Kernel render produced no public geometry artifact.'));
+    fail(createIssue('RENDER_ARTIFACT_MISSING', 'Kernel render produced no public geometry artifact.'));
   }
 
   const formats = new Set(artifacts.map((artifact) => artifact.format));
   if (formats.size > 1) {
     fail(
-      createIssue('MIXED_RENDER_OUTPUT_UNSUPPORTED', 'Kernel render produced mixed public geometry formats.', {
+      createIssue('GEOMETRY_INVALID', 'Kernel render produced mixed public geometry formats.', {
         formats: [...formats],
       }),
     );
@@ -86,7 +86,7 @@ const selectSingleArtifact = (artifacts: readonly GeometryResponse[]): GeometryR
 
   if (artifacts.length > 1) {
     fail(
-      createIssue('MULTI_RENDER_ARTIFACT_UNSUPPORTED', 'Kernel render produced multiple public geometry artifacts.', {
+      createIssue('GEOMETRY_INVALID', 'Kernel render produced multiple public geometry artifacts.', {
         format: artifacts[0]?.format,
         count: artifacts.length,
       }),

@@ -125,6 +125,25 @@ export class PartThumbnailService {
     this.changes.dispose();
   }
 
+  /** Fence in-flight work while retaining bounded last-good previews during refresh. */
+  public invalidate(): void {
+    if (this.disposed) {
+      return;
+    }
+    this.generation += 1;
+    this.activeAbort?.abort(new DOMException('Presented geometry changed.', 'AbortError'));
+    this.current = undefined;
+    for (const [id, state] of this.states) {
+      if (state.bytes) {
+        this.states.set(id, { status: 'ready', bytes: state.bytes });
+      } else {
+        this.states.delete(id);
+        this.identities.delete(id);
+      }
+    }
+    this.emit();
+  }
+
   private lastGood(id: string): Pick<PartThumbnailState, 'bytes'> {
     const bytes = this.states.get(id)?.bytes;
     return bytes ? { bytes } : {};
@@ -287,7 +306,7 @@ export class PartThumbnailService {
   private limitStoredBytes(): void {
     const buffers = new Set([...this.states.values()].flatMap((state) => (state.bytes ? [state.bytes] : [])));
     let total = [...buffers].reduce((sum, bytes) => sum + bytes.byteLength, 0);
-    for (const [id, state] of this.states) {
+    for (const [, state] of this.states) {
       if (total <= maxPreviewBytes) {
         return;
       }

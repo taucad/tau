@@ -38,7 +38,7 @@ describe('PartThumbnailService', () => {
 
   it('should render exact per-part instances in bounded ordered batches through the shared queue', async () => {
     const exportImage = vi.fn(async (job: Parameters<HeadlessImageService['export']>[0]) => {
-      if (job.sourceFormat !== 'glb' || job.exportOptions.mode !== 'batch') {
+      if (job.sourceFormat !== 'glb' || job.exportOptions['mode'] !== 'batch') {
         throw new Error('Expected GLB batch');
       }
       return [image(3), image(2), image(1), image(0)];
@@ -82,6 +82,29 @@ describe('PartThumbnailService', () => {
     expect(service.get('part-4')?.bytes).toEqual(new Uint8Array([1]));
     service.request(source, parts);
     expect(exportImage).toHaveBeenCalledTimes(2);
+  });
+
+  it('invalidates an ineligible presentation and drops its late preview', async () => {
+    const pending = Promise.withResolvers<ExportFile[]>();
+    const exportImage = vi
+      .fn()
+      .mockResolvedValueOnce([image(0, 6)])
+      .mockImplementationOnce(() => pending.promise)
+      .mockResolvedValueOnce([image(0, 9)]);
+    const service = fixture(exportImage);
+    service.request(source, [part('old', 0)]);
+    await vi.waitFor(() => expect(service.get('old')?.status).toBe('ready'));
+    service.request({ ...source, geometryHash: 'pending-glb' }, [part('old', 0)]);
+    await vi.waitFor(() => expect(exportImage).toHaveBeenCalledTimes(2));
+    expect(service.get('old')).toMatchObject({ status: 'pending', bytes: new Uint8Array([6]) });
+    service.invalidate();
+    expect(service.get('old')).toMatchObject({ status: 'ready', bytes: new Uint8Array([6]) });
+    pending.resolve([image(0, 8)]);
+    await Promise.resolve();
+    expect(service.get('old')?.bytes).toEqual(new Uint8Array([6]));
+    service.request({ ...source, geometryHash: 'new-glb' }, [part('new', 1)]);
+    await vi.waitFor(() => expect(service.get('new')?.status).toBe('ready'));
+    expect(service.get('new')?.bytes).toEqual(new Uint8Array([9]));
   });
 
   it('should reject stale batch results and keep the last good preview while refreshing', async () => {
@@ -169,7 +192,7 @@ describe('PartThumbnailService', () => {
     const service = fixture(vi.fn().mockResolvedValue([image(0)]));
     const first = vi.fn();
     const second = vi.fn();
-    let unsubscribeFirst = () => undefined;
+    let unsubscribeFirst: () => void = () => undefined;
     unsubscribeFirst = service.subscribe(() => {
       first();
       unsubscribeFirst();

@@ -10,7 +10,7 @@ const glb = new Uint8Array([0x67, 0x6c, 0x54, 0x46]);
 const files = (bytes = new Uint8Array([1, 2, 3])): ExportFile[] => [
   { name: 'thumbnail.webp', mimeType: 'image/webp', bytes },
 ];
-const thumbnailJob = (identity: string): HeadlessImageJob => ({
+const thumbnailJob = (identity: string): WebpGlbJob => ({
   kind: 'automatic-thumbnail',
   identity,
   projectId: 'project-1',

@@ -1,5 +1,5 @@
 ---
-tscircuit: patch
+tscircuit: minor
 ---
 
-Publish `@taucad/tscircuit`, the tscircuit EDA kernel: TSX boards rendered to a 3D GLB, schematic SVG or PCB SVG through the `output` render option, with BOM, netlist and circuit JSON exports. Rendering is offline; consumers on a zod 4 workspace need the documented pnpm `readPackage` hook until upstream tscircuit manifests are zod-4 clean.
+fix(runtime)!: Publish the tscircuit EDA kernel on the v2 view/export contract. One evaluation offers separate 3D board, schematic SVG and PCB SVG views plus GLB, BOM CSV, netlist text and circuit JSON exports. The former global `renderOptions.output` selector is removed; the current client renders only the first offered view until W3 adds explicit document-view selection. Rendering remains offline.

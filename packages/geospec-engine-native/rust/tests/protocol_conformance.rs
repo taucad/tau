@@ -121,15 +121,37 @@ fn canonicalizes_and_rejects_the_frozen_codec_vectors_without_reserializing_inpu
 fn reports_the_complete_current_initialize_contract_through_both_entrypoints() {
     let current = current();
     let bound = binding(&current, "a1/raw/initialize");
+    let mut expected = bound.clone();
+    let mut response: Value = serde_json::from_str(
+        &bound["expectedUtf8"]
+            .as_str()
+            .unwrap()
+            .replace("geospec-st-logical-requests-v3", CURRENT_NUMERIC_PROFILE),
+    )
+    .unwrap();
+    let capabilities = response["result"]["capabilities"].as_array_mut().unwrap();
+    assert_eq!(capabilities.last().unwrap()["name"], "queryPmi");
+    capabilities.push(serde_json::json!({
+        "name": "minimumDistance",
+        "implementation": "implemented",
+        "profile": "geospec-minimum-distance-v1",
+        "qualification": "unqualified",
+        "registryVersion": 5,
+        "scope": "declared-subject-profile",
+    }));
+    expected["expectedUtf8"] =
+        String::from_utf8(canonicalize(&serde_json::to_vec(&response).unwrap()).unwrap())
+            .unwrap()
+            .into();
     let request = input(bound);
     let engine = Engine::new().process_request(&request);
     let free = process_request(&request);
-    let engine = assert_exact(engine, bound, "Engine::initialize").unwrap();
-    let free = assert_exact(free, bound, "process_request::initialize").unwrap();
+    let engine = assert_exact(engine, &expected, "Engine::initialize").unwrap();
+    let free = assert_exact(free, &expected, "process_request::initialize").unwrap();
     assert_eq!(engine, free);
     assert_eq!(
         engine["result"]["capabilities"].as_array().unwrap().len(),
-        31
+        32
     );
 }
 

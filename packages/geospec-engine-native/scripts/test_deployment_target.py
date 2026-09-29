@@ -577,6 +577,59 @@ class PreparationContractTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, f'Prefix receipt {field} changed'):
                     prepare.verify_prefix(self.prefix, contract)
 
+    def test_should_reuse_relocated_prefix_only_with_original_receipt_and_matching_occt_source(self):
+        original = self.root / 'original/packages/geospec-engine-native/native/occt/build-occt.sh'
+        original.parent.mkdir(parents=True)
+        original.write_bytes(self.builder.read_bytes())
+        patch_file = self.builder.parent / 'selected.patch'
+        original_patch = original.parent / patch_file.name
+        patch_file.write_text('inert patch bytes')
+        original_patch.write_bytes(patch_file.read_bytes())
+        self.receipt['command'][1] = str(original)
+        prepare.write_json(self.receipt_path, self.receipt)
+        receipt_bytes = self.receipt_path.read_bytes()
+        with patch.dict(os.environ, GEOSPEC_OCCT_PRODUCER_BUILDER=str(original)):
+            reused = self.verify()
+            self.assertEqual(self.receipt_path.read_bytes(), receipt_bytes, 'reuse never relabels the producer receipt')
+            self.assertEqual(reused['recovery']['originalReceiptSha256'], prepare.digest(self.receipt_path))
+            self.assertEqual(reused['recovery']['sourceFiles'], 2)
+            bridge = self.builder.parent / 'bridge/geospec_occt_bridge.cpp'
+            bridge.parent.mkdir(parents=True)
+            bridge.write_text('changed downstream bridge')
+            self.assertEqual(self.verify()['recovery']['sourceFiles'], 2,
+                             'bridge code is not consumed by the OCCT static prefix')
+            manifest = self.builder.parent / 'source-manifest.json'
+            original_manifest = original.parent / manifest.name
+            manifest.write_text('{"source":"pinned"}')
+            original_manifest.write_bytes(manifest.read_bytes())
+            self.assertEqual(self.verify()['recovery']['sourceFiles'], 3)
+            manifest.write_text('{"source":"changed"}')
+            with self.assertRaisesRegex(ValueError, 'OCCT source closure changed'):
+                self.verify()
+            manifest.write_bytes(original_manifest.read_bytes())
+            patch_file.write_text('changed patch')
+            with self.assertRaisesRegex(ValueError, 'OCCT source closure changed'):
+                self.verify()
+            patch_file.write_bytes(original_patch.read_bytes())
+            self.builder.write_text('changed builder')
+            with self.assertRaisesRegex(ValueError, 'builderSha256 changed'):
+                self.verify()
+            self.builder.write_bytes(original.read_bytes())
+            changed = self.contract()
+            changed['command'][2] = '-DCMAKE_C_COMPILER=/changed/compiler'
+            with self.assertRaisesRegex(ValueError, 'Prefix receipt command changed'):
+                prepare.verify_prefix(self.prefix, changed)
+            changed = self.contract()
+            changed['toolMetadata'] = {'changedTool': True}
+            with self.assertRaisesRegex(ValueError, 'Prefix receipt toolMetadata changed'):
+                prepare.verify_prefix(self.prefix, changed)
+            selected = self.recipe['occt']['sha256']
+            self.recipe['occt']['sha256'] = 'changed-source'
+            with self.assertRaisesRegex(ValueError, 'Prefix source selection changed'):
+                self.verify()
+            self.recipe['occt']['sha256'] = selected
+            self.assertEqual(self.receipt_path.read_bytes(), receipt_bytes)
+
     def test_should_refuse_changed_installed_outputs_and_cache(self):
         for path in [self.library, self.header, self.prefix / 'build/CMakeCache.txt']:
             original = path.read_bytes()

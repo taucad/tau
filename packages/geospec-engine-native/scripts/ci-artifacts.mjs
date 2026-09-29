@@ -13,14 +13,17 @@
  */
 import assert from 'node:assert/strict';
 import childProcess from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   copyFileSync,
+  closeSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -39,6 +42,15 @@ const mixedCommandsPath = `${transportPath}/mixed-commands.json`;
 const proofPath = `${transportPath}/native-proof/identity-source-proof.json`;
 const archiveNames = ['root.tgz', 'darwin-arm64.tgz', 'geospec-engine-native-source-relink.tar.gz'];
 const archivePaths = archiveNames.map((name) => `${transportPath}/assembly/tarballs/${name}`);
+const lockPath = 'node_modules/.cache/geospec-engine-native/ci-artifacts.lock';
+const activePath = 'node_modules/.cache/geospec-engine-native/ci-artifacts.active.json';
+/** @type {number | undefined} */
+let heldLockFile;
+/** Keep the lock alive in an active producer even if this coordinator is killed. */
+const producerStdio = (capture = false) =>
+  heldLockFile === undefined
+    ? capture ? 'pipe' : 'inherit'
+    : capture ? ['inherit', 'pipe', 'pipe', heldLockFile] : ['inherit', 'inherit', 'inherit', heldLockFile];
 /** @type {() => {id: string | null, attempt: string | null}} */
 const workflowRun = () => ({ id: process.env.GITHUB_RUN_ID ?? null, attempt: process.env.GITHUB_RUN_ATTEMPT ?? null });
 const outputs = [
@@ -50,6 +62,7 @@ const outputs = [
 ];
 /** @type {(bytes: import('node:crypto').BinaryLike) => string} */
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
+const producerRecipe = digest(readFileSync(fileURLToPath(import.meta.url)));
 /** @type {(path: string) => Record<string, unknown>} */
 const readJson = (path) => {
   /** @type {unknown} */
@@ -63,6 +76,88 @@ const fileRecord = (root, path) => {
   const bytes = readFileSync(resolve(root, path));
   return { path, bytes: bytes.length, sha256: digest(bytes) };
 };
+/** Publish an inventory as one complete file, never a torn JSON write.
+ * @type {(root: string, inventory: Record<string, unknown>) => void}
+ */
+const publishInventory = (root, inventory) => {
+  const destination = resolve(root, inventoryPath);
+  const temporary = `${destination}.${process.pid}.tmp`;
+  try {
+    writeFileSync(temporary, `${JSON.stringify(inventory, null, 2)}\n`);
+    renameSync(temporary, destination);
+  } finally {
+    rmSync(temporary, { force: true });
+  }
+};
+/** A killed coordinator leaves a durable refusal; only its clean completion clears it.
+ * @type {<T>(root: string, work: () => T, producer?: {pgid: number, recipeSha256?: string}) => T}
+ * @internal
+ */
+export const withProducerMarker = (root, work, producer) => {
+  const path = resolve(root, activePath);
+  mkdirSync(resolve(root, 'node_modules/.cache/geospec-engine-native'), { recursive: true });
+  assert.ok(
+    !existsSync(path),
+    `GeoSpec producer interrupted: ${path}; inspect live descendants and shared outputs before explicit recovery.`,
+  );
+  const marker = {
+    owner: randomUUID(),
+    pid: process.pid,
+    pgid: producer?.pgid ?? null,
+    recipeSha256: producer?.recipeSha256 ?? producerRecipe,
+    started: new Date().toISOString(),
+  };
+  writeFileSync(path, `${JSON.stringify(marker)}\n`, { flag: 'wx' });
+  const result = work();
+  assert.deepEqual(readJson(path), marker, 'GeoSpec producer marker changed during production.');
+  rmSync(path);
+  return result;
+};
+/** A retry is only possible after the complete owned producer group has exited.
+ * Legacy/unknown markers deliberately require operator-confirmed recovery.
+ * @type {(root: string, groupAlive: (pgid: number) => boolean, recipeSha256?: string) => boolean}
+ * @internal
+ */
+export const recoverExitedProducer = (root, groupAlive, recipeSha256 = producerRecipe) => {
+  const path = resolve(root, activePath);
+  if (!existsSync(path)) {
+    return false;
+  }
+  const marker = readJson(path);
+  assert.ok(
+    typeof marker.owner === 'string' &&
+      typeof marker.pid === 'number' &&
+      Number.isSafeInteger(marker.pgid) &&
+      marker.pgid === marker.pid &&
+      marker.pgid > 0 &&
+      marker.recipeSha256 === recipeSha256 &&
+      typeof marker.started === 'string',
+    `GeoSpec producer marker is not a recognized closed recipe: ${path}; explicit operator recovery required.`,
+  );
+  assert.ok(
+    !groupAlive(marker.pgid),
+    `GeoSpec producer group ${marker.pgid} still has a possible writer; refusing retry.`,
+  );
+  // Invalidate the only reusable publication before allowing another producer.
+  rmSync(resolve(root, inventoryPath), { force: true });
+  assert.deepEqual(readJson(path), marker, 'GeoSpec producer marker changed during recovery.');
+  rmSync(path);
+  return true;
+};
+/** Report any non-zombie member of the owned Darwin process group. A failed
+ * process listing is not evidence of absence and must fail closed.
+ * @type {(pgid: number) => boolean}
+ */
+export const darwinGroupAlive = (pgid) => {
+  const result = childProcess.spawnSync('ps', ['-axo', 'pgid=,state='], { encoding: 'utf8' });
+  assert.ok(result.status === 0 && typeof result.stdout === 'string', 'Could not prove GeoSpec producer group exit.');
+  const members = result.stdout.split('\n').filter((line) => line.trim() !== '').map((line) => {
+    const match = /^\s*(\d+)\s+([^\s]+)\s*$/u.exec(line);
+    assert.ok(match, 'Malformed process listing cannot prove GeoSpec producer group exit.');
+    return { pgid: match[1], state: match[2] };
+  });
+  return members.some((member) => member.pgid === String(pgid) && !member.state?.startsWith('Z'));
+};
 /** @type {(root: string) => {revision: string, files: ReturnType<typeof fileRecord>[]}} */
 const sourceIdentity = (root) => {
   /** @type {(args: string[]) => string} */
@@ -70,6 +165,8 @@ const sourceIdentity = (root) => {
   const paths = git([
     'ls-files',
     '--cached',
+    '--others',
+    '--exclude-standard',
     '-z',
     '--',
     packagePath,
@@ -78,10 +175,21 @@ const sourceIdentity = (root) => {
     'pnpm-workspace.yaml',
     'nx.json',
     'tsconfig.base.json',
+    'tsconfig.json',
+    'rust-toolchain.toml',
+    'Cargo.toml',
+    'Cargo.lock',
+    '.cargo',
+    'tools',
     'tools/tsdown.plugin.ts',
   ])
     .split('\0')
-    .filter(Boolean);
+    .filter((path) =>
+      path &&
+      !path.startsWith(`${packagePath}/bindings/node/generated/`) &&
+      !path.startsWith(`${packagePath}/bindings/emscripten/generated/`) &&
+      !path.split('/').some((part) => ['target', 'dist', 'out'].includes(part)),
+    );
   // Bind the source-kit package, including licenses; also cover owned helpers before their first commit.
   paths.push(`${packagePath}/scripts/ci-artifacts.mjs`);
   paths.push(`${packagePath}/scripts/collect-native-proof.py`);
@@ -91,6 +199,11 @@ const sourceIdentity = (root) => {
     files: [...new Set(paths)].sort().map((path) => fileRecord(root, path)),
   };
 };
+/** The closed producer recipe is the complete selected source closure, not just
+ * this coordinator. Changing any producer script forces explicit inspection.
+ * @type {(root: string) => string}
+ */
+const closedRecipe = (root) => digest(JSON.stringify(sourceIdentity(root).files));
 /** @type {(root: string) => ReturnType<typeof fileRecord>[]} */
 const payload = (root) => {
   const files = outputs.map((path) => fileRecord(root, path));
@@ -276,8 +389,8 @@ export const verifyArtifacts = (root) => {
   const artifacts = payload(root);
   assert.ok(schema === 'geospec-ci-artifacts-v2', 'Unsupported GeoSpec artifact inventory.');
   assert.ok(
-    isDeepStrictEqual(recordedSource, source),
-    'GeoSpec artifact source revision/inputs differ from this checkout.',
+    isDeepStrictEqual(recordedSource.files, source.files),
+    'GeoSpec artifact source inputs differ from this checkout.',
   );
   assert.ok(
     isDeepStrictEqual(recordedArtifacts, artifacts),
@@ -290,8 +403,8 @@ export const verifyArtifacts = (root) => {
   ]) {
     assert.ok(isDeepStrictEqual(inventory[key], fileRecord(root, path)), `${key} changed during transport.`);
   }
-  checkReceipt(root, { source, artifacts });
-  return { ...inventory, source, artifacts };
+  checkReceipt(root, { source: recordedSource, artifacts });
+  return { ...inventory, source: recordedSource, artifacts };
 };
 
 /** Verify the final assembly as well as the build inputs; portable across checkout paths.
@@ -338,6 +451,7 @@ export const prepareArtifacts = (root) => {
   const nativeTarget = mkdtempSync(join(cache, 'ci-node-target-'));
   const environment = {
     ...process.env,
+    NX_DAEMON: 'false',
     PATH: process.env.PATH,
     CARGO_HOME: resolve(root, process.env.CARGO_HOME ?? join(homedir(), '.cargo')),
     pnpm_config_verify_deps_before_run: 'warn',
@@ -362,7 +476,7 @@ export const prepareArtifacts = (root) => {
     const started = new Date().toISOString();
     const result = childProcess.spawnSync('pnpm', argv.slice(1), {
       cwd: root,
-      stdio: capture ? 'pipe' : 'inherit',
+      stdio: producerStdio(capture),
       encoding: 'utf8',
       maxBuffer: 64 * 1024 ** 2,
       env: {
@@ -444,7 +558,7 @@ export const prepareArtifacts = (root) => {
   const receiptBytes = readFileSync(producedReceipt);
   const { manifestSha256 } = readJson(producedReceipt);
   assert.ok(manifestSha256 === digest(inputsBytes), 'Mixed build did not use the prepared inputs.');
-  assert.ok(isDeepStrictEqual(source, sourceIdentity(root)), 'GeoSpec sources changed during production.');
+  assert.ok(isDeepStrictEqual(source.files, sourceIdentity(root).files), 'GeoSpec sources changed during production.');
   const artifacts = payload(root);
   mkdirSync(resolve(root, transportPath), { recursive: true });
   writeFileSync(resolve(root, receiptPath), receiptBytes);
@@ -459,7 +573,7 @@ export const prepareArtifacts = (root) => {
     mixedCommands: fileRecord(root, mixedCommandsPath),
   };
   checkReceipt(root, inventory);
-  writeFileSync(resolve(root, inventoryPath), `${JSON.stringify(inventory, null, 2)}\n`);
+  publishInventory(root, inventory);
   verifyArtifacts(root);
   // The collector is a source-owned adaptation of the accepted ordinary identity observation.
   // It runs only on the real producer; pure tests replace this subprocess with inert metadata.
@@ -477,7 +591,7 @@ export const prepareArtifacts = (root) => {
     ],
     {
       cwd: root,
-      stdio: 'inherit',
+      stdio: producerStdio(),
       env: environment,
     },
   );
@@ -495,7 +609,7 @@ export const prepareArtifacts = (root) => {
       '--manifest-path',
       resolve(root, packagePath, 'bindings/python/Cargo.toml'),
     ],
-    { cwd: root, stdio: 'inherit', env: environment },
+    { cwd: root, stdio: producerStdio(), env: environment },
   );
   assert.ok(pythonSources.status === 0, 'Locked Python Cargo material fetch failed.');
   const assemblyOutput = run('assemble-package');
@@ -508,7 +622,7 @@ export const prepareArtifacts = (root) => {
   for (const name of archiveNames) {
     copyFileSync(join(selections[0], 'tarballs', name), resolve(root, transportPath, 'assembly/tarballs', name));
   }
-  assert.ok(isDeepStrictEqual(source, sourceIdentity(root)), 'GeoSpec sources changed during assembly.');
+  assert.ok(isDeepStrictEqual(source.files, sourceIdentity(root).files), 'GeoSpec sources changed during assembly.');
   const complete = {
     ...inventory,
     delivery: {
@@ -518,7 +632,7 @@ export const prepareArtifacts = (root) => {
       nativeProof: fileRecord(root, proofPath),
     },
   };
-  writeFileSync(resolve(root, inventoryPath), `${JSON.stringify(complete, null, 2)}\n`);
+  publishInventory(root, complete);
   return verifyDelivery(root);
 };
 
@@ -535,25 +649,91 @@ export const ensureDelivery = (root) => {
   return prepareArtifacts(root);
 };
 
+/** Select immutable archives while holding the same producer lock as ensure/verify.
+ * @type {(root: string) => string}
+ * @internal
+ */
+export const snapshotDelivery = (root) => {
+  ensureDelivery(root);
+  const cache = resolve(root, 'node_modules/.cache/geospec-engine-native');
+  mkdirSync(cache, { recursive: true });
+  const snapshot = mkdtempSync(join(cache, 'assembly-snapshot-'));
+  try {
+    mkdirSync(join(snapshot, 'tarballs'));
+    for (const name of archiveNames) {
+      const source = `${transportPath}/assembly/tarballs/${name}`;
+      const destination = join(snapshot, 'tarballs', name);
+      const expected = fileRecord(root, source);
+      copyFileSync(resolve(root, source), destination);
+      assert.ok(digest(readFileSync(destination)) === expected.sha256, `Assembly snapshot changed: ${name}`);
+    }
+    return snapshot;
+  } catch (error) {
+    rmSync(snapshot, { recursive: true, force: true });
+    throw error;
+  }
+};
+
 const invokedScript = process.argv.at(1);
 if (invokedScript !== undefined && resolve(invokedScript) === fileURLToPath(import.meta.url)) {
   try {
     const root = resolve(import.meta.dirname, '../../..');
-    assert.ok(process.argv.length === 3, 'Usage: ci-artifacts.mjs prepare|verify|verify-delivery|ensure-delivery');
-    const mode = process.argv[2];
+    const worker = process.argv[2] === '--producer';
     assert.ok(
-      mode === 'prepare' || mode === 'verify' || mode === 'verify-delivery' || mode === 'ensure-delivery',
-      'Usage: ci-artifacts.mjs prepare|verify|verify-delivery|ensure-delivery',
+      process.argv.length === (worker ? 4 : 3),
+      'Usage: ci-artifacts.mjs prepare|verify|verify-delivery|ensure-delivery|snapshot-delivery',
     );
-    const inventory =
-      mode === 'ensure-delivery'
-        ? ensureDelivery(root)
-        : mode === 'prepare'
-          ? prepareArtifacts(root)
-          : mode === 'verify-delivery'
-            ? verifyDelivery(root)
-            : verifyArtifacts(root);
-    console.log(`Verified ${inventory.artifacts.length} GeoSpec artifacts for ${inventory.source.revision}.`);
+    const mode = process.argv[worker ? 3 : 2];
+    assert.ok(
+      mode === 'prepare' || mode === 'verify' || mode === 'verify-delivery' || mode === 'ensure-delivery' || mode === 'snapshot-delivery',
+      'Usage: ci-artifacts.mjs prepare|verify|verify-delivery|ensure-delivery|snapshot-delivery',
+    );
+    const produces = mode === 'prepare' || mode === 'ensure-delivery' || mode === 'snapshot-delivery';
+    assert.ok(
+      process.platform === 'darwin' || !produces,
+      'GeoSpec production and snapshot selection require Darwin; non-Darwin supports verified transport reads only.',
+    );
+    if (worker) {
+      assert.ok(produces && process.platform === 'darwin', 'Unsupported GeoSpec producer worker.');
+      heldLockFile = 3;
+    } else if (process.platform === 'darwin') {
+      const file = resolve(root, lockPath);
+      mkdirSync(resolve(root, 'node_modules/.cache/geospec-engine-native'), { recursive: true });
+      heldLockFile = openSync(file, 'a+');
+      const lock = childProcess.spawnSync('lockf', ['3'], { stdio: ['ignore', 'inherit', 'inherit', heldLockFile] });
+      assert.ok(lock.status === 0, `GeoSpec delivery lock failed: ${lock.error?.message ?? lock.status}`);
+    }
+    try {
+      if (!worker && produces) {
+        recoverExitedProducer(root, darwinGroupAlive, closedRecipe(root));
+      } else if (!worker) {
+        assert.ok(!existsSync(resolve(root, activePath)), 'GeoSpec producer active or interrupted; read-only verification refused.');
+      }
+      if (!worker && produces) {
+        const child = childProcess.spawnSync(process.execPath, [fileURLToPath(import.meta.url), '--producer', mode], {
+          cwd: root,
+          detached: true,
+          stdio: ['inherit', 'inherit', 'inherit', heldLockFile],
+        });
+        assert.ok(child.status === 0, `GeoSpec producer failed: ${child.error?.message ?? child.status}`);
+      } else if (mode === 'snapshot-delivery') {
+        console.log(`ASSEMBLY_ROOT=${withProducerMarker(root, () => snapshotDelivery(root), { pgid: process.pid, recipeSha256: closedRecipe(root) })}`);
+      } else {
+        const inventory =
+          mode === 'ensure-delivery'
+            ? withProducerMarker(root, () => ensureDelivery(root), { pgid: process.pid, recipeSha256: closedRecipe(root) })
+            : mode === 'prepare'
+              ? withProducerMarker(root, () => prepareArtifacts(root), { pgid: process.pid, recipeSha256: closedRecipe(root) })
+              : mode === 'verify-delivery'
+                ? verifyDelivery(root)
+                : verifyArtifacts(root);
+        console.log(`Verified ${inventory.artifacts.length} GeoSpec artifacts for ${inventory.source.revision}.`);
+      }
+    } finally {
+      if (heldLockFile !== undefined) {
+        closeSync(heldLockFile);
+      }
+    }
   } catch (error) {
     console.error(error instanceof Error ? error.message : error);
     process.exitCode = 1;

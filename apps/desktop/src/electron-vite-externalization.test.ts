@@ -21,7 +21,7 @@ import { copyGeoSpecNative, copyGeoSpecNativeAssembly, copyGeoSpecSourceRelink }
 const appRoot = join(import.meta.dirname, '..');
 
 describe('macOS GeoSpec assembly selection', () => {
-  it('should ensure the current delivery only for the default assembly before staging', () => {
+  it('should snapshot the current delivery only for the default assembly before staging', () => {
     const source = readFileSync(join(appRoot, 'scripts/package-macos.mts'), 'utf8');
     const mode = source.indexOf('parseMacosPackageMode(process.argv.slice(2))');
     const unsafeOutput = source.indexOf('Refusing unsafe package output root:');
@@ -30,8 +30,8 @@ describe('macOS GeoSpec assembly selection', () => {
     );
     const fallback = source.indexOf("'out/artifacts/geospec-native-engine/ci/assembly'", selection);
     const conditional = source.indexOf('if (selectedGeoSpecAssembly === undefined)', fallback);
-    const ensure = source.indexOf("'ensure-delivery'", conditional);
-    const realPath = source.indexOf('const geospecAssemblyRoot = await realpath(', ensure);
+    const snapshot = source.indexOf("'snapshot-delivery'", conditional);
+    const realPath = source.indexOf('const geospecAssemblyRoot = await realpath(', snapshot);
     const stage = source.indexOf('await rm(outputRoot, { recursive: true, force: true })', realPath);
 
     expect(mode).toBeGreaterThan(-1);
@@ -39,8 +39,8 @@ describe('macOS GeoSpec assembly selection', () => {
     expect(selection).toBeGreaterThan(unsafeOutput);
     expect(fallback).toBeGreaterThan(selection);
     expect(conditional).toBeGreaterThan(fallback);
-    expect(ensure).toBeGreaterThan(conditional);
-    expect(realPath).toBeGreaterThan(ensure);
+    expect(snapshot).toBeGreaterThan(conditional);
+    expect(realPath).toBeGreaterThan(snapshot);
     expect(stage).toBeGreaterThan(realPath);
   });
 });

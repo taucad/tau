@@ -197,7 +197,7 @@ export const ChatErrorAgentStop = memo(function ({
   /** Whether the host will continue this run rather than replay it. */
   readonly resumable: boolean;
 }): React.JSX.Element {
-  const { continueChat } = useChatActions();
+  const { continueChat, regenerate } = useChatActions();
   const {
     execution: { execution },
   } = useChatComposer();
@@ -232,13 +232,7 @@ export const ChatErrorAgentStop = memo(function ({
 
   const primaryAction =
     primary === 'retry' ? (
-      <Button
-        variant='outline'
-        size='sm'
-        onClick={() => {
-          continueChat();
-        }}
-      >
+      <Button variant='outline' size='sm' onClick={regenerate}>
         <RefreshCcw className='size-3.5' />
         Try again
       </Button>

@@ -208,6 +208,8 @@ export function useChatTextareaLogic({
   contextSearchQuery: string;
   selectedMenuIndex: number;
   isSubmitting: boolean;
+  /** The session can continue interrupted work and the main draft is empty. */
+  canResume: boolean;
   inputText: string;
   attachments: readonly DraftAttachment[];
   /** Why Send is disabled for the current attachments and model, shown beside them (D20). */
@@ -281,6 +283,7 @@ export function useChatTextareaLogic({
     execution: { execution },
     status,
     stop,
+    resume,
     attachmentSource,
   } = useChatComposer();
   const attachmentModel = useMemo(
@@ -316,6 +319,16 @@ export function useChatTextareaLogic({
   );
   const sendBlockReason = attachmentSendBlockReason(attachments, attachmentModel);
   const isAttaching = useDraftSelector((state) => (mode === 'main' ? state.attachingMain : state.attachingEdit));
+  const canResume =
+    mode === 'main' &&
+    resume !== undefined &&
+    status !== 'streaming' &&
+    status !== 'submitted' &&
+    inputText.trim().length === 0 &&
+    attachments.length === 0 &&
+    !isAttaching &&
+    !isSubmitting &&
+    !isSubmitDisabled;
   const selectedToolChoice = useDraftSelector((state) =>
     mode === 'main' ? (state.draftToolChoice as ToolSelection) : 'auto',
   );
@@ -414,6 +427,7 @@ export function useChatTextareaLogic({
   const submitInFlightRef = useRef(false);
   const isSubmitDisabledRef = useRef(isSubmitDisabled);
   const onSubmitRef = useRef(onSubmit);
+  const resumeRef = useRef(canResume ? resume : undefined);
   useEffect(() => {
     inputTextRef.current = inputText;
     attachmentsRef.current = attachments;
@@ -422,17 +436,32 @@ export function useChatTextareaLogic({
     isSubmittingRef.current = isSubmitting;
     isSubmitDisabledRef.current = isSubmitDisabled;
     onSubmitRef.current = onSubmit;
-  }, [attachments, inputText, isAttaching, isSubmitDisabled, isSubmitting, onSubmit, sendBlockReason]);
+    resumeRef.current = canResume ? resume : undefined;
+  }, [
+    attachments,
+    canResume,
+    inputText,
+    isAttaching,
+    isSubmitDisabled,
+    isSubmitting,
+    onSubmit,
+    resume,
+    sendBlockReason,
+  ]);
 
   const handleSubmit = useCallback(async (): Promise<void> => {
     if (
-      (inputTextRef.current.trim().length === 0 && attachmentsRef.current.length === 0) ||
       isSubmittingRef.current ||
       submitInFlightRef.current ||
       isSubmitDisabledRef.current ||
       sendBlockReasonRef.current !== undefined ||
       isAttachingRef.current
     ) {
+      return;
+    }
+
+    if (inputTextRef.current.trim().length === 0 && attachmentsRef.current.length === 0) {
+      resumeRef.current?.();
       return;
     }
 
@@ -825,6 +854,7 @@ export function useChatTextareaLogic({
     contextSearchQuery,
     selectedMenuIndex,
     isSubmitting,
+    canResume,
     inputText,
     attachments,
     sendBlockReason,

@@ -21,15 +21,17 @@ const chatState = vi.hoisted(() => ({
 }));
 const retry = vi.hoisted(() => ({ retryAttempt: 0, retryMaxAttempts: 5 }));
 const continueChat = vi.hoisted(() => vi.fn());
+const regenerate = vi.hoisted(() => vi.fn());
+const resumeStream = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 const openPanel = vi.hoisted(() => vi.fn());
 const restore = vi.hoisted(() => vi.fn());
 const host = vi.hoisted(() => ({ settlement: undefined as unknown, workspace: undefined as unknown }));
 
 vi.mock('#hooks/use-chat.js', () => ({
-  useChatContext: () => ({ activeChatId: 'chat-1' }),
+  useChatContext: () => ({ activeChatId: 'chat-1', chat: { resumeStream } }),
   useChatSelector: (selector: (state: typeof chatState) => unknown) => selector(chatState),
   useChatRetrySnapshot: () => retry,
-  useChatActions: () => ({ continueChat }),
+  useChatActions: () => ({ continueChat, regenerate }),
 }));
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'p' }) }));
 vi.mock('#hooks/use-revisions.js', () => ({
@@ -273,16 +275,19 @@ describe('ChatRevisionMarker', () => {
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
   });
 
-  it('should offer Retry when a placed request errors without a settlement', () => {
+  it('should reattach to confirm a save without continuing or replaying the turn', async () => {
+    const user = userEvent.setup();
     host.workspace = { execution: { baseRevisionId: 'rev-4' } };
     setRevisions({ revisions: [revision({ revisionId: 'rev-4', n: 4, turnId: undefined })] });
     chatState.persistedError = { category: 'generic', title: 'Error', message: 'Network error', code: 'ERR' };
     render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
 
     expect(screen.getByRole('status').textContent).toBe('Save not confirmed');
-    fireEvent.click(screen.getByRole('button', { name: /revision details$/ }));
+    await user.click(screen.getByRole('button', { name: /revision details$/ }));
     expect(screen.getByText(/Rev 4 is the last confirmed revision/)).not.toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
-    expect(continueChat).toHaveBeenCalledOnce();
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(resumeStream).toHaveBeenCalledOnce();
+    expect(continueChat).not.toHaveBeenCalled();
+    expect(regenerate).not.toHaveBeenCalled();
   });
 });

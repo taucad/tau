@@ -6,10 +6,11 @@ import { ChatErrorProviderAccount as ChatErrorProviderAccountSelfHost } from '#r
 import { ChatErrorProviderAccount as ChatErrorProviderAccountCloud } from '#routes/w.$workspace.$project/chat-error-provider-account.js';
 
 const continueChat = vi.fn();
+const regenerate = vi.fn();
 const modelSelectorMock = vi.hoisted(() => vi.fn());
 
 vi.mock('#hooks/use-chat.js', () => ({
-  useChatActions: () => ({ continueChat }),
+  useChatActions: () => ({ continueChat, regenerate }),
 }));
 
 /* The composer's own picker reads the chat-scoped model catalogue; this suite
@@ -72,13 +73,14 @@ describe('ChatErrorProviderAccount (self-host)', () => {
     expect(screen.queryByText('credit_balance_exhausted')).not.toBeInTheDocument();
   });
 
-  it('should continue the chat from Try again', async () => {
+  it('should explicitly restart the turn from Try again', async () => {
     const user = userEvent.setup();
     render(<ChatErrorProviderAccountSelfHost description={openAiMessage} details={openAiDetails} />);
 
     await user.click(screen.getByRole('button', { name: 'Try again' }));
 
-    expect(continueChat).toHaveBeenCalledTimes(1);
+    expect(regenerate).toHaveBeenCalledTimes(1);
+    expect(continueChat).not.toHaveBeenCalled();
   });
 
   it('should render no billing link for a provider that has no billing console', () => {
@@ -116,12 +118,13 @@ describe('ChatErrorProviderAccount (Tau Cloud)', () => {
     expect(notice).not.toHaveClass('bg-destructive/10');
   });
 
-  it('should continue the chat from Try again', async () => {
+  it('should explicitly restart the turn from Try again', async () => {
     const user = userEvent.setup();
     render(<ChatErrorProviderAccountCloud details={openAiDetails} />);
 
     await user.click(screen.getByRole('button', { name: 'Try again' }));
 
-    expect(continueChat).toHaveBeenCalledTimes(1);
+    expect(regenerate).toHaveBeenCalledTimes(1);
+    expect(continueChat).not.toHaveBeenCalled();
   });
 });

@@ -376,19 +376,14 @@ const hostRunRecord = (chatId: string): AttachedRun | undefined => browserRuns.g
 export const isBrowserAgentHostPlaced = (chatId: string): boolean => registrations.has(chatId);
 
 /**
- * The run a *Try again* on this chat would continue, or `undefined` when there
- * is nothing left to continue and the turn has to be dispatched afresh.
- *
- * A reattach replays the log and stops where the run stopped, so a run the host
- * no longer holds is unrecoverable by resuming. A terminal run is the same,
- * with one exception: a run the gateway *refused* (no credit) never reached the
- * provider, so its history is whole and the host can continue it at the one
- * call it could not fund.
+ * The failed run a Resume on this chat can continue, or `undefined` when
+ * the host has no resumable failure. Live and approval-paused runs reattach;
+ * they do not admit another continuation.
  *
  * The admission needs the run id as well as the verdict: a continuation is the
  * same attempt's successor, so its lease and its host request name the run the
  * host already holds (I1). Read from {@link hostRunRecord} rather than from the
- * page's own record, whose lifetime settlement owns — that is why *Try again*
+ * page's own record, whose lifetime settlement owns — that is why Resume
  * after a credit refusal judged the run non-resumable and rewound the turn,
  * paying a second time for tool work the customer had already paid for.
  *
@@ -401,7 +396,7 @@ export const resumableBrowserAgentHostRunId = (chatId: string): string | undefin
   if (run === undefined) {
     return undefined;
   }
-  return !terminal(run.state) || (run.state === 'failed' && isResumableRunFailure(run.failure)) ? run.runId : undefined;
+  return run.state === 'failed' && isResumableRunFailure(run.failure) ? run.runId : undefined;
 };
 
 /** Whether the run this chat ended on stopped on a refusal a resume can continue. */

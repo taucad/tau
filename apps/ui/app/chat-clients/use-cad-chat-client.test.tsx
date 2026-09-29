@@ -540,6 +540,7 @@ describe('useCadChatClient', () => {
     expect(browserHostHarness.openAgentHostChannel).toHaveBeenCalledWith('desktop', {
       projectId: 'proj_test',
       workspaceRoot: '/Users/test/Tau/home/proj_test',
+      geoSpecEngine: 'legacy',
     });
     expect(browserHostHarness.createClient).not.toHaveBeenCalled();
     expect(workspaceHarness.prepare).not.toHaveBeenCalled();
@@ -1513,14 +1514,7 @@ describe('useCadChatClient', () => {
     }
   });
 
-  /*
-   * Moved here from `chat-session-store.test.ts` with C3: whether *Try again*
-   * resumes the stream or runs a new turn is the admission's call, because only
-   * it knows whether the host can still continue the run. A turn the gateway
-   * refused at admission leaves a terminal run and no live stream, so resuming
-   * it replayed the same failure and the banner's Try again looked inert.
-   */
-  it('re-runs the turn when a browser-placed chat has no resumable run, and resumes when it has', async () => {
+  it('should refuse a stale Resume without rewinding, and continue only the saved run', async () => {
     const chat = mock<Chat<MyUIMessage>>();
     /* One user message, because a continuation leases it: a transcript with
      * none has no turn to continue and `turnIntentOf` refuses it (W10-B). */
@@ -1531,11 +1525,14 @@ describe('useCadChatClient', () => {
 
     browserHostHarness.placed = true;
     browserHostHarness.resumable = false;
-    await expect(composeTurn({ kind: 'continue' })).resolves.toMatchObject({ request: { kind: 'regenerate' } });
+    const preparedBeforeResume = workspaceHarness.prepare.mock.calls.length;
+    await expect(composeTurn({ kind: 'continue' })).rejects.toThrow(/RESUME_UNAVAILABLE/);
+    expect(workspaceHarness.prepare).toHaveBeenCalledTimes(preparedBeforeResume);
+    expect(chat.regenerate).not.toHaveBeenCalled();
+    expect(persistedErrors).toEqual([expect.objectContaining({ code: 'RESUME_UNAVAILABLE' })]);
 
     browserHostHarness.resumable = true;
     browserHostHarness.run = { runId: 'run_live' };
-    // The rewound turn above settled: its claim is released with it.
     workspaceHarness.current = undefined;
     await expect(composeTurn({ kind: 'continue' })).resolves.toMatchObject({
       runId: 'run_live',

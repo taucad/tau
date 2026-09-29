@@ -4,7 +4,8 @@ import { Bot, ChevronRight, CircleAlert, RefreshCcw, WifiOff } from 'lucide-reac
 import { errorCategory } from '@taucad/types/constants';
 import type { ChatError as NormalizedChatError } from '@taucad/types';
 import { Button } from '@taucad/ui/components/button';
-import { useChatActions, useChatRetrySnapshot, useChatSelector } from '#hooks/use-chat.js';
+import { useChatActions, useChatContext, useChatRetrySnapshot, useChatSelector } from '#hooks/use-chat.js';
+import { resumableBrowserAgentHostRunId } from '#chat-clients/_internal/browser-agent-host-transport.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { CodeViewer } from '#components/code/code-viewer.js';
 import { MarkdownViewer } from '#components/markdown/markdown-viewer.js';
@@ -208,6 +209,8 @@ function codedErrorCard({
 
 export const ChatError = memo(function ({ className }: { readonly className?: string }): React.ReactNode {
   const [genericDetailsOpen, setGenericDetailsOpen] = useState(false);
+  const { activeChatId } = useChatContext();
+  const resumableRunId = useChatSelector(() => resumableBrowserAgentHostRunId(activeChatId));
   const { retryAttempt } = useChatRetrySnapshot();
   // Derive parsed error inside selector - prefer runtime error, fallback to persisted
   const parsedError = useChatSelector((state): NormalizedChatError | undefined => {
@@ -217,7 +220,7 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
 
     return state.persistedError;
   });
-  const { continueChat } = useChatActions();
+  const { regenerate } = useChatActions();
 
   // R7: hide the banner during transparent auto-retry; the reconnecting affordance
   // is `ChatMessagePlanning`, not this component. The early return MUST sit below
@@ -232,13 +235,6 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
   if (!parsedError) {
     return null;
   }
-
-  // Generic fallback recovery must preserve partial assistant parts the user
-  // already saw. Specialized components own auth, credits, rate-limit, and
-  // tool-error actions. Credits remain the account-state "Resume" exception.
-  const handleTryAgain = (): void => {
-    continueChat();
-  };
 
   // Render the generic/server error view with collapsible details
   const renderGenericError = (): React.ReactNode => {
@@ -276,9 +272,7 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
                 variant='outline'
                 className='mx-2 mb-2 h-auto min-h-7 whitespace-normal hover:border-neutral/50 @xs:mb-0 @xs:ml-0'
                 size='sm'
-                onClick={() => {
-                  handleTryAgain();
-                }}
+                onClick={regenerate}
               >
                 <RefreshCcw className='size-3.5' />
                 Try again
@@ -315,7 +309,7 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
     error: parsedError,
     resumable,
     className: cn('min-w-0', className),
-    onTryAgain: handleTryAgain,
+    onTryAgain: regenerate,
   });
   if (codedCard !== undefined) {
     return codedCard;
@@ -337,6 +331,7 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
       return (
         <ChatErrorCredits
           className={cn('min-w-0', className)}
+          resumable={resumableRunId !== undefined}
           description={parsedError.message}
           details={parsedError.details}
         />

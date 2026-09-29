@@ -519,11 +519,8 @@ export type ChatActions = DraftActions & {
   sendMessage: (message: SendMessageInput, options?: { attachments?: readonly AttachmentReference[] }) => Promise<void>;
   regenerate: () => void;
   /**
-   * Re-run the chat's last turn after a failure the person chose to retry.
-   *
-   * A stream the host can still continue is resumed rather than re-run, so
-   * assistant parts that already landed survive; the admission decides which,
-   * because only it knows whether the run is resumable.
+   * Resume the saved run without replaying its completed work. A host that
+   * cannot continue refuses the action; `regenerate` explicitly retries it.
    */
   continueChat: () => void;
   stop: () => void;

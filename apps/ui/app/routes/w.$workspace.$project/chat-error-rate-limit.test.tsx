@@ -61,7 +61,7 @@ describe('ChatErrorRateLimit', () => {
 
     await user.click(screen.getByRole('button', { name: 'Try again' }));
 
-    expect(continueChat).toHaveBeenCalledTimes(1);
-    expect(regenerate).not.toHaveBeenCalled();
+    expect(regenerate).toHaveBeenCalledTimes(1);
+    expect(continueChat).not.toHaveBeenCalled();
   });
 });

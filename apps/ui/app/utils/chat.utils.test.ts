@@ -12,12 +12,136 @@ import type { RequestTerminationCause } from '#hooks/chat-persistence.machine.js
 import { clearLedger, recordRpcOutcome } from '#services/rpc-ledger.js';
 import { metaConfig } from '#constants/meta.constants.js';
 import { storedRef } from '#utils/attachment.test-utils.js';
+import { Chat } from '@ai-sdk/react';
+import { initialChatProjection, materializeTranscript, reduceChatProjection } from '#machines/chat-projection.logic.js';
+import { lifecycleRow, logRow } from '#machines/chat-projection.fixture.js';
+import { openRunWatch } from '#chat-clients/_internal/run-watch.js';
+import { BrowserPlacementChatTransport } from '#chat-clients/_internal/browser-agent-host-transport.js';
 
 const baseMessage = (parts: MyUIMessage['parts']): MyUIMessage => ({
   id: 'msg-1',
   role: 'assistant',
   parts,
 });
+
+it.each([1, 16, 113])(
+  'should converge live, reload and export for 55 calls and 9 edits in batches of %s',
+  async (size) => {
+    const rows = [lifecycleRow(0, 'admitted'), lifecycleRow(1, 'running')];
+    for (let index = 0; index < 55; index++) {
+      const edit = index >= 46;
+      const content = edit
+        ? [
+            {
+              type: 'diff',
+              path: index % 2 === 0 ? 'main.cs' : 'main.geospec.ts',
+              oldText: 'before',
+              newText: `after-${String(index)}`,
+            },
+          ]
+        : { result: index };
+      const call = { toolCallId: `vendor-${String(index)}`, kind: edit ? 'edit' : 'execute', content };
+      const identity = {
+        toolCallId: `call-${String(index)}`,
+        toolName: edit ? 'applyPatch' : 'shell',
+        metadata: { tauInternal: { kind: 'external-tool', origin: 'external' } },
+      };
+      rows.push(
+        logRow(rows.length, {
+          type: 'message.appended',
+          message: {
+            ...identity,
+            id: `in-${String(index)}`,
+            role: 'tool-input',
+            content: { index },
+            call: { ...call, status: 'pending' },
+          },
+        }),
+      );
+      rows.push(
+        logRow(rows.length, {
+          type: 'message.appended',
+          message: {
+            ...identity,
+            id: `out-${String(index)}`,
+            role: 'tool-output',
+            content,
+            call: { ...call, status: 'completed' },
+            isError: false,
+          },
+        }),
+      );
+    }
+    rows.push(lifecycleRow(rows.length, 'completed'));
+    const prefix = 24; // The first 11 calls are visible before call 12's progress.
+    let projection = reduceChatProjection(initialChatProjection, {
+      type: 'batch',
+      answer: { status: 'batch', cursor: 0, nextCursor: prefix, endCursor: rows.length, events: rows.slice(0, prefix) },
+    }).state;
+    const listeners = new Set<() => void>();
+    const watch = openRunWatch({
+      runId: 'run_1',
+      getProjection: () => projection,
+      subscribe: (listener) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    });
+    const transport = new BrowserPlacementChatTransport<MyUIMessage>();
+    transport.arm(watch.stream);
+    const errors: Error[] = [];
+    const chat = new Chat<MyUIMessage>({ id: 'convergence', transport, onError: (error) => errors.push(error) });
+    try {
+      const request = chat.sendMessage({ role: 'user', parts: [{ type: 'text', text: 'fixture' }] });
+      projection = reduceChatProjection(projection, {
+        type: 'live',
+        event: {
+          type: 'tool-output-update',
+          chatId: 'convergence',
+          runId: 'run_1',
+          messageId: 'in-11',
+          contentIndex: 0,
+          toolCallId: 'call-11',
+          toolName: 'shell',
+          output: 'early',
+          isError: false,
+        },
+      }).state;
+      for (const listener of listeners) {
+        listener();
+      }
+      for (let cursor = prefix; cursor < rows.length; cursor += size) {
+        const events = rows.slice(cursor, cursor + size);
+        projection = reduceChatProjection(projection, {
+          type: 'batch',
+          answer: { status: 'batch', cursor, nextCursor: cursor + events.length, endCursor: rows.length, events },
+        }).state;
+        for (const listener of listeners) {
+          listener();
+        }
+      }
+      await request;
+      const restored = await materializeTranscript(projection);
+      const tools = (messages: MyUIMessage[]) =>
+        messages.flatMap((message) => message.parts).filter((part) => part.type === 'dynamic-tool');
+      expect(errors).toEqual([]);
+      expect(chat.status).toBe('ready');
+      expect(tools(chat.messages)).toEqual(tools(restored));
+      expect(new Set(tools(restored).map((part) => part.toolCallId)).size).toBe(55);
+      expect(tools(restored).every((part) => part.state === 'output-available')).toBe(true);
+      expect(tools(restored).filter((part) => part.toolName === 'applyPatch')).toHaveLength(9);
+      const exported = serializeTranscript(restored, 'Recovered fixture');
+      expect(exported.match(/<tool_call /gu)).toHaveLength(55);
+      expect(exported.match(/"type": "diff"/gu)).toHaveLength(9);
+      expect(exported).toContain('main.cs');
+      expect(exported).toContain('main.geospec.ts');
+      expect(exported).not.toMatch(/\[Pending\.\.\.\]|\[Streaming\.\.\.\]/u);
+      expect(listeners.size).toBe(0);
+    } finally {
+      watch.detach();
+    }
+  },
+);
 
 describe('serializeMessage', () => {
   describe('text parts', () => {

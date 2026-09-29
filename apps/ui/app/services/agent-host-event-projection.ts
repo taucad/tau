@@ -113,7 +113,7 @@ export type AgentHostLiveBlocks = Map<
       /** A text block whose last applied frame was a durable checkpoint: open, but nothing is arriving. */
       resting?: boolean;
     }
-  | { readonly type: 'tool'; content: ''; closed: true }
+  | { readonly type: 'tool'; content: ''; closed: boolean; input: 'started' | 'available' }
 >;
 
 /**
@@ -129,13 +129,13 @@ const textStreamState = (streamState: 'checkpoint' | 'live'): { providerMetadata
 });
 
 /**
- * The key a settled tool call is fenced under. Durable and live rows travel on
- * independent subscriptions, so a live `tool-input-*` row can land after the
+ * The run-scoped identity for a tool call's input and settled-output fence.
+ * Durable and live rows travel on independent subscriptions, so a live `tool-input-*` row can land after the
  * call's durable `tool-output`; projecting it would rewind the settled part and
  * drop its output, after which the finalize pass marks a successful call as
  * orphaned ("File edits failed", lane H5).
  */
-const settledToolKey = (toolCallId: string): string => `tool:${toolCallId}`;
+const toolKey = (runId: string, toolCallId: string): string => JSON.stringify([runId, 'tool', toolCallId]);
 
 const reasoningTiming = (
   metadata: ProviderMessageMetadata | undefined,
@@ -466,6 +466,11 @@ const messageChunks = (
       return assistantChunks(message, runId, streamedBlocks);
     }
     case 'tool-input': {
+      const key = toolKey(runId, message.toolCallId);
+      if (streamedBlocks?.get(key)?.closed) {
+        return [];
+      }
+      streamedBlocks?.set(key, { type: 'tool', content: '', closed: false, input: 'available' });
       return [
         {
           type: 'tool-input-available',
@@ -477,7 +482,12 @@ const messageChunks = (
       ];
     }
     case 'tool-output': {
-      streamedBlocks?.set(settledToolKey(message.toolCallId), { type: 'tool', content: '', closed: true });
+      streamedBlocks?.set(toolKey(runId, message.toolCallId), {
+        type: 'tool',
+        content: '',
+        closed: true,
+        input: 'available',
+      });
       const { title: _title, ...facts } = toolChunkFacts(message);
       const output: UIMessageChunk = message.isError
         ? {
@@ -664,16 +674,33 @@ export const projectAgentHostLiveEvent = (
   event: AgentLiveEvent,
   streamedBlocks: AgentHostLiveBlocks,
 ): readonly UIMessageChunk[] => {
-  if ('toolCallId' in event && streamedBlocks.get(settledToolKey(event.toolCallId))?.closed) {
+  const tool = 'toolCallId' in event ? streamedBlocks.get(toolKey(event.runId, event.toolCallId)) : undefined;
+  if (tool?.closed) {
     return [];
   }
   if (event.type === 'tool-input-start') {
+    if (tool !== undefined) {
+      return [];
+    }
+    streamedBlocks.set(toolKey(event.runId, event.toolCallId), {
+      type: 'tool',
+      content: '',
+      closed: false,
+      input: 'started',
+    });
     return [{ type: 'tool-input-start', toolCallId: event.toolCallId, toolName: event.toolName }];
   }
   if (event.type === 'tool-input-delta') {
+    if (tool?.type !== 'tool' || tool.input !== 'started') {
+      return [];
+    }
     return [{ type: 'tool-input-delta', toolCallId: event.toolCallId, inputTextDelta: event.delta }];
   }
   if (event.type === 'tool-input-end') {
+    if (tool?.type !== 'tool' || tool.input !== 'started') {
+      return [];
+    }
+    tool.input = 'available';
     return [
       {
         type: 'tool-input-available',
@@ -684,6 +711,9 @@ export const projectAgentHostLiveEvent = (
     ];
   }
   if (event.type === 'tool-output-update') {
+    if (tool?.type !== 'tool' || tool.input !== 'available') {
+      return [];
+    }
     return [
       event.isError
         ? {
@@ -703,6 +733,9 @@ export const projectAgentHostLiveEvent = (
   const type = event.type.startsWith('text-') ? 'text' : 'thinking';
   const id = blockId(type, event.messageId, event.contentIndex);
   const current = streamedBlocks.get(key);
+  if (current?.type === 'tool') {
+    return [];
+  }
   if (current?.closed) {
     return [];
   }
@@ -784,7 +817,7 @@ export const projectAgentHostLiveEvent = (
 const hasOpenBlock = (runId: string, streamedBlocks: AgentHostLiveBlocks | undefined): boolean => {
   const prefix = `[${JSON.stringify(runId)},`;
   for (const [key, block] of streamedBlocks ?? []) {
-    if (!block.closed && key.startsWith(prefix)) {
+    if (block.type !== 'tool' && !block.closed && key.startsWith(prefix)) {
       return true;
     }
   }

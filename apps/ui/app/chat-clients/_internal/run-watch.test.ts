@@ -1,3 +1,6 @@
+import { readUIMessageStream } from 'ai';
+import type { MyUIMessage } from '@taucad/chat';
+import type { AgentLiveEvent } from '@taucad/agent-host';
 import { describe, expect, it, vi } from 'vitest';
 import { initialChatProjection, reduceChatProjection } from '#machines/chat-projection.logic.js';
 import type { ChatProjection, ChatProjectionReadAnswer } from '#machines/chat-projection.logic.js';
@@ -124,3 +127,134 @@ describe('openRunWatch', () => {
     expect(listeners.size).toBe(0);
   });
 });
+
+it.each([false, true])(
+  'should feed causally valid interleaved tools to the real SDK (external=%s)',
+  async (external) => {
+    let projection = reduceChatProjection(initialChatProjection, {
+      type: 'batch',
+      answer: batch([lifecycleRow(0, 'admitted'), lifecycleRow(1, 'running')], 0),
+    }).state;
+    const listeners = new Set<() => void>();
+    const watch = openRunWatch({
+      runId: 'run_1',
+      getProjection: () => projection,
+      subscribe: (listener) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    });
+    const errors: unknown[] = [];
+    let parts: MyUIMessage['parts'] = [];
+    const consumed = (async () => {
+      for await (const message of readUIMessageStream<MyUIMessage>({
+        stream: watch.stream,
+        onError: (error) => {
+          errors.push(error);
+        },
+      })) {
+        parts = message.parts;
+      }
+    })();
+    const notify = (): void => {
+      for (const listener of listeners) {
+        listener();
+      }
+    };
+    const live = (event: AgentLiveEvent): void => {
+      projection = reduceChatProjection(projection, { type: 'live', event }).state;
+      notify();
+    };
+    let cursor = 2;
+    const durable = (message: Record<string, unknown>): void => {
+      projection = reduceChatProjection(projection, {
+        type: 'batch',
+        answer: batch([logRow(cursor, { type: 'message.appended', message })], cursor),
+      }).state;
+      cursor++;
+      notify();
+    };
+    const identity = { chatId: 'chat_1', runId: 'run_1', messageId: 'assistant', contentIndex: 0, toolName: 'edit' };
+    const preview = (toolCallId: string): void => {
+      live({ ...identity, toolCallId, type: 'tool-input-start' });
+      live({ ...identity, toolCallId, type: 'tool-input-delta', delta: '{"stale":' });
+      live({ ...identity, toolCallId, type: 'tool-input-end', input: { stale: true } });
+    };
+    live({ ...identity, toolCallId: 'a', type: 'tool-output-update', output: 'early', isError: false });
+    live({ ...identity, toolCallId: 'b', type: 'tool-input-delta', delta: 'orphan' });
+    live({ ...identity, toolCallId: 'b', type: 'tool-input-end', input: { orphan: true } });
+    if (!external) {
+      live({ ...identity, toolCallId: 'a', type: 'tool-input-start' });
+      live({ ...identity, toolCallId: 'a', type: 'tool-output-update', output: 'before-input', isError: false });
+      live({ ...identity, toolCallId: 'a', type: 'tool-input-delta', delta: '{"file":' });
+      live({ ...identity, toolCallId: 'a', type: 'tool-input-start' });
+      live({ ...identity, toolCallId: 'a', type: 'tool-input-delta', delta: '"a.ts"}' });
+      live({ ...identity, toolCallId: 'a', type: 'tool-input-end', input: { file: 'a.ts' } });
+    }
+    const metadata = external
+      ? { tauInternal: { kind: 'external-tool', origin: 'external', agentId: 'codex' } }
+      : undefined;
+    for (const toolCallId of ['a', 'b']) {
+      durable({
+        id: `input-${toolCallId}`,
+        role: 'tool-input',
+        toolCallId,
+        toolName: 'edit',
+        content: { file: `${toolCallId}.ts` },
+        metadata,
+      });
+      preview(toolCallId);
+      live({ ...identity, toolCallId, type: 'tool-output-update', output: 'working', isError: false });
+    }
+    durable({
+      id: 'refine-a',
+      role: 'tool-input',
+      toolCallId: 'a',
+      toolName: 'edit',
+      content: { file: 'a.ts', diff: '+saved' },
+      metadata,
+    });
+    for (const toolCallId of ['b', 'a']) {
+      durable({
+        id: `output-${toolCallId}`,
+        role: 'tool-output',
+        toolCallId,
+        toolName: 'edit',
+        content: { saved: toolCallId },
+        isError: false,
+        metadata,
+      });
+      preview(toolCallId);
+      live({ ...identity, toolCallId, type: 'tool-output-update', output: 'late', isError: false });
+    }
+    projection = reduceChatProjection(projection, {
+      type: 'batch',
+      answer: batch([lifecycleRow(cursor, 'completed')], cursor),
+    }).state;
+    notify();
+    await consumed;
+    expect(errors).toEqual([]);
+    const chunks = projection.live?.chunks ?? [];
+    expect(chunks.filter((chunk) => chunk.type === 'tool-input-start')).toHaveLength(external ? 0 : 1);
+    expect(chunks.filter((chunk) => chunk.type === 'tool-input-delta')).toHaveLength(external ? 0 : 2);
+    const tools = parts.filter((part) => 'toolCallId' in part);
+    expect(tools).toHaveLength(2);
+    expect(tools).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          toolCallId: 'a',
+          state: 'output-available',
+          input: { file: 'a.ts', diff: '+saved' },
+          output: { saved: 'a' },
+        }),
+        expect.objectContaining({
+          toolCallId: 'b',
+          state: 'output-available',
+          input: { file: 'b.ts' },
+          output: { saved: 'b' },
+        }),
+      ]),
+    );
+    expect(listeners.size).toBe(0);
+  },
+);

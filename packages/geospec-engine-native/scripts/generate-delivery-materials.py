@@ -730,6 +730,33 @@ def file_record(path):
     return {'path': str(path), 'sha256': digest(path), 'bytes': path.stat().st_size}
 
 
+def current_mixed_source(closure, path):
+    recorded = Path(path)
+    require(recorded.is_absolute() and '..' not in recorded.parts and str(recorded) == str(path),
+            'Noncanonical mixed input path')
+    producer_package = (Path(closure['sourceRoot']) / 'packages/geospec-engine-native'
+                        if 'sourceRoot' in closure else PACKAGE)
+    return PACKAGE / recorded.relative_to(producer_package) if recorded.is_relative_to(producer_package) else recorded
+
+
+def verify_mixed_source_inputs(closure):
+    pins = {row['path']: row['sha256'] for row in closure['inputs']}
+    require(len(pins) == len(closure['inputs']), 'Duplicate mixed input')
+    for path, sha in pins.items():
+        require(digest(current_mixed_source(closure, path)) == sha, f'Mixed input changed: {path}')
+    actual_sources = set()
+    for subtree in ['rust', 'native', 'bindings/emscripten']:
+        for parent, directories, names in os.walk(PACKAGE / subtree):
+            directories[:] = [d for d in directories if d not in
+                              {'target', 'node_modules', '.git', '__pycache__', 'out-tsc'}
+                              and not (Path(parent) == PACKAGE / 'bindings/emscripten' and d == 'generated')]
+            actual_sources.update(str(Path(parent) / name) for name in names if name != '.DS_Store')
+    producer_root = Path(closure['sourceRoot'])
+    require({str(producer_root / Path(path).relative_to(ROOT)) for path in actual_sources} <= pins.keys(),
+            'Mixed source files added after the recorded freeze')
+    return pins
+
+
 def select_mixed_build():
     paths = {}
     for key in ['RECEIPT', 'COMMANDS', 'INPUTS']:
@@ -740,7 +767,13 @@ def select_mixed_build():
     require(receipt['manifestSha256'] == digest(paths['inputs']), 'Mixed receipt/manifest differ')
     require(closure['schema'] == 'geospec-mixed-build-inputs-v3', 'Expected fixed-SIMD mixed inputs v3')
     require(receipt.get('schema') == 'geospec-mixed-build-receipt-v2', 'Expected fixed-SIMD build receipt v2')
-    require(closure['sourceRoot'] == str(ROOT) == receipt['sourceRoot'], 'Wrong source root')
+    require(closure['sourceRoot'] == receipt['sourceRoot']
+            and Path(closure['sourceRoot']).is_absolute()
+            and '..' not in Path(closure['sourceRoot']).parts
+            and str(Path(closure['sourceRoot'])) == closure['sourceRoot'], 'Wrong source root')
+    producer_root = Path(closure['sourceRoot'])
+    producer_package = producer_root / 'packages/geospec-engine-native'
+
     require(closure['sourceRevision'] == receipt['sourceRevision'], 'Mixed revision references differ')
     require(closure['linkOptimization'] == 'O3', 'Expected current ST O3 mixed profile')
     require(len(commands) == 4 and all(c['status'] == 0 for c in commands), 'Incomplete mixed commands')
@@ -748,18 +781,7 @@ def select_mixed_build():
             and commands[3]['executable'] == closure['emxx'] and commands[3]['args'][0] == '-O3',
             'Mixed commands do not select the recorded Cargo/linker profile')
     # This is content validation, not the preparation verifier's unrelated HEAD equality gate.
-    pins = {row['path']: row['sha256'] for row in closure['inputs']}
-    require(len(pins) == len(closure['inputs']), 'Duplicate mixed input')
-    for path, sha in pins.items():
-        require(digest(path) == sha, f'Mixed input changed: {path}')
-    actual_sources = set()
-    for subtree in ['rust', 'native', 'bindings/emscripten']:
-        for parent, directories, names in os.walk(PACKAGE / subtree):
-            directories[:] = [d for d in directories if d not in
-                              {'target', 'node_modules', '.git', '__pycache__', 'out-tsc'}
-                              and not (Path(parent) == PACKAGE / 'bindings/emscripten' and d == 'generated')]
-            actual_sources.update(str(Path(parent) / name) for name in names if name != '.DS_Store')
-    require(actual_sources <= pins.keys(), 'Mixed source files added after the recorded freeze')
+    pins = verify_mixed_source_inputs(closure)
     for parent in {ROOT, *ROOT.parents, PACKAGE, PACKAGE / 'bindings', PACKAGE / 'bindings/emscripten',
                    Path(closure['environment']['CARGO_HOME'])}:
         for name in ['config', 'config.toml']:
@@ -768,7 +790,8 @@ def select_mixed_build():
     require(receipt['bindingSha256'] == digest(PACKAGE / 'bindings/emscripten/src/lib.rs'),
             'Mixed binding source differs')
     recipe = PACKAGE / 'scripts/selected-delivery.json'
-    require(digest(recipe) == closure['recipeSha256'] == pins[str(recipe)], 'Mixed selected recipe differs')
+    require(digest(recipe) == closure['recipeSha256'] == pins[str(producer_package / 'scripts/selected-delivery.json')],
+            'Mixed selected recipe differs')
     selected = read_json(recipe)
     require(selected['rust']['commit'] in receipt['rustVersion']
             and selected['emscripten']['commit'] in receipt['emVersion'], 'Mixed tool versions differ')
@@ -788,7 +811,7 @@ def select_mixed_build():
         require(closure['wasmSimd']['linkFlag'] in commands[3]['args'],
                 'Mixed link command omitted fixed SIMD')
     cargo_args = commands[2]['args']
-    require(cargo_args == ['build', '--manifest-path', str(PACKAGE / 'bindings/emscripten/Cargo.toml'),
+    require(cargo_args == ['build', '--manifest-path', str(producer_package / 'bindings/emscripten/Cargo.toml'),
                           '--locked', '--offline', '--release', '--target', 'wasm32-unknown-emscripten',
                           '--target-dir', str(Path(closure['cache']) / 'target')], 'Mixed Cargo route differs')
     link_args = commands[3]['args']
@@ -800,7 +823,8 @@ def select_mixed_build():
     for row in receipt['artifacts']:
         generated = PACKAGE / 'bindings/emscripten/generated' / Path(row['path']).name
         staged = PACKAGE / 'dist/bindings/mixed-wasm' / generated.name
-        require(Path(row['path']) == generated and receipt['output'] == str(generated.parent),
+        require(Path(row['path']) == producer_package / 'bindings/emscripten/generated' / generated.name
+                and receipt['output'] == str(producer_package / 'bindings/emscripten/generated'),
                 'Mixed receipt selects a different artifact path')
         require(generated.stat().st_size == row['bytes'] and digest(generated) == row['sha256'],
                 f'Current generated mixed artifact differs from receipt: {generated}')
@@ -896,7 +920,8 @@ def mixed_producer_recipe(mixed):
     prefix_command = 'env -i ' + ' '.join(word(f'{k}={v}') for k, v in prefix_environment.items()
                                          if k not in control_keys) + ' ' + controls
     prefix_command += ' ' + ' '.join(word(v) for v in mixed['prefix']['command'])
-    fetch_commands = [[c['cargo'], 'fetch', '--locked', '--manifest-path', str(PACKAGE / relative)]
+    recorded_package = Path(c['sourceRoot']) / 'packages/geospec-engine-native'
+    fetch_commands = [[c['cargo'], 'fetch', '--locked', '--manifest-path', str(recorded_package / relative)]
                       for relative in ['bindings/emscripten/Cargo.toml', 'native/runtime/Cargo.toml']]
     config = Path(c['environment']['EM_CONFIG']).read_text()
     # Config values are emitted by the selected Python to preserve Python quoting.
@@ -958,10 +983,13 @@ def copy_mixed_material(output, mixed):
     receipts = output / 'receipts'
     # Older closures selected the then-current recipe implicitly. It is usable
     # only if its bytes still join both that closure and the original receipt.
-    prefix_recipe = Path(c.get('prefixProducerRecipe', PACKAGE / 'scripts/selected-delivery.json'))
+    default_recipe = (Path(c['sourceRoot']) / 'packages/geospec-engine-native/scripts/selected-delivery.json'
+                      if 'sourceRoot' in c else PACKAGE / 'scripts/selected-delivery.json')
+    prefix_recipe_recorded = Path(c.get('prefixProducerRecipe', default_recipe))
+    prefix_recipe = current_mixed_source(c, prefix_recipe_recorded)
     recipe_bytes = prefix_recipe.read_bytes()
     recipe_sha = hashlib.sha256(recipe_bytes).hexdigest()
-    recipe_pin = next((row['sha256'] for row in c['inputs'] if row['path'] == str(prefix_recipe)), None)
+    recipe_pin = next((row['sha256'] for row in c['inputs'] if row['path'] == str(prefix_recipe_recorded)), None)
     require(recipe_sha == recipe_pin, 'Mixed prefix recipe differs from its input pin')
     require(recipe_sha == read_json(mixed['prefixReceipt'])['recipeSha256'],
             'Mixed prefix recipe differs from its producer receipt')
@@ -1022,9 +1050,9 @@ def make_relink_material(output, delivery_cache, cohort, mixed=None):
     source_records = []
     selected_sources = set(source_files())
     if mixed:
-        selected_sources.update(Path(row['path']).relative_to(ROOT)
+        selected_sources.update(Path(row['path']).relative_to(Path(mixed['closure']['sourceRoot']))
                                 for row in mixed['closure']['inputs']
-                                if Path(row['path']).is_relative_to(PACKAGE))
+                                if Path(row['path']).is_relative_to(Path(mixed['closure']['sourceRoot']) / 'packages/geospec-engine-native'))
     for relative_path in sorted(selected_sources):
         source = ROOT / relative_path
         require(source.exists(), f'Missing source-relink input: {source}')

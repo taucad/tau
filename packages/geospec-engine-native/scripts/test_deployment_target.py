@@ -39,6 +39,35 @@ materials = load_script('generate-delivery-materials')
 
 
 class DeploymentTargetTest(unittest.TestCase):
+    def test_should_verify_relocated_mixed_sources_without_relabeling_external_inputs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / 'consumer'
+            package = root / 'packages/geospec-engine-native'
+            source = package / 'rust/src/lib.rs'
+            source.parent.mkdir(parents=True)
+            source.write_bytes(b'original producer source')
+            external = Path(temporary) / 'tool.bin'
+            external.write_bytes(b'original tool')
+            producer_root = Path(temporary) / 'producer'
+            recorded_source = producer_root / 'packages/geospec-engine-native/rust/src/lib.rs'
+            closure = {'sourceRoot': str(producer_root), 'inputs': [
+                {'path': str(recorded_source), 'sha256': materials.digest(source)},
+                {'path': str(external), 'sha256': materials.digest(external)},
+            ]}
+            with patch.object(materials, 'ROOT', root), patch.object(materials, 'PACKAGE', package):
+                self.assertEqual(materials.current_mixed_source(closure, recorded_source), source)
+                self.assertEqual(materials.current_mixed_source(closure, external), external)
+                self.assertEqual(len(materials.verify_mixed_source_inputs(closure)), 2)
+                source.write_bytes(b'changed source')
+                with self.assertRaisesRegex(ValueError, 'Mixed input changed'):
+                    materials.verify_mixed_source_inputs(closure)
+                source.write_bytes(b'original producer source')
+                (source.parent / 'new.rs').write_bytes(b'new source')
+                with self.assertRaisesRegex(ValueError, 'Mixed source files added'):
+                    materials.verify_mixed_source_inputs(closure)
+                with self.assertRaisesRegex(ValueError, 'Noncanonical mixed input path'):
+                    materials.current_mixed_source(closure, str(recorded_source.parent / '../src/lib.rs'))
+
     def test_should_carry_job_limits_and_owned_git_ceilings_through_env_i(self):
         tools = {name: f'/recorded/{name}/bin/{name}'
                  for name in ['node', 'python3', 'cmake', 'ninja', 'git', 'rustup', 'xcrun', 'bash']}

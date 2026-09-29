@@ -145,7 +145,7 @@ void test('cache key follows source and selected toolchain without generated out
 void test('cached preparation target uses verified ensure-delivery on source changes', () => {
   const project =
     /** @type {{targets: Record<string, {cache?: boolean, inputs?: unknown[], options?: {command?: string}} >}} */ JSON.parse(
-      (readFileSync(resolve(import.meta.dirname, '../project.json'), 'utf8')),
+      readFileSync(resolve(import.meta.dirname, '../project.json'), 'utf8'),
     );
   const target = project.targets['prepare-geospec-ci-artifacts'];
   assert.ok(target);
@@ -766,7 +766,7 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
     put(coordinatorFile, 'future coordinator edit');
     assert.throws(() => verifyArtifacts(producer), /source inputs differ/);
     put(coordinatorFile, coordinatorBytes);
-    const originalDelivery = /** @type {{archives: {path: string}[]}} */ (inventory.delivery);
+    const originalDelivery = /** @type {{archives: {path: string, sha256: string}[]}} */ (inventory.delivery);
     const oldArchives = originalDelivery.archives.map((archive) => fileRecordForTest(join(producer, archive.path)));
     revision = 'b'.repeat(40);
     for (const path of sourceOnlyPaths) {
@@ -797,8 +797,12 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
       [...builtTargets, 'assemble-package'],
       'source-only edit runs assembly without a compiler',
     );
-    const renewedDelivery = /** @type {{archives: {path: string}[]}} */ (renewed.delivery);
+    const renewedDelivery = /** @type {{archives: {path: string, sha256: string}[]}} */ (renewed.delivery);
     assert.notDeepEqual(renewedDelivery.archives, originalDelivery.archives);
+    assert.ok(
+      renewedDelivery.archives.every((archive, index) => archive.sha256 !== originalDelivery.archives[index]?.sha256),
+      'all three source-kit archives must refresh',
+    );
     assert.deepEqual(ensureDelivery(producer), renewed, 'warm v3 delivery reuses its selected trio');
     assert.deepEqual(targets, [...builtTargets, 'assemble-package']);
     const relink = renewedDelivery.archives[2];

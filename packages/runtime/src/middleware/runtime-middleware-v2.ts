@@ -11,6 +11,7 @@ import type {
   KernelMiddlewareV2,
   MiddlewareContent,
   ViewContentKeys,
+  ViewContentMap,
 } from '#types/runtime-middleware-v2.types.js';
 
 // oxlint-disable-next-line @typescript-eslint/no-empty-object-type -- Empty Zod object is the no-state/no-options default.
@@ -47,7 +48,7 @@ export interface MiddlewarePluginFactoryV2<
 > {
   (
     ...args: FactoryArgs<Options>
-  ): MiddlewarePlugin<Id, ViewContentKeys<Content>, ExportContentMap<Content>> &
+  ): MiddlewarePlugin<Id, ViewContentKeys<Content>, ExportContentMap<Content>, ViewContentMap<Content>> &
     RuntimePluginDefinitionCarrier<KernelMiddlewareV2<StateSchema, OptionsSchema, Content>>;
 }
 /* oxlint-enable typescript/prefer-function-type, typescript/consistent-type-definitions, typescript/no-restricted-types */

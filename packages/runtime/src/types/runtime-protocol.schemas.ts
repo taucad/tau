@@ -18,8 +18,8 @@
 import { z } from 'zod';
 import { runtimeCapabilityKinds } from '#plugins/plugin-types.js';
 import { runtimeContentSchema } from '#types/runtime-content.types.js';
-import { cadLengthUnits, exportFidelityValues, fileExtensions } from '@taucad/types/constants';
-import type { FileExtension, MimeType } from '@taucad/types';
+import { cadLengthUnits, exportFidelityValues } from '@taucad/types/constants';
+import type { MimeType } from '@taucad/types';
 import type { MessagePortLike, WireProtocolSchemas } from '@taucad/rpc';
 import { isMessagePortLike } from '#transport/_internal/wire-transferables.js';
 import { compiledWasmModuleSchema } from '#transport/_internal/compiled-wasm-module.schema.js';
@@ -33,12 +33,6 @@ import type { ParameterManifest } from '@taucad/parameters';
 
 // ---------- Primitives ----------
 
-const fileExtensionSchema = z.enum(
-  // SAFETY: `fileExtensions` is exported as `readonly FileExtension[]`;
-  // `z.enum` requires the non-empty tuple form. The cast preserves the
-  // literal union (no runtime change).
-  fileExtensions as unknown as readonly [FileExtension, ...FileExtension[]],
-);
 const lengthSymbolSchema = z.enum(cadLengthUnits);
 
 const rootedPathSchema = z.string().superRefine((value, context) => {
@@ -304,9 +298,9 @@ const contentCapabilitySchema = z
 
 const exportRouteSchema = z
   .object({
-    targetFormat: fileExtensionSchema,
+    targetFormat: z.string().min(1),
     kernelId: z.string(),
-    sourceFormat: fileExtensionSchema,
+    sourceFormat: z.string().min(1),
     transcoderId: z.string().optional(),
     fidelity: z.enum(exportFidelityValues),
     exportOptions: z
@@ -397,7 +391,7 @@ export const runtimeInitializeResultSchema = z
 
 export const runtimeExportArgsSchema = z
   .object({
-    format: fileExtensionSchema,
+    format: z.string().min(1),
     options: z.record(z.string(), z.unknown()).optional(),
     content: runtimeContentSchema.optional(),
   })
@@ -411,7 +405,7 @@ export const runtimeExportModelArgsSchema = z
     file: geometryFileSchema,
     parameters: z.record(z.string(), z.unknown()),
     options: z.record(z.string(), z.unknown()).optional(),
-    format: fileExtensionSchema,
+    format: z.string().min(1),
     exportOptions: z.record(z.string(), z.unknown()).optional(),
     content: runtimeContentSchema.optional(),
   })
@@ -474,8 +468,8 @@ export const runtimeSourceSnapshotResultSchema = z.discriminatedUnion('success',
 
 export const runtimeTranscodeArgsSchema = z
   .object({
-    from: fileExtensionSchema,
-    to: fileExtensionSchema,
+    from: z.string().min(1),
+    to: z.string().min(1),
     files: directExportFilesSchema,
     options: z.record(z.string(), z.unknown()),
   })

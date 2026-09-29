@@ -63,6 +63,8 @@ export {
 export { isKernelIssueCode, kernelIssueCodeValues } from '#types/kernel-issue-codes.js';
 export type { KernelIssueCode } from '#types/kernel-issue-codes.js';
 export type * from '#types/runtime.types.js';
+export { asKnownArtifact } from '#types/runtime-artifact.js';
+export type { KnownArtifact } from '#types/runtime-artifact.js';
 export type * from '#types/runtime-tracer.types.js';
 export type {
   AssetDependency,
@@ -152,6 +154,13 @@ export type {
 } from '#types/runtime-transcoder.types.js';
 export type { TranscoderEdgeType } from '#plugins/plugin-types.js';
 export * from '#types/runtime-protocol.types.js';
+export type {
+  RuntimeDocumentProtocol,
+  WireArtifact,
+  WireRendering,
+  WireExportFile,
+  WireExportResult,
+} from '#types/runtime-document-protocol.types.js';
 export type * from '#types/bridge.types.js';
 export { coordinateSystemSchema, gltfExportConventionSchema, unitSchema } from '#types/export-option-schemas.js';
 export type { CoordinateSystemOptions, UnitOptions } from '#types/export-option-schemas.js';

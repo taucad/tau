@@ -11,6 +11,7 @@
 
 // oxlint-disable-next-line @typescript-eslint/no-explicit-any -- variance: accepts any transport host generic
 import type { RuntimeTransportHost } from '#transport/runtime-transport.types.js';
+import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
 
 /**
  * Forward-compatibility marker for a future host-side file content
@@ -37,7 +38,7 @@ export type RuntimeHostConfig = {
   /**
    * Named host factory result (e.g. `nodeWorkerHost(...)`, `electronUtilityHost(...)`). Required.
    */
-  readonly transport: RuntimeTransportHost;
+  readonly transport: RuntimeTransportHost<RuntimeDocumentProtocol>;
 };
 
 /**

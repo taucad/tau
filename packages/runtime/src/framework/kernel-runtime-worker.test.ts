@@ -1226,9 +1226,9 @@ describe('create-options projection', () => {
           title: 'Display',
           mimeType: 'model/gltf-binary',
           optionsSchema: z.object({
-            nested: z.object({ a: z.number() }),
-            layers: z.array(z.number()),
-            renderOnly: z.string(),
+            nested: z.object({ a: z.number() }).default({ a: 1 }),
+            layers: z.array(z.number()).default([1, 2]),
+            renderOnly: z.string().default('display'),
           }),
         },
       },
@@ -1264,7 +1264,7 @@ describe('create-options projection', () => {
         exportOptions: { nested: { b: 2 }, layers: [9], sourceOnly: 'source' },
       });
 
-      expect(result.success).toBe(true);
+      expect(result.success, JSON.stringify(result.issues)).toBe(true);
       expect(createInputs).toEqual([
         {
           entryPath: 'model.mock',

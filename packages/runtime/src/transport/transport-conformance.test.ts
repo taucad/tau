@@ -27,7 +27,7 @@ import { z } from 'zod';
 import { fromFileSystemBridge, fromFsLike, fromMemoryFs } from '#filesystem/runtime-filesystem.js';
 import { fromNodeFs } from '#filesystem/from-node-fs.js';
 import type { FsLike, RuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
-import { createRuntimeClient } from '#client/runtime-client-core.js';
+import { createRuntimeClient } from '#client/runtime-document-client-core.js';
 import type { KernelWorker } from '#framework/kernel-worker.js';
 import { inProcessTransport } from '#transport/in-process-transport.js';
 import { nodeWorkerHost } from '#transport/node-worker-host.js';
@@ -36,11 +36,12 @@ import { webWorkerHost } from '#transport/web-worker-host.js';
 import { webSocketClient } from '#transport/web-socket-client.js';
 import { webSocketTransport } from '#transport/web-socket-transport.js';
 import { webSocketClientOptionsSchema } from '#transport/web-socket-transport.schemas.js';
-import { triggerRenderTimeout } from '#transport/_internal/abort-channel.js';
+import { triggerDocumentTimeout } from '#transport/_internal/abort-channel.js';
 import { extractInlineFileSystem } from '#transport/_internal/runtime-filesystem-handle.js';
-import { createWorkerDispatcher, runtimeChannelSessionKey } from '#transport/_internal/runtime-worker-dispatcher.js';
+import { runtimeChannelSessionKey } from '#transport/_internal/runtime-worker-dispatcher.js';
+import { createDocumentWorkerDispatcher } from '#transport/_internal/runtime-document-dispatcher.js';
 import type { RuntimeTransportClient } from '#transport/runtime-transport.types.js';
-import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
+import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
 import { defineKernelV2 as defineKernel } from '#types/runtime-kernel-v2.types.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
 import { createMemoryComputeEngine } from '#cache/memory-compute-engine.js';
@@ -50,8 +51,7 @@ import type { ComputeStore, ResidentExportEntry } from '#types/runtime-compute.t
 import { createParameterDeclaration } from '../../test/support/kernel-worker.fixture.js';
 
 const testGeometry = { format: 'gltf', content: new Uint8Array([1]), hash: 'mock' } satisfies Geometry;
-const unsupportedSameIsolateTimeoutMessage =
-  'renderTimeout must be 0 because this transport cannot enforce a wall-clock render deadline. Use a worker-backed transport with terminable timeout recovery.';
+const unsupportedSameIsolateTimeoutMessage = 'This transport cannot enforce a wall-clock operation deadline.';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -141,7 +141,7 @@ describe('transport conformance — in-process (C2)', () => {
     expect(typeof ready.channel.notify).toBe('function');
     expect(ready.channel.hello.payload).toMatchObject({
       server: 'kernel-runtime-worker',
-      protocolVersion: 3,
+      protocolVersion: 4,
     });
     await client.close();
     await client.closed;
@@ -172,7 +172,7 @@ describe('transport conformance — in-process (C2)', () => {
       },
       async evaluate(input, runtime) {
         const label = await runtime.filesystem.readFile(input.entryPath, 'utf8');
-        return { handle: { label } };
+        return { handle: { label }, views: ['model'] as const, exports: ['glb'] as const };
       },
       async render({ handle }) {
         return { content: encoder.encode(`mesh:${handle.label}`) };
@@ -191,29 +191,36 @@ describe('transport conformance — in-process (C2)', () => {
     });
 
     try {
-      const preview = await client.render({ source: { files: { 'preview.scope': 'preview-c' } } });
-      expect(preview.superseded).toBe(false);
+      const preview = client.open({ source: { files: { 'preview.scope': 'preview-c' } } });
+      expect((await preview.evaluation()).superseded).toBe(false);
 
-      const evaluation = await client.evaluate({ source: { files: { 'evaluation.scope': 'source-a' } } });
-      expect(evaluation.success, JSON.stringify(evaluation.issues)).toBe(true);
-      if (!evaluation.success || evaluation.data.format !== 'gltf') {
-        throw new Error('Expected request-scoped GLTF evaluation.');
+      const evaluationDocument = client.open({ source: { files: { 'evaluation.scope': 'source-a' } } });
+      expect((await evaluationDocument.evaluation()).superseded).toBe(false);
+      const evaluation = await evaluationDocument.view('model').rendering();
+      expect(evaluation.superseded).toBe(false);
+      if (evaluation.superseded || !evaluation.rendering.success) {
+        throw new Error('Expected request-scoped GLB rendering.');
       }
-      expect(decoder.decode(evaluation.data.content)).toBe('mesh:source-a');
+      expect(decoder.decode(evaluation.rendering.artifact.content as Uint8Array)).toBe('mesh:source-a');
 
-      const requestExport = await client.export('glb', { source: { files: { 'export.scope': 'source-b' } } });
+      const exportDocument = client.open({ source: { files: { 'export.scope': 'source-b' } } });
+      expect((await exportDocument.evaluation()).superseded).toBe(false);
+      const requestExport = await exportDocument.export('glb');
       expect(requestExport.success).toBe(true);
       if (!requestExport.success) {
         throw new Error('Expected request-scoped export.');
       }
-      expect(decoder.decode(requestExport.data[0]?.bytes)).toBe('export:source-b');
+      expect(decoder.decode(requestExport.files[0].bytes)).toBe('export:source-b');
 
-      const previewExport = await client.export('glb');
+      const previewExport = await preview.export('glb');
       expect(previewExport.success).toBe(true);
       if (!previewExport.success) {
         throw new Error('Expected settled-preview export.');
       }
-      expect(decoder.decode(previewExport.data[0]?.bytes)).toBe('export:preview-c');
+      expect(decoder.decode(previewExport.files[0].bytes)).toBe('export:preview-c');
+      preview.close();
+      evaluationDocument.close();
+      exportDocument.close();
     } finally {
       await client.shutdown();
     }
@@ -306,7 +313,7 @@ describe('transport conformance — in-process (C2)', () => {
           scope.announce({ entries: [{ kind: 'action', action, digest, computeDuration: 2, estimatedBytes: 5 }] });
         }
         settlement = scope.close({ outcome: 'delivered' }).settled;
-        return { handle: {} };
+        return { handle: {}, views: ['model'] as const, exports: [] as const };
       },
       async render() {
         return { content: testGeometry.content };
@@ -328,17 +335,23 @@ describe('transport conformance — in-process (C2)', () => {
         }),
       });
     const producer = createClient();
-    const produced = await producer.render({ source: { files: { 'main.compute': 'producer' } } });
+    const producerDocument = producer.open({ source: { files: { 'main.compute': 'producer' } } });
+    const produced = await producerDocument.evaluation();
     expect(produced.superseded).toBe(false);
     if (!produced.superseded) {
-      expect(produced.geometry.success, JSON.stringify(produced.geometry.issues)).toBe(true);
+      expect(produced.evaluation.success, JSON.stringify(produced.evaluation.issues)).toBe(true);
     }
+    const producerView = producerDocument.view('model');
+    await expect(producerView.rendering()).resolves.toMatchObject({ superseded: false, rendering: { success: true } });
+    producerView.close();
     await expect(settlement).resolves.toMatchObject({ status: 'published' });
     await producer.shutdown();
 
     const consumer = createClient();
     try {
-      await consumer.render({ source: { files: { 'main.compute': 'consumer' } } });
+      const consumerDocument = consumer.open({ source: { files: { 'main.compute': 'consumer' } } });
+      expect((await consumerDocument.evaluation()).superseded).toBe(false);
+      consumerDocument.close();
       expect(createCalls).toBe(2);
       expect(imports).toBe(1);
       expect(solves).toBe(1);
@@ -382,14 +395,14 @@ describe('transport conformance — in-process (C2)', () => {
       expect(() =>
         createRuntimeClient({
           transport: makeTransport(),
-          renderTimeout: 1,
+          operationTimeout: 1,
         }),
       ).toThrow(new TypeError(unsupportedSameIsolateTimeoutMessage));
 
       const client = createRuntimeClient({ transport: makeTransport() });
       await client.connect();
       expect(() => {
-        client.setRenderTimeout(1);
+        client.setOperationTimeout(1);
       }).toThrow(new TypeError(unsupportedSameIsolateTimeoutMessage));
       client.terminate();
     },
@@ -926,7 +939,7 @@ describe('transport conformance — web-socket (C2)', () => {
       await ready.channel.ready;
       expect(ready.channel.hello.payload).toMatchObject({
         server: 'kernel-runtime-worker',
-        protocolVersion: 3,
+        protocolVersion: 4,
       });
       expect(bed.dialled.map((entry) => new URL(entry.url).pathname)).toEqual(['/runtime']);
       expect(new URL(bed.dialled[0]!.url).searchParams.get('session')).toEqual(expect.any(String));
@@ -1130,7 +1143,7 @@ describe('transport conformance — shared transport internals (T37)', () => {
   /** The abort frame the shared helper would emit for `target` — the byte-for-byte reference. */
   const sharedAbortFrame = (target: { renderId: string; abortGeneration?: number }): [string, unknown] => {
     const notify = vi.fn();
-    triggerRenderTimeout({ notify } as unknown as Channel<RuntimeProtocol>, undefined, target);
+    triggerDocumentTimeout({ notify } as unknown as Channel<RuntimeDocumentProtocol>, undefined, target);
     return notify.mock.calls[0] as [string, unknown];
   };
 
@@ -1146,10 +1159,10 @@ describe('transport conformance — shared transport internals (T37)', () => {
   } => {
     const pair = new MessageChannel();
     const received = Promise.withResolvers<[string, unknown]>();
-    const server = createChannelServer<RuntimeProtocol>({
+    const server = createChannelServer<RuntimeDocumentProtocol>({
       port: wrapMessagePort<unknown>(pair.port2, { label: 't37:peer' }),
       sessionKey: runtimeChannelSessionKey,
-      hello: { server: 'kernel-runtime-worker', runtimeVersion: 'test', protocolVersion: 3 },
+      hello: { server: 'kernel-runtime-worker', runtimeVersion: 'test', protocolVersion: 4 },
       impl: {
         async call() {
           throw new Error('T37 conformance issues no calls');
@@ -1434,7 +1447,7 @@ function createWebSocketTestBed(): {
   dispose: () => void;
 } {
   const dialled: DialledSocket[] = [];
-  const dispatchers: Array<ChannelServerHandle<RuntimeProtocol>> = [];
+  const dispatchers: Array<ChannelServerHandle<RuntimeDocumentProtocol>> = [];
   const fileSystemFrames: unknown[] = [];
   const firstFileSystemFrame = Promise.withResolvers<void>();
 
@@ -1449,7 +1462,9 @@ function createWebSocketTestBed(): {
       if (new URL(url).pathname.endsWith('/runtime')) {
         /* Wired here, not after `open()` resolves: the dispatcher posts its
          * hello during construction and a later listener never sees it. */
-        dispatchers.push(createWorkerDispatcher(makeStubKernelWorker(), wrapWebSocket<unknown>(host, msgpackCodec)));
+        dispatchers.push(
+          createDocumentWorkerDispatcher(makeStubKernelWorker(), wrapWebSocket<unknown>(host, msgpackCodec)),
+        );
       } else {
         host.addEventListener('message', (event) => {
           fileSystemFrames.push(msgpackCodec.decode((event as { data: Uint8Array<ArrayBuffer> }).data));

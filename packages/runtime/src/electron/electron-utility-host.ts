@@ -14,11 +14,11 @@ import type {
   TransportHostReady,
 } from '#transport/index.js';
 import type { Geometry } from '@taucad/types';
-import type { RuntimeProtocol } from '#index.js';
+import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
 import { extractInlineFileSystem } from '#transport/_internal/runtime-filesystem-handle.js';
 import { createWorkerFileSystemProxy } from '#transport/_internal/worker-filesystem-proxy.js';
 import type { WorkerFileSystemProxy } from '#transport/_internal/worker-filesystem-proxy.js';
-import { createWorkerDispatcher } from '#transport/_internal/runtime-worker-dispatcher.js';
+import { createDocumentWorkerDispatcher } from '#transport/_internal/runtime-document-dispatcher.js';
 import { installWorkerCrashTrap } from '#transport/_internal/worker-crash-trap.js';
 import { encodeBinaryAsOwnedCopy, encodeGeometryAsOwnedCopy } from '#transport/_internal/owned-transfer-bytes.js';
 import { buildHelloPayload } from '#transport/_internal/transport-hello.js';
@@ -47,13 +47,13 @@ const debugLog = (origin: string, message: string, data?: Record<string, unknown
  */
 export const electronUtilityHost = (
   hostOptions: ElectronUtilityHostOptions,
-): RuntimeTransportHost<RuntimeProtocol, Readonly<Record<never, never>>, typeof electronUtilityId> => {
+): RuntimeTransportHost<RuntimeDocumentProtocol, Readonly<Record<never, never>>, typeof electronUtilityId> => {
   const utilityFsBase = extractInlineFileSystem(hostOptions.fileSystem);
 
   debugLog('utility:host', 'constructed');
 
-  let openPromise: Promise<TransportHostReady> | undefined;
-  let dispatcherHandle: ChannelServerHandle<RuntimeProtocol> | undefined;
+  let openPromise: Promise<TransportHostReady<RuntimeDocumentProtocol>> | undefined;
+  let dispatcherHandle: ChannelServerHandle<RuntimeDocumentProtocol> | undefined;
   let transferredFileSystem: WorkerFileSystemProxy | undefined;
   let receivedPortHandles: Array<{ close(): void }> = [];
   let fileSystemDisposed = false;
@@ -96,11 +96,11 @@ export const electronUtilityHost = (
     return encodeGeometryAsOwnedCopy(geometry);
   };
 
-  const open = async (): Promise<TransportHostReady> => {
+  const open = async (): Promise<TransportHostReady<RuntimeDocumentProtocol>> => {
     if (openPromise) {
       return openPromise;
     }
-    openPromise = new Promise<TransportHostReady>((resolve, reject) => {
+    openPromise = new Promise<TransportHostReady<RuntimeDocumentProtocol>>((resolve, reject) => {
       rejectOpen = reject;
       if (isClosed) {
         reject(new Error('electronUtilityHost: closed before open()'));
@@ -209,7 +209,7 @@ export const electronUtilityHost = (
               }
               const { worker } = hostOptions;
               debugLog('utility:host', 'kernel-runtime-worker-instantiated');
-              const dispatcher = createWorkerDispatcher(worker, wireport, {
+              const dispatcher = createDocumentWorkerDispatcher(worker, wireport, {
                 inlineFileSystem: transferredFileSystem ?? utilityFsBase!,
                 computeBindingMode: event.data?.computeBindingMode === 'off' ? 'off' : 'memory',
                 ...(wrappedComputeStorePort ? { computeStorePort: wrappedComputeStorePort } : {}),

@@ -2,13 +2,16 @@ import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { createKernelSuccess } from '#kernels/kernel-helpers.js';
 import { KernelRuntimeWorker } from '#framework/kernel-runtime-worker.js';
+import { sourceRevisionFileDigest } from '#framework/kernel-worker.js';
 import { defineKernelV2 } from '#types/runtime-kernel-v2.types.js';
 import { defineMiddlewareV2 } from '#middleware/runtime-middleware-v2.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
 import { defineTranscoder } from '#types/runtime-transcoder.types.js';
+import { abortReason } from '#types/runtime-protocol.types.js';
 /* oxlint-disable no-restricted-imports, import/extensions -- Runtime-private white-box fixture. */
 import {
   createGeometryFile,
+  getTestFileSystem,
   initializeWorkerForTesting,
   seedTestFileSystem,
 } from '../../test/support/kernel-worker.fixture.js';
@@ -26,6 +29,643 @@ const parameters = {
 } as const;
 
 describe('v2 kernel boundary with the current client', () => {
+  it('retains missing optional dependencies as wire revision tokens', () => {
+    const path = '.tau/parameters/model.circuit.json';
+    expect(sourceRevisionFileDigest('missing', path)).toBe('missing');
+    expect(sourceRevisionFileDigest('a'.repeat(64), path)).toBe(`sha256:${'a'.repeat(64)}`);
+  });
+
+  it('preserves a model dependency named __proto__ as an own source-revision key', async () => {
+    const kernel = defineKernelV2({
+      id: 'prototype-path',
+      extensions: ['circuit'] as const,
+      name: 'Prototype path',
+      version: '1.0.0',
+      views: {},
+      exports: {},
+      async initialize() {
+        return {};
+      },
+      async resolve({ entryPath }) {
+        return { resolved: [entryPath, '__proto__'], unresolved: [] };
+      },
+      async describe() {
+        return createKernelSuccess({ parameters });
+      },
+      async evaluate(_input, runtime) {
+        const dependency = await runtime.filesystem.readFile('__proto__', 'utf8');
+        return { handle: { dependency }, views: [] as const, exports: [] as const };
+      },
+    })();
+    await seedTestFileSystem(
+      Object.fromEntries([
+        ['model.circuit', 'board'],
+        ['__proto__', 'dependency'],
+      ]),
+    );
+    const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
+    await initializeWorkerForTesting(worker);
+    const evaluated: Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0][] = [];
+    worker.onEvaluated = (event) => {
+      evaluated.push(event);
+    };
+    try {
+      worker.handleOpenDocument({
+        documentId: 'doc',
+        intent: 1,
+        file: createGeometryFile('model.circuit'),
+        parameters: {},
+        watch: false,
+      });
+      await vi.waitFor(() => {
+        expect(evaluated).toHaveLength(1);
+      });
+      expect(evaluated[0]?.success, JSON.stringify(evaluated[0]?.issues)).toBe(true);
+      const files = evaluated[0]?.sourceRevision?.files;
+      expect(Object.hasOwn(files ?? {}, '__proto__')).toBe(true);
+      expect(files?.['__proto__']).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
+  it.each([
+    ['image/svg+xml', new Uint8Array([1]), 'SVG_DOCUMENT_INVALID'],
+    ['model/gltf-binary', 'not bytes', 'GLTF_BYTES_INVALID'],
+    ['application/x-cad', 'opaque', undefined],
+  ] as const)('admits a %s view with its media-specific content rule', async (mimeType, content, expectedCode) => {
+    const kernel = defineKernelV2({
+      id: 'media',
+      extensions: ['circuit'] as const,
+      name: 'Media',
+      version: '1.0.0',
+      views: { display: { title: 'Display', mimeType } },
+      exports: {},
+      async initialize() {
+        return {};
+      },
+      async resolve({ entryPath }) {
+        return { resolved: [entryPath], unresolved: [] };
+      },
+      async describe() {
+        return createKernelSuccess({ parameters });
+      },
+      async evaluate() {
+        return { handle: {}, views: ['display'] as const, exports: [] as const };
+      },
+      async render() {
+        return { content };
+      },
+    })();
+    await seedTestFileSystem({ 'model.circuit': 'board' });
+    const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
+    await initializeWorkerForTesting(worker);
+    const rendered: Parameters<NonNullable<KernelRuntimeWorker['onRendered']>>[0][] = [];
+    worker.onRendered = (event) => {
+      rendered.push(event);
+    };
+    try {
+      worker.handleOpenDocument({
+        documentId: 'doc',
+        intent: 1,
+        file: createGeometryFile('model.circuit'),
+        parameters: {},
+        watch: false,
+      });
+      worker.handleOpenView({ documentId: 'doc', subscriptionId: 'view', requestId: 'r1', options: {} });
+      await vi.waitFor(() => {
+        expect(rendered).toHaveLength(1);
+      });
+      expect(rendered[0]?.success).toBe(expectedCode === undefined);
+      if (expectedCode) expect(rendered[0]?.issues[0]?.code).toBe(expectedCode);
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
+  it('acknowledges a cooperative document timeout with its exact operation ID', async () => {
+    const evaluating = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const kernel = defineKernelV2({
+      id: 'deadline',
+      extensions: ['circuit'] as const,
+      name: 'Deadline',
+      version: '1.0.0',
+      views: {},
+      exports: {},
+      async initialize() {
+        return {};
+      },
+      async resolve({ entryPath }) {
+        return { resolved: [entryPath], unresolved: [] };
+      },
+      async describe() {
+        return createKernelSuccess({ parameters });
+      },
+      async evaluate() {
+        evaluating.resolve();
+        await release.promise;
+        return { handle: {}, views: [] as const, exports: [] as const };
+      },
+    })();
+    await seedTestFileSystem({ 'model.circuit': 'board' });
+    const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
+    await initializeWorkerForTesting(worker);
+    const errors: Parameters<NonNullable<KernelRuntimeWorker['onDocumentError']>>[0][] = [];
+    const evaluations: Parameters<NonNullable<KernelRuntimeWorker['onEvaluating']>>[0][] = [];
+    worker.onDocumentError = (event) => {
+      errors.push(event);
+    };
+    worker.onEvaluating = (event) => {
+      evaluations.push(event);
+    };
+    try {
+      worker.handleOpenDocument({
+        documentId: 'doc',
+        intent: 1,
+        file: createGeometryFile('model.circuit'),
+        parameters: {},
+        watch: false,
+      });
+      await evaluating.promise;
+      const evaluationId = evaluations[0]?.evaluationId;
+      expect(evaluationId).toBeDefined();
+      worker.handleOperationAbort({ operationId: `evaluate:doc:${evaluationId}`, reason: abortReason.timeout });
+      release.resolve();
+      await vi.waitFor(() => {
+        expect(errors).toContainEqual(
+          expect.objectContaining({
+            scope: 'operation',
+            operationId: `evaluate:doc:${evaluationId}`,
+            evaluationId,
+            code: 'OPERATION_TIMEOUT',
+          }),
+        );
+      });
+    } finally {
+      release.resolve();
+      await worker.cleanup();
+    }
+  });
+
+  it('releases a closed document handle only after an active view render leaves the lane', async () => {
+    const rendering = Promise.withResolvers<void>();
+    const releaseRender = Promise.withResolvers<void>();
+    const releaseHandle = vi.fn();
+    const kernel = defineKernelV2({
+      id: 'close-render',
+      extensions: ['circuit'] as const,
+      name: 'Close render',
+      version: '1.0.0',
+      views: { display: { title: 'Display', mimeType: 'image/svg+xml' } },
+      exports: {},
+      async initialize() {
+        return {};
+      },
+      async resolve({ entryPath }) {
+        return { resolved: [entryPath], unresolved: [] };
+      },
+      async describe() {
+        return createKernelSuccess({ parameters });
+      },
+      async evaluate() {
+        return { handle: { id: 1 }, views: ['display'] as const, exports: [] as const };
+      },
+      async render() {
+        rendering.resolve();
+        await releaseRender.promise;
+        return { content: '<svg xmlns="http://www.w3.org/2000/svg"/>' };
+      },
+      releaseHandle,
+    })();
+    await seedTestFileSystem({ 'model.circuit': 'board' });
+    const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
+    await initializeWorkerForTesting(worker);
+    const rendered = vi.fn();
+    worker.onRendered = rendered;
+    try {
+      worker.handleOpenDocument({
+        documentId: 'doc',
+        intent: 1,
+        file: createGeometryFile('model.circuit'),
+        parameters: {},
+        watch: false,
+      });
+      worker.handleOpenView({ documentId: 'doc', subscriptionId: 'view', requestId: 'r1', options: {} });
+      await rendering.promise;
+      worker.handleCloseDocument({ documentId: 'doc' });
+      expect(releaseHandle).not.toHaveBeenCalled();
+      releaseRender.resolve();
+      await vi.waitFor(() => {
+        expect(releaseHandle).toHaveBeenCalledOnce();
+      });
+      expect(rendered).not.toHaveBeenCalled();
+    } finally {
+      releaseRender.resolve();
+      await worker.cleanup();
+    }
+    expect(releaseHandle).toHaveBeenCalledOnce();
+  });
+
+  it('does not publish a watched evaluation whose new dependency changes while arming observation', async () => {
+    const evaluate = vi.fn(async () => ({ handle: {}, views: [] as const, exports: [] as const }));
+    const kernel = defineKernelV2({
+      id: 'watch-arm',
+      extensions: ['circuit'] as const,
+      name: 'Watch arm',
+      version: '1.0.0',
+      views: {},
+      exports: {},
+      async initialize() {
+        return {};
+      },
+      async resolve({ entryPath }) {
+        return { resolved: [entryPath, 'dep.circuit'], unresolved: [] };
+      },
+      async describe() {
+        return createKernelSuccess({ parameters });
+      },
+      evaluate,
+    })();
+    await seedTestFileSystem({ 'model.circuit': 'board', 'dep.circuit': 'old' });
+    const base = getTestFileSystem();
+    let changed = false;
+    const inlineFileSystem = Object.assign(base, {
+      watch: () => () => undefined,
+      watchReady: () => ({
+        unsubscribe: () => undefined,
+        ready: (async () => {
+          if (!changed) {
+            changed = true;
+            await base.writeFile('dep.circuit', new TextEncoder().encode('new'));
+          }
+        })(),
+      }),
+    });
+    const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
+    await worker.initialize({
+      callbacks: { onLog: () => undefined },
+      transferables: { inlineFileSystem },
+      options: {},
+    });
+    const evaluated: Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0][] = [];
+    worker.onEvaluated = (event) => {
+      evaluated.push(event);
+    };
+    try {
+      worker.handleOpenDocument({
+        documentId: 'doc',
+        intent: 1,
+        file: createGeometryFile('model.circuit'),
+        parameters: {},
+        watch: true,
+      });
+      await vi.waitFor(() => {
+        expect(evaluated).toHaveLength(1);
+      });
+      expect(changed).toBe(true);
+      expect(evaluate).toHaveBeenCalledTimes(2);
+      expect(evaluated[0]?.success).toBe(true);
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
+  it('rejects a route with a required edge option owned by its source export', async () => {
+    const kernel = defineKernelV2({
+      id: 'route-collision',
+      extensions: ['circuit'] as const,
+      name: 'Route collision',
+      version: '1.0.0',
+      views: {},
+      exports: {
+        source: {
+          title: 'Source',
+          mimeType: 'text/plain',
+          extension: 'txt',
+          optionsSchema: z.object({ delimiter: z.string() }),
+        },
+      },
+      async initialize() {
+        return {};
+      },
+      async resolve({ entryPath }) {
+        return { resolved: [entryPath], unresolved: [] };
+      },
+      async describe() {
+        return createKernelSuccess({ parameters });
+      },
+      async evaluate() {
+        return { handle: {}, views: [] as const, exports: ['source'] as const };
+      },
+      async write() {
+        return { files: [{ name: 'source.txt', mimeType: 'text/plain', bytes: new Uint8Array([1]) }] as const };
+      },
+    })();
+    const transcoder = defineTranscoder({
+      id: 'required-collision',
+      name: 'Required collision',
+      version: '1.0.0',
+      edges: [{ from: 'txt', to: 'csv', fidelity: 'mesh', optionsSchema: z.object({ delimiter: z.string() }) }],
+      async initialize() {
+        return {};
+      },
+      async transcode() {
+        return {
+          success: true,
+          data: [{ name: 'out.csv', mimeType: 'text/csv', bytes: new Uint8Array([1]) }],
+          issues: [],
+        };
+      },
+    })();
+    await seedTestFileSystem({ 'model.circuit': 'board' });
+    const worker = new KernelRuntimeWorker({
+      runtime: defineRuntime({ kernels: [kernel], transcoders: [transcoder] }),
+    });
+    await initializeWorkerForTesting(worker);
+    const evaluated: Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0][] = [];
+    worker.onEvaluated = (event) => {
+      evaluated.push(event);
+    };
+    try {
+      worker.handleOpenDocument({
+        documentId: 'doc',
+        intent: 1,
+        file: createGeometryFile('model.circuit'),
+        parameters: {},
+        watch: false,
+      });
+      await vi.waitFor(() => {
+        expect(evaluated).toHaveLength(1);
+      });
+      expect(evaluated[0]?.success).toBe(false);
+      expect(evaluated[0]?.issues[0]?.message).toMatch(/requires source-owned export options delimiter/);
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
+  it('rejects a first offered view whose options are not defaultable', async () => {
+    const render = vi.fn(async () => ({ content: '<svg xmlns="http://www.w3.org/2000/svg"/>' }));
+    const kernel = defineKernelV2({
+      id: 'bad-default',
+      extensions: ['circuit'] as const,
+      name: 'Bad default',
+      version: '1.0.0',
+      views: {
+        required: { title: 'Required', mimeType: 'image/svg+xml', optionsSchema: z.object({ label: z.string() }) },
+      },
+      exports: {},
+      async initialize() {
+        return {};
+      },
+      async resolve({ entryPath }) {
+        return { resolved: [entryPath], unresolved: [] };
+      },
+      async describe() {
+        return createKernelSuccess({ parameters });
+      },
+      async evaluate() {
+        return { handle: {}, views: ['required'] as const, exports: [] as const };
+      },
+      render,
+    })();
+    await seedTestFileSystem({ 'model.circuit': 'board' });
+    const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
+    await initializeWorkerForTesting(worker);
+    const evaluated: Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0][] = [];
+    worker.onEvaluated = (event) => {
+      evaluated.push(event);
+    };
+    try {
+      worker.handleOpenDocument({
+        documentId: 'doc',
+        intent: 1,
+        file: createGeometryFile('model.circuit'),
+        parameters: {},
+        watch: false,
+      });
+      await vi.waitFor(() => {
+        expect(evaluated).toHaveLength(1);
+      });
+      expect(evaluated[0]).toMatchObject({
+        success: false,
+        issues: [expect.objectContaining({ code: 'VIEW_OPTIONS_INVALID' })],
+      });
+      expect(render).not.toHaveBeenCalled();
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
+  it('projects two subscriptions from one evaluation and admits a required secondary view', async () => {
+    const evaluate = vi.fn(async () => ({
+      handle: { value: 1 },
+      views: ['primary', 'secondary'] as const,
+      exports: [] as const,
+    }));
+    const render = vi.fn(async ({ view }: { view: string }) => ({
+      content: `<svg xmlns="http://www.w3.org/2000/svg"><text>${view}</text></svg>`,
+    }));
+    const kernel = defineKernelV2({
+      id: 'two-views',
+      extensions: ['circuit'] as const,
+      name: 'Two views',
+      version: '1.0.0',
+      views: {
+        primary: { title: 'Primary', mimeType: 'image/svg+xml' },
+        secondary: {
+          title: 'Secondary',
+          mimeType: 'image/svg+xml',
+          optionsSchema: z.object({ label: z.string() }),
+          content: ['includeEdges'] as const,
+        },
+      },
+      exports: {},
+      async initialize() {
+        return {};
+      },
+      async resolve({ entryPath }) {
+        return { resolved: [entryPath], unresolved: [] };
+      },
+      async describe() {
+        return createKernelSuccess({ parameters });
+      },
+      evaluate,
+      render,
+    })();
+    await seedTestFileSystem({ 'model.circuit': 'board' });
+    const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
+    await initializeWorkerForTesting(worker);
+    const rendered: Parameters<NonNullable<KernelRuntimeWorker['onRendered']>>[0][] = [];
+    worker.onRendered = (event) => {
+      rendered.push(event);
+    };
+    try {
+      worker.handleOpenDocument({
+        documentId: 'doc',
+        intent: 1,
+        file: createGeometryFile('model.circuit'),
+        parameters: {},
+        watch: false,
+      });
+      worker.handleOpenView({ documentId: 'doc', subscriptionId: 'a', requestId: 'r1', options: {} });
+      worker.handleOpenView({
+        documentId: 'doc',
+        subscriptionId: 'b',
+        requestId: 'r2',
+        view: 'secondary',
+        options: { label: 'ok' },
+        content: { includeEdges: true },
+      });
+      worker.handleOpenView({
+        documentId: 'doc',
+        subscriptionId: 'c',
+        requestId: 'r3',
+        view: 'primary',
+        options: {},
+        content: { includeEdges: true },
+      });
+      await vi.waitFor(() => {
+        expect(rendered).toHaveLength(3);
+      });
+      expect(rendered.map((event) => event.view)).toEqual(['primary', 'secondary', 'primary']);
+      expect(rendered.map((event) => event.success)).toEqual([true, true, false]);
+      expect(evaluate).toHaveBeenCalledOnce();
+      expect(render).toHaveBeenCalledTimes(2);
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
+  it('reevaluates another watched document after a staged shared source change', async () => {
+    const evaluate = vi.fn(async () => ({ handle: {}, views: [] as const, exports: [] as const }));
+    const kernel = defineKernelV2({
+      id: 'watch-shared',
+      extensions: ['circuit'] as const,
+      name: 'Watch shared',
+      version: '1.0.0',
+      views: {},
+      exports: {},
+      async initialize() {
+        return {};
+      },
+      async resolve({ entryPath }) {
+        return { resolved: [entryPath], unresolved: [] };
+      },
+      async describe() {
+        return createKernelSuccess({ parameters });
+      },
+      evaluate,
+    })();
+    await seedTestFileSystem({ 'model.circuit': 'board' });
+    const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
+    await initializeWorkerForTesting(worker);
+    const evaluated: Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0][] = [];
+    worker.onEvaluated = (event) => {
+      evaluated.push(event);
+    };
+    try {
+      for (const documentId of ['a', 'b']) {
+        worker.handleOpenDocument({
+          documentId,
+          intent: 1,
+          file: createGeometryFile('model.circuit'),
+          parameters: {},
+          watch: true,
+        });
+      }
+      await vi.waitFor(() => {
+        expect(evaluated).toHaveLength(2);
+      });
+      worker.handleUpdateDocument({
+        documentId: 'a',
+        intent: 2,
+        stage: { 'model.circuit': new TextEncoder().encode('changed') },
+      });
+      await vi.waitFor(() => {
+        expect(evaluated.filter((event) => event.documentId === 'b')).toHaveLength(2);
+      });
+      const bRevisions = evaluated.filter((event) => event.documentId === 'b').map((event) => event.sourceRevision);
+      expect(bRevisions[0]).not.toEqual(bRevisions[1]);
+      expect(evaluate).toHaveBeenCalledTimes(2);
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
+  it('selects same-extension document exports by ID and refuses unavailable declared IDs', async () => {
+    const write = vi.fn(async ({ exportId, options }: { exportId: string; options: Record<string, unknown> }) => ({
+      files: [
+        { name: `${exportId}.txt`, mimeType: 'text/plain', bytes: new TextEncoder().encode(JSON.stringify(options)) },
+      ] as const,
+    }));
+    const kernel = defineKernelV2({
+      id: 'same-extension',
+      extensions: ['circuit'] as const,
+      name: 'Same extension',
+      version: '1.0.0',
+      views: {},
+      exports: {
+        plain: { title: 'Plain', mimeType: 'text/plain', extension: 'txt' },
+        configured: {
+          title: 'Configured',
+          mimeType: 'text/plain',
+          extension: 'txt',
+          optionsSchema: z.object({ label: z.string() }),
+        },
+        txt: { title: 'Unavailable', mimeType: 'text/plain', extension: 'txt' },
+      },
+      async initialize() {
+        return {};
+      },
+      async resolve({ entryPath }) {
+        return { resolved: [entryPath], unresolved: [] };
+      },
+      async describe() {
+        return createKernelSuccess({ parameters });
+      },
+      async evaluate() {
+        return { handle: {}, views: [] as const, exports: ['plain', 'configured'] as const };
+      },
+      write,
+    })();
+    await seedTestFileSystem({ 'model.circuit': 'board' });
+    const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
+    await initializeWorkerForTesting(worker);
+    const evaluated: Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0][] = [];
+    worker.onEvaluated = (event) => {
+      evaluated.push(event);
+    };
+    try {
+      worker.handleOpenDocument({
+        documentId: 'doc',
+        intent: 1,
+        file: createGeometryFile('model.circuit'),
+        parameters: {},
+        watch: false,
+      });
+      await vi.waitFor(() => {
+        expect(evaluated).toHaveLength(1);
+      });
+      const plain = await worker.exportDocument({ documentId: 'doc', operationId: 'plain', target: 'plain' });
+      const configured = await worker.exportDocument({
+        documentId: 'doc',
+        operationId: 'configured',
+        target: 'configured',
+        options: { label: 'ok' },
+      });
+      const unavailable = await worker.exportDocument({ documentId: 'doc', operationId: 'unavailable', target: 'txt' });
+      expect(plain.success).toBe(true);
+      expect(configured.success).toBe(true);
+      expect(write.mock.calls.map(([input]) => input.exportId)).toEqual(['plain', 'configured']);
+      expect(unavailable.success).toBe(false);
+      expect(unavailable.issues[0]?.code).toBe('EXPORT_UNKNOWN');
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
   it('should validate a v2 source export and transcoder edge separately', async () => {
     const write = vi.fn(async ({ options }: { options: { source: string } }) => ({
       files: [{ name: 'source.txt', mimeType: 'text/plain', bytes: new TextEncoder().encode(options.source) }] as const,
@@ -294,7 +934,7 @@ describe('v2 kernel boundary with the current client', () => {
         schematic: {
           title: 'Schematic',
           mimeType: 'image/svg+xml',
-          optionsSchema: z.object({ labels: z.boolean() }),
+          optionsSchema: z.object({ labels: z.boolean().default(false) }),
           content: ['includeEdges'] as const,
         },
       },
@@ -364,6 +1004,28 @@ describe('v2 kernel boundary with the current client', () => {
       expect(phases).toContain('evaluate:model.circuit');
       expect(phases).toContain('render:schematic:image/svg+xml:true');
       expect(phases).toContain('write:bom:text/csv:csv:true');
+      const evaluated: Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0][] = [];
+      worker.onEvaluated = (event) => {
+        evaluated.push(event);
+      };
+      worker.handleOpenDocument({
+        documentId: 'content-doc',
+        intent: 1,
+        file: createGeometryFile('model.circuit'),
+        parameters: {},
+        watch: false,
+      });
+      await vi.waitFor(() => {
+        expect(evaluated).toHaveLength(1);
+      });
+      const documentExport = await worker.exportDocument({
+        documentId: 'content-doc',
+        operationId: 'content-export',
+        target: 'bom',
+        content: { includeTopology: true },
+      });
+      expect(documentExport.success, JSON.stringify(documentExport.issues)).toBe(true);
+      expect(phases.filter((phase) => phase === 'write:bom:text/csv:csv:true')).toHaveLength(2);
     } finally {
       await worker.cleanup();
     }

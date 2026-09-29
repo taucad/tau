@@ -30,7 +30,7 @@
 
 import { fromMemoryFs } from '#filesystem/runtime-filesystem.js';
 import type { RuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
-import type { RuntimeClientOptionsWithTransport } from '#client/runtime-client-core.js';
+import type { RuntimeClientOptionsWithTransport } from '#client/runtime-document-client-core.js';
 import type { AnyRuntimeDefinition, RuntimeConfigInput, RuntimeConfigProvider } from '#worker/runtime-definition.js';
 import { webWorkerTransport } from '#transport/web-worker-transport.js';
 import type { WebWorkerTransportOptions } from '#transport/web-worker-client.js';

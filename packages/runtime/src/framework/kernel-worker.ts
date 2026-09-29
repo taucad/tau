@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/member-ordering -- operation entrypoints stay adjacent to their private lane implementations in this stateful worker. */
 /* oxlint-disable unicorn/prefer-math-trunc, no-bitwise -- cancellation generations require ECMAScript ToUint32 wrap semantics. */
 import deepmerge from 'deepmerge';
-import { logLevels, lookupExportFidelity, mimeTypes } from '@taucad/types/constants';
+import { logLevels, lookupExportFidelity } from '@taucad/types/constants';
 import { randomUuid } from '@taucad/utils/id';
 import { assertRootedPath, joinRelativePath } from '@taucad/utils/path';
 import { named, preserveMethodNames } from '#framework/named.js';
@@ -13,7 +13,6 @@ import type { MessagePortLike } from '@taucad/rpc';
 import type {
   HashedGeometryResult,
   CreateGeometryResult,
-  MeshGeometryResult,
   ExportGeometryResult,
   GetParameterDeclarationsResult,
   GetParametersResult,
@@ -37,6 +36,15 @@ import type {
   RuntimeImplementationAsset,
 } from '#types/runtime-kernel.types.js';
 import type { RuntimeFileLocator } from '#types/runtime-file.types.js';
+import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
+import type {
+  Description,
+  Evaluation,
+  ExportOffer,
+  ExportResult,
+  Rendering,
+  ViewOffer,
+} from '#client/runtime-document.types.js';
 import type { KernelMiddlewareRuntime, MiddlewareExportGeometryRequest } from '#types/runtime-middleware.types.js';
 import type { BundlerDefinition } from '#types/runtime-bundler.types.js';
 import type {
@@ -109,6 +117,7 @@ import type {
   WriteRequest,
 } from '#types/runtime-middleware-v2.types.js';
 import { nonemptyExportFiles } from '#types/runtime-kernel-v2.types.js';
+import { asKnownArtifact } from '#types/runtime-artifact.js';
 import type {
   Artifact,
   DescribeInput,
@@ -189,6 +198,71 @@ type RenderCancellationRecord = {
   readonly controller: AbortController;
   reason?: 'superseded' | 'timeout';
   executing: boolean;
+};
+
+type DocumentInput = RuntimeDocumentProtocol['notifies']['open']['args'];
+type DocumentUpdateInput = RuntimeDocumentProtocol['notifies']['update']['args'];
+type ViewOpenInput = RuntimeDocumentProtocol['notifies']['openView']['args'];
+type ViewUpdateInput = RuntimeDocumentProtocol['notifies']['updateView']['args'];
+type DocumentRecord = {
+  readonly id: string;
+  file: RuntimeFileLocator;
+  intent: number;
+  parameters: Record<string, unknown>;
+  evaluateOptions: Record<string, unknown>;
+  committedParameters: Record<string, unknown>;
+  committedEvaluateOptions: Record<string, unknown>;
+  watch: boolean;
+  closed: boolean;
+  current?: DocumentEvaluation;
+  committed?: DocumentEvaluation;
+  pendingCommitted?: CommittedAdmission;
+  readonly views: Map<string, ViewRecord>;
+  readonly operations: Set<AbortController>;
+  watchPaths: Set<string>;
+};
+type CommittedAdmission = {
+  readonly intent: number;
+  readonly completion: PromiseWithResolvers<DocumentEvaluation>;
+  pins: number;
+  evaluation?: DocumentEvaluation;
+};
+type DocumentEvaluation = {
+  readonly id: string;
+  readonly intent: number;
+  readonly transient: boolean;
+  readonly result: Evaluation;
+  readonly artifact?: MaterializedRender;
+  projections?: Map<string, RenderResult>;
+};
+type ViewRecord = {
+  readonly document: DocumentRecord;
+  readonly id: string;
+  requestId: string;
+  view?: string;
+  instance?: string | null;
+  options: Record<string, unknown>;
+  content?: RuntimeContentInput;
+  readonly operations: Set<AbortController>;
+};
+
+/** Preserve a missing optional dependency as a wire revision token. @internal */
+export const sourceRevisionFileDigest = (contentHash: string, path: string): ContentDigest | 'missing' =>
+  contentHash === 'missing'
+    ? 'missing'
+    : contentDigest({ value: `sha256:${contentHash}`, name: `document evaluation ${path}` });
+
+const sourceRevisionForArtifact = (artifact: MaterializedRender, fallback?: SourceRevision): SourceRevision => {
+  const entry = assertRootedPath(joinRelativePath(artifact.identity.file.path, artifact.identity.file.filename));
+  const files = Object.fromEntries<ContentDigest | 'missing'>([
+    ...Object.entries(fallback?.files ?? {}),
+    ...artifact.identity.dependencies.flatMap((dependency) =>
+      dependency.type === 'file'
+        ? [[dependency.path, sourceRevisionFileDigest(dependency.contentHash, dependency.path)] as const]
+        : [],
+    ),
+  ]);
+  return { entry, files };
 };
 
 const neverAbortedSignal = new AbortController().signal;
@@ -333,15 +407,17 @@ type OwnerBoundExportRoute =
   | {
       kind: 'direct';
       kernelId: string | undefined;
-      targetFormat: FileExtension;
+      targetFormat: string;
+      exportId?: string;
       options: Record<string, unknown>;
       content: RuntimeContentInput;
     }
   | {
       kind: 'transcoded';
       kernelId: string;
-      sourceFormat: FileExtension;
-      targetFormat: FileExtension;
+      sourceFormat: string;
+      targetFormat: string;
+      exportId?: string;
       transcoderId: string;
       sourceOptions: Record<string, unknown>;
       edgeOptions: Record<string, unknown>;
@@ -523,8 +599,18 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   /** Callback for pushing kernel-authored events to the dispatcher. */
   public onKernelEvent?: (event: RuntimeProtocol['notifies']['kernelEvent']['args']) => void;
 
+  /** Document notifications are public values; the dispatcher owns binary encoding. */
+  public onDescribed?: (event: RuntimeDocumentProtocol['notifies']['described']['args']) => void;
+  public onEvaluating?: (event: RuntimeDocumentProtocol['notifies']['evaluating']['args']) => void;
+  public onEvaluated?: (event: RuntimeDocumentProtocol['notifies']['evaluated']['args']) => void;
+  public onRendering?: (event: RuntimeDocumentProtocol['notifies']['rendering']['args']) => void;
+  public onRendered?: (event: { readonly subscriptionId: string; readonly intent: number } & Rendering) => void;
+  public onDocumentProgressUpdate?: (event: RuntimeDocumentProtocol['notifies']['progress']['args']) => void;
+  public onDocumentError?: (event: RuntimeDocumentProtocol['notifies']['errorEvent']['args']) => void;
+  public onDocumentStateChanged?: (event: RuntimeDocumentProtocol['notifies']['stateChanged']['args']) => void;
+
   /** Raw Zod schemas for runtime validation, keyed by kernel ID → format. Populated from kernel definitions. */
-  protected readonly kernelExportZodSchemasMap = new Map<string, Partial<Record<FileExtension, z.ZodType>>>();
+  protected readonly kernelExportZodSchemasMap = new Map<string, Partial<Record<string, z.ZodType>>>();
   protected readonly kernelAmbiguousExportFormatsMap = new Map<string, Set<string>>();
 
   /** Raw Zod schema for render option validation, keyed by kernel ID. Populated from kernel definitions. */
@@ -537,10 +623,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   protected readonly kernelCreateOptionsZodSchemaMap = new Map<string, z.ZodObject<z.ZodRawShape>>();
 
   /** Native content declarations keyed by kernel ID and export format. */
-  protected readonly kernelExportContentMap = new Map<
-    string,
-    Partial<Record<FileExtension, readonly RuntimeContentKey[]>>
-  >();
+  protected readonly kernelExportContentMap = new Map<string, Partial<Record<string, readonly RuntimeContentKey[]>>>();
   /** Export IDs and media types selected by the current client's extension route. */
   protected readonly kernelExportMetadataMap = new Map<
     string,
@@ -757,6 +840,12 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private cleanupPromise: Promise<void> | undefined;
 
   private readonly renderCancellationRecords = new Map<string, RenderCancellationRecord>();
+  private readonly documents = new Map<string, DocumentRecord>();
+  private readonly documentViews = new Map<string, ViewRecord>();
+  private readonly documentOperations = new Map<string, AbortController>();
+  private readonly committedAdmissions = new Set<CommittedAdmission>();
+  private readonly pinnedDocumentEvaluations = new Map<DocumentEvaluation, number>();
+  private documentEvaluationSequence = 0;
   private activeRenderRecord: RenderCancellationRecord | undefined;
   private operationSignal: AbortSignal | undefined;
 
@@ -1001,6 +1090,734 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    */
   public setSignalBuffer(buffer: SharedArrayBuffer): void {
     this.signalView = new Int32Array(buffer);
+  }
+
+  /** Admit one live document and start its first evaluation. */
+  public handleOpenDocument(input: DocumentInput): void {
+    if (this.documents.has(input.documentId)) throw new Error(`Document ${input.documentId} is already open.`);
+    const file = this.canonicalGeometryFile(input.file);
+    const record: DocumentRecord = {
+      id: input.documentId,
+      file,
+      intent: input.intent,
+      parameters: { ...input.parameters },
+      evaluateOptions: { ...input.evaluateOptions },
+      committedParameters: { ...input.parameters },
+      committedEvaluateOptions: { ...input.evaluateOptions },
+      watch: input.watch,
+      closed: false,
+      views: new Map(),
+      operations: new Set(),
+      watchPaths: new Set([assertRootedPath(joinRelativePath(file.path, file.filename))]),
+    };
+    this.documents.set(record.id, record);
+    this.scheduleDocumentEvaluation(record, input.intent, false, input.stage);
+  }
+
+  /** Update document inputs without changing any view request. */
+  public handleUpdateDocument(input: DocumentUpdateInput): void {
+    const record = this.documents.get(input.documentId);
+    if (!record || record.closed) return;
+    if (input.intent <= record.intent) return;
+    record.intent = input.intent;
+    const baseParameters = input.transient ? record.parameters : record.committedParameters;
+    const baseEvaluateOptions = input.transient ? record.evaluateOptions : record.committedEvaluateOptions;
+    record.parameters = { ...(input.parameters ?? baseParameters) };
+    record.evaluateOptions = { ...(input.evaluateOptions ?? baseEvaluateOptions) };
+    if (!input.transient) {
+      record.committedParameters = { ...record.parameters };
+      record.committedEvaluateOptions = { ...record.evaluateOptions };
+    }
+    this.scheduleDocumentEvaluation(record, input.intent, input.transient ?? false, input.stage);
+  }
+
+  /** Close one document and its subscriptions before any queued result can publish. */
+  public handleCloseDocument(input: { readonly documentId: string }): void {
+    const record = this.documents.get(input.documentId);
+    if (!record) return;
+    record.closed = true;
+    this.documents.delete(record.id);
+    for (const view of record.views.values()) this.documentViews.delete(view.id);
+    record.views.clear();
+    record.watchPaths.clear();
+    for (const controller of record.operations) controller.abort();
+    record.pendingCommitted?.completion.reject(new Error(`Document ${record.id} closed.`));
+    void this.enqueueOperation(async () => {
+      await this.reconcileObservedPaths();
+      const closedSlotId =
+        record.current?.artifact?.evaluationSlot?.id ?? record.committed?.artifact?.evaluationSlot?.id;
+      if (
+        closedSlotId !== undefined &&
+        ![...this.documents.values()].some(
+          (live) =>
+            live.current?.artifact?.evaluationSlot?.id === closedSlotId ||
+            live.committed?.artifact?.evaluationSlot?.id === closedSlotId,
+        ) &&
+        ![...this.pinnedDocumentEvaluations.keys()].some(
+          (evaluation) => evaluation.artifact?.evaluationSlot?.id === closedSlotId,
+        ) &&
+        this.currentPublishedRender?.evaluationSlot?.id !== closedSlotId
+      ) {
+        if (this.retainedEvaluation?.id === closedSlotId) this.retainedEvaluation = undefined;
+        if (this.latestEvaluationArtifact?.evaluationSlot?.id === closedSlotId)
+          this.latestEvaluationArtifact = undefined;
+      }
+      this.disposeUnreachableNativeHandles();
+    }).catch((error: unknown) => {
+      this.logger.warn('Failed to reconcile watched paths after document close', {
+        data: { error: error instanceof Error ? error.message : String(error) },
+      });
+    });
+  }
+
+  /** Subscribe one view to the document's current and future evaluations. */
+  public handleOpenView(input: ViewOpenInput): void {
+    const document = this.documents.get(input.documentId);
+    if (!document || document.closed || this.documentViews.has(input.subscriptionId)) return;
+    const view: ViewRecord = {
+      document,
+      id: input.subscriptionId,
+      requestId: input.requestId,
+      view: input.view,
+      instance: input.instance,
+      options: { ...input.options },
+      content: input.content,
+      operations: new Set(),
+    };
+    document.views.set(view.id, view);
+    this.documentViews.set(view.id, view);
+    if (document.current) this.scheduleDocumentView(view, document.current);
+  }
+
+  /** Replace one view request without evaluating its document again. */
+  public handleUpdateView(input: ViewUpdateInput): void {
+    const view = this.documentViews.get(input.subscriptionId);
+    if (!view) return;
+    view.requestId = input.requestId;
+    if (input.instance !== undefined) view.instance = input.instance;
+    if (input.options !== undefined) view.options = { ...input.options };
+    if (input.content !== undefined) view.content = input.content;
+    if (view.document.current) this.scheduleDocumentView(view, view.document.current);
+  }
+
+  /** Stop one view's projections while leaving the document live. */
+  public handleCloseView(input: { readonly subscriptionId: string }): void {
+    const view = this.documentViews.get(input.subscriptionId);
+    if (!view) return;
+    this.documentViews.delete(view.id);
+    view.document.views.delete(view.id);
+    for (const controller of view.operations) controller.abort();
+  }
+
+  /** Abort one request-owned waiter or queued operation. */
+  public handleOperationAbort(input: { readonly operationId: string; readonly reason: number }): void {
+    this.documentOperations.get(input.operationId)?.abort(input.reason);
+  }
+
+  /** Describe a source without creating or retargeting a document. */
+  public async describe(
+    input: RuntimeDocumentProtocol['calls']['describe']['args'],
+    signal?: AbortSignal,
+  ): Promise<Description> {
+    return this.enqueueOperation(async () => {
+      signal?.throwIfAborted();
+      if (input.stage) await this.writeFilesAndInvalidate(input.stage);
+      signal?.throwIfAborted();
+      await this.revalidateRetainedFiles();
+      const owner = await this.createOperationOwner(input.file, 'request');
+      const result = await this.getParametersInLane(input.file, { owner, resolution: input.resolution });
+      await this.reconcileObservedPaths();
+      return result.success
+        ? { success: true, kernelId: owner.binding?.kernelId, parameters: result.data, issues: result.issues }
+        : { success: false, kernelId: owner.binding?.kernelId, issues: result.issues };
+    }, signal);
+  }
+
+  /** Export from the committed evaluation selected when the request arrived. */
+  public async exportDocument(
+    input: RuntimeDocumentProtocol['calls']['export']['args'],
+    signal?: AbortSignal,
+  ): Promise<ExportResult> {
+    const document = this.documents.get(input.documentId);
+    if (!document || document.closed) throw new Error(`Document ${input.documentId} is closed.`);
+    const pending = document.pendingCommitted;
+    if (pending) pending.pins++;
+    const committedAtAdmission = document.committed;
+    const pinned = pending?.completion.promise ?? Promise.resolve(committedAtAdmission);
+    if (!pending && committedAtAdmission) {
+      this.pinnedDocumentEvaluations.set(
+        committedAtAdmission,
+        (this.pinnedDocumentEvaluations.get(committedAtAdmission) ?? 0) + 1,
+      );
+    }
+    const controller = new AbortController();
+    const abortFromCall = (): void => {
+      controller.abort(signal?.reason);
+    };
+    signal?.addEventListener('abort', abortFromCall, { once: true });
+    if (signal?.aborted) abortFromCall();
+    document.operations.add(controller);
+    this.documentOperations.set(input.operationId, controller);
+    try {
+      return await this.enqueueOperation(async () => {
+        controller.signal.throwIfAborted();
+        const evaluation = await pinned;
+        controller.signal.throwIfAborted();
+        if (!evaluation) {
+          return {
+            success: false,
+            issues: [
+              {
+                code: 'HANDLE_MISSING',
+                message: 'Document has no committed evaluation.',
+                severity: 'error',
+                type: 'runtime',
+              },
+            ],
+          };
+        }
+        if (!evaluation.result.success || !evaluation.artifact) {
+          return { success: false, issues: evaluation.result.issues, sourceRevision: evaluation.result.sourceRevision };
+        }
+        const artifact = evaluation.artifact;
+        const target = this.resolveDocumentExportTarget(artifact.owner, artifact.evaluationSlot?.offers, input.target);
+        if (!target.success) {
+          return { success: false, issues: target.issues, sourceRevision: evaluation.result.sourceRevision };
+        }
+        const plan = this.createExportRequestPlan(artifact.owner, {
+          format: target.format,
+          options: input.options,
+          content: input.content,
+          exportId: target.exportId,
+        });
+        if (!plan.success) {
+          return { success: false, issues: plan.result.issues, sourceRevision: evaluation.result.sourceRevision };
+        }
+        this.onDocumentProgressUpdate?.({
+          documentId: document.id,
+          intent: evaluation.intent,
+          evaluationId: evaluation.id,
+          operationId: input.operationId,
+          phase: 'writing',
+        });
+        const activeMiddleware = this.getOuterExportExecutionList(plan);
+        const result = finalizeExportArtifactSet(
+          activeMiddleware.length === 0
+            ? await this.executeExportRequest(plan, artifact, evaluation.result.sourceRevision)
+            : await this.runExportMiddlewarePipeline({
+                plan,
+                renderIdentity: artifact.identity,
+                renderArtifact: artifact,
+                activeMiddleware,
+                pinnedSourceRevision: evaluation.result.sourceRevision,
+              }),
+        );
+        controller.signal.throwIfAborted();
+        if (!result.success)
+          return { success: false, issues: result.issues, sourceRevision: evaluation.result.sourceRevision };
+        const files = nonemptyExportFiles(result.data);
+        return {
+          success: true,
+          exportId: target.exportId,
+          evaluationId: evaluation.id,
+          files,
+          issues: result.issues,
+          sourceRevision: evaluation.result.sourceRevision,
+        };
+      }, controller.signal);
+    } catch (error) {
+      if (controller.signal.aborted && controller.signal.reason === abortReasonEnum.timeout) {
+        this.onDocumentError?.({
+          scope: 'operation',
+          documentId: document.id,
+          intent: document.intent,
+          operationId: input.operationId,
+          code: 'OPERATION_TIMEOUT',
+          phase: 'write',
+          message: 'Document export timed out.',
+        });
+      }
+      throw error;
+    } finally {
+      signal?.removeEventListener('abort', abortFromCall);
+      if (pending) pending.pins--;
+      if (pending?.pins === 0) this.committedAdmissions.delete(pending);
+      if (!pending && committedAtAdmission) {
+        const remaining = (this.pinnedDocumentEvaluations.get(committedAtAdmission) ?? 1) - 1;
+        if (remaining > 0) this.pinnedDocumentEvaluations.set(committedAtAdmission, remaining);
+        else this.pinnedDocumentEvaluations.delete(committedAtAdmission);
+      }
+      document.operations.delete(controller);
+      if (this.documentOperations.get(input.operationId) === controller)
+        this.documentOperations.delete(input.operationId);
+    }
+  }
+
+  /** Resolve an export ID before direct extension before transcode route. */
+  protected resolveDocumentExportTarget(
+    _owner: OperationOwner,
+    _offers: KernelOffers | undefined,
+    target: string,
+  ): { success: true; format: string; exportId: string } | { success: false; issues: KernelIssue[] } {
+    return { success: true, format: target, exportId: target };
+  }
+
+  /** Return the exact declaration for an explicitly selected export ID. */
+  protected getDocumentExportDeclaration(
+    _owner: OperationOwner,
+    _exportId: string,
+  ): { extension: string; mimeType: string; schema?: z.ZodType; content: readonly RuntimeContentKey[] } | undefined {
+    return undefined;
+  }
+
+  private async pinnedSourceStillMatches(revision: SourceRevision): Promise<boolean> {
+    for (const [path, expected] of Object.entries(revision.files)) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one committed source closure is checked in path order.
+        const bytes = await this.filesystem.readFile(path);
+        // oxlint-disable-next-line no-await-in-loop -- hash each path before making a source-correct write.
+        if (`sha256:${await this.hashContent(bytes)}` !== expected) return false;
+      } catch (error) {
+        if (expected !== 'missing' || !isNotFoundError(error)) return false;
+      }
+    }
+    return true;
+  }
+
+  private sourceSnapshotChangedResult(): ExportGeometryResult {
+    return createKernelError([
+      {
+        code: 'SOURCE_SNAPSHOT_CHANGED',
+        message: 'The committed source changed before its native export handle could be rebuilt.',
+        type: 'runtime',
+        severity: 'error',
+      },
+    ]);
+  }
+
+  private scheduleDocumentEvaluation(
+    document: DocumentRecord,
+    intent: number,
+    transient: boolean,
+    stage?: Readonly<Record<string, Uint8Array<ArrayBuffer>>>,
+  ): void {
+    const evaluationId = String(++this.documentEvaluationSequence);
+    const operationId = `evaluate:${document.id}:${evaluationId}`;
+    const admissionAlias = `${document.id}:${intent}`;
+    const controller = new AbortController();
+    this.documentOperations.set(operationId, controller);
+    this.documentOperations.set(admissionAlias, controller);
+    document.operations.add(controller);
+    const pendingCommitted: CommittedAdmission | undefined = transient
+      ? undefined
+      : {
+          intent,
+          completion: Promise.withResolvers<DocumentEvaluation>(),
+          pins: 0,
+        };
+    // An unobserved committed admission may be superseded or closed before an export pins it.
+    void pendingCommitted?.completion.promise.catch(() => undefined);
+    if (pendingCommitted) {
+      document.pendingCommitted = pendingCommitted;
+      this.committedAdmissions.add(pendingCommitted);
+    }
+    const parameters = { ...document.parameters };
+    const evaluateOptions = { ...document.evaluateOptions };
+    const file = document.file;
+    this.onEvaluating?.({ documentId: document.id, intent, evaluationId, transient });
+    this.onDocumentProgressUpdate?.({ documentId: document.id, intent, evaluationId, operationId, phase: 'queued' });
+    this.onDocumentStateChanged?.({ state: 'busy' });
+    const pending = this.enqueueOperation(async () => {
+      const previousProgress = this.onProgress;
+      this.onProgress = (phase) => {
+        this.onDocumentProgressUpdate?.({ documentId: document.id, intent, evaluationId, operationId, phase });
+      };
+      try {
+        if (!this.shouldContinueDocumentEvaluation(document, controller, intent, pendingCommitted)) {
+          this.abandonDocumentEvaluation(pendingCommitted);
+          return;
+        }
+        if (stage) await this.writeFilesAndInvalidate(stage, document.id);
+        await this.revalidateRetainedFiles();
+        const dependencyContext: DependencyResolutionContext = {};
+        const owner = await this.createOperationOwner(file, 'request');
+        const described = await this.getParametersInLane(file, { dependencyContext, owner });
+        const description: Description = described.success
+          ? { success: true, kernelId: owner.binding?.kernelId, parameters: described.data, issues: described.issues }
+          : { success: false, kernelId: owner.binding?.kernelId, issues: described.issues };
+        if (!this.shouldContinueDocumentEvaluation(document, controller, intent, pendingCommitted)) {
+          this.abandonDocumentEvaluation(pendingCommitted);
+          return;
+        }
+        this.onDescribed?.({ documentId: document.id, intent, evaluationId, ...description });
+        let evaluation: DocumentEvaluation;
+        const legacyProjection = described.success ? described.data.legacyProjection : undefined;
+        if (!described.success || legacyProjection?.status !== 'usable') {
+          const issues = described.success
+            ? ([
+                {
+                  code: 'RUNTIME',
+                  message: 'Parameter schema cannot be represented by the active Draft-7 execution path',
+                  type: 'kernel',
+                  severity: 'error',
+                },
+              ] as KernelIssue[])
+            : described.issues;
+          evaluation = {
+            id: evaluationId,
+            intent,
+            transient,
+            result: { success: false, id: evaluationId, transient, issues, sourceRevision: described.sourceRevision },
+          };
+        } else {
+          const manifest = described.data;
+          const parametersWithDefaults = mergeParameterDefaults({}, parameters, legacyProjection.schema);
+          const { artifact } = await this.materializeRender(
+            {
+              file,
+              parameters: parametersWithDefaults,
+              parameterDefaults: manifest.defaults,
+              parameterManifest: manifest,
+              parameterSchema: legacyProjection.schema,
+              options: evaluateOptions,
+            },
+            { dependencyContext, owner, display: false, publish: false },
+          );
+          const result = artifact.result;
+          evaluation = result.success
+            ? {
+                id: evaluationId,
+                intent,
+                transient,
+                artifact,
+                result: {
+                  success: true,
+                  id: evaluationId,
+                  transient,
+                  views: this.getDocumentViewOffers(owner, artifact.evaluationSlot?.offers),
+                  exports: this.getDocumentExportOffers(owner, artifact.evaluationSlot?.offers),
+                  issues: result.issues,
+                  sourceRevision: sourceRevisionForArtifact(artifact, described.sourceRevision),
+                },
+              }
+            : {
+                id: evaluationId,
+                intent,
+                transient,
+                result: {
+                  success: false,
+                  id: evaluationId,
+                  transient,
+                  issues: result.issues,
+                  sourceRevision: sourceRevisionForArtifact(artifact, described.sourceRevision),
+                },
+              };
+        }
+        if (document.watch) {
+          document.watchPaths = new Set([
+            ...Object.keys(evaluation.result.sourceRevision?.files ?? {}),
+            ...(evaluation.artifact?.identity.dependencies.flatMap((dependency) =>
+              dependency.type === 'file' ? [dependency.path] : [],
+            ) ?? []),
+          ]);
+          if (!(await this.reconcileObservedPaths())) {
+            this.abandonDocumentEvaluation(pendingCommitted);
+            if (this.shouldPublishDocumentEvaluation(document, controller, intent)) {
+              this.scheduleDocumentEvaluation(document, intent, transient);
+            }
+            return;
+          }
+        }
+        if (pendingCommitted) {
+          pendingCommitted.evaluation = evaluation;
+          pendingCommitted.completion.resolve(evaluation);
+          if (pendingCommitted.pins === 0) this.committedAdmissions.delete(pendingCommitted);
+        }
+        if (!this.shouldPublishDocumentEvaluation(document, controller, intent)) return;
+        document.current = evaluation;
+        if (!transient) {
+          document.committed = evaluation;
+          if (document.pendingCommitted === pendingCommitted) document.pendingCommitted = undefined;
+        }
+        this.onEvaluated?.({ documentId: document.id, intent, ...evaluation.result });
+        this.onDocumentStateChanged?.({ state: evaluation.result.success ? 'idle' : 'error' });
+        for (const view of document.views.values()) this.scheduleDocumentView(view, evaluation);
+        if (!document.watch) await this.reconcileObservedPaths();
+      } finally {
+        this.onProgress = previousProgress;
+      }
+    }, controller.signal);
+    void pending
+      .catch((error: unknown) => {
+        if (controller.signal.aborted && controller.signal.reason === abortReasonEnum.timeout) {
+          this.onDocumentError?.({
+            scope: 'operation',
+            documentId: document.id,
+            intent,
+            evaluationId,
+            operationId,
+            code: 'OPERATION_TIMEOUT',
+            phase: 'evaluate',
+            message: 'Document evaluation timed out.',
+          });
+        }
+        const issues = this.errorToRuntimeIssues(error);
+        const result: Evaluation = { success: false, id: evaluationId, transient, issues };
+        const evaluation: DocumentEvaluation = { id: evaluationId, intent, transient, result };
+        if (pendingCommitted) {
+          if (controller.signal.aborted || document.closed) pendingCommitted.completion.reject(error);
+          else {
+            pendingCommitted.evaluation = evaluation;
+            pendingCommitted.completion.resolve(evaluation);
+          }
+          if (pendingCommitted.pins === 0) this.committedAdmissions.delete(pendingCommitted);
+        }
+        if (!controller.signal.aborted && !document.closed && document.intent === intent) {
+          document.current = evaluation;
+          if (!transient) document.committed = evaluation;
+          this.onEvaluated?.({ documentId: document.id, intent, ...result });
+          this.onDocumentStateChanged?.({ state: 'error', detail: issueDetail(issues) });
+          for (const view of document.views.values()) this.scheduleDocumentView(view, evaluation);
+        }
+      })
+      .finally(() => {
+        if (this.documentOperations.get(operationId) === controller) this.documentOperations.delete(operationId);
+        if (this.documentOperations.get(admissionAlias) === controller) this.documentOperations.delete(admissionAlias);
+        document.operations.delete(controller);
+      });
+  }
+
+  /** Metadata for the selected kernel's offered views. */
+  protected getDocumentViewOffers(_owner: OperationOwner, _offers?: KernelOffers): readonly ViewOffer[] {
+    return [];
+  }
+
+  /** Metadata for the selected kernel's offered exports. */
+  protected getDocumentExportOffers(_owner: OperationOwner, _offers?: KernelOffers): readonly ExportOffer[] {
+    return [];
+  }
+
+  /** Select and validate an offered view, including its media type and instance. */
+  protected selectDocumentView(
+    _owner: OperationOwner,
+    _offers: KernelOffers | undefined,
+    _view: string | undefined,
+    _instance: string | null | undefined,
+  ):
+    | { success: true; selection: { view: string; mimeType: MediaType; instance?: string } }
+    | { success: false; issues: KernelIssue[] } {
+    return createKernelError([
+      { code: 'VIEW_UNAVAILABLE', message: 'No view is available.', type: 'kernel', severity: 'error' },
+    ]);
+  }
+
+  private scheduleDocumentView(view: ViewRecord, evaluation: DocumentEvaluation): void {
+    const { document } = view;
+    const requestId = view.requestId;
+    const operationId = `render:${view.id}:${evaluation.id}:${requestId}`;
+    const controller = new AbortController();
+    this.documentOperations.set(operationId, controller);
+    this.documentOperations.set(requestId, controller);
+    document.operations.add(controller);
+    view.operations.add(controller);
+    this.onRendering?.({ subscriptionId: view.id, requestId, evaluationId: evaluation.id, intent: evaluation.intent });
+    this.onDocumentProgressUpdate?.({
+      documentId: document.id,
+      intent: evaluation.intent,
+      evaluationId: evaluation.id,
+      operationId,
+      requestId,
+      phase: 'queued',
+    });
+    const pending = this.enqueueOperation(async () => {
+      if (
+        controller.signal.aborted ||
+        document.closed ||
+        document.current !== evaluation ||
+        view.requestId !== requestId
+      )
+        return;
+      const artifact = evaluation.artifact;
+      let result: Rendering;
+      if (!artifact || !evaluation.result.success) {
+        result = {
+          success: false,
+          requestId,
+          evaluationId: evaluation.id,
+          transient: evaluation.transient,
+          issues: [...evaluation.result.issues],
+          sourceRevision: evaluation.result.sourceRevision,
+        };
+      } else {
+        const selected = this.selectDocumentView(
+          artifact.owner,
+          artifact.evaluationSlot?.offers,
+          view.view,
+          view.instance,
+        );
+        if (!selected.success) {
+          result = {
+            success: false,
+            view: view.view,
+            requestId,
+            evaluationId: evaluation.id,
+            transient: evaluation.transient,
+            issues: selected.issues,
+            sourceRevision: evaluation.result.sourceRevision,
+          };
+        } else {
+          const selection = selected.selection;
+          const key = canonicalJson([selection, view.options, view.content]);
+          evaluation.projections ??= new Map();
+          let projected = evaluation.projections.get(key);
+          if (!projected) {
+            this.onDocumentProgressUpdate?.({
+              documentId: document.id,
+              intent: evaluation.intent,
+              evaluationId: evaluation.id,
+              operationId,
+              requestId,
+              phase: 'computingGeometry',
+            });
+            const identity = {
+              ...artifact.identity,
+              dependencyHash: await sha256String(canonicalJson([artifact.identity.dependencyHash, key])),
+            };
+            projected = await this.runMeshPhase({
+              owner: artifact.owner,
+              identity,
+              selection,
+              renderOptions: view.options,
+              requestedContent: view.content,
+              resolvedMiddleware: this.getMeshExecutionList(artifact.owner, view.content ?? {}),
+              createResult: { success: true, data: undefined, issues: [...evaluation.result.issues] },
+              renderArtifact: artifact,
+            });
+            if (projected.success) {
+              try {
+                projected = { ...projected, data: asKnownArtifact(projected.data) ?? projected.data };
+              } catch (error) {
+                projected = createKernelError([
+                  {
+                    code: selection.mimeType === 'image/svg+xml' ? 'SVG_DOCUMENT_INVALID' : 'GLTF_BYTES_INVALID',
+                    message: error instanceof Error ? error.message : String(error),
+                    type: 'runtime',
+                    severity: 'error',
+                  },
+                ]);
+              }
+            }
+            evaluation.projections.set(key, projected);
+          }
+          result = projected.success
+            ? {
+                success: true,
+                view: selection.view,
+                artifact: projected.data,
+                hash: await sha256String(canonicalJson([artifact.identity.dependencyHash, key])),
+                requestId,
+                evaluationId: evaluation.id,
+                instance: selection.instance,
+                transient: evaluation.transient,
+                issues: projected.issues,
+                sourceRevision: evaluation.result.sourceRevision,
+              }
+            : {
+                success: false,
+                view: selection.view,
+                requestId,
+                evaluationId: evaluation.id,
+                instance: selection.instance,
+                transient: evaluation.transient,
+                issues: projected.issues,
+                sourceRevision: evaluation.result.sourceRevision,
+              };
+        }
+      }
+      if (this.isCurrentViewRequest(view, evaluation, requestId, controller)) {
+        this.onRendered?.({ subscriptionId: view.id, intent: evaluation.intent, ...result });
+      }
+    }, controller.signal);
+    void pending
+      .catch((error: unknown) => {
+        if (controller.signal.aborted && controller.signal.reason === abortReasonEnum.timeout) {
+          this.onDocumentError?.({
+            scope: 'operation',
+            documentId: document.id,
+            intent: evaluation.intent,
+            evaluationId: evaluation.id,
+            subscriptionId: view.id,
+            requestId,
+            operationId,
+            code: 'OPERATION_TIMEOUT',
+            phase: 'render',
+            message: 'View rendering timed out.',
+          });
+        }
+        if (
+          !controller.signal.aborted &&
+          !document.closed &&
+          document.current === evaluation &&
+          view.requestId === requestId
+        ) {
+          const result: Rendering = {
+            success: false,
+            view: view.view,
+            requestId,
+            evaluationId: evaluation.id,
+            transient: evaluation.transient,
+            issues: this.errorToRuntimeIssues(error),
+            sourceRevision: evaluation.result.sourceRevision,
+          };
+          this.onRendered?.({ subscriptionId: view.id, intent: evaluation.intent, ...result });
+        }
+      })
+      .finally(() => {
+        if (this.documentOperations.get(operationId) === controller) this.documentOperations.delete(operationId);
+        if (this.documentOperations.get(requestId) === controller) this.documentOperations.delete(requestId);
+        document.operations.delete(controller);
+        view.operations.delete(controller);
+      });
+  }
+
+  private shouldContinueDocumentEvaluation(
+    document: DocumentRecord,
+    controller: AbortController,
+    intent: number,
+    pendingCommitted?: CommittedAdmission,
+  ): boolean {
+    return (
+      !controller.signal.aborted && !document.closed && (document.intent === intent || Boolean(pendingCommitted?.pins))
+    );
+  }
+
+  private abandonDocumentEvaluation(pendingCommitted?: CommittedAdmission): void {
+    if (!pendingCommitted) return;
+    pendingCommitted.completion.reject(new Error('Document evaluation was superseded or closed.'));
+    if (pendingCommitted.pins === 0) this.committedAdmissions.delete(pendingCommitted);
+  }
+
+  private shouldPublishDocumentEvaluation(
+    document: DocumentRecord,
+    controller: AbortController,
+    intent: number,
+  ): boolean {
+    return !controller.signal.aborted && !document.closed && document.intent === intent;
+  }
+
+  private isCurrentViewRequest(
+    view: ViewRecord,
+    evaluation: DocumentEvaluation,
+    requestId: string,
+    controller: AbortController,
+  ): boolean {
+    return (
+      !controller.signal.aborted &&
+      !view.document.closed &&
+      view.document.views.get(view.id) === view &&
+      view.document.current === evaluation &&
+      view.requestId === requestId
+    );
   }
 
   /**
@@ -1632,6 +2449,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       return this.cleanupPromise;
     }
     this.operationAdmissionOpen = false;
+    for (const document of this.documents.values()) {
+      document.closed = true;
+      for (const controller of document.operations) controller.abort();
+      document.pendingCommitted?.completion.reject(new Error(`Document ${document.id} closed.`));
+    }
     if (this.activeRenderRecord) {
       this.abortRenderRecord(this.activeRenderRecord, 'superseded');
     }
@@ -1648,6 +2470,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
   /** Clean up worker state, native handles, telemetry collector, and filesystem proxy. */
   private async performCleanup(): Promise<void> {
+    this.documents.clear();
+    this.documentViews.clear();
+    this.documentOperations.clear();
+    this.committedAdmissions.clear();
+    this.pinnedDocumentEvaluations.clear();
     this.watchUnsubscribe?.();
     this.watchUnsubscribe = undefined;
     this.assetHashCache.clear();
@@ -2140,7 +2967,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    */
   // oxlint-disable-next-line max-params -- mirrors the fixed `export` protocol call shape (format, options, content, signal).
   public async exportGeometry(
-    format: FileExtension,
+    format: string,
     options?: Record<string, unknown>,
     content?: RuntimeContentInput,
     signal?: AbortSignal,
@@ -2149,7 +2976,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   }
 
   private async exportGeometryInLane(
-    format: FileExtension,
+    format: string,
     options?: Record<string, unknown>,
     content?: RuntimeContentInput,
   ): Promise<ExportGeometryResult> {
@@ -2607,19 +3434,17 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       transcoder: transcoder.id,
     });
 
-    const parsedOptions = edge.optionsSchema?.safeParse(request.options);
-    if (parsedOptions && !parsedOptions.success) {
+    const admittedOptions = admitKernelOptions(
+      edge.optionsSchema,
+      request.options,
+      `Transcoder ${request.from} → ${request.to}`,
+      'TRANSCODER_OPTIONS_INVALID',
+    );
+    if (!admittedOptions.success) {
       span.end({ success: false });
-      return createKernelError(
-        parsedOptions.error.issues.map((issue) => ({
-          message: `Transcoder option validation failed (${request.from} → ${request.to}): ${issue.path.join('.')} — ${issue.message}`,
-          code: 'TRANSCODER_OPTIONS_INVALID',
-          type: 'runtime',
-          severity: 'error',
-        })),
-      );
+      return createKernelError(admittedOptions.issues);
     }
-    const options = parsedOptions ? (parsedOptions.data as Record<string, unknown>) : request.options;
+    const options = admittedOptions.options;
 
     let context: unknown;
     try {
@@ -2966,7 +3791,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       options?: Record<string, unknown>;
       content?: RuntimeContentInput;
       export?: {
-        format: FileExtension;
+        format: string;
         options: Record<string, unknown>;
         dependency: ExportDependency;
       };
@@ -3360,7 +4185,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     // evaluations materialize display geometry; export materializations do not.
     let displayResult = internalResult;
     if (options.display && internalResult.success && internalResult.data === undefined) {
-      displayResult = await this.runMeshPhase({
+      const projection = await this.runMeshPhase({
         owner,
         identity,
         selection: evaluated.success ? this.selectDefaultViewForOwner(owner, evaluated.data) : undefined,
@@ -3382,6 +4207,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           serializedNativeHandleSlot,
         },
       });
+      displayResult = projection.success
+        ? { success: true, data: toLegacyGeometry(projection.data), issues: projection.issues }
+        : projection;
     }
 
     if (options.publish) {
@@ -3542,6 +4370,12 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         this.retainedEvaluation?.id,
         this.latestEvaluationArtifact?.evaluationSlot?.id,
         this.currentPublishedRender?.evaluationSlot?.id,
+        ...[...this.documents.values()].flatMap((document) => [
+          document.current?.artifact?.evaluationSlot?.id,
+          document.committed?.artifact?.evaluationSlot?.id,
+        ]),
+        ...[...this.committedAdmissions].map((admission) => admission.evaluation?.artifact?.evaluationSlot?.id),
+        ...[...this.pinnedDocumentEvaluations.keys()].map((evaluation) => evaluation.artifact?.evaluationSlot?.id),
       ].filter((id): id is number => id !== undefined),
     );
 
@@ -4177,7 +5011,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     resolvedMiddleware: ResolvedMiddleware[];
     createResult: Extract<CreateGeometryResult, { success: true }>;
     renderArtifact: MaterializedRender;
-  }): Promise<MeshGeometryResult> {
+  }): Promise<RenderResult> {
     const {
       owner,
       identity,
@@ -4201,7 +5035,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       ]);
     }
 
-    const selectedKeys = new Set(this.getNativeRenderContentKeys(owner));
+    const selectedKeys = new Set(this.getNativeRenderContentKeys(owner, selection.view));
     for (const { enabled, middleware } of resolvedMiddleware) {
       if (enabled) {
         for (const key of middleware.content?.views?.[selection.mimeType] ?? []) {
@@ -4250,7 +5084,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           this.withProviderRuntimeContent(
             { ...handlerInput, nativeHandle: handle.handle },
             selectedContent,
-            this.getNativeRenderContentKeys(owner),
+            this.getNativeRenderContentKeys(owner, selection.view),
           ),
           runtime,
           renderArtifact.evaluationSlot ??
@@ -4262,7 +5096,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         (resolved) =>
           resolved.enabled &&
           resolved.middleware.wrapRender &&
-          this.middlewareRunsForRender(resolved, owner, selectedContent),
+          this.middlewareRunsForRender(resolved, owner, selection, selectedContent),
       );
 
       const { tracer } = this;
@@ -4354,11 +5188,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       // Compose the display result: mesh-phase artifact plus create-phase warnings.
       // The durable handle snapshot stays in `serializedNativeHandleSlot`, which the
       // export path reads; a display result never carries it.
-      return {
-        success: true,
-        data: toLegacyGeometry(meshResult.data),
-        issues: [...createResult.issues, ...meshResult.issues],
-      };
+      return { ...meshResult, issues: [...createResult.issues, ...meshResult.issues] };
     } finally {
       meshSpan.end();
     }
@@ -4375,7 +5205,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     };
   }
 
-  private async writeFilesAndInvalidate(stage: Record<string, Uint8Array<ArrayBuffer>>): Promise<void> {
+  private async writeFilesAndInvalidate(
+    stage: Record<string, Uint8Array<ArrayBuffer>>,
+    sourceDocumentId?: string,
+  ): Promise<void> {
     const entries = Object.entries(stage).map(([path, bytes]) => [assertRootedPath(path), bytes] as const);
     if (new Set(entries.map(([path]) => path)).size !== entries.length) {
       throw new TypeError('Staged runtime paths must be unique after canonicalization');
@@ -4414,6 +5247,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       }
       if (changedPaths.length > 0) {
         this._applyObservedRevisions(changedPaths, revisions);
+        this.scheduleWatchedDocuments(changedPaths, sourceDocumentId);
       }
     } finally {
       publication.resolve();
@@ -4444,17 +5278,20 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private createExportRequestPlan(
     owner: OperationOwner,
     request: {
-      readonly format: FileExtension;
+      readonly format: string;
       readonly options?: Record<string, unknown>;
       readonly content?: RuntimeContentInput;
+      readonly exportId?: string;
     },
   ): OwnerBoundExportPlan {
-    const { format, options, content } = request;
+    const { format, options, content, exportId } = request;
     const rawOptions = options ?? {};
     const ownerKernelId = owner.binding?.kernelId;
     const zodSchemas = ownerKernelId ? this.kernelExportZodSchemasMap.get(ownerKernelId) : undefined;
-    const formatZodSchema = zodSchemas?.[format];
-    if (ownerKernelId && this.kernelAmbiguousExportFormatsMap.get(ownerKernelId)?.has(format)) {
+    const selectedDeclaration = exportId ? this.getDocumentExportDeclaration(owner, exportId) : undefined;
+    const directDeclaration = selectedDeclaration?.extension === format ? selectedDeclaration : undefined;
+    const formatZodSchema = directDeclaration ? directDeclaration.schema : zodSchemas?.[format];
+    if (!directDeclaration && ownerKernelId && this.kernelAmbiguousExportFormatsMap.get(ownerKernelId)?.has(format)) {
       return {
         success: false,
         result: createKernelError([
@@ -4468,7 +5305,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       };
     }
 
-    if (zodSchemas && Object.hasOwn(zodSchemas, format)) {
+    if (directDeclaration !== undefined || (zodSchemas !== undefined && Object.hasOwn(zodSchemas, format))) {
       const admitted = admitKernelOptions(
         formatZodSchema,
         rawOptions,
@@ -4478,7 +5315,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       if (!admitted.success) {
         return { success: false, result: createKernelError(admitted.issues) };
       }
-      const contentResult = this.validateRuntimeContent('export', this.getExportContentKeys(owner, format), content);
+      const contentResult = this.validateRuntimeContent(
+        'export',
+        this.getExportContentKeys(owner, format, exportId),
+        content,
+      );
       if (!contentResult.success) {
         return { success: false, result: createKernelError(contentResult.issues) };
       }
@@ -4497,7 +5338,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         };
       }
       const validatedOptions: Record<string, unknown> = { ...parsedOptions };
-      const contentContributors = this.describeContentContributors(owner, format, contentResult.content);
+      const contentContributors = this.describeContentContributors(owner, format, contentResult.content, exportId);
       return {
         success: true,
         owner,
@@ -4506,6 +5347,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           kind: 'direct',
           kernelId: ownerKernelId,
           targetFormat: format,
+          ...(exportId ? { exportId } : {}),
           options: validatedOptions,
           content: contentResult.content,
         },
@@ -4518,6 +5360,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             kind: 'direct',
             kernelId: ownerKernelId,
             targetFormat: format,
+            ...(exportId ? { exportId } : {}),
             contentContributors,
           },
         },
@@ -4598,7 +5441,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
     let sourceOptions: Record<string, unknown> = {};
     let edgeOptions: Record<string, unknown> = {};
-    const sourceZodSchema = zodSchemas?.[transcoderRoute.sourceFormat];
+    const sourceZodSchema = selectedDeclaration
+      ? selectedDeclaration.schema
+      : zodSchemas?.[transcoderRoute.sourceFormat];
     const transcoder = this.loadedTranscoders.get(transcoderRoute.transcoderId!);
     const matchingEdge = transcoder?.edges.find(
       (edge) => edge.from === transcoderRoute.sourceFormat && edge.to === format,
@@ -4610,9 +5455,14 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         route.transcoderId === undefined,
     );
     const pinnedSourceKeys = Object.keys(matchingEdge?.sourceOptions ?? {});
-    const sourceOptionKeys = Object.keys(sourceRoute?.exportOptions.schema.properties ?? {}).filter(
-      (key) => !pinnedSourceKeys.includes(key),
-    );
+    const selectedSourceSchema = selectedDeclaration?.schema
+      ? this.deriveJsonSchema(selectedDeclaration.schema, `export:${ownerKernelId}:${exportId}`).schema
+      : undefined;
+    const sourceOptionKeys = Object.keys(
+      selectedDeclaration
+        ? (selectedSourceSchema?.properties ?? {})
+        : (sourceRoute?.exportOptions.schema.properties ?? {}),
+    ).filter((key) => !pinnedSourceKeys.includes(key));
     const edgeOptionKeys = [...allowedOptionKeys].filter((key) => !sourceOptionKeys.includes(key));
     if (sourceZodSchema) {
       const admittedSource = admitKernelOptions(
@@ -4630,35 +5480,27 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       sourceOptions = admittedSource.options;
     }
 
-    const sourceContentKeys = this.getExportContentKeys(owner, transcoderRoute.sourceFormat);
+    const sourceContentKeys = this.getExportContentKeys(owner, transcoderRoute.sourceFormat, exportId);
     const edgeContentKeys = new Set(matchingEdge?.content ?? []);
     const routeContentKeys = sourceContentKeys.filter((key) => edgeContentKeys.has(key));
     const contentResult = this.validateRuntimeContent('export', routeContentKeys, content);
     if (!contentResult.success) {
       return { success: false, result: createKernelError(contentResult.issues) };
     }
-    if (matchingEdge?.optionsSchema) {
-      const edgeParseResult = matchingEdge.optionsSchema.safeParse(pickRecordProperties(rawOptions, edgeOptionKeys));
-      if (!edgeParseResult.success) {
-        return {
-          success: false,
-          result: createKernelError(
-            edgeParseResult.error.issues.map((issue) => ({
-              message: `Transcoder edge option validation failed (${transcoderRoute.sourceFormat} → ${format}): ${issue.path.join('.')} — ${issue.message}`,
-              code: 'TRANSCODER_OPTIONS_INVALID',
-              type: 'runtime',
-              severity: 'error',
-            })),
-          ),
-        };
-      }
-      edgeOptions = edgeParseResult.data as Record<string, unknown>;
-    }
+    const admittedEdge = admitKernelOptions(
+      matchingEdge?.optionsSchema,
+      pickRecordProperties(rawOptions, edgeOptionKeys),
+      `Transcoder edge ${transcoderRoute.sourceFormat} → ${format}`,
+      'TRANSCODER_OPTIONS_INVALID',
+    );
+    if (!admittedEdge.success) return { success: false, result: createKernelError(admittedEdge.issues) };
+    edgeOptions = admittedEdge.options;
     sourceOptions = { ...sourceOptions, ...matchingEdge?.sourceOptions };
     const contentContributors = this.describeContentContributors(
       owner,
       transcoderRoute.sourceFormat,
       contentResult.content,
+      exportId,
     );
 
     return {
@@ -4670,6 +5512,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         kernelId: transcoderRoute.kernelId,
         sourceFormat: transcoderRoute.sourceFormat,
         targetFormat: transcoderRoute.targetFormat,
+        ...(exportId ? { exportId } : {}),
         transcoderId: transcoderRoute.transcoderId!,
         sourceOptions,
         edgeOptions,
@@ -4685,6 +5528,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           kernelId: transcoderRoute.kernelId,
           sourceFormat: transcoderRoute.sourceFormat,
           targetFormat: transcoderRoute.targetFormat,
+          ...(exportId ? { exportId } : {}),
           transcoderId: transcoderRoute.transcoderId,
           transcoderVersion: transcoder?.definition.version,
           transcoderOptions: transcoder?.options,
@@ -4701,6 +5545,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     owner: OperationOwner;
     runtime: KernelRuntime;
     renderArtifact: MaterializedRender;
+    pinnedSourceRevision?: SourceRevision;
   }): Promise<{ success: true; handle: unknown } | { success: false; result: ExportGeometryResult }> {
     const { owner, runtime, renderArtifact } = options;
     const { identity } = renderArtifact;
@@ -4727,6 +5572,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       }
     }
 
+    if (options.pinnedSourceRevision && !(await this.pinnedSourceStillMatches(options.pinnedSourceRevision))) {
+      return { success: false, result: this.sourceSnapshotChangedResult() };
+    }
     const reheatedSlot = await this.reheatNativeHandleForOwner(owner, renderArtifact, runtime);
     if (this.isLiveNativeHandleSlotUsableForOwner(reheatedSlot, owner)) {
       return { success: true, handle: reheatedSlot.handle };
@@ -4893,6 +5741,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     renderArtifact?: MaterializedRender;
     activeMiddleware: ResolvedMiddleware[];
     onCacheMiss?: (input: MiddlewareExportGeometryRequest) => Promise<ExportGeometryResult>;
+    pinnedSourceRevision?: SourceRevision;
   }): Promise<ExportGeometryResult> {
     if (!options.renderIdentity) {
       return this.createExportRenderIdentityMissingResult();
@@ -4938,11 +5787,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const kernelId = options.plan.owner.binding?.kernelId;
     const declared =
       kernelId && options.plan.route.kind === 'direct'
-        ? this.kernelExportMetadataMap.get(kernelId)?.[targetFormat]
+        ? options.plan.route.exportId
+          ? this.getDocumentExportDeclaration(options.plan.owner, options.plan.route.exportId)
+          : this.kernelExportMetadataMap.get(kernelId)?.[targetFormat]
         : undefined;
     const writeRequest: WriteRequest = {
-      exportId: declared?.id ?? targetFormat,
-      mimeType: declared?.mimeType ?? mimeTypes[targetFormat],
+      exportId: options.plan.route.exportId ?? (declared && 'id' in declared ? declared.id : targetFormat),
+      mimeType: declared?.mimeType ?? 'application/octet-stream',
       extension: targetFormat,
       options: options.plan.input.options,
     };
@@ -4952,7 +5803,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         if (!renderArtifact) {
           return this.createExportRenderIdentityMissingResult();
         }
-        return this.executeExportRequest({ ...options.plan, input: handlerInput }, renderArtifact);
+        return this.executeExportRequest(
+          { ...options.plan, input: handlerInput },
+          renderArtifact,
+          options.pinnedSourceRevision,
+        );
       });
 
     const { tracer } = this;
@@ -5043,6 +5898,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private async executeExportRequest(
     plan: Extract<OwnerBoundExportPlan, { success: true }>,
     renderArtifact: MaterializedRender,
+    pinnedSourceRevision?: SourceRevision,
   ): Promise<ExportGeometryResult> {
     const exportMaterialization =
       plan.route.kind === 'direct'
@@ -5059,6 +5915,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       return createKernelError(desiredNativeHandleKey.issues);
     }
     if (!this.artifactMatchesNativeBuild(renderArtifact, plan.owner, desiredNativeHandleKey.key)) {
+      if (pinnedSourceRevision && !(await this.pinnedSourceStillMatches(pinnedSourceRevision))) {
+        return this.sourceSnapshotChangedResult();
+      }
       const parametersResult = await this.getParametersInLane(renderArtifact.identity.file, { owner: plan.owner });
       if (!parametersResult.success) {
         return parametersResult;
@@ -5099,6 +5958,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       plan,
       runtime,
       renderArtifact,
+      pinnedSourceRevision,
     });
     if (!nativeInput.success) {
       return nativeInput.result;
@@ -5119,12 +5979,14 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     plan: Extract<OwnerBoundExportPlan, { success: true }>;
     runtime: KernelRuntime;
     renderArtifact: MaterializedRender;
+    pinnedSourceRevision?: SourceRevision;
   }): Promise<{ success: true; input: KernelExportGeometryInput } | { success: false; result: ExportGeometryResult }> {
     const { plan, runtime, renderArtifact } = options;
     const nativeHandle = await this.materializeNativeHandleForOwner({
       owner: plan.owner,
       runtime,
       renderArtifact,
+      pinnedSourceRevision: options.pinnedSourceRevision,
     });
     if (!nativeHandle.success) {
       return nativeHandle;
@@ -5683,6 +6545,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       (this.activeRenderRecord === undefined && this.shouldScheduleExactPreview(paths)
         ? this.createAutonomousPreviewRecord()
         : undefined);
+    this.scheduleWatchedDocuments(paths);
     if (preview === undefined || preview !== this.activeRenderRecord || !this.currentFile) {
       return;
     }
@@ -5699,6 +6562,21 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     this.scheduleRender(renderDebounce, preview);
   }
 
+  private scheduleWatchedDocuments(paths: readonly string[], sourceDocumentId?: string): void {
+    for (const document of this.documents.values()) {
+      if (
+        document.id === sourceDocumentId ||
+        !document.watch ||
+        document.closed ||
+        !paths.some((path) => document.watchPaths.has(path))
+      )
+        continue;
+      document.parameters = { ...document.committedParameters };
+      document.evaluateOptions = { ...document.committedEvaluateOptions };
+      this.scheduleDocumentEvaluation(document, document.intent, false);
+    }
+  }
+
   /**
    * Derive the full set of watched dependencies from all active caches
    * and update the filesystem watch subscription.
@@ -5706,6 +6584,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private async reconcileObservedPaths(candidate?: typeof this.previewWatchCandidate): Promise<boolean> {
     const previewPaths = candidate?.paths ?? this.currentPreviewWatchPaths;
     const allDeps = new Map(previewPaths);
+    for (const document of this.documents.values()) {
+      if (document.watch && !document.closed) {
+        for (const path of document.watchPaths) allDeps.set(path, fileChangeDebounce);
+      }
+    }
     for (const result of this.bundleResultCache.values()) {
       for (const dep of result.dependencies) {
         allDeps.set(assertRootedPath(dep), fileChangeDebounce);
@@ -5886,7 +6769,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   }
 
   /** Derive JSON Schema and defaults from a Zod schema. */
-  private deriveJsonSchema(
+  protected deriveJsonSchema(
     zodSchema: z.ZodType,
     label: string,
   ): { schema: JSONSchema7; defaults: Record<string, unknown> } {
@@ -5978,7 +6861,18 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           }
 
           const sourceSchemas = omitJsonSchemaProperties(cap, Object.keys(edge.sourceOptions ?? {}));
-          const { schema, defaults } = mergeJsonSchemas(sourceSchemas, edgeSchemas, {
+          const sourceKeys = new Set(Object.keys(collectJsonSchemaProperties(sourceSchemas.schema)));
+          const overlap = Object.keys(collectJsonSchemaProperties(edgeSchemas.schema)).filter((key) =>
+            sourceKeys.has(key),
+          );
+          const unreachableRequired = overlap.filter((key) => edgeSchemas.schema.required?.includes(key));
+          if (unreachableRequired.length > 0) {
+            throw new Error(
+              `Transcoder ${transcoder.id} requires source-owned export options ${unreachableRequired.join(', ')} on ${edge.from} → ${edge.to}.`,
+            );
+          }
+          const publicEdgeSchemas = omitJsonSchemaProperties(edgeSchemas, overlap);
+          const { schema, defaults } = mergeJsonSchemas(sourceSchemas, publicEdgeSchemas, {
             a: `${cap.kernelId}:${edge.from}`,
             b: `${transcoder.id}:${edge.from}->${edge.to}`,
           });
@@ -6111,9 +7005,14 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       return this.onExportGeometryForOwner(
         plan.owner,
         this.withProviderRuntimeContent(
-          { ...this.withoutRuntimeContent(input), format: plan.route.targetFormat, options: input.options },
+          {
+            ...this.withoutRuntimeContent(input),
+            format: plan.route.targetFormat,
+            options: input.options,
+            ...(plan.route.exportId ? { exportId: plan.route.exportId } : {}),
+          },
           plan.route.content,
-          this.getNativeExportContentKeys(plan.owner, plan.route.targetFormat),
+          this.getNativeExportContentKeys(plan.owner, plan.route.targetFormat, plan.route.exportId),
         ),
         runtime,
         evaluationSlot,
@@ -6139,15 +7038,18 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       ]);
     }
 
-    const sourceInput: KernelExportGeometryInput = {
+    const sourceInput: KernelExportGeometryInput & { exportId?: string } = {
       ...this.withoutRuntimeContent(input),
       format: route.sourceFormat,
       options: route.sourceOptions,
+      ...(route.exportId ? { exportId: route.exportId } : {}),
     };
-    const sourceMetadata = this.kernelExportMetadataMap.get(route.kernelId)?.[route.sourceFormat];
+    const sourceMetadata = route.exportId
+      ? this.getDocumentExportDeclaration(plan.owner, route.exportId)
+      : this.kernelExportMetadataMap.get(route.kernelId)?.[route.sourceFormat];
     const sourceWriteRequest: WriteRequest = {
-      exportId: sourceMetadata?.id ?? route.sourceFormat,
-      mimeType: sourceMetadata?.mimeType ?? mimeTypes[route.sourceFormat],
+      exportId: route.exportId ?? (sourceMetadata && 'id' in sourceMetadata ? sourceMetadata.id : route.sourceFormat),
+      mimeType: sourceMetadata?.mimeType ?? 'application/octet-stream',
       extension: route.sourceFormat,
       options: route.sourceOptions,
     };
@@ -6172,7 +7074,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         this.withProviderRuntimeContent(
           { ...sourceInput, options: handlerInput.options },
           route.content,
-          this.getNativeExportContentKeys(plan.owner, route.sourceFormat),
+          this.getNativeExportContentKeys(plan.owner, route.sourceFormat, route.exportId),
         ),
         runtime,
         evaluationSlot,
@@ -7198,15 +8100,16 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     return { success: true, options: renderOptions ?? {} };
   }
 
-  private getNativeRenderContentKeys(owner: OperationOwner): readonly RuntimeContentKey[] {
+  protected getNativeRenderContentKeys(owner: OperationOwner, _view?: string): readonly RuntimeContentKey[] {
     return owner.binding?.kernelId ? (this.kernelRenderContentMap.get(owner.binding.kernelId) ?? []) : [];
   }
 
   private getMiddlewareRenderContentKeys(
     middleware: RuntimeMiddlewareDefinition,
     kernelId: string | undefined,
+    selectedMimeType?: MediaType,
   ): readonly RuntimeContentKey[] {
-    const mimeType = kernelId ? this.kernelRenderMimeTypeMap.get(kernelId) : undefined;
+    const mimeType = selectedMimeType ?? (kernelId ? this.kernelRenderMimeTypeMap.get(kernelId) : undefined);
     return mimeType ? (middleware.content?.views?.[mimeType] ?? []) : [];
   }
 
@@ -7226,12 +8129,17 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     return [...keys];
   }
 
-  private getNativeExportContentKeys(owner: OperationOwner, format: FileExtension): readonly RuntimeContentKey[] {
+  private getNativeExportContentKeys(
+    owner: OperationOwner,
+    format: string,
+    exportId?: string,
+  ): readonly RuntimeContentKey[] {
+    if (exportId) return this.getDocumentExportDeclaration(owner, exportId)?.content ?? [];
     return owner.binding?.kernelId ? (this.kernelExportContentMap.get(owner.binding.kernelId)?.[format] ?? []) : [];
   }
 
-  private getExportContentKeys(owner: OperationOwner, format: FileExtension): readonly RuntimeContentKey[] {
-    const keys = new Set(this.getNativeExportContentKeys(owner, format));
+  private getExportContentKeys(owner: OperationOwner, format: string, exportId?: string): readonly RuntimeContentKey[] {
+    const keys = new Set(this.getNativeExportContentKeys(owner, format, exportId));
     for (const { enabled, middleware } of this.getMiddleware()) {
       if (enabled) {
         for (const key of middleware.content?.exports?.[format] ?? []) {
@@ -7324,13 +8232,18 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private middlewareRunsForRender(
     resolved: ResolvedMiddleware,
     owner: OperationOwner,
+    selection: { view: string; mimeType: MediaType },
     content: RuntimeContentInput,
   ): boolean {
     if (!resolved.middleware.content?.views) {
       return true;
     }
-    const declared = this.getMiddlewareRenderContentKeys(resolved.middleware, owner.binding?.kernelId);
-    const native = new Set(this.getNativeRenderContentKeys(owner));
+    const declared = this.getMiddlewareRenderContentKeys(
+      resolved.middleware,
+      owner.binding?.kernelId,
+      selection.mimeType,
+    );
+    const native = new Set(this.getNativeRenderContentKeys(owner, selection.view));
     return declared.some((key) => content[key] === true && !native.has(key));
   }
 
@@ -7346,7 +8259,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       return false;
     }
     const declared = declarations[plan.route.targetFormat] ?? [];
-    const native = new Set(this.getNativeExportContentKeys(plan.owner, plan.route.targetFormat));
+    const native = new Set(this.getNativeExportContentKeys(plan.owner, plan.route.targetFormat, plan.route.exportId));
     return declared.some((key) => plan.route.content[key] === true && !native.has(key));
   }
 
@@ -7354,15 +8267,16 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     owner: OperationOwner,
     route: Extract<OwnerBoundExportRoute, { kind: 'transcoded' }>,
   ): ResolvedMiddleware[] {
-    return this.getContentContributors(owner, route.sourceFormat, route.content);
+    return this.getContentContributors(owner, route.sourceFormat, route.content, route.exportId);
   }
 
   private getContentContributors(
     owner: OperationOwner,
-    format: FileExtension,
+    format: string,
     content: RuntimeContentInput,
+    exportId?: string,
   ): ResolvedMiddleware[] {
-    const native = new Set(this.getNativeExportContentKeys(owner, format));
+    const native = new Set(this.getNativeExportContentKeys(owner, format, exportId));
     return this.getMiddleware().filter(({ enabled, middleware }) => {
       if (!enabled || !middleware.wrapWrite) {
         return false;
@@ -7373,11 +8287,12 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
   private describeContentContributors(
     owner: OperationOwner,
-    format: FileExtension,
+    format: string,
     content: RuntimeContentInput,
+    exportId?: string,
   ): NonNullable<NonNullable<ExportDependency['route']>['contentContributors']> {
     const allMiddleware = this.getMiddleware();
-    return this.getContentContributors(owner, format, content).map((resolved) => ({
+    return this.getContentContributors(owner, format, content, exportId).map((resolved) => ({
       id: resolved.id,
       version: resolved.middleware.version,
       index: allMiddleware.indexOf(resolved),

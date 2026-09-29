@@ -12,7 +12,7 @@
  */
 
 import { z } from 'zod';
-import type { FileExtension, LogLevel, GeometryResponse, FileStatEntry } from '@taucad/types';
+import type { LogLevel, GeometryResponse, FileStatEntry } from '@taucad/types';
 import type { FileSystemProvider, WatchEvent, WatchRequest } from '@taucad/filesystem';
 import type { KernelComputeCapability } from '#types/runtime-compute.types.js';
 import type { ExportGeometryResult, GetParameterDeclarationsResult, KernelIssue } from '#types/runtime.types.js';
@@ -287,7 +287,7 @@ export type ExportGeometryRequest<
   ExportFormats extends KernelExportFormats = {},
 > = [keyof ExportFormats] extends [never]
   ? {
-      format: FileExtension;
+      format: string;
       /** Export options (untyped fallback). */
       options: Record<string, unknown>;
     }

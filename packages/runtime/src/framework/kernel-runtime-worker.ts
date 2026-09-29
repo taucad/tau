@@ -40,6 +40,7 @@ import type {
   KernelViewDeclarations,
   ViewInstance,
 } from '#types/runtime-kernel-v2.types.js';
+import type { ExportOffer, ViewOffer } from '#client/runtime-document.types.js';
 import type { GetDependenciesResult } from '#types/runtime-dependency.types.js';
 import type { RuntimeSpanTracer } from '#types/runtime-tracer.types.js';
 import { KernelWorker } from '#framework/kernel-worker.js';
@@ -50,7 +51,7 @@ import { isWebAssemblyException } from '#framework/wasm-exception.js';
 import { createKernelError } from '#kernels/kernel-helpers.js';
 import { admitKernelOptions } from '#framework/kernel-option-admission.js';
 import type { KernelPlugin } from '#plugins/plugin-types.js';
-import type { RuntimeContentInput } from '#types/runtime-content.types.js';
+import type { RuntimeContentInput, RuntimeContentKey } from '#types/runtime-content.types.js';
 import type { RenderRequest } from '#types/runtime-middleware-v2.types.js';
 import type { AnyRuntimeDefinition } from '#worker/runtime-definition.js';
 import { resolveRuntimeDefinition } from '#worker/runtime-definition.js';
@@ -391,6 +392,17 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
           seen.add(id);
         }
       }
+      const firstView = viewIds[0];
+      if (firstView) {
+        const defaultView = kernel.definition.views[firstView];
+        const defaultOptions = admitKernelOptions(
+          defaultView?.optionsSchema,
+          {},
+          `Kernel ${kernel.entry.id} default view ${firstView}`,
+          'VIEW_OPTIONS_INVALID',
+        );
+        if (!defaultOptions.success) return createKernelError(defaultOptions.issues);
+      }
       const instances: Record<string, readonly ViewInstance[]> = {};
       for (const [id, value] of Object.entries(output.instances ?? {})) {
         const candidate: unknown = value;
@@ -493,6 +505,160 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
 
   protected override kernelHasMeshPhaseForOwner(owner: OperationOwner): boolean {
     return this.getKernelForOwner(owner)?.definition.render !== undefined;
+  }
+
+  protected override getDocumentViewOffers(owner: OperationOwner, offers?: KernelOffers): readonly ViewOffer[] {
+    const kernel = this.getKernelForOwner(owner);
+    if (!kernel) return [];
+    return (offers?.views ?? Object.keys(kernel.definition.views)).map((id) => {
+      const declaration = kernel.definition.views[id]!;
+      return {
+        id,
+        title: declaration.title,
+        mimeType: declaration.mimeType,
+        ...(offers?.instances?.[id] ? { instances: offers.instances[id] } : {}),
+        ...(declaration.optionsSchema
+          ? { options: this.deriveJsonSchema(declaration.optionsSchema, `view:${kernel.entry.id}:${id}`) }
+          : {}),
+      };
+    });
+  }
+
+  protected override getDocumentExportOffers(owner: OperationOwner, offers?: KernelOffers): readonly ExportOffer[] {
+    const kernel = this.getKernelForOwner(owner);
+    if (!kernel) return [];
+    return (offers?.exports ?? Object.keys(kernel.definition.exports)).map((id) => {
+      const declaration = kernel.definition.exports[id]!;
+      return {
+        id,
+        title: declaration.title,
+        mimeType: declaration.mimeType,
+        extension: declaration.extension,
+        ...(declaration.optionsSchema
+          ? { options: this.deriveJsonSchema(declaration.optionsSchema, `export:${kernel.entry.id}:${id}`) }
+          : {}),
+      };
+    });
+  }
+
+  protected override resolveDocumentExportTarget(
+    owner: OperationOwner,
+    offers: KernelOffers | undefined,
+    target: string,
+  ): { success: true; format: string; exportId: string } | { success: false; issues: KernelIssue[] } {
+    const kernel = this.getKernelForOwner(owner);
+    if (kernel && Object.hasOwn(kernel.definition.exports, target)) {
+      const offered = offers?.exports ?? Object.keys(kernel.definition.exports);
+      if (!offered.includes(target)) {
+        return createKernelError([
+          {
+            code: 'EXPORT_UNKNOWN',
+            message: `Export ${target} is unavailable for this evaluation.`,
+            type: 'kernel',
+            severity: 'error',
+          },
+        ]);
+      }
+      return { success: true, format: kernel.definition.exports[target]!.extension, exportId: target };
+    }
+    const exports = this.getDocumentExportOffers(owner, offers);
+    const direct = exports.filter((item) => item.extension === target);
+    if (direct.length === 1) return { success: true, format: target, exportId: direct[0]!.id };
+    if (direct.length > 1) {
+      return createKernelError([
+        {
+          code: 'EXPORT_AMBIGUOUS',
+          message: `Export extension ${target} matches ${direct.map((item) => item.id).join(', ')}; select an export ID.`,
+          type: 'kernel',
+          severity: 'error',
+        },
+      ]);
+    }
+    const route = this.capabilitiesManifest.routes.find(
+      (item) => item.kernelId === owner.binding?.kernelId && item.targetFormat === target && item.transcoderId,
+    );
+    if (route) {
+      const source = exports.filter((item) => item.extension === route.sourceFormat);
+      if (source.length === 1) return { success: true, format: target, exportId: source[0]!.id };
+      if (source.length > 1) {
+        return createKernelError([
+          {
+            code: 'EXPORT_AMBIGUOUS',
+            message: `Route ${target} has multiple source exports for ${route.sourceFormat}: ${source.map((item) => item.id).join(', ')}; export an ID, then transcode.`,
+            type: 'kernel',
+            severity: 'error',
+          },
+        ]);
+      }
+    }
+    return createKernelError([
+      {
+        code: 'EXPORT_UNKNOWN',
+        message: `Unknown export ${target}. Available: ${exports.map((item) => `${item.id} (${item.extension})`).join(', ') || 'none'}.`,
+        type: 'kernel',
+        severity: 'error',
+      },
+    ]);
+  }
+
+  protected override getDocumentExportDeclaration(
+    owner: OperationOwner,
+    exportId: string,
+  ): { extension: string; mimeType: string; schema?: z.ZodType; content: readonly RuntimeContentKey[] } | undefined {
+    const declaration = this.getKernelForOwner(owner)?.definition.exports[exportId];
+    return declaration
+      ? {
+          extension: declaration.extension,
+          mimeType: declaration.mimeType,
+          schema: declaration.optionsSchema,
+          content: declaration.content ?? [],
+        }
+      : undefined;
+  }
+
+  protected override getNativeRenderContentKeys(owner: OperationOwner, view?: string): readonly RuntimeContentKey[] {
+    if (!view) return super.getNativeRenderContentKeys(owner);
+    return this.getKernelForOwner(owner)?.definition.views[view]?.content ?? [];
+  }
+
+  protected override selectDocumentView(
+    owner: OperationOwner,
+    offers: KernelOffers | undefined,
+    requested: string | undefined,
+    instance: string | null | undefined,
+  ):
+    | { success: true; selection: { view: string; mimeType: Artifact['mimeType']; instance?: string } }
+    | { success: false; issues: KernelIssue[] } {
+    const kernel = this.getKernelForOwner(owner);
+    const offered = offers?.views ?? Object.keys(kernel?.definition.views ?? {});
+    const view = requested ?? offered[0];
+    const declaration = view ? kernel?.definition.views[view] : undefined;
+    if (!view || !declaration || !offered.includes(view)) {
+      return createKernelError([
+        {
+          message: view ? `View ${view} is unavailable for this evaluation.` : 'This evaluation offers no views.',
+          code: view && !declaration ? 'VIEW_UNKNOWN' : 'VIEW_UNAVAILABLE',
+          type: 'kernel',
+          severity: 'error',
+        },
+      ]);
+    }
+    const instances = offers?.instances?.[view];
+    const selectedInstance = instance ?? instances?.[0]?.id;
+    if (selectedInstance && (!instances || !instances.some((item) => item.id === selectedInstance))) {
+      return createKernelError([
+        {
+          message: `View ${view} does not offer instance ${selectedInstance}.`,
+          code: 'VIEW_UNAVAILABLE',
+          type: 'kernel',
+          severity: 'error',
+        },
+      ]);
+    }
+    return {
+      success: true,
+      selection: { view, mimeType: declaration.mimeType, ...(selectedInstance ? { instance: selectedInstance } : {}) },
+    };
   }
 
   protected override selectDefaultViewForOwner(
@@ -636,7 +802,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
   // oxlint-disable-next-line max-params -- Implements the base owner-bound hook including its evaluation slot.
   protected override async onExportGeometryForOwner(
     owner: OperationOwner,
-    input: ExportGeometryInput,
+    input: ExportGeometryInput & { exportId?: string },
     runtime: KernelRuntime,
     slot?: EvaluationSlot,
   ): Promise<ExportGeometryResult> {
@@ -776,14 +942,18 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
   // oxlint-disable-next-line max-params -- The optional evaluation slot guards selected offers at the write boundary.
   private async writeForKernel(
     kernel: LoadedKernel,
-    input: ExportGeometryInput & { content?: RuntimeContentInput },
+    input: ExportGeometryInput & { content?: RuntimeContentInput; exportId?: string },
     runtime: KernelRuntime,
     slot?: EvaluationSlot,
   ): Promise<ExportGeometryResult> {
     const declared = Object.entries(kernel.definition.exports).filter(
       ([, declaration]) => declaration.extension === input.format,
     );
-    const matching = declared.filter(([id]) => slot?.offers?.exports === undefined || slot.offers.exports.includes(id));
+    const matching = declared.filter(
+      ([id]) =>
+        (input.exportId === undefined || id === input.exportId) &&
+        (slot?.offers?.exports === undefined || slot.offers.exports.includes(id)),
+    );
     const selected = matching[0];
     if (matching.length > 1) {
       return createKernelError([

@@ -10,7 +10,7 @@
 
 import { assertType, describe, it } from 'vitest';
 import type { RuntimeTransportHost } from '#transport/runtime-transport.types.js';
-import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
+import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
 import { nodeWorkerHost } from '#transport/node-worker-host.js';
 import { nodeWorkerTransport } from '#transport/node-worker-transport.js';
 import type { KernelWorker } from '#framework/kernel-worker.js';
@@ -20,7 +20,7 @@ describe('nodeWorkerHost — type conformance (R2)', () => {
     const stubWorker = {} as unknown as KernelWorker;
     const direct = nodeWorkerHost({ worker: stubWorker });
     const second = nodeWorkerHost({ worker: stubWorker });
-    assertType<RuntimeTransportHost<RuntimeProtocol, Readonly<Record<never, never>>, 'node-worker'>>(direct);
+    assertType<RuntimeTransportHost<RuntimeDocumentProtocol, Readonly<Record<never, never>>, 'node-worker'>>(direct);
     assertType<typeof direct>(second);
   });
 

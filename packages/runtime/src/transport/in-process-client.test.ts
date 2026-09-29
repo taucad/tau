@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { afterEach, expect, it, vi } from 'vitest';
 
-import { createRuntimeClient } from '#client/runtime-client-core.js';
+import { createRuntimeClient } from '#client/runtime-document-client-core.js';
 import { KernelRuntimeWorker } from '#framework/kernel-runtime-worker.js';
 import { fromMemoryFs } from '#filesystem/runtime-filesystem.js';
 import { inProcessTransport } from '#transport/in-process-transport.js';

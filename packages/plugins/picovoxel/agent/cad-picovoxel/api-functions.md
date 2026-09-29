@@ -8,10 +8,10 @@ declare function createPico(options?: CreatePicoOptions): Promise<Pico>;
 // Creates a single-threaded runtime
 declare function createPicoRuntime(options?: CreatePicoRuntimeOptions): Promise<PicoRuntime>;
 
-// SG15 — the empty-bounds sentinel the ABI structs use (`BBox3()` default
+// The empty-bounds sentinel the ABI structs use (`BBox3()` default
 declare function emptyBounds(): Bounds;
 
-// True for the SG15 sentinel (an empty mesh/field produced it)
+// True for the empty-bounds sentinel (an empty mesh/field produced it)
 declare function isEmptyBounds(bounds: Bounds): boolean;
 
 // Serialises indexed geometry to binary STL bytes (deindexed, as the format is)

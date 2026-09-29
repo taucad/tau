@@ -12,6 +12,7 @@ import { rpcName } from '@taucad/chat/constants';
 import type { RpcHandlerDependencies, RpcCallInput } from '#hooks/rpc-handlers.js';
 import { omittedSectionCutsNotice } from '#services/headless-capture.js';
 import type { SectionCut } from '#components/geometry/graphics/section-cuts.js';
+import { workbenchPaths, workbenchRecords } from '@taucad/workbench';
 
 type RpcDependencies = ChatRpc.RpcDependencies;
 type RpcFileSystem = ChatRpc.RpcFileSystem;
@@ -184,7 +185,14 @@ type MockTreeService = ReturnType<typeof createMockTreeService>;
 
 function createMockFileManager() {
   return {
-    readFile: vi.fn<(path: string) => Promise<Uint8Array<ArrayBuffer>>>(),
+    fileManagerRef: { getSnapshot: () => ({ context: { rootDirectory: '/projects/proj-test' } }) },
+    workbenchFiles: {
+      writeFileChecked: vi.fn<RpcHandlerDependencies['fileManager']['workbenchFiles']['writeFileChecked']>(),
+      deleteFileChecked: vi.fn<RpcHandlerDependencies['fileManager']['workbenchFiles']['deleteFileChecked']>(),
+    },
+    readFile: vi
+      .fn<(path: string) => Promise<Uint8Array<ArrayBuffer>>>()
+      .mockRejectedValue(new FileNotFoundError('missing', { path: workbenchPaths.entries })),
     writeFile: vi
       .fn<(path: string, data: Uint8Array<ArrayBuffer>, options: { source: string }) => Promise<void>>()
       .mockResolvedValue(undefined),
@@ -265,7 +273,6 @@ function buildDeps(overrides?: {
   fileManager?: ReturnType<typeof createMockFileManager>;
   fileTree?: Map<string, FileEntry>;
   projectRef?: ReturnType<typeof createMockProjectRef>;
-  editorRef?: RpcHandlerDependencies['editorRef'];
   headlessImageService?: RpcHandlerDependencies['headlessImageService'];
   treeService?: MockTreeService;
   createGeoSpecClient?: RpcHandlerDependencies['createGeoSpecClient'];
@@ -282,7 +289,6 @@ function buildDeps(overrides?: {
     chatId: 'chat_rpc_handlers_test_deps',
     fileManager: mockFm as RpcHandlerDependencies['fileManager'],
     projectRef: (overrides?.projectRef ?? createMockProjectRef()) as unknown as RpcHandlerDependencies['projectRef'],
-    editorRef: overrides?.editorRef,
     headlessImageService: overrides?.headlessImageService,
     createGeoSpecClient: overrides?.createGeoSpecClient,
   });
@@ -321,6 +327,44 @@ describe('rpc-handlers', () => {
       fileTree = new Map<string, FileEntry>();
       const deps = buildDeps({ fileManager: mockFm, fileTree });
       fileSystem = deps.fileSystem;
+    });
+
+    it('routes checked mutations through the owning live root', async () => {
+      mockFm.workbenchFiles.writeFileChecked.mockResolvedValue({ status: 'applied', content: new Uint8Array([1]) });
+      mockFm.workbenchFiles.deleteFileChecked.mockResolvedValue({ status: 'applied', content: new Uint8Array() });
+      await fileSystem.writeFileChecked({
+        path: 'views/front.json',
+        data: '{}',
+        preconditions: [{ path: 'views/front.json', expected: null }],
+      });
+      await fileSystem.deleteFileChecked({
+        path: 'views/front.json',
+        preconditions: [{ path: 'views/front.json', expected: '{}' }],
+      });
+      expect(mockFm.workbenchFiles.writeFileChecked).toHaveBeenCalledWith({
+        path: '/projects/proj-test/views/front.json',
+        data: '{}',
+        preconditions: [{ path: '/projects/proj-test/views/front.json', expected: null }],
+      });
+      expect(mockFm.workbenchFiles.deleteFileChecked).toHaveBeenCalledWith({
+        path: '/projects/proj-test/views/front.json',
+        preconditions: [{ path: '/projects/proj-test/views/front.json', expected: '{}' }],
+      });
+      await expect(
+        fileSystem.deleteFileChecked({ path: '../escape', preconditions: [{ path: '../escape', expected: null }] }),
+      ).rejects.toThrow();
+      expect(mockFm.workbenchFiles.deleteFileChecked).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects malformed UTF-8 record bytes with a typed error', async () => {
+      mockFm.readFile.mockResolvedValue(new Uint8Array([0xc3, 0x28]));
+      await expect(fileSystem.readFile('views/bad.json')).rejects.toMatchObject({ code: 'INVALID_TEXT_ENCODING' });
+    });
+
+    it('preserves a UTF-8 BOM in text read for checked record preconditions', async () => {
+      const content = '\uFEFF{"version":1}';
+      mockFm.readFile.mockResolvedValue(new TextEncoder().encode(content));
+      await expect(fileSystem.readFile('.tau/workbench/layout.json')).resolves.toBe(content);
     });
 
     // ----- readFile -----
@@ -1571,12 +1615,16 @@ describe('rpc-handlers', () => {
         projectRef.send.mockImplementation(() => {
           geometryUnits.set('main.scad', cadUnit);
         });
-        const editorRef = {
-          getSnapshot: () => ({ context: { unitSettings: { 'main.scad': { renderTimeout: 30_000 } } } }),
-        } as unknown as RpcHandlerDependencies['editorRef'];
+        const fileManager = createMockFileManager();
+        fileManager.readFile.mockImplementation(async (path) => {
+          expect(path).toBe(workbenchPaths.entries);
+          return new TextEncoder().encode(
+            workbenchRecords.entries.serialize({ version: 1, entries: { 'main.scad': { renderTimeout: 30_000 } } }),
+          );
+        });
         mockWaitFor.mockResolvedValue({ value: 'idle', context: { kernelIssues: new Map<string, unknown[]>() } });
 
-        const deps = buildDeps({ projectRef, editorRef });
+        const deps = buildDeps({ projectRef, fileManager });
         await deps.kernelClient.getKernelResult('main.scad');
 
         const claim = projectRef.send.mock.calls[0]?.[0] as unknown as {

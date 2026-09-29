@@ -45,9 +45,7 @@ export function ChatTurnHost(): ReactNode {
       try {
         if (
           gesture.kind === 'continue' &&
-          (projectedRun === undefined ||
-            (projectedRun.lifecycle !== 'paused' &&
-              !(projectedRun.lifecycle === 'failed' && isResumableRunFailure(projectedRun.failure))))
+          !(projectedRun?.lifecycle === 'failed' && isResumableRunFailure(projectedRun.failure))
         ) {
           throw new Error('This turn cannot be resumed. Choose Try again to replay it.');
         }

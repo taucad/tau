@@ -1037,15 +1037,13 @@ export const ConverterPanelBody = function ({
   downloadOnly = false,
   isShown = true,
 }: { readonly downloadOnly?: boolean; readonly isShown?: boolean } = {}): ReactElement {
-  const { geometryUnits, mainEntryPath, parameterService, projectRef, editorRef } = useProject();
+  const { geometryUnits, mainEntryPath, parameterService, projectRef, viewRecords, entriesRecord } = useProject();
   const fileManager = useFileManager();
   const projectName = useSelector(projectRef, (state) => state.context.project?.name) ?? 'model';
-  const viewSettings = useSelector(editorRef, (state) => state.context.viewSettings);
-  const unitSettings = useSelector(editorRef, (state) => state.context.unitSettings);
 
   const cuEntries = useMemo<GeometryUnitEntry[]>(() => {
-    return listGeometryEntryPaths(geometryUnits, viewSettings, mainEntryPath).map((entryPath) => ({ entryPath }));
-  }, [geometryUnits, viewSettings, mainEntryPath]);
+    return listGeometryEntryPaths(geometryUnits, viewRecords, mainEntryPath).map((entryPath) => ({ entryPath }));
+  }, [geometryUnits, viewRecords, mainEntryPath]);
 
   const [selectedEntryPath, setSelectedEntryPath] = useState(mainEntryPath);
 
@@ -1063,7 +1061,7 @@ export const ConverterPanelBody = function ({
     }
   }, [cuEntries, selectedEntryPath, mainEntryPath]);
 
-  const selectedRenderTimeout = unitSettings[selectedEntryPath]?.renderTimeout;
+  const selectedRenderTimeout = entriesRecord?.entries[selectedEntryPath]?.renderTimeout;
   useEffect(() => {
     if (!isShown || !selectedEntryPath) {
       return;

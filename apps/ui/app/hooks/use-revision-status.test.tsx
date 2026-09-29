@@ -429,6 +429,39 @@ describe('the page client of the worker revision root', () => {
     expect(client.status()).toBeUndefined();
   });
 
+  it('does not report a closed channel as a failed save', async () => {
+    const pendingSave = Promise.withResolvers<RevisionAnswer>();
+    const revision = vi.fn(
+      async (request: JsonValue): Promise<RevisionAnswer> =>
+        typeof request === 'object' && request !== null && 'command' in request && request['command'] === 'saveRevision'
+          ? pendingSave.promise
+          : Promise.resolve({ result: null, status: { projectId, branch: 'main' } }),
+    );
+    const channel = revisionChannel({
+      revision,
+      async *revisionEvents() {
+        yield* [];
+      },
+      close: vi.fn(),
+    });
+    const client = createHostRevisionClient({ projectId, connect: async () => channel });
+    const toasts: RevisionToast[] = [];
+    client.subscribeToasts((toast) => toasts.push(toast));
+
+    client.open();
+    await waitFor(() => {
+      expect(client.status()).toBeDefined();
+    });
+    client.send({ command: 'saveRevision' });
+    await expect.poll(() => revision.mock.calls.length).toBe(3);
+    client.close();
+    pendingSave.reject(new Error('Channel closed'));
+    await settle();
+
+    expect(toasts).toEqual([]);
+    expect(channel.close).toHaveBeenCalledOnce();
+  });
+
   it('replays a native chat projection to a later route subscriber', async () => {
     const channel = revisionChannel({
       revision: vi.fn(async (): Promise<RevisionAnswer> => ({ result: null, status: { projectId, branch: 'main' } })),

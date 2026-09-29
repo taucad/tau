@@ -24,7 +24,13 @@
  * @module
  */
 
-import type { CheckedFileWrite, CheckedFileWriteResult, FileStat, FileStatEntry } from '@taucad/types';
+import type {
+  CheckedFileWrite,
+  CheckedFileWriteResult,
+  FileWritePrecondition,
+  FileStat,
+  FileStatEntry,
+} from '@taucad/types';
 import { assertRootedPath, joinRelativePath, resolveAuthorityPath } from '@taucad/utils/path';
 import type {
   DirectoryEntry,
@@ -81,9 +87,14 @@ export type RootedPorcelain = {
  * Filesystem provider surface issued for one captured mount.
  * @public
  */
-export type RootedFileSystem = Omit<FileSystemProvider, 'writeFileChecked' | 'rmdir'> &
+export type RootedFileSystem = Omit<FileSystemProvider, 'writeFileChecked' | 'deleteFileChecked' | 'rmdir'> &
   Partial<RootedPorcelain> & {
     writeFileChecked(input: CheckedFileWrite): Promise<CheckedFileWriteResult>;
+    deleteFileChecked(input: {
+      path: string;
+      preconditions: readonly FileWritePrecondition[];
+      signal?: AbortSignal;
+    }): Promise<CheckedFileWriteResult>;
     /**
      * Remove one directory of this root, recursively when asked.
      *
@@ -301,6 +312,25 @@ export class RootedViews {
         path: target.authorityPath,
         resolution: target.resolution,
         data: input.data,
+        preconditions,
+        signal: input.signal,
+        context: mutationContext,
+      });
+    };
+    const deleteFileChecked = async (input: {
+      path: string;
+      preconditions: readonly FileWritePrecondition[];
+      signal?: AbortSignal;
+    }): Promise<CheckedFileWriteResult> => {
+      const target = resolveLocal(input.path);
+      assertMutableRoot(target.localPath);
+      const preconditions = input.preconditions.map((precondition) => {
+        const resolved = resolveLocal(precondition.path);
+        return { ...precondition, path: resolved.authorityPath, resolution: resolved.resolution };
+      });
+      return this._pipeline.deleteFileCheckedResolved({
+        path: target.authorityPath,
+        resolution: target.resolution,
         preconditions,
         signal: input.signal,
         context: mutationContext,
@@ -553,6 +583,7 @@ export class RootedViews {
       readFileStream,
       writeFile,
       writeFileChecked,
+      deleteFileChecked,
       appendFile,
       readdir,
       readdirWithStats,

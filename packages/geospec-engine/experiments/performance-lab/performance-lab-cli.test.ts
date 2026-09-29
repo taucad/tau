@@ -15,16 +15,17 @@ import {
   verifySourceAuthority,
   loadLegacyWithoutPersistence,
   summarizeLabCaseResults,
-} from '#bench/performance-lab-cli';
+} from '#experiments/performance-lab/performance-lab-cli.js';
+/* oxlint-disable no-restricted-imports -- Private lab test reads the frozen native catalog and source receipt. */
 import {
   performanceLabCases,
   performanceLabFixtures,
   performanceLabNativeQueries,
   performanceLabScaleCases,
   performanceLabScaleQueries,
-} from '#bench/performance-lab';
-// oxlint-disable-next-line no-restricted-imports -- Test-only current-source overlay inventory.
-import currentAuthority from './fixtures/performance-lab/current-source-authority-v5.json' with { type: 'json' };
+} from '../../../geospec-engine-native/bench/performance-lab.ts';
+import currentAuthority from '../../../geospec-engine-native/bench/fixtures/performance-lab/current-source-authority-v5.json' with { type: 'json' };
+/* oxlint-enable no-restricted-imports */
 
 void it('counts known differences separately and preserves unsupported, unverified and unexpected statuses', () => {
   const legacyCases = ['toHaveBoundingBox', 'toHaveCenterOfMass', 'toHaveCircularHole', 'toHaveChamferFeature'].map(
@@ -145,7 +146,7 @@ void it('plans the shared authored catalog and verifies a pinned ordinary input 
     options.modules.map(({ engine }) => engine),
     ['legacy-wasm', 'combined-wasm', 'native-desktop'],
   );
-  assert.equal(options.outputDir, resolve(import.meta.dirname, '../../../out/reports/benchmarks/performance-lab'));
+  assert.equal(options.outputDir, resolve(import.meta.dirname, '../../../../out/reports/benchmarks/performance-lab'));
   const ordinary = selectLabFixtures(false);
   const selected = ordinary.flatMap(({ cases }) => cases);
   const affected = selected.filter(({ id }) => currentAuthority.affectedCaseIds.includes(id));
@@ -235,7 +236,7 @@ void it('plans the shared authored catalog and verifies a pinned ordinary input 
   );
   const fixture = performanceLabFixtures.find(({ id }) => id === 'rational-plate');
   assert.ok(fixture);
-  const path = resolve(import.meta.dirname, '../../..', fixture.path);
+  const path = resolve(import.meta.dirname, '../../../..', fixture.path);
   const artifacts = await verifyLabArtifacts([{ path, sha256: fixture.sha256 }]);
   assert.deepStrictEqual(artifacts, [{ path, sha256: fixture.sha256, bytes: fixture.bytes }]);
 });

@@ -68,7 +68,19 @@ const requestReveal = (componentId: string): void => {
   });
 };
 vi.mock('#hooks/use-project.js', () => ({
-  useProject: () => ({ ...project, mainEntryPath: 'main.ts' }),
+  useProject: () => ({
+    ...project,
+    mainEntryPath: 'main.ts',
+    viewRecords: new Map(
+      Object.entries(
+        (
+          project.editorRef as
+            | { getSnapshot?: () => { context: { viewSettings: Record<string, { entryPath: string }> } } }
+            | undefined
+        )?.getSnapshot?.().context.viewSettings ?? {},
+      ),
+    ),
+  }),
 }));
 
 vi.mock('dockview-react', () => ({

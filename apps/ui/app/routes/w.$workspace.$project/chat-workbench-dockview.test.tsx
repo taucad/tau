@@ -142,6 +142,7 @@ vi.mock('#hooks/use-file-manager.js', () => ({
 const editorMachineSnapshot = {
   context: {
     openFiles: [] as Array<{ paneId: string; path: string; readOnly?: boolean }>,
+    fileSidebars: {} as Record<string, number>,
     panelState: { desktopLayout: { workbenchOpen: true } },
   },
   status: 'active',

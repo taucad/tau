@@ -72,6 +72,9 @@ import {
 } from '@taucad/ui/components/dropdown-menu';
 import { useProject } from '#hooks/use-project.js';
 import { mountFileOperationParticipants } from '#filesystem/file-operation-participants.js';
+import { useWorkbenchViewCommands } from '#workbench-records/view-actions.js';
+import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
+import type { ViewerNode } from '@taucad/workbench';
 import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
 import { HighlightText } from '#components/highlight-text.js';
 import {
@@ -379,7 +382,71 @@ export const ChatEditorFileTree = memo(function ({
   // It's necessary to opt out of React Compiler auto-memoization for this component due to:
   // https://headless-tree.lukasbach.com/guides/react-compiler/
   'use no memo'; // Opt out of React Compiler memoization
-  const { projectRef, editorRef, parameterService } = useProject();
+  const { projectRef, editorRef, parameterService, viewRecords, changeEntryPaths } = useProject();
+  const viewCommands = useWorkbenchViewCommands();
+  // oxlint-disable-next-line typescript/no-unnecessary-condition -- Shared/read-only trees can render outside a project workspace.
+  const layoutController = useProjectWorkspace({ enableNoContext: true })?.layoutController;
+  const viewRecordsRef = useRef(viewRecords);
+  const observedViewRecordsRef = useRef(viewRecords);
+  if (observedViewRecordsRef.current !== viewRecords) {
+    observedViewRecordsRef.current = viewRecords;
+    viewRecordsRef.current = viewRecords;
+  }
+  const onWorkbenchPathChange = useCallback(
+    async (
+      change: Readonly<{ type: 'rename'; oldPath: string; newPath: string } | { type: 'delete'; path: string }>,
+    ): Promise<void> => {
+      const source = change.type === 'rename' ? change.oldPath : change.path;
+      // oxlint-disable-next-line typescript/no-restricted-types -- The record schema explicitly permits a cleared entry binding.
+      const matches = (path: string | null): boolean =>
+        path !== null && (path === source || path.startsWith(`${source}/`));
+      const affected = [...viewRecordsRef.current].filter(([, record]) => matches(record.entryPath));
+      try {
+        for (const [viewId, record] of affected) {
+          let nextRecord: typeof record | undefined;
+          const saved =
+            change.type === 'rename'
+              ? // oxlint-disable-next-line eslint/no-await-in-loop -- Checked record edits must preserve file-event order.
+                await viewCommands.edit(viewId, (current) => {
+                  const latest = current ?? record;
+                  nextRecord = matches(latest.entryPath)
+                    ? { ...latest, entryPath: `${change.newPath}${latest.entryPath!.slice(source.length)}` }
+                    : latest;
+                  return nextRecord;
+                })
+              : // oxlint-disable-next-line eslint/no-await-in-loop -- Checked record deletes must preserve file-event order.
+                await viewCommands.remove(viewId);
+          if (!saved) {
+            throw new Error(`View ${viewId} could not follow the file change.`);
+          }
+          const nextRecords = new Map(viewRecordsRef.current);
+          if (nextRecord) {
+            nextRecords.set(viewId, nextRecord);
+          } else {
+            nextRecords.delete(viewId);
+          }
+          viewRecordsRef.current = nextRecords;
+        }
+        if (!(await changeEntryPaths(change))) {
+          throw new Error('Entry settings could not follow the file change.');
+        }
+        if (change.type === 'delete' && affected.length > 0) {
+          const current = layoutController?.snapshot()?.layout.viewer;
+          if (current) {
+            const removed = new Set(affected.map(([id]) => id));
+            const omit = (node: ViewerNode): ViewerNode =>
+              node.kind === 'group'
+                ? { ...node, tabs: node.tabs.filter((tab) => !removed.has(tab.view)), active: undefined }
+                : { ...node, children: node.children.map(omit) };
+            layoutController.personViewerChanged(omit(current));
+          }
+        }
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Workbench records could not follow the file change.');
+      }
+    },
+    [changeEntryPaths, layoutController, viewCommands],
+  );
   const fileManager = useFileManager();
   const {
     overrideUnit,
@@ -428,6 +495,7 @@ export const ChatEditorFileTree = memo(function ({
             editorRef,
             projectRef,
             parameterFiles: parameterService,
+            onWorkbenchPathChange,
           })
         : undefined;
 
@@ -435,7 +503,7 @@ export const ChatEditorFileTree = memo(function ({
       fileOpenedSub.unsubscribe();
       participantDispose?.();
     };
-  }, [projectRef, editorRef, contentService, readFile, readOnly, parameterService]);
+  }, [projectRef, editorRef, contentService, readFile, readOnly, parameterService, onWorkbenchPathChange]);
 
   const requestOpenFile = useCallback(
     (path: string, fileReadOnly?: boolean) => {

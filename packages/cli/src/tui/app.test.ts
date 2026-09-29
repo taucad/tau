@@ -22,10 +22,14 @@ import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 
 import { createAgentChannelClient } from '@taucad/agent-host/channel-client';
+import type { AgentLogEvent } from '@taucad/agent-host';
+import type { AgentChannelClient } from '@taucad/agent-host/channel-client';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
 import { WebSocket, WebSocketServer } from 'ws';
 
 import { runTui } from '#tui/app.js';
+import * as agentClient from '#commands/agent/client.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolvePath(here, '../../../..');
@@ -372,6 +376,7 @@ const mount = (
 
 /** Type a prompt and submit it. */
 const submit = async (terminal: Terminal, prompt: string): Promise<void> => {
+  await untilPainted(terminal, /Following /u);
   terminal.stdin.write(prompt);
   await until(() => (terminal.output().includes(prompt) ? true : undefined), `prompt "${prompt}"`);
   terminal.stdin.write('\r');
@@ -567,11 +572,18 @@ describe('tau tui', () => {
 
     /* A live external run cannot be steered, and the refusal is this view's own
      * — a `steer` command would only be refused by the host after the fact. */
+    const secondTurnOutputStart = terminal.output().length;
     await submit(terminal, 'slow noask again');
     /* The transcript row, not the log file: the run is only "live" to this view
      * once the page carrying its admission has been folded. */
-    await untilPainted(terminal, /user slow noask again/u);
-    await untilPainted(terminal, /enter keeps draft until this external run settles/u);
+    await until(() =>
+      /user slow noask again/u.test(terminal.output().slice(secondTurnOutputStart)) ? true : undefined,
+    );
+    await until(() =>
+      /enter keeps draft until this external run settles/u.test(terminal.output().slice(secondTurnOutputStart))
+        ? true
+        : undefined,
+    );
     terminal.stdin.write('nudge');
     await untilPainted(terminal, /nudge/u);
     terminal.stdin.write('\r');
@@ -585,6 +597,220 @@ describe('tau tui', () => {
     await settle();
     terminal.stdin.write('q');
     await expect(finished).resolves.toBeUndefined();
+  }, 120_000);
+
+  it('keeps the current external run selected when an older turn settles late', async () => {
+    const client = mock<AgentChannelClient>();
+    client.execute.mockImplementation(async (command) => ({
+      commandId: command.commandId,
+      generation: 1,
+      status: 'applied',
+      effect: 'durable',
+      cursor: 0,
+    }));
+    const chatId = 'chat-tui-late-settlement';
+    const base = { version: 1, leaderEpoch: 'epoch-1', recordedAt: new Date(0).toISOString() } as const;
+    const events = [
+      {
+        ...base,
+        sequence: 0,
+        runId: 'old-run',
+        type: 'run.lifecycle',
+        state: 'completed',
+      },
+      {
+        ...base,
+        sequence: 1,
+        runId: 'new-run',
+        type: 'message.appended',
+        message: {
+          id: 'new-user',
+          role: 'user',
+          content: 'slow noask again',
+          metadata: { tauInternal: { kind: 'external-agent', agentId: 'codex', model: 'gpt-5.3-codex' } },
+        },
+      },
+      { ...base, sequence: 2, runId: 'new-run', type: 'run.lifecycle', state: 'admitted' },
+      { ...base, sequence: 3, runId: 'new-run', type: 'run.lifecycle', state: 'running' },
+      {
+        ...base,
+        sequence: 4,
+        runId: 'old-run',
+        type: 'turn.finalized',
+        turnId: 'old-user',
+        chatId,
+        projectId: 'project-1',
+        changedPaths: [],
+        trigger: 'turn',
+        runIds: ['old-run'],
+      },
+      {
+        ...base,
+        sequence: 5,
+        runId: 'old-run',
+        type: 'message.envelope-replaced',
+        messageId: 'old-assistant',
+        replacement: { id: 'old-assistant', role: 'assistant', content: 'late old envelope' },
+      },
+      {
+        ...base,
+        sequence: 6,
+        runId: 'new-run',
+        type: 'message.appended',
+        message: { id: 'new-assistant', role: 'assistant', content: 'new turn is active' },
+      },
+    ] satisfies AgentLogEvent[];
+    const opened = vi.spyOn(agentClient, 'openAgentChannel').mockResolvedValue({
+      client,
+      url: new URL('http://127.0.0.1:1'),
+    });
+    const replay = vi.spyOn(agentClient, 'readNext').mockImplementation(async ({ ledger, signal }) => {
+      if (ledger.position.cursor === 0) {
+        return {
+          ledger: { ...ledger, position: { cursor: events.length } },
+          events,
+          endCursor: events.length,
+          reset: false,
+        };
+      }
+      await new Promise<void>((resolve) => {
+        signal?.addEventListener(
+          'abort',
+          () => {
+            resolve();
+          },
+          { once: true },
+        );
+      });
+      return { ledger, events: [], endCursor: events.length, reset: false };
+    });
+    try {
+      const terminal = createTerminal();
+      const finished = runTui({
+        host: 'http://127.0.0.1:1',
+        chatId,
+        from: 0,
+        stdin: terminal.stdin,
+        stdout: terminal.stdout,
+      });
+      mounted.push({ terminal, finished });
+      await untilPainted(terminal, /6 {2}message\.appended {2}assistant new turn is active/u);
+      const beforeKeypress = terminal.output().length;
+      terminal.stdin.write('nudge');
+      await until(() => (terminal.output().slice(beforeKeypress).includes('> nudge') ? true : undefined));
+      terminal.stdin.write('\r');
+      await untilPainted(terminal, /EXTERNAL_AGENT_UNSUPPORTED/u);
+      expect(terminal.output()).toContain('4  turn.finalized');
+      expect(terminal.output()).toContain('5  message.envelope-replaced');
+      expect(terminal.output()).not.toContain('steer failed');
+      expect(client.execute.mock.calls.some(([command]) => command.type === 'steer')).toBe(false);
+      terminal.stdin.write('\u001B');
+      await settle();
+      terminal.stdin.write('q');
+      await expect(finished).resolves.toBeUndefined();
+    } finally {
+      replay.mockRestore();
+      opened.mockRestore();
+    }
+  }, 120_000);
+
+  it('steers a locally started Tau run after an external turn completed', async () => {
+    const client = mock<AgentChannelClient>();
+    const chatId = 'chat-tui-external-to-tau';
+    const base = { version: 1, leaderEpoch: 'epoch-1', recordedAt: new Date(0).toISOString() } as const;
+    const events = [
+      {
+        ...base,
+        sequence: 0,
+        runId: 'external-run',
+        type: 'message.appended',
+        message: {
+          id: 'external-user',
+          role: 'user',
+          content: 'external turn',
+          metadata: { tauInternal: { kind: 'external-agent', agentId: 'codex' } },
+        },
+      },
+      { ...base, sequence: 1, runId: 'external-run', type: 'run.lifecycle', state: 'admitted' },
+      { ...base, sequence: 2, runId: 'external-run', type: 'run.lifecycle', state: 'completed' },
+    ] satisfies AgentLogEvent[];
+    let startedRunId: string | undefined;
+    client.execute.mockImplementation(async (command) => {
+      if (command.type === 'attach') {
+        return { commandId: command.commandId, generation: 1, status: 'applied', effect: 'durable', cursor: 0 };
+      }
+      if (command.type === 'start') {
+        startedRunId = command.payload.runId;
+        return {
+          commandId: command.commandId,
+          generation: 1,
+          status: 'applied',
+          effect: 'durable',
+          cursor: events.length,
+        };
+      }
+      if (command.type === 'steer') {
+        return {
+          commandId: command.commandId,
+          generation: 1,
+          status: 'applied',
+          effect: 'durable',
+          cursor: events.length,
+        };
+      }
+      throw new Error(`unexpected ${command.type} command`);
+    });
+    const opened = vi.spyOn(agentClient, 'openAgentChannel').mockResolvedValue({
+      client,
+      url: new URL('http://127.0.0.1:1'),
+    });
+    const replay = vi.spyOn(agentClient, 'readNext').mockImplementation(async ({ ledger, signal }) => {
+      if (ledger.position.cursor === 0) {
+        return {
+          ledger: { ...ledger, position: { cursor: events.length } },
+          events,
+          endCursor: events.length,
+          reset: false,
+        };
+      }
+      await new Promise<void>((resolve) => {
+        signal?.addEventListener(
+          'abort',
+          () => {
+            resolve();
+          },
+          { once: true },
+        );
+      });
+      return { ledger, events: [], endCursor: events.length, reset: false };
+    });
+    try {
+      const terminal = createTerminal();
+      const finished = runTui({
+        host: 'http://127.0.0.1:1',
+        chatId,
+        from: 0,
+        stdin: terminal.stdin,
+        stdout: terminal.stdout,
+      });
+      mounted.push({ terminal, finished });
+      await untilPainted(terminal, /run completed/u);
+      const localOutputStart = terminal.output().length;
+      await submit(terminal, 'local turn');
+      await until(() => startedRunId);
+      await until(() => (/enter steers/u.test(terminal.output().slice(localOutputStart)) ? true : undefined));
+      await submit(terminal, 'nudge local');
+      await until(() => (client.execute.mock.calls.some(([command]) => command.type === 'steer') ? true : undefined));
+      expect(client.execute.mock.calls).toContainEqual([
+        expect.objectContaining({ type: 'steer', payload: { chatId, runId: startedRunId, message: 'nudge local' } }),
+      ]);
+      expect(terminal.output()).not.toContain('EXTERNAL_AGENT_UNSUPPORTED');
+      terminal.stdin.write('q');
+      await expect(finished).resolves.toBeUndefined();
+    } finally {
+      replay.mockRestore();
+      opened.mockRestore();
+    }
   }, 120_000);
 
   it('shows an interrupted ACP run as abandoned on reattach without repeating the turn', async () => {

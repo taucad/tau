@@ -11,9 +11,20 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { join } from 'node:path';
 import { rm } from 'node:fs/promises';
+import type { Expectation } from '#compute-baseline/oracle.js';
+import { describeGlb, violations } from '#compute-baseline/oracle.js';
 import { arms } from '#compute-baseline/qualification.js';
 import type { ArmReport, StepReport } from '#compute-baseline/runner.js';
-import { runArm, scratch } from '#compute-baseline/runner.js';
+import { readDump, runArm, scratch } from '#compute-baseline/runner.js';
+
+const millimetre = 0.001;
+const parityBox: Expectation = {
+  names: ['ParityBox'],
+  volume: (40 * 30 * 20 - Math.PI * 5 * 5 * 20) * millimetre ** 3,
+  volumeTolerance: 0.001,
+  bounds: [100 * millimetre, 0, -30 * millimetre, 140 * millimetre, 20 * millimetre, 0],
+  boundsTolerance: 10e-6,
+};
 
 const fanout = process.env['TAU_COMPUTE_BASELINE_FANOUT'] === 'full' ? [2, 4, 8, 16] : [2];
 
@@ -25,12 +36,26 @@ beforeAll(async () => {
   workspace = await scratch('arms');
   const store = join(workspace, 'seed-store');
   const seedRun = await runArm(
-    { model: 'parity-box', arm: 'durable', steps: ['cold'], store, label: 'seed' },
+    {
+      model: 'parity-box',
+      arm: 'durable',
+      steps: ['cold'],
+      store,
+      dumpGlb: join(workspace, 'seed-glb'),
+      label: 'seed',
+    },
     workspace,
   );
   seed = seedRun.steps[0]!;
   restart = await runArm(
-    { model: 'parity-box', arm: 'durable', steps: ['restart', 'late'], store, label: 'restart' },
+    {
+      model: 'parity-box',
+      arm: 'durable',
+      steps: ['restart', 'late'],
+      store,
+      dumpGlb: join(workspace, 'restart-glb'),
+      label: 'restart',
+    },
     workspace,
   );
 });
@@ -62,14 +87,38 @@ describe('compute-baseline arms', () => {
     }
   });
 
-  it('restart-warm: a fresh process reuses a store another process published', () => {
+  it('restart-warm: a fresh process reuses a store another process published', async () => {
     const warm = restart.steps.find((step) => step.step === 'restart')!;
+    const admitted = seed.counters['session.admitted']?.bytes ?? 0;
+    const imported = warm.counters['session.prepared.entries']?.bytes ?? 0;
     expect(seed.lookups.hit).toBe(0);
     expect(seed.records.staged).toBeGreaterThan(0);
-    // The restart process never computed the prefix itself.
-    expect(warm.lookups.hit).toBe(seed.records.staged);
-    expect(warm.lookups.miss).toBe(0);
-    expect(warm.spans['create.runOcMain']!.ms).toBeLessThan(seed.spans['create.runOcMain']!.ms / 2);
+    // Staging includes actions below the production admission floor. Only
+    // admitted actions are published, and this process must import and reuse
+    // every one of them while recomputing the remaining work.
+    expect(admitted).toBeGreaterThan(0);
+    expect(imported).toBe(admitted);
+    expect(warm.lookups.hit).toBe(imported);
+    expect(warm.lookups.cache).toBe(imported);
+    expect(warm.counters['native.solve']?.calls ?? 0).toBe(seed.counters['native.solve']!.calls - imported);
+    const seedGeometry = await describeGlb(
+      await readDump({
+        directory: join(workspace, 'seed-glb'),
+        model: 'parity-box',
+        arm: 'durable',
+        step: 'cold',
+      }),
+    );
+    const warmGeometry = await describeGlb(
+      await readDump({
+        directory: join(workspace, 'restart-glb'),
+        model: 'parity-box',
+        arm: 'durable',
+        step: 'restart',
+      }),
+    );
+    expect(violations(seedGeometry, parityBox)).toEqual([]);
+    expect(violations(warmGeometry, parityBox)).toEqual([]);
   });
 
   it('restart-warm: startup and warm discovery are separate intervals from the solve', () => {
@@ -89,10 +138,20 @@ describe('compute-baseline arms', () => {
 
   it.each(fanout)('seeded-fanout: %i independent workers reuse the published prefix', async (workers) => {
     const store = join(workspace, `fanout-${workers}-store`);
-    await runArm(
-      { model: 'parity-box', arm: 'durable', steps: ['cold'], store, label: `fanout-${workers}-seed` },
+    const seeded = await runArm(
+      {
+        model: 'parity-box',
+        arm: 'durable',
+        steps: ['cold'],
+        store,
+        dumpGlb: join(workspace, `fanout-${workers}-seed-glb`),
+        label: `fanout-${workers}-seed`,
+      },
       workspace,
     );
+    const cold = seeded.steps[0]!;
+    const admitted = cold.counters['session.admitted']?.bytes ?? 0;
+    expect(admitted).toBeGreaterThan(0);
     const variants = await Promise.all(
       Array.from({ length: workers }, async (_unused, worker) =>
         runArm(
@@ -101,6 +160,7 @@ describe('compute-baseline arms', () => {
             arm: 'durable',
             steps: ['restart', 'late'],
             store,
+            dumpGlb: join(workspace, `fanout-${workers}-w${worker}-glb`),
             label: `fanout-${workers}-w${worker}`,
           },
           workspace,
@@ -108,13 +168,26 @@ describe('compute-baseline arms', () => {
       ),
     );
     expect(variants).toHaveLength(workers);
-    for (const variant of variants) {
-      const warm = variant.steps.find((step) => step.step === 'restart')!;
-      // T14: zero native solves for the declared eligible unchanged actions.
-      expect(warm.lookups.miss).toBe(0);
-      expect(warm.lookups.hit).toBeGreaterThan(0);
-      // Correct suffix: the changed variant still produces geometry.
-      expect(variant.steps.find((step) => step.step === 'late')!.output.triangles).toBeGreaterThan(0);
-    }
+    await Promise.all(
+      variants.map(async (variant, worker) => {
+        const warm = variant.steps.find((step) => step.step === 'restart')!;
+        // T14: each fresh worker imports the eligible prefix and avoids that
+        // many native solves; below-floor actions remain honest misses.
+        expect(warm.counters['session.prepared.entries']?.bytes).toBe(admitted);
+        expect(warm.lookups.cache).toBe(admitted);
+        expect(warm.counters['native.solve']?.calls ?? 0).toBe(cold.counters['native.solve']!.calls - admitted);
+        const warmGeometry = await describeGlb(
+          await readDump({
+            directory: join(workspace, `fanout-${workers}-w${worker}-glb`),
+            model: 'parity-box',
+            arm: 'durable',
+            step: 'restart',
+          }),
+        );
+        expect(violations(warmGeometry, parityBox)).toEqual([]);
+        // Correct suffix: the changed variant still produces geometry.
+        expect(variant.steps.find((step) => step.step === 'late')!.output.triangles).toBeGreaterThan(0);
+      }),
+    );
   });
 });

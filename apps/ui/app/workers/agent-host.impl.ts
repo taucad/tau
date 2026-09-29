@@ -8,7 +8,11 @@ import { ResourceQueue } from '@taucad/filesystem';
 import type { FileSystemProvider } from '@taucad/filesystem';
 import type { FileSystemBridgeProxy } from '@taucad/fs-bridge';
 import { toRpcError } from '@taucad/chat/rpc';
-import { createChatToolRegistry, createProviderRpcFileSystem } from '@taucad/agent-tools/registry';
+import {
+  createChatToolRegistry,
+  createProviderRpcFileSystem,
+  createRuntimeWorkbenchClient,
+} from '@taucad/agent-tools/registry';
 import { composeView } from '@taucad/filesystem/composed-view';
 import type { ComposedView } from '@taucad/filesystem/composed-view';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
@@ -51,6 +55,7 @@ type ProjectFileSystemBridge = Pick<
   | 'readFile'
   | 'writeFile'
   | 'writeFileChecked'
+  | 'deleteFileChecked'
   | 'appendFile'
   | 'readdir'
   | 'stat'
@@ -494,6 +499,11 @@ const composeProjectHost = async (
    * project code read too — the kernel runtime below and the GeoSpec runner's
    * port — because the code they run is code the agent wrote (CI1, W14). */
   const workspaceProvider = createRelayedFileSystemProvider(fileSystem);
+  const workbenchRootProvider = createRelayedFileSystemProvider(projectRoot);
+  const workbenchRootView = composeView(
+    { filesystem: workbenchRootProvider },
+    { consumer: 'user', policy: tauPathPolicy },
+  );
   const agentView = composeView(
     { filesystem: workspaceProvider },
     { consumer: 'agent', policy: tauPathPolicy, overlays: [systemSkillsOverlay()] },
@@ -575,6 +585,9 @@ const composeProjectHost = async (
         createProviderRpcFileSystem({ provider: view, mutations: fileSystemMutations, signal }),
       recordFileSystemFor: (signal) =>
         createProviderRpcFileSystem({ provider: record, mutations: fileSystemMutations, signal }),
+      workbenchFileSystemFor: (signal) =>
+        createProviderRpcFileSystem({ provider: workbenchRootView, mutations: fileSystemMutations, signal }),
+      workbench: createRuntimeWorkbenchClient(async () => runtimeClient),
       skillResolver,
       ...runtimeRpc,
       parameters,

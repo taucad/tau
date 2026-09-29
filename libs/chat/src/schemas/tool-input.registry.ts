@@ -1,4 +1,8 @@
 import type { z } from 'zod';
+import {
+  arrangeWorkbenchInputSchema,
+  arrangeWorkbenchOutputSchema,
+} from '#schemas/tools/arrange-workbench.tool.schema.js';
 import { editFileInputSchema, editFileOutputSchema } from '#schemas/tools/edit-file.tool.schema.js';
 import { webBrowserInputSchema, webBrowserOutputSchema } from '#schemas/tools/web-browser.tool.schema.js';
 import { webSearchInputSchema, webSearchOutputSchema } from '#schemas/tools/web-search.tool.schema.js';
@@ -91,6 +95,7 @@ export const uiMessageTools = {
     inputSchema: createFileInputSchema,
     outputSchema: createFileOutputSchema,
   },
+  [toolName.arrangeWorkbench]: { inputSchema: arrangeWorkbenchInputSchema, outputSchema: arrangeWorkbenchOutputSchema },
   [toolName.editFile]: {
     inputSchema: editFileInputSchema,
     outputSchema: editFileOutputSchema,

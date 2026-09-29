@@ -577,6 +577,18 @@ export const replicadKernel = defineKernel({
     });
 
     if (resolved.variant === 'multi') {
+      /* oxlint-disable new-cap -- OCCT exposes callable C++ PascalCase methods. */
+      const pool = openCascade.OSD_ThreadPool.DefaultPool(-1);
+      try {
+        if (pool.IsInUse()) {
+          throw new Error('Cannot configure Replicad OCCT thread pool while it is in use');
+        }
+        // ponytail: cap OCCT threads to reduce parallel working sets; revisit after native batch memory is reduced.
+        pool.Init(Math.min(pool.NbThreads(), 4));
+      } finally {
+        pool.delete();
+      }
+      /* oxlint-enable new-cap */
       activateOccParallelism(openCascade, logger);
     } else {
       logger.log(`Replicad OCCT initialised: variant=${resolved.variant} (single-threaded)`);

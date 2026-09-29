@@ -2,6 +2,7 @@ import { projectIdSchema } from '@taucad/types';
 import type {
   CheckedFileWrite,
   CheckedFileWriteResult,
+  FileWritePrecondition,
   FileStat,
   FileStatEntry,
   FileSystemBackend,
@@ -430,6 +431,22 @@ export class WorkspaceFileService {
       signal: input.signal,
       context,
     });
+  }
+
+  /** Check current bytes and delete one file inside the canonical mutation fence. */
+  public async deleteFileChecked(
+    input: { path: string; preconditions: readonly FileWritePrecondition[]; signal?: AbortSignal },
+    context?: WorkspaceMutationContext,
+  ): Promise<CheckedFileWriteResult> {
+    const path = resolveAuthorityPath(input.path);
+    this._assertGenericMutationPath(path);
+    const resolution = this._resolveProvider(path);
+    const preconditions = input.preconditions.map((precondition) => {
+      const preconditionPath = resolveAuthorityPath(precondition.path);
+      this._assertGenericMutationPath(preconditionPath);
+      return { ...precondition, path: preconditionPath, resolution: this._resolveProvider(preconditionPath) };
+    });
+    return this._pipeline.deleteFileCheckedResolved({ path, resolution, preconditions, signal: input.signal, context });
   }
 
   /**

@@ -1351,11 +1351,10 @@ function KinematicsContent({
   readonly isShown: boolean;
   readonly reveal: KinematicsReveal | undefined;
 }): React.JSX.Element {
-  const { geometryUnits, mainEntryPath, viewGraphics, editorRef, projectRef } = useProject();
-  const viewSettings = useSelector(editorRef, (state) => state.context.viewSettings);
+  const { geometryUnits, mainEntryPath, viewGraphics, viewRecords, projectRef } = useProject();
   const entryPaths = useMemo(
-    () => listGeometryEntryPaths(geometryUnits, viewSettings, mainEntryPath),
-    [geometryUnits, mainEntryPath, viewSettings],
+    () => listGeometryEntryPaths(geometryUnits, viewRecords, mainEntryPath),
+    [geometryUnits, mainEntryPath, viewRecords],
   );
   useEffect(() => {
     if (!isShown) {
@@ -1376,10 +1375,10 @@ function KinematicsContent({
   const entries = useMemo(
     () =>
       entryPaths.map((entryPath): KinematicsEntry => {
-        const graphicsRef = [...viewGraphics].find(([viewId]) => viewSettings[viewId]?.entryPath === entryPath)?.[1];
+        const graphicsRef = [...viewGraphics].find(([viewId]) => viewRecords.get(viewId)?.entryPath === entryPath)?.[1];
         return [entryPath, geometryUnits.get(entryPath), graphicsRef];
       }),
-    [entryPaths, geometryUnits, viewGraphics, viewSettings],
+    [entryPaths, geometryUnits, viewGraphics, viewRecords],
   );
 
   if (entries.length === 0) {

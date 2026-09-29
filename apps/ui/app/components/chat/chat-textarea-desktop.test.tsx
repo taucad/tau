@@ -290,7 +290,7 @@ describe('ACP slash commands', () => {
 });
 
 describe('ChatTextareaDesktop draft rehydration', () => {
-  const renderComposer = (inputText: string, acpSessionData: AcpSessionData) => {
+  const renderComposer = (inputText: string, acpSessionData: AcpSessionData, canResume = false) => {
     const element = (session: AcpSessionData): React.JSX.Element => (
       <TooltipProvider>
         <ChatTextareaDesktop
@@ -298,6 +298,7 @@ describe('ChatTextareaDesktop draft rehydration', () => {
           dragKind={undefined}
           isSubmitting={false}
           isAttaching={false}
+          canResume={canResume}
           inputText={inputText}
           attachments={[]}
           attachmentDirectory={undefined}
@@ -339,6 +340,14 @@ describe('ChatTextareaDesktop draft rehydration', () => {
       },
     };
   };
+
+  it('should offer Resume through the full composer without the empty-message refusal', () => {
+    renderComposer('', codexSession, true);
+
+    const resume = screen.getByRole('button', { name: 'Resume' });
+    expect(resume).toHaveTextContent('Resume');
+    expect(resume).toHaveAttribute('aria-disabled', 'false');
+  });
 
   it('keeps one editor scroll region above controls that take layout space', () => {
     const view = renderComposer('', codexSession);

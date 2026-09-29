@@ -460,6 +460,7 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
       return (
         <ChatErrorCredits
           className={cn('min-w-0', className)}
+          resumable={resumable}
           description={parsedError.message}
           details={parsedError.details}
         />

@@ -51,7 +51,18 @@ const jsonRpcReplySchema = z.object({
   error: z.object({ code: z.number(), message: z.string() }).optional(),
 });
 const toolsListSchema = z.object({
-  tools: z.array(z.object({ name: z.string(), inputSchema: z.record(z.string(), z.unknown()) })),
+  tools: z.array(
+    z.object({
+      name: z.string(),
+      inputSchema: z.record(z.string(), z.unknown()),
+      annotations: z.object({
+        readOnlyHint: z.boolean(),
+        destructiveHint: z.boolean(),
+        idempotentHint: z.boolean(),
+        openWorldHint: z.boolean(),
+      }),
+    }),
+  ),
 });
 /** Bambu Studio functions a test that never reaches them passes. */
 const unusedBambuStudio: BambuStudioEngine = {
@@ -228,6 +239,7 @@ describe('createHostMcpEndpoint capability', () => {
       'test_model',
       'screenshot',
       'export_geometry',
+      'arrange_workbench',
       'get_print_profiles',
       'request_print',
       'get_print_request',
@@ -602,9 +614,32 @@ describe('the mounted /mcp route', () => {
       secret,
       workspaceRoot,
       registry: {
-        list: () => machineRegistry.list(),
+        list: () => [
+          ...machineRegistry.list(),
+          {
+            name: 'arrange_workbench',
+            description: 'Arrange the workbench.',
+            inputSchema: { type: 'object', properties: { open: { type: 'array', items: { type: 'object' } } } },
+          },
+        ],
         invoke: async (invocation) => {
           invocations.push(invocation);
+          if (invocation.toolName === 'arrange_workbench') {
+            return {
+              content: {
+                status: 'written',
+                revisions: [
+                  {
+                    path: '.tau/workbench/layout.json',
+                    digest: `sha256:${'a'.repeat(64)}`,
+                    previousDigest: 'missing',
+                  },
+                ],
+                visible: [{ kind: 'pane', pane: 'model' }],
+              },
+              isError: false,
+            };
+          }
           return machineRegistry.invoke(invocation);
         },
       },
@@ -634,7 +669,52 @@ describe('the mounted /mcp route', () => {
       'get_print_request',
       'list_print_requests',
       'cancel_print',
+      'arrange_workbench',
     ]);
+    expect(tools.find(({ name }) => name === 'arrange_workbench')?.annotations).toEqual({
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    });
+    expect(
+      tools
+        .filter(({ name }) => ['get_kernel_result', 'test_model', 'screenshot'].includes(name))
+        .map(({ annotations }) => annotations),
+    ).toEqual(
+      Array.from({ length: 3 }, () => ({
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      })),
+    );
+    expect(tools.find(({ name }) => name === 'export_geometry')?.annotations).toEqual({
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false,
+    });
+    expect(tools.find(({ name }) => name === 'request_print')?.annotations).toEqual({
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    });
+    expect(tools.find(({ name }) => name === 'cancel_print')?.annotations).toEqual({
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: true,
+    });
+    for (const name of ['get_print_profiles', 'get_print_request', 'list_print_requests']) {
+      expect(tools.find((tool) => tool.name === name)?.annotations).toEqual({
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      });
+    }
     expect(tools.find(({ name }) => name === 'request_print')?.inputSchema).toMatchObject({
       type: 'object',
       properties: { targetFile: { type: 'string' } },
@@ -645,6 +725,11 @@ describe('the mounted /mcp route', () => {
       const reply = await session.request('tools/call', { name, arguments: args });
       return toolResultSchema.parse(reply.result);
     };
+    expect(await call('arrange_workbench', { open: [{ kind: 'pane', pane: 'model' }] })).toMatchObject({
+      structuredContent: { status: 'written', visible: [{ kind: 'pane', pane: 'model' }] },
+    });
+    expect(invocations[0]).toMatchObject({ toolName: 'arrange_workbench', runId: 'run-1' });
+    invocations.length = 0;
     const options = { layerHeight: 0.2, supports: { enabled: true, angles: [45, 60] } };
     const requested = await call('request_print', { targetFile: 'main.ts', options });
 
